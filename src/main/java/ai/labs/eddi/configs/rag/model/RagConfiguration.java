@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.configs.rag.model;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -225,9 +227,48 @@ public class RagConfiguration {
         if (unsupported != null) {
             throw new IllegalArgumentException(unsupported);
         }
+        if (sources != null) {
+            for (IngestionSource source : sources) {
+                source.validate();
+            }
+        }
     }
 
+    // --- Ingestion sources ---
+
+    /**
+     * Where this knowledge base's documents come from.
+     *
+     * <p>
+     * Sources live on the knowledge base rather than as a resource of their own
+     * because the vector store is keyed by the knowledge base. A standalone source
+     * would have to name its target by string, which is how the draft this replaces
+     * came to write crawled content into a table keyed on the <em>source's</em>
+     * name while retrieval read one keyed on the knowledge base's — an ingestion
+     * that reported success and a knowledge base that stayed empty.
+     */
+    private List<IngestionSource> sources = new ArrayList<>();
+
     // --- Getters and Setters ---
+
+    public List<IngestionSource> getSources() {
+        return sources;
+    }
+
+    public void setSources(List<IngestionSource> sources) {
+        this.sources = sources == null ? new ArrayList<>() : sources;
+    }
+
+    /** The source with this id, or null. */
+    public IngestionSource findSource(String sourceId) {
+        if (sourceId == null || sources == null) {
+            return null;
+        }
+        return sources.stream()
+                .filter(source -> sourceId.equals(source.getId()))
+                .findFirst()
+                .orElse(null);
+    }
 
     public String getName() {
         return name;

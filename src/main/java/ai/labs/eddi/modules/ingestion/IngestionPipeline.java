@@ -1,0 +1,506 @@
+/*
+ * Copyright EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+package ai.labs.eddi.modules.ingestion;
+
+import ai.labs.eddi.configs.rag.model.IngestionSource;
+import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.modules.ingestion.IIngestionStateStore.DocumentState;
+import ai.labs.eddi.modules.ingestion.IIngestionStateStore.IngestionRun;
+import ai.labs.eddi.modules.ingestion.crawl.CrawlRequest;
+import ai.labs.eddi.modules.ingestion.crawl.CrawlSink;
+import ai.labs.eddi.modules.ingestion.crawl.WebCrawler;
+import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
+import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
+import ai.labs.eddi.utils.LogSanitizer;
+import dev.langchain4j.data.document.Document;
+import dev.langchain4j.data.document.Metadata;
+import dev.langchain4j.data.document.splitter.DocumentSplitters;
+import dev.langchain4j.data.segment.TextSegment;
+import dev.langchain4j.exception.UnsupportedFeatureException;
+import dev.langchain4j.model.embedding.EmbeddingModel;
+import dev.langchain4j.store.embedding.EmbeddingStore;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Tags;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import org.jboss.logging.Logger;
+
+import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
+
+import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metadataKey;
+
+/**
+ * Turns a knowledge base's {@link IngestionSource} into embedded documents.
+ *
+ * <p>
+ * Crawl → convert → compare → embed, one document at a time, then reconcile
+ * what has disappeared. The comparison and the reconciliation are the parts
+ * that make this a knowledge base rather than a pile of vectors, and they are
+ * where the draft this replaces went wrong.
+ *
+ * <h2>Three rules</h2>
+ * <ol>
+ * <li><b>The vector store is keyed by the knowledge base.</b> Not by the
+ * source. The draft used the source's name, so crawled content landed in one
+ * table while retrieval read another — ingestion reported success and the agent
+ * retrieved nothing.</li>
+ * <li><b>Re-ingesting replaces.</b> Chunks for a document are removed before
+ * its new ones are added. Appending leaves last month's prices retrievable
+ * beside this month's, which is worse than having no knowledge base at
+ * all.</li>
+ * <li><b>A document is recorded only after its vectors are stored,</b> and only
+ * a crawl that covered the whole source may conclude anything is gone.</li>
+ * </ol>
+ */
+@ApplicationScoped
+public class IngestionPipeline {
+
+    private static final Logger LOGGER = Logger.getLogger(IngestionPipeline.class);
+
+    /**
+     * Metadata key that ties a segment back to its document, used to replace it.
+     */
+    public static final String METADATA_DOCUMENT_ID = "documentId";
+    public static final String METADATA_URL = "url";
+    public static final String METADATA_TITLE = "title";
+    public static final String METADATA_SOURCE = "sourceName";
+    public static final String METADATA_RUN_ID = "runId";
+    public static final String METADATA_INGESTED_AT = "ingestedAt";
+
+    private final WebCrawler crawler;
+    private final HtmlToMarkdownConverter converter;
+    private final IIngestionStateStore stateStore;
+    private final EmbeddingModelFactory embeddingModelFactory;
+    private final EmbeddingStoreFactory embeddingStoreFactory;
+    private final MeterRegistry meterRegistry;
+
+    @Inject
+    public IngestionPipeline(WebCrawler crawler,
+            HtmlToMarkdownConverter converter,
+            IIngestionStateStore stateStore,
+            EmbeddingModelFactory embeddingModelFactory,
+            EmbeddingStoreFactory embeddingStoreFactory,
+            MeterRegistry meterRegistry) {
+        this.crawler = crawler;
+        this.converter = converter;
+        this.stateStore = stateStore;
+        this.embeddingModelFactory = embeddingModelFactory;
+        this.embeddingStoreFactory = embeddingStoreFactory;
+        this.meterRegistry = meterRegistry;
+    }
+
+    /** What a run is for. */
+    public enum Mode {
+        /** Crawl, embed, and reconcile. */
+        INGEST,
+        /**
+         * Crawl and report what would change, embedding nothing and recording nothing.
+         * Lets an operator see the effect of a scope or exclusion before paying for it.
+         */
+        PREVIEW
+    }
+
+    /**
+     * Runs a source. Blocks for the length of the crawl — call it on its own
+     * thread.
+     *
+     * @param ragConfigId
+     *            the knowledge base's resource id, used to scope ingestion state
+     */
+    public IngestionReport run(String ragConfigId, RagConfiguration knowledgeBase, IngestionSource source, Mode mode) {
+        source.validate();
+
+        String knowledgeBaseId = knowledgeBase.getName();
+        if (knowledgeBaseId == null || knowledgeBaseId.isBlank()) {
+            return IngestionReport.failed(null, source.getId(),
+                    "The knowledge base has no name, and its name is what the vector store is keyed by");
+        }
+        if (!source.isEnabled() && mode == Mode.INGEST) {
+            return IngestionReport.skipped(source.getId(), "Source is disabled");
+        }
+
+        String sourceKey = stateKey(ragConfigId, source);
+        String runId;
+        if (mode == Mode.INGEST) {
+            var claimed = stateStore.startRun(sourceKey);
+            if (claimed.isEmpty()) {
+                // Not an error: an operator clicking "run now" while a scheduled run is
+                // in flight should be told, not start a second crawl into one store.
+                return IngestionReport.alreadyRunning(source.getId());
+            }
+            runId = claimed.get();
+        } else {
+            runId = "preview";
+        }
+
+        Instant startedAt = Instant.now();
+        Collector collector = new Collector(ragConfigId, knowledgeBase, knowledgeBaseId, source, sourceKey, runId, mode);
+
+        WebCrawler.CrawlSummary summary;
+        try {
+            summary = crawler.crawl(toCrawlRequest(source), collector);
+        } catch (RuntimeException e) {
+            LOGGER.errorf(e, "Ingestion crawl failed for source '%s'", LogSanitizer.sanitize(source.getName()));
+            IngestionReport report = collector.toReport(null, describe(e), startedAt);
+            finish(mode, runId, sourceKey, report, IngestionRun.Status.FAILED);
+            return report;
+        }
+
+        int tombstoned = reconcileDeletions(source, sourceKey, runId, mode, summary, collector);
+        collector.tombstoned = tombstoned;
+
+        IngestionReport report = collector.toReport(summary, null, startedAt);
+        finish(mode, runId, sourceKey, report,
+                collector.failed > 0 && collector.ingested == 0
+                        ? IngestionRun.Status.FAILED
+                        : IngestionRun.Status.COMPLETED);
+        return report;
+    }
+
+    /**
+     * Removes the vectors of documents that have gone from the source — but only
+     * when the crawl actually covered it.
+     *
+     * <p>
+     * A crawl that hit its page cap, ran out of time, or was cancelled saw an
+     * arbitrary subset. Treating that subset as the whole truth is how a knowledge
+     * base empties itself because a site was slow.
+     */
+    private int reconcileDeletions(IngestionSource source, String sourceKey, String runId, Mode mode,
+                                   WebCrawler.CrawlSummary summary, Collector collector) {
+
+        if (mode != Mode.INGEST) {
+            return 0;
+        }
+        if (!summary.coveredWholeSource()) {
+            collector.tombstoningSkipped = true;
+            LOGGER.infof("Not reconciling deletions for source '%s': the crawl stopped at %s rather than covering "
+                    + "the source", LogSanitizer.sanitize(source.getName()), summary.stopReason());
+            return 0;
+        }
+
+        List<DocumentState> gone = stateStore.tombstoneMissing(
+                sourceKey, runId, source.settings().tombstoneAfterMissedRunsOrDefault());
+        if (gone.isEmpty()) {
+            return 0;
+        }
+
+        EmbeddingStore<TextSegment> store = collector.store();
+        int removed = 0;
+        for (DocumentState document : gone) {
+            try {
+                store.removeAll(metadataKey(METADATA_DOCUMENT_ID).isEqualTo(document.documentId()));
+                removed++;
+            } catch (UnsupportedFeatureException e) {
+                collector.replaceUnsupported = true;
+            } catch (RuntimeException e) {
+                LOGGER.warnf(e, "Could not remove vectors for a deleted document of source '%s'",
+                        LogSanitizer.sanitize(source.getName()));
+            }
+        }
+        return removed;
+    }
+
+    private void finish(Mode mode, String runId, String sourceKey, IngestionReport report,
+                        IngestionRun.Status status) {
+        if (mode != Mode.INGEST) {
+            return;
+        }
+        stateStore.finishRun(new IngestionRun(runId, sourceKey, status, null, Instant.now(),
+                report.documentsSeen(), report.documentsIngested(), report.documentsUnchanged(),
+                report.documentsFailed(), report.documentsTombstoned(), report.segmentsStored(),
+                report.costUsd(), report.message()));
+    }
+
+    /** State is scoped to a source of a knowledge base, not to a source name. */
+    static String stateKey(String ragConfigId, IngestionSource source) {
+        String sourceId = source.getId() == null || source.getId().isBlank() ? source.getName() : source.getId();
+        return ragConfigId + ":" + sourceId;
+    }
+
+    private static CrawlRequest toCrawlRequest(IngestionSource source) {
+        IngestionSource.WebSource web = source.getWeb();
+        IngestionSource.IngestionSettings settings = source.settings();
+
+        var scope = new CrawlRequest.Scope(
+                web.isSameSiteOnly(),
+                web.isIncludeSubdomains(),
+                web.getPathPrefix(),
+                web.getMaxDepth() == null ? 3 : web.getMaxDepth(),
+                web.getExcludePatterns());
+
+        int maxPages = web.getMaxPages() == null ? 200 : web.getMaxPages();
+        var limits = new CrawlRequest.Limits(
+                maxPages,
+                0, // derived from maxPages
+                settings.maxBytesPerPageOrDefault(),
+                0, // default total budget
+                Duration.ofMinutes(settings.timeBudgetMinutesOrDefault()),
+                Duration.ofSeconds(web.getTimeoutSeconds() == null ? 15 : web.getTimeoutSeconds()));
+
+        var politeness = new CrawlRequest.Politeness(
+                Duration.ofMillis(web.getRequestDelayMs() == null ? 500 : web.getRequestDelayMs()),
+                web.getUserAgent(),
+                web.isRespectRobots());
+
+        return new CrawlRequest(web.getStartUrl(), scope, limits, politeness);
+    }
+
+    private static String describe(Exception e) {
+        String message = e.getMessage();
+        return message == null || message.isBlank() ? e.getClass().getSimpleName() : message;
+    }
+
+    /**
+     * Receives crawled pages and does the per-document work: convert, compare,
+     * embed, record.
+     */
+    private final class Collector implements CrawlSink {
+
+        private final RagConfiguration knowledgeBase;
+        private final String knowledgeBaseId;
+        private final IngestionSource source;
+        private final String sourceKey;
+        private final String runId;
+        private final Mode mode;
+        private final Tags metricTags;
+
+        private EmbeddingStore<TextSegment> store;
+        private EmbeddingModel model;
+
+        private int seen;
+        private int ingested;
+        private int unchanged;
+        private int skipped;
+        private int failed;
+        private int segments;
+        private int tombstoned;
+        private boolean replaceUnsupported;
+        private boolean tombstoningSkipped;
+        private boolean budgetExhausted;
+
+        private Collector(String ragConfigId, RagConfiguration knowledgeBase, String knowledgeBaseId,
+                IngestionSource source, String sourceKey, String runId, Mode mode) {
+            this.knowledgeBase = knowledgeBase;
+            this.knowledgeBaseId = knowledgeBaseId;
+            this.source = source;
+            this.sourceKey = sourceKey;
+            this.runId = runId;
+            this.mode = mode;
+            // Tagged by source: a single global error counter tells an operator that
+            // something is failing but not which source, which is the part they need.
+            this.metricTags = Tags.of("knowledgeBase", knowledgeBaseId, "source", String.valueOf(source.getName()));
+        }
+
+        EmbeddingStore<TextSegment> store() {
+            if (store == null) {
+                store = embeddingStoreFactory.getOrCreate(knowledgeBase, knowledgeBaseId);
+            }
+            return store;
+        }
+
+        private EmbeddingModel model() {
+            if (model == null) {
+                model = embeddingModelFactory.getOrCreate(knowledgeBase);
+            }
+            return model;
+        }
+
+        @Override
+        public ConditionalHeaders conditionalFor(String documentId) {
+            return stateStore.lookup(sourceKey, documentId)
+                    .map(state -> new ConditionalHeaders(state.etag(), state.lastModified()))
+                    .orElseGet(ConditionalHeaders::none);
+        }
+
+        @Override
+        public boolean isCancelled() {
+            return budgetExhausted;
+        }
+
+        @Override
+        public void onUnchanged(String documentId) {
+            seen++;
+            unchanged++;
+            if (mode == Mode.INGEST) {
+                stateStore.recordSeen(sourceKey, documentId, runId);
+            }
+        }
+
+        @Override
+        public void onError(CrawlError error) {
+            failed++;
+            meterRegistry.counter("eddi.ingestion.errors", metricTags).increment();
+        }
+
+        @Override
+        public void onPage(CrawledPage page) {
+            seen++;
+            try {
+                String markdown = converter.convert(page.html(), page.finalUrl(),
+                        source.settings().maxContentLengthOrDefault());
+                if (markdown.isBlank()) {
+                    // A page of pure navigation converts to nothing; storing an empty
+                    // document would only pollute retrieval.
+                    skipped++;
+                    return;
+                }
+
+                String hash = ContentHashes.sha256(markdown);
+                var existing = stateStore.lookup(sourceKey, page.documentId());
+                if (existing.isPresent() && !existing.get().hasChanged(hash)) {
+                    unchanged++;
+                    if (mode == Mode.INGEST) {
+                        stateStore.recordSeen(sourceKey, page.documentId(), runId);
+                    }
+                    return;
+                }
+
+                if (mode == Mode.PREVIEW) {
+                    ingested++;
+                    return;
+                }
+
+                int stored = embed(page, markdown);
+                segments += stored;
+                ingested++;
+                meterRegistry.counter("eddi.ingestion.segments.stored", metricTags).increment(stored);
+
+                // Only now, with the vectors safely stored. Recording before this — or
+                // while deciding whether to ingest, as the draft did — means one
+                // provider timeout marks a page done forever.
+                stateStore.recordIngested(sourceKey, page.documentId(), hash,
+                        page.etag(), page.lastModified(), runId);
+
+                if (segments >= source.settings().maxSegmentsPerRunOrDefault()) {
+                    budgetExhausted = true;
+                    LOGGER.warnf("Ingestion of source '%s' stopped at its segment budget (%d)",
+                            LogSanitizer.sanitize(source.getName()), segments);
+                }
+            } catch (RuntimeException e) {
+                failed++;
+                meterRegistry.counter("eddi.ingestion.errors", metricTags).increment();
+                LOGGER.warnf(e, "Failed to ingest a document of source '%s'",
+                        LogSanitizer.sanitize(source.getName()));
+            }
+        }
+
+        /**
+         * Replaces a document's chunks, and returns how many were actually written —
+         * not an estimate. The draft reported {@code markdown.length() / chunkSize},
+         * which its own integration test then asserted on.
+         */
+        private int embed(CrawledPage page, String markdown) {
+            EmbeddingStore<TextSegment> embeddingStore = store();
+
+            // Remove first: without this a page edited weekly leaves a year of stale
+            // versions retrievable beside the current one.
+            try {
+                embeddingStore.removeAll(metadataKey(METADATA_DOCUMENT_ID).isEqualTo(page.documentId()));
+            } catch (UnsupportedFeatureException e) {
+                // Surfaced in the report rather than swallowed: on a store that cannot
+                // delete, re-ingestion accumulates, and the operator has to know.
+                replaceUnsupported = true;
+            }
+
+            Metadata metadata = Metadata.from(METADATA_DOCUMENT_ID, page.documentId())
+                    .put(METADATA_URL, page.finalUrl())
+                    .put(METADATA_TITLE, page.title() == null ? "" : page.title())
+                    .put(METADATA_SOURCE, String.valueOf(source.getName()))
+                    .put(METADATA_RUN_ID, runId)
+                    .put(METADATA_INGESTED_AT, Instant.now().toString());
+
+            var splitter = DocumentSplitters.recursive(
+                    knowledgeBase.getChunkSize() == null ? 1000 : knowledgeBase.getChunkSize(),
+                    knowledgeBase.getChunkOverlap() == null ? 100 : knowledgeBase.getChunkOverlap());
+
+            List<TextSegment> textSegments = splitter.split(Document.from(markdown, metadata));
+            if (textSegments.isEmpty()) {
+                return 0;
+            }
+
+            var embeddings = model().embedAll(textSegments).content();
+            embeddingStore.addAll(embeddings, textSegments);
+            return textSegments.size();
+        }
+
+        IngestionReport toReport(WebCrawler.CrawlSummary summary, String error, Instant startedAt) {
+            double cost = 0.0;
+            Double rate = source.settings().getCostPerThousandSegments();
+            if (rate != null && rate > 0) {
+                cost = (segments / 1000.0) * rate;
+            }
+            return new IngestionReport(
+                    runId,
+                    source.getId(),
+                    error != null
+                            ? IngestionReport.Outcome.FAILED
+                            : mode == Mode.PREVIEW
+                                    ? IngestionReport.Outcome.PREVIEW
+                                    : IngestionReport.Outcome.COMPLETED,
+                    seen, ingested, unchanged, skipped, failed, tombstoned, segments, cost,
+                    replaceUnsupported, tombstoningSkipped,
+                    summary == null ? null : summary.stopReason(),
+                    Duration.between(startedAt, Instant.now()),
+                    error);
+        }
+    }
+
+    /**
+     * What one ingestion run did.
+     *
+     * @param replaceUnsupported
+     *            the configured vector store cannot delete by metadata, so
+     *            re-ingested documents accumulate stale chunks. Reported rather
+     *            than hidden: it changes what retrieval returns.
+     * @param tombstoningSkipped
+     *            the crawl did not cover the whole source, so nothing was concluded
+     *            to be deleted
+     */
+    public record IngestionReport(
+            String runId,
+            String sourceId,
+            Outcome outcome,
+            int documentsSeen,
+            int documentsIngested,
+            int documentsUnchanged,
+            int documentsSkipped,
+            int documentsFailed,
+            int documentsTombstoned,
+            int segmentsStored,
+            double costUsd,
+            boolean replaceUnsupported,
+            boolean tombstoningSkipped,
+            WebCrawler.StopReason stopReason,
+            Duration duration,
+            String message) {
+
+        public enum Outcome {
+            COMPLETED, PREVIEW, FAILED, SKIPPED, ALREADY_RUNNING
+        }
+
+        static IngestionReport failed(String runId, String sourceId, String message) {
+            return new IngestionReport(runId, sourceId, Outcome.FAILED, 0, 0, 0, 0, 0, 0, 0, 0.0,
+                    false, false, null, Duration.ZERO, message);
+        }
+
+        static IngestionReport skipped(String sourceId, String message) {
+            return new IngestionReport(null, sourceId, Outcome.SKIPPED, 0, 0, 0, 0, 0, 0, 0, 0.0,
+                    false, false, null, Duration.ZERO, message);
+        }
+
+        static IngestionReport alreadyRunning(String sourceId) {
+            return new IngestionReport(null, sourceId, Outcome.ALREADY_RUNNING, 0, 0, 0, 0, 0, 0, 0, 0.0,
+                    false, false, null, Duration.ZERO,
+                    "A run is already in flight for this source");
+        }
+
+        public boolean isSuccess() {
+            return outcome == Outcome.COMPLETED || outcome == Outcome.PREVIEW;
+        }
+    }
+}
