@@ -140,15 +140,28 @@ would be flagged despite the Apache option. Nothing hits this today — the dual
 artefacts (`net.java.dev.jna`, `org.javassist`, `com.github.java-json-tools:*`) are all
 transitive and invisible to GitHub's Maven graph.
 
-The `allow-dependencies-licenses` entry for Caffeine is kept but its comment is
-corrected: it is cosmetic, not a gate bypass. Finding 2 means it only keeps one of 58
-equally unresolvable entries out of an informational list.
+### Dropped the Caffeine exemption
+
+The `allow-dependencies-licenses` entry for Caffeine is **removed**. It was first kept
+with a corrected comment calling it cosmetic; CodeRabbit pushed back on the PR, and it
+was right. `groupChanges` in the action's `src/licenses.ts` says so in its own comment —
+*"we leave it off of the `licensed` and `unlicensed` lists"* — so the input drops a
+package from the licence check **entirely**, not just from the unknown-licence notice.
+The exemption therefore also waived `deny-licenses` for any future Caffeine release
+whose licence GitHub *can* resolve, while buying nothing: per finding 2 an unresolved
+licence cannot fail the build anyway, and 57 other entries sit in the same bucket
+unexempted. Caffeine remains verified Apache-2.0 (its own POM on Maven Central at 3.2.4,
+the version the Quarkus BOM resolves), shipped transitively via `quarkus-caffeine`
+before it was ever declared here — nothing needed waiving. The replacement note records
+when that input *is* appropriate: a package whose licence GitHub reports wrongly, naming
+the licence being accepted.
 
 ### Files
 
-- `.github/workflows/dependency-review.yml` — broadened `deny-licenses`; rewrote both
-  comments to record the decision, the evidence, and the revisit condition (upstream
-  announcing removal, or GitHub resolving BOM-managed Maven coordinates).
+- `.github/workflows/dependency-review.yml` — broadened `deny-licenses`, removed
+  `allow-dependencies-licenses`; rewrote the comments to record the decision, the
+  evidence, and the revisit condition (upstream announcing removal, or GitHub resolving
+  BOM-managed Maven coordinates).
 
 ## ⬆️ chore(ui): Node 22 toolchain, Stryker 10, Vitest 5 for the Chat UI (2026-09-17)
 

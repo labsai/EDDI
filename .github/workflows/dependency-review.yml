@@ -55,8 +55,8 @@ jobs:
           #      per-package exclusions that exist only to work around GitHub's
           #      own normalisation — the opposite of what an allow-list is for.
           #   2. It buys no coverage here. The 58 Maven entries GitHub cannot resolve
-          #      (see the note under allow-dependencies-licenses) land in the
-          #      `unlicensed` bucket, and main.ts printNullLicenses() only prints —
+          #      (see the note below the licence list) land in the `unlicensed`
+          #      bucket, and main.ts printNullLicenses() only prints —
           #      it never sets issueFound. They are informational in BOTH modes, so
           #      an allow-list would not gate them either.
           #   3. Removal is not scheduled. Issue #997 was closed by stalebot after
@@ -93,14 +93,22 @@ jobs:
             LGPL-2.1-only, LGPL-2.1-or-later,
             LGPL-3.0-only, LGPL-3.0-or-later,
             SSPL-1.0, BUSL-1.1, Elastic-2.0
-          # Cosmetic, not a gate. BOM-managed dependencies carry no <version> in
-          # the pom (and the langchain4j ones use a ${property}), so GitHub cannot
-          # resolve their metadata and reports no licence — 58 Maven entries are in
-          # that state, plus all 21 pinned GitHub Actions. Per point 2 above none
-          # of them can fail the build; this entry only keeps Caffeine out of the
-          # informational "could not detect a license" list, and records that it
-          # was checked: Apache-2.0, verified against its own POM on Maven Central
-          # (3.2.4, the version the Quarkus BOM resolves), and shipped transitively
-          # via quarkus-caffeine before it was ever declared here.
-          allow-dependencies-licenses: pkg:maven/com.github.ben-manes.caffeine/caffeine
+          # No allow-dependencies-licenses on purpose. BOM-managed dependencies
+          # carry no <version> in the pom (and the langchain4j ones use a
+          # ${property}), so GitHub cannot resolve their metadata and reports no
+          # licence — 58 Maven entries are in that state, plus all 21 pinned
+          # GitHub Actions. Caffeine used to be exempted here to keep one of them
+          # out of the informational "could not detect a license" list, which was
+          # a bad trade: that input drops a package from the licence check
+          # entirely ("we leave it off of the `licensed` and `unlicensed` lists",
+          # groupChanges in the action's src/licenses.ts), so the exemption also
+          # waived deny-licenses for any future Caffeine release whose licence
+          # GitHub *can* resolve. It bought nothing either — per point 2 above an
+          # unresolved licence cannot fail the build, and 57 other entries sit in
+          # the same bucket unexempted. Caffeine is Apache-2.0 (verified against
+          # its own POM on Maven Central at 3.2.4, the version the Quarkus BOM
+          # resolves) and shipped transitively via quarkus-caffeine before it was
+          # ever declared here, so nothing needed waiving. Reach for this input
+          # only for a package whose licence GitHub reports wrongly, and name the
+          # licence being accepted when you do.
           comment-summary-in-pr: always
