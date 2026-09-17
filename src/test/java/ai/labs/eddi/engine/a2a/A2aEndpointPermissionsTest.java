@@ -8,7 +8,7 @@ import io.quarkus.security.Authenticated;
 import io.quarkus.vertx.http.runtime.security.HttpSecurityUtils;
 import io.quarkus.vertx.http.runtime.security.ImmutablePathMatcher;
 import jakarta.annotation.security.PermitAll;
-import jakarta.ws.rs.GET;
+import jakarta.ws.rs.HttpMethod;
 import jakarta.ws.rs.Path;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
@@ -16,12 +16,14 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.io.Reader;
+import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Properties;
 import java.util.Set;
 import java.util.TreeSet;
@@ -197,17 +199,16 @@ class A2aEndpointPermissionsTest {
             if (path == null) {
                 continue;
             }
-            var httpMethod = method.isAnnotationPresent(GET.class) ? "GET" : "POST";
             var resolved = "/" + path.value().replaceAll("\\{[^}]+}", SAMPLE_AGENT_ID);
 
             if (method.isAnnotationPresent(PermitAll.class)) {
-                assertPolicies(resolved, httpMethod, PERMIT,
+                assertPolicies(resolved, httpVerbOf(method), PERMIT,
                         method.getName() + " is @PermitAll, but Quarkus checks the path policy first and"
                                 + " this path does not resolve to permit — add it to a permit entry in"
                                 + " application.properties, or drop the annotation");
                 checked++;
             } else if (method.isAnnotationPresent(Authenticated.class)) {
-                assertPolicies(resolved, httpMethod, AUTHENTICATED,
+                assertPolicies(resolved, httpVerbOf(method), AUTHENTICATED,
                         method.getName() + " is @Authenticated, but the path policy does not require"
                                 + " authentication — a permit entry is overriding the annotation");
                 checked++;
@@ -219,6 +220,30 @@ class A2aEndpointPermissionsTest {
     }
 
     // ==================== Helpers ====================
+
+    /**
+     * The HTTP verb an endpoint answers, read from whichever annotation is itself
+     * meta-annotated {@link HttpMethod} — so {@code @PUT}, {@code @DELETE} and a
+     * custom verb resolve rather than being guessed.
+     * <p>
+     * This was {@code isAnnotationPresent(GET.class) ? "GET" : "POST"}, which
+     * graded every non-GET endpoint as a POST. The permit entries are GET-only, so
+     * a {@code @PermitAll @PUT} would have been checked against a method it does
+     * not serve — and this is the generic guard, so guessing is exactly what it
+     * exists not to do.
+     */
+    private static String httpVerbOf(Method method) {
+        var verbs = Arrays.stream(method.getAnnotations())
+                .map(a -> a.annotationType().getAnnotation(HttpMethod.class))
+                .filter(Objects::nonNull)
+                .map(HttpMethod::value)
+                .distinct()
+                .toList();
+        assertEquals(1, verbs.size(),
+                method.getName() + " carries " + verbs.size() + " JAX-RS verb annotations " + verbs
+                        + "; this guard resolves a path policy for exactly one");
+        return verbs.get(0);
+    }
 
     /**
      * Replicates {@code AbstractPathMatchingHttpSecurityPolicy.findHttpMatchers}:

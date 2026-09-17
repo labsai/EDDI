@@ -42,8 +42,11 @@ Add A2A fields to your agent configuration:
 ### Who can call them
 
 On a deployment with `quarkus.oidc.tenant-enabled=false` — the shipped default —
-everything is reachable without a token, and this section says nothing. With
-authentication on, the column above is the contract:
+no endpoint requires a token, so the column above says nothing there. It is still
+not a promise that every row returns data: `eddi.a2a.capabilities.public` is an
+independent switch, and while it is off the two capability endpoints answer 404
+whether or not a token was sent. With authentication on, the column is the
+contract:
 
 - **Agent Cards are anonymous by design.** A peer is handed a URL and fetches
   `{url}/agent.json` before it holds any credential for your deployment; EDDI's
