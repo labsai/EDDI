@@ -95,7 +95,11 @@ public interface PageFetcher {
                 return true;
             }
             String normalized = contentType.toLowerCase();
-            return normalized.contains("html") || normalized.contains("xhtml") || normalized.contains("xml");
+            // Deliberately NOT a bare "xml" check. Documentation sites link their own
+            // sitemap.xml and RSS feeds, and matching "xml" turned those into
+            // "documents" — a knowledge-base entry of concatenated <loc> URLs that
+            // retrieval then happily returned.
+            return normalized.contains("text/html") || normalized.contains("application/xhtml");
         }
     }
 }

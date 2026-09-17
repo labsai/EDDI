@@ -64,6 +64,12 @@ public class IngestionPipeline {
     /**
      * Metadata key that ties a segment back to its document, used to replace it.
      */
+    /** Cap on third-party text copied into vector metadata. */
+    private static final int MAX_TITLE_LENGTH = 300;
+
+    /** Added to a run's time budget before it counts as abandoned. */
+    private static final Duration STALE_RUN_MARGIN = Duration.ofMinutes(15);
+
     public static final String METADATA_DOCUMENT_ID = "documentId";
     public static final String METADATA_URL = "url";
     public static final String METADATA_TITLE = "title";
@@ -126,6 +132,9 @@ public class IngestionPipeline {
         String sourceKey = stateKey(ragConfigId, source);
         String runId;
         if (mode == Mode.INGEST) {
+            // A run whose process died is still marked RUNNING and would block this
+            // source indefinitely; nothing else calls this.
+            stateStore.reapStaleRuns(Instant.now().minus(staleRunThreshold(source)));
             var claimed = stateStore.startRun(sourceKey);
             if (claimed.isEmpty()) {
                 // Not an error: an operator clicking "run now" while a scheduled run is
@@ -140,25 +149,47 @@ public class IngestionPipeline {
         Instant startedAt = Instant.now();
         Collector collector = new Collector(ragConfigId, knowledgeBase, knowledgeBaseId, source, sourceKey, runId, mode);
 
-        WebCrawler.CrawlSummary summary;
+        // Everything after the run is claimed is guarded, and by Throwable rather
+        // than Exception. A claimed run that is never finished blocks its source for
+        // good: manual runs answer 409 and every scheduled fire fails until the row
+        // is reaped. The ways out are not all RuntimeExceptions — a state-store
+        // failure, an OutOfMemoryError, or a StackOverflowError from a pathological
+        // page are each enough.
         try {
-            summary = crawler.crawl(toCrawlRequest(source), collector);
-        } catch (RuntimeException e) {
-            LOGGER.errorf(e, "Ingestion crawl failed for source '%s'", LogSanitizer.sanitize(source.getName()));
-            IngestionReport report = collector.toReport(null, describe(e), startedAt);
-            finish(mode, runId, sourceKey, report, IngestionRun.Status.FAILED);
+            WebCrawler.CrawlSummary summary = crawler.crawl(toCrawlRequest(source), collector);
+
+            collector.tombstoned = reconcileDeletions(source, sourceKey, runId, mode, summary, collector);
+
+            IngestionReport report = collector.toReport(summary, null, startedAt);
+            finish(mode, runId, sourceKey, report, statusFor(collector));
             return report;
+        } catch (Throwable t) {
+            LOGGER.errorf(t, "Ingestion failed for source '%s'", LogSanitizer.sanitize(source.getName()));
+            try {
+                IngestionReport report = collector.toReport(null, describe(t), startedAt);
+                finish(mode, runId, sourceKey, report, IngestionRun.Status.FAILED);
+                if (t instanceof Error error) {
+                    // Recorded, then rethrown: an Error says the JVM is in trouble and
+                    // swallowing it would hide that.
+                    throw error;
+                }
+                return report;
+            } catch (RuntimeException closingFailure) {
+                LOGGER.errorf(closingFailure, "Could not close the failed ingestion run for source '%s' — it will "
+                        + "be reaped", LogSanitizer.sanitize(source.getName()));
+                throw closingFailure;
+            }
         }
+    }
 
-        int tombstoned = reconcileDeletions(source, sourceKey, runId, mode, summary, collector);
-        collector.tombstoned = tombstoned;
-
-        IngestionReport report = collector.toReport(summary, null, startedAt);
-        finish(mode, runId, sourceKey, report,
-                collector.failed > 0 && collector.ingested == 0
-                        ? IngestionRun.Status.FAILED
-                        : IngestionRun.Status.COMPLETED);
-        return report;
+    /**
+     * A run only counts as failed when nothing at all came through. A stable site
+     * with one dead link produced failures on every run otherwise, which trains
+     * operators to ignore the status.
+     */
+    private static IngestionRun.Status statusFor(Collector collector) {
+        boolean nothingUsable = collector.ingested + collector.unchanged == 0;
+        return collector.failed > 0 && nothingUsable ? IngestionRun.Status.FAILED : IngestionRun.Status.COMPLETED;
     }
 
     /**
@@ -198,8 +229,13 @@ public class IngestionPipeline {
             } catch (UnsupportedFeatureException e) {
                 collector.replaceUnsupported = true;
             } catch (RuntimeException e) {
-                LOGGER.warnf(e, "Could not remove vectors for a deleted document of source '%s'",
-                        LogSanitizer.sanitize(source.getName()));
+                // Un-tombstone so the next run tries again. A tombstoned document is
+                // never reported a second time, so leaving the flag set would orphan
+                // these vectors permanently — retrievable content belonging to a page
+                // that no longer exists, with nothing left to point at it.
+                LOGGER.warnf(e, "Could not remove vectors for a deleted document of source '%s'; it will be "
+                        + "retried on the next run", LogSanitizer.sanitize(source.getName()));
+                stateStore.recordSeen(sourceKey, document.documentId(), runId);
             }
         }
         return removed;
@@ -250,9 +286,25 @@ public class IngestionPipeline {
         return new CrawlRequest(web.getStartUrl(), scope, limits, politeness);
     }
 
-    private static String describe(Exception e) {
-        String message = e.getMessage();
-        return message == null || message.isBlank() ? e.getClass().getSimpleName() : message;
+    private static String describe(Throwable t) {
+        String message = t.getMessage();
+        return message == null || message.isBlank() ? t.getClass().getSimpleName() : message;
+    }
+
+    /** Truncates third-party text before it is stored as metadata. */
+    private static String cap(String value, int maxLength) {
+        if (value == null) {
+            return "";
+        }
+        return value.length() <= maxLength ? value : value.substring(0, maxLength);
+    }
+
+    /**
+     * How long a run may be in flight before it is treated as abandoned: its own
+     * time budget plus a margin, so a slow but healthy run is never reaped.
+     */
+    private static Duration staleRunThreshold(IngestionSource source) {
+        return Duration.ofMinutes(source.settings().timeBudgetMinutesOrDefault()).plus(STALE_RUN_MARGIN);
     }
 
     /**
@@ -313,6 +365,10 @@ public class IngestionPipeline {
         @Override
         public ConditionalHeaders conditionalFor(String documentId) {
             return stateStore.lookup(sourceKey, documentId)
+                    // A tombstoned document has no vectors any more, so revalidating it
+                    // would earn a 304 and leave it permanently unretrievable. Ask for
+                    // the body.
+                    .filter(state -> !state.tombstoned())
                     .map(state -> new ConditionalHeaders(state.etag(), state.lastModified()))
                     .orElseGet(ConditionalHeaders::none);
         }
@@ -343,6 +399,13 @@ public class IngestionPipeline {
             try {
                 String markdown = converter.convert(page.html(), page.finalUrl(),
                         source.settings().maxContentLengthOrDefault());
+                if (page.truncated()) {
+                    // The body hit its size cap, so this document is incomplete. Said
+                    // once per page rather than silently embedding a fragment as if it
+                    // were the whole thing.
+                    LOGGER.infof("Document '%s' of source '%s' was truncated at the page size cap",
+                            LogSanitizer.sanitize(page.documentId()), LogSanitizer.sanitize(source.getName()));
+                }
                 if (markdown.isBlank()) {
                     // A page of pure navigation converts to nothing; storing an empty
                     // document would only pollute retrieval.
@@ -409,7 +472,9 @@ public class IngestionPipeline {
 
             Metadata metadata = Metadata.from(METADATA_DOCUMENT_ID, page.documentId())
                     .put(METADATA_URL, page.finalUrl())
-                    .put(METADATA_TITLE, page.title() == null ? "" : page.title())
+                    // Capped: the title comes from a third-party page and is copied onto
+                    // every segment of the document.
+                    .put(METADATA_TITLE, cap(page.title(), MAX_TITLE_LENGTH))
                     .put(METADATA_SOURCE, String.valueOf(source.getName()))
                     .put(METADATA_RUN_ID, runId)
                     .put(METADATA_INGESTED_AT, Instant.now().toString());

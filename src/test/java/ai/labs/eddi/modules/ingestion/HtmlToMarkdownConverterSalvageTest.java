@@ -8,7 +8,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.concurrent.atomic.AtomicReference;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -196,6 +199,52 @@ class HtmlToMarkdownConverterSalvageTest {
         String result = converter.convert(html, null);
 
         assertFalse(result.contains("\n\n\n"), "no more than one blank line, was: " + result.replace("\n", "\\n"));
+    }
+
+    @Test
+    @DisplayName("deeply nested markup does not overflow the stack")
+    void deepNestingDoesNotOverflow() throws Exception {
+        // The walk is recursive and the HTML is third-party — jsoup builds the full
+        // DOM, 60,000 levels deep if the page says so. A StackOverflowError is an
+        // Error, so it sails past every catch(Exception) in the ingestion pipeline and
+        // kills the run mid-document, leaving its state-store row RUNNING and the
+        // source blocked until something reaps it.
+        //
+        // Run on a deliberately small stack so the test is decisive rather than
+        // dependent on the JVM's default: without the depth cap this overflows, with
+        // it the conversion completes.
+        String html = "<body>" + "<div>".repeat(20_000) + "deep content" + "</div>".repeat(20_000) + "</body>";
+
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        AtomicReference<String> output = new AtomicReference<>();
+        Thread worker = new Thread(null, () -> {
+            try {
+                output.set(converter.convert(html, null));
+            } catch (Throwable t) {
+                failure.set(t);
+            }
+        }, "deep-nesting", 256 * 1024);
+        worker.start();
+        worker.join(60_000);
+
+        assertNull(failure.get(), "conversion must not blow the stack, was: " + failure.get());
+        assertTrue(output.get() != null && output.get().contains("deep content"),
+                "the text below the depth cap must still be collected");
+    }
+
+    @Test
+    @DisplayName("truncation never splits a surrogate pair")
+    void truncationKeepsSurrogatePairsIntact() {
+        // A lone surrogate half is not valid text, and some embedding providers
+        // reject the whole request over one.
+        String emoji = "😀";
+        String html = "<p>" + emoji.repeat(50) + "</p>";
+
+        String result = converter.convert(html, null, 11);
+
+        int cutAt = result.indexOf("\n\n[Content truncated");
+        assertTrue(cutAt > 0, "expected a truncation marker, was: " + result);
+        assertFalse(Character.isHighSurrogate(result.charAt(cutAt - 1)), "the cut must not leave half a pair");
     }
 
     @Test

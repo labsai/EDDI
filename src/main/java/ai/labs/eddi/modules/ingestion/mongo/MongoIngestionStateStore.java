@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.ingestion.mongo;
 
 import ai.labs.eddi.modules.ingestion.IIngestionStateStore;
+import ai.labs.eddi.modules.ingestion.IngestionStateStoreException;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
@@ -13,6 +14,7 @@ import com.mongodb.client.model.Indexes;
 import com.mongodb.client.model.Sorts;
 import com.mongodb.client.model.UpdateOptions;
 import com.mongodb.client.model.Updates;
+import com.mongodb.ErrorCategory;
 import com.mongodb.MongoWriteException;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -181,9 +183,14 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
             runs.insertOne(run);
             return Optional.of(runId);
         } catch (MongoWriteException e) {
-            // Duplicate key on the partial unique index: another run is in flight.
-            // Losing this race is the expected outcome, not an error.
-            return Optional.empty();
+            if (e.getError().getCategory() == ErrorCategory.DUPLICATE_KEY) {
+                // The partial unique index rejected it: another run is in flight.
+                // Losing that race is the expected outcome, not an error.
+                return Optional.empty();
+            }
+            // Anything else is a real failure. Reporting it as "already running"
+            // would show the operator a 409 for a broken database.
+            throw new IngestionStateStoreException("Failed to start an ingestion run", e);
         }
     }
 

@@ -5,6 +5,8 @@
 package ai.labs.eddi.datastore.postgres;
 
 import ai.labs.eddi.modules.ingestion.IIngestionStateStore;
+import ai.labs.eddi.modules.ingestion.IngestionStateStoreException;
+import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
@@ -33,6 +35,7 @@ import java.util.UUID;
  * than two crawls racing into one knowledge base.
  */
 @ApplicationScoped
+@DefaultBean
 public class PostgresIngestionStateStore implements IIngestionStateStore {
 
     private static final Logger LOGGER = Logger.getLogger(PostgresIngestionStateStore.class);
@@ -124,8 +127,10 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
                 return resultSet.next() ? Optional.of(toDocumentState(resultSet)) : Optional.empty();
             }
         } catch (SQLException e) {
-            LOGGER.errorf(e, "Failed to look up ingestion state");
-            return Optional.empty();
+            // Never swallowed: an empty answer here means "never ingested", so the
+            // page is re-embedded and re-billed on every run while the database is
+            // unwell, and the operator sees a healthy-looking run.
+            throw new IngestionStateStoreException("Failed to look up ingestion state", e);
         }
     }
 
@@ -161,7 +166,9 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
             statement.setString(8, runId);
             statement.executeUpdate();
         } catch (SQLException e) {
-            LOGGER.errorf(e, "Failed to record an ingested document");
+            // Losing this write means the document is embedded again next run, and
+            // the run after that, for as long as the failure lasts.
+            throw new IngestionStateStoreException("Failed to record an ingested document", e);
         }
     }
 
@@ -178,7 +185,7 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
             statement.setString(3, documentId);
             statement.executeUpdate();
         } catch (SQLException e) {
-            LOGGER.errorf(e, "Failed to record a seen document");
+            throw new IngestionStateStoreException("Failed to record a seen document", e);
         }
     }
 
@@ -218,7 +225,7 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
                 }
             }
         } catch (SQLException e) {
-            LOGGER.errorf(e, "Failed to tombstone missing documents");
+            throw new IngestionStateStoreException("Failed to tombstone missing documents", e);
         }
         return tombstoned;
     }
@@ -236,7 +243,7 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
                 }
             }
         } catch (SQLException e) {
-            LOGGER.errorf(e, "Failed to list ingestion documents");
+            throw new IngestionStateStoreException("Failed to list ingestion documents", e);
         }
         return states;
     }
@@ -253,7 +260,7 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
                 }
             }
         } catch (SQLException e) {
-            LOGGER.errorf(e, "Failed to purge an ingestion source");
+            throw new IngestionStateStoreException("Failed to purge an ingestion source", e);
         }
     }
 
@@ -273,8 +280,9 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
             // in flight for this source. Losing that race is expected, not an error.
             return statement.executeUpdate() == 1 ? Optional.of(runId) : Optional.empty();
         } catch (SQLException e) {
-            LOGGER.errorf(e, "Failed to start an ingestion run");
-            return Optional.empty();
+            // An empty Optional means "a run is already in flight", which would be a
+            // lie here and would show the operator a 409 for a database fault.
+            throw new IngestionStateStoreException("Failed to start an ingestion run", e);
         }
     }
 
@@ -301,7 +309,9 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
             statement.setString(11, run.runId());
             statement.executeUpdate();
         } catch (SQLException e) {
-            LOGGER.errorf(e, "Failed to finish an ingestion run");
+            // Losing this leaves the run RUNNING, which blocks the source until it
+            // is reaped.
+            throw new IngestionStateStoreException("Failed to finish an ingestion run", e);
         }
     }
 
@@ -314,8 +324,7 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
                 return resultSet.next() ? Optional.of(toRun(resultSet)) : Optional.empty();
             }
         } catch (SQLException e) {
-            LOGGER.errorf(e, "Failed to read the active ingestion run");
-            return Optional.empty();
+            throw new IngestionStateStoreException("Failed to read the active ingestion run", e);
         }
     }
 
@@ -332,7 +341,7 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
                 }
             }
         } catch (SQLException e) {
-            LOGGER.errorf(e, "Failed to list ingestion runs");
+            throw new IngestionStateStoreException("Failed to list ingestion runs", e);
         }
         return history;
     }
@@ -350,8 +359,7 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
             statement.setTimestamp(2, Timestamp.from(startedBefore));
             return statement.executeUpdate();
         } catch (SQLException e) {
-            LOGGER.errorf(e, "Failed to reap stale ingestion runs");
-            return 0;
+            throw new IngestionStateStoreException("Failed to reap stale ingestion runs", e);
         }
     }
 
