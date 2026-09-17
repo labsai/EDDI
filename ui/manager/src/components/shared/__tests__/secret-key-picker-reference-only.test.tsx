@@ -248,6 +248,12 @@ describe("SecretKeyPicker in reference-only mode", () => {
   // popup must normalise instead — otherwise dismissing it leaves an unbraced
   // reference that fails the save until the field is focused and left again.
   describe("dismissing the popup still normalises an unbraced reference", () => {
+    /**
+     * Render a controlled picker holding `initial`, followed by a focusable
+     * "next field" and some non-focusable page text, then open the vault popup
+     * and wait until it has moved focus into its filter — the point at which
+     * the input's blur has been deferred.
+     */
     async function openPopupOn(initial: string) {
       const user = userEvent.setup();
       renderWithProviders(

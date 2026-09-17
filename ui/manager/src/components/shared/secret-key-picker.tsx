@@ -732,15 +732,20 @@ export function SecretKeyPicker({
     if (canonical) onChange(canonical);
   }, [referenceOnly, readOnly, value, onChange]);
 
+  /**
+   * The input lost focus: normalise, unless focus only moved into this
+   * picker's own popup.
+   *
+   * That is not the user leaving the field. The popup focuses its filter 50 ms
+   * after opening; canonicalising on that blur swapped the input for a chip,
+   * and the chip state renders no popup — so the popup the user had just opened
+   * vanished again. Scoped to the popup: tabbing on to the vault button IS
+   * leaving the field. Deferring here makes every way OUT of the popup
+   * responsible for the normalisation instead — see `dismissPopup` and
+   * `handlePopupFocusLeave`.
+   */
   const handleBlur = useCallback(
     (e: React.FocusEvent<HTMLInputElement>) => {
-      // Focus moving into this picker's own popup is not the user leaving the
-      // field. The popup focuses its filter 50 ms after opening; canonicalising
-      // on that blur swapped the input for a chip, and the chip state renders
-      // no popup — so the popup the user had just opened vanished again. Scoped
-      // to the popup: tabbing on to the vault button IS leaving the field.
-      // Deferring here makes every way OUT of the popup responsible for the
-      // normalisation instead — see dismissPopup and handlePopupFocusLeave.
       if (e.relatedTarget instanceof Node && popupRef.current?.contains(e.relatedTarget)) {
         return;
       }
