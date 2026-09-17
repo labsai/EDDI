@@ -19,6 +19,7 @@ import ai.labs.eddi.engine.httpclient.IResponse;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
+import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
@@ -31,6 +32,8 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -766,6 +769,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
         // names the symptom and not the cause.
         callerIdentityResolver.rejectAnyReference(targetUriStr, "the request path");
         rejectConnectionReference(targetUriStr, "the request path");
+        rejectExpiredSecretContext(targetUriStr, "the request path");
         var targetUri = URI.create(targetUriStr);
         var requestBody = prePostUtils.templateValues(requestConfig.getBody(), templateDataObjects);
         // Resolve global variable references, then vault references in request body
@@ -811,6 +815,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
         // shipping nonsense to the API.
         callerIdentityResolver.rejectAnyReference(requestBody, "a request body");
         rejectConnectionReference(requestBody, "a request body");
+        rejectExpiredSecretContext(requestBody, "a request body");
 
         Map<String, String> headers = requestConfig.getHeaders();
         // Header names already written to this request, lower-cased because HTTP
@@ -869,6 +874,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
             if (Boolean.TRUE.equals(claimedHeaders.putIfAbsent(headerName.toLowerCase(Locale.ROOT), Boolean.FALSE))) {
                 throw connectionHeaderCollision(headerName);
             }
+            rejectExpiredSecretContext(headerValue, "header '" + headerName + "'");
             request.setHttpHeader(headerName, headerValue);
         }
 
@@ -882,9 +888,47 @@ public class ApiCallExecutor implements IApiCallExecutor {
             callerIdentityResolver.rejectTokenReference(qpValue, "a query parameter");
             rejectConnectionReference(qpValue, "a query parameter");
             qpValue = callerIdentityResolver.resolveValue(qpValue, targetUri);
+            rejectExpiredSecretContext(qpValue, "query parameter '" + queryParam + "'");
             request.setQueryParam(queryParam, qpValue);
         }
         return new BuiltRequest(request, Set.copyOf(connectionOwnedHeaders));
+    }
+
+    /**
+     * Refuse a request that would carry
+     * {@link MemoryKeys#SECRET_CONTEXT_PLACEHOLDER}.
+     * <p>
+     * A context value the client marked {@code "secret": true} is replaced by the
+     * placeholder when its turn stops, so a template that reads it afterwards — a
+     * call that runs after a HITL approval resumed the turn, or one in a later turn
+     * — resolves to the placeholder. Sending that would authenticate as nobody and
+     * surface as a 401 from the API with nothing naming the cause; failing here
+     * names it.
+     */
+    static void rejectExpiredSecretContext(String value, String location) {
+        if (value == null) {
+            return;
+        }
+        if (value.contains(MemoryKeys.SECRET_CONTEXT_PLACEHOLDER) || urlDecodedContainsSecretContextPlaceholder(value)) {
+            throw new IllegalArgumentException("This API call would send " + MemoryKeys.SECRET_CONTEXT_PLACEHOLDER + " in " + location
+                    + ": it references a context value marked secret, and those only exist during the request that carried "
+                    + "them. This turn no longer has it — it resumed after a human approval, or a later turn referenced it. "
+                    + "Send the value again in the context of the request that makes this call.");
+        }
+    }
+
+    /**
+     * The path is templated URL-encoded, so the placeholder arrives encoded there.
+     */
+    private static boolean urlDecodedContainsSecretContextPlaceholder(String value) {
+        if (value.indexOf('%') < 0) {
+            return false;
+        }
+        try {
+            return URLDecoder.decode(value, StandardCharsets.UTF_8).contains(MemoryKeys.SECRET_CONTEXT_PLACEHOLDER);
+        } catch (IllegalArgumentException malformedEscape) {
+            return false;
+        }
     }
 
     /**

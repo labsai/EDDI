@@ -84,6 +84,10 @@ so concurrent users overwrite each other's value. `secretInput` only hides the t
   cannot be converted falls back to whole replacement (WARN).
 - **`TurnAuditBuffer.flush(memory, secretContextValues)`** redacts those values from every buffered
   entry, independent of the secret-input redaction.
+- **`ApiCallExecutor.rejectExpiredSecretContext`**: an HTTP call whose resolved header, query parameter,
+  body or path (also URL-encoded) still carries the placeholder is refused with an error naming the
+  location — the case of a call that runs after a HITL approval resumed the turn, or a later turn that
+  references the value. Same fail-loudly pattern as unsatisfiable `${caller:…}` references.
 - **`SecretValueScrubber`** (new, `engine.memory`): the string/list/map/Context walk extracted from
   `PropertySetterTask` (which now uses it, unchanged in behaviour), plus `scrubDeep` for the JSON-form
   scrub.
@@ -102,8 +106,9 @@ so concurrent users overwrite each other's value. `secretInput` only hides the t
 
 ### Verification
 
-- `ConversationSecretContextTest` (8) and `SecretValueScrubberTest` (6); the related Conversation,
-  PropertySetterTask, TurnAuditBuffer and LifecycleManager suites stay green (330 tests).
+- `ConversationSecretContextTest` (8), `SecretValueScrubberTest` (6) and
+  `ApiCallExecutorSecretContextTest` (5); the engine audit/memory/runtime, properties and apicalls
+  suites plus the repo-wide guards stay green.
 - Mutation-checked: removing the end-of-turn scrub, the output masking, the audit redaction, the property
   scrub, the possible-results scrub or the JSON-form scrub each fails at least one test.
 - End to end on the packaged build (real MongoDB, mock API that echoes the header back): the HTTP call

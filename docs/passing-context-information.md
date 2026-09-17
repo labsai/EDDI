@@ -74,7 +74,9 @@ really is per request:
   the step, the conversation output, the conversation properties (so a `longTerm` property
   never reaches the user memory store) and the turn's audit ledger entries.
 - A later turn, or tasks that run after a HITL resume, see `<secret context>`. Send the
-  value again with every request that needs it.
+  value again with every request that needs it. An HTTP call that would send the placeholder
+  — in a header, query parameter, body or path — is refused with an error naming where it is,
+  instead of reaching the API as a credential that authenticates nobody.
 
 Use it in an HTTP call **header**:
 
