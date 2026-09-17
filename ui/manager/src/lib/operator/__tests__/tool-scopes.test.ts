@@ -11,6 +11,7 @@ import {
   grantsAgentCreation,
   grantsAgentModification,
   grantsKnowledgeBaseReads,
+  grantsIngestionStatusReads,
   grantsKnowledgeBaseAuthoring,
 } from "../tool-scopes";
 
@@ -91,6 +92,17 @@ describe("tool-scopes", () => {
       expect(grantsKnowledgeBaseReads(endpointsForScope("read_only"))).toBe(true);
       expect(grantsKnowledgeBaseReads(["GET /ragstore/rags/{id}"])).toBe(false);
       expect(grantsKnowledgeBaseReads(["GET /ragstore/rags/descriptors"])).toBe(false);
+    });
+
+    it("tracks the ingestion-status read on its own endpoint", () => {
+      // Deliberately NOT folded into grantsKnowledgeBaseReads: the two config
+      // reads are a complete capability without it, so requiring all three
+      // would drop the whole section on a deployment missing just this one.
+      // One predicate per claim is what keeps the prompt honest either way.
+      expect(grantsIngestionStatusReads(endpointsForScope("read_only"))).toBe(true);
+      expect(
+        grantsIngestionStatusReads(["GET /ragstore/rags/descriptors", "GET /ragstore/rags/{id}"]),
+      ).toBe(false);
     });
 
     it("has a by-id read for every workflow-extension store it can also write", () => {

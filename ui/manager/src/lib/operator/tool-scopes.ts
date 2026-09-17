@@ -520,6 +520,22 @@ export function grantsKnowledgeBaseReads(endpoints: readonly string[]): boolean 
 }
 
 /**
+ * Whether an ingestion run's status can be checked.
+ *
+ * Separate from {@link grantsKnowledgeBaseReads} rather than folded into it, and
+ * the split is the point. The two configuration reads are a complete, useful
+ * capability on their own — "which embedding model, which vector store" is
+ * answerable without ever touching an ingestion run — so requiring all three
+ * would mean a deployment missing this one endpoint got no knowledge-base
+ * guidance whatsoever, which is the failure this whole change exists to fix.
+ * What the invariant actually demands is narrower: never describe a tool that
+ * was not generated. One predicate per claim delivers that exactly.
+ */
+export function grantsIngestionStatusReads(endpoints: readonly string[]): boolean {
+  return new Set(endpoints).has("GET /ragstore/rags/{id}/ingestion/{ingestionId}/status");
+}
+
+/**
  * Whether the granted endpoints can change a knowledge base — create or edit a
  * configuration, or ingest a document into one.
  *

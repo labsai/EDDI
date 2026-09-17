@@ -864,7 +864,8 @@ public class McpAdminTools {
             Map.entry("ai.labs.mcpcalls", "mcpcalls"),
             Map.entry("ai.labs.output", "output"),
             Map.entry("ai.labs.property", "propertysetter"),
-            Map.entry("ai.labs.dictionary", "dictionaries"), Map.entry("ai.labs.parser", "dictionaries"));
+            Map.entry("ai.labs.dictionary", "dictionaries"), Map.entry("ai.labs.parser", "dictionaries"),
+            Map.entry("ai.labs.rag", "rag"));
 
     /**
      * Map a workflow extension type URI to the MCP resource type slug. E.g.,

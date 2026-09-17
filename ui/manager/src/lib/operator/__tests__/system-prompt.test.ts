@@ -265,6 +265,9 @@ describe("buildOperatorPromptBody", () => {
   });
 
   describe("knowledge bases", () => {
+    /** The granted set with every RAG endpoint removed. */
+    const withoutRag = () => READ_ENDPOINTS.filter((e) => !e.includes("/ragstore/"));
+
     it("describes them in BOTH scopes, so the operator never has to guess at a tool", () => {
       // The bug this closes: the operator can read docs/rag.md, so it knew
       // knowledge bases exist, had no tool for one and no sentence saying so —
@@ -289,21 +292,50 @@ describe("buildOperatorPromptBody", () => {
       expect(body).not.toContain("You CANNOT create or edit a knowledge base");
     });
 
-    it("says nothing about them when the reads are not granted", () => {
-      const withoutRag = READ_ENDPOINTS.filter((e) => !e.includes("/ragstore/"));
-      expect(buildOperatorPromptBody(withoutRag)).not.toContain("Knowledge bases (RAG)");
+    it("states the boundary instead of going silent when the reads are not granted", () => {
+      // Silence is what produced the invented `readRag` call. The section stays;
+      // its content becomes "you have no tool for this".
+      const body = buildOperatorPromptBody(withoutRag());
+      expect(body).toContain("You have NO tool to list, read or check one");
+      expect(body).not.toContain("Find one by name in the descriptor listing");
+    });
+
+    it("leaks no RAG capability through the unconditional cheatsheet", () => {
+      // BODY_CHEATSHEET and its docs map are included in every prompt. A `rag`
+      // step type or a "rag" docs-page pointer sitting there would tell a model
+      // with no RAG tool that knowledge bases exist and are inspectable — the
+      // precise feature-aware/no-tool state this change exists to remove.
+      const body = buildOperatorPromptBody(withoutRag());
+      expect(body).not.toContain("rag (knowledge base)");
+      expect(body).not.toContain('knowledge bases: "rag"');
+      expect(body).not.toContain("Documentation: the `rag` page");
     });
 
     it("needs the descriptor listing too — a by-id read alone is unreachable", () => {
-      const byIdOnly = [
-        ...READ_ENDPOINTS.filter((e) => !e.includes("/ragstore/")),
-        "GET /ragstore/rags/{id}",
-      ];
-      expect(buildOperatorPromptBody(byIdOnly)).not.toContain("Knowledge bases (RAG)");
+      const byIdOnly = [...withoutRag(), "GET /ragstore/rags/{id}"];
+      expect(buildOperatorPromptBody(byIdOnly)).toContain("You have NO tool to list, read or check one");
     });
 
-    it("lists rag among the workflow step types it may encounter", () => {
-      expect(defaultOperatorPromptBody("read_only")).toContain("rag (knowledge base)");
+    it("promises the ingestion check only when that endpoint is granted", () => {
+      // The three reads can be granted independently, so the claim has to track
+      // its own endpoint rather than ride along with the other two.
+      const configReadsOnly = [
+        ...withoutRag(),
+        "GET /ragstore/rags/descriptors",
+        "GET /ragstore/rags/{id}",
+      ];
+      const body = buildOperatorPromptBody(configReadsOnly);
+      expect(body).toContain("Find one by name in the descriptor listing");
+      expect(body).not.toContain("ingestion run's status");
+
+      expect(defaultOperatorPromptBody("read_only")).toContain("ingestion run's status");
+    });
+
+    it("names the rag step type so a workflow read is still interpretable", () => {
+      // Both branches: with the reads it is the section's first bullet, without
+      // them it is the step the boundary text names.
+      expect(defaultOperatorPromptBody("read_only")).toContain("by a workflow's `rag` step");
+      expect(buildOperatorPromptBody(withoutRag())).toContain("A workflow may contain a `rag` step");
     });
   });
 

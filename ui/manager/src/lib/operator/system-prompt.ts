@@ -6,6 +6,7 @@ import {
   grantsConversationTesting,
   grantsGroupDiscussion,
   grantsKnowledgeBaseReads,
+  grantsIngestionStatusReads,
   grantsKnowledgeBaseAuthoring,
   type OperatorScope,
 } from "./tool-scopes";
@@ -227,12 +228,22 @@ const BODY_KNOWLEDGE_BASES = `Knowledge bases (RAG):
   the default retrieval parameters.
 - Find one by name in the descriptor listing, then read it by id AND version —
   the by-id read needs both, and a name alone reaches nothing.
-- You can also check an ingestion run's status by its ingestion id.
-- "Is it set up correctly?" is answered from the document plus, when you have an
-  ingestion id, that run's status: which embedding provider and model, which
-  vector store, and whether documents finished ingesting. Report which of those
-  you actually checked. Whether documents were ever ingested is NOT visible in
-  the configuration — say so rather than implying the config alone proves it.`;
+- "Is it set up correctly?" is answered from the document: which embedding
+  provider and model, and which vector store. Report what you actually checked.
+  Whether documents were ever ingested is NOT visible in the configuration — say
+  so rather than implying the config alone proves it.
+- Documentation: the \`rag\` page.`;
+
+/**
+ * The ingestion-status line, appended only when that endpoint is granted.
+ *
+ * Separate from the section above rather than part of it: a deployment can grant
+ * the two configuration reads without this one, and a prompt that promised an
+ * ingestion check the agent holds no tool for is the same defect this whole
+ * section exists to fix, one level down.
+ */
+const BODY_KNOWLEDGE_BASES_INGESTION = `- You can also check an ingestion run's status by its ingestion id — which is
+  what answers "did the documents actually land?" when you have one.`;
 
 /**
  * Appended when knowledge bases can be read but not changed — the current
@@ -243,6 +254,22 @@ const BODY_KNOWLEDGE_BASES_READ_ONLY = `- You CANNOT create or edit a knowledge 
   into one — you have no tool for either. Point the user at the knowledge base
   under Resources in the manager, and offer to read the current configuration
   for them first.`;
+
+/**
+ * Shown INSTEAD of the section above when the reads are not granted.
+ *
+ * Not silence: the operator can still meet a \`rag\` step while reading a
+ * workflow, and an unexplained step type invites the same improvisation as an
+ * unexplained feature. What it must not do is describe a capability it lacks, so
+ * this names the step and stops there — the boundary stated once, where the
+ * model will actually need it.
+ */
+const BODY_KNOWLEDGE_BASES_NO_READS = `Knowledge bases (RAG):
+- A workflow may contain a \`rag\` step, which points at a knowledge base: the
+  documents an agent can retrieve from at answer time.
+- You have NO tool to list, read or check one, and none to change one. If asked
+  about a knowledge base, say that plainly and point the user at Resources in
+  the manager — do not infer its setup from the workflow step or the docs.`;
 
 /**
  * Architecture background, present in BOTH scopes — a read-only operator
@@ -343,13 +370,21 @@ const BODY_AUTHORING_NO_AGENT = `- You CANNOT create or edit an agent, its model
   similar one is configured with.`;
 
 /**
- * Assembles the knowledge-base section: what can be read, plus the boundary
- * sentence whenever nothing here can be written.
+ * Assembles the knowledge-base section from the three grants that can vary
+ * independently: the configuration reads, the ingestion-status read, and any
+ * write. Every line is present only when the tool behind it is.
+ *
+ * When the reads are absent the section does not vanish — it becomes the
+ * boundary statement. Saying nothing is what produced the invented `readRag`
+ * call in the first place.
  */
 function buildKnowledgeBaseSection(endpoints: readonly string[]): string {
-  return grantsKnowledgeBaseAuthoring(endpoints)
-    ? BODY_KNOWLEDGE_BASES
-    : `${BODY_KNOWLEDGE_BASES}\n${BODY_KNOWLEDGE_BASES_READ_ONLY}`;
+  if (!grantsKnowledgeBaseReads(endpoints)) return BODY_KNOWLEDGE_BASES_NO_READS;
+
+  const lines = [BODY_KNOWLEDGE_BASES];
+  if (grantsIngestionStatusReads(endpoints)) lines.push(BODY_KNOWLEDGE_BASES_INGESTION);
+  if (!grantsKnowledgeBaseAuthoring(endpoints)) lines.push(BODY_KNOWLEDGE_BASES_READ_ONLY);
+  return lines.join("\n");
 }
 
 /**
@@ -436,9 +471,9 @@ your tool schemas do not cover it, not as a routine first step:
   Agent-level settings: intro message, approval (HITL) config, memory policy.
 - Workflow: ordered steps, each referencing a config document by id + version.
   Common step types: parser (dictionaries), behavior (rules), llm, apicalls,
-  mcpcalls, rag (knowledge base), output, property. Steps saved before v6 spell
-  apicalls as httpcalls; both resolve to the same step, so leave a stored one as
-  it is.
+  mcpcalls, output, property. Steps saved before v6 spell apicalls as httpcalls;
+  both resolve to the same step, so leave a stored one as it is. (A \`rag\` step
+  is covered in its own section, which states what can be done with one.)
 - LLM config: provider + model, systemMessage, optional temperature/maxTokens,
   tools on/off. apiKey for cloud providers is always a \${vault:key-name}
   reference.
@@ -457,7 +492,7 @@ if the one you want is missing; this deployment may ship a subset):
 - versioning & how the pieces fit: "putting-it-all-together", "architecture"
 - behavior rules: "behavior-rules" · output: "output-configuration"
 - LLM & model selection: "langchain", "model-cascade"
-- HTTP tools: "httpcalls" · MCP: "mcp-server" · knowledge bases: "rag"
+- HTTP tools: "httpcalls" · MCP: "mcp-server"
 - approvals/HITL: "hitl" · secrets & vault: "secrets-vault"
 - groups: "group-conversations" · deployment: "deployment-management-of-agents"
 - memory: "conversation-memory", "user-memory", "properties"`;
@@ -531,7 +566,9 @@ export function buildOperatorPromptBody(endpoints: readonly string[]): string {
     // is that the prompt can never describe a capability the agent lacks.
     ...(grantsConversationTesting(endpoints) ? [BODY_TEST_DRIVE] : []),
     ...(grantsGroupDiscussion(endpoints) ? [BODY_TEST_DRIVE_GROUP] : []),
-    ...(grantsKnowledgeBaseReads(endpoints) ? [buildKnowledgeBaseSection(endpoints)] : []),
+    // Unconditional, but its CONTENT is derived: the section states either what
+    // can be read or that nothing can. See buildKnowledgeBaseSection.
+    buildKnowledgeBaseSection(endpoints),
     BODY_APP_CONTEXT,
     buildModelCatalogueSection(),
     BODY_STYLE,

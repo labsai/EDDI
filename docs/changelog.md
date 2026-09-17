@@ -94,6 +94,30 @@ prevents for agents.
 Existing operators keep their old tool set — tools are provisioned at activation, so an operator
 must be re-activated to gain these.
 
+
+### Review round 1 (Copilot)
+
+Four inline findings, all acted on:
+
+- **`ai.labs.rag` → `unknown` in `STEP_TYPE_TO_RESOURCE_TYPE`** — a real dead end: an MCP client
+  following `list_agent_resources` into `read_resource` would have passed `unknown` and never
+  reached the new case. Mapping added, and the test that pinned `unknown` updated.
+- **The cheatsheet leaked RAG unconditionally** — `rag (knowledge base)` in the step-type list and
+  the `rag` docs-map entry sat in `BODY_CHEATSHEET`, which every prompt carries. A prompt without the
+  RAG endpoints therefore still said knowledge bases exist. Both moved into the conditional section,
+  which now has a *no-reads* variant that names the `rag` step and states the boundary rather than
+  going silent — silence is what produced the invented call.
+- **The ingestion claim did not track its own endpoint** — `grantsKnowledgeBaseReads` gates a section
+  that promised an ingestion check while requiring only the two config reads. Split into
+  `grantsIngestionStatusReads` rather than requiring all three: the config reads are a complete
+  capability alone, so demanding the third would drop the whole section on a deployment missing one
+  endpoint.
+- **Plaintext credentials in a `RagConfiguration`** — the exposure is real but not new: `GET
+  /llmstore/llms/{id}` returns a plaintext key verbatim too, and `RestLlmStore` says so in its own
+  javadoc. RAG was, however, the one credential-carrying store with **no write-time warning**, so it
+  now has the same one `RestLlmStore` and `RestChannelIntegrationStore` already had (warn, never
+  reject — a rejection breaks vault-less instances). Redacting config reads platform-wide is a
+  separate change; doing it for RAG alone would imply the other stores are safe.
 **Files:** `ui/manager/src/lib/operator/tool-scopes.ts`, `.../system-prompt.ts`, their tests,
 `src/main/java/ai/labs/eddi/engine/mcp/McpAdminTools.java`,
 `src/test/java/ai/labs/eddi/engine/mcp/McpAdminToolsSwitchCoverageTest.java`, `docs/mcp-server.md`
