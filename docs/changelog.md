@@ -71,6 +71,10 @@ Stryker 10 dropped Node 20 (Dependabot #768 was red for that reason) and Vitest 
 - **Manager stays on Vitest 4.1.11 — see Decisions.** `dependabot.yml` now ignores Vitest/`@vitest/*`
   *majors* for `/ui/manager` only, with the reason and the upstream issue beside the rule
   (`update-types` scopes it to version updates; security updates still arrive).
+- **The UIs' own docs caught up** (Copilot review): `ui/chat/README.md` and `ui/chat/AGENTS.md` still said
+  Node ≥ 20, Vitest 3 and react-markdown 9.x; `ui/manager/README.md` still said Node ≥ 20. A contributor
+  following them would install an unsupported runtime. Each now names the floor that applies to that UI
+  — 22.12 for the Chat (Vitest 5), 22.18 for the Manager (Stryker 10's Babel 8) — and the pinned 22.23.2.
 - **`updates.test.ts`: a test for the two cleanups in `getWithoutCredentials`'s `finally`.** Stryker 10
   mutates more statements than 9.6.1 (265 mutants on `updates.ts` against 263), and both new ones
   survived: deleting `clearTimeout(timer)` or `csp.stop()` failed no test. The existing "stops listening
