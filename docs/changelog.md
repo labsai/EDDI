@@ -113,6 +113,7 @@ Stryker 10 dropped Node 20 (Dependabot #768 was red for that reason) and Vitest 
   recur; all four entries are present. `npm audit`: 0 vulnerabilities in both UIs.
 
 ---
+
 ## 🔒 fix(security): a token with no principal name fails closed — 401 up front, 403 in the ownership checks (2026-09-17)
 
 **Repo:** EDDI (`fix/nameless-principal-fail-closed`)
