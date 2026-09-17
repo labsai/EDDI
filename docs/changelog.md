@@ -305,6 +305,52 @@ owner reads and continues their conversation with 200 while another non-admin ge
 
 ---
 
+## 🎨 fix(manager): the user-menu avatar no longer shows "?" (2026-09-17)
+
+**Repo:** EDDI (`fix/manager-avatar-no-claims`)
+
+### What changed
+
+- **`ui/manager/src/lib/user-display.ts` (new)** derives the avatar's initials and the menu label from
+  whatever claims the token carries: given + family name, then the display name's first and last word,
+  then the first letter or digit of the username, then of the email's local part. When none yields a
+  character it returns `""`, and `TopBar` and `Sidebar` render a `UserRound` icon instead of the
+  literal `"?"` they used to print. The label falls back to a new `auth.signedIn` key ("Signed in", all
+  11 locales), and the email line is not repeated when the email is the only label available. The top-bar
+  trigger also gained a visible keyboard focus ring.
+- **Review follow-ups.** Initials are the first *letter or digit* of each part, NFC-normalised, so punctuation
+  and emoji no longer become initials ("Doe, Jane (Contractor)" used to give "D("); Thai and Lao preposed
+  vowels are skipped; two Arabic initials get a zero-width non-joiner so they do not join into a word; and
+  `toUpperCase` replaces `toLocaleUpperCase`, which followed the browser's locale rather than the app's (a
+  Turkish system turned "isabel" into "İ"). A username with no letter now falls through to the email. The
+  helper documents why initials prefer given + family name while the label prefers the display name.
+  `userSecondaryEmail` hides the email case-insensitively when it is already the label; truncated name and
+  email lines carry a `title`; the collapsed sidebar avatar is `role="img"` with the user's name as its
+  label and tooltip (expanded, it is `aria-hidden`, since the name is printed beside it); French reads
+  "Session ouverte".
+- Tests: `user-display.test.ts` (18), plus the no-claims token shape in `top-bar.test.tsx` and
+  `sidebar.test.tsx`. Mutation-checked: restoring the `"?"` fallback fails three of them.
+
+- **CI: a UI-only pull request no longer reports "Build Failed" to Slack.** `notify-slack` required
+  `build-and-test` to be `success`, but that job is skipped by design on a pull request touching neither the
+  backend nor the operator docs, so this PR's run was classified a failure with nothing failed and tried to
+  post. A skip now counts as passing only in exactly that case; a skip on push or tag, a cancel or a failure
+  still fails. Checked against a seven-case truth table. Separately, the webhook itself answers HTTP 4xx
+  (`curl` exit 22, also on a genuinely failed run on 2026-09-16), so the job stays red on any real failure
+  until the `SLACK_WEBHOOK_URL` secret is replaced.
+
+### Why the claims were empty
+
+The shipped realm (6.1.0 through 6.4.0) defines only the `openid` client scope, so Keycloak never created
+`profile`, `email` or `basic`, and its tokens carry no `preferred_username`, `name`, `email` or `sub`.
+That is fixed at the source, with the backend consequences it had, on `fix/keycloak-realm-client-scopes`.
+This change stays useful after it: realms provisioned by hand, other identity providers, and users
+without a name or email still reach the fallback.
+
+---
+
+---
+
 ## ⚡ perf(monorepo): the efficiency review follow-ups (2026-09-15)
 
 **Repo:** EDDI (`chore/monorepo-migration`) — the follow-ups from the two-reviewer efficiency review

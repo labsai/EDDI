@@ -11,10 +11,12 @@ import {
   ChevronRight,
   Link2,
   LogOut,
+  UserRound,
 } from "lucide-react";
 import { useTheme } from "./theme-provider";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
+import { userDisplayName, userInitials, userSecondaryEmail } from "@/lib/user-display";
 import { PlatformStatus } from "./platform-status";
 import { OperatorDrawer } from "@/components/operator/operator-drawer";
 
@@ -202,14 +204,10 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
     { code: "hi", label: t("language.hi") },
   ];
 
-  /** User initials for avatar */
-  const initials = showUser
-    ? [user.firstName, user.lastName]
-        .filter(Boolean)
-        .map((n) => n[0])
-        .join("")
-        .toUpperCase() || user.username[0]?.toUpperCase() || "?"
-    : "";
+  /** Avatar initials and label — both empty when the token carries no profile claims */
+  const initials = showUser ? userInitials(user) : "";
+  const displayName = showUser ? userDisplayName(user) : "";
+  const secondaryEmail = showUser ? userSecondaryEmail(user) : "";
 
   return (
     <header className="flex h-16 items-center justify-between border-b border-border bg-card px-4">
@@ -319,13 +317,21 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
             <button
               onClick={() => setUserMenuOpen((prev) => !prev)}
               data-testid="user-menu-trigger"
-              className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground transition-opacity hover:opacity-80"
-              title={user.fullName || user.username}
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card"
+              title={displayName || t("auth.signedIn", "Signed in")}
               aria-label={t("auth.userMenu", "User menu")}
               aria-haspopup="true"
               aria-expanded={userMenuOpen}
             >
-              {initials}
+              {initials ? (
+                <span data-testid="user-menu-initials">{initials}</span>
+              ) : (
+                <UserRound
+                  className="h-4 w-4"
+                  aria-hidden="true"
+                  data-testid="user-menu-avatar-icon"
+                />
+              )}
             </button>
 
             {userMenuOpen && (
@@ -337,12 +343,17 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
               >
                 {/* User info */}
                 <div className="border-b border-border px-3 py-2.5">
-                  <p className="text-sm font-medium text-foreground">
-                    {user.fullName || user.username}
+                  {/* truncate hides the end of a long name or address, so the
+                      full text stays available on hover. */}
+                  <p
+                    className="truncate text-sm font-medium text-foreground"
+                    title={displayName || undefined}
+                  >
+                    {displayName || t("auth.signedIn", "Signed in")}
                   </p>
-                  {user.email && (
-                    <p className="text-xs text-muted-foreground">
-                      {user.email}
+                  {secondaryEmail && (
+                    <p className="truncate text-xs text-muted-foreground" title={secondaryEmail}>
+                      {secondaryEmail}
                     </p>
                   )}
                 </div>
