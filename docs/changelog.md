@@ -85,7 +85,7 @@ owner reads and continues their conversation with 200 while another non-admin ge
 - **`install.sh` repairs existing realms** (import is one-shot). A new block in
   `configure_keycloak_client` creates any missing scope from the downloaded realm file and attaches it to
   `eddi-frontend`; idempotent, removes nothing, and never returns early, so the theme and default-role
-  checks still run. Verified in `bash:3.2` on both the jq and python3 paths: a 6.1–6.4 realm gets 5
+  checks still run. Verified in `bash:3.2` under the installer's own `set -euo pipefail`, on both the jq and python3 paths: a 6.1–6.4 realm gets 5
   created + 5 attached, a pre-6.1 realm gets only `basic` attached, a second run is a no-op, and a
   missing realm file warns without aborting. `install.ps1` has no Admin API step at all, so its users
   and Helm/Kustomize operators get a documented one-time repair in `docs/security.md`, run verbatim

@@ -1208,7 +1208,8 @@ print(json.dumps(d))" 2>/dev/null) || updated_config=""
   # reaches those installations; create the scopes here from its definitions
   # and attach them to eddi-frontend. Idempotent, and it never removes anything.
   # Unlike the steps above and below, it must not `return` early: the theme and
-  # default-role checks that follow still need to run.
+  # default-role checks that follow still need to run, and under `set -e` every
+  # assignment from a pipeline needs its `|| var=""` for the same reason.
   echo -ne "  Checking Keycloak identity scopes  "
   local realm_file="$EDDI_DIR/keycloak/eddi-realm.json"
   local all_scopes_json attached_json attached_names scope scope_id scope_def
@@ -1223,11 +1224,11 @@ print(json.dumps(d))" 2>/dev/null) || updated_config=""
   if [[ -z "$all_scopes_json" || -z "$attached_json" || ! -f "$realm_file" ]]; then
     echo -e "${YELLOW}⚠️${RESET}  ${DIM}(could not read client scopes — identity claims not checked)${RESET}"
   else
-    attached_names=$(echo "$attached_json" | kc_json "$json_tool" names)
+    attached_names=$(echo "$attached_json" | kc_json "$json_tool" names) || attached_names=""
     for scope in basic profile email web-origins acr; do
-      scope_id=$(echo "$all_scopes_json" | kc_json "$json_tool" scope-id "$scope")
+      scope_id=$(echo "$all_scopes_json" | kc_json "$json_tool" scope-id "$scope") || scope_id=""
       if [[ -z "$scope_id" ]]; then
-        scope_def=$(kc_json "$json_tool" scope-def "$scope" < "$realm_file")
+        scope_def=$(kc_json "$json_tool" scope-def "$scope" < "$realm_file") || scope_def=""
         if [[ -z "$scope_def" ]] || ! curl -sf -o /dev/null -X POST \
             -H "Authorization: Bearer ${admin_token}" \
             -H "Content-Type: application/json" \
@@ -1240,7 +1241,7 @@ print(json.dumps(d))" 2>/dev/null) || updated_config=""
         all_scopes_json=$(curl -sf \
           -H "Authorization: Bearer ${admin_token}" \
           "${kc_base}/admin/realms/eddi/client-scopes" 2>/dev/null) || all_scopes_json="[]"
-        scope_id=$(echo "$all_scopes_json" | kc_json "$json_tool" scope-id "$scope")
+        scope_id=$(echo "$all_scopes_json" | kc_json "$json_tool" scope-id "$scope") || scope_id=""
         if [[ -z "$scope_id" ]]; then
           scopes_failed="${scopes_failed} ${scope}"
           continue
