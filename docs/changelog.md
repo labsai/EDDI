@@ -129,6 +129,24 @@ gained `@Authenticated`, rather than gaining a permit entry.
 - `docs/a2a-protocol.md` — an "Anonymous?" column and a "Who can call them" section
 - `docs/configuration-reference.md` — `eddi.a2a.capabilities.public` says what it actually gates
 
+### Review follow-up (PR #782)
+
+Three findings, all valid, all fixed on the branch:
+
+- The generic guard resolved the HTTP verb as `isAnnotationPresent(GET) ? "GET" : "POST"`, so a
+  future `@PermitAll @PUT` would have been graded against a method it does not serve — and since
+  the permit entries are GET-only, that is precisely the drift the guard exists to catch. The verb
+  now comes from whichever annotation is meta-annotated `jakarta.ws.rs.HttpMethod`, and the guard
+  fails on anything other than exactly one. Confirmed by planting a `@PermitAll @PUT` endpoint plus
+  a permit entry naming POST: the old code passed it, the new code names the entry and the verb.
+- `docs/a2a-protocol.md` said everything is reachable without a token when OIDC is off. True of
+  authentication, misleading about the result — `eddi.a2a.capabilities.public` is an independent
+  switch and its endpoints 404 either way while it is off.
+- `docs/configuration-reference.md` said the capability endpoints expose agent *names*.
+  `CapabilityMatch` is `(agentId, skill, confidence, attributes)` — ids. The surface is smaller
+  than the doc claimed, which if anything strengthens the case for leaving `/a2a/agents` (names,
+  descriptions, URLs) authenticated.
+
 ### What's next
 
 Nothing outstanding for A2A. The generic lesson — `@PermitAll` is not a permit entry — applies to
