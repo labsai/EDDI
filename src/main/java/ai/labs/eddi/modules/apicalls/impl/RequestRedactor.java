@@ -12,6 +12,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
 import java.util.HashMap;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -234,6 +235,57 @@ public class RequestRedactor {
         }
         if (requestMap.get(IRequest.KEY_BODY) instanceof String body) {
             requestMap.put(IRequest.KEY_BODY, redactBody(body));
+        }
+    }
+
+    /**
+     * Replace every occurrence of a resolved secret plaintext in {@code text},
+     * longest first so one secret contained in another leaves no fragment.
+     * <p>
+     * This is the by-VALUE complement to the name and shape heuristics above: the
+     * executor knows which vault plaintexts it substituted into a request, and an
+     * opaque key — a Segment write key, a webhook path — matches no heuristic.
+     */
+    public static String redactResolvedSecrets(String text, Set<String> resolvedSecrets) {
+        if (text == null || resolvedSecrets == null || resolvedSecrets.isEmpty()) {
+            return text;
+        }
+        String redacted = text;
+        for (String secret : resolvedSecrets.stream().filter(s -> s != null && !s.isEmpty())
+                .sorted(Comparator.comparingInt(String::length).reversed()).toList()) {
+            redacted = redacted.replace(secret, REDACTED);
+        }
+        return redacted;
+    }
+
+    /**
+     * {@link #redactResolvedSecrets(String, Set)} over the URI, header values,
+     * query-parameter values and body of a request map, each entry REPLACED like
+     * {@link #redactRequestMap(Map, Set)} does.
+     */
+    @SuppressWarnings("unchecked")
+    public static void redactResolvedSecrets(Map<String, Object> requestMap, Set<String> resolvedSecrets) {
+        if (requestMap == null || resolvedSecrets == null || resolvedSecrets.isEmpty()) {
+            return;
+        }
+        if (requestMap.get(IRequest.KEY_URI) instanceof String uri) {
+            requestMap.put(IRequest.KEY_URI, redactResolvedSecrets(uri, resolvedSecrets));
+        }
+        if (requestMap.get(IRequest.KEY_HEADERS) instanceof Map<?, ?> headers) {
+            var redacted = new HashMap<String, Object>();
+            ((Map<String, ?>) headers).forEach((name, value) -> redacted.put(name,
+                    value == null ? null : redactResolvedSecrets(value.toString(), resolvedSecrets)));
+            requestMap.put(IRequest.KEY_HEADERS, redacted);
+        }
+        if (requestMap.get(IRequest.KEY_QUERY_PARAMS) instanceof Map<?, ?> queryParams) {
+            var redacted = new HashMap<String, Object>();
+            ((Map<String, ?>) queryParams).forEach((name, value) -> redacted.put(name, value instanceof List<?> values
+                    ? values.stream().map(v -> v == null ? null : redactResolvedSecrets(v.toString(), resolvedSecrets)).toList()
+                    : value == null ? null : redactResolvedSecrets(value.toString(), resolvedSecrets)));
+            requestMap.put(IRequest.KEY_QUERY_PARAMS, redacted);
+        }
+        if (requestMap.get(IRequest.KEY_BODY) instanceof String body) {
+            requestMap.put(IRequest.KEY_BODY, redactResolvedSecrets(body, resolvedSecrets));
         }
     }
 

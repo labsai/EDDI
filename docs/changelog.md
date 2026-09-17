@@ -49,6 +49,51 @@ bottom of this file and are never archived.
 
 ---
 
+## 🔒 fix(apicalls): configuration references work in templated HTTP-call fields; data-supplied ones are refused (2026-09-17)
+
+**Repo:** EDDI (`fix/vault-references-in-templates`)
+
+### Why
+
+HTTP-call values are rendered by Qute before `${vars:…}`, `${vault:…}`, `${eddivault:…}`, `${caller:…}` and
+`${connection:…}` are resolved. Only `caller` had a pass-through namespace resolver, so every other reference
+in a URL, header, body or query parameter failed the call with "No namespace resolver found" — including
+`${connection:name}` headers, the documented way to use connections, and the vault references
+`docs/secrets-vault.md` lists as supported. Vault was kept failing on purpose, because a resolved body was
+stored unredacted.
+
+The resolvers run on the *rendered* string, so a reference that conversation data put there was resolved
+too: a template substituting user input, a model reply or an API response sent the plaintext of any vault
+secret named in that data (grants are checked at deploy, not at read). That was independent of the
+namespace failure.
+
+### What changed
+
+- `ReferencePassThroughNamespaceResolver` (new base; `CallerNamespaceResolver` now extends it) and
+  `ConfigReferenceNamespaceResolvers` with pass-through beans for `vault`, `eddivault`, `connection` and `vars`.
+- `ConfigReferenceGuard` (new): after rendering and before resolution, every credential reference
+  (`vault`, `eddivault`, `connection`, `caller`) must appear in that field's configuration template, or be the
+  value of a property the template names that is exactly this agent's auto-vault reference
+  (`${vault:<agentId>.<name>}`). Otherwise the call is refused, naming the field. `vars` is not guarded:
+  global variables are configuration, not secrets.
+- `ApiCallExecutor` records the vault plaintexts it substitutes (`BuiltRequest.resolvedSecrets`) and redacts
+  them by value from the memory request record (`RequestRedactor.redactResolvedSecrets`), the approval
+  preview (`ResolvedRequest.withoutResolvedSecrets`, fingerprint unchanged) and the request log lines.
+- `docs/secrets-vault.md`: where references are resolved, and the rule above.
+
+### Verification
+
+- `ConfigReferenceNamespaceResolversTest`, `ConfigReferenceGuardTest` and `ApiCallExecutorConfigReferenceTest`
+  (the executor with the real Qute engine, not a templating stub); apicalls, templating, secrets, connections,
+  security and properties suites plus the repo-wide guards green (6625 tests). Mutation-checked: removing the
+  header or body guard, the memory or preview value redaction, the auto-vault allowance, or the pass-through
+  each fails a test.
+- End to end on the packaged build (MongoDB, vault on, recording mock API): `${vars:}` in the target URL and
+  `${vault:}` in a header and the body reach the API; an injected reference to another agent's secret is
+  refused and never sent; neither secret appears in the response, the conversation read, the stored
+  conversation or the server log (17/17).
+
+
 ## ⚡ perf(monorepo): the efficiency review follow-ups (2026-09-15)
 
 **Repo:** EDDI (`chore/monorepo-migration`) — the follow-ups from the two-reviewer efficiency review
