@@ -24,7 +24,8 @@
     "sessionExpired": "Session expired. Please login again.",
     "profile": "Profile",
     "guest": "Guest",
-    "userMenu": "User menu"
+    "userMenu": "User menu",
+    "signedIn": "Signed in"
   },
   "nav": {
     "dashboard": "Dashboard",

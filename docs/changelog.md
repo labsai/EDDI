@@ -49,6 +49,32 @@ bottom of this file and are never archived.
 
 ---
 
+## 🎨 fix(manager): the user-menu avatar no longer shows "?" (2026-09-17)
+
+**Repo:** EDDI (`claude/menu-icon-auth-ux-ce1dd6`)
+
+### What changed
+
+- **`ui/manager/src/lib/user-display.ts` (new)** derives the avatar's initials and the menu label from
+  whatever claims the token carries: given + family name, then the display name's first and last word,
+  then the first letter or digit of the username, then of the email's local part. When none yields a
+  character it returns `""`, and `TopBar` and `Sidebar` render a `UserRound` icon instead of the
+  literal `"?"` they used to print. The label falls back to a new `auth.signedIn` key ("Signed in", all
+  11 locales), and the email line is not repeated when the email is the only label available. The top-bar
+  trigger also gained a visible keyboard focus ring.
+- Tests: `user-display.test.ts` (9), plus the no-claims token shape in `top-bar.test.tsx` and
+  `sidebar.test.tsx`. Mutation-checked: restoring the `"?"` fallback fails three of them.
+
+### Why the claims were empty
+
+The shipped realm (6.1.0 through 6.4.0) defines only the `openid` client scope, so Keycloak never created
+`profile`, `email` or `basic`, and its tokens carry no `preferred_username`, `name`, `email` or `sub`.
+That is fixed at the source, with the backend consequences it had, on `fix/keycloak-realm-client-scopes`.
+This change stays useful after it: realms provisioned by hand, other identity providers, and users
+without a name or email still reach the fallback.
+
+---
+
 ## ⚡ perf(monorepo): the efficiency review follow-ups (2026-09-15)
 
 **Repo:** EDDI (`chore/monorepo-migration`) — the follow-ups from the two-reviewer efficiency review

@@ -24,7 +24,8 @@
     "sessionExpired": "Session expirée. Veuillez vous reconnecter.",
     "profile": "Profil",
     "guest": "Invité",
-    "userMenu": "Menu utilisateur"
+    "userMenu": "Menu utilisateur",
+    "signedIn": "Connecté"
   },
   "nav": {
     "dashboard": "Tableau de bord",

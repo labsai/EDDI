@@ -317,6 +317,18 @@ describe("Sidebar", () => {
     expect(screen.getByText("johndoe")).toBeInTheDocument();
   });
 
+  it("shows a person icon and a generic label when the token has no profile claims", () => {
+    renderSidebarWithAuth(false, {
+      ...keycloakAuth,
+      user: { username: "", firstName: "", lastName: "", email: "", fullName: "" },
+    });
+
+    const section = screen.getByTestId("sidebar-user");
+    expect(section).not.toHaveTextContent("?");
+    expect(section.querySelector("svg.lucide-user-round")).not.toBeNull();
+    expect(screen.getByText("Signed in")).toBeInTheDocument();
+  });
+
   // ── Help & Tour menu ───────────────────────────────────────────────
   it("renders help button", () => {
     renderWithProviders(

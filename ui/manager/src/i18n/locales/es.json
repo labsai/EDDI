@@ -24,7 +24,8 @@
     "sessionExpired": "Sesión expirada. Inicie sesión de nuevo.",
     "profile": "Perfil",
     "guest": "Invitado",
-    "userMenu": "Menú de usuario"
+    "userMenu": "Menú de usuario",
+    "signedIn": "Sesión iniciada"
   },
   "nav": {
     "dashboard": "Panel",
