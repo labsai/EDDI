@@ -6,6 +6,8 @@ package ai.labs.eddi.engine.runtime.internal;
 
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
+import ai.labs.eddi.modules.ingestion.RagIngestionSchedules;
+import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import ai.labs.eddi.engine.api.IConversationService;
@@ -78,6 +80,9 @@ public class ScheduleFireExecutor {
     TeamCadenceService teamCadenceService;
 
     @Inject
+    RagSourceIngestionService ragSourceIngestionService;
+
+    @Inject
     ToolCostTracker toolCostTracker;
 
     /**
@@ -139,6 +144,13 @@ public class ScheduleFireExecutor {
             // (cluster-wide CAS claim, lease, retry/backoff, dead-lettering, fire
             // log) applies unchanged.
             return fireDreamConsolidation(schedule, instanceId, attemptNumber);
+        }
+
+        if (RagIngestionSchedules.isIngestionSchedule(md)) {
+            // RAG ingestion fast-path — a crawl of a knowledge base's source, not a
+            // conversation turn. Same reasoning and machinery as the Dream and team
+            // cadence fast-paths above.
+            return fireRagIngestion(schedule, instanceId, attemptNumber);
         }
 
         if (TeamCadenceService.isTeamCadenceSchedule(md)) {
@@ -347,6 +359,64 @@ public class ScheduleFireExecutor {
      * misconfigured dream schedule surfaces in the fire log, retries with backoff
      * and eventually dead-letters instead of appearing to run while doing nothing.
      */
+    /**
+     * Runs one ingestion source. Mirrors {@link #fireDreamConsolidation}: the
+     * failure is recorded in the fire log rather than thrown, so the schedule's
+     * retry and dead-lettering behave as they do for every other kind of fire.
+     */
+    private ScheduleFireLog fireRagIngestion(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {
+        Instant startedAt = Instant.now();
+        String status;
+        String errorMessage = null;
+        double cost = 0.0;
+        boolean interrupted = false;
+
+        Map<String, Object> md = schedule.getMetadata();
+        try {
+            var report = ragSourceIngestionService.processScheduledFire(
+                    RagIngestionSchedules.ragConfigId(md),
+                    RagIngestionSchedules.ragConfigVersion(md),
+                    RagIngestionSchedules.sourceId(md));
+            cost = report.costUsd();
+            if (report.isSuccess()) {
+                status = ScheduleConfiguration.FireStatus.COMPLETED.name();
+                LOGGER.infof("[SCHEDULE] Ingestion for schedule '%s' (id=%s): %d ingested, %d unchanged, "
+                        + "%d tombstoned, %d failed, %d segments",
+                        schedule.getName(), schedule.getId(), report.documentsIngested(),
+                        report.documentsUnchanged(), report.documentsTombstoned(), report.documentsFailed(),
+                        report.segmentsStored());
+            } else {
+                status = ScheduleConfiguration.FireStatus.FAILED.name();
+                errorMessage = report.message();
+                LOGGER.errorf("[SCHEDULE] Ingestion failed for schedule '%s' (id=%s): %s",
+                        schedule.getName(), schedule.getId(), errorMessage);
+            }
+        } catch (Exception e) {
+            // Same ordering as the fast-paths above: a blocking call inside the crawl
+            // clears the interrupt flag when it throws InterruptedException, so
+            // remember it and re-assert it after the fire log is written.
+            if (e instanceof InterruptedException) {
+                interrupted = true;
+            }
+            status = ScheduleConfiguration.FireStatus.FAILED.name();
+            errorMessage = e.getClass().getSimpleName() + ": " + e.getMessage();
+            LOGGER.errorf(e, "[SCHEDULE] Ingestion threw for schedule '%s' (id=%s)", schedule.getName(),
+                    schedule.getId());
+        }
+
+        var fireLog = new ScheduleFireLog(UUID.randomUUID().toString(), schedule.getId(), schedule.getFireId(),
+                schedule.getNextFire(), startedAt, Instant.now(), status, instanceId, null, errorMessage,
+                attemptNumber, cost);
+        try {
+            scheduleStore.logFire(fireLog);
+        } catch (Exception e) {
+            LOGGER.errorf(e, "[SCHEDULE] Failed to log ingestion fire for schedule %s", schedule.getId());
+        } finally {
+            restoreInterrupt(interrupted);
+        }
+        return fireLog;
+    }
+
     private ScheduleFireLog fireDreamConsolidation(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {
         Instant startedAt = Instant.now();
         String status;

@@ -181,6 +181,72 @@ Response:
 
 Status values: `pending` → `processing` → `completed` | `failed: <error message>`
 
+## Ingestion Sources
+
+A knowledge base can pull its own documents instead of being fed one at a time. Sources live on the
+knowledge base (`sources[]` on the RAG configuration), because the vector store is keyed by the
+knowledge base — a source that named its target by string could, and in an earlier draft did, write to
+one table while retrieval read another.
+
+```json
+{
+  "name": "product-docs",
+  "sources": [{
+    "name": "public-docs",
+    "type": "web",
+    "cron": "0 2 * * *",
+    "web": {
+      "startUrl": "https://example.com/docs/",
+      "pathPrefix": "/docs/",
+      "maxDepth": 3,
+      "maxPages": 200,
+      "excludePatterns": ["*.pdf", "**/changelog/**"],
+      "requestDelayMs": 500,
+      "respectRobots": true
+    },
+    "settings": {
+      "tombstoneAfterMissedRuns": 2,
+      "maxSegmentsPerRun": 20000,
+      "timeBudgetMinutes": 10
+    }
+  }]
+}
+```
+
+Every field has a default; omitting `settings` entirely means "all defaults". `excludePatterns` are
+globs matched against the URL **path** (`*` stays inside one segment, `**` crosses them).
+
+**What a run does.** Crawls within the scope, converts each page to Markdown, compares a content hash
+against the last successful ingest, and re-embeds only what changed — replacing that document's chunks
+rather than adding to them. Pages that disappear from the source lose their vectors after
+`tombstoneAfterMissedRuns` consecutive *complete* runs miss them; a run that stopped at a limit
+concludes nothing. ETag and Last-Modified from the previous run are sent back, so an unchanged page
+costs one 304.
+
+`robots.txt` is honoured by default, including `Crawl-delay` and `Sitemap` discovery. Turn
+`respectRobots` off only for a site you own.
+
+### Ingestion source endpoints
+
+| Method | Path | Access | Purpose |
+| ------ | ---- | ------ | ------- |
+| `POST` | `/ragstore/rags/{id}/sources/{sourceId}/run?version=N` | EDIT | Start a run (202, or 409 if one is in flight) |
+| `POST` | `/ragstore/rags/{id}/sources/{sourceId}/preview?version=N` | EDIT | Crawl and report what would change, embedding nothing |
+| `GET` | `/ragstore/rags/{id}/sources/{sourceId}/runs?version=N&limit=20` | VIEW | Run history with counters, cost and errors |
+| `DELETE` | `/ragstore/rags/{id}/sources/{sourceId}/documents?version=N` | EDIT | Forget what the source has ingested |
+
+Running needs EDIT rather than VIEW because a published knowledge base grants VIEW to everyone by
+design, and a run rewrites what every agent using it retrieves.
+
+A source with a `cron` gets a schedule named `rag-ingestion:{ragConfigId}:{sourceId}`, kept in step with
+the configuration whenever the knowledge base is saved and removed when it is deleted.
+
+### Store support for replacement
+
+Replacing a document's chunks needs `removeAll(Filter)` on the vector store. `in-memory` and `pgvector`
+implement it. Where a store does not, the run still succeeds and reports `replaceUnsupported`, meaning
+re-ingested documents accumulate stale chunks on that backend.
+
 ## Observability
 
 RAG operations write audit traces to conversation memory:

@@ -50,6 +50,54 @@ bottom of this file and are never archived.
 
 ---
 
+## ⏱️ feat(rag): REST and scheduling for ingestion sources (2026-09-17)
+
+**Repo:** EDDI (`feat/rag-ingestion-rest`)
+
+### What this adds
+
+The operable surface for the sources landed in the previous entry: four endpoints and a cron.
+
+| Method | Path | Access |
+| ------ | ---- | ------ |
+| `POST` | `…/sources/{sourceId}/run` | EDIT |
+| `POST` | `…/sources/{sourceId}/preview` | EDIT |
+| `GET` | `…/sources/{sourceId}/runs` | VIEW |
+| `DELETE` | `…/sources/{sourceId}/documents` | EDIT |
+
+**Running needs EDIT, not VIEW.** A published knowledge base grants VIEW to everyone by design, and a
+run rewrites what every agent using it retrieves — so gating a run on read access would let any editor
+point a source at any published knowledge base and poison it, on a schedule. The draft this replaces
+checked nothing at all. Preview is gated the same way: it writes nothing but still sends a visible
+amount of traffic to a third party's site.
+
+Runs are async on a virtual thread (a crawl takes minutes; an HTTP request cannot wait for it), with a
+409 rather than a second crawl when one is already in flight.
+
+### Scheduling
+
+A source with a `cron` gets a schedule carrying `ragIngestion` metadata, which `ScheduleFireExecutor`
+recognises as a fourth fast-path beside HITL timeouts, Dream consolidation and team cadences — the same
+shape of work, and the same reason: a maintenance job, not a conversation turn, that wants the cluster
+claim, lease, retry and fire log.
+
+Schedules are named `rag-ingestion:{ragConfigId}:{sourceId}`, so syncing is delete-by-name then create:
+no scan and no orphans. The draft searched `readAllSchedules(1000)`; past a thousand schedules — HITL
+timeouts and Dream cycles each create one — it silently failed to find the row, then created a duplicate
+on update and left a schedule still crawling a deleted source on delete. A sync failure is logged as an
+ERROR naming the consequence rather than swallowed behind a 201.
+
+Sources get a generated stable id on write. Addressing them by name would mean renaming a source
+orphaned everything it had ingested.
+
+### Tests
+
+15 for the service (schedule upsert, no-cron and disabled handling, surfaced store failures, scheduled
+fire against a deleted source or knowledge base, concurrent-run refusal, scoped purge) and 12 for the
+REST layer (access level per endpoint, refusals never reaching the service, 404s, 409, limit clamping).
+Four existing RAG REST tests were updated for the new constructor parameter.
+
+
 ## 🔗 feat(rag): knowledge-base sources and the ingestion pipeline (2026-09-17)
 
 **Repo:** EDDI (`feat/rag-ingestion-pipeline`)
