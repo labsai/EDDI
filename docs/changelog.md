@@ -49,6 +49,59 @@ bottom of this file and are never archived.
 
 ---
 
+## 🔐 fix(auth): the shipped realm gives tokens an identity again (2026-09-17)
+
+**Repo:** EDDI (`fix/keycloak-realm-client-scopes`)
+
+### What was broken
+
+Since 6.1.0, `eddi-realm.json` has defined one client scope, `openid`. A realm file that defines
+any client scopes gets only those: Keycloak creates its built-ins solely for realms that define none,
+and logs `Referenced client scope 'profile' doesn't exist. Ignoring` for each missing reference. So
+`eddi-frontend` lost `profile`, `email`, `roles`, `web-origins` and `acr`, and never had `basic`.
+Tokens authenticated and carried their roles (the client maps those itself), but had no `sub`,
+`preferred_username`, `name` or `email`. Measured against `labsai/eddi:ci` and Keycloak 26.7:
+
+- the backend's principal had no name, so `GET /workspaces` reported no principal and every
+  conversation was stamped `anonymous-<hex>`;
+- a non-admin opening or continuing **their own** conversation got HTTP 500:
+  `OwnershipValidator.requireOwnerOrAdmin` called `equals` on a null `callerId`;
+- the Manager's avatar showed "?" (worked around separately on `fix/manager-avatar-no-claims`).
+
+With the fix the principal is the username (`eddi`, `user`), the stored owner is that username, and the
+owner reads and continues their conversation with 200 while another non-admin gets 403. Releases before
+6.1.0 had the built-in scopes, so their principal was already the username: nothing to migrate.
+
+### What changed
+
+- **All three realm copies** add `basic`, `profile`, `email`, `web-origins` and `acr`, copied verbatim from
+  a stock Keycloak 26.7 realm minus server-generated ids. `eddi-frontend` lists `openid, basic, profile,
+  email, web-origins, acr`, and the realm's `defaultDefaultClientScopes` says the same, so a client an
+  operator adds later issues identity claims too. `openid` stays: it puts `openid` in the `scope` claim of
+  a token that did not request it (any direct grant), and Keycloak's userinfo, which the backend calls
+  (`user-info-required=true`), refuses a token without it. `roles` is dropped from the list rather than
+  defined: it never existed on import, and the client's own mappers already emit `realm_access.roles`
+  and the `eddi-backend` audience.
+- **`install.sh` repairs existing realms** (import is one-shot). A new block in
+  `configure_keycloak_client` creates any missing scope from the downloaded realm file and attaches it to
+  `eddi-frontend`; idempotent, removes nothing, and never returns early, so the theme and default-role
+  checks still run. Verified in `bash:3.2` on both the jq and python3 paths: a 6.1–6.4 realm gets 5
+  created + 5 attached, a pre-6.1 realm gets only `basic` attached, a second run is a no-op, and a
+  missing realm file warns without aborting. `install.ps1` has no Admin API step at all, so its users
+  and Helm/Kustomize operators get a documented one-time repair in `docs/security.md`, run verbatim
+  against a broken realm (twice). Both test-user lists in that file also stop claiming `eddi`/`eddi` and a
+  forced password change: `eddi` ships with no password, and Keycloak 26 forces no change on import.
+- **Guards.** `DeploymentManifestsTest` gains three: every referenced client scope is defined in the same
+  file; the SPA client's mappers emit `sub`, `preferred_username`, `name` and `email` into the access
+  token and it keeps `openid`; and `install.sh`'s repair loop matches the realm file. The auth E2E tier
+  gains five: claims for all three fixtures without a scope parameter, `GET /workspaces` naming the
+  admin, and a non-admin opening the conversation they started. Mutation-checked: against the old realm
+  all three unit guards fail and 7 of 12 E2E tests fail (the 5 new ones plus the two role tests, which
+  now also assert `preferred_username`); with the fix, 12/12 and the class passes apart from three
+  `create-secrets.ps1` tests that fail identically on a clean `origin/main` in this environment.
+
+---
+
 ## ⚡ perf(monorepo): the efficiency review follow-ups (2026-09-15)
 
 **Repo:** EDDI (`chore/monorepo-migration`) — the follow-ups from the two-reviewer efficiency review

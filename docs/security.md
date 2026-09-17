@@ -48,9 +48,9 @@ This starts Keycloak alongside EDDI with pre-configured realm, clients, and test
 
 | User | Password | Role | Notes |
 |------|----------|------|-------|
-| `eddi` | `eddi` | `eddi-admin`, `eddi-editor` | Full access, forced password change on first login |
-| `viewer` | `viewer` | `eddi-viewer` | Read-only access, forced password change on first login |
-| `user` | `user` | `eddi-user` | Standard user access, forced password change on first login |
+| `eddi` | *none* | `eddi-admin`, `eddi-editor` | Full access. Ships without a password: set one at `http://localhost:8180/admin` (`admin`/`admin`) → Users → eddi → Credentials |
+| `viewer` | `viewer` | `eddi-viewer` | Read-only access. Development only: no password change is forced |
+| `user` | `user` | `eddi-user` | Standard user access. Development only: no password change is forced |
 
 ### Configuration Properties
 
@@ -123,12 +123,82 @@ This starts Keycloak 26 on port 8180 with:
 - **Realm**: `eddi`
 - **Clients**: `eddi-frontend` (SPA, public), `eddi-backend` (bearer-only)
 - **Roles**: `eddi-admin`, `eddi-editor`, `eddi-user`, `eddi-viewer` (plus `eddi-approver`, used by the HITL approval endpoints)
-- **Test users**: `eddi`/`eddi` (`eddi-admin` + `eddi-editor`), `viewer`/`viewer` (`eddi-viewer`), `user`/`user` (`eddi-user`)
+- **Test users**: `viewer`/`viewer` (`eddi-viewer`), `user`/`user` (`eddi-user`), and `eddi` (`eddi-admin` + `eddi-editor`), which ships **without a password** — set one in the admin console at http://localhost:8180 (`admin`/`admin`)
 
 > `keycloak/eddi-realm.json` is the source of truth for client ids. Provisioning a
 > realm by hand from a doc that names a different one gets you `invalid_client`
 > at login: `RestManagerResource` hardcodes `eddi-frontend` as the id the Manager
 > SPA requests tokens for, so that is the client that has to exist.
+
+### Identity claims, and realms imported from EDDI 6.1.0–6.4.0
+
+EDDI identifies a caller by the principal Quarkus OIDC reads from the access
+token — `preferred_username`, falling back to `sub`. Conversation ownership, HITL
+attribution and workspaces all key on that name. So the `eddi-frontend` client
+has to put identity claims in its tokens, which takes three client scopes:
+`basic` (`sub`), `profile` (`preferred_username`, `name`) and `email`. The
+`openid` scope the realm also defines is there for a different reason: it puts
+`openid` in the token's `scope` claim even when a client did not ask for it, and
+Keycloak's userinfo endpoint — which the backend calls on every request — refuses
+a token without it.
+
+**The realm shipped with EDDI 6.1.0 through 6.4.0 had none of the three.** It
+defined a single client scope, and a realm file that defines any client scopes
+gets only those: Keycloak creates its built-in ones only for realms that define
+none. The import logs `Referenced client scope 'profile' doesn't exist. Ignoring`
+and carries on. Tokens still authenticated and still carried their roles, so
+logins worked and role checks passed, but every caller's principal had no name:
+
+- Every conversation was stamped with a random `anonymous-<hex>` owner instead of
+  the user.
+- A user without `eddi-admin` who opened or continued their own conversation got
+  **HTTP 500**.
+- `GET /workspaces` reported no principal, so workspaces had nothing to scope to.
+- The Manager showed "?" in place of the user's initials and no name in the user
+  menu.
+
+Realm import only runs on first boot, so a fixed realm file does not reach a
+Keycloak that already has the `eddi` realm:
+
+- **`install.sh`** repairs it on every run. Look for
+  `Checking Keycloak identity scopes ✅ (repaired: …)` — then sign out and in again.
+- **`install.ps1`, Helm, Kustomize, or a realm provisioned by hand**: run the
+  repair below once (on Windows, from Git Bash or WSL),
+  against the Keycloak admin API. It creates only the scopes that are missing,
+  using the definitions in the realm file, attaches them to `eddi-frontend`, and
+  removes nothing, so running it twice is harmless. It needs `curl` and `jq`, and
+  it takes the realm file from a checkout of this repository — the three copies
+  define the same scopes.
+
+  ```bash
+  # e.g. kubectl -n eddi port-forward svc/keycloak 8080:8080
+  KC=http://localhost:8080
+  REALM_FILE=keycloak/eddi-realm.json
+  TOKEN=$(curl -sf -d client_id=admin-cli -d grant_type=password -d username=admin \
+    --data-urlencode "password=$KC_ADMIN_PASSWORD" \
+    "$KC/realms/master/protocol/openid-connect/token" | jq -r .access_token)
+  AUTH="Authorization: Bearer $TOKEN"
+  SPA=$(curl -sf -H "$AUTH" "$KC/admin/realms/eddi/clients?clientId=eddi-frontend" | jq -r '.[0].id')
+  scope_id() {
+    curl -sf -H "$AUTH" "$KC/admin/realms/eddi/client-scopes" \
+      | jq -r --arg n "$1" '.[] | select(.name == $n) | .id'
+  }
+  for scope in basic profile email web-origins acr; do
+    if [ -z "$(scope_id "$scope")" ]; then
+      jq -c --arg n "$scope" '.clientScopes[] | select(.name == $n)' "$REALM_FILE" \
+        | curl -sf -X POST -H "$AUTH" -H "Content-Type: application/json" -d @- \
+            "$KC/admin/realms/eddi/client-scopes" && echo "created $scope"
+    fi
+    curl -sf -X PUT -H "$AUTH" \
+      "$KC/admin/realms/eddi/clients/$SPA/default-client-scopes/$(scope_id "$scope")" \
+      && echo "attached $scope"
+  done
+  ```
+
+Users pick the claims up at their next sign-in. The principal then becomes each
+user's username, so conversations started **after** the repair belong to the user
+who started them. Conversations started before it keep their `anonymous-<hex>`
+owner and can be opened by an `eddi-admin`.
 
 ---
 

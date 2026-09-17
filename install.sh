@@ -1053,6 +1053,35 @@ wait_for_ready() {
 
 # ── Configure Keycloak client (post-start) ────────────────
 
+# Reads a Keycloak JSON document on stdin with whichever tool
+# configure_keycloak_client found ($1: jq or python3) and prints:
+#   names            the `name` of every entry in a list, one per line
+#   scope-id NAME    the id of the client scope called NAME in a list
+#   scope-def NAME   client scope NAME from a realm file's clientScopes, as JSON
+# Prints nothing when there is no match or the input is not JSON.
+kc_json() {
+  local tool="$1" mode="$2" name="${3:-}"
+  if [[ "$tool" == "jq" ]]; then
+    case "$mode" in
+      names)     jq -r '.[].name // empty' ;;
+      scope-id)  jq -r --arg n "$name" '[.[] | select(.name == $n) | .id][0] // empty' ;;
+      scope-def) jq -c --arg n "$name" '[.clientScopes[]? | select(.name == $n)][0] // empty' ;;
+    esac 2>/dev/null
+  else
+    python3 -c '
+import sys, json
+mode, name = sys.argv[1], sys.argv[2]
+d = json.load(sys.stdin)
+if mode == "names":
+    print("\n".join(s.get("name", "") for s in d))
+elif mode == "scope-id":
+    print(next((s["id"] for s in d if s.get("name") == name), ""))
+elif mode == "scope-def":
+    s = next((s for s in d.get("clientScopes", []) if s.get("name") == name), None)
+    print(json.dumps(s) if s else "")' "$mode" "$name" 2>/dev/null
+  fi
+}
+
 configure_keycloak_client() {
   [[ "$WITH_AUTH" != "true" ]] && return 0
 
@@ -1167,6 +1196,75 @@ print(json.dumps(d))" 2>/dev/null) || updated_config=""
     echo -e "${GREEN}✅${RESET}"
   else
     echo -e "${YELLOW}⚠️${RESET}  ${DIM}(HTTP ${update_status} — CORS may not work for port ${EDDI_PORT})${RESET}"
+  fi
+
+  # ── Identity claims (client scopes) ─────────────────────
+  # Realms imported from an eddi-realm.json that defined only the `openid`
+  # client scope never got Keycloak's built-in ones: supplying clientScopes at
+  # all stops Keycloak creating them. So profile, email and basic did not exist,
+  # tokens carried no preferred_username, email or even sub, EDDI resolved every
+  # caller's principal to null, and a non-admin opening their own conversation
+  # got HTTP 500. Realm import is one-shot, so the corrected realm file never
+  # reaches those installations; create the scopes here from its definitions
+  # and attach them to eddi-frontend. Idempotent, and it never removes anything.
+  # Unlike the steps above and below, it must not `return` early: the theme and
+  # default-role checks that follow still need to run.
+  echo -ne "  Checking Keycloak identity scopes  "
+  local realm_file="$EDDI_DIR/keycloak/eddi-realm.json"
+  local all_scopes_json attached_json attached_names scope scope_id scope_def
+  local scopes_created=0 scopes_attached=0 scopes_failed=""
+  all_scopes_json=$(curl -sf \
+    -H "Authorization: Bearer ${admin_token}" \
+    "${kc_base}/admin/realms/eddi/client-scopes" 2>/dev/null) || all_scopes_json=""
+  attached_json=$(curl -sf \
+    -H "Authorization: Bearer ${admin_token}" \
+    "${kc_base}/admin/realms/eddi/clients/${client_uuid}/default-client-scopes" 2>/dev/null) || attached_json=""
+
+  if [[ -z "$all_scopes_json" || -z "$attached_json" || ! -f "$realm_file" ]]; then
+    echo -e "${YELLOW}⚠️${RESET}  ${DIM}(could not read client scopes — identity claims not checked)${RESET}"
+  else
+    attached_names=$(echo "$attached_json" | kc_json "$json_tool" names)
+    for scope in basic profile email web-origins acr; do
+      scope_id=$(echo "$all_scopes_json" | kc_json "$json_tool" scope-id "$scope")
+      if [[ -z "$scope_id" ]]; then
+        scope_def=$(kc_json "$json_tool" scope-def "$scope" < "$realm_file")
+        if [[ -z "$scope_def" ]] || ! curl -sf -o /dev/null -X POST \
+            -H "Authorization: Bearer ${admin_token}" \
+            -H "Content-Type: application/json" \
+            "${kc_base}/admin/realms/eddi/client-scopes" \
+            -d "$scope_def" 2>/dev/null; then
+          scopes_failed="${scopes_failed} ${scope}"
+          continue
+        fi
+        scopes_created=$((scopes_created + 1))
+        all_scopes_json=$(curl -sf \
+          -H "Authorization: Bearer ${admin_token}" \
+          "${kc_base}/admin/realms/eddi/client-scopes" 2>/dev/null) || all_scopes_json="[]"
+        scope_id=$(echo "$all_scopes_json" | kc_json "$json_tool" scope-id "$scope")
+        if [[ -z "$scope_id" ]]; then
+          scopes_failed="${scopes_failed} ${scope}"
+          continue
+        fi
+      fi
+      if ! printf '%s\n' "$attached_names" | grep -qx -- "$scope"; then
+        if curl -sf -o /dev/null -X PUT \
+            -H "Authorization: Bearer ${admin_token}" \
+            "${kc_base}/admin/realms/eddi/clients/${client_uuid}/default-client-scopes/${scope_id}" \
+            2>/dev/null; then
+          scopes_attached=$((scopes_attached + 1))
+        else
+          scopes_failed="${scopes_failed} ${scope}"
+        fi
+      fi
+    done
+
+    if [[ -n "$scopes_failed" ]]; then
+      echo -e "${YELLOW}⚠️${RESET}  ${DIM}(could not set up:${scopes_failed} — users may appear without a name)${RESET}"
+    elif [[ $((scopes_created + scopes_attached)) -gt 0 ]]; then
+      echo -e "${GREEN}✅${RESET} ${DIM}(repaired: ${scopes_created} created, ${scopes_attached} attached — sign in again to pick them up)${RESET}"
+    else
+      echo -e "${GREEN}✅${RESET}"
+    fi
   fi
 
   # ── EDDI login theme ────────────────────────────────────

@@ -278,6 +278,11 @@ realm exists, so later edits to the JSON do not reach a running Keycloak — cha
 those in the admin console. Keycloak keeps that database on a PVC, so a restart
 no longer wipes it.
 
+A realm imported from EDDI 6.1.0 through 6.4.0 lacks the client scopes that put
+the user's identity in a token, so EDDI cannot tell its users apart and a
+non-admin opening their own conversation gets HTTP 500. Run the one-time repair
+in [security.md → Identity claims](security.md#identity-claims-and-realms-imported-from-eddi-610640).
+
 #### No credential in this component has a default
 
 Neither delivery path ships a password for the Keycloak superuser or for the
