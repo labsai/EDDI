@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.deployment.IDeploymentStorage;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
+import com.mongodb.MongoCommandException;
 import com.mongodb.MongoException;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
@@ -16,6 +17,7 @@ import com.mongodb.client.model.Indexes;
 import com.mongodb.client.model.ReplaceOptions;
 import io.quarkus.arc.DefaultBean;
 import org.bson.Document;
+import org.bson.conversions.Bson;
 import org.jboss.logging.Logger;
 
 import jakarta.enterprise.context.ApplicationScoped;
@@ -24,7 +26,9 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
+import static com.mongodb.client.model.Filters.and;
 import static com.mongodb.client.model.Filters.eq;
+import static com.mongodb.client.model.Filters.exists;
 import static com.mongodb.client.model.Filters.in;
 
 /**
@@ -47,6 +51,20 @@ public class MongoDeploymentStorage implements IDeploymentStorage {
      */
     private static final String FIELD_DUPLICATE_IDS = "duplicateIds";
     private static final String FIELD_DUPLICATE_COUNT = "duplicateCount";
+
+    /**
+     * MongoDB {@code IndexOptionsConflict} — an index of this name already exists
+     * with different options.
+     */
+    private static final int INDEX_OPTIONS_CONFLICT_ERROR_CODE = 85;
+    /**
+     * MongoDB {@code IndexKeySpecsConflict} — an index on this key pattern already
+     * exists under a different name.
+     */
+    private static final int INDEX_KEY_SPECS_CONFLICT_ERROR_CODE = 86;
+
+    /** The deployment key that the unique index is built on. */
+    private static final Bson DEPLOYMENT_KEY = Indexes.ascending(FIELD_ENVIRONMENT, FIELD_AGENT_ID, FIELD_AGENT_VERSION);
 
     private final MongoCollection<Document> deploymentsCollection;
     private final IDocumentBuilder documentBuilder;
@@ -128,9 +146,61 @@ public class MongoDeploymentStorage implements IDeploymentStorage {
         }
     }
 
+    /**
+     * The key index, restricted to rows that actually carry the key.
+     *
+     * <p>
+     * The restriction is what keeps it off a database that has not been through the
+     * 6.x rename migration yet. EDDI 5 wrote {@code botId}/{@code botVersion}, and
+     * Mongo indexes an absent field as null — so an unrestricted unique index reads
+     * every 5.x row as {@code (environment, null, null)}, i.e. as a duplicate of
+     * every other 5.x row. {@link #removeDuplicateDeploymentRows()} then keeps one
+     * row for the whole collection and deletes the rest. On a real staging database
+     * that was 113 deployment rows reduced to 1 before the rename migration had
+     * even started, with six of seven agents silently never redeployed. The filter
+     * uses {@code $exists}, not a null check, so a row that legitimately carries a
+     * null {@code agentVersion} is still covered by the constraint.
+     * </p>
+     *
+     * <p>
+     * Mongo does not quietly re-shape an index that is already there. An earlier
+     * EDDI built this same key pattern WITHOUT the partial filter, and
+     * {@code createIndex} answers a differing specification on an existing index
+     * with {@code IndexOptionsConflict} (85) — or {@code IndexKeySpecsConflict}
+     * (86) when the name differs too — rather than with a no-op. Every installation
+     * that already has the unrestricted index would therefore keep it, and keep the
+     * behaviour described above, while logging something that reads like a warning
+     * about duplicate rows. So a conflicting index is dropped and rebuilt. Only
+     * those two codes are handled here: anything else (E11000 above all) still goes
+     * up to {@link #createDeploymentKeyIndex()}, which dedupes and retries.
+     * </p>
+     */
     private void createUniqueKeyIndex() {
-        deploymentsCollection.createIndex(Indexes.ascending(FIELD_ENVIRONMENT, FIELD_AGENT_ID, FIELD_AGENT_VERSION),
-                new IndexOptions().unique(true));
+        try {
+            deploymentsCollection.createIndex(DEPLOYMENT_KEY, uniqueKeyIndexOptions());
+            return;
+        } catch (MongoCommandException e) {
+            if (e.getErrorCode() != INDEX_OPTIONS_CONFLICT_ERROR_CODE && e.getErrorCode() != INDEX_KEY_SPECS_CONFLICT_ERROR_CODE) {
+                throw e;
+            }
+            LOGGER.warnf("The deployment-key index on '%s' exists with a different specification (%s). Dropping and "
+                    + "rebuilding it as a partial index, so that rows predating the 6.x rename migration stay out of "
+                    + "it.", COLLECTION_DEPLOYMENTS, e.getErrorMessage());
+        }
+
+        // Rebuilt outside the catch so an E11000 here — duplicates the old index did
+        // not constrain — reaches createDeploymentKeyIndex's dedupe-and-retry rather
+        // than being mistaken for another conflict.
+        deploymentsCollection.dropIndex(DEPLOYMENT_KEY);
+        deploymentsCollection.createIndex(DEPLOYMENT_KEY, uniqueKeyIndexOptions());
+    }
+
+    /**
+     * Fresh options per call: {@link IndexOptions} is mutable, so it is not shared
+     * between the first attempt and the rebuild.
+     */
+    private static IndexOptions uniqueKeyIndexOptions() {
+        return new IndexOptions().unique(true).partialFilterExpression(and(exists(FIELD_AGENT_ID), exists(FIELD_AGENT_VERSION)));
     }
 
     /**
@@ -162,6 +232,10 @@ public class MongoDeploymentStorage implements IDeploymentStorage {
      */
     private int removeDuplicateDeploymentRows() {
         List<Document> pipeline = List.of(
+                // Only rows that carry the key: a row without agentId predates the 6.x
+                // rename migration and is not a duplicate of the other rows that lack it.
+                new Document("$match", new Document(FIELD_AGENT_ID, new Document("$exists", true))
+                        .append(FIELD_AGENT_VERSION, new Document("$exists", true))),
                 new Document("$sort", new Document("_id", 1)),
                 new Document("$group", new Document("_id",
                         new Document(FIELD_ENVIRONMENT, "$" + FIELD_ENVIRONMENT).append(FIELD_AGENT_ID, "$" + FIELD_AGENT_ID)

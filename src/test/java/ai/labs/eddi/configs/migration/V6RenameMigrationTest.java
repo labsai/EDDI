@@ -914,4 +914,79 @@ class V6RenameMigrationTest {
             assertEquals("production", envDoc.get("environment"));
         }
     }
+
+    /**
+     * The deployment sweep in {@code AgentDeploymentManagement} asks this before it
+     * retires a deployment whose agent config it cannot find. On a first boot
+     * against an EDDI 5 database the configs are still in {@code bots}, so the
+     * honest answer there is what keeps the sweep from deleting every deployment
+     * row in the database.
+     */
+    @Nested
+    @DisplayName("isPending")
+    class IsPendingTests {
+
+        @Test
+        @DisplayName("pending while enabled and the migration log has no completion entry")
+        void pendingWhenEnabledAndNotYetRun() {
+            when(migrationLogStore.readMigrationLog("v6-rename-migration-complete")).thenReturn(null);
+
+            assertTrue(migration.isPending());
+        }
+
+        @Test
+        @DisplayName("not pending once the migration has completed")
+        void notPendingAfterCompletion() {
+            when(migrationLogStore.readMigrationLog("v6-rename-migration-complete"))
+                    .thenReturn(new MigrationLog("v6-rename-migration-complete"));
+
+            assertFalse(migration.isPending());
+        }
+
+        /**
+         * The property defaults to false, so "no completion entry" is the permanent
+         * state of every installation that never needed the migration. Reading that as
+         * pending would park the deployment sweep forever on every normal EDDI 6
+         * database.
+         */
+        @Test
+        @DisplayName("never pending when the migration is disabled, and the log is not even read")
+        void notPendingWhenDisabled() {
+            var disabled = new V6RenameMigration(database, migrationLogStore, false);
+
+            assertFalse(disabled.isPending());
+            verify(migrationLogStore, never()).readMigrationLog(anyString());
+        }
+
+        /**
+         * Once complete it stays complete, so a sweep on a ten-second schedule does not
+         * re-read the migration log for the lifetime of the process.
+         */
+        @Test
+        @DisplayName("completion is latched — the migration log is read once, not on every call")
+        void completionIsLatched() {
+            when(migrationLogStore.readMigrationLog("v6-rename-migration-complete"))
+                    .thenReturn(new MigrationLog("v6-rename-migration-complete"));
+
+            assertFalse(migration.isPending());
+            assertFalse(migration.isPending());
+            assertFalse(migration.isPending());
+
+            verify(migrationLogStore, times(1)).readMigrationLog("v6-rename-migration-complete");
+        }
+
+        /**
+         * Pending is the fail-safe answer. A caller that waits loses ten seconds; a
+         * caller that proceeds on an unknown answer deletes the deployment rows it
+         * could not verify.
+         */
+        @Test
+        @DisplayName("a migration log that cannot be read counts as pending")
+        void unreadableLogCountsAsPending() {
+            when(migrationLogStore.readMigrationLog("v6-rename-migration-complete"))
+                    .thenThrow(new IllegalStateException("mongo down"));
+
+            assertTrue(migration.isPending());
+        }
+    }
 }

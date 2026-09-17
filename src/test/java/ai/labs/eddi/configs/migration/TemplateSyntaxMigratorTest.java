@@ -191,6 +191,43 @@ class TemplateSyntaxMigratorTest {
         assertEquals("{baseUrl}/{path}", migrator.migrate("[(${baseUrl + '/' + path})]"));
     }
 
+    // --- a "+" inside the literal being concatenated ---
+
+    /**
+     * The splitter used to be {@code split("\\s*\\+\\s*")}, which cut the literal
+     * apart and left a lone quote character as a part. A lone quote starts and ends
+     * with a quote, so it was taken for a quoted literal and stripped with
+     * {@code substring(1, 0)}: {@code StringIndexOutOfBoundsException}, which
+     * aborted the startup migration for every remaining document in the database.
+     */
+    @Test
+    void migrateStringConcat_literalIsAPlus() {
+        assertEquals("{a}+{b}", migrator.migrate("[[${a + '+' + b}]]"));
+    }
+
+    @Test
+    void migrateStringConcat_literalSurroundsAPlus() {
+        assertEquals("{prefix} + {suffix}", migrator.migrate("[[${prefix + ' + ' + suffix}]]"));
+    }
+
+    @Test
+    void migrateStringConcat_doubleQuotedLiteralIsAPlus() {
+        assertEquals("{a}+{b}", migrator.migrate("[[${a + \"+\" + b}]]"));
+    }
+
+    /**
+     * Taken verbatim from a Gnowbe staging config: three literals concatenated so
+     * that the rendered output is itself a template expression, for a generated
+     * agent configuration. Malformed, never used, and it stopped the whole
+     * migration. Whatever it converts to, it must not throw.
+     */
+    @Test
+    void migrateStringConcat_nestedTemplateLiterals_doesNotThrow() {
+        String input = "{\"targetServerUrl\":\"[['[[${'+'properties.chatGptApi'+'}]]']]\"}";
+        String migrated = assertDoesNotThrow(() -> migrator.migrate(input));
+        assertFalse(migrated.contains("[[${"), "the crashing expression survived: " + migrated);
+    }
+
     // --- B13: concatenation rewriting must not touch non-Thymeleaf content ---
 
     @Test

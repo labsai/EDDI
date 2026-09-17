@@ -89,6 +89,80 @@ class MongoDeploymentStorageTest {
         String key = keyCaptor.getValue().toBsonDocument(Document.class, MongoClientSettings.getDefaultCodecRegistry()).toString();
         assertTrue(key.contains("environment") && key.contains("agentId") && key.contains("agentVersion"),
                 "unexpected unique index key: " + key);
+
+        // Partial, so the index does not span rows written before the 6.x rename
+        // migration: those carry botId/botVersion, Mongo indexes the absent agentId as
+        // null, and an unrestricted unique index reads every one of them as a
+        // duplicate of every other — which the dedupe below then acts on.
+        Bson partial = optionsCaptor.getValue().getPartialFilterExpression();
+        assertNotNull(partial, "the unique deployment-key index must be partial");
+        String filter = partial.toBsonDocument(Document.class, MongoClientSettings.getDefaultCodecRegistry()).toString();
+        assertTrue(filter.contains("agentId") && filter.contains("agentVersion") && filter.contains("exists"),
+                "unexpected partial filter: " + filter);
+    }
+
+    /**
+     * An installation that has already run an earlier 6.x release carries this same
+     * key pattern WITHOUT the partial filter — and Mongo does not silently re-shape
+     * an existing index: {@code createIndex} answers a differing specification with
+     * {@code IndexOptionsConflict} (85). Left unhandled, every such installation
+     * would keep the unrestricted index, keep reading pre-rename rows as duplicates
+     * of one another, and say so only in a log line about duplicate rows. So the
+     * conflicting index is dropped and rebuilt.
+     */
+    @Test
+    @DisplayName("an index that already exists with different options is dropped and rebuilt as the partial one")
+    void rebuildsAnIndexThatConflictsOnOptions() {
+        MongoDatabase database = mock(MongoDatabase.class);
+        MongoCollection<Document> stale = mock(MongoCollection.class);
+        when(database.getCollection("deployments")).thenReturn(stale);
+
+        MongoCommandException conflict = mock(MongoCommandException.class);
+        when(conflict.getErrorCode()).thenReturn(85);
+        when(stale.createIndex(any(Bson.class), any(IndexOptions.class)))
+                .thenThrow(conflict)
+                .thenReturn("environment_1_agentId_1_agentVersion_1");
+
+        assertDoesNotThrow(() -> new MongoDeploymentStorage(database, documentBuilder));
+
+        verify(stale).dropIndex(any(Bson.class));
+        // Rebuilt, and rebuilt as the partial index — not left as it was found.
+        ArgumentCaptor<IndexOptions> optionsCaptor = ArgumentCaptor.forClass(IndexOptions.class);
+        verify(stale, times(2)).createIndex(any(Bson.class), optionsCaptor.capture());
+        IndexOptions rebuilt = optionsCaptor.getAllValues().get(1);
+        assertEquals(Boolean.TRUE, rebuilt.isUnique());
+        assertNotNull(rebuilt.getPartialFilterExpression(), "the rebuilt index must be the partial one");
+
+        // No dedupe: the conflict says the index exists, not that the rows are broken.
+        verify(stale, never()).aggregate(anyList());
+        verify(stale, never()).deleteMany(any(Bson.class));
+    }
+
+    /**
+     * Only the two index-conflict codes are recovered by dropping the index. A
+     * duplicate-key failure (E11000) means the ROWS are wrong, and dropping the
+     * index would throw away the constraint instead of fixing them — that case
+     * belongs to the dedupe path below.
+     */
+    @Test
+    @DisplayName("a failure that is not an index conflict never drops an index")
+    void doesNotDropIndexOnAnUnrelatedFailure() {
+        MongoDatabase database = mock(MongoDatabase.class);
+        MongoCollection<Document> duplicated = mock(MongoCollection.class);
+        when(database.getCollection("deployments")).thenReturn(duplicated);
+
+        MongoCommandException duplicateKey = mock(MongoCommandException.class);
+        when(duplicateKey.getErrorCode()).thenReturn(11000);
+        when(duplicated.createIndex(any(Bson.class), any(IndexOptions.class)))
+                .thenThrow(duplicateKey)
+                .thenReturn("environment_1_agentId_1_agentVersion_1");
+        stubAggregate(duplicated, List.of());
+
+        assertDoesNotThrow(() -> new MongoDeploymentStorage(database, documentBuilder));
+
+        verify(duplicated, never()).dropIndex(any(Bson.class));
+        // It went down the dedupe-and-retry path instead.
+        verify(duplicated).aggregate(anyList());
     }
 
     /**

@@ -164,6 +164,20 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     // SKIP because a slow pass must not overlap the next tick and double-deploy.
     @Scheduled(every = "10s", delayed = "10s", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     public void checkDeployments() {
+        // This sweep retires — deletes — the deployment row of any agent whose config
+        // it cannot read, and it runs on its own schedule rather than after the
+        // startup migrations. While the 6.x rename migration is outstanding the agent
+        // configs are still in `bots` and `agents` does not exist, so every deployed
+        // agent reads as deleted: on a real staging upgrade this deleted the
+        // deployment rows of both deployed agents before the migration had started. A
+        // migration that failed keeps the sweep parked deliberately — the collection
+        // names are then genuinely unknown, and not deploying beats deleting the
+        // record of what was deployed.
+        if (v6RenameMigration.isPending()) {
+            LOGGER.warn("Skipping the deployment sweep: the V6 rename migration has not completed, so agent configs "
+                    + "cannot be read yet and every deployment would look stale.");
+            return;
+        }
         try {
             deploymentStore.readDeploymentInfos(deployed).stream()
                     .filter(deploymentInfo -> deploymentInfo.getAgentId() != null && deploymentInfo.getAgentVersion() != null)

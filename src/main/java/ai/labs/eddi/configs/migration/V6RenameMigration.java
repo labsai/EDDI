@@ -95,12 +95,60 @@ public class V6RenameMigration {
     private final IMigrationLogStore migrationLogStore;
     private final boolean enabled;
 
+    /**
+     * Latches once the migration is known not to be pending, so that
+     * {@link #isPending()} stops reading the migration log on every call. Only ever
+     * set from false to true, and only after a completed migration has been
+     * observed, so a stale read cannot un-complete it.
+     */
+    private volatile boolean knownNotPending;
+
     @Inject
     public V6RenameMigration(MongoDatabase database, IMigrationLogStore migrationLogStore,
             @ConfigProperty(name = "eddi.migration.v6-rename.enabled", defaultValue = "false") boolean enabled) {
         this.database = database;
         this.migrationLogStore = migrationLogStore;
         this.enabled = enabled;
+    }
+
+    /**
+     * Whether this migration has been asked for but has not completed yet — i.e.
+     * whether the collections may still be under their EDDI 5 names.
+     *
+     * <p>
+     * A caller that would read an absent config as "the config is gone" has to wait
+     * for this to be false. The agent configs live in {@code bots} until this
+     * migration renames them, and {@code agents} does not exist at all, so on a
+     * first boot against an EDDI 5 database every deployed agent reads as deleted.
+     * That is what made {@code AgentDeploymentManagement.checkDeployments()} —
+     * which runs on its own ten-second schedule, not after the migrations — retire
+     * the deployment rows of every agent in the database.
+     * </p>
+     *
+     * <p>
+     * Disabled means not pending: nobody asked for a rename, so the collection
+     * names are whatever they already are. That distinction matters because the
+     * property defaults to false, so "no completion entry" is the permanent state
+     * of every installation that never needed the migration. Pending is otherwise
+     * the fail-safe answer — a migration log that cannot be read leaves the
+     * question open, and the caller that waits loses ten seconds where the caller
+     * that proceeds deletes data.
+     * </p>
+     */
+    public boolean isPending() {
+        if (!enabled || knownNotPending) {
+            return false;
+        }
+        try {
+            if (migrationLogStore.readMigrationLog(MIGRATION_KEY) == null) {
+                return true;
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("Could not read the V6 rename migration log (%s) — treating the migration as still pending", e.getMessage());
+            return true;
+        }
+        knownNotPending = true;
+        return false;
     }
 
     /**

@@ -89,6 +89,49 @@ class V6QuteMigrationTest {
         verify(col, atLeastOnce()).replaceOne(any(), eq(doc));
     }
 
+    /**
+     * One document that cannot be migrated must not cost the rest of the database
+     * its migration. Before this, {@code migrateCollection} had no per-document
+     * guard: a single malformed template threw out of {@code runIfNeeded}, every
+     * other config stayed on Thymeleaf syntax, and the only trace was a line saying
+     * it would retry on the next startup — where it threw again.
+     */
+    @SuppressWarnings("unchecked")
+    @Test
+    void runIfNeeded_oneFailingDocumentDoesNotStopTheOthers() {
+        when(migrationLogStore.readMigrationLog("v6-qute-migration-complete")).thenReturn(null);
+        when(migrator.containsThymeleafSyntax("[[${boom}]]")).thenReturn(true);
+        when(migrator.migrate("[[${boom}]]"))
+                .thenThrow(new StringIndexOutOfBoundsException("Range [1, 0) out of bounds for length 1"));
+        when(migrator.containsThymeleafSyntax("[[${good}]]")).thenReturn(true);
+        when(migrator.migrate("[[${good}]]")).thenReturn("{good}");
+        when(migrator.containsThymeleafSyntax("{good}")).thenReturn(false);
+
+        var broken = new Document("template", "[[${boom}]]");
+        broken.put("_id", "doc-broken");
+        var good = new Document("template", "[[${good}]]");
+        good.put("_id", "doc-good");
+
+        MongoCollection<Document> col = mock(MongoCollection.class);
+        when(col.estimatedDocumentCount()).thenReturn(2L);
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        MongoCursor<Document> cursor = mock(MongoCursor.class);
+        when(cursor.hasNext()).thenReturn(true, true, false);
+        when(cursor.next()).thenReturn(broken, good);
+        doReturn(cursor).when(iterable).iterator();
+        when(col.find()).thenReturn(iterable);
+        when(database.getCollection(anyString())).thenReturn(col);
+
+        var migration = new V6QuteMigration(database, migrationLogStore, migrator, true);
+        migration.runIfNeeded();
+
+        verify(col, atLeastOnce()).replaceOne(any(), eq(good));
+        verify(col, never()).replaceOne(any(), eq(broken));
+        // Not marked complete: the broken document is still on Thymeleaf syntax, so
+        // the migration has to run again once someone has dealt with it.
+        verify(migrationLogStore, never()).createMigrationLog(any(MigrationLog.class));
+    }
+
     @SuppressWarnings("unchecked")
     @Test
     void runIfNeeded_migratesNestedDocument() {

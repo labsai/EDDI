@@ -7,6 +7,7 @@ package ai.labs.eddi.configs.migration;
 import jakarta.enterprise.context.ApplicationScoped;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
@@ -71,7 +72,6 @@ public class TemplateSyntaxMigrator {
      * in a document that contains Thymeleaf syntax elsewhere.
      */
     private static final Pattern CONCAT_PATTERN = Pattern.compile("\\[\\[\\$\\{([^}]*?\\+[^}]*?)\\}\\]\\]|\\[\\(\\$\\{([^}]*?\\+[^}]*?)\\}\\)\\]");
-    private static final Pattern CONCAT_OPERATOR = Pattern.compile("\\s*\\+\\s*");
 
     /**
      * Convert Thymeleaf/OGNL string concatenation to Qute inline expressions. e.g.
@@ -86,15 +86,17 @@ public class TemplateSyntaxMigrator {
         while (m.find()) {
             // group 1 = escaped output [[${…}]], group 2 = unescaped output [(${…})]
             String expr = (m.group(1) != null ? m.group(1) : m.group(2)).trim();
-            String[] parts = CONCAT_OPERATOR.split(expr);
             var replacement = new StringBuilder();
-            for (String part : parts) {
+            for (String part : splitOnConcatOperator(expr)) {
                 String trimmed = part.trim();
-                if ((trimmed.startsWith("'") && trimmed.endsWith("'")) || (trimmed.startsWith("\"") && trimmed.endsWith("\""))) {
+                if (isStringLiteral(trimmed)) {
                     // String literal → inline without braces
                     replacement.append(trimmed.substring(1, trimmed.length() - 1));
-                } else {
-                    // Variable → wrap in Qute expression
+                } else if (!trimmed.isEmpty()) {
+                    // Variable → wrap in Qute expression. An empty part is not a variable:
+                    // it only arises from a leading, trailing or doubled +, i.e. from a
+                    // malformed expression, and `{}` would be a broken Qute expression where
+                    // nothing at all is merely a dropped empty operand.
                     replacement.append('{').append(trimmed).append('}');
                 }
             }
@@ -102,6 +104,57 @@ public class TemplateSyntaxMigrator {
         }
         m.appendTail(sb);
         return sb.toString();
+    }
+
+    /**
+     * Splits a concat expression on its {@code +} operators, ignoring any {@code +}
+     * that sits inside a string literal.
+     *
+     * <p>
+     * This used to be {@code split("\\s*\\+\\s*")}, which cuts literals apart:
+     * {@code 'a+b'} became {@code 'a} and {@code b'}, and a literal plus
+     * ({@code '+'}) became two lone quote characters. A lone quote both starts and
+     * ends with a quote, so the caller took it for a quoted literal and stripped
+     * its delimiters with {@code substring(1, 0)} — a
+     * {@link StringIndexOutOfBoundsException} that, before {@link V6QuteMigration}
+     * isolated documents from one another, aborted the Thymeleaf-to-Qute migration
+     * for the whole database over one such template.
+     * </p>
+     */
+    private static List<String> splitOnConcatOperator(String expr) {
+        var parts = new ArrayList<String>();
+        var current = new StringBuilder();
+        char openQuote = 0;
+        for (int i = 0; i < expr.length(); i++) {
+            char c = expr.charAt(i);
+            if (openQuote != 0) {
+                current.append(c);
+                if (c == openQuote) {
+                    openQuote = 0;
+                }
+            } else if (c == '\'' || c == '"') {
+                openQuote = c;
+                current.append(c);
+            } else if (c == '+') {
+                parts.add(current.toString());
+                current.setLength(0);
+            } else {
+                current.append(c);
+            }
+        }
+        parts.add(current.toString());
+        return parts;
+    }
+
+    /**
+     * A quoted string literal, i.e. something whose delimiters can be stripped.
+     * Length two is the minimum: a single quote character starts and ends with a
+     * quote but has no delimiters to strip. Both delimiters must be the same kind
+     * of quote, so {@code 'x"} is a (broken) variable rather than a literal.
+     */
+    private static boolean isStringLiteral(String value) {
+        return value.length() >= 2
+                && ((value.startsWith("'") && value.endsWith("'")) || (value.startsWith("\"") && value.endsWith("\"")));
     }
 
     /**

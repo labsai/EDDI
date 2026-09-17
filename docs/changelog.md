@@ -50,6 +50,105 @@ bottom of this file and are never archived.
 
 ---
 
+## 🛠️ fix(migration): four first-boot defects found upgrading a real 5.5.1 database (2026-09-17)
+
+**Repo:** EDDI (`fix/first-boot-migration-order`)
+
+Found by rehearsing an upgrade of a Gnowbe **staging** EDDI 5.5.1 database (MongoDB Atlas, 3012
+documents, 7 agents, 195 conversations) to 6.4.0 against a verified restore of the production-like
+dump. Four defects fire on the first boot against a 5.x database; two of them destroy data. All four
+are fixed here with tests, including three that drive a real MongoDB through Testcontainers.
+
+### What changed
+
+- **`TemplateSyntaxMigrator.migrateStringConcat` crashed on a `+` inside a string literal.** It split
+  the concat expression with `split("\\s*\\+\\s*")`, which cuts literals apart: a literal `'+'`
+  became two lone quote characters, a lone quote both starts and ends with a quote so it was taken for
+  a quoted literal, and stripping its delimiters was `substring(1, 0)` —
+  `StringIndexOutOfBoundsException: Range [1, 0) out of bounds for length 1`. A new
+  `splitOnConcatOperator` splits only outside quotes, and `isStringLiteral` requires length ≥ 2 and
+  matching delimiters. The real trigger on staging was `httpcalls/65803e063b449c2ce90f8fc4` holding a
+  template whose three concatenated literals render as another template expression.
+- **`V6QuteMigration.migrateCollection` had no per-document isolation**, so that one malformed template
+  aborted the Thymeleaf→Qute conversion for *every* config in the database, logging only "will retry
+  on next startup" — where it threw again. Each document now migrates in its own try/catch, failures
+  are logged with collection and id, and the migration is **not** marked complete while any document
+  failed, so it retries once the data is fixed. `migrateCollection` returns a
+  `CollectionResult(migrated, failed)`.
+- **`MongoDeploymentStorage`'s unique `(environment, agentId, agentVersion)` index destroyed deployment
+  rows on a pre-rename database.** EDDI 5 wrote `botId`/`botVersion`; Mongo indexes the absent
+  `agentId` as null, so an unrestricted unique index read all 113 staging rows as duplicates of one
+  another, `createIndex` failed with E11000, and the recovery path `removeDuplicateDeploymentRows()`
+  kept one row for the whole collection and deleted 112. The index is now partial on
+  `agentId`/`agentVersion` existing, and the dedupe pipeline `$match`es only rows that carry the key.
+- **The `@Scheduled(every = "10s", delayed = "10s")` `checkDeployments()` sweep ran before the rename
+  migration and deleted deployments.** On a first boot against a 5.x database the agent configs are
+  still in `bots`; `agents` does not exist until `V6RenameMigration` creates it, so
+  `isAgentConfigMissing` returned true for every deployed agent and the sweep called
+  `deleteDeploymentInfo` on each. Observed live: both Gnowbe agents' deployment rows deleted. The
+  sweep now returns early while `V6RenameMigration.isPending()`.
+
+### Design decisions
+
+- **The sweep gate asks the migration, it does not track a flag.** The first cut set a
+  `volatile boolean startupMigrationsAttempted` at the end of `autoDeployAgents()`. Two problems:
+  nothing set it if anything above it threw (parking the sweep, and with it all deployment, forever),
+  and it read "migrations attempted" as "collections renamed" — so a rename migration that *failed*
+  released the sweep to delete the rows anyway. `V6RenameMigration.isPending()` is the actual
+  precondition: `enabled && no completion entry in the migration log`, latched once complete so a
+  ten-second schedule does not re-read the log forever, and fail-safe (an unreadable log counts as
+  pending). Disabled is deliberately *not* pending — the property defaults to false, so "no completion
+  entry" is the permanent state of every installation that never needed the migration, and reading that
+  as pending would park the sweep on every normal EDDI 6 database. It also made the fix testable
+  without rewriting the ~25 existing `checkDeployments()` tests, which call it directly on a freshly
+  constructed object.
+- **A conflicting index is dropped and rebuilt.** Mongo does not re-shape an existing index: adding
+  `partialFilterExpression` to a key pattern that already carries the non-partial unique index answers
+  `IndexOptionsConflict` (85), not a no-op. Every installation already running 6.x would otherwise have
+  kept the destructive index while logging something that reads like a warning about duplicate rows.
+  Only codes 85 and 86 drop-and-rebuild; E11000 still goes to the dedupe-and-retry path, because there
+  the *rows* are wrong and dropping the index would throw the constraint away instead of fixing them.
+- **The partial filter uses `$exists`, not a null check**, so a row that legitimately carries a null
+  `agentVersion` stays inside the uniqueness constraint. Only rows missing the field entirely — i.e.
+  pre-rename rows — fall out of the index.
+- **Not marking the Qute migration complete on a failure re-scans on every boot.** That is accepted:
+  `TEMPLATE_COLLECTIONS` is four config collections plus their `.history` counterparts, the scan is
+  cheap, and a migrated document contains no Thymeleaf syntax so nothing is rewritten twice. Shipping a
+  half-migrated database silently is the worse trade. A collection that cannot be *read* at all is
+  still not counted as a failure: only some of these names exist on any given database and some driver
+  versions answer `estimatedDocumentCount` on a missing namespace with an exception, so counting it
+  would leave the migration permanently incomplete on a database with nothing to migrate.
+- **An empty part of a concat expression is now skipped rather than rendered as `{}`.** An empty
+  operand only arises from a leading, trailing or doubled `+`, i.e. from an expression that was already
+  malformed; `{}` is a broken Qute expression where nothing at all is a dropped empty operand.
+
+### Files
+
+- `src/main/java/ai/labs/eddi/configs/migration/TemplateSyntaxMigrator.java`
+- `src/main/java/ai/labs/eddi/configs/migration/V6QuteMigration.java`
+- `src/main/java/ai/labs/eddi/configs/migration/V6RenameMigration.java` — new `isPending()`
+- `src/main/java/ai/labs/eddi/configs/deployment/mongo/MongoDeploymentStorage.java`
+- `src/main/java/ai/labs/eddi/engine/runtime/internal/AgentDeploymentManagement.java`
+- `src/test/java/ai/labs/eddi/configs/migration/TemplateSyntaxMigratorTest.java`,
+  `V6QuteMigrationTest.java`, `V6RenameMigrationTest.java`
+- `src/test/java/ai/labs/eddi/configs/deployment/mongo/MongoDeploymentStorageTest.java` (mocked) and
+  `src/test/java/ai/labs/eddi/datastore/mongo/MongoDeploymentStorageTest.java` (Testcontainers —
+  pre-rename rows survive construction, a non-partial index is rebuilt as partial, and the dedupe
+  spares pre-rename rows on a half-migrated collection)
+- `src/test/java/ai/labs/eddi/engine/runtime/internal/AgentDeploymentManagementTest.java`
+
+### Verification
+
+201 tests green in the selection (`TemplateSyntaxMigratorTest`, `V6QuteMigrationTest`, both
+`MongoDeploymentStorageTest`s, `V6RenameMigrationTest`, `V6RenameMigrationBranchTest`,
+`AgentDeploymentManagementTest`, `AgentDeploymentManagementBranchTest`) plus the repo-wide guards
+(`ImportStyleTest`, `DocumentationLinksTest`, `StrictBoundaryShippedConfigsTest`,
+`RuleSetStoreShippedRulesetsTest`, `BuildQualityGatesTest`, `ChangelogRotationTest`). Mutation-checked:
+reverting the literal-aware split, the partial filter, the dedupe `$match`, the index-conflict rebuild,
+the sweep gate or the "do not mark complete when a document failed" behaviour each makes a test fail.
+
+---
+
 ## ⬆️ chore(ui): Node 22 toolchain, Stryker 10, Vitest 5 for the Chat UI (2026-09-17)
 
 **Repo:** EDDI (`feat/node-22-toolchain`, stacked on `fix/ui-npm-vulnerabilities` / #770)
