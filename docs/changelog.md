@@ -195,6 +195,14 @@ and their transitives), so nothing affected ships in the jar — but Scorecard c
   would overwrite the key just picked. Four tests, one per path, each mutation-checked; they assert
   the chip by structure, because the popup lists the same key as an option and a text match alone
   passed with the popup still open.
+  A fifth exit, found by CodeRabbit: **"Create new secret"**. It closes the popup and opens the modal,
+  so focus leaves the field and the deferred blur never comes — cancel the dialog and the unbraced
+  reference was stranded. Normalising as the dialog *opens* (the suggested fix) cannot work: it
+  switches the picker to its chip state, which returns before the modal is rendered, so the dialog
+  would never appear. It normalises on *close* instead, and only when the user cancelled — `onSuccess`
+  runs before `onClose` without a re-render in between, so an unconditional normalise there would
+  write the old value over the key just created. Both halves are pinned by a test and each fails
+  under the mutation the other guards.
 - **Dependabot: `vitest` + `@vitest/*` (both UIs) and `@stryker-mutator/*` (Manager) are grouped.**
   These packages peer-depend on each other at the exact same version, so a single-package bump can never
   pass `npm ci`. That is precisely what happened: #766 (vitest 4.1.11), #768 (Stryker 10) and the
