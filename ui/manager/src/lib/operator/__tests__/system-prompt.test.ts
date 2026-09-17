@@ -264,6 +264,49 @@ describe("buildOperatorPromptBody", () => {
     expect(body).not.toContain("You can change an existing agent's system prompt");
   });
 
+  describe("knowledge bases", () => {
+    it("describes them in BOTH scopes, so the operator never has to guess at a tool", () => {
+      // The bug this closes: the operator can read docs/rag.md, so it knew
+      // knowledge bases exist, had no tool for one and no sentence saying so —
+      // and answered "check this RAG config" by inventing `readRag` and
+      // reporting the tool-not-found error back to the admin.
+      for (const body of [defaultOperatorPromptBody("read_only"), defaultOperatorPromptBody("read_write")]) {
+        expect(body).toContain("Knowledge bases (RAG)");
+        expect(body).toContain("read it by id AND version");
+        expect(body).toContain("ingestion run's status");
+      }
+    });
+
+    it("states the read-only boundary while no RAG write is granted", () => {
+      expect(defaultOperatorPromptBody("read_write")).toContain("You CANNOT create or edit a knowledge base");
+    });
+
+    it("drops that boundary sentence if a RAG write is ever granted", () => {
+      // Derived, not asserted: allow-listing a write must not leave the prompt
+      // claiming the opposite of what the agent holds.
+      const body = buildOperatorPromptBody([...READ_ENDPOINTS, "PUT /ragstore/rags/{id}"]);
+      expect(body).toContain("Knowledge bases (RAG)");
+      expect(body).not.toContain("You CANNOT create or edit a knowledge base");
+    });
+
+    it("says nothing about them when the reads are not granted", () => {
+      const withoutRag = READ_ENDPOINTS.filter((e) => !e.includes("/ragstore/"));
+      expect(buildOperatorPromptBody(withoutRag)).not.toContain("Knowledge bases (RAG)");
+    });
+
+    it("needs the descriptor listing too — a by-id read alone is unreachable", () => {
+      const byIdOnly = [
+        ...READ_ENDPOINTS.filter((e) => !e.includes("/ragstore/")),
+        "GET /ragstore/rags/{id}",
+      ];
+      expect(buildOperatorPromptBody(byIdOnly)).not.toContain("Knowledge bases (RAG)");
+    });
+
+    it("lists rag among the workflow step types it may encounter", () => {
+      expect(defaultOperatorPromptBody("read_only")).toContain("rag (knowledge base)");
+    });
+  });
+
   it("resolves a scope through the same predicate", () => {
     expect(defaultOperatorPromptBody("read_only")).toBe(buildOperatorPromptBody(READ_ENDPOINTS));
     expect(defaultOperatorPromptBody("read_write")).toBe(

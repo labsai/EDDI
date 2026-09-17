@@ -5,6 +5,8 @@ import {
   grantsAgentModification,
   grantsConversationTesting,
   grantsGroupDiscussion,
+  grantsKnowledgeBaseReads,
+  grantsKnowledgeBaseAuthoring,
   type OperatorScope,
 } from "./tool-scopes";
 import { MODEL_SUGGESTIONS } from "@/lib/model-suggestions";
@@ -205,6 +207,44 @@ const BODY_TEST_DRIVE_GROUP = `Starting a group discussion:
   do. Say what the group is configured to do as part of asking.`;
 
 /**
+ * What a knowledge base is and what can be asked of it.
+ *
+ * Conditional on the reads being granted, like every other capability section —
+ * but it exists because of what happened when nothing said anything at all.
+ * The operator can read `docs/rag.md` (the docs endpoints are granted in both
+ * scopes), so it KNOWS this platform has knowledge bases; it had no tool for
+ * them and no sentence saying so. Asked to check one, it invented a plausible
+ * tool name (`readRag`, by analogy with `readLlm`), got "Tool not found" back
+ * from the tool loop, and reported that instead of an answer. Knowing a feature
+ * exists while holding neither a tool for it nor a word about it is the gap that
+ * produces an improvised tool call — the same failure `BODY_AUTHORING_NO_AGENT`
+ * exists to prevent for agents.
+ */
+const BODY_KNOWLEDGE_BASES = `Knowledge bases (RAG):
+- A knowledge base is its own versioned document in the \`rag\` store, referenced
+  by a workflow's \`rag\` step. It holds the embedding provider and model, the
+  vector store type and its connection parameters, the chunking settings, and
+  the default retrieval parameters.
+- Find one by name in the descriptor listing, then read it by id AND version —
+  the by-id read needs both, and a name alone reaches nothing.
+- You can also check an ingestion run's status by its ingestion id.
+- "Is it set up correctly?" is answered from the document plus, when you have an
+  ingestion id, that run's status: which embedding provider and model, which
+  vector store, and whether documents finished ingesting. Report which of those
+  you actually checked. Whether documents were ever ingested is NOT visible in
+  the configuration — say so rather than implying the config alone proves it.`;
+
+/**
+ * Appended when knowledge bases can be read but not changed — the current
+ * grant in every scope. Derived rather than asserted, so allow-listing a RAG
+ * write later cannot leave the prompt claiming the opposite.
+ */
+const BODY_KNOWLEDGE_BASES_READ_ONLY = `- You CANNOT create or edit a knowledge base, and you cannot ingest a document
+  into one — you have no tool for either. Point the user at the knowledge base
+  under Resources in the manager, and offer to read the current configuration
+  for them first.`;
+
+/**
  * Architecture background, present in BOTH scopes — a read-only operator
  * diagnosing "my change did nothing" needs the versioning model exactly as
  * much as a write-capable one making the change. The write-scope authoring
@@ -303,6 +343,16 @@ const BODY_AUTHORING_NO_AGENT = `- You CANNOT create or edit an agent, its model
   similar one is configured with.`;
 
 /**
+ * Assembles the knowledge-base section: what can be read, plus the boundary
+ * sentence whenever nothing here can be written.
+ */
+function buildKnowledgeBaseSection(endpoints: readonly string[]): string {
+  return grantsKnowledgeBaseAuthoring(endpoints)
+    ? BODY_KNOWLEDGE_BASES
+    : `${BODY_KNOWLEDGE_BASES}\n${BODY_KNOWLEDGE_BASES_READ_ONLY}`;
+}
+
+/**
  * Assembles the "Creating things" section from exactly what the granted
  * endpoints support — never a static string, for the same reason the rest of
  * this module derives everything from the resolved set rather than an intent.
@@ -386,8 +436,9 @@ your tool schemas do not cover it, not as a routine first step:
   Agent-level settings: intro message, approval (HITL) config, memory policy.
 - Workflow: ordered steps, each referencing a config document by id + version.
   Common step types: parser (dictionaries), behavior (rules), llm, apicalls,
-  mcpcalls, output, property. Steps saved before v6 spell apicalls as
-  httpcalls; both resolve to the same step, so leave a stored one as it is.
+  mcpcalls, rag (knowledge base), output, property. Steps saved before v6 spell
+  apicalls as httpcalls; both resolve to the same step, so leave a stored one as
+  it is.
 - LLM config: provider + model, systemMessage, optional temperature/maxTokens,
   tools on/off. apiKey for cloud providers is always a \${vault:key-name}
   reference.
@@ -406,7 +457,7 @@ if the one you want is missing; this deployment may ship a subset):
 - versioning & how the pieces fit: "putting-it-all-together", "architecture"
 - behavior rules: "behavior-rules" · output: "output-configuration"
 - LLM & model selection: "langchain", "model-cascade"
-- HTTP tools: "httpcalls" · MCP: "mcp-server"
+- HTTP tools: "httpcalls" · MCP: "mcp-server" · knowledge bases: "rag"
 - approvals/HITL: "hitl" · secrets & vault: "secrets-vault"
 - groups: "group-conversations" · deployment: "deployment-management-of-agents"
 - memory: "conversation-memory", "user-memory", "properties"`;
@@ -480,6 +531,7 @@ export function buildOperatorPromptBody(endpoints: readonly string[]): string {
     // is that the prompt can never describe a capability the agent lacks.
     ...(grantsConversationTesting(endpoints) ? [BODY_TEST_DRIVE] : []),
     ...(grantsGroupDiscussion(endpoints) ? [BODY_TEST_DRIVE_GROUP] : []),
+    ...(grantsKnowledgeBaseReads(endpoints) ? [buildKnowledgeBaseSection(endpoints)] : []),
     BODY_APP_CONTEXT,
     buildModelCatalogueSection(),
     BODY_STYLE,

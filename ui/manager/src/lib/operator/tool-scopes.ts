@@ -147,6 +147,28 @@ export const READ_ENDPOINTS: readonly string[] = [
   // Schedules — added alongside WRITE_ENDPOINTS' schedule disable: without this
   // the operator could stop a runaway job but never see it to know to.
   "GET /schedulestore/schedules",
+  // Knowledge bases (RAG). Read-only, and deliberately NOT folded into
+  // WORKFLOW_EXTENSION_STORES: that constant doubles as WRITABLE_EXTENSION_STORES,
+  // so adding `ragstore/rags` there would grant PUT/POST as a side effect of
+  // wanting a read.
+  //
+  // Why a `descriptors` entry, when no other extension store gets one: a
+  // knowledge base is asked about BY NAME ("check the FinanzDash Manual KB"),
+  // not reached by navigating agent -> workflow -> step. Without the listing
+  // there is no path from the name to the id, and the by-id read is unreachable.
+  //
+  // Exposure is the same class already granted by `llmstore/llms`: a
+  // RagConfiguration's embedding and vector-store credentials are
+  // `${vault:...}` references resolved at runtime (`VaultGrantChecker` reads
+  // this store for exactly that reason), not plaintext the read hands back.
+  //
+  // Ingestion: the STATUS read only. `POST /ragstore/rags/{id}/ingest` stays
+  // excluded, as `planning/operator-write-scope-plan.md` §5 requires — but
+  // "did the documents actually land?" is the question an admin asks about a
+  // knowledge base, and answering it needs no write.
+  "GET /ragstore/rags/descriptors",
+  "GET /ragstore/rags/{id}",
+  "GET /ragstore/rags/{id}/ingestion/{ingestionId}/status",
   // Audit
   "GET /auditstore/agent/{agentId}",
 ] as const;
@@ -480,6 +502,37 @@ export function grantsAgentModification(endpoints: readonly string[]): boolean {
   return (
     set.has("PUT /workflowstore/workflows/{id}") ||
     WRITABLE_EXTENSION_STORES.some((store) => set.has(`PUT /${store}/{id}`))
+  );
+}
+
+/**
+ * Whether the granted endpoints can inspect a knowledge base — find one by name
+ * AND read its configuration.
+ *
+ * Both are required, for the reason the `descriptors` entry exists at all: a
+ * by-id read with no way to resolve a name to an id is a tool the operator can
+ * never reach, and a prompt that advertised it would send the model looking for
+ * an id nobody gave it.
+ */
+export function grantsKnowledgeBaseReads(endpoints: readonly string[]): boolean {
+  const set = new Set(endpoints);
+  return set.has("GET /ragstore/rags/descriptors") && set.has("GET /ragstore/rags/{id}");
+}
+
+/**
+ * Whether the granted endpoints can change a knowledge base — create or edit a
+ * configuration, or ingest a document into one.
+ *
+ * Currently always `false`; it exists so the prompt's "you cannot author one"
+ * sentence is derived rather than asserted. If a RAG write is ever allow-listed,
+ * the prompt stops claiming the opposite on its own.
+ */
+export function grantsKnowledgeBaseAuthoring(endpoints: readonly string[]): boolean {
+  const set = new Set(endpoints);
+  return (
+    set.has("PUT /ragstore/rags/{id}") ||
+    set.has("POST /ragstore/rags") ||
+    set.has("POST /ragstore/rags/{id}/ingest")
   );
 }
 

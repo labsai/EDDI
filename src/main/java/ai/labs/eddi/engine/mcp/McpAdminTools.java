@@ -25,6 +25,7 @@ import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.configs.patch.PatchInstruction;
 import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
+import ai.labs.eddi.configs.rag.IRestRagStore;
 import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
 import ai.labs.eddi.configs.dictionary.IRestDictionaryStore;
 import ai.labs.eddi.configs.dictionary.model.DictionaryConfiguration;
@@ -389,10 +390,10 @@ public class McpAdminTools {
 
     @Tool(name = "read_resource", description = "Read any EDDI resource configuration by type and ID. "
             + "Supported types: 'behavior', 'langchain', 'httpcalls', 'mcpcalls', 'output', "
-            + "'propertysetter', 'dictionaries'. Returns the full configuration JSON.")
+            + "'propertysetter', 'dictionaries', 'rag'. Returns the full configuration JSON.")
     public String readResource(
                                @ToolArg(description = "Resource type: 'behavior', 'langchain', 'httpcalls', 'mcpcalls', 'output', "
-                                       + "'propertysetter', or 'dictionaries' (required)") String resourceType,
+                                       + "'propertysetter', 'dictionaries', or 'rag' (required)") String resourceType,
                                @ToolArg(description = "Resource ID (required)") String resourceId,
                                @ToolArg(description = "Version number (default: 1)") Integer version) {
         requireRole(identity, authEnabled, "eddi-admin");
@@ -421,6 +422,15 @@ public class McpAdminTools {
 
     /**
      * Dispatch resource read to the correct REST store based on type.
+     * <p>
+     * {@code "rag"} is readable here but deliberately absent from
+     * {@link #updateResourceByType}, {@link #createResourceByType} and
+     * {@link #deleteResourceByType}: a knowledge base is a workflow extension like
+     * any other and an agent's configuration cannot be explained without it, but
+     * authoring one — and ingesting into one — is a separate decision that has not
+     * been taken. An unsupported type is rejected by name in each switch's default
+     * branch, so the asymmetry surfaces as a clear refusal rather than a silent
+     * write to the wrong store.
      */
     private Object readResourceByType(String type, String id, int version) {
         return switch (type) {
@@ -431,8 +441,9 @@ public class McpAdminTools {
             case "output" -> getRestStore(IRestOutputStore.class).readOutputSet(id, version, "", "", 0, 0);
             case "propertysetter" -> getRestStore(IRestPropertySetterStore.class).readPropertySetter(id, version);
             case "dictionaries" -> getRestStore(IRestDictionaryStore.class).readRegularDictionary(id, version, "", "", 0, 0);
-            default -> throw new IllegalArgumentException(
-                    "Unknown resource type: " + type + ". Supported: behavior, langchain, httpcalls, mcpcalls, output, propertysetter, dictionaries");
+            case "rag" -> getRestStore(IRestRagStore.class).readRag(id, version);
+            default -> throw new IllegalArgumentException("Unknown resource type: " + type
+                    + ". Supported: behavior, langchain, httpcalls, mcpcalls, output, propertysetter, dictionaries, rag");
         };
     }
 
