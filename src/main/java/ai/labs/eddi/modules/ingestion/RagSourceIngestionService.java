@@ -18,9 +18,11 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.Optional;
-import java.util.concurrent.Executors;
 
 /**
  * Runs a knowledge base's ingestion sources, on demand or on a cron, and keeps
@@ -34,6 +36,9 @@ import java.util.concurrent.Executors;
 public class RagSourceIngestionService {
 
     private static final Logger LOGGER = Logger.getLogger(RagSourceIngestionService.class);
+
+    /** Ceiling on how long a preview may block its caller. */
+    private static final int PREVIEW_TIME_BUDGET_MINUTES = 2;
 
     /** Scheduled runs are not a user's action. */
     private static final String SCHEDULE_USER_ID = "system:scheduler";
@@ -72,22 +77,55 @@ public class RagSourceIngestionService {
         // One virtual thread per run, as the existing RagIngestionService does for
         // single-document ingestion. Crawls block by design — on the fetch and on the
         // politeness delay — so they must never run on a shared pool.
-        Executors.newVirtualThreadPerTaskExecutor().submit(() -> {
+        // One virtual thread, started directly: an ExecutorService per call was never
+        // closed. Throwable rather than RuntimeException so an Error is logged instead
+        // of disappearing into a dead thread.
+        Thread.ofVirtual().name("rag-ingestion-" + sourceKey).start(() -> {
             try {
                 IngestionReport report = pipeline.run(ragConfigId, knowledgeBase, source, Mode.INGEST);
                 LOGGER.infof("Ingestion of source '%s' finished: %s, %d ingested, %d unchanged, %d tombstoned",
                         LogSanitizer.sanitize(source.getName()), report.outcome(),
                         report.documentsIngested(), report.documentsUnchanged(), report.documentsTombstoned());
-            } catch (RuntimeException e) {
-                LOGGER.errorf(e, "Ingestion of source '%s' threw", LogSanitizer.sanitize(source.getName()));
+            } catch (Throwable t) {
+                LOGGER.errorf(t, "Ingestion of source '%s' threw", LogSanitizer.sanitize(source.getName()));
             }
         });
         return Optional.of(sourceKey);
     }
 
-    /** Crawls and reports what would change, embedding and recording nothing. */
+    /**
+     * Crawls and reports what would change, embedding and recording nothing.
+     *
+     * <p>
+     * Deliberately capped well below the source's own limits. A preview blocks the
+     * caller for the length of the crawl, and an uncapped one would hold a request
+     * thread for up to the source time budget (a day, at the maximum) while sending
+     * that much traffic to a third party — for every click, since nothing stops
+     * previews running concurrently.
+     */
     public IngestionReport preview(String ragConfigId, RagConfiguration knowledgeBase, IngestionSource source) {
-        return pipeline.run(ragConfigId, knowledgeBase, source, Mode.PREVIEW);
+        return pipeline.run(ragConfigId, knowledgeBase, cappedForPreview(source), Mode.PREVIEW);
+    }
+
+    /** A copy of the source with limits an operator can wait for. */
+    private static IngestionSource cappedForPreview(IngestionSource source) {
+        var capped = new IngestionSource();
+        capped.setId(source.getId());
+        capped.setName(source.getName());
+        capped.setEnabled(true);
+        capped.setType(source.getType());
+        capped.setWeb(source.getWeb());
+        capped.setCron(null);
+
+        var settings = new IngestionSource.IngestionSettings();
+        var original = source.settings();
+        settings.setMaxContentLength(original.getMaxContentLength());
+        settings.setMaxBytesPerPage(original.getMaxBytesPerPage());
+        settings.setTombstoneAfterMissedRuns(original.getTombstoneAfterMissedRuns());
+        settings.setMaxSegmentsPerRun(original.getMaxSegmentsPerRun());
+        settings.setTimeBudgetMinutes(Math.min(original.timeBudgetMinutesOrDefault(), PREVIEW_TIME_BUDGET_MINUTES));
+        capped.setSettings(settings);
+        return capped;
     }
 
     /** Run history for a source, newest first. */
@@ -138,12 +176,32 @@ public class RagSourceIngestionService {
      * this an upsert with no scan and no orphans — see
      * {@link RagIngestionSchedules} for what the alternative cost the draft.
      */
-    public void syncSchedules(String ragConfigId, Integer version, RagConfiguration knowledgeBase) {
+    public void syncSchedules(String ragConfigId, Integer version, RagConfiguration knowledgeBase,
+                              Collection<String> previousSourceIds) {
+
+        // Sources that existed before and do not now must lose their schedules.
+        // Walking only the new document left the removed source's schedule in place,
+        // still naming the old version, still crawling a third party on a cron with
+        // nothing in the configuration to show for it.
+        Set<String> currentIds = new HashSet<>();
+        if (knowledgeBase.getSources() != null) {
+            for (IngestionSource source : knowledgeBase.getSources()) {
+                currentIds.add(sourceIdOf(source));
+            }
+        }
+        if (previousSourceIds != null) {
+            for (String previousId : previousSourceIds) {
+                if (previousId != null && !currentIds.contains(previousId)) {
+                    deleteScheduleQuietly(ragConfigId, previousId);
+                }
+            }
+        }
+
         if (knowledgeBase.getSources() == null) {
             return;
         }
         for (IngestionSource source : knowledgeBase.getSources()) {
-            String sourceId = source.getId() == null || source.getId().isBlank() ? source.getName() : source.getId();
+            String sourceId = sourceIdOf(source);
             String name = RagIngestionSchedules.scheduleName(ragConfigId, sourceId);
             try {
                 scheduleStore.deleteSchedulesByName(name);
@@ -161,19 +219,27 @@ public class RagSourceIngestionService {
         }
     }
 
+    /** The id a source is addressed and keyed by. */
+    public static String sourceIdOf(IngestionSource source) {
+        return source.getId() == null || source.getId().isBlank() ? source.getName() : source.getId();
+    }
+
+    private void deleteScheduleQuietly(String ragConfigId, String sourceId) {
+        try {
+            scheduleStore.deleteSchedulesByName(RagIngestionSchedules.scheduleName(ragConfigId, sourceId));
+        } catch (IResourceStore.ResourceStoreException e) {
+            LOGGER.errorf(e, "Could not remove the ingestion schedule for a removed source of knowledge base %s — "
+                    + "it may keep crawling", LogSanitizer.sanitize(ragConfigId));
+        }
+    }
+
     /** Removes every ingestion schedule belonging to a knowledge base's sources. */
     public void removeSchedules(String ragConfigId, RagConfiguration knowledgeBase) {
         if (knowledgeBase == null || knowledgeBase.getSources() == null) {
             return;
         }
         for (IngestionSource source : knowledgeBase.getSources()) {
-            String sourceId = source.getId() == null || source.getId().isBlank() ? source.getName() : source.getId();
-            try {
-                scheduleStore.deleteSchedulesByName(RagIngestionSchedules.scheduleName(ragConfigId, sourceId));
-            } catch (IResourceStore.ResourceStoreException e) {
-                LOGGER.errorf(e, "Could not remove the ingestion schedule for source '%s'",
-                        LogSanitizer.sanitize(source.getName()));
-            }
+            deleteScheduleQuietly(ragConfigId, sourceIdOf(source));
         }
     }
 

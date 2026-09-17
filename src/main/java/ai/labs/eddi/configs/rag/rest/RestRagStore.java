@@ -24,6 +24,8 @@ import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 import java.util.UUID;
 
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
@@ -72,8 +74,11 @@ public class RestRagStore implements IRestRagStore {
     @Override
     public Response updateRag(String id, Integer version, RagConfiguration ragConfiguration) {
         prepareForWrite(ragConfiguration);
+        // Read before writing: a source removed from sources[] must lose its
+        // schedule, and afterwards there is nothing left to say which ones existed.
+        Set<String> previousSourceIds = sourceIdsOf(readQuietly(id, version));
         Response response = restVersionInfo.update(id, version, ragConfiguration);
-        syncIngestionSchedules(response, id, ragConfiguration);
+        syncIngestionSchedules(response, id, ragConfiguration, previousSourceIds);
         return response;
     }
 
@@ -81,8 +86,40 @@ public class RestRagStore implements IRestRagStore {
     public Response createRag(RagConfiguration ragConfiguration) {
         prepareForWrite(ragConfiguration);
         Response response = restVersionInfo.create(ragConfiguration);
-        syncIngestionSchedules(response, null, ragConfiguration);
+        syncIngestionSchedules(response, null, ragConfiguration, Set.of());
         return response;
+    }
+
+    /**
+     * Whether any other version of this knowledge base can still be read. Schedules
+     * belong to the knowledge base rather than to one version, so they only go when
+     * nothing is left to crawl for.
+     */
+    private boolean anyVersionRemains(String id, Integer deletedVersion) {
+        int highest = deletedVersion == null ? 1 : deletedVersion;
+        for (int candidate = 1; candidate <= highest + 1; candidate++) {
+            if (candidate != highest && readQuietly(id, candidate) != null) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private RagConfiguration readQuietly(String id, Integer version) {
+        try {
+            return restVersionInfo.read(id, version);
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    private static Set<String> sourceIdsOf(RagConfiguration configuration) {
+        if (configuration == null || configuration.getSources() == null) {
+            return Set.of();
+        }
+        return configuration.getSources().stream()
+                .map(RagSourceIngestionService::sourceIdOf)
+                .collect(Collectors.toSet());
     }
 
     /**
@@ -94,9 +131,12 @@ public class RestRagStore implements IRestRagStore {
      * visible — the draft this replaces swallowed the same failure and returned 201
      * for a source that looked scheduled and never ran.
      */
-    private void syncIngestionSchedules(Response response, String knownId, RagConfiguration ragConfiguration) {
-        if (ragConfiguration == null || ragConfiguration.getSources() == null
-                || ragConfiguration.getSources().isEmpty()) {
+    private void syncIngestionSchedules(Response response, String knownId, RagConfiguration ragConfiguration,
+                                        Set<String> previousSourceIds) {
+        if (ragConfiguration == null
+                || ((ragConfiguration.getSources() == null || ragConfiguration.getSources().isEmpty())
+                        && previousSourceIds.isEmpty())) {
+            // Nothing to add and nothing that used to exist — no schedule work.
             return;
         }
         IResourceId resourceId = resourceIdOf(response);
@@ -108,7 +148,7 @@ public class RestRagStore implements IRestRagStore {
         }
         Integer version = resourceId == null ? null : resourceId.getVersion();
         try {
-            sourceIngestionService.syncSchedules(id, version, ragConfiguration);
+            sourceIngestionService.syncSchedules(id, version, ragConfiguration, previousSourceIds);
         } catch (RuntimeException e) {
             LOGGER.errorf(e, "Ingestion schedules for knowledge base %s were NOT synchronised. Sources with a "
                     + "cron will not run until it is saved again.", LogSanitizer.sanitize(id));
@@ -166,6 +206,20 @@ public class RestRagStore implements IRestRagStore {
      * Falling back to the source's <em>name</em> would mean renaming a source
      * orphaned everything it had ingested.
      */
+    /**
+     * Strips a copy's inherited ingestion identity: new ids, and no schedule until
+     * an operator asks for one.
+     */
+    private void detachIngestionSources(RagConfiguration ragConfiguration) {
+        if (ragConfiguration == null || ragConfiguration.getSources() == null) {
+            return;
+        }
+        for (var source : ragConfiguration.getSources()) {
+            source.setId(UUID.randomUUID().toString());
+            source.setCron(null);
+        }
+    }
+
     private void assignSourceIds(RagConfiguration ragConfiguration) {
         if (ragConfiguration.getSources() == null) {
             return;
@@ -203,13 +257,21 @@ public class RestRagStore implements IRestRagStore {
         // Read before deleting: afterwards there is nothing left to tell us which
         // schedules belonged to this knowledge base, and an orphaned schedule keeps
         // crawling a third-party site on behalf of a config that no longer exists.
-        try {
-            sourceIngestionService.removeSchedules(id, restVersionInfo.read(id, version));
-        } catch (RuntimeException e) {
-            LOGGER.errorf(e, "Could not remove ingestion schedules for knowledge base %s before deleting it",
-                    LogSanitizer.sanitize(id));
+        RagConfiguration deleted = readQuietly(id, version);
+        Response response = restVersionInfo.delete(id, version, permanent);
+
+        // Only once no readable version is left. Deleting an OLD version of a
+        // knowledge base that is still deployed at a newer one used to remove the
+        // live version's schedules, so it silently stopped crawling.
+        if (deleted != null && readQuietly(id, version) == null && !anyVersionRemains(id, version)) {
+            try {
+                sourceIngestionService.removeSchedules(id, deleted);
+            } catch (RuntimeException e) {
+                LOGGER.errorf(e, "Could not remove ingestion schedules for knowledge base %s",
+                        LogSanitizer.sanitize(id));
+            }
         }
-        return restVersionInfo.delete(id, version, permanent);
+        return response;
     }
 
     @Override
@@ -220,6 +282,12 @@ public class RestRagStore implements IRestRagStore {
         // document must not be refused just because the rules tightened after it was
         // stored.
         normalizeLegacyChunkStrategy(config);
+        // A copy must not inherit its original's ingestion identity. Vector stores are
+        // keyed by the knowledge base NAME, which a duplicate shares, so a copied
+        // source with the same id and cron would run against the original's documents
+        // — replacing and tombstoning them while the original's state still says
+        // "unchanged".
+        detachIngestionSources(config);
         return restVersionInfo.create(config);
     }
 

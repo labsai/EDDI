@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.runtime.internal;
 
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
+import ai.labs.eddi.modules.ingestion.IngestionPipeline.IngestionReport;
 import ai.labs.eddi.modules.ingestion.RagIngestionSchedules;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
@@ -378,8 +379,19 @@ public class ScheduleFireExecutor {
                     RagIngestionSchedules.ragConfigVersion(md),
                     RagIngestionSchedules.sourceId(md));
             cost = report.costUsd();
-            if (report.isSuccess()) {
+            if (report.isSuccess() || isBenignOutcome(report)) {
+                // ALREADY_RUNNING and SKIPPED are outcomes, not failures. The lease is
+                // five minutes and a crawl's default budget is ten, so the schedule is
+                // legitimately re-claimed while the first run is still going; the
+                // second fire then loses the database's single-in-flight race. Calling
+                // that FAILED increments failCount on every fire and dead-letters the
+                // schedule within days. fireTeamCadence treats the same case the same
+                // way.
                 status = ScheduleConfiguration.FireStatus.COMPLETED.name();
+                if (!report.isSuccess()) {
+                    LOGGER.infof("[SCHEDULE] Ingestion for schedule '%s' (id=%s) did not run: %s",
+                            schedule.getName(), schedule.getId(), report.message());
+                }
                 LOGGER.infof("[SCHEDULE] Ingestion for schedule '%s' (id=%s): %d ingested, %d unchanged, "
                         + "%d tombstoned, %d failed, %d segments",
                         schedule.getName(), schedule.getId(), report.documentsIngested(),
@@ -415,6 +427,14 @@ public class ScheduleFireExecutor {
             restoreInterrupt(interrupted);
         }
         return fireLog;
+    }
+
+    /**
+     * Whether a run that did not happen should still count as a successful fire.
+     */
+    private static boolean isBenignOutcome(IngestionReport report) {
+        var outcome = report.outcome();
+        return outcome == IngestionReport.Outcome.ALREADY_RUNNING || outcome == IngestionReport.Outcome.SKIPPED;
     }
 
     private ScheduleFireLog fireDreamConsolidation(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {

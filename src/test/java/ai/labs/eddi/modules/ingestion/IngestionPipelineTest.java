@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.time.Instant;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -398,7 +399,7 @@ class IngestionPipelineTest {
             // every scheduled fire a failure, until something reaps it — and nothing did.
             var exploding = new InMemoryIngestionStateStore() {
                 @Override
-                public java.util.List<DocumentState> tombstoneMissing(String sourceId, String runId, int threshold) {
+                public List<DocumentState> tombstoneMissing(String sourceId, String runId, int threshold) {
                     throw new IngestionStateStoreException("database is unwell", new RuntimeException());
                 }
             };
@@ -420,7 +421,7 @@ class IngestionPipelineTest {
             String sourceKey = IngestionPipeline.stateKey(KB_RESOURCE_ID, source());
             stateStore.startRun(sourceKey);
             // Make it look old enough to be abandoned.
-            stateStore.reapStaleRuns(java.time.Instant.now().plusSeconds(1));
+            stateStore.reapStaleRuns(Instant.now().plusSeconds(1));
             stateStore.startRun(sourceKey);
 
             IngestionReport report = pipelineFor(new FakeSite().page(SITE + "/", pageWith("x")))

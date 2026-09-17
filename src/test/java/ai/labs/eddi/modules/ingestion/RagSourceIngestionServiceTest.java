@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -85,7 +86,7 @@ class RagSourceIngestionServiceTest {
         void createsScheduleForCron() throws Exception {
             var source = source("0 2 * * *");
 
-            service.syncSchedules(KB_ID, 1, knowledgeBase(source));
+            service.syncSchedules(KB_ID, 1, knowledgeBase(source), Set.of());
 
             ArgumentCaptor<ScheduleConfiguration> captor = ArgumentCaptor.forClass(ScheduleConfiguration.class);
             verify(scheduleStore).createSchedule(captor.capture());
@@ -105,8 +106,8 @@ class RagSourceIngestionServiceTest {
             // find the row and created a duplicate.
             var source = source("0 2 * * *");
 
-            service.syncSchedules(KB_ID, 1, knowledgeBase(source));
-            service.syncSchedules(KB_ID, 1, knowledgeBase(source));
+            service.syncSchedules(KB_ID, 1, knowledgeBase(source), Set.of());
+            service.syncSchedules(KB_ID, 1, knowledgeBase(source), Set.of());
 
             verify(scheduleStore, times(2))
                     .deleteSchedulesByName(RagIngestionSchedules.scheduleName(KB_ID, SOURCE_ID));
@@ -115,7 +116,7 @@ class RagSourceIngestionServiceTest {
         @Test
         @DisplayName("a source with no cron gets no schedule, but any old one is still removed")
         void noCronMeansNoSchedule() throws Exception {
-            service.syncSchedules(KB_ID, 1, knowledgeBase(source(null)));
+            service.syncSchedules(KB_ID, 1, knowledgeBase(source(null)), Set.of());
 
             verify(scheduleStore).deleteSchedulesByName(RagIngestionSchedules.scheduleName(KB_ID, SOURCE_ID));
             verify(scheduleStore, never()).createSchedule(any());
@@ -127,7 +128,7 @@ class RagSourceIngestionServiceTest {
             var source = source("0 2 * * *");
             source.setEnabled(false);
 
-            service.syncSchedules(KB_ID, 1, knowledgeBase(source));
+            service.syncSchedules(KB_ID, 1, knowledgeBase(source), Set.of());
 
             verify(scheduleStore).deleteSchedulesByName(RagIngestionSchedules.scheduleName(KB_ID, SOURCE_ID));
             verify(scheduleStore, never()).createSchedule(any());
@@ -141,7 +142,7 @@ class RagSourceIngestionServiceTest {
             when(scheduleStore.createSchedule(any())).thenThrow(new IResourceStore.ResourceStoreException("nope"));
 
             assertThrows(IllegalStateException.class,
-                    () -> service.syncSchedules(KB_ID, 1, knowledgeBase(source("0 2 * * *"))));
+                    () -> service.syncSchedules(KB_ID, 1, knowledgeBase(source("0 2 * * *")), Set.of()));
         }
 
         @Test
@@ -167,10 +168,78 @@ class RagSourceIngestionServiceTest {
             var empty = new RagConfiguration();
             empty.setSources(null);
 
-            service.syncSchedules(KB_ID, 1, empty);
+            service.syncSchedules(KB_ID, 1, empty, Set.of());
             service.removeSchedules(KB_ID, empty);
 
             verify(scheduleStore, never()).createSchedule(any());
+        }
+    }
+
+    @Nested
+    @DisplayName("review findings")
+    class ReviewFindings {
+
+        @Test
+        @DisplayName("a source removed from the knowledge base loses its schedule")
+        void removedSourceLosesItsSchedule() throws Exception {
+            // syncSchedules only walked the NEW document's sources, so a source deleted
+            // from sources[] kept its schedule — still naming the old version, still
+            // crawling a third party on a cron, with nothing in the configuration left
+            // to show for it or to switch it off.
+            var remaining = source("0 2 * * *");
+            remaining.setId("src-keep");
+
+            service.syncSchedules(KB_ID, 2, knowledgeBase(remaining), Set.of("src-keep", "src-removed"));
+
+            verify(scheduleStore).deleteSchedulesByName(RagIngestionSchedules.scheduleName(KB_ID, "src-removed"));
+        }
+
+        @Test
+        @DisplayName("a source that is still present keeps exactly one schedule")
+        void survivingSourceIsNotDoubleDeleted() throws Exception {
+            var source = source("0 2 * * *");
+
+            service.syncSchedules(KB_ID, 2, knowledgeBase(source), Set.of(SOURCE_ID));
+
+            // Once for the upsert, and NOT a second time as a supposed removal.
+            verify(scheduleStore, times(1))
+                    .deleteSchedulesByName(RagIngestionSchedules.scheduleName(KB_ID, SOURCE_ID));
+        }
+
+        @Test
+        @DisplayName("a preview cannot block its caller for the source's full time budget")
+        void previewIsCapped() {
+            // Preview is synchronous and unguarded by the single-in-flight rule, so an
+            // uncapped one holds a request thread for up to a day per click while
+            // sending that much traffic to a third party.
+            var generous = source(null);
+            var settings = new IngestionSource.IngestionSettings();
+            settings.setTimeBudgetMinutes(1440);
+            generous.setSettings(settings);
+            when(pipeline.run(anyString(), any(), any(), eq(Mode.PREVIEW)))
+                    .thenReturn(IngestionReport.skipped(SOURCE_ID, "stub"));
+
+            service.preview(KB_ID, knowledgeBase(generous), generous);
+
+            ArgumentCaptor<IngestionSource> used = ArgumentCaptor.forClass(IngestionSource.class);
+            verify(pipeline).run(anyString(), any(), used.capture(), eq(Mode.PREVIEW));
+            assertTrue(used.getValue().settings().timeBudgetMinutesOrDefault() <= 2,
+                    "preview budget was " + used.getValue().settings().timeBudgetMinutesOrDefault() + " minutes");
+        }
+
+        @Test
+        @DisplayName("a preview never runs against the source's own schedule or identity")
+        void previewDoesNotInheritCron() {
+            var scheduled = source("0 2 * * *");
+            when(pipeline.run(anyString(), any(), any(), eq(Mode.PREVIEW)))
+                    .thenReturn(IngestionReport.skipped(SOURCE_ID, "stub"));
+
+            service.preview(KB_ID, knowledgeBase(scheduled), scheduled);
+
+            ArgumentCaptor<IngestionSource> used = ArgumentCaptor.forClass(IngestionSource.class);
+            verify(pipeline).run(anyString(), any(), used.capture(), eq(Mode.PREVIEW));
+            assertEquals(null, used.getValue().getCron());
+            assertEquals(SOURCE_ID, used.getValue().getId(), "state must still be keyed the same way");
         }
     }
 
