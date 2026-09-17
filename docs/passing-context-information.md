@@ -10,7 +10,7 @@ Context enables your agents to:
 
 - **Personalize responses**: Use user names, preferences, account details
 - **Make business decisions**: Check user roles, subscription status, account balances
-- **Maintain session state**: Pass authentication tokens, session IDs
+- **Maintain session state**: Pass authentication tokens (marked [secret](#secret-context-values)), session IDs
 - **Adapt behavior**: Change agent responses based on time of day, location, language
 - **Integrate with your systems**: Bring data from your CRM, database, or services
 
@@ -53,6 +53,43 @@ EDDI supports four context types:
    ```
 
 > An `array` context is readable in output templates and HTTP call bodies, but it can never be matched by a `contextmatcher` — see [Behavior Rules → Limitations](behavior-rules.md#limitations). Send the data as an `object` (and match with `objectKeyPath`) if you need to match into it.
+
+### Secret Context Values
+
+Context is stored with the conversation step it arrives with, and it is echoed in the
+conversation output. For a value that must never be stored or returned — typically the
+caller's credential for a downstream API — add `"secret": true`:
+
+```json
+"userToken": {"type": "string", "value": "<the caller's token>", "secret": true}
+```
+
+A secret value is usable for the turn it arrives with, exactly like any other context: in
+templates (`{context.userToken}`), HTTP call headers and behavior rules. Its lifetime
+really is per request:
+
+- It is **never echoed** in the conversation output, not even while the turn is still running.
+- When the turn ends — completed, stopped, paused or failed — its stored entry is replaced
+  by `<secret context>`, and every copy a template made of it is replaced too: other data of
+  the step, the conversation output, the conversation properties (so a `longTerm` property
+  never reaches the user memory store) and the turn's audit ledger entries.
+- A later turn, or tasks that run after a HITL resume, see `<secret context>`. Send the
+  value again with every request that needs it.
+
+Use it in an HTTP call **header**:
+
+```json
+"headers": { "Authorization": "Bearer {context.userToken}" }
+```
+
+Keep it out of anything that leaves EDDI while the turn runs: a prompt sends it to the model
+provider, a streamed reply reaches the user before the turn ends (the returned and stored reply
+is scrubbed), and a query parameter or body is written to the server log by the HTTP call task. Values shorter than 8 characters are only removed from
+their own entry, not searched for elsewhere.
+
+`"secret": true` is different from the `secretInput` flag: `secretInput` hides the
+**message the user typed** (see [Secrets Vault → Secret Input](secrets-vault.md#secret-input-agent-conversations)),
+`secret` hides a **context value your application sends**.
 
 ### How Context is Used
 

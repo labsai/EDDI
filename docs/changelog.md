@@ -49,6 +49,77 @@ bottom of this file and are never archived.
 
 ---
 
+## 🔒 feat(context): secret context values — usable for one turn, never stored or returned (2026-09-17)
+
+**Repo:** EDDI (`feat/secret-context-values`)
+
+### Why
+
+A client that needs the agent to call a downstream API as the signed-in user has to hand EDDI that
+user's credential, and context is the only channel for it. But `Conversation` stores every context
+entry as a step datum and echoes it in the conversation output, so the credential landed in
+`conversationmemories`, in every detailed response and conversation read, and — once a property
+setter copied it — in the properties and the user memory store. `scope: "secret"` does not fit a
+per-user, per-request credential: the vault key is `agentId + "." + propertyName`, one slot per agent,
+so concurrent users overwrite each other's value. `secretInput` only hides the typed message.
+`${caller:token}` only covers calls back to EDDI's own origin.
+
+### What changed
+
+- **`Context.secret`** (`Boolean`, nullable so ordinary entries serialize unchanged). The client marks
+  the entry: `{"type": "string", "value": "…", "secret": true}`. The flag lives on the value because the
+  sender knows what is sensitive; putting a key list in the agent configuration would couple every agent
+  to one client's field names.
+- **`Conversation`**: a secret entry is never put into the echoed `context` output, not even mid-turn.
+  The step datum keeps the live value while the pipeline runs, so templates, HTTP call headers and
+  behavior rules work. When the pipeline stops — completed, stopped, paused or failed — the new
+  `scrubSecretContextValues()` runs first in `executeConversationStep`'s `finally`, before the audit
+  flush, the longTerm write and the stored snapshot. It replaces the entry with
+  `MemoryKeys.SECRET_CONTEXT_PLACEHOLDER` (`<secret context>`) and every copy of the value in
+  properties (in place, so their step mirrors follow), other step data (result and possible results)
+  and the conversation output. Objects the plain walk cannot enter (output items, records) are scrubbed
+  through their JSON form, using the persistence mapper configuration, and replaced by the scrubbed tree
+  — so a reply that echoed the value is stored and returned as
+  `[{"type":"text","text":"Token was <secret context>"}]`, keeping its shape. Only an object that
+  cannot be converted falls back to whole replacement (WARN).
+- **`TurnAuditBuffer.flush(memory, secretContextValues)`** redacts those values from every buffered
+  entry, independent of the secret-input redaction.
+- **`SecretValueScrubber`** (new, `engine.memory`): the string/list/map/Context walk extracted from
+  `PropertySetterTask` (which now uses it, unchanged in behaviour), plus `scrubDeep` for the JSON-form
+  scrub.
+- Docs: `passing-context-information.md` (new "Secret Context Values" section) and a pointer in
+  `secrets-vault.md`.
+
+### Design decisions
+
+- **Scrub at the end of the turn, not at read time.** Tasks need the plaintext while they run; what
+  must not happen is the value outliving the request. A HITL resume therefore sees the placeholder —
+  documented: send the value again with the request that needs it.
+- **Values shorter than 8 characters are only removed from their own entry**, not searched for
+  elsewhere, so a short value cannot wreck unrelated output. Longest values are replaced first.
+- **Separate placeholder from `<secret input>`**: that one on `input:initial` is how the audit ledger
+  decides the INPUT was a secret.
+
+### Verification
+
+- `ConversationSecretContextTest` (8) and `SecretValueScrubberTest` (6); the related Conversation,
+  PropertySetterTask, TurnAuditBuffer and LifecycleManager suites stay green (330 tests).
+- Mutation-checked: removing the end-of-turn scrub, the output masking, the audit redaction, the property
+  scrub, the possible-results scrub or the JSON-form scrub each fails at least one test.
+- End to end on the packaged build (real MongoDB, mock API that echoes the header back): the HTTP call
+  sent the real token in its header; the say response, the conversation read, the stored document and
+  the server log did not contain it; the saved API response and the reply showed the placeholder with
+  their shape intact; a control run without the flag stored the token as before (12/12).
+
+### Not covered
+
+- The value still reaches anything a template sends out of EDDI while the turn runs: a prompt (model
+  provider), a reply streamed over SSE (the returned and stored reply is scrubbed), or a query
+  parameter/body (written to the server log by the HTTP call task). Documented: use it in headers only.
+- HITL pending tool-call batches are not scrubbed (they hold model-generated arguments, and HTTP
+  previews are already redacted by `RequestRedactor`).
+
+
 ## ⚡ perf(monorepo): the efficiency review follow-ups (2026-09-15)
 
 **Repo:** EDDI (`chore/monorepo-migration`) — the follow-ups from the two-reviewer efficiency review
@@ -3721,6 +3792,7 @@ _For recording decisions that come up during implementation that aren't in the p
 | 2026-03-05 | Use Astro (not Expo) for website                                      | Static site on GitHub Pages           | Expo would add unnecessary abstraction for a marketing site |
 | 2026-03-05 | Use AI complexity scale (🟢/🟡/🔴/⚫) instead of human time estimates | AI will do all implementation work    | Human hours are meaningless for AI execution                |
 | 2026-03-05 | Docs already published at docs.labs.ai                                | Third-party tool reads `docs/` folder | Could migrate to Astro Content Collections later            |
+| 2026-09-17 | Mark secret context on the value (`"secret": true`), scrub every copy when the turn ends | A per-user credential sent as context was stored, echoed and copied into properties; `scope: secret` holds one vault slot per agent | A list of secret keys in the agent configuration — couples every agent to one client's field names |
 | 2026-09-14 | Connection deployment settings are runtime-writable; a set property pins its value (409 on change) | Properties-only meant a restart per change and protected nothing from `eddi-admin`, who already writes the vault and can send any `${vault:}` value anywhere via an httpcall | Keep properties only (restart, no real protection); store without pinning (removes the operator/admin split for deployments that have one); seed the store from properties (a removed property would be silently replaced by its copy) |
 | 2026-09-13 | Block the cloud metadata service on every outbound path, even with `eddi.security.ssrf-protection.enabled=false` | E2E: a config-authored httpcall reached `169.254.169.254` | Flip SSRF protection on by default — breaks every configured internal API |
 | 2026-09-13 | Buffer a turn's audit entries and flush them after the pipeline, redacting a vaulted input | E2E: parser/rules entries carried a `scope: secret` plaintext into the append-only ledger | Redact after submission — impossible, entries are signed and immutable |

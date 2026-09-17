@@ -44,6 +44,15 @@ public final class MemoryKeys {
      */
     public static final String SECRET_INPUT_PLACEHOLDER = "<secret input>";
 
+    /**
+     * What replaces a context value the client marked {@code "secret": true} once
+     * its turn has run — in the stored context entry, and wherever the value was
+     * copied to during the turn (step data, conversation output, properties, audit
+     * entries). Distinct from {@link #SECRET_INPUT_PLACEHOLDER} because that one on
+     * {@code input:initial} tells the audit ledger the INPUT was a secret.
+     */
+    public static final String SECRET_CONTEXT_PLACEHOLDER = "<secret context>";
+
     // ---- Parser ----
 
     /**
