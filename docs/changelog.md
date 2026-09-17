@@ -51,7 +51,7 @@ bottom of this file and are never archived.
 
 ## 🎨 fix(manager): the user-menu avatar no longer shows "?" (2026-09-17)
 
-**Repo:** EDDI (`claude/menu-icon-auth-ux-ce1dd6`)
+**Repo:** EDDI (`fix/manager-avatar-no-claims`)
 
 ### What changed
 
@@ -62,7 +62,17 @@ bottom of this file and are never archived.
   literal `"?"` they used to print. The label falls back to a new `auth.signedIn` key ("Signed in", all
   11 locales), and the email line is not repeated when the email is the only label available. The top-bar
   trigger also gained a visible keyboard focus ring.
-- Tests: `user-display.test.ts` (9), plus the no-claims token shape in `top-bar.test.tsx` and
+- **Review follow-ups.** Initials are the first *letter or digit* of each part, NFC-normalised, so punctuation
+  and emoji no longer become initials ("Doe, Jane (Contractor)" used to give "D("); Thai and Lao preposed
+  vowels are skipped; two Arabic initials get a zero-width non-joiner so they do not join into a word; and
+  `toUpperCase` replaces `toLocaleUpperCase`, which followed the browser's locale rather than the app's (a
+  Turkish system turned "isabel" into "İ"). A username with no letter now falls through to the email. The
+  helper documents why initials prefer given + family name while the label prefers the display name.
+  `userSecondaryEmail` hides the email case-insensitively when it is already the label; truncated name and
+  email lines carry a `title`; the collapsed sidebar avatar is `role="img"` with the user's name as its
+  label and tooltip (expanded, it is `aria-hidden`, since the name is printed beside it); French reads
+  "Session ouverte".
+- Tests: `user-display.test.ts` (18), plus the no-claims token shape in `top-bar.test.tsx` and
   `sidebar.test.tsx`. Mutation-checked: restoring the `"?"` fallback fails three of them.
 
 ### Why the claims were empty

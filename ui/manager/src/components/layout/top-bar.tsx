@@ -16,7 +16,7 @@ import {
 import { useTheme } from "./theme-provider";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
-import { userDisplayName, userInitials } from "@/lib/user-display";
+import { userDisplayName, userInitials, userSecondaryEmail } from "@/lib/user-display";
 import { PlatformStatus } from "./platform-status";
 import { OperatorDrawer } from "@/components/operator/operator-drawer";
 
@@ -207,6 +207,7 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
   /** Avatar initials and label — both empty when the token carries no profile claims */
   const initials = showUser ? userInitials(user) : "";
   const displayName = showUser ? userDisplayName(user) : "";
+  const secondaryEmail = showUser ? userSecondaryEmail(user) : "";
 
   return (
     <header className="flex h-16 items-center justify-between border-b border-border bg-card px-4">
@@ -342,12 +343,17 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
               >
                 {/* User info */}
                 <div className="border-b border-border px-3 py-2.5">
-                  <p className="truncate text-sm font-medium text-foreground">
+                  {/* truncate hides the end of a long name or address, so the
+                      full text stays available on hover. */}
+                  <p
+                    className="truncate text-sm font-medium text-foreground"
+                    title={displayName || undefined}
+                  >
                     {displayName || t("auth.signedIn", "Signed in")}
                   </p>
-                  {user.email && user.email !== displayName && (
-                    <p className="truncate text-xs text-muted-foreground">
-                      {user.email}
+                  {secondaryEmail && (
+                    <p className="truncate text-xs text-muted-foreground" title={secondaryEmail}>
+                      {secondaryEmail}
                     </p>
                   )}
                 </div>
