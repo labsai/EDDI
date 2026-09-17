@@ -73,11 +73,35 @@ public class OwnershipValidator {
         if (!authEnabled) {
             return true;
         }
-        if (identity == null || identity.isAnonymous() || identity.getPrincipal() == null) {
+        if (identity == null || identity.isAnonymous()) {
             return false;
         }
-        return resourceOwnerId != null && !resourceOwnerId.isBlank()
-                && identity.getPrincipal().getName().equals(resourceOwnerId);
+        String callerId = principalName(identity);
+        return callerId != null && callerId.equals(resourceOwnerId);
+    }
+
+    /**
+     * The caller's principal name, or {@code null} when the identity has no
+     * principal or the principal has a null or blank name.
+     * <p>
+     * An authenticated identity can be nameless: Quarkus OIDC derives the name from
+     * {@code upn}, {@code preferred_username} or {@code sub}, and a token carrying
+     * none of them resolves to {@code null}. {@link NamelessPrincipalAugmentor}
+     * rejects such tokens at authentication, so this is the second line: every
+     * check here treats a nameless caller as owning nothing, instead of calling
+     * {@code equals} on the null and answering 500.
+     */
+    public static String principalName(SecurityIdentity identity) {
+        if (identity == null || identity.getPrincipal() == null) {
+            return null;
+        }
+        String name = identity.getPrincipal().getName();
+        return name == null || name.isBlank() ? null : name;
+    }
+
+    private static ForbiddenException namelessCaller(String action) {
+        LOGGER.warnf("Ownership check failed: the authenticated identity has no principal name, so it cannot %s", action);
+        return new ForbiddenException("Access denied: the authenticated identity has no principal name");
     }
 
     /**
@@ -102,7 +126,10 @@ public class OwnershipValidator {
             return;
         }
 
-        String callerId = identity.getPrincipal().getName();
+        String callerId = principalName(identity);
+        if (callerId == null) {
+            throw namelessCaller("access user data");
+        }
         if (!callerId.equals(requestedUserId)) {
             LOGGER.warnf("Ownership check failed: caller attempted to access another user's data");
             LOGGER.debugf("Ownership detail: caller='%s', requestedUserId='%s'", sanitize(callerId), sanitize(requestedUserId));
@@ -135,9 +162,15 @@ public class OwnershipValidator {
             return requestedUserId; // let @RolesAllowed handle anonymous access
         }
 
-        String callerId = identity.getPrincipal().getName();
+        String callerId = principalName(identity);
 
         if (requestedUserId == null || requestedUserId.isBlank()) {
+            if (callerId == null) {
+                // Returning null here used to hand the conversation to
+                // computeAnonymousUserIdIfEmpty, which stamped an authenticated
+                // user's conversation with a random anonymous-<hex> owner.
+                throw namelessCaller("own a conversation");
+            }
             return callerId;
         }
 
@@ -145,6 +178,9 @@ public class OwnershipValidator {
             return requestedUserId;
         }
 
+        if (callerId == null) {
+            throw namelessCaller("start a conversation");
+        }
         if (!callerId.equals(requestedUserId)) {
             LOGGER.warnf("UserId resolution rejected: caller attempted to impersonate another user");
             LOGGER.debugf("UserId resolution detail: caller='%s', requestedUserId='%s'", sanitize(callerId), sanitize(requestedUserId));
@@ -186,7 +222,10 @@ public class OwnershipValidator {
             return;
         }
 
-        String callerId = identity.getPrincipal().getName();
+        String callerId = principalName(identity);
+        if (callerId == null) {
+            throw namelessCaller("own a " + resourceType);
+        }
         if (!callerId.equals(resourceOwnerId)) {
             LOGGER.warnf("Ownership check failed: caller denied access to %s owned by another user", resourceType);
             LOGGER.debugf("Ownership detail: caller='%s', resourceType='%s', ownerId='%s'", sanitize(callerId), sanitize(resourceType),

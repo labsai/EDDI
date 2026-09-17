@@ -75,6 +75,27 @@ docker run -e QUARKUS_OIDC_TENANT_ENABLED=true \
            labsai/eddi:latest
 ```
 
+### The Token Must Name the User
+
+EDDI files conversations, memories and approvals under the principal name.
+Quarkus reads it from `quarkus.oidc.token.principal-claim` or, when that is unset,
+from the first of `upn`, `preferred_username` and `sub` the token carries. A
+token that carries none of them still validates, but its principal has no name,
+and nothing can be owned by nobody.
+
+EDDI therefore **rejects such a token with `401`** (`NamelessPrincipalAugmentor`)
+and logs a `[SECURITY]` WARN, at most once every five minutes, naming the claims
+it looked for and the token's issuer and client (`azp`). If you see it, either add
+one of those claims to the access token — in Keycloak, the `profile` client scope
+maps `preferred_username` and the `basic` scope maps `sub` — or set
+`QUARKUS_OIDC_TOKEN_PRINCIPAL_CLAIM` to a claim your provider does emit. Pick a
+claim that is stable and unique per user: ownership is keyed on its value, so a
+changed name orphans everything filed under the old one.
+
+The ownership checks deny a nameless caller with `403` as a second line of
+defence. Background work (schedule fires, group members, sub-agents) never
+authenticates a request and is unaffected.
+
 > **Roles are deployment-wide.** `eddi-editor` grants authoring rights over
 > *every* configuration in the deployment. To scope agents, workflows and the
 > rest to the user or team that created them — and to share them deliberately —

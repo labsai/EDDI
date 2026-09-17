@@ -49,6 +49,87 @@ bottom of this file and are never archived.
 
 ---
 
+## 🔒 fix(security): a token with no principal name fails closed — 401 up front, 403 in the ownership checks (2026-09-17)
+
+**Repo:** EDDI (`fix/nameless-principal-fail-closed`)
+
+### Problem
+
+Measured against `labsai/eddi` with OIDC enforced and a Keycloak realm whose access tokens carried no
+`upn`, `preferred_username` or `sub`: Quarkus authenticates the token but resolves the principal name to
+`null`. Two consequences followed.
+
+- `OwnershipValidator.validateAndResolveUserId` returned that `null` as the resolved userId, and
+  `ConversationSetup.computeAnonymousUserIdIfEmpty` then stamped an authenticated user's conversation with
+  a random `anonymous-<hex>` owner the user could never read back.
+- `GET`/`POST /agents/{conversationId}` by a non-admin owner answered **500**:
+  `requireOwnerOrAdmin` called `callerId.equals(...)` on the null. `validateUserAccess`,
+  `validateAndResolveUserId` and `isOwner` had the same unguarded `getName().equals`, as did the group
+  conversation owner filters in `RestGroupConversation.listGroupConversations` and
+  `McpGroupTools.list_group_conversations`.
+
+The shipped realm is fixed separately (`fix/keycloak-realm-client-scopes`); this change is for every other
+identity provider or hand-built realm that can produce the same token.
+
+### What changed
+
+- **`NamelessPrincipalAugmentor`** (new, `engine/security`) — a `SecurityIdentityAugmentor` that fails
+  authentication (`AuthenticationFailedException` → **401**) for a non-anonymous identity whose principal is
+  missing or whose name is null or blank. It logs a `[SECURITY]` WARN naming the claims it looked for (the
+  configured `quarkus.oidc.token.principal-claim`, else `upn`/`preferred_username`/`sub`) and the token's
+  issuer and `azp`, log-sanitized, never the token. A misconfigured realm fails every request, so the WARN is
+  throttled to once per five minutes and the rest log at DEBUG. Anonymous identities pass untouched.
+- **`OwnershipValidator`** — a public static `principalName(identity)` normalises a missing principal and a
+  null/blank name to `null`. Every check denies a nameless non-admin with **403** instead of NPE-ing:
+  `isOwner` is `false`, `validateUserAccess`/`requireOwnerOrAdmin` (and so `requireOwnerOrAdminStrict` and
+  `requireOwnerAdminOrApprover`) throw `ForbiddenException`, and `validateAndResolveUserId` throws rather
+  than resolving to `null`.
+- **Group conversation listings** (`RestGroupConversation`, `McpGroupTools`) use `principalName` and return
+  nothing for a nameless caller — including legacy rows with no owner, which a null-to-null comparison would
+  otherwise have matched.
+- **`docs/security.md`** — new "The Token Must Name the User" section: the claims Quarkus reads, the 401 and
+  its WARN, and the two fixes (add the claim, or set `QUARKUS_OIDC_TOKEN_PRINCIPAL_CLAIM`).
+
+### Design decisions
+
+- **Reject at authentication, and keep the 403s.** The augmentor is the legible failure: one 401 and one WARN
+  that say what is missing, rather than a 500 on one endpoint, a silently orphaned conversation on another
+  and an empty list on a third. The null-safe validator is defence in depth for any identity that reaches a
+  resource without passing through the augmentor (a future auth mechanism, a test identity).
+- **401, not 403.** The token is not *forbidden* something; it cannot identify the caller at all, which is an
+  authentication failure. The Manager and Chat UI treat 401 and 403 alike, so there is no redirect loop.
+- **Admins keep their role-based bypass in the validator.** `requireOwnerOrAdmin` and an admin naming an
+  explicit `userId` are authorized by the role, not the name. An admin with *no* `userId` to resolve is still
+  denied — there is nobody to file the conversation under. In practice the augmentor rejects the admin's
+  nameless token first.
+- **No escape hatch.** A nameless identity cannot own anything, so there is no configuration in which letting
+  it through is useful; the remedy is `quarkus.oidc.token.principal-claim`.
+- **Background paths are unaffected.** Schedule fires, group members and sub-agents never authenticate a
+  request, so they never reach the augmentor, and the validator's `identity == null` branches are unchanged.
+- **Other principal reads left alone.** `HitlAccessGuard`, `RestConnectionAuthorization`,
+  `RestConnectionSettings`, `A2ATaskHandler`, `OpenAiAuthFilter`, `SpaceContext`, `RestScheduleStore`,
+  `CallerIdentityContext` and `RestAgentEngine` already null-check the name; the audit stamps in
+  `RestAgentEngine` (`endedBy`, `cancelledBy`) and `RestGroupConversation` (`submittedBy`, `decidedBy`) record
+  `null` rather than failing, which the augmentor now makes unreachable.
+
+### Tests
+
+- `OwnershipValidatorTest` — new `nameless principal` nested class: every method with a null, empty and
+  whitespace name (plus an identity with no principal), admin and non-admin (32 cases).
+- `NamelessPrincipalAugmentorTest` (new) — named and anonymous pass through; null/blank/missing principal
+  fail with `AuthenticationFailedException`; the diagnostic names the default or configured claim and the
+  sanitized issuer/client; the WARN throttle.
+- `RestGroupConversationTest`, `McpGroupToolsTest` — a nameless caller lists nothing, including an unowned row.
+- **Mutation-checked:** with `OwnershipValidator` and both listings reverted to `origin/main` and the augmentor
+  short-circuited, 22 of the new tests fail (NPEs, missing 403s, missing 401s). The blank-name cases that
+  pass against the old code do so because a blank name never equalled a real owner; they stay as regression
+  guards.
+- **Not run end to end against a live Keycloak.** That a failing augmentor answers 401 was checked in the
+  Quarkus 3.39.3 sources instead: `QuarkusIdentityProviderManagerImpl` chains the augmentors into the
+  authentication `Uni`, and `HttpSecurityRecorder.DefaultAuthFailureHandler` answers an
+  `AuthenticationFailedException` with the mechanism's challenge (401). No unit test covers that HTTP step.
+
+
 ## ⚡ perf(monorepo): the efficiency review follow-ups (2026-09-15)
 
 **Repo:** EDDI (`chore/monorepo-migration`) — the follow-ups from the two-reviewer efficiency review
