@@ -50,6 +50,106 @@ bottom of this file and are never archived.
 
 ---
 
+## 🔏 chore(ci): settle the dependency-review licence policy — deny-list kept, broadened, documented (2026-09-17)
+
+**Repo:** EDDI (`chore/dependency-review-license-policy`)
+
+### Why
+
+`.github/workflows/dependency-review.yml` printed a deprecation warning on every PR
+("The deny-licenses option is deprecated for possible removal in the next major
+release"). The comment above the option already recorded the deferral: migrating to
+`allow-licenses` means enumerating every licence the project accepts, which is a
+repo-wide policy decision, not a mechanical swap. This session established the real
+input, put the decision to the maintainer, and implemented the answer.
+
+### What the dependency graph actually contains
+
+Enumerated three ways: `license-maven-plugin:add-third-party` for the resolved Maven
+tree (582 artefacts), `npm query ":not(.dev)"` for both UIs, and — the one that
+matters — the live graph the action actually reads,
+`gh api repos/labsai/EDDI/dependency-graph/sbom`.
+
+GitHub's Maven graph parses `pom.xml` directly and does **not** resolve transitives,
+so the policy is evaluated against 95 Maven entries, not 582:
+
+| Count | Licence |
+|---|---|
+| 58 | `NOASSERTION` — BOM-managed (`io.quarkus:*`, `jakarta.annotation`, `caffeine`) or `${property}`-versioned (all 22 `dev.langchain4j:*`) |
+| 27 | `Apache-2.0` |
+| 4 | `MIT` (testcontainers) |
+| 2 | `Apache-2.0 AND BSD-3-Clause AND MIT` (maven plugins) |
+| 2 | `LicenseRef-bad-non-standard` — `org.jsoup:jsoup`, `io.github.classgraph:classgraph`; both are really MIT |
+| 1 | `BSD-2-Clause` (postgresql) |
+| 1 | `EPL-2.0 OR (Apache-2.0 AND EPL-2.0)` (jacoco) |
+
+npm contributes 1137 graph entries but `fail-on-scopes` defaults to `runtime` and
+`main.ts` runs the licence check on the scope-filtered set, so only production deps
+count: manager 179 (MIT 164, OFL-1.1 8, ISC 2, Apache-2.0 2, BSD-3-Clause 1,
+`MPL-2.0 OR Apache-2.0` 1) and chat 126 (MIT 122, ISC 2, BSD-3-Clause 1). The
+MPL-2.0, CC-BY-4.0 and Python-2.0 entries in the graph are all devDependencies.
+
+### Decision
+
+Keep `deny-licenses`, broaden it, and record why the warning is accepted. Three
+findings from reading the action's source made the allow-list migration the worse
+option rather than merely the more expensive one:
+
+1. **It would fail the build today.** `spdx.satisfies()` returns `false` for an
+   expression it cannot match, so the two `LicenseRef-bad-non-standard` entries land
+   in `forbidden` → `setFailed` under an allow-list. Under a deny-list
+   `satisfiesAny()` returns `false` and they pass. Migrating would mean two permanent
+   per-package exclusions that exist only to work around GitHub's own normalisation.
+2. **It buys no coverage.** The 58 unknown-licence entries go to the `unlicensed`
+   bucket, and `printNullLicenses()` only prints — it never sets `issueFound`. They
+   are informational in *both* modes.
+3. **Removal is not scheduled.** Upstream issue #997 was closed by stalebot after 180
+   days of inactivity, not by a decision, and v5.0.0 (2026-05-08) is a node20 → node24
+   runtime bump that leaves `deny-licenses` fully documented in `action.yml`. There is
+   no newer v4 digest, so the pin stays at v4.9.0.
+
+The line is drawn at the library level, because EDDI is Apache-2.0 and ships a fat jar
+inside a distributed Docker image — a combined work. Permissive and weak (file-level)
+copyleft stay acceptable; EPL especially has to, since the whole Jakarta EE / JUnit /
+JaCoCo layer Quarkus pulls in is EPL, usually dual with GPL-2.0 under the Classpath
+Exception. Denied: AGPL-3.0, GPL-2.0, GPL-3.0, LGPL-2.0/2.1/3.0 (each `-only` and
+`-or-later`), SSPL-1.0, BUSL-1.1, Elastic-2.0. The additions past the original two are
+not hypothetical — the realistic hazard for middleware is a dependency relicensing to
+source-available, and EDDI already depends on MongoDB and Elasticsearch clients.
+
+### Verified, not assumed
+
+Ran the candidate list through the same libraries the action uses
+(`@onebeyond/spdx-license-satisfies`, `spdx-expression-parse`) against every licence
+value in the live SBOM:
+
+- nothing currently in the graph is newly denied — the change is a strict superset of
+  the old behaviour with no regression;
+- every listed hazard is caught;
+- deprecated ids still match: a dep declared `GPL-3.0` is caught by `GPL-3.0-only`, so
+  modernising the identifiers does not weaken the gate;
+- Classpath-Exception artefacts do **not** false-positive —
+  `EPL-2.0 OR GPL-2.0-with-classpath-exception` and
+  `CDDL-1.1 OR GPL-2.0-only WITH Classpath-exception-2.0` both pass with `GPL-2.0-only`
+  and `GPL-2.0-or-later` denied. This was the main risk of adding GPL-2.0 and it is
+  disproven, not hoped.
+
+Known trade-off, recorded in the workflow: `satisfiesAny()` treats `A OR B` as denied
+when either side is, so a *directly declared* dep offering `Apache-2.0 OR LGPL-2.1`
+would be flagged despite the Apache option. Nothing hits this today — the dual-licensed
+artefacts (`net.java.dev.jna`, `org.javassist`, `com.github.java-json-tools:*`) are all
+transitive and invisible to GitHub's Maven graph.
+
+The `allow-dependencies-licenses` entry for Caffeine is kept but its comment is
+corrected: it is cosmetic, not a gate bypass. Finding 2 means it only keeps one of 58
+equally unresolvable entries out of an informational list.
+
+### Files
+
+- `.github/workflows/dependency-review.yml` — broadened `deny-licenses`; rewrote both
+  comments to record the decision, the evidence, and the revisit condition (upstream
+  announcing removal, or GitHub resolving BOM-managed Maven coordinates).
+
 ## 🔒 feat(context): secret context values — usable for one turn, never stored or returned (2026-09-17)
 
 **Repo:** EDDI (`feat/secret-context-values`)
@@ -3096,6 +3196,7 @@ _For recording decisions that come up during implementation that aren't in the p
 | 2026-03-05 | Use Astro (not Expo) for website                                      | Static site on GitHub Pages           | Expo would add unnecessary abstraction for a marketing site |
 | 2026-03-05 | Use AI complexity scale (🟢/🟡/🔴/⚫) instead of human time estimates | AI will do all implementation work    | Human hours are meaningless for AI execution                |
 | 2026-03-05 | Docs already published at docs.labs.ai                                | Third-party tool reads `docs/` folder | Could migrate to Astro Content Collections later            |
+| 2026-09-17 | Keep `deny-licenses` in dependency-review, broadened to GPL-2.0, LGPL-2.0/2.1/3.0, SSPL-1.0, BUSL-1.1 and Elastic-2.0 | An allow-list would fail today on the `LicenseRef-bad-non-standard` values GitHub reports for jsoup and classgraph, and would gate nothing extra — unknown licences are informational in both modes | Migrate to `allow-licenses` (needs two permanent per-package exclusions to work around GitHub's normalisation); leave the list at GPL-3.0/AGPL-3.0 (misses the source-available relicensing hazard that actually threatens a project depending on MongoDB and Elasticsearch clients) |
 | 2026-09-17 | Mark secret context on the value (`"secret": true`), scrub every copy when the turn ends | A per-user credential sent as context was stored, echoed and copied into properties; `scope: secret` holds one vault slot per agent | A list of secret keys in the agent configuration — couples every agent to one client's field names |
 | 2026-09-14 | Connection deployment settings are runtime-writable; a set property pins its value (409 on change) | Properties-only meant a restart per change and protected nothing from `eddi-admin`, who already writes the vault and can send any `${vault:}` value anywhere via an httpcall | Keep properties only (restart, no real protection); store without pinning (removes the operator/admin split for deployments that have one); seed the store from properties (a removed property would be silently replaced by its copy) |
 | 2026-09-13 | Block the cloud metadata service on every outbound path, even with `eddi.security.ssrf-protection.enabled=false` | E2E: a config-authored httpcall reached `169.254.169.254` | Flip SSRF protection on by default — breaks every configured internal API |
