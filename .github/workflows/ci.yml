@@ -924,10 +924,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
-      - name: Set up Node 20
+      - name: Set up Node 22
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: |
             ui/manager/package-lock.json
@@ -976,10 +976,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
-      - name: Set up Node 20
+      - name: Set up Node 22
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: |
             ui/manager/package-lock.json
@@ -1017,10 +1017,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
-      - name: Set up Node 20
+      - name: Set up Node 22
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: |
             ui/chat/package-lock.json
@@ -1199,10 +1199,10 @@ jobs:
           java-version: ${{ env.JAVA_VERSION }}
           cache: maven
 
-      - name: Set up Node 20
+      - name: Set up Node 22
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Generate CycloneDX SBOM (Maven)
         run: ./mvnw org.cyclonedx:cyclonedx-maven-plugin:2.9.1:makeBom -DskipTests -B --no-transfer-progress
@@ -1362,10 +1362,10 @@ jobs:
       # frontend-maven-plugin vendors its own Node, but its `npm ci` reads and writes
       # the same ~/.npm cache this restores; without it every run downloaded both
       # dependency trees cold.
-      - name: Set up Node 20 (npm cache for the UI build)
+      - name: Set up Node 22 (npm cache for the UI build)
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: |
             ui/manager/package-lock.json
@@ -1488,10 +1488,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
-      - name: Set up Node 20
+      - name: Set up Node 22
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Download the OpenAPI document
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -1625,10 +1625,10 @@ jobs:
           done
           echo "### Shipped shells verified ($(wc -l < deps.uniq) dependencies)" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Set up Node 20
+      - name: Set up Node 22
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: ui/manager/package-lock.json
 
@@ -1740,10 +1740,10 @@ jobs:
           gunzip -c eddi-ci.tar.gz | docker load
           rm eddi-ci.tar.gz
 
-      - name: Set up Node 20
+      - name: Set up Node 22
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: ui/manager/package-lock.json
 
