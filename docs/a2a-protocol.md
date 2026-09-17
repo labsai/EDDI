@@ -30,12 +30,44 @@ Add A2A fields to your agent configuration:
 
 ### Endpoints
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/.well-known/agent.json` | Default Agent Card (first A2A-enabled agent) |
-| `GET` | `/a2a/agents/{agentId}/agent.json` | Per-agent Agent Card |
-| `GET` | `/a2a/agents` | List all A2A-enabled agents |
-| `POST` | `/a2a/agents/{agentId}` | JSON-RPC 2.0 endpoint |
+| Method | Path | Description | Anonymous? |
+|---|---|---|---|
+| `GET` | `/.well-known/agent.json` | Default Agent Card (first A2A-enabled agent) | Yes |
+| `GET` | `/a2a/agents/{agentId}/agent.json` | Per-agent Agent Card | Yes |
+| `GET` | `/a2a/agents` | List all A2A-enabled agents | **No** |
+| `POST` | `/a2a/agents/{agentId}` | JSON-RPC 2.0 endpoint | **No** |
+| `GET` | `/.well-known/capabilities?skill=…` | Capability discovery | Only with `eddi.a2a.capabilities.public=true` |
+| `GET` | `/.well-known/capabilities/skills` | Registered skill names | Only with `eddi.a2a.capabilities.public=true` |
+
+### Who can call them
+
+On a deployment with `quarkus.oidc.tenant-enabled=false` — the shipped default —
+everything is reachable without a token, and this section says nothing. With
+authentication on, the column above is the contract:
+
+- **Agent Cards are anonymous by design.** A peer is handed a URL and fetches
+  `{url}/agent.json` before it holds any credential for your deployment; EDDI's
+  own client does exactly that, with `apiKey` optional. Reading a card needs the
+  agent id, so it discloses one agent, not the roster. When authentication is on,
+  the card advertises how to authenticate for the JSON-RPC call that follows
+  (`authentication.credentials` points at your OIDC token endpoint).
+- **`GET /a2a/agents` requires authentication.** It enumerates every A2A-enabled
+  agent — name, description, skills, URL — which no part of the protocol needs,
+  and which is strictly more than the skill-name list gated behind
+  `eddi.a2a.capabilities.public`.
+- **The JSON-RPC endpoint requires authentication.** `tasks/send` runs a
+  conversation on your LLM budget.
+- **Capability discovery follows its flag.** `eddi.a2a.capabilities.public` is the
+  only gate: off (the default) it answers 404 to everyone; on, it is anonymous,
+  which is what "public" means there.
+
+> **Implementation note.** `@PermitAll` on the JAX-RS method is only half of
+> this. Quarkus evaluates the `quarkus.http.auth.permission.*` path policies
+> *before* declarative RBAC, so an endpoint that is not also named in a `permit`
+> entry in `application.properties` is claimed by the `/*` catch-all and answers
+> 401 regardless of its annotation. The two halves are kept in step by
+> `A2aEndpointPermissionsTest`; the status codes above are asserted against a
+> real Keycloak in `ui/manager/e2e/auth/a2a-discovery.spec.ts`.
 
 ### JSON-RPC Methods
 
@@ -68,6 +100,7 @@ Add A2A fields to your agent configuration:
 |---|---|---|
 | `eddi.a2a.enabled` | `true` | Master toggle for all A2A endpoints |
 | `eddi.a2a.base-url` | `http://localhost:7070` | Base URL used in Agent Card URLs |
+| `eddi.a2a.capabilities.public` | `false` | Whether `/.well-known/capabilities` and `/.well-known/capabilities/skills` are served at all — see [Who can call them](#who-can-call-them) |
 
 ---
 

@@ -298,7 +298,7 @@ Full guide: [import-export-an-agent.md](import-export-an-agent.md).
 |---|---|---|
 | `eddi.a2a.enabled` | `true` | Serve the A2A endpoints |
 | `eddi.a2a.base-url` | `http://localhost:7070` | The URL advertised in Agent Cards. **Wrong here means peers cannot reach you** |
-| `eddi.a2a.capabilities.public` | `false` | Serve `/.well-known/capabilities` unauthenticated |
+| `eddi.a2a.capabilities.public` | `false` | Serve `/.well-known/capabilities` and `/.well-known/capabilities/skills` unauthenticated. The only gate on them: while it is off both answer 404 to authenticated and anonymous callers alike. Exposes agent names and skills |
 | `eddi.a2a.tool-description.max-chars` | `1024` | Truncation cap on peer tool descriptions |
 | `eddi.a2a.signing.nonce.max-age-ms` | `300000` (5 min) | Replay window for signed requests |
 | `eddi.a2a.signing.nonce.clock-skew-ms` | `30000` | Tolerated clock difference between peers |
