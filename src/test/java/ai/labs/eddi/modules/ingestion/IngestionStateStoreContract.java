@@ -197,6 +197,26 @@ public interface IngestionStateStoreContract {
     }
 
     @Test
+    @DisplayName("a tombstoned document needs re-embedding even when its content is identical")
+    default void tombstonedDocumentAlwaysNeedsReIngest() {
+        // Tombstoning deleted the document's vectors, so the stored hash no longer
+        // describes what the vector store holds. Comparing hashes alone means a page
+        // that 404s for two runs and then comes back byte-identical is reported
+        // "unchanged" forever and is never retrievable again.
+        String firstRun = openRun(SOURCE);
+        store().recordIngested(SOURCE, DOC, "hash-1", null, null, firstRun);
+        closeRun(firstRun, SOURCE, IngestionRun.Status.COMPLETED);
+
+        String secondRun = openRun(SOURCE);
+        store().tombstoneMissing(SOURCE, secondRun, 1);
+
+        DocumentState tombstoned = store().lookup(SOURCE, DOC).orElseThrow();
+        assertTrue(tombstoned.tombstoned());
+        assertTrue(tombstoned.hasChanged("hash-1"),
+                "identical content still has to be re-embedded once its vectors are gone");
+    }
+
+    @Test
     @DisplayName("a tombstoned document that reappears is revived")
     default void reappearingDocumentIsRevived() {
         String firstRun = openRun(SOURCE);

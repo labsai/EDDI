@@ -147,9 +147,18 @@ public interface IIngestionStateStore {
             int missedRuns,
             boolean tombstoned) {
 
-        /** Whether freshly converted content differs from what was last stored. */
+        /**
+         * Whether this document needs embedding again.
+         *
+         * <p>
+         * True for a tombstoned document even when its content is byte-identical:
+         * tombstoning deleted its vectors, so the store no longer holds what the hash
+         * says it holds. Comparing hashes alone means a page that 404s for two runs and
+         * then comes back unchanged is reported "unchanged" forever and is never
+         * retrievable again — silent, permanent loss with nothing in any log.
+         */
         public boolean hasChanged(String candidateHash) {
-            return contentHash == null || !contentHash.equals(candidateHash);
+            return tombstoned || contentHash == null || !contentHash.equals(candidateHash);
         }
     }
 
