@@ -27,7 +27,9 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayDeque;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Queue;
@@ -103,14 +105,22 @@ public class WebCrawler {
         }
 
         List<UrlPattern> excludes = UrlPattern.compileAll(request.scope().excludePatterns());
+        // Keyed by host: with sameSiteOnly off or subdomains included a crawl reaches
+        // several hosts, and applying the seed's robots.txt to all of them means
+        // obeying one site's rules while ignoring another's.
+        Map<String, RobotsPolicy> robotsByHost = new HashMap<>();
         RobotsPolicy robots = request.politeness().respectRobots()
-                ? fetchRobots(request)
+                ? robotsFor(request, request.seedUrl(), robotsByHost)
                 : RobotsPolicy.allowAll();
         Duration delay = effectiveDelay(request, robots);
 
         Set<String> visited = new HashSet<>();
+        // Separate from `visited`: a URL is queued long before it is polled, and
+        // without this a page linked from 200 others is enqueued 200 times. At
+        // maxPages 50,000 with typical navigation that is millions of entries.
+        Set<String> queued = new HashSet<>();
         Queue<Candidate> queue = new ArrayDeque<>();
-        enqueueSeeds(request, robots, queue, seedHost, excludes);
+        enqueueSeeds(request, robots, queue, queued, seedHost, excludes);
 
         Instant deadline = start.plus(request.limits().timeBudget());
         StopReason stopReason = StopReason.COMPLETED;
@@ -139,12 +149,19 @@ public class WebCrawler {
             }
 
             Candidate candidate = queue.poll();
-            if (visited.contains(candidate.canonicalId())) {
-                // The queue can hold two spellings of one page; skip before spending a
-                // request on it.
+            RobotsPolicy candidateRobots = request.politeness().respectRobots()
+                    ? robotsFor(request, candidate.fetchUrl(), robotsByHost)
+                    : robots;
+            // Marked before the fetch, not after it. Recording only successes meant a
+            // dead link in a site-wide footer was fetched once per referring page:
+            // 200 requests, 200 errors, and a fetch budget exhausted so completely
+            // that the crawl never reported full coverage — which silently disabled
+            // deletion reconciliation for that site on every run.
+            if (!visited.add(candidate.canonicalId())) {
                 continue;
             }
-            if (request.politeness().respectRobots() && !robots.isAllowed(CrawlUrls.path(candidate.fetchUrl()))) {
+            if (request.politeness().respectRobots()
+                    && !candidateRobots.isAllowed(CrawlUrls.path(candidate.fetchUrl()))) {
                 counters.skipped++;
                 continue;
             }
@@ -160,7 +177,7 @@ public class WebCrawler {
             }
             firstRequest = false;
 
-            processCandidate(request, sink, candidate, seedHost, excludes, queue, visited, counters);
+            processCandidate(request, sink, candidate, seedHost, excludes, queue, queued, visited, counters);
         }
 
         CrawlSummary summary = counters.summarize(start, stopReason);
@@ -169,7 +186,8 @@ public class WebCrawler {
     }
 
     private void processCandidate(CrawlRequest request, CrawlSink sink, Candidate candidate, String seedHost,
-                                  List<UrlPattern> excludes, Queue<Candidate> queue, Set<String> visited, Counters counters) {
+                                  List<UrlPattern> excludes, Queue<Candidate> queue, Set<String> queued, Set<String> visited,
+                                  Counters counters) {
 
         ConditionalHeaders conditional = sink.conditionalFor(candidate.canonicalId());
         FetchCommand command = new FetchCommand(
@@ -232,24 +250,26 @@ public class WebCrawler {
             counters.skipped++;
             return;
         }
-        if (!visited.add(documentId)) {
-            // Already handled under its canonical identity — two URLs pointing at one
-            // page, which is exactly what canonicalization is for.
+        // The requested URL was marked visited when it was polled, so only a
+        // documentId that DIFFERS from it — a redirect or a canonical link landing on
+        // a page another URL already produced — can be a duplicate here.
+        if (!documentId.equals(candidate.canonicalId()) && !visited.add(documentId)) {
             counters.skipped++;
             return;
         }
+        visited.add(documentId);
 
         counters.pagesFetched++;
         sink.onPage(new CrawledPage(documentId, finalUrl, document.title(), document.outerHtml(),
                 page.etag(), page.lastModified(), candidate.depth(), page.truncated()));
 
         if (candidate.depth() < request.scope().maxDepth()) {
-            enqueueLinks(document, candidate.depth() + 1, seedHost, request, excludes, queue, visited);
+            enqueueLinks(document, candidate.depth() + 1, seedHost, request, excludes, queue, queued, visited);
         }
     }
 
     private void enqueueLinks(Document document, int depth, String seedHost, CrawlRequest request,
-                              List<UrlPattern> excludes, Queue<Candidate> queue, Set<String> visited) {
+                              List<UrlPattern> excludes, Queue<Candidate> queue, Set<String> queued, Set<String> visited) {
 
         for (Element link : document.select("a[href]")) {
             String href = link.attr("abs:href");
@@ -261,18 +281,19 @@ public class WebCrawler {
                 continue;
             }
             String canonical = CrawlUrls.canonicalize(href);
-            if (canonical.isEmpty() || visited.contains(canonical)) {
+            if (canonical.isEmpty() || visited.contains(canonical) || queued.contains(canonical)) {
                 continue;
             }
             if (!isInScope(canonical, seedHost, request, excludes)) {
                 continue;
             }
+            queued.add(canonical);
             queue.add(new Candidate(CrawlUrls.stripFragment(href), canonical, depth));
         }
     }
 
     private void enqueueSeeds(CrawlRequest request, RobotsPolicy robots, Queue<Candidate> queue,
-                              String seedHost, List<UrlPattern> excludes) {
+                              Set<String> queued, String seedHost, List<UrlPattern> excludes) {
 
         queue.add(new Candidate(CrawlUrls.stripFragment(request.seedUrl()),
                 CrawlUrls.canonicalize(request.seedUrl()), 0));
@@ -285,7 +306,8 @@ public class WebCrawler {
                 String canonical = CrawlUrls.canonicalize(url);
                 // A sitemap is written by the site, not by the operator, and may list
                 // anything at all — so it earns no exemption from the scope.
-                if (!canonical.isEmpty() && isInScope(canonical, seedHost, request, excludes)) {
+                if (!canonical.isEmpty() && queued.add(canonical)
+                        && isInScope(canonical, seedHost, request, excludes)) {
                     queue.add(new Candidate(CrawlUrls.stripFragment(url), canonical, 0));
                 }
             }
@@ -346,8 +368,19 @@ public class WebCrawler {
         }
     }
 
-    private RobotsPolicy fetchRobots(CrawlRequest request) {
-        String robotsUrl = robotsUrlFor(request.seedUrl());
+    /**
+     * The robots policy for a URL's host, fetched once per host per crawl.
+     */
+    private RobotsPolicy robotsFor(CrawlRequest request, String url, Map<String, RobotsPolicy> cache) {
+        String host = CrawlUrls.host(url).orElse(null);
+        if (host == null) {
+            return RobotsPolicy.allowAll();
+        }
+        return cache.computeIfAbsent(host, ignored -> fetchRobots(request, url));
+    }
+
+    private RobotsPolicy fetchRobots(CrawlRequest request, String forUrl) {
+        String robotsUrl = robotsUrlFor(forUrl);
         if (robotsUrl == null) {
             return RobotsPolicy.allowAll();
         }

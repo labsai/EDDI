@@ -14,6 +14,7 @@ import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.util.Locale;
 
 /**
@@ -39,6 +40,9 @@ public class SafeHttpPageFetcher implements PageFetcher {
 
     private static final String HEADER_USER_AGENT = "User-Agent";
     private static final String HEADER_ACCEPT = "Accept";
+    /** Body reads get this multiple of the request timeout — see readBounded. */
+    private static final int BODY_READ_TIMEOUT_FACTOR = 4;
+
     private static final String ACCEPT_HTML = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
 
     private final SafeHttpClient httpClient;
@@ -79,7 +83,7 @@ public class SafeHttpPageFetcher implements PageFetcher {
             return new FetchedPage(304, finalUrl, contentType, null, new byte[0], etag, lastModified, false);
         }
 
-        BoundedBody bounded = readBounded(response.body(), command.maxBytes());
+        BoundedBody bounded = readBounded(response.body(), command.maxBytes(), command.timeout());
         return new FetchedPage(response.statusCode(), finalUrl, contentType, charsetOf(contentType),
                 bounded.bytes(), etag, lastModified, bounded.truncated());
     }
@@ -88,14 +92,25 @@ public class SafeHttpPageFetcher implements PageFetcher {
      * Reads at most {@code maxBytes}, then stops. Closing the stream early aborts
      * the transfer rather than politely draining a response we have no use for.
      */
-    private static BoundedBody readBounded(InputStream stream, long maxBytes) throws IOException {
+    private static BoundedBody readBounded(InputStream stream, long maxBytes, Duration timeout) throws IOException {
         long cap = maxBytes > 0 ? maxBytes : Long.MAX_VALUE;
+        // The request timeout covers the response HEADERS only. Without a deadline
+        // on the body a server that trickles one byte per second holds this thread
+        // for weeks — the crawl's own budget is checked between pages, not during
+        // one.
+        long deadlineNanos = System.nanoTime() + readBudget(timeout).toNanos();
+
         try (InputStream body = stream) {
             byte[] buffer = new byte[8192];
             ByteArrayOutputStream collected = new ByteArrayOutputStream();
             long total = 0;
             int read;
             while ((read = body.read(buffer)) != -1) {
+                if (System.nanoTime() > deadlineNanos) {
+                    // Closing the stream on the way out aborts the transfer; what was
+                    // read is returned as truncated rather than discarded.
+                    return new BoundedBody(collected.toByteArray(), true);
+                }
                 if (total + read > cap) {
                     collected.write(buffer, 0, (int) (cap - total));
                     return new BoundedBody(collected.toByteArray(), true);
@@ -105,6 +120,17 @@ public class SafeHttpPageFetcher implements PageFetcher {
             }
             return new BoundedBody(collected.toByteArray(), false);
         }
+    }
+
+    /**
+     * How long a body may take. A multiple of the per-request timeout: a large page
+     * on a slow link is legitimate, a page that never ends is not.
+     */
+    private static Duration readBudget(Duration requestTimeout) {
+        Duration base = requestTimeout == null || requestTimeout.isZero() || requestTimeout.isNegative()
+                ? Duration.ofSeconds(15)
+                : requestTimeout;
+        return base.multipliedBy(BODY_READ_TIMEOUT_FACTOR);
     }
 
     private static void closeQuietly(InputStream stream) {
