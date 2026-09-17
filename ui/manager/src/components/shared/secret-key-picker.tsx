@@ -563,6 +563,8 @@ export function SecretKeyPicker({
   const containerRef = useRef<HTMLDivElement>(null);
   const popupRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  /** Set by the create dialog's success path, so closing it does not re-normalise over the new key. */
+  const createdFromDialogRef = useRef(false);
 
   // Vault data
   const { data: secrets, isLoading: secretsLoading } = useSecrets(tenantId);
@@ -1096,9 +1098,23 @@ export function SecretKeyPicker({
       {/* Create secret modal */}
       {showCreateDialog && (
         <CreateSecretModal
-          onClose={() => setShowCreateDialog(false)}
+          onClose={() => {
+            setShowCreateDialog(false);
+            // "Create new secret" is the fourth way out of the popup, and it
+            // leaves the field too: focus goes to the modal, so the input's
+            // deferred blur never comes. Cancel it and the unbraced reference
+            // would be stranded. Normalising when the dialog OPENS cannot work —
+            // it switches the picker to its chip state, which returns before the
+            // modal is rendered, so the dialog would never appear.
+            if (!createdFromDialogRef.current) canonicalizeValue();
+            createdFromDialogRef.current = false;
+          }}
           tenantId={tenantId}
           onSuccess={(keyName) => {
+            // Ordered before onClose by CreateSecretModal, but the parent has
+            // not re-rendered yet, so canonicalizeValue() would still see the
+            // OLD value and overwrite the key just created.
+            createdFromDialogRef.current = true;
             onChange(toVaultRef(keyName));
           }}
         />

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { server } from "@/test/mocks/server";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
@@ -318,6 +318,33 @@ describe("SecretKeyPicker in reference-only mode", () => {
 
       expect(nextField).toHaveFocus();
       await expectNormalisedChip("jira-client-secret");
+    });
+
+    it("cancelling the create-secret dialog normalises rather than stranding the value", async () => {
+      const user = await openPopupOn("vault:jira-client-secret");
+
+      await user.click(screen.getByTestId("vault-popup-create"));
+      await user.click(
+        within(await screen.findByRole("dialog")).getByRole("button", { name: "Cancel" }),
+      );
+
+      await expectNormalisedChip("jira-client-secret");
+    });
+
+    it("keeps the newly created key when the dialog succeeds", async () => {
+      // The trap in normalising on close: onSuccess runs first, but the parent
+      // has not re-rendered, so a normalise on the way out would write the OLD
+      // value over the key just created.
+      const user = await openPopupOn("vault:jira-client-secret");
+
+      await user.click(screen.getByTestId("vault-popup-create"));
+      const dialog = within(await screen.findByRole("dialog"));
+      await user.type(dialog.getByPlaceholderText(/openaiKey/), "brand-new-key");
+      await user.type(dialog.getByPlaceholderText(/secret value/i), "s3cret");
+      await user.click(dialog.getByRole("button", { name: "Store Secret" }));
+
+      await expectNormalisedChip("brand-new-key");
+      expect(screen.queryByText("jira-client-secret")).not.toBeInTheDocument();
     });
 
     it("picking a key is not overwritten by normalising the value it replaced", async () => {

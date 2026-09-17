@@ -5,6 +5,7 @@ import {
   REALM,
   SPA_CLIENT_ID,
   USERS,
+  type Fixture,
   authHeaders,
   decodeClaims,
   realmRoles,
@@ -109,6 +110,127 @@ test.describe("Authentication and authorization — Keycloak", () => {
     expect(orphans.status()).toBe(200);
   });
 
+  // The realm once defined a single client scope, `openid`. Supplying any
+  // clientScopes stops Keycloak creating its built-ins, so profile, email and
+  // basic never existed: tokens authenticated and carried their roles, but had
+  // no sub, preferred_username, name or email. The backend then resolved every
+  // caller's principal to null, and the Manager's avatar read "?". Every test
+  // above passed throughout, because none of them asked who the caller was.
+  for (const fixture of Object.keys(USERS) as Fixture[]) {
+    test(`${fixture}'s token says who they are, without asking for a scope`, async ({ request }) => {
+      // tokenFor sends no `scope` parameter, like any direct-grant or CLI client.
+      const claims = decodeClaims(await tokenFor(request, fixture));
+
+      expect(claims.sub, "no `sub` — the realm's `basic` client scope is missing").toBeTruthy();
+      expect(
+        claims.preferred_username,
+        "no preferred_username — the realm's `profile` client scope is missing, so the backend's"
+          + " principal has no name",
+      ).toBe(USERS[fixture].username);
+      expect(claims.name, "no `name` — the Manager cannot say who is signed in").toBeTruthy();
+      expect(claims.email, "no `email` — the realm's `email` client scope is missing").toBeTruthy();
+      // Keycloak's userinfo endpoint refuses a token whose scope lacks openid, and
+      // the backend calls it on every request (user-info-required=true).
+      expect(String(claims.scope ?? "").split(" ")).toContain("openid");
+    });
+  }
+
+  test("the backend resolves the caller's principal to their username", async ({ request }) => {
+    const res = await request.get(`${API_BASE}/workspaces`, {
+      headers: authHeaders(await tokenFor(request, "admin")),
+    });
+    expect(res.status()).toBe(200);
+    const info = (await res.json()) as { principal?: string; defaultSpace?: string };
+    expect(
+      info.principal,
+      "the backend authenticated the caller but could not name them. Ownership, attribution and"
+        + " workspaces all key on this name; check the token's preferred_username",
+    ).toBe(USERS.admin.username);
+    expect(info.defaultSpace).toBe(`user:${USERS.admin.username}`);
+  });
+
+  test("a non-admin can open the conversation they started", async ({ request }) => {
+    const admin = authHeaders(await tokenFor(request, "admin"));
+    const user = authHeaders(await tokenFor(request, "user"));
+
+    const workflow = await request.post(`${API_BASE}/workflowstore/workflows`, {
+      headers: admin,
+      data: { workflowSteps: [] },
+    });
+    expect(workflow.status()).toBe(201);
+    const agent = await request.post(`${API_BASE}/agentstore/agents`, {
+      headers: admin,
+      data: { workflows: [workflow.headers()["location"]] },
+    });
+    expect(agent.status()).toBe(201);
+    // Locations are `…/{id}?version=1`, as eddi:// or http URLs alike.
+    const idOf = (location: string | undefined) => location!.split("/").pop()!.split("?")[0]!;
+    const workflowId = idOf(workflow.headers()["location"]);
+    const agentId = idOf(agent.headers()["location"]);
+
+    let conversationId: string | undefined;
+    try {
+      const deploy = await request.post(
+        `${API_BASE}/administration/production/deploy/${agentId}?version=1`,
+        { headers: admin },
+      );
+      expect([200, 202]).toContain(deploy.status());
+      await expect
+        .poll(
+          async () =>
+            (
+              await request.get(
+                `${API_BASE}/administration/production/deploymentstatus/${agentId}?version=1`,
+                { headers: admin },
+              )
+            ).text(),
+          { timeout: 30_000 },
+        )
+        .toContain("READY");
+
+      const start = await request.post(`${API_BASE}/agents/${agentId}/start`, { headers: user });
+      expect(start.status()).toBe(201);
+      conversationId = idOf(start.headers()["location"]);
+
+      const stored = await request.get(
+        `${API_BASE}/conversationstore/conversations/${conversationId}`,
+        { headers: admin },
+      );
+      expect(((await stored.json()) as { userId?: string }).userId).toBe(USERS.user.username);
+
+      // Without a principal name this was HTTP 500: OwnershipValidator compared the
+      // stored owner against a null caller id.
+      const own = await request.get(`${API_BASE}/agents/${conversationId}`, { headers: user });
+      expect(own.status(), "the owner of a conversation must be able to read it").toBe(200);
+    } finally {
+      // Cleanup must never replace the error that sent us here: a request that
+      // throws is swallowed, and a refused one is reported softly. Undeploying an
+      // agent with a live conversation answers 409 unless told to end it.
+      const cleanup = async (label: string, call: () => Promise<{ status(): number }>) => {
+        const res = await call().catch(() => undefined);
+        expect.soft(res === undefined || res.status() < 400, `cleanup: ${label} failed`).toBe(true);
+      };
+      await cleanup("undeploy", () =>
+        request.post(
+          `${API_BASE}/administration/production/undeploy/${agentId}?version=1&endAllActiveConversations=true`,
+          { headers: admin },
+        ),
+      );
+      if (conversationId) {
+        const id = conversationId;
+        await cleanup("delete conversation", () =>
+          request.delete(`${API_BASE}/conversationstore/conversations/${id}`, { headers: admin }),
+        );
+      }
+      await cleanup("delete agent", () =>
+        request.delete(`${API_BASE}/agentstore/agents/${agentId}?version=1`, { headers: admin }),
+      );
+      await cleanup("delete workflow", () =>
+        request.delete(`${API_BASE}/workflowstore/workflows/${workflowId}?version=1`, { headers: admin }),
+      );
+    }
+  });
+
   for (const fixture of ["user", "viewer"] as const) {
     test(`${fixture} (${USERS[fixture].roles.join(", ")}) is authenticated but refused`, async ({
       request,
@@ -116,9 +238,8 @@ test.describe("Authentication and authorization — Keycloak", () => {
       const token = await tokenFor(request, fixture);
 
       // A real identity carrying exactly the role it should — so a 403 below is
-      // authorization refusing a known role, not a token being rejected. (The
-      // realm's client scopes do not include `profile`, so the token has no
-      // preferred_username to assert on; the roles are the contract anyway.)
+      // authorization refusing a known role, not a token being rejected.
+      expect(decodeClaims(token).preferred_username).toBe(USERS[fixture].username);
       expect(realmRoles(token)).toEqual(
         expect.arrayContaining([...USERS[fixture].roles]),
       );
