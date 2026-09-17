@@ -24,6 +24,7 @@ import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.model.SecretReference;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -44,6 +45,7 @@ import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
 
 import java.io.IOException;
 import static ai.labs.eddi.utils.MatchingUtilities.executeValuePath;
@@ -228,8 +230,11 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     // headers a connection filled, which no name or value heuristic can
                     // recognise on its own.
                     requestRedactor.redactRequestMap(requestMap, built.connectionOwnedHeaders());
+                    // By value as well: a vault secret need not look like one, and the
+                    // executor knows exactly which plaintexts it substituted.
+                    RequestRedactor.redactResolvedSecrets(requestMap, built.resolvedSecrets());
                     prePostUtils.createMemoryEntry(currentStep, requestMap, objectName, KEY_HTTP_CALLS);
-                    response = executeAndMeasureRequest(call, request, retryCall, amountOfExecutions);
+                    response = executeAndMeasureRequest(call, request, built.resolvedSecrets(), retryCall, amountOfExecutions);
 
                     var isResponseSuccessful = response.getHttpCode() >= 200 && response.getHttpCode() < 300;
                     if (!isResponseSuccessful) {
@@ -415,7 +420,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     queryParams,
                     requestRedactor.redactHeaders(headers, built.connectionOwnedHeaders()),
                     body == null ? null : body.toString(),
-                    !canExecuteDivergeFromResolve(call));
+                    !canExecuteDivergeFromResolve(call)).withoutResolvedSecrets(built.resolvedSecrets());
         } catch (Exception e) {
             // Deliberately NOT logged here — throw only. Unlike execute(), the sole
             // caller of resolve() is the gate-time/pre-execution pinning path, which
@@ -522,10 +527,12 @@ public class ApiCallExecutor implements IApiCallExecutor {
         return false;
     }
 
-    private IResponse executeAndMeasureRequest(ApiCall call, IRequest request, boolean retryCall, int amountOfExecutions)
+    private IResponse executeAndMeasureRequest(ApiCall call, IRequest request, Set<String> resolvedSecrets, boolean retryCall,
+                                               int amountOfExecutions)
             throws IRequest.HttpRequestException, ExecutionException, InterruptedException {
 
-        LOGGER.info(call.getName() + " Request: " + (amountOfExecutions > 0 ? amountOfExecutions + ". retry - " : "") + request.toString());
+        LOGGER.info(call.getName() + " Request: " + (amountOfExecutions > 0 ? amountOfExecutions + ". retry - " : "")
+                + RequestRedactor.redactResolvedSecrets(request.toString(), resolvedSecrets));
         int delayInMillis = getDelayInMillis(call, retryCall, amountOfExecutions);
 
         long executionStart = currentTimeMillis();
@@ -559,30 +566,31 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 List<Object> batchIterationList = prePostUtils.buildIterationValues(batchRequest.getIterationObjectName(),
                         batchRequest.getPathToTargetArray(), batchRequest.getTemplateFilterExpression(), templateDataObjects);
 
-                IRequest request;
                 for (Object iterationObject : batchIterationList) {
                     templateDataObjects.put(batchRequest.getIterationObjectName(), iterationObject);
-                    request = buildRequest(targetServerUrl, call, templateDataObjects).request();
+                    BuiltRequest built = buildRequest(targetServerUrl, call, templateDataObjects);
+                    IRequest request = built.request();
                     if (batchRequest.getExecuteCallsSequentially()) {
                         long executionStart = currentTimeMillis();
-                        LOGGER.info(callName + " Batch Request: " + request);
+                        LOGGER.info(
+                                callName + " Batch Request: " + RequestRedactor.redactResolvedSecrets(request.toString(), built.resolvedSecrets()));
                         IResponse response = request.send();
                         logExecutionResponse(response, callName, executionStart, currentTimeMillis(), false);
                     } else {
-                        executeFireAndForgetCall(request, callName);
+                        executeFireAndForgetCall(built, callName);
                     }
                 }
                 return null;
             }), null);
         } else {
-            IRequest request = buildRequest(targetServerUrl, call, templateDataObjects).request();
-            executeFireAndForgetCall(request, callName);
+            executeFireAndForgetCall(buildRequest(targetServerUrl, call, templateDataObjects), callName);
         }
     }
 
-    private static void executeFireAndForgetCall(IRequest request, String httpCallsName) throws IRequest.HttpRequestException {
+    private static void executeFireAndForgetCall(BuiltRequest built, String httpCallsName) throws IRequest.HttpRequestException {
 
-        LOGGER.info(httpCallsName + " Request (f'n'f): " + request);
+        IRequest request = built.request();
+        LOGGER.info(httpCallsName + " Request (f'n'f): " + RequestRedactor.redactResolvedSecrets(request.toString(), built.resolvedSecrets()));
         long executionStart = currentTimeMillis();
         request.send(res -> logExecutionResponse(res, httpCallsName, executionStart, currentTimeMillis(), true));
     }
@@ -745,7 +753,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
      *            header names written from a {@code ${connection:…}} reference;
      *            never null, empty when none was
      */
-    record BuiltRequest(IRequest request, Set<String> connectionOwnedHeaders) {
+    record BuiltRequest(IRequest request, Set<String> connectionOwnedHeaders, Set<String> resolvedSecrets) {
     }
 
     private BuiltRequest buildRequest(String targetServerUrl, ApiCall call, Map<String, Object> templateDataObjects)
@@ -757,10 +765,12 @@ public class ApiCallExecutor implements IApiCallExecutor {
             path = SLASH_CHAR + path;
         }
         var targetDestination = !path.startsWith("http") ? targetServerUrl + path : path;
+        var resolvedSecrets = new HashSet<String>();
         var targetUriStr = prePostUtils.templateValues(targetDestination, pathSafeView(templateDataObjects));
+        ConfigReferenceGuard.requireConfiguredReferences(targetDestination, targetUriStr, "the request path", templateDataObjects);
         // Resolve global variable references, then vault references in URL
         targetUriStr = globalVariableResolver.resolveValue(targetUriStr);
-        targetUriStr = secretResolver.resolveValue(targetUriStr);
+        targetUriStr = resolveSecrets(targetUriStr, resolvedSecrets);
         // The path is not caller-resolved either, and a surviving reference would
         // reach URI.create() to fail as "Illegal character in path" — an error that
         // names the symptom and not the cause.
@@ -768,9 +778,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
         rejectConnectionReference(targetUriStr, "the request path");
         var targetUri = URI.create(targetUriStr);
         var requestBody = prePostUtils.templateValues(requestConfig.getBody(), templateDataObjects);
+        ConfigReferenceGuard.requireConfiguredReferences(requestConfig.getBody(), requestBody, "a request body", templateDataObjects);
         // Resolve global variable references, then vault references in request body
         requestBody = globalVariableResolver.resolveValue(requestBody);
-        requestBody = secretResolver.resolveValue(requestBody);
+        requestBody = resolveSecrets(requestBody, resolvedSecrets);
 
         // SSRF protection (opt-in): validate the fully-resolved target and disable
         // redirect-following so a 3xx cannot bounce the request to an internal host.
@@ -823,9 +834,11 @@ public class ApiCallExecutor implements IApiCallExecutor {
         var connectionOwnedHeaders = new HashSet<String>();
         for (String headerName : headers.keySet()) {
             String headerValue = prePostUtils.templateValues(headers.get(headerName), templateDataObjects);
+            ConfigReferenceGuard.requireConfiguredReferences(headers.get(headerName), headerValue, "header '" + headerName + "'",
+                    templateDataObjects);
             // Resolve global variable references, then vault references in headers
             headerValue = globalVariableResolver.resolveValue(headerValue);
-            headerValue = secretResolver.resolveValue(headerValue);
+            headerValue = resolveSecrets(headerValue, resolvedSecrets);
             // Caller identity resolves last and needs the target URI: the token is
             // only released when the call goes back to the caller's own origin.
             headerValue = callerIdentityResolver.resolveValue(headerValue, targetUri);
@@ -875,16 +888,39 @@ public class ApiCallExecutor implements IApiCallExecutor {
         Map<String, String> queryParams = requestConfig.getQueryParams();
         for (String queryParam : queryParams.keySet()) {
             var qpValue = prePostUtils.templateValues(queryParams.get(queryParam), templateDataObjects);
+            ConfigReferenceGuard.requireConfiguredReferences(queryParams.get(queryParam), qpValue, "query parameter '" + queryParam + "'",
+                    templateDataObjects);
             // Resolve global variable references, then vault references in query params
             qpValue = globalVariableResolver.resolveValue(qpValue);
-            qpValue = secretResolver.resolveValue(qpValue);
+            qpValue = resolveSecrets(qpValue, resolvedSecrets);
             // A token in a query string leaks via access logs and proxies.
             callerIdentityResolver.rejectTokenReference(qpValue, "a query parameter");
             rejectConnectionReference(qpValue, "a query parameter");
             qpValue = callerIdentityResolver.resolveValue(qpValue, targetUri);
             request.setQueryParam(queryParam, qpValue);
         }
-        return new BuiltRequest(request, Set.copyOf(connectionOwnedHeaders));
+        return new BuiltRequest(request, Set.copyOf(connectionOwnedHeaders), Set.copyOf(resolvedSecrets));
+    }
+
+    /**
+     * Resolve the vault references in {@code value}, recording each plaintext that
+     * was substituted so the request can be redacted by value wherever it is
+     * recorded — a vault secret need not look like a credential, so name and shape
+     * heuristics alone would miss it.
+     */
+    private String resolveSecrets(String value, Set<String> resolvedSecrets) {
+        if (value == null) {
+            return null;
+        }
+        Matcher references = SecretReference.compiledPattern().matcher(value);
+        while (references.find()) {
+            String reference = references.group();
+            String plaintext = secretResolver.resolveValue(reference);
+            if (plaintext != null && !plaintext.isEmpty() && !plaintext.equals(reference)) {
+                resolvedSecrets.add(plaintext);
+            }
+        }
+        return secretResolver.resolveValue(value);
     }
 
     /**

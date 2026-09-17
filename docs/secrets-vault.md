@@ -58,6 +58,17 @@ ${vault:tenantId/keyName}
 | **LangChain** (`langchain.json`)      | `apiKey` and other model configuration |
 | **Property Setter** (`property.json`) | Values with `scope: secret` auto-vault |
 
+In an HTTP call, a vault reference is resolved **only where the configuration wrote it**: in the
+template of that URL, header, body or query parameter, or as the value of an auto-vaulted property
+the template names (`Bearer {properties.apiKey}` holding `${vault:<agentId>.apiKey}`). The same
+applies to `${eddivault:…}`, `${connection:…}` and `${caller:…}`. A reference that arrives through
+conversation data — user input, a model reply, an API response, client context — refuses the call
+instead of being resolved, with an error naming the field. Grants are checked at deploy time, so
+without this rule a user could have a template substitute any secret of the tenant.
+
+The plaintext EDDI substitutes is redacted by value from everything it records about the request:
+the request record in conversation memory, the HITL approval preview and the request log line.
+
 ### Resolution Behavior
 
 Vault references are resolved **at runtime** when the task executes, never stored as plaintext in conversation memory. The resolution flow:
