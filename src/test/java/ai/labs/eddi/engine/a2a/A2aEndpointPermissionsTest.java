@@ -229,17 +229,24 @@ class A2aEndpointPermissionsTest {
      */
     private static List<String> policiesFor(String path, String method) {
         var match = matcher.match(HttpSecurityUtils.normalizePath(path));
-        var entries = match.getValue();
-        if (entries == null || entries.isEmpty()) {
+        if (match.getValue() == null || match.getValue().isEmpty()) {
             return List.of(NO_POLICY);
         }
-        var byMethod = entries.stream().filter(e -> e.methods().contains(method)).toList();
-        var withoutMethods = entries.stream().filter(e -> e.methods().isEmpty()).toList();
-        var applicable = !byMethod.isEmpty() ? byMethod : withoutMethods;
+        var applicable = applicableEntries(path, method);
         if (applicable.isEmpty()) {
             return List.of(DENIED_BY_METHOD);
         }
         return applicable.stream().map(Entry::policy).distinct().sorted().toList();
+    }
+
+    /** The entries that survive Quarkus's method filtering, in match order. */
+    private static List<Entry> applicableEntries(String path, String method) {
+        var entries = matcher.match(HttpSecurityUtils.normalizePath(path)).getValue();
+        if (entries == null || entries.isEmpty()) {
+            return List.of();
+        }
+        var byMethod = entries.stream().filter(e -> e.methods().contains(method)).toList();
+        return !byMethod.isEmpty() ? byMethod : entries.stream().filter(e -> e.methods().isEmpty()).toList();
     }
 
     private static void assertPolicies(String path, String method, String expected) {
@@ -248,7 +255,29 @@ class A2aEndpointPermissionsTest {
 
     private static void assertPolicies(String path, String method, String expected, String message) {
         assertEquals(List.of(expected), policiesFor(path, method),
-                (message == null ? "" : message + " — ") + method + " " + path);
+                (message == null ? "" : message + " — ") + method + " " + path
+                        + " (matched by " + matchingEntryNames(path, method) + ")");
+    }
+
+    /**
+     * Which permission entries claimed this request, for the failure message.
+     * "resolved to permit" is half the answer; which entry did it is the half a
+     * reader needs to know where to look.
+     */
+    private static String matchingEntryNames(String path, String method) {
+        var applicable = applicableEntries(path, method);
+        if (!applicable.isEmpty()) {
+            return names(applicable);
+        }
+        // Nothing survived, and the distinction matters: either no entry claimed
+        // the path at all, or one claimed it and excluded this method — which
+        // Quarkus turns into a denial rather than a fall-through.
+        var onPath = matcher.match(HttpSecurityUtils.normalizePath(path)).getValue();
+        return onPath == null || onPath.isEmpty() ? "no entry" : names(onPath) + ", but none of them for " + method;
+    }
+
+    private static String names(List<Entry> entries) {
+        return entries.stream().map(Entry::name).distinct().sorted().collect(Collectors.joining(", "));
     }
 
     /**
@@ -274,7 +303,7 @@ class A2aEndpointPermissionsTest {
         return properties;
     }
 
-    /** Every {@code <name>} that declares paths, in declaration order. */
+    /** Every {@code <name>} that declares paths, in a stable (sorted) order. */
     private static Set<String> permissionNames(Properties properties) {
         var names = new LinkedHashSet<String>();
         for (var key : new TreeSet<>(properties.stringPropertyNames())) {
