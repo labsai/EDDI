@@ -228,6 +228,47 @@ class TemplateSyntaxMigratorTest {
         assertFalse(migrated.contains("[[${"), "the crashing expression survived: " + migrated);
     }
 
+    // --- an escaped quote inside the literal (Copilot review, PR #781) ---
+
+    /**
+     * A backslash escapes the next character inside an OGNL literal. Without that,
+     * the splitter leaves quote mode at the escaped apostrophe and reads the
+     * following {@code +} as a concat operator, cutting the literal in half.
+     */
+    @Test
+    void migrateStringConcat_escapedQuoteInsideLiteral() {
+        // Thymeleaf source: [[${a + 'it\'s + here' + b}]]
+        assertEquals("{a}it's + here{b}", migrator.migrate("[[${a + 'it\\'s + here' + b}]]"));
+    }
+
+    @Test
+    void migrateStringConcat_escapedDoubleQuoteInsideLiteral() {
+        // Thymeleaf source: [[${a + "say \"hi\" + bye" + b}]]
+        assertEquals("{a}say \"hi\" + bye{b}", migrator.migrate("[[${a + \"say \\\"hi\\\" + bye\" + b}]]"));
+    }
+
+    /**
+     * The escape only consumes the character after it, so a literal ending in an
+     * escaped backslash still has its closing delimiter recognised.
+     */
+    @Test
+    void migrateStringConcat_escapedBackslashAtEndOfLiteral() {
+        // Thymeleaf source: [[${a + 'dir\\' + b}]] — the literal is `dir\`
+        assertEquals("{a}dir\\{b}", migrator.migrate("[[${a + 'dir\\\\' + b}]]"));
+    }
+
+    /**
+     * Escapes other than a quote or a backslash are left exactly as they are. OGNL
+     * would read `\t` as a tab, but a Windows path in a config is the likelier
+     * intent and silently rewriting it into control characters is the worse
+     * mistake.
+     */
+    @Test
+    void migrateStringConcat_otherBackslashSequencesAreLeftAlone() {
+        // Thymeleaf source: [[${a + 'C:\temp' + b}]]
+        assertEquals("{a}C:\\temp{b}", migrator.migrate("[[${a + 'C:\\temp' + b}]]"));
+    }
+
     // --- B13: concatenation rewriting must not touch non-Thymeleaf content ---
 
     @Test

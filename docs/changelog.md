@@ -122,6 +122,19 @@ are fixed here with tests, including three that drive a real MongoDB through Tes
   operand only arises from a leading, trailing or doubled `+`, i.e. from an expression that was already
   malformed; `{}` is a broken Qute expression where nothing at all is a dropped empty operand.
 
+### Review follow-up (PR #781)
+
+Copilot found a real gap in the first version of the splitter: it left quote mode at the *first*
+matching quote character, escaped or not, so a valid OGNL literal such as `'it\'s + here'` ended at
+the escaped apostrophe and the `+` after it was read as an operator — cutting the literal in half
+again, just for a rarer input. A backslash now escapes the next character while inside a literal.
+
+Stripping the delimiters also reduces `\'`, `\"` and `\\` to the character they stood for, because
+the conversion inlines the literal's text verbatim and Thymeleaf renders `'it\'s'` as `it's` — leaving
+the backslash in would put it on the screen. The other OGNL escapes (`\t`, `\n`, …) are deliberately
+left exactly as they are: a Windows path in a config is the likelier intent than a control character,
+and guessing wrong there rewrites config content rather than merely failing to tidy it.
+
 ### Files
 
 - `src/main/java/ai/labs/eddi/configs/migration/TemplateSyntaxMigrator.java`

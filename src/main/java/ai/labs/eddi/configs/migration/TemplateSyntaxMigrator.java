@@ -73,6 +73,9 @@ public class TemplateSyntaxMigrator {
      */
     private static final Pattern CONCAT_PATTERN = Pattern.compile("\\[\\[\\$\\{([^}]*?\\+[^}]*?)\\}\\]\\]|\\[\\(\\$\\{([^}]*?\\+[^}]*?)\\}\\)\\]");
 
+    /** The escape character inside an OGNL string literal. */
+    private static final char ESCAPE = '\\';
+
     /**
      * Convert Thymeleaf/OGNL string concatenation to Qute inline expressions. e.g.
      * [[${a + '/' + b}]] → {a}/{b}, [[${a + '..' + b}]] → {a}..{b}
@@ -91,7 +94,7 @@ public class TemplateSyntaxMigrator {
                 String trimmed = part.trim();
                 if (isStringLiteral(trimmed)) {
                     // String literal → inline without braces
-                    replacement.append(trimmed.substring(1, trimmed.length() - 1));
+                    replacement.append(literalText(trimmed));
                 } else if (!trimmed.isEmpty()) {
                     // Variable → wrap in Qute expression. An empty part is not a variable:
                     // it only arises from a leading, trailing or doubled +, i.e. from a
@@ -120,16 +123,28 @@ public class TemplateSyntaxMigrator {
      * isolated documents from one another, aborted the Thymeleaf-to-Qute migration
      * for the whole database over one such template.
      * </p>
+     *
+     * <p>
+     * A backslash escapes the next character while inside a literal, so
+     * {@code 'it\'s + here'} stays one part: without that, the escaped apostrophe
+     * would close the literal and the {@code +} after it would be read as an
+     * operator.
+     * </p>
      */
     private static List<String> splitOnConcatOperator(String expr) {
         var parts = new ArrayList<String>();
         var current = new StringBuilder();
         char openQuote = 0;
+        boolean escaped = false;
         for (int i = 0; i < expr.length(); i++) {
             char c = expr.charAt(i);
             if (openQuote != 0) {
                 current.append(c);
-                if (c == openQuote) {
+                if (escaped) {
+                    escaped = false;
+                } else if (c == ESCAPE) {
+                    escaped = true;
+                } else if (c == openQuote) {
                     openQuote = 0;
                 }
             } else if (c == '\'' || c == '"') {
@@ -155,6 +170,42 @@ public class TemplateSyntaxMigrator {
     private static boolean isStringLiteral(String value) {
         return value.length() >= 2
                 && ((value.startsWith("'") && value.endsWith("'")) || (value.startsWith("\"") && value.endsWith("\"")));
+    }
+
+    /**
+     * The text of a quoted literal: delimiters removed, and an escaped quote or
+     * backslash reduced to the character it stood for.
+     *
+     * <p>
+     * The unescaping is what the delimiters imply. Thymeleaf renders the literal
+     * {@code 'it\'s'} as {@code it's}, and the Qute conversion inlines that text
+     * verbatim, so leaving the backslash in would put it on the screen. Only
+     * {@code \'}, {@code \"} and {@code \\} are reduced: the other OGNL escapes
+     * ({@code \t}, {@code \n}, …) are left exactly as they are rather than guessed
+     * at, since those are the ones where a Windows path in a config would be
+     * silently rewritten into control characters.
+     * </p>
+     */
+    private static String literalText(String literal) {
+        String body = literal.substring(1, literal.length() - 1);
+        if (body.indexOf(ESCAPE) < 0) {
+            return body;
+        }
+        var text = new StringBuilder(body.length());
+        for (int i = 0; i < body.length(); i++) {
+            char c = body.charAt(i);
+            if (c == ESCAPE && i + 1 < body.length() && isEscapableInLiteral(body.charAt(i + 1))) {
+                text.append(body.charAt(i + 1));
+                i++;
+            } else {
+                text.append(c);
+            }
+        }
+        return text.toString();
+    }
+
+    private static boolean isEscapableInLiteral(char c) {
+        return c == '\'' || c == '"' || c == ESCAPE;
     }
 
     /**
