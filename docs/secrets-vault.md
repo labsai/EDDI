@@ -228,6 +228,11 @@ When the **client flags input as secret** (via the `secretInput` context key):
 3. The actual plaintext still flows through lifecycle data so `PropertySetterTask` can vault it
 4. The conversation log and API responses show `<secret input>` — **plaintext is never persisted**
 
+When the **client sends a credential as context** — for example the caller's token for a
+downstream API — it marks that context entry `"secret": true`. The value works for that one
+turn and is replaced by `<secret context>` in everything that outlives it. See
+[Passing Context Information → Secret Context Values](passing-context-information.md#secret-context-values).
+
 ### Output InputField Directive
 
 To signal the chat UI to show a password field, use the `inputField` output type in your output configuration:
