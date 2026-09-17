@@ -548,6 +548,10 @@ export function grantsKnowledgeBaseAuthoring(endpoints: readonly string[]): bool
   return (
     set.has("PUT /ragstore/rags/{id}") ||
     set.has("POST /ragstore/rags") ||
+    // The duplicate verb. A copy of a knowledge base is a NEW knowledge base,
+    // so an operator holding this can create one — omitting it would leave the
+    // prompt appending "you cannot create a knowledge base" to an agent that can.
+    set.has("POST /ragstore/rags/{id}") ||
     set.has("POST /ragstore/rags/{id}/ingest")
   );
 }

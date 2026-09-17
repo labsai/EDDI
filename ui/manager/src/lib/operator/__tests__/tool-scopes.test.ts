@@ -94,6 +94,21 @@ describe("tool-scopes", () => {
       expect(grantsKnowledgeBaseReads(["GET /ragstore/rags/descriptors"])).toBe(false);
     });
 
+    it("counts every RAG authoring route, duplicate included", () => {
+      // `POST /ragstore/rags/{id}` is duplicateRag — a copy is a new knowledge
+      // base. Missing it would make the prompt tell an operator that CAN create
+      // one that it cannot.
+      for (const write of [
+        "PUT /ragstore/rags/{id}",
+        "POST /ragstore/rags",
+        "POST /ragstore/rags/{id}",
+        "POST /ragstore/rags/{id}/ingest",
+      ]) {
+        expect(grantsKnowledgeBaseAuthoring([...READ_ENDPOINTS, write]), write).toBe(true);
+      }
+      expect(grantsKnowledgeBaseAuthoring(READ_ENDPOINTS)).toBe(false);
+    });
+
     it("tracks the ingestion-status read on its own endpoint", () => {
       // Deliberately NOT folded into grantsKnowledgeBaseReads: the two config
       // reads are a complete capability without it, so requiring all three

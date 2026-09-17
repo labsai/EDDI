@@ -112,6 +112,11 @@ Four inline findings, all acted on:
   `grantsIngestionStatusReads` rather than requiring all three: the config reads are a complete
   capability alone, so demanding the third would drop the whole section on a deployment missing one
   endpoint.
+- **`grantsKnowledgeBaseAuthoring` missed the duplicate verb** (a *suppressed* Copilot comment, which
+  carries no thread — found by grepping the review body). `POST /ragstore/rags/{id}` is `duplicateRag`,
+  and a copy of a knowledge base is a new knowledge base, so granting it would have left the prompt
+  telling an operator that CAN create one that it cannot. Added, with a test covering all four
+  authoring routes.
 - **Plaintext credentials in a `RagConfiguration`** — the exposure is real but not new: `GET
   /llmstore/llms/{id}` returns a plaintext key verbatim too, and `RestLlmStore` says so in its own
   javadoc. RAG was, however, the one credential-carrying store with **no write-time warning**, so it
