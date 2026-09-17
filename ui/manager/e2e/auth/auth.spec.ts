@@ -203,19 +203,24 @@ test.describe("Authentication and authorization — Keycloak", () => {
       const own = await request.get(`${API_BASE}/agents/${conversationId}`, { headers: user });
       expect(own.status(), "the owner of a conversation must be able to read it").toBe(200);
     } finally {
-      await request.post(`${API_BASE}/administration/production/undeploy/${agentId}?version=1`, {
-        headers: admin,
-      }).catch(() => {});
+      // Undeploying an agent with a live conversation answers 409 unless told to
+      // end it, and Playwright does not throw on a 409: without the flag every
+      // run left a deployed agent behind on the shared backend. Soft, so a
+      // cleanup failure is reported without hiding the assertion that failed first.
+      const undeploy = await request.post(
+        `${API_BASE}/administration/production/undeploy/${agentId}?version=1&endAllActiveConversations=true`,
+        { headers: admin },
+      );
+      expect.soft([200, 202], `undeploy answered ${undeploy.status()}`).toContain(undeploy.status());
       if (conversationId) {
         await request.delete(`${API_BASE}/conversationstore/conversations/${conversationId}`, {
           headers: admin,
-        }).catch(() => {});
+        });
       }
-      await request.delete(`${API_BASE}/agentstore/agents/${agentId}?version=1`, { headers: admin })
-        .catch(() => {});
+      await request.delete(`${API_BASE}/agentstore/agents/${agentId}?version=1`, { headers: admin });
       await request.delete(`${API_BASE}/workflowstore/workflows/${workflowId}?version=1`, {
         headers: admin,
-      }).catch(() => {});
+      });
     }
   });
 

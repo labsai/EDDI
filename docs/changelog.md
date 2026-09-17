@@ -82,22 +82,34 @@ owner reads and continues their conversation with 200 while another non-admin ge
   (`user-info-required=true`), refuses a token without it. `roles` is dropped from the list rather than
   defined: it never existed on import, and the client's own mappers already emit `realm_access.roles`
   and the `eddi-backend` audience.
-- **`install.sh` repairs existing realms** (import is one-shot). A new block in
-  `configure_keycloak_client` creates any missing scope from the downloaded realm file and attaches it to
-  `eddi-frontend`; idempotent, removes nothing, and never returns early, so the theme and default-role
-  checks still run. Verified in `bash:3.2` under the installer's own `set -euo pipefail`, on both the jq and python3 paths: a 6.1–6.4 realm gets 5
-  created + 5 attached, a pre-6.1 realm gets only `basic` attached, a second run is a no-op, and a
-  missing realm file warns without aborting. `install.ps1` has no Admin API step at all, so its users
-  and Helm/Kustomize operators get a documented one-time repair in `docs/security.md`, run verbatim
-  against a broken realm (twice). Both test-user lists in that file also stop claiming `eddi`/`eddi` and a
-  forced password change: `eddi` ships with no password, and Keycloak 26 forces no change on import.
+- **`install.sh` repairs existing realms** (import is one-shot). `repair_keycloak_identity_scopes` creates any
+  missing scope from the realm file and attaches it to `eddi-frontend`. It runs from `configure_keycloak_client`
+  on a fresh setup and from a new `repair_running_keycloak` in `main()`'s already-running branch, which is how
+  an existing installation is re-run: that path skipped every setup step, so it detects auth from
+  `.eddi-config`, reads Keycloak's port from `.env`, refreshes the stale realm file and repairs, and re-applies
+  nothing else (CORS origins depend on ports that run may not be given). `basic`, `profile` and `email` are
+  attached unless the client has them as a default or optional scope; `web-origins` and `acr` only when this
+  run created them, so an operator who detached them is respected. Idempotent, removes nothing, and every
+  pipeline assignment carries `|| var=""` under the installer's `set -euo pipefail`. Verified in `bash:3.2`
+  against Keycloak 26.7 and 26.0.8 (what the compose files and charts ship): a 6.1–6.4 realm on the jq and
+  python3 paths and through the already-running path (5 created, 5 attached), a pre-6.1 realm (`basic`
+  attached), an operator's detached `web-origins` and optional `email` (untouched), a no-auth install (silent),
+  malformed JSON (survives; the unguarded form exits), and a second run of each (no-op). `eddi update` does not
+  run it. `install.ps1` has no Admin API step at all, so its users and Helm/Kustomize operators get a documented
+  one-time repair in `docs/security.md` (`set -eu`, fails loudly on a bad login or missing scope, strips the CRLF
+  a Windows `jq.exe` emits), run verbatim on 26.0.8 twice through a CRLF-emitting jq and once with a wrong
+  password. Both test-user lists there stop claiming `eddi`/`eddi` and a forced password change: `eddi` ships
+  with no password, and Keycloak 26 forces no change on import.
 - **Guards.** `DeploymentManifestsTest` gains three: every referenced client scope is defined in the same
   file; the SPA client's mappers emit `sub`, `preferred_username`, `name` and `email` into the access
   token and it keeps `openid`; and `install.sh`'s repair loop matches the realm file. The auth E2E tier
   gains five: claims for all three fixtures without a scope parameter, `GET /workspaces` naming the
-  admin, and a non-admin opening the conversation they started. Mutation-checked: against the old realm
+  admin, and a non-admin opening the conversation they started (whose cleanup undeploys with
+  `endAllActiveConversations=true`; without it a live conversation made undeploy answer 409 and leaked the agent).
+  The installer guard also pins the already-running path and the docs loop. Mutation-checked: against the old realm
   all three unit guards fail and 7 of 12 E2E tests fail (the 5 new ones plus the two role tests, which
-  now also assert `preferred_username`); with the fix, 12/12 and the class passes apart from three
+  now also assert `preferred_username`); with the fix, 12/12 on Keycloak 26.7 and twice on 26.0.8 with no agent left
+  deployed, and the class passes apart from three
   `create-secrets.ps1` tests that fail identically on a clean `origin/main` in this environment.
 
 ---

@@ -1744,9 +1744,27 @@ class DeploymentManifestsTest {
         @Test
         @DisplayName("install.sh repairs exactly the identity scopes the realm file defines")
         void installerRepairsTheScopesTheRealmDefines() throws IOException {
-            String loop = captureAfter(read(Path.of("install.sh")), "for scope in ([a-z -]+); do");
+            String installer = read(Path.of("install.sh"));
+            String loop = captureAfter(installer, "for scope in ([a-z -]+); do");
             assertFalse(loop.isBlank(), "install.sh no longer has its `for scope in ...; do` identity-scope repair loop");
             List<String> repaired = List.of(loop.split("\\s+"));
+
+            // main() exits early when EDDI is already up, and re-running the installer
+            // on a live installation is how it picks up fixes, so that branch has to
+            // run the repair too. It once did not, and the docs said it did.
+            int runningBranch = installer.indexOf("if [[ \"$EDDI_ALREADY_RUNNING\" == \"true\" ]]; then");
+            assertTrue(runningBranch >= 0, "install.sh no longer has main()'s already-running branch");
+            String running = installer.substring(runningBranch, installer.indexOf("exit 0", runningBranch));
+            assertTrue(running.contains("repair_running_keycloak"),
+                    "main()'s already-running branch exits without repair_running_keycloak, so re-running the "
+                            + "installer on a live 6.1-6.4 installation leaves its realm without identity claims");
+
+            // The manual repair in docs/security.md is the same loop by hand, for
+            // install.ps1, Helm and Kustomize.
+            String documented = captureAfter(read(Path.of("docs", "security.md")), "for scope in ([a-z -]+); do");
+            assertEquals(loop, documented,
+                    "docs/security.md's manual repair covers different scopes than install.sh, so operators "
+                            + "repairing by hand get a different realm than installer users");
 
             JsonNode realm = JSON.readTree(COMPOSE_REALM.toFile());
             Set<String> defined = names(realm, "clientScopes", "name");
