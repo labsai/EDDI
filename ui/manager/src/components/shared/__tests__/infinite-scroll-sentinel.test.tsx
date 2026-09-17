@@ -3,12 +3,14 @@ import { screen } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
 import { InfiniteScrollSentinel } from "@/components/shared/infinite-scroll-sentinel";
 
-// Mock IntersectionObserver
+// Mock IntersectionObserver. The component calls it with `new`, and since
+// Vitest 4 a vi.fn implementation invoked as a constructor must be a `function`
+// (or class) — an arrow function throws "is not a constructor".
 const observe = vi.fn();
 const disconnect = vi.fn();
 vi.stubGlobal(
   "IntersectionObserver",
-  vi.fn((cb: IntersectionObserverCallback) => {
+  vi.fn(function (cb: IntersectionObserverCallback) {
     // immediately call with isIntersecting=true
     setTimeout(() => cb([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver), 0);
     return { observe, disconnect, unobserve: vi.fn() };
