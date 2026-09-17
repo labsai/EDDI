@@ -316,6 +316,8 @@ interface VaultPopupProps {
   vaultError?: string;
   /** The popup's root, so the parent can tell focus moving INTO the popup from focus leaving the field. */
   popupRef: React.RefObject<HTMLDivElement | null>;
+  /** Focus left an element inside the popup; the parent decides whether that left the field. */
+  onFocusLeave: (e: React.FocusEvent) => void;
 }
 
 function VaultPopup({
@@ -330,6 +332,7 @@ function VaultPopup({
   onCreate,
   vaultError,
   popupRef,
+  onFocusLeave,
 }: VaultPopupProps) {
   const { t } = useTranslation();
   const filterRef = useRef<HTMLInputElement>(null);
@@ -372,6 +375,7 @@ function VaultPopup({
   return (
     <div
       ref={popupRef}
+      onBlur={onFocusLeave}
       className="absolute inset-x-0 top-full z-50 mt-1 overflow-hidden rounded-lg border border-border bg-popover shadow-xl animate-in fade-in-0 zoom-in-95 slide-in-from-top-2 duration-150"
       /*
        * The parent's handler, not one of our own.
@@ -558,6 +562,7 @@ export function SecretKeyPicker({
   // Refs
   const containerRef = useRef<HTMLDivElement>(null);
   const popupRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   // Vault data
   const { data: secrets, isLoading: secretsLoading } = useSecrets(tenantId);
@@ -718,22 +723,64 @@ export function SecretKeyPicker({
    * canonicalises to `${vault:}` and the rest of the word lands after the
    * closing brace. Nothing is normalised until they are done.
    */
-  const handleBlur = useCallback((e: React.FocusEvent<HTMLInputElement>) => {
+  const canonicalizeValue = useCallback(() => {
     // `readOnly` guarded like every other mutating handler here. A read-only
     // input is still focusable, so without this a viewer could rewrite the
     // value — and dirty the parent's form — just by tabbing through it.
     if (!referenceOnly || readOnly) return;
-    // Focus moving into this picker's own popup is not the user leaving the
-    // field. The popup focuses its filter 50 ms after opening; canonicalising
-    // on that blur swapped the input for a chip, and the chip state renders no
-    // popup — so the popup the user had just opened vanished again. Scoped to
-    // the popup: tabbing on to the vault button IS leaving the field.
-    if (e.relatedTarget instanceof Node && popupRef.current?.contains(e.relatedTarget)) {
-      return;
-    }
     const canonical = canonicalizeReference(value);
     if (canonical) onChange(canonical);
   }, [referenceOnly, readOnly, value, onChange]);
+
+  const handleBlur = useCallback(
+    (e: React.FocusEvent<HTMLInputElement>) => {
+      // Focus moving into this picker's own popup is not the user leaving the
+      // field. The popup focuses its filter 50 ms after opening; canonicalising
+      // on that blur swapped the input for a chip, and the chip state renders
+      // no popup — so the popup the user had just opened vanished again. Scoped
+      // to the popup: tabbing on to the vault button IS leaving the field.
+      // Deferring here makes every way OUT of the popup responsible for the
+      // normalisation instead — see dismissPopup and handlePopupFocusLeave.
+      if (e.relatedTarget instanceof Node && popupRef.current?.contains(e.relatedTarget)) {
+        return;
+      }
+      canonicalizeValue();
+    },
+    [canonicalizeValue],
+  );
+
+  /**
+   * Close the popup from inside the field (Escape, or the opener button) and,
+   * if focus was in the popup, hand it back to the input — the combobox pattern.
+   * The input's own blur then normalises the value when the user moves on, so
+   * nothing is rewritten while they are still in the field.
+   */
+  const dismissPopup = useCallback(() => {
+    const focusWasInPopup = popupRef.current?.contains(document.activeElement) ?? false;
+    closePopup();
+    if (focusWasInPopup) inputRef.current?.focus();
+  }, [closePopup]);
+
+  /**
+   * Focus left something inside the popup. Tabbing out of it (anywhere but back
+   * to the input) leaves the field, so close the popup and normalise — the
+   * input's blur was deferred when focus went in, and will not fire again.
+   *
+   * A blur with no `relatedTarget` is ignored on purpose: that is what picking
+   * a key looks like (the option unmounts), and normalising the stale value
+   * there would overwrite the key just picked. Clicking outside also blurs
+   * with no target; the mousedown handler below covers that case.
+   */
+  const handlePopupFocusLeave = useCallback(
+    (e: React.FocusEvent) => {
+      const next = e.relatedTarget;
+      if (!(next instanceof Node)) return;
+      if (popupRef.current?.contains(next) || next === inputRef.current) return;
+      closePopup();
+      canonicalizeValue();
+    },
+    [closePopup, canonicalizeValue],
+  );
 
   const handleInputKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -748,7 +795,7 @@ export function SecretKeyPicker({
 
       if (e.key === "Escape") {
         e.preventDefault();
-        closePopup();
+        dismissPopup();
       } else if (e.key === "ArrowDown") {
         e.preventDefault();
         setHighlightedIndex((prev) =>
@@ -773,7 +820,7 @@ export function SecretKeyPicker({
       popupOpen,
       vaultAvailable,
       openPopup,
-      closePopup,
+      dismissPopup,
       filteredForNav,
       highlightedIndex,
       handleSelectKey,
@@ -788,12 +835,17 @@ export function SecretKeyPicker({
         containerRef.current &&
         !containerRef.current.contains(e.target as Node)
       ) {
+        // Clicking away from the popup leaves the field. If focus was inside
+        // the popup, the input's blur was deferred and will not come again, so
+        // normalise here. (With focus still in the input, its own blur does it.)
+        const focusWasInPopup = popupRef.current?.contains(document.activeElement) ?? false;
         closePopup();
+        if (focusWasInPopup) canonicalizeValue();
       }
     };
     document.addEventListener("mousedown", handleMouseDown);
     return () => document.removeEventListener("mousedown", handleMouseDown);
-  }, [popupOpen, closePopup]);
+  }, [popupOpen, closePopup, canonicalizeValue]);
 
   // ─── Render ────────────────────────────────────────────────────────────────
 
@@ -901,6 +953,7 @@ export function SecretKeyPicker({
         {/* Password input */}
         <div className="relative flex-1">
           <input
+            ref={inputRef}
             id={id}
             // Nothing to mask: in reference-only mode the only admissible value
             // is a pointer, and masking it hides the one thing worth reading.
@@ -962,7 +1015,7 @@ export function SecretKeyPicker({
             // unmount this very button between mousedown and mouseup, and the
             // click never landed.
             onMouseDown={(e) => e.preventDefault()}
-            onClick={() => (popupOpen ? closePopup() : openPopup())}
+            onClick={() => (popupOpen ? dismissPopup() : openPopup())}
             title={t("secretPicker.pickFromVault", "Pick from vault")}
             className={`flex h-7 items-center gap-0.5 border border-s-0 border-input px-1.5 text-xs transition-colors ${
               offerConnections ? "" : "rounded-e-md"
@@ -1031,6 +1084,7 @@ export function SecretKeyPicker({
           }}
           vaultError={vaultError}
           popupRef={popupRef}
+          onFocusLeave={handlePopupFocusLeave}
         />
       )}
 

@@ -102,6 +102,13 @@ and their transitives), so nothing affected ships in the jar — but Scorecard c
   2 of 3 times. `handleBlur` now ignores focus moving into the popup (scoped to the popup, not the whole
   picker: tabbing on to the vault button still canonicalises, which two existing tests pin). A new
   test waits for the filter to take focus and fails with the fix reverted.
+  Deferring that blur made every way *out* of the popup responsible for normalising instead (Copilot
+  review): Escape and the opener button hand focus back to the input, whose own blur then normalises;
+  clicking away or tabbing out of the popup normalises directly. A blur with no `relatedTarget` is
+  deliberately ignored — that is what picking a key looks like, and normalising the stale value there
+  would overwrite the key just picked. Four tests, one per path, each mutation-checked; they assert
+  the chip by structure, because the popup lists the same key as an option and a text match alone
+  passed with the popup still open.
 - **Dependabot: `vitest` + `@vitest/*` (both UIs) and `@stryker-mutator/*` (Manager) are grouped.**
   These packages peer-depend on each other at the exact same version, so a single-package bump can never
   pass `npm ci`. That is precisely what happened: #766 (vitest 4.1.11), #768 (Stryker 10) and the
