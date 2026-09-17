@@ -15,8 +15,8 @@
 | React          | 19      | UI framework                   |
 | TypeScript     | 5.7     | Type safety                    |
 | Vite           | 6       | Build tool + dev server        |
-| Vitest         | 3.x     | Unit testing (jsdom)           |
-| react-markdown | 9.x     | Markdown rendering in messages |
+| Vitest         | 5.x     | Unit testing (jsdom)           |
+| react-markdown | 10.x    | Markdown rendering in messages |
 
 ### Ecosystem
 
