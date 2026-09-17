@@ -561,13 +561,16 @@ public class ApiCallExecutor implements IApiCallExecutor {
             // value — then fails the turn exactly as a single fire-and-forget call does,
             // instead of being logged by a worker nobody reads while the turn reports
             // success. It also means the request sees the turn's template data as it is
-            // now, not as it is when a worker gets to it.
+            // now, not as it is when a worker gets to it. Each request gets its own copy of
+            // the template data, so the iteration variable never leaks into the calls that
+            // run after this one.
             List<Object> batchIterationList = prePostUtils.buildIterationValues(batchRequest.getIterationObjectName(),
                     batchRequest.getPathToTargetArray(), batchRequest.getTemplateFilterExpression(), templateDataObjects);
             List<IRequest> requests = new ArrayList<>(batchIterationList.size());
             for (Object iterationObject : batchIterationList) {
-                templateDataObjects.put(batchRequest.getIterationObjectName(), iterationObject);
-                requests.add(buildRequest(targetServerUrl, call, templateDataObjects).request());
+                Map<String, Object> iterationData = new LinkedHashMap<>(templateDataObjects);
+                iterationData.put(batchRequest.getIterationObjectName(), iterationObject);
+                requests.add(buildRequest(targetServerUrl, call, iterationData).request());
             }
 
             // The sending runs on a thread of its own; propagate() keeps the turn's

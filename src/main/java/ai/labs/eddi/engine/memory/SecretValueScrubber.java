@@ -53,7 +53,7 @@ public final class SecretValueScrubber {
      * any other type are not inspected and yield {@code null}.
      */
     public static Object scrubValue(Object value, String plaintext, String placeholder) {
-        return scrubSorted(value, List.of(plaintext), placeholder, false);
+        return plaintext == null || plaintext.isEmpty() ? null : scrubSorted(value, List.of(plaintext), placeholder, false);
     }
 
     /**
@@ -63,7 +63,8 @@ public final class SecretValueScrubber {
      * fragment behind.
      */
     public static Object scrubAll(Object value, Collection<String> plaintexts, String placeholder) {
-        return plaintexts.isEmpty() ? null : scrubSorted(value, longestFirst(plaintexts), placeholder, false);
+        List<String> sorted = longestFirst(plaintexts);
+        return sorted.isEmpty() ? null : scrubSorted(value, sorted, placeholder, false);
     }
 
     /**
@@ -71,7 +72,7 @@ public final class SecretValueScrubber {
      * removed from its value, or {@code null} when it does not carry it.
      */
     public static Context scrubContext(Context context, String plaintext, String placeholder) {
-        return (Context) scrubSorted(context, List.of(plaintext), placeholder, false);
+        return plaintext == null || plaintext.isEmpty() ? null : (Context) scrubSorted(context, List.of(plaintext), placeholder, false);
     }
 
     /**
@@ -86,7 +87,8 @@ public final class SecretValueScrubber {
      *         the plaintexts
      */
     public static Object scrubDeep(Object value, Collection<String> plaintexts, String placeholder) {
-        return value == null || plaintexts.isEmpty() ? null : scrubSorted(value, longestFirst(plaintexts), placeholder, true);
+        List<String> sorted = longestFirst(plaintexts);
+        return value == null || sorted.isEmpty() ? null : scrubSorted(value, sorted, placeholder, true);
     }
 
     /**
@@ -99,15 +101,22 @@ public final class SecretValueScrubber {
      *             if the scrubbed form cannot be read back as {@code type}
      */
     public static <T> T scrubTyped(T value, Class<T> type, Collection<String> plaintexts, String placeholder) {
-        if (value == null || plaintexts.isEmpty()) {
+        if (value == null || longestFirst(plaintexts).isEmpty()) {
             return null;
         }
         Object cleaned = scrubDeep(TREE_MAPPER.convertValue(value, Object.class), plaintexts, placeholder);
         return cleaned == null ? null : TREE_MAPPER.convertValue(cleaned, type);
     }
 
+    /**
+     * The usable plaintexts, longest first. Null and empty ones are dropped:
+     * replacing "" would insert the placeholder between every character.
+     */
     private static List<String> longestFirst(Collection<String> plaintexts) {
-        return plaintexts.stream().sorted(Comparator.comparingInt(String::length).reversed()).toList();
+        return plaintexts.stream()
+                .filter(plaintext -> plaintext != null && !plaintext.isEmpty())
+                .sorted(Comparator.comparingInt(String::length).reversed())
+                .toList();
     }
 
     /**

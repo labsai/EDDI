@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.model.Context;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -115,6 +116,15 @@ class SecretValueScrubberTest {
         assertEquals("Bearer " + SECRET, holder.header, "the original is not mutated");
         holder.header = "clean";
         assertNull(SecretValueScrubber.scrubTyped(holder, Holder.class, List.of(SECRET), MARK));
+    }
+
+    @Test
+    @DisplayName("null and empty plaintexts are ignored instead of expanding every string")
+    void emptyPlaintexts() {
+        assertNull(SecretValueScrubber.scrubValue("abc", "", MARK));
+        assertNull(SecretValueScrubber.scrubValue("abc", null, MARK));
+        assertNull(SecretValueScrubber.scrubAll("abc", Arrays.asList("", null), MARK));
+        assertEquals("x " + MARK, SecretValueScrubber.scrubDeep("x " + SECRET, Arrays.asList("", null, SECRET), MARK));
     }
 
     @Test

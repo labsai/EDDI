@@ -41,12 +41,14 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -136,8 +138,10 @@ class ApiCallExecutorBatchPrincipalPropagationTest {
         resolutionPrincipalContext.bind(OWNER);
         callerIdentityContext.bind(CALLER);
 
-        executor.execute(batchCall(), memory, templateData(), SERVER);
+        Map<String, Object> templateData = templateData();
+        executor.execute(batchCall(), memory, templateData, SERVER);
 
+        assertFalse(templateData.containsKey("item"), "the batch iteration variable must not stay in the turn's template data");
         assertEquals(OWNER, principalSeenByResolver.get(),
                 "the connection resolver must see the conversation's principal, or every PER_USER connection in a "
                         + "fire-and-forget batch is refused with advice about scheduled runs");
@@ -153,6 +157,7 @@ class ApiCallExecutorBatchPrincipalPropagationTest {
         callerIdentityContext.clear();
         resolutionPrincipalContext.clear();
         principalSeenByResolver.set(null);
+        callerSeenByResolver.set(null);
         ExecutorService worker = Executors.newSingleThreadExecutor();
         try {
             worker.submit(dispatched.getValue()).get();
@@ -162,6 +167,8 @@ class ApiCallExecutorBatchPrincipalPropagationTest {
         }
 
         assertNull(principalSeenByResolver.get(), "the worker only sends: nothing is resolved again on the batch thread");
+        assertNull(callerSeenByResolver.get(), "the worker only sends: nothing is resolved again on the batch thread");
+        verify(connectionResolver, times(1)).resolve(anyString(), any(), any());
     }
 
     private static ApiCall batchCall() {
