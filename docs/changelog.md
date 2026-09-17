@@ -89,8 +89,18 @@ so concurrent users overwrite each other's value. `secretInput` only hides the t
   location — the case of a call that runs after a HITL approval resumed the turn, or a later turn that
   references the value. Same fail-loudly pattern as unsatisfiable `${caller:…}` references.
 - **`SecretValueScrubber`** (new, `engine.memory`): the string/list/map/Context walk extracted from
-  `PropertySetterTask` (which now uses it, unchanged in behaviour), plus `scrubDeep` for the JSON-form
-  scrub.
+  `PropertySetterTask` (which now uses it), plus `scrubDeep` for the JSON-form scrub and `scrubTyped` for
+  values that must keep their type. Map keys carrying a secret are scrubbed with the values; a number is
+  replaced when its string form equals a secret; longest-first replacement is enforced inside the
+  utility instead of relying on the caller's order (review follow-ups).
+- **HITL tool-call pauses**: the persisted pending batch (`argumentsRaw` used by the resume, the redacted
+  arguments, request previews, transcript) is scrubbed with the step, so a secret context value does not
+  survive a pause there either. A resumed HTTP tool call then hits the expired-value refusal below.
+- **Fire-and-forget batch HTTP calls build every request on the turn's thread** and only send in the
+  background. A request that cannot be built — expired secret context value, unsatisfiable `${caller:…}`
+  or `${connection:…}` reference — now fails the turn like a single fire-and-forget call does, instead of
+  being logged by a worker while the turn reports success. Behaviour change for configs whose batch
+  build fails today: that failure becomes visible.
 - Docs: `passing-context-information.md` (new "Secret Context Values" section) and a pointer in
   `secrets-vault.md`.
 
@@ -106,9 +116,10 @@ so concurrent users overwrite each other's value. `secretInput` only hides the t
 
 ### Verification
 
-- `ConversationSecretContextTest` (8), `SecretValueScrubberTest` (6) and
-  `ApiCallExecutorSecretContextTest` (5); the engine audit/memory/runtime, properties and apicalls
-  suites plus the repo-wide guards stay green.
+- `ConversationSecretContextTest` (10), `SecretValueScrubberTest` (10), `ApiCallExecutorSecretContextTest`
+  (6) and a new `TurnAuditBufferTest` case; the engine audit/memory/runtime, properties and apicalls
+  suites plus the repo-wide guards stay green. The review follow-ups (pending batch, numbers, map keys,
+  scrub order, audit numbers) were each mutation-checked.
 - Mutation-checked: removing the end-of-turn scrub, the output masking, the audit redaction, the property
   scrub, the possible-results scrub or the JSON-form scrub each fails at least one test.
 - End to end on the packaged build (real MongoDB, mock API that echoes the header back): the HTTP call
@@ -121,8 +132,6 @@ so concurrent users overwrite each other's value. `secretInput` only hides the t
 - The value still reaches anything a template sends out of EDDI while the turn runs: a prompt (model
   provider), a reply streamed over SSE (the returned and stored reply is scrubbed), or a query
   parameter/body (written to the server log by the HTTP call task). Documented: use it in headers only.
-- HITL pending tool-call batches are not scrubbed (they hold model-generated arguments, and HTTP
-  previews are already redacted by `RequestRedactor`).
 
 
 ## ⚡ perf(monorepo): the efficiency review follow-ups (2026-09-15)

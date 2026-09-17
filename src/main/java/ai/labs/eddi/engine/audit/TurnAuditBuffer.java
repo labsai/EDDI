@@ -193,20 +193,28 @@ public final class TurnAuditBuffer implements IAuditEntryCollector {
 
     private static Object redactValue(Object value, List<String> needles, String placeholder) {
         if (value instanceof String text) {
-            String redacted = text;
-            for (String needle : needles) {
-                redacted = redacted.replace(needle, placeholder);
-            }
-            return redacted;
+            return redactText(text, needles, placeholder);
+        }
+        if (value instanceof Number number) {
+            // A number cannot hold part of a secret without being the secret.
+            return needles.contains(String.valueOf(number)) ? placeholder : number;
         }
         if (value instanceof Map<?, ?> map) {
             Map<String, Object> copy = new LinkedHashMap<>();
-            map.forEach((key, nested) -> copy.put(String.valueOf(key), redactValue(nested, needles, placeholder)));
+            map.forEach((key, nested) -> copy.put(redactText(String.valueOf(key), needles, placeholder), redactValue(nested, needles, placeholder)));
             return copy;
         }
         if (value instanceof List<?> list) {
             return list.stream().map(nested -> redactValue(nested, needles, placeholder)).toList();
         }
         return value;
+    }
+
+    private static String redactText(String text, List<String> needles, String placeholder) {
+        String redacted = text;
+        for (String needle : needles) {
+            redacted = redacted.replace(needle, placeholder);
+        }
+        return redacted;
     }
 }

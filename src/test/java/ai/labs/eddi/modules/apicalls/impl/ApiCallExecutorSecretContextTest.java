@@ -5,6 +5,8 @@
 package ai.labs.eddi.modules.apicalls.impl;
 
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
+import ai.labs.eddi.configs.apicalls.model.BatchRequestBuildingInstruction;
+import ai.labs.eddi.configs.apicalls.model.HttpPreRequest;
 import ai.labs.eddi.configs.apicalls.model.Request;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -26,6 +28,7 @@ import org.junit.jupiter.api.Test;
 import java.net.URI;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -53,11 +56,14 @@ class ApiCallExecutorSecretContextTest {
     private ApiCallExecutor executor;
     private IConversationMemory memory;
     private IRequest mockRequest;
+    private IRuntime runtime;
+    private PrePostUtils prePostUtils;
 
     @BeforeEach
     void setUp() throws Exception {
         IHttpClient httpClient = mock(IHttpClient.class);
-        PrePostUtils prePostUtils = mock(PrePostUtils.class);
+        prePostUtils = mock(PrePostUtils.class);
+        runtime = mock(IRuntime.class);
         SecretResolver secretResolver = mock(SecretResolver.class);
         GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
         CallerIdentityResolver callerIdentityResolver = mock(CallerIdentityResolver.class);
@@ -65,7 +71,7 @@ class ApiCallExecutorSecretContextTest {
         when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
         when(callerIdentityResolver.resolveValue(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
 
-        executor = new ApiCallExecutor(httpClient, mock(IJsonSerialization.class), mock(IRuntime.class), prePostUtils, globalVariableResolver,
+        executor = new ApiCallExecutor(httpClient, mock(IJsonSerialization.class), runtime, prePostUtils, globalVariableResolver,
                 secretResolver, callerIdentityResolver, mock(CallerIdentityContext.class), new RequestRedactor(callerIdentityResolver), null,
                 false, 30_000L, 2_000_000);
 
@@ -133,6 +139,25 @@ class ApiCallExecutorSecretContextTest {
     @DisplayName("a path carrying the URL-encoded placeholder is refused")
     void encodedPath() throws Exception {
         assertRefused(call("/users/%3Csecret%20context%3E/items", Map.of(), Map.of(), ""), "the request path");
+    }
+
+    @Test
+    @DisplayName("a fire-and-forget batch is built before it is dispatched, so the refusal reaches the turn")
+    void batchRefusalReachesTheTurn() throws Exception {
+        ApiCall call = call("/api", Map.of("Authorization", "Bearer " + EXPIRED), Map.of(), "");
+        call.setFireAndForget(true);
+        var batch = new BatchRequestBuildingInstruction();
+        batch.setIterationObjectName("item");
+        batch.setPathToTargetArray("items");
+        var preRequest = new HttpPreRequest();
+        preRequest.setBatchRequests(batch);
+        call.setPreRequest(preRequest);
+        when(prePostUtils.buildIterationValues(any(), any(), any(), any())).thenReturn(List.of("one", "two"));
+
+        var failure = assertThrows(LifecycleException.class, () -> executor.execute(call, memory, new HashMap<>(), SERVER));
+
+        assertTrue(failure.getMessage().contains("header 'Authorization'"), "was: " + failure.getMessage());
+        verify(runtime, never()).submitCallable(any(), any());
     }
 
     @Test

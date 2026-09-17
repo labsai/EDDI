@@ -51,14 +51,16 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * A fire-and-forget batch runs on a runtime thread of its own. The executor
- * wraps that work with {@code CallerIdentityContext#propagate}, which used to
- * carry the caller and nothing else — so a {@code PER_USER} connection resolved
- * inside the batch found no {@link ResolutionPrincipal} on the worker and was
- * refused as if the turn were a scheduled run, with advice about scheduled
- * runs. Both bindings have to travel together.
+ * A fire-and-forget batch sends on a runtime thread of its own. Its requests
+ * used to be built there too, where {@code CallerIdentityContext#propagate}
+ * once carried the caller and nothing else — so a {@code PER_USER} connection
+ * found no {@link ResolutionPrincipal} on the worker and was refused as if the
+ * turn were a scheduled run. The requests are now built on the turn's own
+ * thread, before dispatch, so a connection resolves with the turn's bindings
+ * and a request that cannot be built fails the turn; the send still runs on the
+ * worker, wrapped by {@code propagate}.
  */
-@DisplayName("ApiCallExecutor — a fire-and-forget batch keeps the turn's principal and caller")
+@DisplayName("ApiCallExecutor — a fire-and-forget batch resolves with the turn's principal and caller")
 class ApiCallExecutorBatchPrincipalPropagationTest {
 
     private static final String SERVER = "http://api.example.com";
@@ -128,13 +130,18 @@ class ApiCallExecutorBatchPrincipalPropagationTest {
     }
 
     @Test
-    @DisplayName("the batch callable carries the dispatching turn's principal AND caller to the runtime thread")
-    void batchCallableCarriesBothBindings() throws Exception {
+    @DisplayName("the batch requests resolve with the turn's principal AND caller, and the worker is left clean")
+    void batchResolvesWithBothBindings() throws Exception {
         // The bindings a pipeline turn has when it reaches ApiCallExecutor.
         resolutionPrincipalContext.bind(OWNER);
         callerIdentityContext.bind(CALLER);
 
         executor.execute(batchCall(), memory, templateData(), SERVER);
+
+        assertEquals(OWNER, principalSeenByResolver.get(),
+                "the connection resolver must see the conversation's principal, or every PER_USER connection in a "
+                        + "fire-and-forget batch is refused with advice about scheduled runs");
+        assertEquals(CALLER, callerSeenByResolver.get(), "the caller must be there too — carrying one binding and not the other is the drift");
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Callable<Object>> dispatched = ArgumentCaptor.forClass(Callable.class);
@@ -145,6 +152,7 @@ class ApiCallExecutorBatchPrincipalPropagationTest {
         // rather than borrowing the test thread's.
         callerIdentityContext.clear();
         resolutionPrincipalContext.clear();
+        principalSeenByResolver.set(null);
         ExecutorService worker = Executors.newSingleThreadExecutor();
         try {
             worker.submit(dispatched.getValue()).get();
@@ -153,10 +161,7 @@ class ApiCallExecutorBatchPrincipalPropagationTest {
             worker.shutdownNow();
         }
 
-        assertEquals(OWNER, principalSeenByResolver.get(),
-                "the connection resolver ran on the batch thread and must see the conversation's principal there, or every "
-                        + "PER_USER connection in a fire-and-forget batch is refused with advice about scheduled runs");
-        assertEquals(CALLER, callerSeenByResolver.get(), "the caller must still travel too — carrying one binding and not the other is the drift");
+        assertNull(principalSeenByResolver.get(), "the worker only sends: nothing is resolved again on the batch thread");
     }
 
     private static ApiCall batchCall() {

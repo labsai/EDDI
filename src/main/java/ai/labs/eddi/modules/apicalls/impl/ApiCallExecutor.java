@@ -555,17 +555,25 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 batchRequest.setExecuteCallsSequentially(false);
             }
 
-            // A batch runs on a thread of its own, where the caller binding does not
-            // follow, so ${caller:...} in these requests would fail closed without
-            // propagate() carrying it across.
-            runtime.submitCallable(callerIdentityContext.propagate(() -> {
-                List<Object> batchIterationList = prePostUtils.buildIterationValues(batchRequest.getIterationObjectName(),
-                        batchRequest.getPathToTargetArray(), batchRequest.getTemplateFilterExpression(), templateDataObjects);
+            // Every request is built here, on the turn's own thread, and only the sending
+            // goes to the background. A request that cannot be built — an unsatisfiable
+            // ${caller:...} or ${connection:...} reference, an expired secret context
+            // value — then fails the turn exactly as a single fire-and-forget call does,
+            // instead of being logged by a worker nobody reads while the turn reports
+            // success. It also means the request sees the turn's template data as it is
+            // now, not as it is when a worker gets to it.
+            List<Object> batchIterationList = prePostUtils.buildIterationValues(batchRequest.getIterationObjectName(),
+                    batchRequest.getPathToTargetArray(), batchRequest.getTemplateFilterExpression(), templateDataObjects);
+            List<IRequest> requests = new ArrayList<>(batchIterationList.size());
+            for (Object iterationObject : batchIterationList) {
+                templateDataObjects.put(batchRequest.getIterationObjectName(), iterationObject);
+                requests.add(buildRequest(targetServerUrl, call, templateDataObjects).request());
+            }
 
-                IRequest request;
-                for (Object iterationObject : batchIterationList) {
-                    templateDataObjects.put(batchRequest.getIterationObjectName(), iterationObject);
-                    request = buildRequest(targetServerUrl, call, templateDataObjects).request();
+            // The sending runs on a thread of its own; propagate() keeps the turn's
+            // bindings available there for anything the send itself resolves.
+            runtime.submitCallable(callerIdentityContext.propagate(() -> {
+                for (IRequest request : requests) {
                     if (batchRequest.getExecuteCallsSequentially()) {
                         long executionStart = currentTimeMillis();
                         LOGGER.info(callName + " Batch Request: " + request);

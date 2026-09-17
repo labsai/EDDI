@@ -72,7 +72,8 @@ really is per request:
 - When the turn ends — completed, stopped, paused or failed — its stored entry is replaced
   by `<secret context>`, and every copy a template made of it is replaced too: other data of
   the step, the conversation output, the conversation properties (so a `longTerm` property
-  never reaches the user memory store) and the turn's audit ledger entries.
+  never reaches the user memory store), a paused tool-call batch and the turn's audit ledger
+  entries.
 - A later turn, or tasks that run after a HITL resume, see `<secret context>`. Send the
   value again with every request that needs it. An HTTP call that would send the placeholder
   — in a header, query parameter, body or path — is refused with an error naming where it is,

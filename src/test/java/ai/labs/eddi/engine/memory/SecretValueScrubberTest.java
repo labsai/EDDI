@@ -75,6 +75,49 @@ class SecretValueScrubberTest {
     }
 
     @Test
+    @DisplayName("a map key carrying the plaintext is scrubbed with the values")
+    void mapKey() {
+        assertEquals(Map.of("id-" + MARK, "v"), SecretValueScrubber.scrubValue(Map.of("id-" + SECRET, "v"), SECRET, MARK));
+        assertEquals(Map.of(MARK, List.of(MARK)), SecretValueScrubber.scrubDeep(Map.of(SECRET, List.of(SECRET)), List.of(SECRET), MARK));
+    }
+
+    @Test
+    @DisplayName("a number equal to a plaintext is replaced; other numbers are not")
+    void number() {
+        assertEquals(List.of(MARK, 87654321L), SecretValueScrubber.scrubDeep(List.of(12345678L, 87654321L), List.of("12345678"), MARK));
+        assertNull(SecretValueScrubber.scrubDeep(123456789L, List.of("12345678"), MARK), "a number only matches whole");
+    }
+
+    @Test
+    @DisplayName("the longest plaintext wins whatever order the caller passes")
+    void orderIndependent() {
+        assertEquals(MARK, SecretValueScrubber.scrubAll(SECRET, List.of("tok-aaaa", SECRET), MARK));
+        assertEquals(MARK, SecretValueScrubber.scrubDeep(SECRET, List.of("tok-aaaa", SECRET), MARK));
+    }
+
+    /** A typed value that has to come back as its own type. */
+    public static class Holder {
+        public String header;
+        public List<String> args;
+    }
+
+    @Test
+    @DisplayName("scrubTyped returns a scrubbed copy of the same type, or null when clean")
+    void typed() {
+        var holder = new Holder();
+        holder.header = "Bearer " + SECRET;
+        holder.args = List.of("keep");
+
+        Holder cleaned = SecretValueScrubber.scrubTyped(holder, Holder.class, List.of(SECRET), MARK);
+
+        assertEquals("Bearer " + MARK, cleaned.header);
+        assertEquals(List.of("keep"), cleaned.args);
+        assertEquals("Bearer " + SECRET, holder.header, "the original is not mutated");
+        holder.header = "clean";
+        assertNull(SecretValueScrubber.scrubTyped(holder, Holder.class, List.of(SECRET), MARK));
+    }
+
+    @Test
     @DisplayName("collectPlaintexts walks lists and maps and keeps scalar string forms")
     void collect() {
         Set<String> found = new LinkedHashSet<>();

@@ -11,6 +11,8 @@ import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.ILifecycleManager;
+import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException;
+import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException.PauseOrigin;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
@@ -19,6 +21,8 @@ import ai.labs.eddi.engine.memory.IPropertiesHandler;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.Data;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
 import com.fasterxml.jackson.annotation.JsonInclude;
@@ -38,6 +42,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -107,6 +112,7 @@ class ConversationSecretContextTest {
         doAnswer(invocation -> {
             var step = memory.getCurrentStep();
             IData<Context> live = step.getLatestData("context:userToken");
+            assertNotNull(live, "the context entry must be in the step while the turn runs");
             assertEquals(token, live.getResult().getValue(), "the live value must be usable during the turn");
             @SuppressWarnings("unchecked")
             var echoedContext = (Map<String, Object>) step.getConversationOutput().get("context");
@@ -138,11 +144,13 @@ class ConversationSecretContextTest {
         assertTrue(document.contains("Ada"), "non-secret context must be kept");
 
         IData<Context> stored = memory.getCurrentStep().getLatestData("context:userToken");
+        assertNotNull(stored);
         assertEquals(PLACEHOLDER, stored.getResult().getValue());
         assertEquals(Boolean.TRUE, stored.getResult().getSecret());
         assertEquals("Bearer " + PLACEHOLDER, memory.getConversationProperties().get("lastHeader").getValueString());
-        assertEquals(Map.of("header", "Bearer " + PLACEHOLDER), memory.getCurrentStep().getLatestData("opaque:holder").getResult(),
-                "an object is scrubbed through its JSON form, keeping its shape");
+        IData<Object> opaque = memory.getCurrentStep().getLatestData("opaque:holder");
+        assertNotNull(opaque);
+        assertEquals(Map.of("header", "Bearer " + PLACEHOLDER), opaque.getResult(), "an object is scrubbed through its JSON form, keeping its shape");
     }
 
     @Test
@@ -203,6 +211,47 @@ class ConversationSecretContextTest {
     }
 
     @Test
+    @DisplayName("a tool-call pause scrubs the persisted pending batch, the arguments a resume would execute included")
+    void pendingToolCallBatchIsScrubbed() throws Exception {
+        doAnswer(invocation -> {
+            var call = new PendingToolCall();
+            call.setToolName("downstream");
+            call.setArgumentsRaw("{\"authorization\":\"Bearer " + TOKEN + "\"}");
+            call.setArgumentsRedacted("{\"authorization\":\"Bearer " + TOKEN + "\"}");
+            var batch = new PendingToolCallBatch();
+            batch.setCalls(List.of(call));
+            batch.setChatTranscriptJson("[{\"system\":\"token " + TOKEN + "\"}]");
+            memory.setHitlPendingToolCalls(batch);
+            throw new ConversationPauseException("wf1", 1, "gated", PauseOrigin.TOOL_CALL);
+        }).when(lifecycleManager).executeLifecycle(any(), any());
+
+        conversation().say("hello", contexts(TOKEN, true));
+
+        assertEquals(ConversationState.AWAITING_HUMAN, memory.getConversationState());
+        PendingToolCallBatch persisted = memory.getHitlPendingToolCalls();
+        assertNotNull(persisted);
+        assertEquals("{\"authorization\":\"Bearer " + PLACEHOLDER + "\"}", persisted.getCalls().getFirst().getArgumentsRaw());
+        assertFalse(storedDocument().contains(TOKEN));
+    }
+
+    @Test
+    @DisplayName("a numeric leaf of a secret object is replaced where a task copied it")
+    void numericSecretLeaf() throws Exception {
+        doAnswer(invocation -> {
+            memory.getCurrentStep().storeData(new Data<>("copy", Map.of("account", 12345678L)));
+            return null;
+        }).when(lifecycleManager).executeLifecycle(any(), any());
+        var secretObject = new Context(Context.ContextType.object, Map.of("accountNumber", 12345678L));
+        secretObject.setSecret(true);
+
+        conversation().say("hello", Map.of("account", secretObject));
+
+        IData<Object> copy = memory.getCurrentStep().getLatestData("copy");
+        assertNotNull(copy);
+        assertEquals(Map.of("account", PLACEHOLDER), copy.getResult());
+    }
+
+    @Test
     @DisplayName("control: the same value without the flag is stored as before")
     void unflaggedValueIsKept() throws Exception {
         doAnswer(invocation -> {
@@ -227,6 +276,7 @@ class ConversationSecretContextTest {
         conversation().say("hello", contexts(shortValue, true));
 
         IData<Context> stored = memory.getCurrentStep().getLatestData("context:userToken");
+        assertNotNull(stored);
         assertEquals(PLACEHOLDER, stored.getResult().getValue());
         assertTrue(storedDocument().contains("code " + shortValue));
     }

@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.*;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationProperties;
 import ai.labs.eddi.engine.memory.model.Data;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -852,8 +853,11 @@ public class Conversation implements IConversation {
      * have copied the value there).
      * <p>
      * Runs when the pipeline stops for any reason — completed, stopped, paused or
-     * failed. Tasks that run after a HITL resume therefore see the placeholder: a
-     * secret context value lives for the request that carried it, not longer.
+     * failed. A tool-call pause persists its pending batch (the model's arguments,
+     * the transcript, the request previews), so that is scrubbed too. Tasks that
+     * run after a HITL resume therefore see the placeholder — including a resumed
+     * tool call whose arguments carried the value: a secret context value lives for
+     * the request that carried it, not longer.
      * <p>
      * Objects the plain walk cannot enter (output items, records) are scrubbed
      * through their JSON form and replaced by the scrubbed tree, which is stored
@@ -875,6 +879,15 @@ public class Conversation implements IConversation {
         IConversationProperties properties = conversationMemory.getConversationProperties();
         if (properties != null && !needles.isEmpty()) {
             properties.values().stream().filter(Objects::nonNull).forEach(property -> scrubProperty(property, needles));
+        }
+
+        PendingToolCallBatch pendingToolCalls = conversationMemory.getHitlPendingToolCalls();
+        if (pendingToolCalls != null && !needles.isEmpty()) {
+            PendingToolCallBatch cleaned = SecretValueScrubber.scrubTyped(pendingToolCalls, PendingToolCallBatch.class, needles,
+                    MemoryKeys.SECRET_CONTEXT_PLACEHOLDER);
+            if (cleaned != null) {
+                conversationMemory.setHitlPendingToolCalls(cleaned);
+            }
         }
 
         for (IData<?> datum : step.getAllElements()) {
