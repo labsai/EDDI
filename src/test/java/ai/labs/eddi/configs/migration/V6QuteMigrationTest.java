@@ -5,6 +5,8 @@
 package ai.labs.eddi.configs.migration;
 
 import ai.labs.eddi.configs.migration.model.MigrationLog;
+import com.mongodb.MongoCommandException;
+import com.mongodb.MongoTimeoutException;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
@@ -87,6 +89,75 @@ class V6QuteMigrationTest {
         migration.runIfNeeded();
 
         verify(col, atLeastOnce()).replaceOne(any(), eq(doc));
+    }
+
+    // --- a collection that cannot be counted (CodeRabbit review, PR #781) ---
+
+    /**
+     * {@code NamespaceNotFound} is the one count failure that means "nothing to
+     * migrate here". Only some of these collections exist on any given database,
+     * and while the current driver answers a missing namespace with a count of
+     * zero, others have raised this instead — treating it as a failure would leave
+     * the migration permanently incomplete on a database with nothing to migrate.
+     */
+    @SuppressWarnings("unchecked")
+    @Test
+    void runIfNeeded_missingCollectionIsNotAFailure() {
+        when(migrationLogStore.readMigrationLog("v6-qute-migration-complete")).thenReturn(null);
+
+        MongoCommandException namespaceNotFound = mock(MongoCommandException.class);
+        when(namespaceNotFound.getErrorCode()).thenReturn(26);
+        MongoCollection<Document> missing = mock(MongoCollection.class);
+        when(missing.estimatedDocumentCount()).thenThrow(namespaceNotFound);
+        when(database.getCollection(anyString())).thenReturn(missing);
+
+        var migration = new V6QuteMigration(database, migrationLogStore, migrator, true);
+        migration.runIfNeeded();
+
+        verify(migrationLogStore).createMigrationLog(any(MigrationLog.class));
+    }
+
+    /**
+     * Any other count failure — an authorization error, a timeout, a server error —
+     * means the collection may well hold Thymeleaf templates that nobody has looked
+     * at. Swallowing it would mark the migration complete over a collection that
+     * was never read, which is the same silent half-migration the per-document
+     * guard exists to prevent.
+     */
+    @SuppressWarnings("unchecked")
+    @Test
+    void runIfNeeded_unreadableCollectionBlocksCompletion() {
+        when(migrationLogStore.readMigrationLog("v6-qute-migration-complete")).thenReturn(null);
+
+        MongoCommandException unauthorized = mock(MongoCommandException.class);
+        when(unauthorized.getErrorCode()).thenReturn(13);
+        MongoCollection<Document> unreadable = mock(MongoCollection.class);
+        when(unreadable.estimatedDocumentCount()).thenThrow(unauthorized);
+        when(database.getCollection(anyString())).thenReturn(unreadable);
+
+        var migration = new V6QuteMigration(database, migrationLogStore, migrator, true);
+        migration.runIfNeeded();
+
+        verify(migrationLogStore, never()).createMigrationLog(any(MigrationLog.class));
+    }
+
+    /**
+     * And the same for a failure that is not a command exception at all, such as a
+     * server-selection timeout.
+     */
+    @SuppressWarnings("unchecked")
+    @Test
+    void runIfNeeded_countTimeoutBlocksCompletion() {
+        when(migrationLogStore.readMigrationLog("v6-qute-migration-complete")).thenReturn(null);
+
+        MongoCollection<Document> unreachable = mock(MongoCollection.class);
+        when(unreachable.estimatedDocumentCount()).thenThrow(new MongoTimeoutException("no server available"));
+        when(database.getCollection(anyString())).thenReturn(unreachable);
+
+        var migration = new V6QuteMigration(database, migrationLogStore, migrator, true);
+        migration.runIfNeeded();
+
+        verify(migrationLogStore, never()).createMigrationLog(any(MigrationLog.class));
     }
 
     /**
@@ -207,18 +278,26 @@ class V6QuteMigrationTest {
         assertEquals("{item}", nestedList.get(0));
     }
 
+    /**
+     * This used to assert the opposite — that a collection which could not be
+     * reached at all still let the migration record completion — under the name
+     * {@code runIfNeeded_collectionsNotExist}. That premise was wrong twice over:
+     * {@code getCollection} does not contact the server, so it never fails merely
+     * because a collection is absent (a genuinely missing namespace is covered by
+     * {@link #runIfNeeded_missingCollectionIsNotAFailure()}), and recording
+     * completion over a collection that was never read is the silent half-migration
+     * this whole change exists to stop.
+     */
     @SuppressWarnings("unchecked")
     @Test
-    void runIfNeeded_collectionsNotExist() {
+    void runIfNeeded_collectionAccessFailureBlocksCompletion() {
         when(migrationLogStore.readMigrationLog("v6-qute-migration-complete")).thenReturn(null);
 
-        // Simulate getCollection throwing
         when(database.getCollection(anyString())).thenThrow(new RuntimeException("No collection"));
 
         var migration = new V6QuteMigration(database, migrationLogStore, migrator, true);
         migration.runIfNeeded();
 
-        // Should still record completion
-        verify(migrationLogStore).createMigrationLog(any(MigrationLog.class));
+        verify(migrationLogStore, never()).createMigrationLog(any(MigrationLog.class));
     }
 }

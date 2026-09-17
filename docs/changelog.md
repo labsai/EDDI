@@ -135,6 +135,16 @@ the backslash in would put it on the screen. The other OGNL escapes (`\t`, `\n`,
 left exactly as they are: a Windows path in a config is the likelier intent than a control character,
 and guessing wrong there rewrites config content rather than merely failing to tidy it.
 
+CodeRabbit then found that the `catch` around `estimatedDocumentCount()` was half-right in the other
+direction: keeping the missing-collection case out of the failure count also swallowed authorization
+errors, timeouts and server errors, so `runIfNeeded()` saw zero failures and recorded completion over
+a collection it had never read — the same silent half-migration the per-document guard exists to
+prevent. Only `NamespaceNotFound` (26) now counts as "nothing to migrate here"; anything else counts
+as a failure and keeps the migration incomplete. A pre-existing test
+(`runIfNeeded_collectionsNotExist`) asserted the old behaviour on a false premise — `getCollection`
+does not contact the server, so it never fails merely because a collection is absent — and now
+asserts the corrected contract under the name `runIfNeeded_collectionAccessFailureBlocksCompletion`.
+
 ### Files
 
 - `src/main/java/ai/labs/eddi/configs/migration/TemplateSyntaxMigrator.java`
