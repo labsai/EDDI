@@ -86,8 +86,9 @@ owner reads and continues their conversation with 200 while another non-admin ge
   missing scope from the realm file and attaches it to `eddi-frontend`. It runs from `configure_keycloak_client`
   on a fresh setup and from a new `repair_running_keycloak` in `main()`'s already-running branch, which is how
   an existing installation is re-run: that path skipped every setup step, so it detects auth from
-  `.eddi-config`, reads Keycloak's port from `.env`, refreshes the stale realm file and repairs, and re-applies
-  nothing else (CORS origins depend on ports that run may not be given). `basic`, `profile` and `email` are
+  `.eddi-config`, reads Keycloak's port from `.env` (quotes and CRLF tolerated), reads the scope definitions
+  from a fresh copy in a temporary file (the realm file on disk, which an operator may have edited, is never
+  touched; a proxy's HTML page just produces a warning), and re-applies nothing else (CORS origins depend on ports that run may not be given). `basic`, `profile` and `email` are
   attached unless the client has them as a default or optional scope; `web-origins` and `acr` only when this
   run created them, so an operator who detached them is respected. Idempotent, removes nothing, and every
   pipeline assignment carries `|| var=""` under the installer's `set -euo pipefail`. Verified in `bash:3.2`
@@ -96,9 +97,12 @@ owner reads and continues their conversation with 200 while another non-admin ge
   attached), an operator's detached `web-origins` and optional `email` (untouched), a no-auth install (silent),
   malformed JSON (survives; the unguarded form exits), and a second run of each (no-op). `eddi update` does not
   run it. `install.ps1` has no Admin API step at all, so its users and Helm/Kustomize operators get a documented
-  one-time repair in `docs/security.md` (`set -eu`, fails loudly on a bad login or missing scope, strips the CRLF
+  one-time repair in `docs/security.md` (a subshell with `set -eu`, so pasting it cannot close the terminal; fails loudly on a bad login or missing scope, strips the CRLF
   a Windows `jq.exe` emits), run verbatim on 26.0.8 twice through a CRLF-emitting jq and once with a wrong
-  password. Both test-user lists there stop claiming `eddi`/`eddi` and a forced password change: `eddi` ships
+  password, and pasted into a live shell after an unset or wrong password. The docs tell a custom-port install to
+  re-run the installer with the same `EDDI_PORT`, since the installer recognises a running EDDI only on that port.
+  Known gap: a run that creates `web-origins`/`acr` and fails before attaching them leaves them unattached on
+  later runs (they carry no identity). Both test-user lists there stop claiming `eddi`/`eddi` and a forced password change: `eddi` ships
   with no password, and Keycloak 26 forces no change on import.
 - **Guards.** `DeploymentManifestsTest` gains three: every referenced client scope is defined in the same
   file; the SPA client's mappers emit `sub`, `preferred_username`, `name` and `email` into the access

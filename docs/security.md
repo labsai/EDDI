@@ -163,8 +163,11 @@ Realm import only runs on first boot, so a fixed realm file does not reach a
 Keycloak that already has the `eddi` realm:
 
 - **`install.sh`** repairs it whenever it runs, including when EDDI is already up:
-  run the installer again (with EDDI running, it only refreshes the `eddi` command
-  and checks Keycloak). Look for
+  run the installer again while EDDI is running — with EDDI running, it only
+  refreshes the `eddi` command and checks Keycloak. If you installed on a port
+  other than 7070, pass the same one (`EDDI_PORT=7071 bash install.sh`): the
+  installer recognises a running EDDI only on the port it is given, and would
+  otherwise set up a new installation. Look for
   `Checking Keycloak identity scopes ✅ (repaired: …)`, then sign out and in again.
   `eddi update` does **not** run this check.
 - **`install.ps1`, Helm, Kustomize, or a realm provisioned by hand**: run the
@@ -172,21 +175,24 @@ Keycloak that already has the `eddi` realm:
   WSL. It creates only the scopes that are missing, using the definitions in the
   realm file, attaches them to `eddi-frontend`, and removes nothing, so running it
   twice is harmless. It needs `curl` and `jq`, and a checkout of this repository
-  for the realm file (the three copies define the same scopes). Set `KC` and
-  `KC_ADMIN_PASSWORD` for your Keycloak: `http://localhost:8180` and `admin` for
-  the docker-compose setup the installers create, or the port-forward and the
-  `keycloak-admin` Secret on Kubernetes.
+  for the realm file (the three copies define the same scopes); run it from the
+  checkout's root. Set `KC`, `KC_ADMIN_USER` and `KC_ADMIN_PASSWORD` for your
+  Keycloak: `http://localhost:8180`, `admin` and `admin` for the docker-compose
+  setup the installers create, or the port-forward, `keycloak.adminUsername` and
+  the admin Secret on Kubernetes. It runs in a subshell, so pasting it into a
+  terminal cannot close that terminal when a step fails.
 
   ```bash
-  set -eu
+  ( set -eu
   KC=${KC:-http://localhost:8180}   # kubectl -n eddi port-forward svc/keycloak 8080:8080 → http://localhost:8080
+  : "${KC_ADMIN_PASSWORD:?set KC_ADMIN_PASSWORD to the Keycloak admin password}"
   REALM_FILE=keycloak/eddi-realm.json
   # tr -d '\r': a native Windows jq.exe ends its output with CRLF under Git Bash
   j() { jq "$@" | tr -d '\r'; }
-  TOKEN=$(curl -sSf -d client_id=admin-cli -d grant_type=password -d username=admin \
+  TOKEN=$(curl -sSf -d client_id=admin-cli -d grant_type=password -d "username=${KC_ADMIN_USER:-admin}" \
     --data-urlencode "password=$KC_ADMIN_PASSWORD" \
     "$KC/realms/master/protocol/openid-connect/token" | j -r .access_token)
-  [ -n "$TOKEN" ] || { echo "could not log in to $KC as admin" >&2; exit 1; }
+  [ -n "$TOKEN" ] || { echo "could not log in to $KC as ${KC_ADMIN_USER:-admin}" >&2; exit 1; }
   AUTH="Authorization: Bearer $TOKEN"
   SPA=$(curl -sSf -H "$AUTH" "$KC/admin/realms/eddi/clients?clientId=eddi-frontend" | j -r '.[0].id // empty')
   [ -n "$SPA" ] || { echo "no eddi-frontend client in realm eddi" >&2; exit 1; }
@@ -205,7 +211,7 @@ Keycloak that already has the `eddi` realm:
     [ -n "$id" ] || { echo "client scope $scope is still missing" >&2; exit 1; }
     curl -sSf -X PUT -H "$AUTH" "$KC/admin/realms/eddi/clients/$SPA/default-client-scopes/$id"
     echo "attached $scope"
-  done
+  done )
   ```
 
 Users pick the claims up at their next sign-in. The principal then becomes each

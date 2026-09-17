@@ -1174,7 +1174,7 @@ repair_keycloak_identity_scopes() {
   done
 
   if [[ -n "$scopes_failed" ]]; then
-    echo -e "${YELLOW}⚠️${RESET}  ${DIM}(could not set up:${scopes_failed} — users may appear without a name)${RESET}"
+    echo -e "${YELLOW}⚠️${RESET}  ${DIM}(could not set up:${scopes_failed} — see docs/security.md, Identity claims)${RESET}"
   elif [[ $((scopes_created + scopes_attached)) -gt 0 ]]; then
     echo -e "${GREEN}✅${RESET} ${DIM}(repaired: ${scopes_created} created, ${scopes_attached} attached — sign in again to pick them up)${RESET}"
   else
@@ -1204,23 +1204,24 @@ repair_running_keycloak() {
   fi
 
   local kc_port kc_base
-  kc_port=$(grep '^KEYCLOAK_PORT=' "$EDDI_DIR/.env" 2>/dev/null | tail -n1 | cut -d= -f2-) || kc_port=""
+  kc_port=$(grep '^KEYCLOAK_PORT=' "$EDDI_DIR/.env" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d "\"'\r ") || kc_port=""
   kc_base="http://localhost:${kc_port:-8180}"
 
-  # The scope definitions have to be current. The copy on disk is the one this
-  # installation was set up with, which is exactly the file that lacked them.
-  local realm_file="$EDDI_DIR/keycloak/eddi-realm.json"
-  local realm_tmp="${realm_file}.tmp"
-  mkdir -p "$EDDI_DIR/keycloak"
-  if [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/keycloak/eddi-realm.json" ]]; then
-    cp "$SCRIPT_DIR/keycloak/eddi-realm.json" "$realm_tmp" 2>/dev/null || true
-  else
-    curl -fsSL "${COMPOSE_BASE_URL}/keycloak/eddi-realm.json" -o "$realm_tmp" 2>/dev/null || true
+  # The scope definitions have to be current: the realm file on disk is the one
+  # this installation was set up with, which is exactly the file that lacked
+  # them. Read them from a fresh copy in a temporary file instead, and leave the
+  # file on disk alone — an operator may have edited it, and a proxy's HTML page
+  # must not replace what the next fresh import reads.
+  local realm_defs
+  realm_defs=$(mktemp "${TMPDIR:-/tmp}/eddi-realm.XXXXXX") || realm_defs=""
+  if [[ -z "$realm_defs" ]]; then
+    echo -e "  Checking Keycloak identity scopes  ${YELLOW}⚠️${RESET}  ${DIM}(could not create a temporary file — see docs/security.md, Identity claims)${RESET}"
+    return 0
   fi
-  if [[ -s "$realm_tmp" ]]; then
-    mv -f "$realm_tmp" "$realm_file"
+  if [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/keycloak/eddi-realm.json" ]]; then
+    cp "$SCRIPT_DIR/keycloak/eddi-realm.json" "$realm_defs" 2>/dev/null || true
   else
-    rm -f "$realm_tmp"
+    curl -fsSL "${COMPOSE_BASE_URL}/keycloak/eddi-realm.json" -o "$realm_defs" 2>/dev/null || true
   fi
 
   local admin_token clients_json client_uuid
@@ -1229,7 +1230,8 @@ repair_running_keycloak() {
     "${kc_base}/realms/master/protocol/openid-connect/token" 2>/dev/null \
     | kc_json "$json_tool" token) || admin_token=""
   if [[ -z "$admin_token" ]]; then
-    echo -e "  Checking Keycloak identity scopes  ${YELLOW}⚠️${RESET}  ${DIM}(Keycloak admin API unavailable at ${kc_base})${RESET}"
+    rm -f "$realm_defs"
+    echo -e "  Checking Keycloak identity scopes  ${YELLOW}⚠️${RESET}  ${DIM}(could not log in to ${kc_base} as admin — see docs/security.md, Identity claims)${RESET}"
     return 0
   fi
   clients_json=$(curl -sf \
@@ -1237,11 +1239,13 @@ repair_running_keycloak() {
     "${kc_base}/admin/realms/eddi/clients?clientId=eddi-frontend" 2>/dev/null) || clients_json=""
   client_uuid=$(echo "$clients_json" | kc_json "$json_tool" first-id) || client_uuid=""
   if [[ -z "$client_uuid" ]]; then
+    rm -f "$realm_defs"
     echo -e "  Checking Keycloak identity scopes  ${YELLOW}⚠️${RESET}  ${DIM}(eddi-frontend client not found)${RESET}"
     return 0
   fi
 
-  repair_keycloak_identity_scopes "$kc_base" "$realm_file" "$json_tool" "$admin_token" "$client_uuid"
+  repair_keycloak_identity_scopes "$kc_base" "$realm_defs" "$json_tool" "$admin_token" "$client_uuid"
+  rm -f "$realm_defs"
 }
 
 configure_keycloak_client() {

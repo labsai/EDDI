@@ -203,24 +203,31 @@ test.describe("Authentication and authorization — Keycloak", () => {
       const own = await request.get(`${API_BASE}/agents/${conversationId}`, { headers: user });
       expect(own.status(), "the owner of a conversation must be able to read it").toBe(200);
     } finally {
-      // Undeploying an agent with a live conversation answers 409 unless told to
-      // end it, and Playwright does not throw on a 409: without the flag every
-      // run left a deployed agent behind on the shared backend. Soft, so a
-      // cleanup failure is reported without hiding the assertion that failed first.
-      const undeploy = await request.post(
-        `${API_BASE}/administration/production/undeploy/${agentId}?version=1&endAllActiveConversations=true`,
-        { headers: admin },
+      // Cleanup must never replace the error that sent us here: a request that
+      // throws is swallowed, and a refused one is reported softly. Undeploying an
+      // agent with a live conversation answers 409 unless told to end it.
+      const cleanup = async (label: string, call: () => Promise<{ status(): number }>) => {
+        const res = await call().catch(() => undefined);
+        expect.soft(res === undefined || res.status() < 400, `cleanup: ${label} failed`).toBe(true);
+      };
+      await cleanup("undeploy", () =>
+        request.post(
+          `${API_BASE}/administration/production/undeploy/${agentId}?version=1&endAllActiveConversations=true`,
+          { headers: admin },
+        ),
       );
-      expect.soft([200, 202], `undeploy answered ${undeploy.status()}`).toContain(undeploy.status());
       if (conversationId) {
-        await request.delete(`${API_BASE}/conversationstore/conversations/${conversationId}`, {
-          headers: admin,
-        });
+        const id = conversationId;
+        await cleanup("delete conversation", () =>
+          request.delete(`${API_BASE}/conversationstore/conversations/${id}`, { headers: admin }),
+        );
       }
-      await request.delete(`${API_BASE}/agentstore/agents/${agentId}?version=1`, { headers: admin });
-      await request.delete(`${API_BASE}/workflowstore/workflows/${workflowId}?version=1`, {
-        headers: admin,
-      });
+      await cleanup("delete agent", () =>
+        request.delete(`${API_BASE}/agentstore/agents/${agentId}?version=1`, { headers: admin }),
+      );
+      await cleanup("delete workflow", () =>
+        request.delete(`${API_BASE}/workflowstore/workflows/${workflowId}?version=1`, { headers: admin }),
+      );
     }
   });
 
