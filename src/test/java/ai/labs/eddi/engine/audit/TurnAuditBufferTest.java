@@ -132,6 +132,28 @@ class TurnAuditBufferTest {
     }
 
     @Test
+    @DisplayName("secret context values are redacted from strings, map keys and equal numbers; the recorded input stays")
+    void secretContextValuesAreRedactedEverywhere() {
+        TurnAuditBuffer buffer = TurnAuditBuffer.install(memory);
+        Map<String, Object> llmDetail = new LinkedHashMap<>();
+        llmDetail.put("compiledPrompt", "use " + SECRET);
+        llmDetail.put("byKey", Map.of(SECRET, "v"));
+        llmDetail.put("account", 12345678L);
+        llmDetail.put("other", 87654321L);
+        memory.getAuditCollector().collect(entry("llm", "hello", llmDetail));
+
+        buffer.flush(memory, List.of(SECRET, "12345678"));
+
+        String placeholder = MemoryKeys.SECRET_CONTEXT_PLACEHOLDER;
+        Map<String, Object> redacted = ledger.getFirst().llmDetail();
+        assertEquals("use " + placeholder, redacted.get("compiledPrompt"));
+        assertEquals(Map.of(placeholder, "v"), redacted.get("byKey"));
+        assertEquals(placeholder, redacted.get("account"));
+        assertEquals(87654321L, redacted.get("other"), "a number that is not a secret is left alone");
+        assertEquals("hello", ledger.getFirst().input().get("userInput"), "a secret context value does not make the input a secret");
+    }
+
+    @Test
     @DisplayName("a failing submit does not drop the entries after it")
     void failingSubmitDoesNotStopTheRest() {
         List<String> accepted = new ArrayList<>();
