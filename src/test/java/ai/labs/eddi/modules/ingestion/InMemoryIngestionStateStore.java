@@ -24,7 +24,7 @@ import java.util.UUID;
  * suite into a lie, which is exactly the trap the two real stores fell into
  * before the shared contract existed.
  */
-public final class InMemoryIngestionStateStore implements IIngestionStateStore {
+public class InMemoryIngestionStateStore implements IIngestionStateStore {
 
     private final Map<String, DocumentState> documents = new LinkedHashMap<>();
     private final Map<String, IngestionRun> runs = new LinkedHashMap<>();

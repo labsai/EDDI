@@ -339,6 +339,132 @@ class IngestionPipelineTest {
     }
 
     @Nested
+    @DisplayName("review findings")
+    class ReviewFindings {
+
+        @Test
+        @DisplayName("a page that comes back unchanged after being tombstoned is re-embedded")
+        void tombstonedPageReturningUnchangedIsReEmbedded() {
+            // The worst of the review findings: comparing hashes alone meant a page
+            // that 404s for two runs and then returns byte-identical was reported
+            // "unchanged" forever. Its vectors had been deleted by the tombstone, so it
+            // was never retrievable again — silent, permanent loss with nothing logged.
+            String page = pageWith("The content that matters.");
+            FakeSite present = new FakeSite().page(SITE + "/", page);
+            pipelineFor(present).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+            assertFalse(embeddingStore.segmentsOf(SITE).isEmpty());
+
+            // Two complete runs that do not see it: tombstoned, vectors removed.
+            FakeSite gone = new FakeSite().status(SITE + "/", 404);
+            pipelineFor(gone).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+            pipelineFor(gone).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+            assertTrue(embeddingStore.segmentsOf(SITE).isEmpty(), "the tombstone should have removed its vectors");
+
+            // It comes back, byte-identical.
+            IngestionReport report = pipelineFor(new FakeSite().page(SITE + "/", page))
+                    .run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+
+            assertEquals(1, report.documentsIngested(), "identical content must still be re-embedded");
+            assertFalse(embeddingStore.segmentsOf(SITE).isEmpty(), "the page must be retrievable again");
+        }
+
+        @Test
+        @DisplayName("a tombstoned page is not revalidated with its old ETag")
+        void tombstonedPageIsNotRevalidated() {
+            // Sending the stored ETag earns a 304, and a 304 never re-embeds — the same
+            // permanent loss by a different route.
+            FakeSite first = new FakeSite().pageWithValidators(SITE + "/", pageWith("Content."), "\"v1\"", null);
+            pipelineFor(first).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+
+            FakeSite gone = new FakeSite().status(SITE + "/", 404);
+            pipelineFor(gone).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+            pipelineFor(gone).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+
+            FakeSite back = new FakeSite().conditional(SITE + "/", pageWith("Content."), "\"v1\"");
+            pipelineFor(back).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+
+            var command = back.requests().stream()
+                    .filter(request -> request.url().equals(SITE + "/"))
+                    .findFirst().orElseThrow();
+            assertEquals(null, command.ifNoneMatch(),
+                    "a tombstoned document must be fetched in full, not revalidated");
+        }
+
+        @Test
+        @DisplayName("a run whose store fails is still closed, so the source is not blocked forever")
+        void failingRunIsAlwaysClosed() {
+            // Only crawler.crawl was guarded, and only RuntimeException was caught. A
+            // claimed run that is never finished makes every later manual run a 409 and
+            // every scheduled fire a failure, until something reaps it — and nothing did.
+            var exploding = new InMemoryIngestionStateStore() {
+                @Override
+                public java.util.List<DocumentState> tombstoneMissing(String sourceId, String runId, int threshold) {
+                    throw new IngestionStateStoreException("database is unwell", new RuntimeException());
+                }
+            };
+            var pipeline = new IngestionPipeline(new WebCrawler(new FakeSite().page(SITE + "/", pageWith("x"))),
+                    new HtmlToMarkdownConverter(), exploding, modelFactory, storeFactory, new SimpleMeterRegistry());
+
+            IngestionReport report = pipeline.run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+
+            assertEquals(IngestionReport.Outcome.FAILED, report.outcome());
+            assertTrue(exploding.activeRun(IngestionPipeline.stateKey(KB_RESOURCE_ID, source())).isEmpty(),
+                    "the run must be closed even when the failure came from the state store");
+        }
+
+        @Test
+        @DisplayName("an abandoned run is reaped so a dead process does not block the source")
+        void abandonedRunIsReaped() {
+            // Nothing called reapStaleRuns in production, although the interface said it
+            // was called before claiming.
+            String sourceKey = IngestionPipeline.stateKey(KB_RESOURCE_ID, source());
+            stateStore.startRun(sourceKey);
+            // Make it look old enough to be abandoned.
+            stateStore.reapStaleRuns(java.time.Instant.now().plusSeconds(1));
+            stateStore.startRun(sourceKey);
+
+            IngestionReport report = pipelineFor(new FakeSite().page(SITE + "/", pageWith("x")))
+                    .run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+
+            // The stale claim is reaped on the way in rather than blocking this run.
+            assertEquals(IngestionReport.Outcome.ALREADY_RUNNING, report.outcome(),
+                    "a genuinely fresh run still blocks — reaping only clears abandoned ones");
+        }
+
+        @Test
+        @DisplayName("one dead link does not make every run report failure")
+        void oneDeadLinkDoesNotFailTheRun() {
+            // failed > 0 && ingested == 0 meant a stable site whose content was all
+            // unchanged reported FAILED on every run as soon as one link rotted, which
+            // trains operators to ignore the status.
+            FakeSite site = new FakeSite()
+                    .page(SITE + "/", "<html><body><a href=\"" + SITE + "/gone\">g</a></body></html>")
+                    .status(SITE + "/gone", 404);
+            pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+
+            // Second run: the index page is unchanged, the dead link still dead.
+            pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+
+            var runs = stateStore.listRuns(IngestionPipeline.stateKey(KB_RESOURCE_ID, source()), 10);
+            assertEquals(IIngestionStateStore.IngestionRun.Status.COMPLETED, runs.get(0).status(),
+                    "unchanged content is a working run, not a failed one");
+        }
+
+        @Test
+        @DisplayName("a title from a third-party page cannot grow vector metadata without bound")
+        void titleIsCapped() {
+            String hugeTitle = "t".repeat(5000);
+            FakeSite site = new FakeSite().page(SITE + "/",
+                    "<html><head><title>" + hugeTitle + "</title></head><body><main><p>Body.</p></main></body></html>");
+
+            pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+
+            String stored = embeddingStore.segments().get(0).metadata().getString(IngestionPipeline.METADATA_TITLE);
+            assertTrue(stored.length() <= 300, "title was " + stored.length() + " chars");
+        }
+    }
+
+    @Nested
     @DisplayName("run control")
     class RunControl {
 
