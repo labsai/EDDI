@@ -223,6 +223,77 @@ so concurrent users overwrite each other's value. `secretInput` only hides the t
   provider), a reply streamed over SSE (the returned and stored reply is scrubbed), or a query
   parameter/body (written to the server log by the HTTP call task). Documented: use it in headers only.
 
+---
+
+## 🔐 fix(auth): the shipped realm gives tokens an identity again (2026-09-17)
+
+**Repo:** EDDI (`fix/keycloak-realm-client-scopes`)
+
+### What was broken
+
+Since 6.1.0, `eddi-realm.json` has defined one client scope, `openid`. A realm file that defines
+any client scopes gets only those: Keycloak creates its built-ins solely for realms that define none,
+and logs `Referenced client scope 'profile' doesn't exist. Ignoring` for each missing reference. So
+`eddi-frontend` lost `profile`, `email`, `roles`, `web-origins` and `acr`, and never had `basic`.
+Tokens authenticated and carried their roles (the client maps those itself), but had no `sub`,
+`preferred_username`, `name` or `email`. Measured against `labsai/eddi:ci` and Keycloak 26.7:
+
+- the backend's principal had no name, so `GET /workspaces` reported no principal and every
+  conversation was stamped `anonymous-<hex>`;
+- a non-admin opening or continuing **their own** conversation got HTTP 500:
+  `OwnershipValidator.requireOwnerOrAdmin` called `equals` on a null `callerId`;
+- the Manager's avatar showed "?" (worked around separately on `fix/manager-avatar-no-claims`).
+
+With the fix the principal is the username (`eddi`, `user`), the stored owner is that username, and the
+owner reads and continues their conversation with 200 while another non-admin gets 403. Releases before
+6.1.0 had the built-in scopes, so their principal was already the username: nothing to migrate.
+
+### What changed
+
+- **All three realm copies** add `basic`, `profile`, `email`, `web-origins` and `acr`, copied verbatim from
+  a stock Keycloak 26.7 realm minus server-generated ids. `eddi-frontend` lists `openid, basic, profile,
+  email, web-origins, acr`, and the realm's `defaultDefaultClientScopes` says the same, so a client an
+  operator adds later issues identity claims too. `openid` stays: it puts `openid` in the `scope` claim of
+  a token that did not request it (any direct grant), and Keycloak's userinfo, which the backend calls
+  (`user-info-required=true`), refuses a token without it. `roles` is dropped from the list rather than
+  defined: it never existed on import, and the client's own mappers already emit `realm_access.roles`
+  and the `eddi-backend` audience.
+- **`install.sh` repairs existing realms** (import is one-shot). `repair_keycloak_identity_scopes` creates any
+  missing scope from the realm file and attaches it to `eddi-frontend`. It runs from `configure_keycloak_client`
+  on a fresh setup and from a new `repair_running_keycloak` in `main()`'s already-running branch, which is how
+  an existing installation is re-run: that path skipped every setup step, so it detects auth from
+  `.eddi-config`, reads Keycloak's port from `.env` (quotes and CRLF tolerated), reads the scope definitions
+  from a fresh copy in a temporary file (the realm file on disk, which an operator may have edited, is never
+  touched; a proxy's HTML page just produces a warning), and re-applies nothing else (CORS origins depend on ports that run may not be given). `basic`, `profile` and `email` are
+  attached unless the client has them as a default or optional scope; `web-origins` and `acr` only when this
+  run created them, so an operator who detached them is respected. Idempotent, removes nothing, and every
+  pipeline assignment carries `|| var=""` under the installer's `set -euo pipefail`. Verified in `bash:3.2`
+  against Keycloak 26.7 and 26.0.8 (what the compose files and charts ship): a 6.1–6.4 realm on the jq and
+  python3 paths and through the already-running path (5 created, 5 attached), a pre-6.1 realm (`basic`
+  attached), an operator's detached `web-origins` and optional `email` (untouched), a no-auth install (silent),
+  malformed JSON (survives; the unguarded form exits), and a second run of each (no-op). `eddi update` does not
+  run it. `install.ps1` has no Admin API step at all, so its users and Helm/Kustomize operators get a documented
+  one-time repair in `docs/security.md` (a subshell with `set -eu`, so pasting it cannot close the terminal; fails loudly on a bad login or missing scope, strips the CRLF
+  a Windows `jq.exe` emits), run verbatim on 26.0.8 twice through a CRLF-emitting jq and once with a wrong
+  password, and pasted into a live shell after an unset or wrong password. The docs tell a custom-port install to
+  re-run the installer with the same `EDDI_PORT`, since the installer recognises a running EDDI only on that port.
+  Known gap: a run that creates `web-origins`/`acr` and fails before attaching them leaves them unattached on
+  later runs (they carry no identity). Both test-user lists there stop claiming `eddi`/`eddi` and a forced password change: `eddi` ships
+  with no password, and Keycloak 26 forces no change on import.
+- **Guards.** `DeploymentManifestsTest` gains three: every referenced client scope is defined in the same
+  file; the SPA client's mappers emit `sub`, `preferred_username`, `name` and `email` into the access
+  token and it keeps `openid`; and `install.sh`'s repair loop matches the realm file. The auth E2E tier
+  gains five: claims for all three fixtures without a scope parameter, `GET /workspaces` naming the
+  admin, and a non-admin opening the conversation they started (whose cleanup undeploys with
+  `endAllActiveConversations=true`; without it a live conversation made undeploy answer 409 and leaked the agent).
+  The installer guard also pins the already-running path and the docs loop. Mutation-checked: against the old realm
+  all three unit guards fail and 7 of 12 E2E tests fail (the 5 new ones plus the two role tests, which
+  now also assert `preferred_username`); with the fix, 12/12 on Keycloak 26.7 and twice on 26.0.8 with no agent left
+  deployed, and the class passes apart from three
+  `create-secrets.ps1` tests that fail identically on a clean `origin/main` in this environment.
+
+---
+
 ## ⚡ perf(monorepo): the efficiency review follow-ups (2026-09-15)
 
 **Repo:** EDDI (`chore/monorepo-migration`) — the follow-ups from the two-reviewer efficiency review
