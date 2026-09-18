@@ -50,6 +50,188 @@ bottom of this file and are never archived.
 
 ---
 
+## 🔐 fix(a2a): make the A2A endpoints' anonymity real, and decide which of them deserve it (2026-09-17)
+
+**Repo:** EDDI (`fix/a2a-anonymous-discovery-permissions`)
+
+`RestA2AEndpoint` annotated five endpoints `@PermitAll`, intending them to be reachable by peer
+agents that hold no EDDI credential. None of them were named in a
+`quarkus.http.auth.permission.*` entry. **Quarkus evaluates those path policies before declarative
+RBAC**, so the `/*` catch-all (`policy=authenticated`) claimed all five: on any instance with
+`quarkus.oidc.tenant-enabled=true`, Agent Card discovery answered **401** to exactly the callers it
+exists for — a bare 401, since `quarkus.oidc.application-type=service` sends no login redirect. The
+annotation and the deployment had disagreed for as long as the endpoints existed.
+
+Nothing caught it because `A2aEndpointIT` runs against a `BaseStandaloneIT` instance with
+authorization off, where `DisabledAuthController` switches the path policies off wholesale and a
+permitted path and a protected one answer identically.
+
+### The decision, endpoint by endpoint
+
+Not all five were meant to be anonymous, so this is not "add a permit entry for the five".
+
+| Endpoint | Posture | Why |
+|---|---|---|
+| `GET /.well-known/agent.json` | **permit** | The A2A discovery convention. A peer reads the card *before* it holds any credential |
+| `GET /a2a/agents/{agentId}/agent.json` | **permit** | The card EDDI's own client fetches — `A2AToolProviderManager.fetchAgentCard` sends `apiKey` only if one is configured. Needs the agent id, so it discloses one agent, not the roster |
+| `GET /a2a/agents` | **authenticated** — `@PermitAll` removed | The whole roster: every A2A agent's name, description, skills and URL. Strictly more than the skill-name list that sits behind `eddi.a2a.capabilities.public`, and nothing in the protocol or in this repo fetches it |
+| `GET /.well-known/capabilities` | **permit** at the HTTP layer | `eddi.a2a.capabilities.public` (default `false`) is the only *authorization* gate — `eddi.a2a.enabled` gates it as well, but neither looks at the caller. While either is off the handler answers 404 to authenticated and anonymous callers alike, so permitting the path widens nothing — and while both are on, "public" has to mean *without a token* |
+| `GET /.well-known/capabilities/skills` | **permit** at the HTTP layer | Same flag, same reasoning |
+
+Where code and config disagreed, the **code** was changed: `listA2AAgents` lost `@PermitAll` and
+gained `@Authenticated`, rather than gaining a permit entry.
+
+### Design decisions
+
+- **`/a2a/agents/*/agent.json`, not `/a2a/agents/*`.** Quarkus 3.39's `ImmutablePathMatcher`
+  supports an inner wildcard matching exactly one path segment, and the distinction is load-bearing
+  twice over. A `/a2a/agents/*` prefix would (a) permit the roster, because the prefix registers
+  under `/a2a/agents` and wins over the catch-all, and (b) **break A2A outright**: the JSON-RPC
+  `POST /a2a/agents/{agentId}` would match a `methods=GET` entry, and Quarkus *denies* on a method
+  mismatch rather than falling through. Both are asserted.
+- **No `/.well-known/*` wildcard.** RFC 9728 protected-resource metadata is planned under that
+  prefix (`planning/saas-connectors-plan.md` §6.3); a wildcard would pre-permit it, and anything
+  else later dropped there, with nobody deciding to. The paths are enumerated and a test asserts a
+  sibling still requires authentication.
+- **One knob for capability discovery.** The permission entry does not re-express
+  `eddi.a2a.capabilities.public`; duplicating the gate into a second property is how the two drift.
+
+### Tests
+
+- **`A2aEndpointPermissionsTest`** (new, unit — runs in `./mvnw test`, no container). Feeds the
+  shipped `application.properties` through Quarkus's own `ImmutablePathMatcher` and resolves the
+  effective policy per path and method, replicating `findHttpMatchers`' method-filtering rule. Its
+  last test reflects over `RestA2AEndpoint` and asserts every `@PermitAll` / `@Authenticated` method
+  resolves to the policy it claims — so the *next* endpoint added with a forgotten permit entry
+  fails here. Mutation-checked three ways: removing the card entry reproduces the original
+  `[authenticated]`; widening to `/a2a/agents/*` catches both failure modes above; a
+  `/.well-known/*` wildcard trips the sibling assertion.
+- **`ui/manager/e2e/auth/a2a-discovery.spec.ts`** (new). The auth E2E tier is the only one that
+  enforces authentication, so it is where the real status codes belong: it creates an A2A-enabled
+  agent (a card is built from stored config, no deployment needed), then asserts 200 anonymous for
+  both cards and both capability endpoints and 401 anonymous for the roster, the JSON-RPC surface
+  and an unlisted `/.well-known` sibling. It opens with its own "this backend really is enforcing
+  auth" guard so it cannot pass vacuously, and re-checks the roster with an admin token so the 401
+  is provably about anonymity.
+- `docker-compose.integration-keycloak.yml` sets `EDDI_A2A_CAPABILITIES_PUBLIC=true`, because with
+  the flag off the spec could not tell "permitted, flag says no" (404) from "the permission entry is
+  missing again". The flag-off 404 stays covered by `RestA2AEndpointTest`.
+
+### Files
+
+- `src/main/resources/application.properties` — new `a2a-agent-card` and `a2a-capabilities` permit
+  entries, GET-only, before the catch-all
+- `src/main/java/ai/labs/eddi/engine/a2a/RestA2AEndpoint.java` — `listA2AAgents` is
+  `@Authenticated`; Javadoc on every endpoint records the posture and why
+- `src/test/java/ai/labs/eddi/engine/a2a/A2aEndpointPermissionsTest.java` — new
+- `ui/manager/e2e/auth/a2a-discovery.spec.ts` — new
+- `ui/manager/docker-compose.integration-keycloak.yml` — capability flag on
+- `docs/a2a-protocol.md` — an "Anonymous?" column and a "Who can call them" section
+- `docs/configuration-reference.md` — `eddi.a2a.capabilities.public` says what it actually gates
+
+### Review follow-up (PR #782)
+
+Three findings, all valid, all fixed on the branch:
+
+- The generic guard resolved the HTTP verb as `isAnnotationPresent(GET) ? "GET" : "POST"`, so a
+  future `@PermitAll @PUT` would have been graded against a method it does not serve — and since
+  the permit entries are GET-only, that is precisely the drift the guard exists to catch. The verb
+  now comes from whichever annotation is meta-annotated `jakarta.ws.rs.HttpMethod`, and the guard
+  fails on anything other than exactly one. Confirmed by planting a `@PermitAll @PUT` endpoint plus
+  a permit entry naming POST: the old code passed it, the new code names the entry and the verb.
+- `docs/a2a-protocol.md` said everything is reachable without a token when OIDC is off. True of
+  authentication, misleading about the result — `eddi.a2a.capabilities.public` is an independent
+  switch and its endpoints 404 either way while it is off.
+- `docs/configuration-reference.md` said the capability endpoints expose agent *names*.
+  `CapabilityMatch` is `(agentId, skill, confidence, attributes)` — ids. The surface is smaller
+  than the doc claimed, which if anything strengthens the case for leaving `/a2a/agents` (names,
+  descriptions, URLs) authenticated.
+
+**Second pass** (CodeRabbit's first review was rate-limited before it saw the fix commits, so both bots
+were asked for a fresh look):
+
+- `eddi.a2a.capabilities.public` was described as "the only gate". `eddi.a2a.enabled` gates the
+  capability endpoints too (`if (!a2aEnabled || !capabilitiesPublic) → 404`). Reworded in all five
+  places that said it to "the only *authorization* gate — neither flag inspects the caller", which
+  is the claim the permit entry actually rests on.
+- The Agent Card's `authentication.credentials` is built from `quarkus.oidc.auth-server-url`, i.e.
+  the URL **EDDI** uses to reach the IdP. The shapes that bundle Keycloak set that to an in-cluster
+  or compose hostname, so the token endpoint advertised to an outside peer does not resolve — which
+  this PR makes consequential, because the card is now anonymously readable under auth. Initially
+  deferred as a config-design decision; **fixed here** once CodeRabbit raised it independently at
+  Major severity — see the fourth pass below.
+
+**Third pass — two findings Copilot *suppressed* into its review body**, where they have no thread and
+a `reviewThreads` query cannot see them. Both were real, and both are properly this PR's:
+
+- **`/.well-known/agent.json` fanned out over the whole roster.** `getDefaultAgentCard()` called
+  `listA2AAgents()` and returned `cards.get(0)` — building a card for every A2A-enabled agent
+  (`getCurrentResourceId` + `read` + `readDescriptor` apiece, up to 100 candidates) and discarding
+  all but one. Merely wasteful while the endpoint required a token; an amplification vector now that
+  this PR makes it anonymous. `AgentCardService.getDefaultAgentCard()` now stops at the first match
+  (`collectA2AAgents(stopAtFirst)`), and `AgentCardServiceTest` asserts **one** store read across 25
+  candidates rather than asserting the card — the card was always right, the cost was not.
+- **The E2E cleanup scored a failed request as success.** `await call().catch(() => undefined)`
+  followed by `res === undefined || res.status() < 400` passed when the request never completed,
+  leaking the A2A-enabled fixture agent. That one contaminates specifically: the default Agent Card
+  is whichever A2A agent comes first, so a leftover is exactly what a later run reads. The soft
+  assertion now requires a real 2xx/3xx and reports the status or the error.
+
+**Fourth pass — the advertised token endpoint, raised independently by both reviewers.** Deferred
+twice on scope, then implemented: two reviewers agreeing, both framing it as "the permission change
+makes this pre-existing URL consequential", outweighed the argument for keeping it separate.
+
+`AgentCardService.advertisedTokenEndpoint()` resolves what the card advertises:
+
+- **`eddi.a2a.public-token-endpoint`** (new, optional) — advertised verbatim. The *endpoint*, not
+  the issuer, because the path is the provider-specific part.
+- Otherwise `<issuer>/protocol/openid-connect/token`, where `<issuer>` is **`eddi.keycloak.public.url`**
+  grafted onto the realm path from `quarkus.oidc.auth-server-url`, falling back to
+  `quarkus.oidc.auth-server-url` itself. Both shipped authenticated deployments already set the
+  public URL — Helm *requires* it, since the Manager SPA cannot start a login without it — so they
+  become correct with no new configuration. Only the origin is taken from it; the realm path stays
+  what EDDI is configured against, so the two cannot drift. **Nothing moves for a deployment that
+  does not opt in**, which is what made this safe to do inside a permissions PR.
+
+The derivation **assumes Keycloak**, which the docs now say rather than gloss. OIDC discovery would
+remove the assumption instead of documenting it and is the right follow-up; it is not done here
+because it turns rendering an anonymous card into an outbound HTTP call, needing `SafeHttpClient`,
+a cache and a failure policy.
+
+Verified end to end rather than by unit test alone — built the image, ran the Keycloak tier, and read
+the anonymous card: `credentials` is now
+`http://localhost:8180/realms/eddi/protocol/openid-connect/token`, the published port an outside peer
+sees, where it was `http://keycloak:8080/...`. That URL is provably reachable — it is the one the
+test fixtures fetch their tokens from. `a2a-discovery.spec.ts` now asserts it exactly, as the
+reviewer asked.
+
+**Fifth pass — a bug in the fourth pass.** CodeRabbit (Major) caught that the property introduced
+above was the *issuer*, while the Keycloak path `/protocol/openid-connect/token` was appended to
+whatever it named. So the one knob documented as "the escape hatch for a non-Keycloak IdP" handed an
+Okta or Auth0 operator their issuer with a Keycloak path stapled on — it did not do the job it was
+documented as doing, and the docs, the commit message and the reply to the reviewer all repeated the
+claim.
+
+Replaced `eddi.a2a.public-auth-server-url` with `eddi.a2a.public-token-endpoint`, advertised
+verbatim: **one** property instead of two, and it actually covers the case the other one claimed to.
+The property was one commit old and unreleased, so nothing depended on it. Two tests pin the
+distinction, including one asserting the Keycloak path is never appended to an endpoint given in
+full.
+
+Also seen this pass and **not** fixed here: `UI Manager Checks` went red on
+`share-dialog.test.tsx › does not let two quick Enters skip the ownership confirmation`, a file this
+branch does not touch. It passes 15/15 locally three runs in a row, and the cause is visible in the
+test — a synchronous `expect(screen.getByTestId("share-owner-warning"))` immediately after an async
+`userEvent.type`, with no `waitFor`, so a slow runner loses the race. A real flake with a one-line
+fix, but in unrelated code; filed separately rather than smuggled into a permissions PR.
+
+### What's next
+
+Nothing outstanding for A2A. The generic lesson — `@PermitAll` is not a permit entry — applies to
+any future endpoint meant to be anonymous; `A2aEndpointPermissionsTest` only guards
+`RestA2AEndpoint`, and widening it to every `@PermitAll` in the codebase would be a reasonable
+follow-up.
+
 ## ⬆️ chore(ui): Node 22 toolchain, Stryker 10, Vitest 5 for the Chat UI (2026-09-17)
 
 **Repo:** EDDI (`feat/node-22-toolchain`, stacked on `fix/ui-npm-vulnerabilities` / #770)
