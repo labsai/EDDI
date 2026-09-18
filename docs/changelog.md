@@ -146,7 +146,7 @@ with a bounded `limit(10)` sample, dropping the URI condition, and dropping the 
 
 **Repo:** EDDI (`fix/first-boot-migration-order`)
 
-Found by rehearsing an upgrade of a Gnowbe **staging** EDDI 5.5.1 database (MongoDB Atlas, 3012
+Found by rehearsing an upgrade of a customer deployment's **staging** EDDI 5.5.1 database (MongoDB Atlas, 3012
 documents, 7 agents, 195 conversations) to 6.4.0 against a verified restore of the production-like
 dump. Four defects fire on the first boot against a 5.x database; two of them destroy data. All four
 are fixed here with tests, including three that drive a real MongoDB through Testcontainers.
@@ -159,8 +159,8 @@ are fixed here with tests, including three that drive a real MongoDB through Tes
   a quoted literal, and stripping its delimiters was `substring(1, 0)` —
   `StringIndexOutOfBoundsException: Range [1, 0) out of bounds for length 1`. A new
   `splitOnConcatOperator` splits only outside quotes, and `isStringLiteral` requires length ≥ 2 and
-  matching delimiters. The real trigger on staging was `httpcalls/65803e063b449c2ce90f8fc4` holding a
-  template whose three concatenated literals render as another template expression.
+  matching delimiters. The real trigger on staging was a single `httpcalls` config holding a template
+  whose three concatenated literals render as another template expression.
 - **`V6QuteMigration.migrateCollection` had no per-document isolation**, so that one malformed template
   aborted the Thymeleaf→Qute conversion for *every* config in the database, logging only "will retry
   on next startup" — where it threw again. Each document now migrates in its own try/catch, failures
@@ -177,7 +177,7 @@ are fixed here with tests, including three that drive a real MongoDB through Tes
   migration and deleted deployments.** On a first boot against a 5.x database the agent configs are
   still in `bots`; `agents` does not exist until `V6RenameMigration` creates it, so
   `isAgentConfigMissing` returned true for every deployed agent and the sweep called
-  `deleteDeploymentInfo` on each. Observed live: both Gnowbe agents' deployment rows deleted. The
+  `deleteDeploymentInfo` on each. Observed live: the deployment rows of both deployed agents deleted. The
   sweep now returns early while `V6RenameMigration.isPending()`.
 
 ### Design decisions
@@ -245,7 +245,9 @@ asserts the corrected contract under the name `runIfNeeded_collectionAccessFailu
 - `src/main/java/ai/labs/eddi/configs/deployment/mongo/MongoDeploymentStorage.java`
 - `src/main/java/ai/labs/eddi/engine/runtime/internal/AgentDeploymentManagement.java`
 - `src/test/java/ai/labs/eddi/configs/migration/TemplateSyntaxMigratorTest.java`,
-  `V6QuteMigrationTest.java`, `V6RenameMigrationTest.java`
+  `V6QuteMigrationTest.java`, `V6RenameMigrationTest.java` — fixtures use synthetic identifiers; the
+  concat fixture reproduces the shape of the crashing template, not its content, and still fails with
+  the original `StringIndexOutOfBoundsException` against the pre-fix code
 - `src/test/java/ai/labs/eddi/configs/deployment/mongo/MongoDeploymentStorageTest.java` (mocked) and
   `src/test/java/ai/labs/eddi/datastore/mongo/MongoDeploymentStorageTest.java` (Testcontainers —
   pre-rename rows survive construction, a non-partial index is rebuilt as partial, and the dedupe

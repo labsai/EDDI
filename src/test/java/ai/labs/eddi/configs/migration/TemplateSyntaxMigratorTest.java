@@ -216,14 +216,15 @@ class TemplateSyntaxMigratorTest {
     }
 
     /**
-     * Taken verbatim from a Gnowbe staging config: three literals concatenated so
-     * that the rendered output is itself a template expression, for a generated
-     * agent configuration. Malformed, never used, and it stopped the whole
-     * migration. Whatever it converts to, it must not throw.
+     * The shape of a template found in a customer deployment's configuration, with
+     * its identifiers replaced: three literals concatenated so that the rendered
+     * output is itself a template expression, for a generated agent configuration.
+     * Malformed, never used, and it stopped the whole migration. Whatever it
+     * converts to, it must not throw.
      */
     @Test
     void migrateStringConcat_nestedTemplateLiterals_doesNotThrow() {
-        String input = "{\"targetServerUrl\":\"[['[[${'+'properties.chatGptApi'+'}]]']]\"}";
+        String input = "{\"targetServerUrl\":\"[['[[${'+'properties.apiBaseUrl'+'}]]']]\"}";
         String migrated = assertDoesNotThrow(() -> migrator.migrate(input));
         assertFalse(migrated.contains("[[${"), "the crashing expression survived: " + migrated);
     }
