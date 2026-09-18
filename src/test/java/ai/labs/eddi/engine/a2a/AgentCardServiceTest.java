@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -36,6 +37,80 @@ class AgentCardServiceTest {
                 "http://localhost:7070",
                 false,
                 Optional.empty());
+    }
+
+    // --- getDefaultAgentCard ---
+
+    @Nested
+    class GetDefaultAgentCard {
+
+        /**
+         * {@code /.well-known/agent.json} is anonymous, so the work one unauthenticated
+         * GET can provoke is part of its contract. This used to call
+         * {@code listA2AAgents()} and take element zero, building — and discarding — a
+         * card for every other A2A-enabled agent: three store reads apiece, up to a
+         * hundred candidates.
+         */
+        @Test
+        void stopsAtTheFirstA2AEnabledAgent() throws Exception {
+            var descriptors = new ArrayList<DocumentDescriptor>();
+            for (int i = 0; i < 25; i++) {
+                var descriptor = new DocumentDescriptor();
+                descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/agent" + i + "?version=1"));
+                descriptors.add(descriptor);
+            }
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.agent"), anyString(), anyInt(), anyInt(), anyBoolean()))
+                    .thenReturn(descriptors);
+
+            var config = new AgentConfiguration();
+            config.setA2aEnabled(true);
+            when(restAgentStore.getCurrentResourceId(anyString()))
+                    .thenReturn(new IResourceStore.IResourceId() {
+                        @Override
+                        public String getId() {
+                            return "agent0";
+                        }
+
+                        @Override
+                        public Integer getVersion() {
+                            return 1;
+                        }
+                    });
+            when(restAgentStore.read(anyString(), anyInt())).thenReturn(config);
+
+            assertNotNull(service.getDefaultAgentCard());
+
+            // One candidate resolved, not twenty-five. Asserting the store calls rather
+            // than the returned card is the point: the card was always correct, the
+            // cost was not.
+            verify(restAgentStore, times(1)).read(anyString(), anyInt());
+        }
+
+        @Test
+        void returnsNullWhenNoAgentIsA2AEnabled() throws Exception {
+            var descriptor = new DocumentDescriptor();
+            descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/agent0?version=1"));
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.agent"), anyString(), anyInt(), anyInt(), anyBoolean()))
+                    .thenReturn(List.of(descriptor));
+
+            var config = new AgentConfiguration();
+            config.setA2aEnabled(false);
+            when(restAgentStore.getCurrentResourceId(anyString()))
+                    .thenReturn(new IResourceStore.IResourceId() {
+                        @Override
+                        public String getId() {
+                            return "agent0";
+                        }
+
+                        @Override
+                        public Integer getVersion() {
+                            return 1;
+                        }
+                    });
+            when(restAgentStore.read(anyString(), anyInt())).thenReturn(config);
+
+            assertNull(service.getDefaultAgentCard());
+        }
     }
 
     // --- getAgentCard ---

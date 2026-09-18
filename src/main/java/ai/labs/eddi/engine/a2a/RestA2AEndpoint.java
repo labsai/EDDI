@@ -97,12 +97,12 @@ public class RestA2AEndpoint {
             return Response.status(Response.Status.NOT_FOUND).build();
         }
 
-        List<AgentCard> cards = agentCardService.listA2AAgents();
-        if (cards.isEmpty()) {
+        AgentCard card = agentCardService.getDefaultAgentCard();
+        if (card == null) {
             return Response.status(Response.Status.NOT_FOUND).entity(Map.of("error", "No A2A-enabled agents found")).build();
         }
 
-        return Response.ok(cards.get(0)).build();
+        return Response.ok(card).build();
     }
 
     /**

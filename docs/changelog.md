@@ -162,6 +162,22 @@ were asked for a fresh look):
   gained a caveat and the fix is filed as follow-up: give the advertised issuer its own config
   source falling back to `auth-server-url`, and assert the public URL in the auth E2E tier.
 
+**Third pass — two findings Copilot *suppressed* into its review body**, where they have no thread and
+a `reviewThreads` query cannot see them. Both were real, and both are properly this PR's:
+
+- **`/.well-known/agent.json` fanned out over the whole roster.** `getDefaultAgentCard()` called
+  `listA2AAgents()` and returned `cards.get(0)` — building a card for every A2A-enabled agent
+  (`getCurrentResourceId` + `read` + `readDescriptor` apiece, up to 100 candidates) and discarding
+  all but one. Merely wasteful while the endpoint required a token; an amplification vector now that
+  this PR makes it anonymous. `AgentCardService.getDefaultAgentCard()` now stops at the first match
+  (`collectA2AAgents(stopAtFirst)`), and `AgentCardServiceTest` asserts **one** store read across 25
+  candidates rather than asserting the card — the card was always right, the cost was not.
+- **The E2E cleanup scored a failed request as success.** `await call().catch(() => undefined)`
+  followed by `res === undefined || res.status() < 400` passed when the request never completed,
+  leaking the A2A-enabled fixture agent. That one contaminates specifically: the default Agent Card
+  is whichever A2A agent comes first, so a leftover is exactly what a later run reads. The soft
+  assertion now requires a real 2xx/3xx and reports the status or the error.
+
 ### What's next
 
 Nothing outstanding for A2A. The generic lesson — `@PermitAll` is not a permit entry — applies to

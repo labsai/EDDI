@@ -35,6 +35,9 @@ public class AgentCardService {
 
     private static final Logger LOGGER = Logger.getLogger(AgentCardService.class);
 
+    /** How many agent descriptors a single card lookup will scan. */
+    private static final int MAX_AGENT_DESCRIPTORS = 100;
+
     private final IAgentStore agentStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final String baseUrl;
@@ -81,11 +84,39 @@ public class AgentCardService {
     }
 
     /**
+     * The Agent Card served at {@code /.well-known/agent.json} — the first
+     * A2A-enabled agent's.
+     * <p>
+     * Stops at the first match rather than reusing {@link #listA2AAgents()} and
+     * taking element zero. That shortcut built a card for every A2A-enabled agent —
+     * {@code getCurrentResourceId} + {@code read} + {@code readDescriptor} apiece —
+     * and threw all but one away. It was merely wasteful while the endpoint
+     * required a token; it is an amplification vector now that the endpoint is
+     * anonymous, since one unauthenticated GET would fan out across up to
+     * {@value #MAX_AGENT_DESCRIPTORS} candidates.
+     *
+     * @return the default AgentCard, or null when no agent is A2A-enabled
+     */
+    public AgentCard getDefaultAgentCard() {
+        List<AgentCard> cards = collectA2AAgents(true);
+        return cards.isEmpty() ? null : cards.get(0);
+    }
+
+    /**
      * List Agent Cards for all A2A-enabled agents.
      *
      * @return list of AgentCards (may be empty)
      */
     public List<AgentCard> listA2AAgents() {
+        return collectA2AAgents(false);
+    }
+
+    /**
+     * @param stopAtFirst
+     *            return as soon as one A2A-enabled agent has been found, instead of
+     *            building a card for every candidate
+     */
+    private List<AgentCard> collectA2AAgents(boolean stopAtFirst) {
         List<AgentCard> cards = new ArrayList<>();
         try {
             // Unrestricted deliberately: an Agent Card is published to A2A *peers*, which
@@ -94,7 +125,8 @@ public class AgentCardService {
             // scope
             // to. The gate for this surface is `isA2aEnabled()` on the agent plus whatever
             // authentication fronts the A2A endpoints — not the workspace model.
-            List<DocumentDescriptor> descriptors = documentDescriptorStore.readDescriptors("ai.labs.agent", "", 0, 100, false);
+            List<DocumentDescriptor> descriptors = documentDescriptorStore.readDescriptors("ai.labs.agent", "", 0,
+                    MAX_AGENT_DESCRIPTORS, false);
             if (descriptors == null) {
                 return cards;
             }
@@ -118,6 +150,9 @@ public class AgentCardService {
                 AgentCard card = getAgentCard(agentId);
                 if (card != null) {
                     cards.add(card);
+                    if (stopAtFirst) {
+                        return cards;
+                    }
                 }
             }
         } catch (Exception e) {

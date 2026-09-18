@@ -55,9 +55,18 @@ test.describe("A2A discovery — anonymous reachability", () => {
 
   test.afterAll(async ({ request }) => {
     const admin = authHeaders(await tokenFor(request, "admin"));
+    // Soft, so a cleanup failure cannot mask a real one — but it must require an
+    // actual 2xx/3xx. `catch(() => undefined)` followed by `res === undefined ||
+    // ...` scored a request that never completed as a success, which would leak
+    // the A2A-enabled fixture agent. That one contaminates specifically: the
+    // default Agent Card is whichever A2A agent comes first, so a leftover from an
+    // earlier run is exactly what a later run would read.
     const cleanup = async (label: string, call: () => Promise<{ status(): number }>) => {
-      const res = await call().catch(() => undefined);
-      expect.soft(res === undefined || res.status() < 400, `cleanup: ${label} failed`).toBe(true);
+      const outcome = await call().then(
+        (res) => ({ ok: res.status() < 400, detail: `HTTP ${res.status()}` }),
+        (err: unknown) => ({ ok: false, detail: `request failed: ${String(err)}` }),
+      );
+      expect.soft(outcome.ok, `cleanup: ${label} failed — ${outcome.detail}`).toBe(true);
     };
     if (agentId) {
       await cleanup("delete agent", () =>
