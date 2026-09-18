@@ -36,7 +36,89 @@ class AgentCardServiceTest {
                 documentDescriptorStore,
                 "http://localhost:7070",
                 false,
+                Optional.empty(),
+                Optional.empty(),
                 Optional.empty());
+    }
+
+    /** An auth-enabled service with the two public-issuer knobs under test. */
+    private AgentCardService authServiceWith(String oidcAuthServerUrl, String publicAuthServerUrl,
+                                             String keycloakPublicUrl) {
+        return new AgentCardService(
+                restAgentStore,
+                documentDescriptorStore,
+                "http://localhost:7070",
+                true,
+                Optional.ofNullable(oidcAuthServerUrl),
+                Optional.ofNullable(publicAuthServerUrl),
+                Optional.ofNullable(keycloakPublicUrl));
+    }
+
+    /**
+     * Which issuer an Agent Card advertises.
+     * <p>
+     * The card is fetched anonymously by peers outside this deployment, so
+     * {@code quarkus.oidc.auth-server-url} — the address <em>EDDI</em> uses, an
+     * in-cluster Service under Helm — is the wrong thing to publish. These pin the
+     * resolution order, including the fallback that keeps every deployment which
+     * configures neither knob exactly where it was.
+     */
+    @Nested
+    class PublicIssuerUrl {
+
+        private static final String INTERNAL = "http://keycloak:8080/realms/eddi";
+
+        @Test
+        void explicitPublicUrlWins() {
+            var service = authServiceWith(INTERNAL, "https://idp.example.com/realms/eddi",
+                    "http://localhost:8180");
+
+            assertEquals("https://idp.example.com/realms/eddi", service.publicIssuerUrl());
+        }
+
+        @Test
+        void keycloakPublicUrlIsGraftedOntoTheRealmPath() {
+            // The shipped authenticated deployments: Helm requires eddi.oidc.publicUrl
+            // and the auth compose profile sets EDDI_KEYCLOAK_PUBLIC_URL, so both are
+            // correct without any new configuration.
+            var service = authServiceWith(INTERNAL, null, "http://localhost:8180");
+
+            assertEquals("http://localhost:8180/realms/eddi", service.publicIssuerUrl());
+        }
+
+        @Test
+        void trailingSlashOnThePublicUrlDoesNotDoubleUp() {
+            var service = authServiceWith(INTERNAL, null, "http://localhost:8180/");
+
+            assertEquals("http://localhost:8180/realms/eddi", service.publicIssuerUrl());
+        }
+
+        @Test
+        void fallsBackToTheConfiguredIssuerWhenNeitherIsSet() {
+            // The externally hosted IdP case, where EDDI and its peers reach the
+            // issuer by the same name. Nothing changes for a deployment that has not
+            // opted in.
+            var service = authServiceWith(INTERNAL, null, null);
+
+            assertEquals(INTERNAL, service.publicIssuerUrl());
+        }
+
+        @Test
+        void nullWhenOidcIsNotConfiguredAtAll() {
+            assertNull(authServiceWith(null, null, null).publicIssuerUrl());
+        }
+
+        @Test
+        void theCardAdvertisesTheGraftedTokenEndpoint() {
+            var service = authServiceWith(INTERNAL, null, "http://localhost:8180");
+            var config = new AgentConfiguration();
+            config.setA2aEnabled(true);
+
+            var card = service.buildAgentCard("a1", config, 1);
+
+            assertEquals("http://localhost:8180/realms/eddi/protocol/openid-connect/token",
+                    card.authentication().credentials());
+        }
     }
 
     // --- getDefaultAgentCard ---
@@ -289,12 +371,7 @@ class AgentCardServiceTest {
 
         @Test
         void withAuth_whenEnabled() {
-            var authService = new AgentCardService(
-                    restAgentStore,
-                    documentDescriptorStore,
-                    "http://localhost:7070",
-                    true,
-                    Optional.of("http://keycloak:8080/realms/eddi"));
+            var authService = authServiceWith("http://keycloak:8080/realms/eddi", null, null);
 
             var config = new AgentConfiguration();
             config.setA2aEnabled(true);

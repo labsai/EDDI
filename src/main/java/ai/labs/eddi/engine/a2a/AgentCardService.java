@@ -43,17 +43,76 @@ public class AgentCardService {
     private final String baseUrl;
     private final boolean authEnabled;
     private final String oidcAuthServerUrl;
+    private final String publicAuthServerUrl;
+    private final String keycloakPublicUrl;
 
     @Inject
     public AgentCardService(IAgentStore agentStore, IDocumentDescriptorStore documentDescriptorStore,
             @ConfigProperty(name = "eddi.a2a.base-url", defaultValue = "http://localhost:7070") String baseUrl,
             @ConfigProperty(name = "authorization.enabled", defaultValue = "false") boolean authEnabled,
-            @ConfigProperty(name = "quarkus.oidc.auth-server-url") Optional<String> oidcAuthServerUrl) {
+            @ConfigProperty(name = "quarkus.oidc.auth-server-url") Optional<String> oidcAuthServerUrl,
+            @ConfigProperty(name = "eddi.a2a.public-auth-server-url") Optional<String> publicAuthServerUrl,
+            @ConfigProperty(name = "eddi.keycloak.public.url") Optional<String> keycloakPublicUrl) {
         this.agentStore = agentStore;
         this.documentDescriptorStore = documentDescriptorStore;
         this.baseUrl = baseUrl;
         this.authEnabled = authEnabled;
         this.oidcAuthServerUrl = oidcAuthServerUrl.orElse(null);
+        this.publicAuthServerUrl = publicAuthServerUrl.filter(url -> !url.isBlank()).orElse(null);
+        this.keycloakPublicUrl = keycloakPublicUrl.filter(url -> !url.isBlank()).orElse(null);
+    }
+
+    /**
+     * The issuer URL to advertise in an Agent Card, which is not necessarily the
+     * one EDDI itself uses.
+     * <p>
+     * {@code quarkus.oidc.auth-server-url} is how <em>this process</em> reaches the
+     * IdP: the Helm chart points it at the in-cluster Keycloak Service and the auth
+     * compose profile at {@code http://keycloak:8080}. Publishing that to an
+     * external peer — which the card now does anonymously — advertises a host the
+     * peer cannot resolve, so discovery dead-ends and the token endpoint has to be
+     * communicated out of band.
+     * <p>
+     * Resolution order, most explicit first:
+     * <ol>
+     * <li>{@code eddi.a2a.public-auth-server-url} — the full public issuer, for any
+     * IdP and any layout.</li>
+     * <li>{@code eddi.keycloak.public.url} grafted onto the issuer's path. Both
+     * shipped authenticated deployments already set it (Helm <em>requires</em> it;
+     * the SPA cannot start a login without it), so they are correct with no new
+     * configuration.</li>
+     * <li>{@code quarkus.oidc.auth-server-url} unchanged — which is right whenever
+     * EDDI and its peers reach the IdP by the same name, the externally hosted IdP
+     * case. Nothing moves for a deployment that does not opt in.</li>
+     * </ol>
+     *
+     * @return the issuer URL, or null when OIDC is not configured at all
+     */
+    String publicIssuerUrl() {
+        if (publicAuthServerUrl != null) {
+            return stripTrailingSlash(publicAuthServerUrl);
+        }
+        if (keycloakPublicUrl != null && oidcAuthServerUrl != null) {
+            try {
+                var issuer = URI.create(oidcAuthServerUrl);
+                var publicOrigin = URI.create(stripTrailingSlash(keycloakPublicUrl));
+                // Only the origin is taken from the public URL; the realm path stays
+                // whatever EDDI is actually configured against, so the two cannot drift.
+                var grafted = new URI(publicOrigin.getScheme(), publicOrigin.getAuthority(),
+                        issuer.getPath(), null, null);
+                return stripTrailingSlash(grafted.toString());
+            } catch (Exception e) {
+                // A malformed URL must not cost the peer its card — the card is still
+                // correct and useful without an authentication block it cannot trust.
+                LOGGER.warnf("Could not derive a public issuer URL from '%s' and '%s': %s",
+                        sanitize(keycloakPublicUrl), sanitize(oidcAuthServerUrl), e.getMessage());
+            }
+        }
+        return oidcAuthServerUrl == null ? null : stripTrailingSlash(oidcAuthServerUrl);
+    }
+
+    private static String stripTrailingSlash(String url) {
+        return url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
     }
 
     /**
@@ -209,7 +268,12 @@ public class AgentCardService {
         // Build authentication info if auth is enabled
         AgentAuthentication authentication = null;
         if (authEnabled) {
-            String credentials = oidcAuthServerUrl != null ? oidcAuthServerUrl + "/protocol/openid-connect/token" : null;
+            // The path stays Keycloak's. OIDC discovery
+            // (<issuer>/.well-known/openid-configuration) is the provider-agnostic
+            // answer and is the right follow-up; an operator on a different IdP can
+            // already publish the correct endpoint via eddi.a2a.public-auth-server-url.
+            String issuer = publicIssuerUrl();
+            String credentials = issuer != null ? issuer + "/protocol/openid-connect/token" : null;
             authentication = new AgentAuthentication(List.of("Bearer"), credentials);
         }
 

@@ -52,17 +52,9 @@ on, the column is the contract:
   `{url}/agent.json` before it holds any credential for your deployment; EDDI's
   own client does exactly that, with `apiKey` optional. Reading a card needs the
   agent id, so it discloses one agent, not the roster. When authentication is on,
-  the card carries an `authentication` block for the JSON-RPC call that follows.
-
-  > **Caveat.** `authentication.credentials` is derived from
-  > `quarkus.oidc.auth-server-url`, which is the URL **EDDI** uses to reach the
-  > IdP. Point that at a publicly resolvable issuer and the value is usable as
-  > published. The shapes that bundle Keycloak do not: the Helm chart sets it to
-  > the in-cluster service and `docker-compose.integration-keycloak.yml` to the
-  > compose hostname, so the advertised token endpoint does not resolve for an
-  > outside peer, which must be told its token endpoint out of band. Nothing
-  > leaks — an internal hostname is not a credential — but do not rely on the
-  > card alone for token discovery there.
+  the card carries an `authentication` block naming the token endpoint for the
+  JSON-RPC call that follows — see [The advertised token
+  endpoint](#the-advertised-token-endpoint).
 - **`GET /a2a/agents` requires authentication.** It enumerates every A2A-enabled
   agent — name, description, skills, URL — which no part of the protocol needs,
   and which is strictly more than the skill-name list gated behind
@@ -74,6 +66,31 @@ on, the column is the contract:
   only gate: `eddi.a2a.enabled` still has to be on, and with either off the two
   endpoints answer 404 to everyone. With both on they are anonymous, which is what
   "public" means there.
+
+### The advertised token endpoint
+
+`authentication.credentials` has to name an issuer the **peer** can reach, which
+is not always the one EDDI uses: the Helm chart points
+`quarkus.oidc.auth-server-url` at the in-cluster Keycloak Service and the auth
+compose profile at `http://keycloak:8080`. Publishing either to an outside peer
+dead-ends its discovery. EDDI resolves it in this order:
+
+1. **`eddi.a2a.public-auth-server-url`** — the full public issuer
+   (`https://idp.example.com/realms/eddi`). Set this for a non-Keycloak IdP, or
+   any layout the step below does not describe.
+2. **`eddi.keycloak.public.url`**, grafted onto the realm path from
+   `quarkus.oidc.auth-server-url`. Both shipped authenticated deployments already
+   set it — the Helm chart *requires* it, since the Manager SPA cannot start a
+   login without it — so they advertise a reachable endpoint with no new
+   configuration. Only the origin is taken from it; the realm path stays whatever
+   EDDI is configured against, so the two cannot drift apart.
+3. **`quarkus.oidc.auth-server-url`** unchanged — correct whenever EDDI and its
+   peers reach the IdP by the same name, which is the externally hosted IdP case.
+
+The path itself is Keycloak's `/protocol/openid-connect/token`. OIDC discovery
+(`<issuer>/.well-known/openid-configuration`) is the provider-agnostic answer and
+is a sensible follow-up; until then, step 1 lets an operator on another IdP
+publish the right endpoint directly.
 
 > **Implementation note.** `@PermitAll` on the JAX-RS method is only half of
 > this. Quarkus evaluates the `quarkus.http.auth.permission.*` path policies
@@ -114,6 +131,7 @@ on, the column is the contract:
 |---|---|---|
 | `eddi.a2a.enabled` | `true` | Master toggle for all A2A endpoints |
 | `eddi.a2a.base-url` | `http://localhost:7070` | Base URL used in Agent Card URLs |
+| `eddi.a2a.public-auth-server-url` | *(derived)* | The IdP issuer advertised in Agent Cards — see [The advertised token endpoint](#the-advertised-token-endpoint) |
 | `eddi.a2a.capabilities.public` | `false` | Whether `/.well-known/capabilities` and `/.well-known/capabilities/skills` are served at all — see [Who can call them](#who-can-call-them) |
 
 ---

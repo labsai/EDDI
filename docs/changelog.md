@@ -157,10 +157,9 @@ were asked for a fresh look):
 - The Agent Card's `authentication.credentials` is built from `quarkus.oidc.auth-server-url`, i.e.
   the URL **EDDI** uses to reach the IdP. The shapes that bundle Keycloak set that to an in-cluster
   or compose hostname, so the token endpoint advertised to an outside peer does not resolve — which
-  this PR makes consequential, because the card is now anonymously readable under auth. Not a leak
-  (an internal hostname is not a credential) and not this PR's code, so `docs/a2a-protocol.md`
-  gained a caveat and the fix is filed as follow-up: give the advertised issuer its own config
-  source falling back to `auth-server-url`, and assert the public URL in the auth E2E tier.
+  this PR makes consequential, because the card is now anonymously readable under auth. Initially
+  deferred as a config-design decision; **fixed here** once CodeRabbit raised it independently at
+  Major severity — see the fourth pass below.
 
 **Third pass — two findings Copilot *suppressed* into its review body**, where they have no thread and
 a `reviewThreads` query cannot see them. Both were real, and both are properly this PR's:
@@ -177,6 +176,33 @@ a `reviewThreads` query cannot see them. Both were real, and both are properly t
   leaking the A2A-enabled fixture agent. That one contaminates specifically: the default Agent Card
   is whichever A2A agent comes first, so a leftover is exactly what a later run reads. The soft
   assertion now requires a real 2xx/3xx and reports the status or the error.
+
+**Fourth pass — the advertised token endpoint, raised independently by both reviewers.** Deferred
+twice on scope, then implemented: two reviewers agreeing, both framing it as "the permission change
+makes this pre-existing URL consequential", outweighed the argument for keeping it separate.
+
+`AgentCardService.publicIssuerUrl()` resolves what the card advertises, most explicit first:
+
+1. **`eddi.a2a.public-auth-server-url`** (new, optional) — the full public issuer, for any IdP.
+2. **`eddi.keycloak.public.url`** grafted onto the realm path from `quarkus.oidc.auth-server-url`.
+   Both shipped authenticated deployments already set it — Helm *requires* it, since the Manager SPA
+   cannot start a login without it — so they become correct with no new configuration. Only the
+   origin is taken from it; the realm path stays what EDDI is configured against, so the two cannot
+   drift.
+3. **`quarkus.oidc.auth-server-url`** unchanged — right whenever EDDI and its peers reach the IdP by
+   the same name (the externally hosted IdP case). **Nothing moves for a deployment that does not
+   opt in**, which is what made this safe to do inside a permissions PR.
+
+The Keycloak-shaped `/protocol/openid-connect/token` path stays, with a comment: OIDC discovery is
+the provider-agnostic answer and a sensible follow-up, and step 1 already lets an operator on
+another IdP publish the right endpoint.
+
+Verified end to end rather than by unit test alone — built the image, ran the Keycloak tier, and read
+the anonymous card: `credentials` is now
+`http://localhost:8180/realms/eddi/protocol/openid-connect/token`, the published port an outside peer
+sees, where it was `http://keycloak:8080/...`. That URL is provably reachable — it is the one the
+test fixtures fetch their tokens from. `a2a-discovery.spec.ts` now asserts it exactly, as the
+reviewer asked.
 
 ### What's next
 

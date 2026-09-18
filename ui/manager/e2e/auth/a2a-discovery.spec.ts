@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { API_BASE, authHeaders, tokenFor, waitForBackend } from "./auth-helpers";
+import { API_BASE, KEYCLOAK_BASE, authHeaders, tokenFor, waitForBackend } from "./auth-helpers";
 
 /**
  * Who can reach the A2A endpoints on a backend running with OIDC ENFORCED.
@@ -110,8 +110,22 @@ test.describe("A2A discovery — anonymous reachability", () => {
     const res = await request.get(`${API_BASE}/a2a/agents/${agentId}/agent.json`);
     expect(res.status()).toBe(200);
 
-    const card = (await res.json()) as { skills?: { id?: string }[] };
+    const card = (await res.json()) as {
+      skills?: { id?: string }[];
+      authentication?: { credentials?: string };
+    };
     expect(card.skills?.map((s) => s.id)).toContain("order-tracking");
+
+    // The token endpoint has to be one THIS caller could reach. The backend's own
+    // QUARKUS_OIDC_AUTH_SERVER_URL is http://keycloak:8080/... — resolvable only
+    // inside the compose network — so publishing that would strand every external
+    // peer. KEYCLOAK_BASE is the published port, i.e. exactly what an outside peer
+    // sees, and it is what EDDI_KEYCLOAK_PUBLIC_URL names.
+    expect(
+      card.authentication?.credentials,
+      "the card must advertise a token endpoint reachable from outside the compose network —"
+        + " a keycloak:8080 host here means the public issuer derivation regressed",
+    ).toBe(`${KEYCLOAK_BASE}/realms/eddi/protocol/openid-connect/token`);
   });
 
   test("an anonymous caller can reach capability discovery while the flag allows it", async ({
