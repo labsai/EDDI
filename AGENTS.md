@@ -962,6 +962,7 @@ Always use v6 canonical URIs in new configs:
 | `eddi://ai.labs.output`    | `eddi://ai.labs.output/...`   | Usually yes — user messages |
 | `eddi://ai.labs.llm`       | `eddi://ai.labs.llm/...`      | Optional — LLM interaction  |
 | `eddi://ai.labs.mcpcalls`  | `eddi://ai.labs.mcpcalls/...` | Optional — MCP tool calls   |
+| `eddi://ai.labs.rag`       | `eddi://ai.labs.rag/...`      | Optional — binds a knowledge base; retrieval itself runs inside the LLM task |
 | `eddi://ai.labs.templating`| — (no config URI)             | Yes when any output or system prompt contains `{…}` placeholders — must be last |
 
 ### 5.6 Reference Implementation
