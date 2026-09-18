@@ -464,14 +464,56 @@ describe("TopBar", () => {
     expect(trigger).toHaveAttribute("aria-expanded", "true");
   });
 
-  it("shows username as fallback when no fullName", () => {
+  it("shows username as fallback when no name claims", () => {
+    renderTopBarWithAuth({
+      ...keycloakAuth,
+      user: { ...keycloakAuth.user!, fullName: "", firstName: "", lastName: "" },
+    });
+
+    const trigger = screen.getByTestId("user-menu-trigger");
+    expect(trigger).toHaveAttribute("title", "janedoe");
+    expect(screen.getByTestId("user-menu-initials")).toHaveTextContent("J");
+  });
+
+  it("joins given and family name when the token has no display name", () => {
     renderTopBarWithAuth({
       ...keycloakAuth,
       user: { ...keycloakAuth.user!, fullName: "" },
     });
 
+    expect(screen.getByTestId("user-menu-trigger")).toHaveAttribute("title", "Jane Doe");
+  });
+
+  // The token Keycloak issues when the realm grants no `profile`/`email` scope:
+  // every claim the avatar reads is absent. It used to render a literal "?".
+  it("shows a person icon, not a question mark, when the token has no profile claims", async () => {
+    renderTopBarWithAuth({
+      ...keycloakAuth,
+      user: { username: "", firstName: "", lastName: "", email: "", fullName: "" },
+    });
+
     const trigger = screen.getByTestId("user-menu-trigger");
-    expect(trigger).toHaveAttribute("title", "janedoe");
+    expect(trigger).not.toHaveTextContent("?");
+    expect(screen.getByTestId("user-menu-avatar-icon")).toBeInTheDocument();
+    expect(screen.queryByTestId("user-menu-initials")).not.toBeInTheDocument();
+    expect(trigger).toHaveAttribute("title", "Signed in");
+
+    const user = userEvent.setup();
+    await user.click(trigger);
+    expect(screen.getByTestId("user-menu-dropdown")).toHaveTextContent("Signed in");
+    expect(screen.getByTestId("user-menu-logout")).toBeInTheDocument();
+  });
+
+  it("does not repeat the email when it is the only label available", async () => {
+    renderTopBarWithAuth({
+      ...keycloakAuth,
+      user: { username: "", firstName: "", lastName: "", email: "jane@example.com", fullName: "" },
+    });
+
+    expect(screen.getByTestId("user-menu-initials")).toHaveTextContent("J");
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("user-menu-trigger"));
+    expect(screen.getAllByText("jane@example.com")).toHaveLength(1);
   });
 
   it("handles user without email in dropdown", async () => {
