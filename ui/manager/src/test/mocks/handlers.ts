@@ -5723,8 +5723,8 @@ const mockConnections: Record<string, Record<string, unknown>> = {
   // own key per request, so the document carries a header name and nowhere to
   // send it — and no valueTemplate, which the backend refuses on this binding.
   conn6: {
-    name: "gnowbe",
-    description: "Each caller brings their own Gnowbe key",
+    name: "acme",
+    description: "Each caller brings their own Acme key",
     authType: "STATIC",
     binding: "CALLER_SUPPLIED",
     allowUnverifiedPrincipal: false,
@@ -5735,7 +5735,7 @@ const mockConnections: Record<string, Record<string, unknown>> = {
       username: null,
       passwordRef: null,
     },
-    baseUrlAllowlist: ["https://api.gnowbe.com"],
+    baseUrlAllowlist: ["https://api.example.com"],
     timeoutMs: null,
   },
 };

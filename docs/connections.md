@@ -125,11 +125,11 @@ which header the credential goes in and where it may be sent.
 
 ```json
 {
-  "name": "gnowbe",
+  "name": "acme",
   "authType": "STATIC",
   "binding": "CALLER_SUPPLIED",
   "staticAuth": { "headerName": "x-api-key" },
-  "baseUrlAllowlist": ["https://api.gnowbe.com"]
+  "baseUrlAllowlist": ["https://api.example.com"]
 }
 ```
 
@@ -150,7 +150,7 @@ is reported by the startup guard.
 The caller attaches it per request, once per connection:
 
 ```
-X-EDDI-Connection-Credential: gnowbe key-id:secret
+X-EDDI-Connection-Credential: acme key-id:secret
 ```
 
 The connection name runs up to the first space; everything after it is the whole
