@@ -19,6 +19,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -39,11 +40,17 @@ class RagModuleTest {
 
     private Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders;
     private RagTask ragTask;
+    private ILifecycleTask otherTask;
 
     @SuppressWarnings("unchecked")
     @BeforeEach
     void setUp() {
         lifecycleTaskProviders = new HashMap<>();
+        // Registered BEFORE configure(), so leavesOtherRegistrationsAlone can prove
+        // configure() preserved it. Putting it in afterwards passed even if
+        // configure() cleared the map.
+        otherTask = mock(ILifecycleTask.class);
+        lifecycleTaskProviders.put("ai.labs.output", () -> otherTask);
         ragTask = new RagTask(mock(IResourceClientLibrary.class));
 
         Instance<ILifecycleTask> instance = mock(Instance.class);
@@ -75,10 +82,10 @@ class RagModuleTest {
     @Test
     @DisplayName("does not disturb extensions registered by other modules")
     void leavesOtherRegistrationsAlone() {
-        var otherTask = mock(ILifecycleTask.class);
-        lifecycleTaskProviders.put("ai.labs.output", () -> otherTask);
+        Provider<ILifecycleTask> survivor = lifecycleTaskProviders.get("ai.labs.output");
 
-        assertNotNull(lifecycleTaskProviders.get("ai.labs.output"));
+        assertNotNull(survivor, "configure() must not drop an extension registered before it ran");
+        assertSame(otherTask, survivor.get());
         assertNotNull(lifecycleTaskProviders.get(RagTask.ID));
     }
 }
