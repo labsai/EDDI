@@ -16,6 +16,9 @@ import {
   defaultOperatorConfig,
   verifyGateInstalled,
   reportOperatorGateStatus,
+  fetchPlatformSelfUrl,
+  resolveOperatorApiBaseUrl,
+  type PlatformSelfUrl,
   type GateVerificationResult,
   type OperatorConfig,
   type FetchedSpec,
@@ -36,6 +39,7 @@ export const operatorKeys = {
   status: (agentId: string, version: number) =>
     ["operator", "status", agentId, version] as const,
   gate: (agentId: string) => ["operator", "gate", agentId] as const,
+  selfUrl: ["operator", "self-url"] as const,
 };
 
 /* ─── Config ─── */
@@ -81,6 +85,27 @@ export function useOperatorStatus(config: OperatorConfig | null | undefined) {
   });
 }
 
+/**
+ * The address EDDI reports it can reach itself at.
+ *
+ * Read so the activation form can PREFILL the platform base URL rather than
+ * leaving an admin to guess it — and so the form can say whether the deployment
+ * chose the address (`eddi.self.base-url`) or it was derived from the HTTP port.
+ *
+ * `null` is a meaningful answer: the backend predates the endpoint. The form
+ * treats that as "you may have to fill this in yourself" instead of an error.
+ * `staleTime: Infinity` because this is deployment configuration — it cannot
+ * change without a restart, which ends this session anyway.
+ */
+export function usePlatformSelfUrl(enabled = true) {
+  return useQuery<PlatformSelfUrl | null>({
+    queryKey: operatorKeys.selfUrl,
+    queryFn: fetchPlatformSelfUrl,
+    enabled,
+    staleTime: Infinity,
+  });
+}
+
 /* ─── Activation ─── */
 
 /** Progress stages surfaced while activation runs. */
@@ -111,6 +136,18 @@ export interface ActivationOutcome {
   policyVerified: boolean | null;
   /** The spec activation provisioned against, for the background probes. */
   spec: FetchedSpec;
+  /**
+   * Set when the operator this activation replaced could not be retired, so it
+   * is probably STILL DEPLOYED alongside the new one.
+   *
+   * This used to be a bare `catch {}`. The consequence was not cosmetic: a
+   * reconfigure that changed only the model left two `READY` operators on the
+   * instance, the UI silently addressed the new one, and an engineer debugging a
+   * broken operator repaired the agent that was no longer in use — the fix
+   * changed nothing and the real cause stayed hidden. A failure here has to
+   * reach the screen.
+   */
+  supersededWarning: string | null;
 }
 
 export interface ActivateParams {
@@ -151,8 +188,16 @@ export function useActivateOperator() {
         );
       }
 
+      // The address the generated tools will target. Resolved HERE, before
+      // anything is created, because it is the single field that decides whether
+      // the operator can function at all — and because the resolved value is then
+      // persisted on the config, so the operator screen can show it and a later
+      // reconfigure reuses the admin's choice instead of re-deriving it.
+      const apiBaseUrl = await resolveOperatorApiBaseUrl(config);
+      const effectiveConfig: OperatorConfig = { ...config, apiBaseUrl };
+
       onStage?.("provisioning");
-      const result = await provisionOperator({ agentName, config, apiKey, baseUrl, spec });
+      const result = await provisionOperator({ agentName, config: effectiveConfig, apiKey, baseUrl, spec });
       // 201 does not mean deployed, and the id can come back as "unknown".
       assertProvisioned(result);
 
@@ -173,7 +218,7 @@ export function useActivateOperator() {
 
         onStage?.("saving");
         next = {
-          ...config,
+          ...effectiveConfig,
           enabled: true,
           agentId: result.agentId,
           version,
@@ -184,7 +229,7 @@ export function useActivateOperator() {
         // a cleanup that itself fails must not replace it. `version` may be
         // unresolved, so fall back to 1 — the version provisionOperator creates.
         try {
-          await removeSupersededAgent({ ...config, agentId: result.agentId, version: 1 });
+          await removeSupersededAgent({ ...effectiveConfig, agentId: result.agentId, version: 1 });
         } catch {
           // Left deployed; the rethrown error below is still the honest report.
         }
@@ -193,11 +238,35 @@ export function useActivateOperator() {
 
       // Retire the agent this activation replaced, so repeated reconfiguration
       // doesn't accumulate deployed operators.
-      if (config.agentId && config.agentId !== result.agentId) {
+      //
+      // Reported, not swallowed. `setup-api` always builds a NEW agent id, so a
+      // reconfigure is a replacement, and a replacement whose retirement quietly
+      // failed is the worst of both worlds: two deployed operators, both READY,
+      // with nothing on screen saying which one the UI is talking to. That is not
+      // a hypothetical — it happened on a reconfigure that changed only the model,
+      // and the ensuing debugging session repaired the abandoned agent.
+      let supersededWarning: string | null = null;
+      if (config.agentId && config.agentId !== result.agentId && config.version == null) {
+        // A config that recorded the agent but not its version (written before
+        // version tracking) cannot be undeployed or deleted — both endpoints need
+        // the version. removeSupersededAgent would return silently and leave two
+        // operators running, which is exactly the state this exists to report.
+        supersededWarning =
+          `The new operator agent (${result.agentId}) is live, but the one it replaced (${config.agentId}) ` +
+          "has no recorded version, so it could not be removed automatically. It may still be deployed and answering. " +
+          "Delete it from the Agents screen — and note that this screen now talks to the NEW agent, " +
+          "so changes made to the old one will have no effect.";
+      } else if (config.agentId && config.agentId !== result.agentId) {
         try {
           await removeSupersededAgent(config);
-        } catch {
-          // Best-effort cleanup; the new operator is already live and saved.
+        } catch (removalError) {
+          const detail =
+            removalError instanceof Error ? removalError.message : String(removalError);
+          supersededWarning =
+            `The new operator agent (${result.agentId}) is live, but the one it replaced (${config.agentId}) ` +
+            `could not be removed (${detail}). It may still be deployed and answering. ` +
+            "Delete it from the Agents screen — and note that this screen now talks to the NEW agent, " +
+            "so changes made to the old one will have no effect.";
         }
       }
 
@@ -255,7 +324,7 @@ export function useActivateOperator() {
       const policyVerified = await enforceGateDryRun(next, spec);
 
       onStage?.("done");
-      return { config: next, gate, policyVerified, spec };
+      return { config: next, gate, policyVerified, spec, supersededWarning };
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: operatorKeys.all });
@@ -361,9 +430,18 @@ async function rollBackUnsafeOperator(config: OperatorConfig, failure: string): 
 async function removeSupersededAgent(config: OperatorConfig): Promise<void> {
   if (!config.agentId || config.version == null) return;
   try {
-    await undeployAgent(config.environment, config.agentId, config.version);
+    // `endAllActiveConversations`, for the same reason deactivateOperator and
+    // resetOperator pass it: the backend refuses (409) to undeploy an agent that
+    // still has active conversations, and the superseded operator's active
+    // conversation is almost always the admin's own operator chat — on the very
+    // screen the Reconfigure button lives on. Without the flag, having USED the
+    // operator was enough to make its replacement leave it deployed.
+    await undeployAgent(config.environment, config.agentId, config.version, {
+      endAllActiveConversations: true,
+    });
   } catch {
-    // Already undeployed.
+    // Already undeployed, or the environment is gone — the delete below is what
+    // actually retires it, and its failure is NOT swallowed.
   }
   await deleteAgent(config.agentId, config.version, {
     cascade: true,

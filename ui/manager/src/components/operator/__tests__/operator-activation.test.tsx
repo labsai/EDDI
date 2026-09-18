@@ -76,6 +76,111 @@ describe("OperatorActivation", () => {
     });
   });
 
+  /**
+   * The field whose absence cost a day: the operator's tools used to be
+   * provisioned with `window.location.origin` — the BROWSER's address — with
+   * nothing on any screen saying so. It is now visible, prefilled from the
+   * server, and editable.
+   */
+  describe("platform base URL", () => {
+    it("prefills the address the backend reports it can reach itself at", async () => {
+      renderActivation();
+      const field = screen.getByLabelText(/platform base url/i);
+      await waitFor(() => expect(field).toHaveValue("http://127.0.0.1:7070"));
+    });
+
+    it("hands the prefilled address to onActivate rather than the browser's origin", async () => {
+      const { onActivate } = renderActivation({
+        initial: { ...defaultOperatorConfig("Body text."), credentialKey: "operator-llm-key" },
+      });
+      await waitFor(() =>
+        expect(screen.getByLabelText(/platform base url/i)).toHaveValue("http://127.0.0.1:7070"),
+      );
+      await userEvent.click(screen.getByTestId("operator-next"));
+      await userEvent.click(await screen.findByTestId("operator-activate"));
+      expect(onActivate).toHaveBeenCalledWith(
+        expect.objectContaining({ apiBaseUrl: "http://127.0.0.1:7070" }),
+        expect.anything(),
+        undefined,
+      );
+    });
+
+    it("keeps an admin's own value instead of overwriting it with the server's", async () => {
+      renderActivation();
+      const field = screen.getByLabelText(/platform base url/i);
+      await waitFor(() => expect(field).toHaveValue("http://127.0.0.1:7070"));
+      await userEvent.clear(field);
+      await userEvent.type(field, "https://eddi.svc.internal:8443");
+      // The prefill effect must not fight the admin for the field.
+      await waitFor(() => expect(field).toHaveValue("https://eddi.svc.internal:8443"));
+    });
+
+    /** A value baked into 22 resources should not be able to be a bare hostname. */
+    it("blocks continuing on a value that cannot be a base URL", async () => {
+      renderActivation({
+        initial: { ...defaultOperatorConfig("Body text."), credentialKey: "operator-llm-key" },
+      });
+      const field = screen.getByLabelText(/platform base url/i);
+      await waitFor(() => expect(field).toHaveValue("http://127.0.0.1:7070"));
+      await userEvent.clear(field);
+      await userEvent.type(field, "eddi.internal:7070");
+      expect(await screen.findByTestId("operator-platform-base-url-invalid")).toBeInTheDocument();
+      expect(screen.getByTestId("operator-next")).toBeDisabled();
+    });
+
+    it("says so when the deployment cannot report its own address", async () => {
+      server.use(
+        http.get("*/administration/operator/self-url", () =>
+          HttpResponse.json({ message: "not found" }, { status: 404 }),
+        ),
+      );
+      renderActivation();
+      expect(
+        await screen.findByTestId("operator-platform-base-url-unknown"),
+      ).toBeInTheDocument();
+    });
+
+    /**
+     * A reconfigure carries the stored address in, and it wins over the server's
+     * answer. When the two disagree — the deployment moved port since — the admin
+     * must be told, or the reconfigure re-provisions the old fault.
+     */
+    it("says when a carried-in address differs from what the server now reports", async () => {
+      renderActivation({
+        initial: { ...defaultOperatorConfig("Body text."), apiBaseUrl: "http://127.0.0.1:9090" },
+      });
+      expect(await screen.findByTestId("operator-platform-base-url-differs")).toHaveTextContent(
+        "http://127.0.0.1:7070",
+      );
+      // The loopback note describes the SERVER's answer; it must not sit under a
+      // field holding something else.
+      expect(screen.queryByTestId("operator-platform-base-url-source")).not.toBeInTheDocument();
+    });
+
+    it("treats an unresolved server answer like no answer", async () => {
+      server.use(
+        http.get("*/administration/operator/self-url", () =>
+          HttpResponse.json({ baseUrl: null, source: "unresolved" }),
+        ),
+      );
+      renderActivation();
+      expect(await screen.findByTestId("operator-platform-base-url-unknown")).toBeInTheDocument();
+    });
+
+    /** Empty is legal: activation resolves it. It must not block the form. */
+    it("allows an empty value and reports it as server-resolved on review", async () => {
+      renderActivation({
+        initial: { ...defaultOperatorConfig("Body text."), credentialKey: "operator-llm-key" },
+      });
+      const field = screen.getByLabelText(/platform base url/i);
+      await waitFor(() => expect(field).toHaveValue("http://127.0.0.1:7070"));
+      await userEvent.clear(field);
+      expect(screen.getByTestId("operator-next")).not.toBeDisabled();
+      await userEvent.click(screen.getByTestId("operator-next"));
+      expect(await screen.findByText(/resolved from the server/i)).toBeInTheDocument();
+    });
+  });
+
   describe("reconfiguring an existing operator", () => {
     it("pre-fills the stored vault key so the credential need not be re-entered", async () => {
       renderActivation({

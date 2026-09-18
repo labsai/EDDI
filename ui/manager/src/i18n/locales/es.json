@@ -4134,8 +4134,15 @@
       "tools": "Herramientas que recibirá ({{toolCount}})",
       "activate": "Activar y desplegar",
       "callerIdentityNote": "EDDI inserta tu token en el momento de la llamada. Nunca se almacena en la conversación y solo se envía de vuelta a esta instalación.",
-      "rebuildWarning": "Al guardar se crea un nuevo agente operador y se elimina el actual. Tu conversación de operador existente no se conservará.",
-      "environmentHint": "Dónde se ejecuta el propio agente operador. Aun así puede leer cualquier entorno."
+      "rebuildWarning": "Guardar SUSTITUYE al operador: se crea un agente nuevo y el actual ({{agentId}}) se retira del despliegue y se elimina. Tu conversación de operador actual no se conservará, y desde ese momento esta pantalla se referirá al nuevo agente.",
+      "environmentHint": "Dónde se ejecuta el propio agente operador. Aun así puede leer cualquier entorno.",
+      "platformBaseUrl": "URL base de la plataforma",
+      "platformBaseUrlHint": "La dirección en la que EDDI puede alcanzarse a sí mismo: las herramientas del operador la llaman desde dentro del servidor, por lo que no es la dirección que usa tu navegador. Déjala como viene rellenada salvo que sepas lo contrario.",
+      "platformBaseUrlInvalid": "Debe ser una URL absoluta http:// o https://, por ejemplo http://127.0.0.1:7070.",
+      "platformBaseUrlUnknown": "Esta instalación de EDDI no puede informar de su propia dirección, así que se usará el origen de tu navegador. Eso solo es correcto si nada (ningún túnel, redirección de puertos ni proxy inverso) se interpone entre tu navegador y EDDI; en caso contrario, introduce aquí la dirección.",
+      "platformBaseUrlLoopback": "Derivada del puerto HTTP de esta instalación. Sustitúyela si hay que dirigirse a EDDI por un nombre de servicio o mediante TLS en el propio proceso.",
+      "platformBaseUrlAuto": "resuelta por el servidor",
+      "platformBaseUrlDiffers": "Esta instalación informa actualmente de su propia dirección como {{serverUrl}}. El valor de arriba es distinto: consérvalo solo si lo pusiste a propósito."
     },
     "authMode": {
       "none": {
@@ -4183,7 +4190,10 @@
       "gateUnknown": "Puerta no comprobada",
       "gateVerified": "Puerta verificada",
       "gateNotVerified": "Puerta no verificada",
-      "gateUnverifiedHelp": "No se pudo verificar la puerta de aprobación en el documento de este agente."
+      "gateUnverifiedHelp": "No se pudo verificar la puerta de aprobación en el documento de este agente.",
+      "agentId": "Agente",
+      "platformBaseUrl": "Llama a la plataforma en",
+      "platformBaseUrlUnknown": "no registrada"
     },
     "chat": {
       "empty": "Pregunta sobre tu instalación. El operador lo consulta y te muestra cada llamada que hace.",
@@ -4297,6 +4307,9 @@
       "stepCount_one": "{{count}} paso",
       "stepCount_other": "{{count}} pasos",
       "stepCount_many": "{{count}} pasos"
+    },
+    "superseded": {
+      "title": "El agente operador anterior sigue desplegado."
     }
   },
   "groupWorkspace": {

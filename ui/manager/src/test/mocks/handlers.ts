@@ -5479,6 +5479,13 @@ export const backupSyncHandlers = [
   // don't care about it still trigger it as a side effect of gate
   // verification and the write canary. Without a default, every one of them
   // logs an MSW "unhandled request" warning that drowns out real ones.
+  // The address EDDI reports it can reach ITSELF at — what the operator's tools
+  // must target. Deliberately DIFFERENT from the test origin, so a test that
+  // accidentally provisions the browser's origin fails instead of passing by
+  // coincidence: that coincidence is precisely how the bug shipped.
+  http.get("*/administration/operator/self-url", () =>
+    HttpResponse.json({ baseUrl: "http://127.0.0.1:7070", source: "loopback" }),
+  ),
   http.post("*/administration/operator/canary-result", () => new HttpResponse(null, { status: 204 })),
   http.post("*/administration/operator/gate-status", () => new HttpResponse(null, { status: 204 })),
 

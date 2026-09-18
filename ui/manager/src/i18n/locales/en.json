@@ -4097,8 +4097,15 @@
       "tools": "Tools it will be given ({{toolCount}})",
       "activate": "Activate & deploy",
       "callerIdentityNote": "EDDI substitutes your token when it makes the call. It is never stored in the conversation, and is only ever sent back to this deployment.",
-      "rebuildWarning": "Saving builds a new operator agent and removes the current one. Your existing operator conversation will not carry over.",
-      "environmentHint": "Where the operator agent itself runs. It can still read any environment."
+      "rebuildWarning": "Saving REPLACES the operator: a new agent is built and the current one ({{agentId}}) is undeployed and deleted. Your existing operator conversation will not carry over, and this screen will address the new agent from then on.",
+      "environmentHint": "Where the operator agent itself runs. It can still read any environment.",
+      "platformBaseUrl": "Platform base URL",
+      "platformBaseUrlHint": "The address EDDI can reach itself at — the operator's tools call it from inside the server, so it is not the address your browser uses. Leave it as prefilled unless you know otherwise.",
+      "platformBaseUrlInvalid": "This must be an absolute http:// or https:// URL, for example http://127.0.0.1:7070.",
+      "platformBaseUrlUnknown": "This EDDI deployment cannot report its own address, so it will fall back to your browser's origin. That is only correct when nothing (no tunnel, port mapping or reverse proxy) sits between your browser and EDDI — otherwise enter the address here.",
+      "platformBaseUrlLoopback": "Derived from this deployment's HTTP port. Override it if EDDI must be addressed by a service name or through in-process TLS.",
+      "platformBaseUrlAuto": "resolved from the server",
+      "platformBaseUrlDiffers": "This deployment currently reports its own address as {{serverUrl}}. The value above differs — keep it only if you set it on purpose."
     },
     "authMode": {
       "none": {
@@ -4146,7 +4153,10 @@
       "gateUnknown": "Gate not checked",
       "gateVerified": "Gate verified",
       "gateNotVerified": "Gate not verified",
-      "gateUnverifiedHelp": "The approval gate could not be verified on this agent's document."
+      "gateUnverifiedHelp": "The approval gate could not be verified on this agent's document.",
+      "agentId": "Agent",
+      "platformBaseUrl": "Calls platform at",
+      "platformBaseUrlUnknown": "not recorded"
     },
     "chat": {
       "empty": "Ask about your deployment. The operator looks things up and shows you every call it makes.",
@@ -4258,6 +4268,9 @@
       "noOpeningMessage": "(no message yet)",
       "stepCount_one": "{{count}} step",
       "stepCount_other": "{{count}} steps"
+    },
+    "superseded": {
+      "title": "The previous operator agent is still deployed."
     }
   },
   "groupWorkspace": {

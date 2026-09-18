@@ -292,6 +292,7 @@ describe("runPostActivationProbes", () => {
         config: { ...config({ scope: "read_only" }), agentId: "op-1", version: 1, enabled: true },
         gate: { verified: true, checkedVersions: [1] },
         policyVerified: null,
+      supersededWarning: null,
         spec: { raw: { openapi: "3.1.0", paths: {} }, paths: {} },
       },
       {
