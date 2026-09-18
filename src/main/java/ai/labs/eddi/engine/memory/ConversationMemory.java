@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationProperties;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -40,6 +41,11 @@ public class ConversationMemory implements IConversationMemory {
     private ConversationState conversationState;
     private ResolutionPrincipal.Provenance resolutionProvenance;
     private volatile boolean cancelled;
+    /**
+     * Optimistic-concurrency revision of the document this memory was loaded from.
+     * See {@link IConversationMemory#getRevision()}.
+     */
+    private long revision = ConversationMemorySnapshot.UNVERSIONED_REVISION;
 
     /** Transient — never serialized to MongoDB. Set per-turn for SSE streaming. */
     private transient ConversationEventSink eventSink;
@@ -178,6 +184,16 @@ public class ConversationMemory implements IConversationMemory {
     @Override
     public Integer getAgentVersion() {
         return agentVersion;
+    }
+
+    @Override
+    public long getRevision() {
+        return revision;
+    }
+
+    @Override
+    public void setRevision(long revision) {
+        this.revision = revision;
     }
 
     public List<ConversationOutput> getConversationOutputs() {

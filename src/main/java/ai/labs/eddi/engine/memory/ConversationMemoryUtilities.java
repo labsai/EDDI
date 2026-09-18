@@ -72,6 +72,10 @@ public class ConversationMemoryUtilities {
         // read as legacy — a snapshot built from live memory is current by
         // definition and must say so explicitly.
         snapshot.setSchemaVersion(ConversationMemorySnapshot.CURRENT_SCHEMA_VERSION);
+        // The revision this write is DERIVED from, not the one it will create: the
+        // store filters on it and increments it, so a turn built on a snapshot that
+        // another writer has already superseded is refused instead of overwriting it.
+        snapshot.setRevision(conversationMemory.getRevision());
 
         if (conversationMemory.getUserId() != null) {
             snapshot.setUserId(conversationMemory.getUserId());
@@ -143,6 +147,10 @@ public class ConversationMemoryUtilities {
                 snapshot.getUserId());
 
         conversationMemory.setConversationState(snapshot.getConversationState());
+        // The revision this memory is a view of. Every write derived from this memory
+        // carries it, so the store can tell "built on the current document" from
+        // "built on a document someone else has since replaced".
+        conversationMemory.setRevision(snapshot.getRevision());
         conversationMemory.setResolutionProvenance(snapshot.getResolutionProvenance());
         conversationMemory.setHitlPausedWorkflowId(snapshot.getHitlPausedWorkflowId());
         conversationMemory.setHitlPausedAbsoluteTaskIndex(snapshot.getHitlPausedAbsoluteTaskIndex());

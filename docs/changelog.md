@@ -50,6 +50,129 @@ bottom of this file and are never archived.
 
 ---
 
+## 🐛 fix(conversation): optimistic concurrency on the conversation document (2026-09-18)
+
+**Repo:** EDDI (`fix/conversation-turn-concurrency`)
+
+A turn's reply could be handed to the client with HTTP 200 and `conversationState: READY`
+and the turn then be discarded — no error, no 409, nothing in the log. Measured on a live
+6.4.0 instance: three turns posted to `POST /agents/managed/{intent}/{userId}` back to back,
+each awaiting its own 200, produced a conversation holding the greeting, turn 1 and turn 3.
+Turn 2 was absent from MongoDB entirely. A 3 second gap between turns stored all four outputs.
+
+### The mechanism, as verified in this branch
+
+Two things compose:
+
+1. **The reply leaves before the turn is durable.** `Conversation.runStep` calls
+   `outputProvider.renderOutput(memory)` in its `finally` block, and that is the lambda
+   `ConversationService.say` passes to `agent.continueConversation` — so
+   `responseHandler.onComplete` (HTTP 200) fires from *inside* the pipeline callable, while the
+   persist happens afterwards in the runtime's `onComplete`
+   (`ConversationStepRunner.runGuardedConversationStep`). A client that waits for every 200
+   can therefore still post the next turn before the previous one has been written.
+2. **The next turn's load is not serialized, and the write replaced the whole document.**
+   `ConversationService.say` calls `loadConversationMemory` on the REST thread, *before*
+   `conversationCoordinator.submitInOrder`. So turn N+1 can load a snapshot that predates
+   turn N's store, append its own step, and write the whole document back via
+   `replaceOne({_id}, snapshot)` — matching on the id alone. Last writer won, silently.
+
+`MongoConversationTurnConcurrencyTest` reproduces both shapes against a real MongoDB
+(Testcontainers) through the production conversion path, and `threeSequentialTurnsKeepEveryTurn`
+reproduces the reporter's exact symptom: stored inputs `[greeting, turn 1, turn 3]`.
+
+### What changed
+
+- **`ConversationMemorySnapshot._rev`** — a monotonic revision on the conversation document.
+  A loaded snapshot carries the revision it was loaded at; `IConversationMemory.getRevision()`
+  carries it across the turn (set by `convertConversationMemorySnapshot`, read back by
+  `convertConversationMemory`).
+- **Both snapshot-store methods are now revision-guarded.**
+  `ConversationMemoryStore.storeConversationMemorySnapshot` filters on
+  `{_id, _rev: loaded}` and stamps `_rev: loaded + 1`; a zero-match throws the new
+  `ConcurrentConversationModificationException` (a `ResourceStoreException` subtype).
+  `storeConversationMemorySnapshotIfState` — the undo/redo and HITL-resume path — now filters
+  on the revision **in addition to** the conversation state, and returns `false` on a miss
+  (which the REST layer already maps to 409).
+- **`PostgresConversationMemoryStore` keeps parity** via
+  `WHERE id = ? AND COALESCE((data->>'_rev')::bigint, 0) = ?`.
+- **A zero-match is disambiguated with one point-read** so the two causes get different
+  answers: the conversation is gone (deleted mid-turn — a plain `ResourceStoreException`,
+  nothing to retry against) versus present at another revision (a conflict a retry from a
+  fresh load can still resolve).
+- **The say path reports the conflict loudly**: `ConversationStepRunner.reportStoreConflict`
+  increments `eddi_conversation_store_conflict_count` and logs ERROR naming the revision the
+  turn was built on.
+- **A conditional-store miss is diagnosed, not assumed.** `storeConversationMemorySnapshotIfState`
+  now misses for two reasons, and its callers (say-path pause commit, HITL resume, undo, redo)
+  were written when there was one ("a concurrent end/cancel moved the state"). On a miss,
+  `ConversationStepRunner.diagnoseConditionalStoreMiss` reads the stored state once: if it still
+  equals the expected state, the revision failed, so it counts the conflict and logs it at WARN.
+  The callers' own messages now say "state or revision". Without this, a revision conflict on
+  those paths would have been logged as a benign handover and never counted — silent again.
+
+### Decisions
+
+- **Detect and report, do not merge — yet.** By the time the persist runs, the reply is already
+  with the caller, so neither a 409 nor a re-execution is available on the say path. A "reload
+  and re-apply" is only safe once re-applying means *appending* rather than replacing, which is
+  the follow-up commit. This commit's job is to convert a silent loss into an attributable one:
+  a dedicated exception, an ERROR line and a metric.
+- **A conflict does NOT flip the conversation to ERROR.** `logConversationError` would, but the
+  document on disk belongs to a writer that succeeded; breaking a healthy conversation because
+  this turn lost the race trades one wrong outcome for another.
+- **Cross-instance by construction.** The guard is a filtered `updateOne`/`UPDATE … WHERE`
+  evaluated by MongoDB or PostgreSQL, not a JVM lock. It holds between pods, between the say
+  path and the undo/redo path, and between EDDI and any other writer of the collection — which
+  is the point: `InMemoryConversationCoordinator` only serializes turns within one pod, and the
+  load happens outside even that.
+- **Narrow field updates deliberately do not bump `_rev`.** `setConversationState`,
+  `compareAndSetState` and `clearHitlBookmark` are already arbitrated by the conversation-state
+  CAS; bumping there would turn existing intentional handovers (a watchdog parking a turn as
+  `EXECUTION_INTERRUPTED` while that turn is completing) into write conflicts.
+- **Legacy documents upgrade without a migration.** A document with no `_rev` reads as
+  `UNVERSIONED_REVISION` and its filter is `{_rev: 0} OR {_rev: {$exists: false}}` — MongoDB's
+  `{_rev: 0}` does not match a missing field, so without the `$exists` half every pre-upgrade
+  conversation would have been bricked on its next turn.
+  `legacyDocumentWithoutRevisionUpgrades` covers it.
+
+### Files
+
+- `src/main/java/ai/labs/eddi/engine/memory/ConcurrentConversationModificationException.java` (new)
+- `src/main/java/ai/labs/eddi/engine/memory/ConversationMemoryStore.java`
+- `src/main/java/ai/labs/eddi/engine/memory/IConversationMemoryStore.java`
+- `src/main/java/ai/labs/eddi/engine/memory/ConversationMemory.java`,
+  `IConversationMemory.java`, `ConversationMemoryUtilities.java`
+- `src/main/java/ai/labs/eddi/engine/memory/model/ConversationMemorySnapshot.java`
+- `src/main/java/ai/labs/eddi/datastore/postgres/PostgresConversationMemoryStore.java`
+- `src/main/java/ai/labs/eddi/engine/internal/ConversationStepRunner.java`,
+  `ConversationService.java`
+- `src/main/java/ai/labs/eddi/engine/internal/ConversationHitlService.java` (log wording)
+- `src/test/java/ai/labs/eddi/datastore/mongo/MongoConversationTurnConcurrencyTest.java` (new)
+- `src/test/java/ai/labs/eddi/engine/internal/ConversationServiceStoreConflictTest.java` (new) —
+  the say-path conflict is counted and does not flip the conversation to ERROR; a
+  conditional-store revision miss is counted, a state miss is not
+- `src/test/java/ai/labs/eddi/engine/memory/ConversationMemoryStoreTest.java`,
+  `ConversationMemoryStoreResilienceTest.java`,
+  `src/test/java/ai/labs/eddi/datastore/postgres/PostgresConversationMemoryStoreUnitTest.java`
+
+### Mutation check
+
+Disabling the revision half of `revisionFilter` (returning the id filter alone) fails 4 tests,
+including both invariant reproductions — `overlappingTurnIsNotSilentlyLost` reports
+`[greeting, turn B]` and `threeSequentialTurnsKeepEveryTurn` reports
+`[greeting, turn 1, turn 3]`. Removing the conflict-counter increments fails 2 of the 3
+`ConversationServiceStoreConflictTest` tests.
+
+### What's next
+
+The write amplification is untouched: a turn still rewrites the whole document to append one
+step (410 KB average on a production 5.x database). The follow-up commit replaces that with
+`$push` of the new steps, which also turns a conflict into a retryable merge instead of a
+reported loss.
+
+---
+
 ## ⬆️ chore(ui): Node 22 toolchain, Stryker 10, Vitest 5 for the Chat UI (2026-09-17)
 
 **Repo:** EDDI (`feat/node-22-toolchain`, stacked on `fix/ui-npm-vulnerabilities` / #770)

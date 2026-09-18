@@ -288,6 +288,37 @@ public interface IConversationMemory extends Serializable {
         // no-op by default
     }
 
+    // === Optimistic concurrency ===
+
+    /**
+     * The revision of the conversation document this memory was loaded from, or
+     * {@code ConversationMemorySnapshot.UNVERSIONED_REVISION} for a memory that was
+     * never loaded (a brand-new conversation) or one loaded from a document written
+     * before the field existed.
+     * <p>
+     * Carried on memory because the load establishes it and the store needs it: the
+     * write filters on this value and increments it, so a turn that started from a
+     * superseded snapshot is refused rather than silently applied over the newer
+     * one.
+     *
+     * @since 6.4.1
+     */
+    default long getRevision() {
+        return 0L;
+    }
+
+    /**
+     * Records the document revision this memory represents. Set by
+     * {@code ConversationMemoryUtilities.convertConversationMemorySnapshot} on
+     * load, and again by the store path after a successful write so a second write
+     * from the same live memory carries the revision it just created.
+     *
+     * @since 6.4.1
+     */
+    default void setRevision(long revision) {
+        // no-op by default
+    }
+
     interface IConversationStepStack {
         <T> IData<T> getLatestData(String key);
 

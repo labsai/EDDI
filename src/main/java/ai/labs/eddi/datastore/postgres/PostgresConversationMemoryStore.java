@@ -6,6 +6,7 @@ package ai.labs.eddi.datastore.postgres;
 
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.memory.ConcurrentConversationModificationException;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException;
@@ -89,11 +90,19 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
             String conversationId = snapshot.getConversationId();
 
             if (conversationId != null) {
-                // Update existing
+                long expectedRevision = snapshot.getRevision();
+                // The revision the write CREATES, stamped before serializing: the row
+                // stores the snapshot verbatim, so the persisted _rev must be the new one
+                // or the guard below would keep matching the same revision forever.
+                snapshot.setRevision(expectedRevision + 1);
+                json = jsonSerialization.serialize(snapshot);
+                // Update existing, guarded on the revision this write was derived from.
+                // COALESCE because a row written before _rev existed carries no such key
+                // and must still be writable (it upgrades in the process).
                 String sql = """
                         UPDATE conversation_memories
                         SET AGENT_ID = ?, AGENT_VERSION = ?, conversation_state = ?, data = ?::jsonb
-                        WHERE id = ?::uuid
+                        WHERE id = ?::uuid AND COALESCE((data->>'_rev')::bigint, 0) = ?
                         """;
                 try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
                     ps.setString(1, snapshot.getAgentId());
@@ -101,22 +110,28 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
                     ps.setString(3, snapshot.getConversationState().name());
                     ps.setString(4, json);
                     ps.setString(5, conversationId);
-                    // No upsert on purpose: zero affected rows means the conversation was
-                    // deleted while the turn was running (GDPR erasure, retention sweep).
-                    // Discarding the count dropped the turn's memory silently and still
-                    // returned a normal response to the caller — surface the conflict
-                    // instead, exactly as the MongoDB store does.
+                    ps.setLong(6, expectedRevision);
+                    // No upsert on purpose: zero affected rows means either the row was
+                    // deleted while the turn was running (GDPR erasure, retention sweep) or
+                    // another writer committed first. Discarding the count dropped the
+                    // turn's memory silently and still returned a normal response to the
+                    // caller — surface the conflict instead, exactly as the MongoDB store
+                    // does.
                     if (ps.executeUpdate() == 0) {
-                        throw new IResourceStore.ResourceStoreException(
-                                "Conversation '" + conversationId + "' no longer exists — the turn was NOT persisted. "
-                                        + "The conversation row was deleted concurrently (e.g. erasure or retention cleanup).");
+                        // Leave the caller's snapshot describing the revision it was actually
+                        // derived from, so a retry re-presents that one.
+                        snapshot.setRevision(expectedRevision);
+                        throw conversationNotWritten(conn, conversationId, expectedRevision);
                     }
                 }
             } else {
                 // Insert new
                 conversationId = UUID.randomUUID().toString();
                 snapshot.setId(conversationId);
-                String json2 = jsonSerialization.serialize(snapshot); // re-serialize with ID
+                // A fresh conversation starts at revision 1, so a legacy-shaped row (no
+                // _rev, read as UNVERSIONED_REVISION) can never be mistaken for one.
+                snapshot.setRevision(ConversationMemorySnapshot.UNVERSIONED_REVISION + 1);
+                String json2 = jsonSerialization.serialize(snapshot); // re-serialize with ID and revision
                 String sql = """
                         INSERT INTO conversation_memories (id, AGENT_ID, AGENT_VERSION, conversation_state, data)
                         VALUES (?::uuid, ?, ?, ?, ?::jsonb)
@@ -150,14 +165,19 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
             return false;
         }
         try {
+            long expectedRevision = snapshot.getRevision();
+            snapshot.setRevision(expectedRevision + 1);
             String json = jsonSerialization.serialize(snapshot);
-            // Atomic compare-and-store: the WHERE guards the state column (the CAS
-            // arbiter, see compareAndSetState), so a concurrent terminal writer that
-            // moved the row off expectedState is not overwritten.
+            // Atomic compare-and-store on BOTH arbiters: the state column (see
+            // compareAndSetState), so a concurrent terminal writer that moved the row off
+            // expectedState is not overwritten; and the revision, so a concurrent
+            // NON-terminal writer — a say turn that appended a step while an undo was in
+            // flight — is not overwritten either, which the state filter alone cannot see
+            // because both writers leave the same state behind.
             String sql = """
                     UPDATE conversation_memories
                     SET AGENT_ID = ?, AGENT_VERSION = ?, conversation_state = ?, data = ?::jsonb
-                    WHERE id = ?::uuid AND conversation_state = ?
+                    WHERE id = ?::uuid AND conversation_state = ? AND COALESCE((data->>'_rev')::bigint, 0) = ?
                     """;
             try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
                 ps.setString(1, snapshot.getAgentId());
@@ -166,11 +186,38 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
                 ps.setString(4, json);
                 ps.setString(5, conversationId);
                 ps.setString(6, expectedState.name());
-                return ps.executeUpdate() > 0;
+                ps.setLong(7, expectedRevision);
+                if (ps.executeUpdate() > 0) {
+                    return true;
+                }
+                snapshot.setRevision(expectedRevision);
+                return false;
             }
         } catch (IOException | SQLException e) {
             throw new IResourceStore.ResourceStoreException("Failed to conditionally store conversation memory", e);
         }
+    }
+
+    /**
+     * A zero-row write has exactly two causes and they need different answers from
+     * the caller, so tell them apart with one extra probe on the id alone: the row
+     * is gone (deleted mid-turn — nothing to retry against) or it is there at a
+     * different revision (another writer committed first — a retry from a fresh
+     * load can still land).
+     */
+    private IResourceStore.ResourceStoreException conversationNotWritten(Connection conn, String conversationId, long expectedRevision)
+            throws SQLException {
+        try (PreparedStatement probe = conn.prepareStatement("SELECT 1 FROM conversation_memories WHERE id = ?::uuid")) {
+            probe.setString(1, conversationId);
+            try (ResultSet rs = probe.executeQuery()) {
+                if (rs.next()) {
+                    return new ConcurrentConversationModificationException(conversationId, expectedRevision);
+                }
+            }
+        }
+        return new IResourceStore.ResourceStoreException(
+                "Conversation '" + conversationId + "' no longer exists — the turn was NOT persisted. "
+                        + "The conversation row was deleted concurrently (e.g. erasure or retention cleanup).");
     }
 
     @Override

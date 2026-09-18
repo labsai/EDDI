@@ -199,6 +199,14 @@ public class ConversationService implements IConversationService {
     private final Counter counterConversationRedo;
     final Counter counterHitlPause;
     private final Counter counterHitlResume;
+    /**
+     * Turns whose persist was refused because another writer had already committed
+     * to the same conversation document (an optimistic-concurrency conflict). Every
+     * increment here used to be an invisible data loss: the stale write replaced
+     * the winner and the turn disappeared with no error, no 409 and nothing in the
+     * log.
+     */
+    final Counter counterConversationStoreConflict;
     // Task 10 — tool-level HITL metrics registry (new meters, never re-tag
     // existing).
     private final MeterRegistry meterRegistry;
@@ -270,6 +278,7 @@ public class ConversationService implements IConversationService {
         this.counterConversationProcessing = meterRegistry.counter("eddi_conversation_processing_count");
         this.counterConversationUndo = meterRegistry.counter("eddi_conversation_undo_count");
         this.counterConversationRedo = meterRegistry.counter("eddi_conversation_redo_count");
+        this.counterConversationStoreConflict = meterRegistry.counter("eddi_conversation_store_conflict_count");
         this.counterHitlPause = meterRegistry.counter("eddi_hitl_pause_count", "surface", "regular");
         this.counterHitlResume = meterRegistry.counter("eddi_hitl_resume_count", "surface", "regular");
         // (timeout fires are counted in HitlTimeoutHandler, tagged by surface)
@@ -955,7 +964,7 @@ public class ConversationService implements IConversationService {
                 // the store lands only if nothing moved the DB state meanwhile; on a
                 // miss the concurrent writer wins and undo reports no-op.
                 if (!storeConversationMemoryIfState(conversationMemory, environment, loadedStateForUndo)) {
-                    LOGGER.warnf("Undo of conversation %s aborted: state changed concurrently (was %s)",
+                    LOGGER.warnf("Undo of conversation %s aborted: its state or revision changed concurrently (state was %s)",
                             conversationId, loadedStateForUndo);
                     return false;
                 }
@@ -1001,7 +1010,7 @@ public class ConversationService implements IConversationService {
                 // Same second-writer race as undo (see above): CAS from the loaded
                 // state so a concurrent say-turn pause commit is not clobbered.
                 if (!storeConversationMemoryIfState(conversationMemory, environment, loadedStateForRedo)) {
-                    LOGGER.warnf("Redo of conversation %s aborted: state changed concurrently (was %s)",
+                    LOGGER.warnf("Redo of conversation %s aborted: its state or revision changed concurrently (state was %s)",
                             conversationId, loadedStateForRedo);
                     return false;
                 }

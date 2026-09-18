@@ -47,6 +47,40 @@ public class ConversationMemorySnapshot {
      * {@code ConversationSchemaMigrations}.
      */
     private int schemaVersion = LEGACY_SCHEMA_VERSION;
+    /**
+     * The revision a document that predates the {@code _rev} field reads as. Also
+     * the initialiser, so a snapshot built from live memory that was never loaded
+     * (a brand-new conversation) claims it too and its first write inserts at
+     * revision 1.
+     */
+    public static final long UNVERSIONED_REVISION = 0L;
+    /**
+     * Optimistic-concurrency revision of the stored document, persisted as
+     * {@code _rev}.
+     * <p>
+     * On a snapshot that was <em>loaded</em> this is the revision the load saw; on
+     * a snapshot about to be <em>written</em> it is therefore the revision the
+     * write is derived from, so the stores filter on it and increment it. A
+     * zero-match means another writer committed first — see
+     * {@code ConcurrentConversationModificationException}.
+     * <p>
+     * A document written before this field existed deserializes to
+     * {@link #UNVERSIONED_REVISION} and upgrades on its next write, with no
+     * migration. That is why the stores match "expected
+     * {@link #UNVERSIONED_REVISION}" as "{@code _rev} is 0 <em>or</em> absent":
+     * MongoDB's {@code {_rev: 0}} does not match a document that has no
+     * {@code _rev} at all.
+     * <p>
+     * The revision guards the document <em>body</em> — the steps, outputs,
+     * properties and state that the two snapshot-store methods write. The narrow
+     * field-level updates ({@code setConversationState},
+     * {@code compareAndSetState}, {@code clearHitlBookmark}) deliberately do NOT
+     * bump it: those races are already arbitrated by the conversation-state CAS,
+     * and bumping here would convert existing, intentional state handovers (a
+     * watchdog parking a turn as EXECUTION_INTERRUPTED while that turn is still
+     * completing) into write conflicts.
+     */
+    private long revision = UNVERSIONED_REVISION;
     private String conversationId;
     private String agentId;
     private Integer agentVersion;
@@ -110,6 +144,16 @@ public class ConversationMemorySnapshot {
 
     public void setSchemaVersion(int schemaVersion) {
         this.schemaVersion = schemaVersion;
+    }
+
+    @JsonProperty("_rev")
+    public long getRevision() {
+        return revision;
+    }
+
+    @JsonProperty("_rev")
+    public void setRevision(long revision) {
+        this.revision = revision;
     }
 
     @JsonProperty("_id")

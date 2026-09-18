@@ -11,6 +11,7 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationNotFoundException;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
+import ai.labs.eddi.engine.memory.ConcurrentConversationModificationException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -303,9 +304,9 @@ class ConversationStepRunner {
                                         conversationMemory, environment, preTurnPersistedState);
                                 if (!persisted) {
                                     conversationService.contextLogger.setLoggingContext(loggingContext);
-                                    LOGGER.infof("Pause of conversation %s not persisted: a concurrent end/cancel moved "
-                                            + "it off %s — discarding the pause outcome so the terminal state wins",
-                                            conversationId, preTurnPersistedState);
+                                    LOGGER.infof("Pause of conversation %s not persisted: a concurrent writer moved it "
+                                            + "off %s or rewrote the document — discarding the pause outcome so the "
+                                            + "committed write wins", conversationId, preTurnPersistedState);
                                     return;
                                 }
                                 // M2: close the cancel-during-commit window. A cancel that
@@ -344,6 +345,20 @@ class ConversationStepRunner {
                                 // settles to READY/ENDED/… and persists the full snapshot.
                                 storeConversationMemory(conversationMemory, environment);
                             }
+                        } catch (ConcurrentConversationModificationException e) {
+                            // The turn ran, its reply was already handed to the caller
+                            // (renderOutput fires from inside the pipeline callable, before
+                            // this persist), and the document has since been rewritten by
+                            // another writer. Report it loudly instead of overwriting the
+                            // winner — which is what happened before the revision guard
+                            // existed, silently.
+                            //
+                            // Deliberately NOT routed through logConversationError: that
+                            // flips the conversation to ERROR, and the document on disk here
+                            // belongs to a writer that succeeded. Breaking a healthy
+                            // conversation because THIS turn lost the race would trade one
+                            // wrong outcome for another.
+                            reportStoreConflict(loggingContext, conversationId, e);
                         } catch (ResourceStoreException e) {
                             logConversationError(loggingContext, conversationId, e);
                         }
@@ -427,6 +442,24 @@ class ConversationStepRunner {
         }
     }
 
+    /**
+     * A turn whose persist lost the optimistic-concurrency race. Counts it on
+     * {@code eddi_conversation_store_conflict_count} and logs it at ERROR naming
+     * the revision the turn was built on, so the loss is attributable in metrics
+     * and in the log instead of being invisible.
+     * <p>
+     * The conversation state is left alone on purpose — see the call site.
+     */
+    void reportStoreConflict(Map<String, String> loggingContext, String conversationId,
+                             ConcurrentConversationModificationException e) {
+        conversationService.counterConversationStoreConflict.increment();
+        conversationService.contextLogger.setLoggingContext(loggingContext);
+        LOGGER.errorf(e, "Turn of conversation %s was NOT persisted: the conversation document was written by another "
+                + "turn, resume, undo/redo or instance while this turn was running (this turn started from revision %d). "
+                + "The reply was already returned to the caller, so this turn's step is lost — the caller should retry it.",
+                conversationId, e.getExpectedRevision());
+    }
+
     void logConversationError(Map<String, String> loggingContext, String conversationId, Throwable t) {
         setConversationState(conversationId, ConversationState.ERROR);
         String msg = "Error while processing user input (conversationId=%s , conversationState=%s)";
@@ -474,21 +507,65 @@ class ConversationStepRunner {
     String storeConversationMemory(IConversationMemory conversationMemory, Environment environment) throws ResourceStoreException {
         var memorySnapshot = convertConversationMemory(conversationMemory);
         memorySnapshot.setEnvironment(environment);
-        return conversationMemoryStore.storeConversationMemorySnapshot(memorySnapshot);
+        var conversationId = conversationMemoryStore.storeConversationMemorySnapshot(memorySnapshot);
+        // The store stamped the revision it created. Carry it back so a second write
+        // from this same live memory (a start turn that stores and is then stored
+        // again, a resume that commits twice) presents the revision it just created
+        // rather than the superseded one it loaded.
+        conversationMemory.setRevision(memorySnapshot.getRevision());
+        return conversationId;
     }
 
     /**
      * Persist the full memory snapshot only while the conversation is still in
-     * {@code expectedState} — an atomic compare-and-store. Used by the resume path
-     * so a resumed outcome cannot clobber an ENDED/EXECUTION_INTERRUPTED state
-     * written concurrently by end/cancel.
+     * {@code expectedState} and still holds the revision this memory was loaded at
+     * — an atomic compare-and-store on both. Used by the resume and undo/redo paths
+     * so a resumed or undone outcome cannot clobber an ENDED/EXECUTION_INTERRUPTED
+     * state written concurrently by end/cancel, nor a step appended concurrently by
+     * a say turn.
      */
     boolean storeConversationMemoryIfState(IConversationMemory conversationMemory, Environment environment,
                                            ConversationState expectedState)
             throws ResourceStoreException {
         var memorySnapshot = convertConversationMemory(conversationMemory);
         memorySnapshot.setEnvironment(environment);
-        return conversationMemoryStore.storeConversationMemorySnapshotIfState(memorySnapshot, expectedState);
+        boolean stored = conversationMemoryStore.storeConversationMemorySnapshotIfState(memorySnapshot, expectedState);
+        if (stored) {
+            conversationMemory.setRevision(memorySnapshot.getRevision());
+        } else {
+            diagnoseConditionalStoreMiss(conversationMemory, expectedState);
+        }
+        return stored;
+    }
+
+    /**
+     * A conditional store now misses for one of two reasons, and every caller (the
+     * say-path pause commit, HITL resume, undo, redo) was written when there was
+     * only one: "a concurrent end/cancel moved the state". The other is a revision
+     * conflict — another turn, undo or instance rewrote the document while the
+     * state stayed the same — which is exactly the lost update this guard exists to
+     * catch. Without telling them apart, a revision conflict on these paths would
+     * be logged as a benign state handover and never reach
+     * {@code eddi_conversation_store_conflict_count}, i.e. it would be silent
+     * again.
+     * <p>
+     * One point-read of the state, only on a miss. If the stored state still equals
+     * the expected one, the revision is what failed. (The state can move between
+     * the miss and this read; the diagnosis then errs towards "state changed",
+     * which is the pre-existing message, never towards inventing a conflict.)
+     */
+    private void diagnoseConditionalStoreMiss(IConversationMemory conversationMemory, ConversationState expectedState) {
+        String conversationId = conversationMemory.getConversationId();
+        if (conversationId == null || expectedState == null) {
+            return;
+        }
+        ConversationState storedState = conversationMemoryStore.getConversationState(conversationId);
+        if (storedState == expectedState) {
+            conversationService.counterConversationStoreConflict.increment();
+            LOGGER.warnf("Conditional write of conversation %s was NOT persisted: the state is still %s, but the document "
+                    + "was rewritten by another turn, undo/redo, resume or instance since this write loaded revision %d",
+                    sanitize(conversationId), expectedState, conversationMemory.getRevision());
+        }
     }
 
     /**

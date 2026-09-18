@@ -54,6 +54,11 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     private static final String KEY_AGENT_ID = "agentId";
     private static final String KEY_AGENT_VERSION = "agentVersion";
     private static final String KEY_CONVERSATION_STATE = "conversationState";
+    /**
+     * Optimistic-concurrency revision — see
+     * {@link ConversationMemorySnapshot#getRevision()}.
+     */
+    private static final String KEY_REVISION = "_rev";
     private final MongoCollection<Document> conversationCollectionDocument;
     private final MongoCollection<ConversationMemorySnapshot> conversationCollectionObject;
 
@@ -72,18 +77,29 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     public String storeConversationMemorySnapshot(ConversationMemorySnapshot snapshot) throws IResourceStore.ResourceStoreException {
         String conversationId = snapshot.getConversationId();
         if (conversationId != null) {
-            var result = conversationCollectionObject.replaceOne(new Document(OBJECT_ID, new ObjectId(conversationId)), snapshot);
+            long expectedRevision = snapshot.getRevision();
+            // The revision the write creates. Set BEFORE the replace, because
+            // replaceOne serializes the snapshot as-is — the stored _rev has to be the
+            // new one, or every subsequent write would match the same revision and the
+            // guard would never fire.
+            snapshot.setRevision(expectedRevision + 1);
+            var result = conversationCollectionObject.replaceOne(revisionFilter(conversationId, expectedRevision), snapshot);
             // No upsert on purpose: a missing document means the conversation was
             // deleted while the turn was running (GDPR erasure, retention sweep).
             // Ignoring matchedCount discarded the turn's memory silently and still
             // returned a normal response to the caller — surface the conflict instead.
             if (result.getMatchedCount() == 0) {
-                throw new IResourceStore.ResourceStoreException(
-                        "Conversation '" + conversationId + "' no longer exists — the turn was NOT persisted. "
-                                + "The conversation document was deleted concurrently (e.g. erasure or retention cleanup).");
+                // Restore the revision so the caller's snapshot still describes the
+                // document it was derived from — a retry must re-present the revision
+                // it actually loaded, not the one this attempt failed to create.
+                snapshot.setRevision(expectedRevision);
+                throw conversationNotWritten(conversationId, expectedRevision);
             }
         } else {
             snapshot.setId(new ObjectId().toString());
+            // A fresh conversation starts at revision 1, so a legacy-shaped document
+            // (no _rev, read as UNVERSIONED_REVISION) can never be mistaken for one.
+            snapshot.setRevision(ConversationMemorySnapshot.UNVERSIONED_REVISION + 1);
             conversationCollectionObject.insertOne(snapshot);
         }
 
@@ -101,14 +117,61 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
             // CAS miss (discard) rather than NPE on expectedState.name().
             return false;
         }
-        var filter = new Document(OBJECT_ID, new ObjectId(conversationId))
-                .append(KEY_CONVERSATION_STATE, expectedState.name());
-        // Atomic compare-and-store: replaces the whole document (including its new
-        // state) only while the persisted state still equals expectedState. If a
-        // concurrent terminal writer already flipped it (ENDED/EXECUTION_INTERRUPTED),
-        // the filter misses and nothing is overwritten.
+        long expectedRevision = snapshot.getRevision();
+        var filter = Filters.and(
+                revisionFilter(conversationId, expectedRevision),
+                Filters.eq(KEY_CONVERSATION_STATE, expectedState.name()));
+        // Atomic compare-and-store on BOTH arbiters: replaces the whole document
+        // (including its new state) only while the persisted state still equals
+        // expectedState AND nothing has written the document since this snapshot was
+        // loaded. The state half keeps a concurrent terminal writer
+        // (ENDED/EXECUTION_INTERRUPTED) from being overwritten; the revision half keeps
+        // a concurrent NON-terminal writer — a say turn that appended a step while an
+        // undo was in flight — from being overwritten too, which the state filter alone
+        // cannot see because both writers leave the same state behind.
+        snapshot.setRevision(expectedRevision + 1);
         var result = conversationCollectionObject.replaceOne(filter, snapshot);
-        return result.getMatchedCount() > 0;
+        if (result.getMatchedCount() == 0) {
+            snapshot.setRevision(expectedRevision);
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * Matches the conversation only while it still holds {@code expectedRevision}.
+     * <p>
+     * {@code UNVERSIONED_REVISION} needs the {@code $or}: a document written before
+     * {@code _rev} existed has no such field, and MongoDB's {@code {_rev: 0}} does
+     * not match a missing field. Without this, every pre-upgrade conversation's
+     * next write would be refused as a phantom conflict.
+     */
+    private static Bson revisionFilter(String conversationId, long expectedRevision) {
+        var idFilter = Filters.eq(OBJECT_ID, new ObjectId(conversationId));
+        if (expectedRevision == ConversationMemorySnapshot.UNVERSIONED_REVISION) {
+            return Filters.and(idFilter,
+                    Filters.or(Filters.eq(KEY_REVISION, expectedRevision), Filters.exists(KEY_REVISION, false)));
+        }
+        return Filters.and(idFilter, Filters.eq(KEY_REVISION, expectedRevision));
+    }
+
+    /**
+     * A zero-match write has exactly two causes, and they need different answers
+     * from the caller, so tell them apart with one extra point-read of the id
+     * alone: the document is gone (deleted mid-turn — nothing to retry against) or
+     * it is there at a different revision (another writer committed first — a retry
+     * from a fresh load can still land).
+     */
+    private IResourceStore.ResourceStoreException conversationNotWritten(String conversationId, long expectedRevision) {
+        boolean stillExists = conversationCollectionDocument
+                .find(Filters.eq(OBJECT_ID, new ObjectId(conversationId)))
+                .projection(new Document(OBJECT_ID, 1)).first() != null;
+        if (stillExists) {
+            return new ConcurrentConversationModificationException(conversationId, expectedRevision);
+        }
+        return new IResourceStore.ResourceStoreException(
+                "Conversation '" + conversationId + "' no longer exists — the turn was NOT persisted. "
+                        + "The conversation document was deleted concurrently (e.g. erasure or retention cleanup).");
     }
 
     @Override
