@@ -47,9 +47,11 @@
              CI's Build Image job is the build that ships them. -->
         <skipUi>false</skipUi>
         <frontend-maven-plugin.version>1.15.1</frontend-maven-plugin.version>
-        <!-- Node 20 matches CI (ci.yml, the ui-* jobs). Both frontends are on
-             Vite 6, which needs 20.19 or newer. -->
-        <node.version>v20.20.2</node.version>
+        <!-- Node 22 matches CI (ci.yml, the ui-* jobs) and mise.toml. The floor is
+             22.18: Vitest 5 needs 22.12, and Stryker 10's Babel 8 declares
+             `^22.18.0 || >=24.11.0`. Node 22 is Maintenance LTS until 2027-04-30;
+             20 reached end of life on 2026-04-30. -->
+        <node.version>v22.23.2</node.version>
         <!-- Pinned: Maven only warns when a declared plugin carries no version, then
              takes whatever its default lifecycle binding says, which moves with the
              Maven wrapper. -->

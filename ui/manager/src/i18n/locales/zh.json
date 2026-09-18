@@ -24,7 +24,8 @@
     "sessionExpired": "会话已过期，请重新登录。",
     "profile": "个人资料",
     "guest": "访客",
-    "userMenu": "用户菜单"
+    "userMenu": "用户菜单",
+    "signedIn": "已登录"
   },
   "nav": {
     "dashboard": "仪表盘",

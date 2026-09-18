@@ -11,6 +11,7 @@ import {
   PanelLeftClose,
   PanelLeft,
   LogOut,
+  UserRound,
   ExternalLink,
   BookOpen,
   FileJson,
@@ -40,6 +41,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
+import { userDisplayName, userInitials, userSecondaryEmail } from "@/lib/user-display";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useOnboarding, ALL_CHAPTERS, type TourChapterId } from "@/hooks/use-onboarding";
@@ -149,14 +151,11 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const { data: pendingApprovals } = usePendingApprovals();
   const pendingApprovalCount = pendingApprovals?.length ?? 0;
 
-  /** User initials for avatar */
-  const initials = showUser
-    ? [user.firstName, user.lastName]
-        .filter(Boolean)
-        .map((n) => n[0])
-        .join("")
-        .toUpperCase() || user.username[0]?.toUpperCase() || "?"
-    : "";
+  /** Avatar initials and label — both empty when the token carries no profile claims */
+  const initials = showUser ? userInitials(user) : "";
+  const displayName = showUser ? userDisplayName(user) : "";
+  const secondaryEmail = showUser ? userSecondaryEmail(user) : "";
+  const userLabel = displayName || t("auth.signedIn", "Signed in");
 
   // ── Collapsible section state (persisted in localStorage) ──
   const STORAGE_KEY = "eddi-sidebar-sections";
@@ -367,18 +366,36 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                 near-black on gold, so no visible change. It is also the app's only
                 use of the token: without it Tailwind tree-shakes it out of the
                 design-system bundle entirely (see .design-sync/NOTES.md). */}
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sidebar-accent text-xs font-bold text-sidebar-accent-foreground">
-              {initials}
+            {/* Collapsed, the avatar is all that is left, so it carries the name
+                for hover and screen readers. Expanded, the name is printed beside
+                it, and announcing the initials first would only repeat it. */}
+            <div
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sidebar-accent text-xs font-bold text-sidebar-accent-foreground"
+              data-testid="sidebar-user-avatar"
+              {...(collapsed
+                ? { role: "img", "aria-label": userLabel, title: userLabel }
+                : { "aria-hidden": true })}
+            >
+              {initials || (
+                <UserRound
+                  className="h-4 w-4"
+                  aria-hidden="true"
+                  data-testid="sidebar-user-avatar-icon"
+                />
+              )}
             </div>
             {!collapsed && (
               <div className="flex min-w-0 flex-1 items-center justify-between">
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-sidebar-foreground">
-                    {user.fullName || user.username}
+                  <p
+                    className="truncate text-sm font-medium text-sidebar-foreground"
+                    title={displayName || undefined}
+                  >
+                    {userLabel}
                   </p>
-                  {user.email && (
-                    <p className="truncate text-xs text-sidebar-foreground/60">
-                      {user.email}
+                  {secondaryEmail && (
+                    <p className="truncate text-xs text-sidebar-foreground/60" title={secondaryEmail}>
+                      {secondaryEmail}
                     </p>
                   )}
                 </div>
