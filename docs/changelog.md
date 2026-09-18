@@ -181,21 +181,22 @@ a `reviewThreads` query cannot see them. Both were real, and both are properly t
 twice on scope, then implemented: two reviewers agreeing, both framing it as "the permission change
 makes this pre-existing URL consequential", outweighed the argument for keeping it separate.
 
-`AgentCardService.publicIssuerUrl()` resolves what the card advertises, most explicit first:
+`AgentCardService.advertisedTokenEndpoint()` resolves what the card advertises:
 
-1. **`eddi.a2a.public-auth-server-url`** (new, optional) — the full public issuer, for any IdP.
-2. **`eddi.keycloak.public.url`** grafted onto the realm path from `quarkus.oidc.auth-server-url`.
-   Both shipped authenticated deployments already set it — Helm *requires* it, since the Manager SPA
-   cannot start a login without it — so they become correct with no new configuration. Only the
-   origin is taken from it; the realm path stays what EDDI is configured against, so the two cannot
-   drift.
-3. **`quarkus.oidc.auth-server-url`** unchanged — right whenever EDDI and its peers reach the IdP by
-   the same name (the externally hosted IdP case). **Nothing moves for a deployment that does not
-   opt in**, which is what made this safe to do inside a permissions PR.
+- **`eddi.a2a.public-token-endpoint`** (new, optional) — advertised verbatim. The *endpoint*, not
+  the issuer, because the path is the provider-specific part.
+- Otherwise `<issuer>/protocol/openid-connect/token`, where `<issuer>` is **`eddi.keycloak.public.url`**
+  grafted onto the realm path from `quarkus.oidc.auth-server-url`, falling back to
+  `quarkus.oidc.auth-server-url` itself. Both shipped authenticated deployments already set the
+  public URL — Helm *requires* it, since the Manager SPA cannot start a login without it — so they
+  become correct with no new configuration. Only the origin is taken from it; the realm path stays
+  what EDDI is configured against, so the two cannot drift. **Nothing moves for a deployment that
+  does not opt in**, which is what made this safe to do inside a permissions PR.
 
-The Keycloak-shaped `/protocol/openid-connect/token` path stays, with a comment: OIDC discovery is
-the provider-agnostic answer and a sensible follow-up, and step 1 already lets an operator on
-another IdP publish the right endpoint.
+The derivation **assumes Keycloak**, which the docs now say rather than gloss. OIDC discovery would
+remove the assumption instead of documenting it and is the right follow-up; it is not done here
+because it turns rendering an anonymous card into an outbound HTTP call, needing `SafeHttpClient`,
+a cache and a failure policy.
 
 Verified end to end rather than by unit test alone — built the image, ran the Keycloak tier, and read
 the anonymous card: `credentials` is now
@@ -203,6 +204,26 @@ the anonymous card: `credentials` is now
 sees, where it was `http://keycloak:8080/...`. That URL is provably reachable — it is the one the
 test fixtures fetch their tokens from. `a2a-discovery.spec.ts` now asserts it exactly, as the
 reviewer asked.
+
+**Fifth pass — a bug in the fourth pass.** CodeRabbit (Major) caught that the property introduced
+above was the *issuer*, while the Keycloak path `/protocol/openid-connect/token` was appended to
+whatever it named. So the one knob documented as "the escape hatch for a non-Keycloak IdP" handed an
+Okta or Auth0 operator their issuer with a Keycloak path stapled on — it did not do the job it was
+documented as doing, and the docs, the commit message and the reply to the reviewer all repeated the
+claim.
+
+Replaced `eddi.a2a.public-auth-server-url` with `eddi.a2a.public-token-endpoint`, advertised
+verbatim: **one** property instead of two, and it actually covers the case the other one claimed to.
+The property was one commit old and unreleased, so nothing depended on it. Two tests pin the
+distinction, including one asserting the Keycloak path is never appended to an endpoint given in
+full.
+
+Also seen this pass and **not** fixed here: `UI Manager Checks` went red on
+`share-dialog.test.tsx › does not let two quick Enters skip the ownership confirmation`, a file this
+branch does not touch. It passes 15/15 locally three runs in a row, and the cause is visible in the
+test — a synchronous `expect(screen.getByTestId("share-owner-warning"))` immediately after an async
+`userEvent.type`, with no `waitFor`, so a slow runner loses the race. A real flake with a one-line
+fix, but in unrelated code; filed separately rather than smuggled into a permissions PR.
 
 ### What's next
 

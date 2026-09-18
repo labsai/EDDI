@@ -41,8 +41,8 @@ class AgentCardServiceTest {
                 Optional.empty());
     }
 
-    /** An auth-enabled service with the two public-issuer knobs under test. */
-    private AgentCardService authServiceWith(String oidcAuthServerUrl, String publicAuthServerUrl,
+    /** An auth-enabled service with the two public-endpoint knobs under test. */
+    private AgentCardService authServiceWith(String oidcAuthServerUrl, String publicTokenEndpoint,
                                              String keycloakPublicUrl) {
         return new AgentCardService(
                 restAgentStore,
@@ -50,7 +50,7 @@ class AgentCardServiceTest {
                 "http://localhost:7070",
                 true,
                 Optional.ofNullable(oidcAuthServerUrl),
-                Optional.ofNullable(publicAuthServerUrl),
+                Optional.ofNullable(publicTokenEndpoint),
                 Optional.ofNullable(keycloakPublicUrl));
     }
 
@@ -68,12 +68,28 @@ class AgentCardServiceTest {
 
         private static final String INTERNAL = "http://keycloak:8080/realms/eddi";
 
+        /**
+         * The reason this property is the *endpoint* and not the issuer. It briefly was
+         * the issuer, and the Keycloak path was appended to whatever it named — so an
+         * operator on Okta or Auth0 got their issuer with
+         * {@code /protocol/openid-connect/token} stapled on, which is not their token
+         * endpoint. The property did not do the job it was documented as doing.
+         */
         @Test
-        void explicitPublicUrlWins() {
-            var service = authServiceWith(INTERNAL, "https://idp.example.com/realms/eddi",
+        void anExplicitTokenEndpointIsAdvertisedVerbatim() {
+            var service = authServiceWith(INTERNAL, "https://example.okta.com/oauth2/default/v1/token",
                     "http://localhost:8180");
 
-            assertEquals("https://idp.example.com/realms/eddi", service.publicIssuerUrl());
+            assertEquals("https://example.okta.com/oauth2/default/v1/token",
+                    service.advertisedTokenEndpoint());
+        }
+
+        @Test
+        void anExplicitTokenEndpointNeverGainsTheKeycloakPath() {
+            var service = authServiceWith(INTERNAL, "https://example.okta.com/oauth2/default/v1/token", null);
+
+            assertFalse(service.advertisedTokenEndpoint().contains("openid-connect/token"),
+                    "the Keycloak path must not be appended to an endpoint the operator gave in full");
         }
 
         @Test
@@ -106,6 +122,17 @@ class AgentCardServiceTest {
         @Test
         void nullWhenOidcIsNotConfiguredAtAll() {
             assertNull(authServiceWith(null, null, null).publicIssuerUrl());
+            assertNull(authServiceWith(null, null, null).advertisedTokenEndpoint());
+        }
+
+        @Test
+        void derivedEndpointKeepsTheKeycloakPath() {
+            // Stated rather than glossed: with no explicit endpoint, EDDI assumes
+            // Keycloak — which is what every shipped authenticated deployment runs.
+            var service = authServiceWith(INTERNAL, null, "http://localhost:8180");
+
+            assertEquals("http://localhost:8180/realms/eddi/protocol/openid-connect/token",
+                    service.advertisedTokenEndpoint());
         }
 
         @Test

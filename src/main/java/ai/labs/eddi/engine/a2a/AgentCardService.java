@@ -43,7 +43,7 @@ public class AgentCardService {
     private final String baseUrl;
     private final boolean authEnabled;
     private final String oidcAuthServerUrl;
-    private final String publicAuthServerUrl;
+    private final String publicTokenEndpoint;
     private final String keycloakPublicUrl;
 
     @Inject
@@ -51,14 +51,14 @@ public class AgentCardService {
             @ConfigProperty(name = "eddi.a2a.base-url", defaultValue = "http://localhost:7070") String baseUrl,
             @ConfigProperty(name = "authorization.enabled", defaultValue = "false") boolean authEnabled,
             @ConfigProperty(name = "quarkus.oidc.auth-server-url") Optional<String> oidcAuthServerUrl,
-            @ConfigProperty(name = "eddi.a2a.public-auth-server-url") Optional<String> publicAuthServerUrl,
+            @ConfigProperty(name = "eddi.a2a.public-token-endpoint") Optional<String> publicTokenEndpoint,
             @ConfigProperty(name = "eddi.keycloak.public.url") Optional<String> keycloakPublicUrl) {
         this.agentStore = agentStore;
         this.documentDescriptorStore = documentDescriptorStore;
         this.baseUrl = baseUrl;
         this.authEnabled = authEnabled;
         this.oidcAuthServerUrl = oidcAuthServerUrl.orElse(null);
-        this.publicAuthServerUrl = publicAuthServerUrl.filter(url -> !url.isBlank()).orElse(null);
+        this.publicTokenEndpoint = publicTokenEndpoint.filter(url -> !url.isBlank()).orElse(null);
         this.keycloakPublicUrl = keycloakPublicUrl.filter(url -> !url.isBlank()).orElse(null);
     }
 
@@ -73,10 +73,8 @@ public class AgentCardService {
      * peer cannot resolve, so discovery dead-ends and the token endpoint has to be
      * communicated out of band.
      * <p>
-     * Resolution order, most explicit first:
+     * Resolution order:
      * <ol>
-     * <li>{@code eddi.a2a.public-auth-server-url} — the full public issuer, for any
-     * IdP and any layout.</li>
      * <li>{@code eddi.keycloak.public.url} grafted onto the issuer's path. Both
      * shipped authenticated deployments already set it (Helm <em>requires</em> it;
      * the SPA cannot start a login without it), so they are correct with no new
@@ -85,13 +83,13 @@ public class AgentCardService {
      * EDDI and its peers reach the IdP by the same name, the externally hosted IdP
      * case. Nothing moves for a deployment that does not opt in.</li>
      * </ol>
+     * Only used to <em>derive</em> a Keycloak-shaped token endpoint; an operator
+     * who needs a different one sets {@code eddi.a2a.public-token-endpoint} and
+     * this is not consulted. See {@link #advertisedTokenEndpoint()}.
      *
      * @return the issuer URL, or null when OIDC is not configured at all
      */
     String publicIssuerUrl() {
-        if (publicAuthServerUrl != null) {
-            return stripTrailingSlash(publicAuthServerUrl);
-        }
         if (keycloakPublicUrl != null && oidcAuthServerUrl != null) {
             try {
                 var issuer = URI.create(oidcAuthServerUrl);
@@ -109,6 +107,33 @@ public class AgentCardService {
             }
         }
         return oidcAuthServerUrl == null ? null : stripTrailingSlash(oidcAuthServerUrl);
+    }
+
+    /**
+     * The token endpoint an Agent Card advertises.
+     * <p>
+     * {@code eddi.a2a.public-token-endpoint} is taken verbatim when set — the
+     * endpoint, not the issuer, because the path is the part that is
+     * provider-specific. Otherwise the endpoint is derived from
+     * {@link #publicIssuerUrl()} plus Keycloak's
+     * {@code /protocol/openid-connect/token}, <b>which assumes Keycloak</b>: it is
+     * what every shipped authenticated deployment runs, and it keeps those correct
+     * with no configuration at all. An operator on any other IdP sets the property.
+     * <p>
+     * OIDC discovery ({@code <issuer>/.well-known/openid-configuration}) would
+     * remove the assumption rather than document it, and is the right follow-up. It
+     * is not done here because it turns card rendering into an outbound HTTP call —
+     * needing {@code SafeHttpClient}, a cache and a failure policy — on a path that
+     * is now anonymous.
+     *
+     * @return the token endpoint, or null when OIDC is not configured at all
+     */
+    String advertisedTokenEndpoint() {
+        if (publicTokenEndpoint != null) {
+            return publicTokenEndpoint;
+        }
+        String issuer = publicIssuerUrl();
+        return issuer == null ? null : issuer + "/protocol/openid-connect/token";
     }
 
     private static String stripTrailingSlash(String url) {
@@ -268,13 +293,7 @@ public class AgentCardService {
         // Build authentication info if auth is enabled
         AgentAuthentication authentication = null;
         if (authEnabled) {
-            // The path stays Keycloak's. OIDC discovery
-            // (<issuer>/.well-known/openid-configuration) is the provider-agnostic
-            // answer and is the right follow-up; an operator on a different IdP can
-            // already publish the correct endpoint via eddi.a2a.public-auth-server-url.
-            String issuer = publicIssuerUrl();
-            String credentials = issuer != null ? issuer + "/protocol/openid-connect/token" : null;
-            authentication = new AgentAuthentication(List.of("Bearer"), credentials);
+            authentication = new AgentAuthentication(List.of("Bearer"), advertisedTokenEndpoint());
         }
 
         return new AgentCard(name, description, agentUrl, "EDDI", "6.0.0", capabilities, skills, authentication);
