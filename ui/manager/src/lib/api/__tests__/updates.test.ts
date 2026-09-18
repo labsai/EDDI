@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { http, HttpResponse } from "msw";
 import { server } from "@/test/mocks/server";
 import en from "@/i18n/locales/en.json";
@@ -378,6 +378,34 @@ describe("updates", () => {
 
       server.use(http.get(LATEST_URL, () => HttpResponse.error()));
       await expect(fetchLatestEddiRelease()).rejects.toMatchObject({ reason: "unreachable" });
+    });
+
+    /**
+     * The test above cannot see a leak: each request reads its own closure's
+     * flag, so a listener left behind by the first check never touches the
+     * second one's verdict — it just accumulates, one per check. Both cleanups
+     * in the `finally` are therefore pinned directly. (Stryker 10's
+     * statement-removal mutants survived on exactly these two lines.)
+     */
+    it("removes its violation listener and clears its abort timer once the request is done", async () => {
+      const added = vi.spyOn(document, "addEventListener");
+      const removed = vi.spyOn(document, "removeEventListener");
+      const scheduled = vi.spyOn(globalThis, "setTimeout");
+      const cleared = vi.spyOn(globalThis, "clearTimeout");
+      try {
+        server.use(http.get(LATEST_URL, () => HttpResponse.json({ tag_name: "6.3.0" })));
+        await fetchLatestEddiRelease();
+
+        const listener = added.mock.calls.find(([type]) => type === "securitypolicyviolation")?.[1];
+        expect(listener).toBeDefined();
+        expect(removed).toHaveBeenCalledWith("securitypolicyviolation", listener);
+
+        const abortTimer = scheduled.mock.calls.findIndex(([, delay]) => delay === 10_000);
+        expect(abortTimer).not.toBe(-1); // the 10 s abort timer was scheduled
+        expect(cleared).toHaveBeenCalledWith(scheduled.mock.results[abortTimer]!.value);
+      } finally {
+        vi.restoreAllMocks();
+      }
     });
 
     it("rejects a release with no tag rather than inventing a version", async () => {

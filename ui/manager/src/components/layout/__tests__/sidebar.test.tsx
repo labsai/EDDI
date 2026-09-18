@@ -317,6 +317,49 @@ describe("Sidebar", () => {
     expect(screen.getByText("johndoe")).toBeInTheDocument();
   });
 
+  it("shows a person icon and a generic label when the token has no profile claims", () => {
+    renderSidebarWithAuth(false, {
+      ...keycloakAuth,
+      user: { username: "", firstName: "", lastName: "", email: "", fullName: "" },
+    });
+
+    expect(screen.getByTestId("sidebar-user-avatar-icon")).toBeInTheDocument();
+    expect(screen.getByTestId("sidebar-user-avatar")).toHaveTextContent("");
+    expect(screen.getByText("Signed in")).toBeInTheDocument();
+  });
+
+  it("names the user on the avatar when collapsed, and hides it from screen readers when expanded", () => {
+    const { unmount } = renderSidebarWithAuth(true, keycloakAuth);
+    const collapsedAvatar = screen.getByTestId("sidebar-user-avatar");
+    expect(collapsedAvatar).toHaveAttribute("role", "img");
+    expect(collapsedAvatar).toHaveAccessibleName("John Doe");
+    expect(collapsedAvatar).toHaveAttribute("title", "John Doe");
+    unmount();
+
+    renderSidebarWithAuth(false, keycloakAuth);
+    expect(screen.getByTestId("sidebar-user-avatar")).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("gives a collapsed avatar a label even when the token has no profile claims", () => {
+    renderSidebarWithAuth(true, {
+      ...keycloakAuth,
+      user: { username: "", firstName: "", lastName: "", email: "", fullName: "" },
+    });
+
+    expect(screen.getByRole("img", { name: "Signed in" })).toBe(
+      screen.getByTestId("sidebar-user-avatar"),
+    );
+  });
+
+  it("does not repeat the email when it is the only name the token carries", () => {
+    renderSidebarWithAuth(false, {
+      ...keycloakAuth,
+      user: { username: "", firstName: "", lastName: "", email: "john@example.com", fullName: "" },
+    });
+
+    expect(screen.getAllByText("john@example.com")).toHaveLength(1);
+  });
+
   // ── Help & Tour menu ───────────────────────────────────────────────
   it("renders help button", () => {
     renderWithProviders(
