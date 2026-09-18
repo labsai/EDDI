@@ -31,7 +31,13 @@ import dev.langchain4j.service.tool.ToolExecutor;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
+import java.net.ConnectException;
+import java.net.NoRouteToHostException;
+import java.net.SocketTimeoutException;
 import java.net.URI;
+import java.net.UnknownHostException;
+import java.net.http.HttpConnectTimeoutException;
+import java.nio.channels.UnresolvedAddressException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -75,6 +81,12 @@ class HttpCallToolsProvider implements ToolSourceProvider {
      * redaction concern below.
      */
     private static final int ARGS_LOG_MAX_BYTES = 512;
+
+    /**
+     * Bounds the cause walk in {@link #connectFailureKind} so a self-referential
+     * chain cannot spin.
+     */
+    private static final int MAX_CAUSE_DEPTH = 12;
 
     /**
      * Keys produced by {@link IMemoryItemConverter#convert} that carry
@@ -242,7 +254,7 @@ class HttpCallToolsProvider implements ToolSourceProvider {
                             return serialized;
                         } catch (Exception e) {
                             LOGGER.error("Error executing httpcall tool '" + apiCall.getName() + "'", e);
-                            return errorResult(e.getMessage() != null ? e.getMessage() : "Unknown error");
+                            return errorResult(describeToolFailure(e, targetServerUrl, apiCall));
                         }
                     });
                 }
@@ -464,6 +476,114 @@ class HttpCallToolsProvider implements ToolSourceProvider {
      */
     private static String errorResult(String message) {
         return "{\"error\": \"" + new String(JsonStringEncoder.getInstance().quoteAsString(message)) + "\"}";
+    }
+
+    /**
+     * What a failed tool call reports back to the model.
+     *
+     * <h3>The bug this fixes</h3> A transport failure used to surface as the bare
+     * exception message — {@code "Connection refused"} and nothing else. The model
+     * has no way to tell an unreachable target from a broken dependency, so it
+     * guessed, and its guess was confidently wrong: an operator whose 22 tools all
+     * pointed at an address unreachable from inside the container told its admin
+     * "the documentation service is currently unavailable" and "this indicates a
+     * problem with the platform's internal services". That sent the admin to check
+     * EDDI's health, which was fine, instead of to the one field that was wrong. So
+     * a connect-class failure now names the address that was tried and says
+     * outright that the configured base URL is the thing to suspect.
+     *
+     * <h3>What may and may not go in here</h3> This string reaches the model and
+     * therefore, in paraphrase, the chat surface. The target URL goes in: it is the
+     * whole diagnostic value, and it is configuration an admin can already read.
+     * Headers do not, and neither does anything resolved from the vault — which is
+     * why this builds the address from {@code targetServerUrl} plus the
+     * <em>configured</em> path rather than from the fully-resolved request URI
+     * ({@code ApiCallExecutor} resolves {@code ${vault:…}} and global-variable
+     * references into that URI, so it can legitimately hold a secret). The result
+     * is redacted as a belt-and-braces measure in case a base URL itself carries
+     * credentials, e.g. {@code https://user:pass@host}.
+     */
+    static String describeToolFailure(Exception e, String targetServerUrl, ApiCall apiCall) {
+        String raw = e != null && e.getMessage() != null ? e.getMessage() : "Unknown error";
+        String connectFailure = connectFailureKind(e);
+        if (connectFailure == null) {
+            return SecretRedactionFilter.redact(raw);
+        }
+        String method = apiCall != null && apiCall.getRequest() != null && apiCall.getRequest().getMethod() != null
+                ? apiCall.getRequest().getMethod().toUpperCase(Locale.ROOT)
+                : "the request";
+        String attempted = attemptedTarget(targetServerUrl, apiCall);
+        return SecretRedactionFilter.redact(connectFailure + " while trying to reach " + method + " " + attempted + " (" + raw + "). "
+                + "This is a network failure reaching that address, NOT a fault in the service behind it. "
+                + "The base URL configured for this tool (" + describeBase(targetServerUrl) + ") must be an address the EDDI "
+                + "server itself can reach — not the address a browser uses to reach EDDI. Report this to the administrator "
+                + "as a configuration problem with the tool's base URL, and do not speculate about the state of the target service.");
+    }
+
+    /**
+     * A short name for the kind of connect-class failure, or {@code null} when this
+     * is not one.
+     * <p>
+     * Matched on exception type through the whole cause chain, because the HTTP
+     * client wraps: the {@code ConnectException} that matters arrives as the cause
+     * of an {@code ExecutionException} of a {@code RuntimeException}. A message
+     * substring check is the fallback for clients that flatten a connect failure
+     * into text, and is deliberately last — a type is unambiguous, a message is
+     * locale- and client-dependent.
+     */
+    private static String connectFailureKind(Throwable e) {
+        int depth = 0;
+        for (Throwable cause = e; cause != null && depth < MAX_CAUSE_DEPTH; cause = cause.getCause(), depth++) {
+            if (cause instanceof UnknownHostException || cause instanceof UnresolvedAddressException) {
+                return "The host name could not be resolved";
+            }
+            if (cause instanceof HttpConnectTimeoutException || cause instanceof SocketTimeoutException) {
+                return "The connection timed out";
+            }
+            if (cause instanceof NoRouteToHostException) {
+                return "There is no route to the host";
+            }
+            // Last of the socket-level branches: "refused" is the fallback reading of a
+            // failed connect, and the three above are the cases that have a more
+            // specific and more actionable answer than that.
+            if (cause instanceof ConnectException) {
+                return "The connection was refused";
+            }
+            // A cause chain can be cyclic in pathological wrapping; depth bounds it.
+            if (cause.getCause() == cause) {
+                break;
+            }
+        }
+        String message = e != null && e.getMessage() != null ? e.getMessage().toLowerCase(Locale.ROOT) : "";
+        if (message.contains("connection refused")) {
+            return "The connection was refused";
+        }
+        if (message.contains("unresolved") || message.contains("unknownhost") || message.contains("name or service not known")) {
+            return "The host name could not be resolved";
+        }
+        return null;
+    }
+
+    /**
+     * {@code targetServerUrl} joined to the call's CONFIGURED path — never the
+     * resolved one. Path parameters are left as their template placeholders, which
+     * is the point: the address is what is being diagnosed, not the arguments.
+     */
+    private static String attemptedTarget(String targetServerUrl, ApiCall apiCall) {
+        String path = apiCall != null && apiCall.getRequest() != null && apiCall.getRequest().getPath() != null
+                ? apiCall.getRequest().getPath().trim()
+                : "";
+        if (path.startsWith("http")) {
+            return path;
+        }
+        if (!path.isEmpty() && !path.startsWith("/")) {
+            path = "/" + path;
+        }
+        return describeBase(targetServerUrl) + path;
+    }
+
+    private static String describeBase(String targetServerUrl) {
+        return targetServerUrl == null || targetServerUrl.isBlank() ? "<not configured>" : targetServerUrl.trim();
     }
 
     /**

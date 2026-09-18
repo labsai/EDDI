@@ -36,8 +36,10 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <h2>Why this is safe</h2>
  * <ul>
  * <li><b>Same-origin only.</b> {@code ${caller:token}} resolves only when the
- * outbound request targets the exact origin the caller addressed. An agent
- * config naming a third-party host cannot exfiltrate the token.</li>
+ * outbound request targets the exact origin the caller addressed, or the
+ * address <em>this very process</em> can be reached at
+ * ({@link SelfUrlResolver}). An agent config naming a third-party host cannot
+ * exfiltrate the token.</li>
  * <li><b>Headers only.</b> A token in a query string ends up in access logs,
  * proxies and browser history, so a token reference outside a header is
  * rejected rather than resolved.</li>
@@ -105,6 +107,17 @@ public class CallerIdentityResolver {
      */
     @Inject
     MeterRegistry meterRegistry;
+
+    /**
+     * The address this process can reach itself at, for the "is this target me?"
+     * half of the origin check.
+     * <p>
+     * Field-injected for the same reason as the registry above — and, like it,
+     * {@code null} degrades to the behaviour that existed before: origin equality
+     * with the caller alone.
+     */
+    @Inject
+    SelfUrlResolver selfUrlResolver;
 
     private final CallerIdentityContext callerIdentityContext;
     private final boolean enabled;
@@ -283,12 +296,30 @@ public class CallerIdentityResolver {
                     "This API call references ${caller:token}, but the caller's request carried no bearer token.");
         }
         if (!OriginMatcher.sameOrigin(identity.origin(), target)) {
-            // Do not log the target's full URI at INFO — it may embed identifiers.
-            LOGGER.warnf("Refusing to forward the caller token to a different origin (caller=%s, target=%s)", sanitize(identity.origin()),
-                    sanitize(OriginMatcher.normalize(target)));
-            record("cross_origin", REF_TOKEN);
-            throw new CallerIdentityException("${caller:token} may only be sent back to the origin the caller came from ("
-                    + identity.origin() + "), but this call targets " + OriginMatcher.normalize(target) + ".");
+            // Not the caller's origin — but it may still be THIS process, addressed by
+            // the loopback (or operator-configured) URL rather than by whatever the
+            // browser typed. That is the Platform Operator's normal shape: its tools
+            // must target an address EDDI can reach itself at, which is not the address
+            // a browser behind a tunnel, a port mapping or a reverse proxy used. The
+            // token is handed back to the very process that issued the request it came
+            // from — the same argument LoopbackCallerAuthFilter makes for the internal
+            // hop — so this is a narrower release than same-origin, not a wider one.
+            // SelfUrlResolver's value comes from deployment configuration only, never
+            // from an agent config or a request, so no config can nominate itself here.
+            if (!isSelf(target)) {
+                // Do not log the target's full URI at INFO — it may embed identifiers.
+                LOGGER.warnf("Refusing to forward the caller token to a different origin (caller=%s, target=%s)",
+                        sanitize(identity.origin()), sanitize(OriginMatcher.normalize(target)));
+                record("cross_origin", REF_TOKEN);
+                throw new CallerIdentityException("${caller:token} may only be sent back to the origin the caller came from ("
+                        + identity.origin() + ") or to this deployment's own address, but this call targets "
+                        + OriginMatcher.normalize(target) + ".");
+            }
+            // Counted apart from a plain same-origin resolution: a deployment where
+            // every operator call lands here is working as designed, while a sudden
+            // shift between the two tags means an address changed under someone.
+            record("resolved_self", REF_TOKEN);
+            return identity.token();
         }
         record("resolved", REF_TOKEN);
         return identity.token();
@@ -309,6 +340,17 @@ public class CallerIdentityResolver {
         }
         record("resolved", REF_USER_ID);
         return identity.userId();
+    }
+
+    /**
+     * Whether the target is this deployment's own address.
+     * <p>
+     * Null-safe because {@link #selfUrlResolver} is field-injected: a directly
+     * constructed instance answers {@code false}, i.e. the strict same-origin
+     * behaviour.
+     */
+    private boolean isSelf(URI target) {
+        return selfUrlResolver != null && selfUrlResolver.isSelf(target);
     }
 
     /** Raised when a {@code ${caller:...}} reference cannot be safely resolved. */
