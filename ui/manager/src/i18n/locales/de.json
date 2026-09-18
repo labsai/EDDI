@@ -24,7 +24,8 @@
     "sessionExpired": "Sitzung abgelaufen. Bitte erneut anmelden.",
     "profile": "Profil",
     "guest": "Gast",
-    "userMenu": "Benutzermenü"
+    "userMenu": "Benutzermenü",
+    "signedIn": "Angemeldet"
   },
   "nav": {
     "dashboard": "Dashboard",

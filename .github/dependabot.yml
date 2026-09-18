@@ -140,6 +140,18 @@ updates:
       # patch bumps stay enabled — that is how a security fix arrives.
       - dependency-name: "react-router*"
         update-types: ["version-update:semver-major"]
+      # Vitest 5 is held back HERE ONLY, because it breaks the mutation gate:
+      # @stryker-mutator/vitest-runner 10.0.0 builds its per-test filter with a
+      # space, Vitest 5 joins test names with " > ", so the filter selects no
+      # test and every covered mutant "survives" (updates.ts: 0.00, against 81.85
+      # on Vitest 4 with the same runner) — stryker-mutator/stryker-js#6210.
+      # Remove once a fixed runner ships.
+      # ui/chat has no Stryker and is already on Vitest 5. update-types limits
+      # this to version updates; security updates are not affected.
+      - dependency-name: "vitest"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@vitest/*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: /ui/chat

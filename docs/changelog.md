@@ -410,6 +410,69 @@ miss threshold fails three of them.
 The crawler, then the source config plus the pipeline that ties fetch → convert → this store → embed,
 with vector removal driven by the tombstone list.
 
+## ⬆️ chore(ui): Node 22 toolchain, Stryker 10, Vitest 5 for the Chat UI (2026-09-17)
+
+**Repo:** EDDI (`feat/node-22-toolchain`, stacked on `fix/ui-npm-vulnerabilities` / #770)
+
+Node 20 reached end of life on 2026-04-30, and it was what held the UIs on Stryker 9 and Vitest 4:
+Stryker 10 dropped Node 20 (Dependabot #768 was red for that reason) and Vitest 5 requires ≥ 22.12.
+
+### What changed
+
+- **Node 20 → 22 everywhere the build names a version.** `pom.xml` `node.version` `v20.20.2` →
+  `v22.23.2` (the latest 22.x; Maintenance LTS until 2027-04-30), `mise.toml` to match, and all eight
+  `actions/setup-node` steps in `ci.yml` (`node-version: 22`, step names too). `AGENTS.md` and
+  `README.md` no longer say Maven downloads Node 20. No test asserts on the version and no Dockerfile
+  uses Node.
+- **Manager: Stryker `9.6.1` → `10.0.0`** (still exact-pinned). Its only breaking change is the Node
+  floor. The `typed-rest-client` → `qs` override stays: Stryker 10 still takes `typed-rest-client`
+  `~2.3.0`.
+- **Chat UI: Vitest `^4.1.11` → `^5.0.1`.** No test or config change was needed.
+- **Manager stays on Vitest 4.1.11 — see Decisions.** `dependabot.yml` now ignores Vitest/`@vitest/*`
+  *majors* for `/ui/manager` only, with the reason and the upstream issue beside the rule
+  (`update-types` scopes it to version updates; security updates still arrive).
+- **The UIs' own docs caught up** (Copilot review): `ui/chat/README.md` and `ui/chat/AGENTS.md` still said
+  Node ≥ 20, Vitest 3 and react-markdown 9.x; `ui/manager/README.md` still said Node ≥ 20. A contributor
+  following them would install an unsupported runtime. Each now names the floor that applies to that UI
+  — 22.12 for the Chat (Vitest 5), 22.18 for the Manager (Stryker 10's Babel 8) — and the pinned 22.23.2.
+- **`updates.test.ts`: a test for the two cleanups in `getWithoutCredentials`'s `finally`.** Stryker 10
+  mutates more statements than 9.6.1 (265 mutants on `updates.ts` against 263), and both new ones
+  survived: deleting `clearTimeout(timer)` or `csp.stop()` failed no test. The existing "stops listening
+  for violations once the request is done" test cannot see that leak — each request reads its own
+  closure's flag, so a leftover listener never touches the next verdict, it only accumulates. The new
+  test pins both calls (spies on add/removeEventListener and set/clearTimeout) and fails with either
+  line deleted.
+
+### Decisions
+
+- **The Manager cannot take Vitest 5 yet: it breaks Stryker.** On Vitest 5, `@stryker-mutator/vitest-runner`
+  10.0.0 selects zero tests per mutant — its per-test filter joins names with a space, Vitest 5 joins
+  them with `' > '` ([stryker-mutator/stryker-js#6210](https://github.com/stryker-mutator/stryker-js/issues/6210),
+  open, no fixed release on npm). Measured here: `updates.ts` scored **0.00** (all 257 covered mutants
+  "survived") against 81.85 on Vitest 4 with the same runner and Node. The break threshold would at least
+  fail the run, but a gate whose every mutant survives measures nothing. The Chat UI has no Stryker, so it
+  moves. Revisit the Manager when a fixed runner ships — the Dependabot ignore rule names the issue.
+- **The real Node floor is 22.18, not 22.12.** Stryker 10 moved to Babel 8, whose packages declare
+  `engines.node` `^22.18.0 || >=24.11.0`. The `pom.xml` comment records it; on an older 22.x Stryker
+  warns `EBADENGINE` and may not run.
+- **22, not 24.** 24 is Active LTS until 2028-04-30, but this change was scoped to leaving the EOL line.
+  Every package in both lockfiles declares an `engines.node` range that also accepts 24.21.0, so moving
+  on later is a pin change, not a migration.
+
+### Verification (on Node 22.23.2 — the binary Maven downloads)
+
+- `./mvnw package -DskipTests` installed Node v22.23.2 and ran `npm ci` + `npm run build` for both UIs:
+  BUILD SUCCESS.
+- Manager (Vitest 4.1.11, Stryker 10): lint, typecheck, `vitest run --coverage` — 411 files, 6,515
+  tests, thresholds met. Scoped `stryker run --mutate src/lib/api/updates.ts`: **83.78** (216 killed of
+  265), above `thresholds.break` 82 — 81.85 before the new cleanup test, 82.49 on Stryker 9.6.1.
+- Chat (Vitest 5.0.1): typecheck, 278/278 tests. A static sweep found none of Vitest 5's removals in use
+  (`.sequential`, non-top-level `vi.mock`, removed `vitest/*` entry points, `toThrow('')`), and its new
+  `clearMocks: true` default broke nothing.
+- `npm ci` for both lockfiles in a `node:22.23.2` Linux container. The Windows `@emnapi` pruning did not
+  recur; all four entries are present. `npm audit`: 0 vulnerabilities in both UIs.
+
+---
 
 ## 🔒 feat(context): secret context values — usable for one turn, never stored or returned (2026-09-17)
 
@@ -494,6 +557,8 @@ so concurrent users overwrite each other's value. `secretInput` only hides the t
 - The value still reaches anything a template sends out of EDDI while the turn runs: a prompt (model
   provider), a reply streamed over SSE (the returned and stored reply is scrubbed), or a query
   parameter/body (written to the server log by the HTTP call task). Documented: use it in headers only.
+
+---
 
 ---
 
@@ -663,6 +728,52 @@ owner reads and continues their conversation with 200 while another non-admin ge
   now also assert `preferred_username`); with the fix, 12/12 on Keycloak 26.7 and twice on 26.0.8 with no agent left
   deployed, and the class passes apart from three
   `create-secrets.ps1` tests that fail identically on a clean `origin/main` in this environment.
+
+---
+
+## 🎨 fix(manager): the user-menu avatar no longer shows "?" (2026-09-17)
+
+**Repo:** EDDI (`fix/manager-avatar-no-claims`)
+
+### What changed
+
+- **`ui/manager/src/lib/user-display.ts` (new)** derives the avatar's initials and the menu label from
+  whatever claims the token carries: given + family name, then the display name's first and last word,
+  then the first letter or digit of the username, then of the email's local part. When none yields a
+  character it returns `""`, and `TopBar` and `Sidebar` render a `UserRound` icon instead of the
+  literal `"?"` they used to print. The label falls back to a new `auth.signedIn` key ("Signed in", all
+  11 locales), and the email line is not repeated when the email is the only label available. The top-bar
+  trigger also gained a visible keyboard focus ring.
+- **Review follow-ups.** Initials are the first *letter or digit* of each part, NFC-normalised, so punctuation
+  and emoji no longer become initials ("Doe, Jane (Contractor)" used to give "D("); Thai and Lao preposed
+  vowels are skipped; two Arabic initials get a zero-width non-joiner so they do not join into a word; and
+  `toUpperCase` replaces `toLocaleUpperCase`, which followed the browser's locale rather than the app's (a
+  Turkish system turned "isabel" into "İ"). A username with no letter now falls through to the email. The
+  helper documents why initials prefer given + family name while the label prefers the display name.
+  `userSecondaryEmail` hides the email case-insensitively when it is already the label; truncated name and
+  email lines carry a `title`; the collapsed sidebar avatar is `role="img"` with the user's name as its
+  label and tooltip (expanded, it is `aria-hidden`, since the name is printed beside it); French reads
+  "Session ouverte".
+- Tests: `user-display.test.ts` (18), plus the no-claims token shape in `top-bar.test.tsx` and
+  `sidebar.test.tsx`. Mutation-checked: restoring the `"?"` fallback fails three of them.
+
+- **CI: a UI-only pull request no longer reports "Build Failed" to Slack.** `notify-slack` required
+  `build-and-test` to be `success`, but that job is skipped by design on a pull request touching neither the
+  backend nor the operator docs, so this PR's run was classified a failure with nothing failed and tried to
+  post. A skip now counts as passing only in exactly that case; a skip on push or tag, a cancel or a failure
+  still fails. Checked against a seven-case truth table. Separately, the webhook itself answers HTTP 4xx
+  (`curl` exit 22, also on a genuinely failed run on 2026-09-16), so the job stays red on any real failure
+  until the `SLACK_WEBHOOK_URL` secret is replaced.
+
+### Why the claims were empty
+
+The shipped realm (6.1.0 through 6.4.0) defines only the `openid` client scope, so Keycloak never created
+`profile`, `email` or `basic`, and its tokens carry no `preferred_username`, `name`, `email` or `sub`.
+That is fixed at the source, with the backend consequences it had, on `fix/keycloak-realm-client-scopes`.
+This change stays useful after it: realms provisioned by hand, other identity providers, and users
+without a name or email still reach the fallback.
+
+---
 
 ---
 
