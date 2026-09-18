@@ -27,8 +27,6 @@ import static com.mongodb.client.model.Filters.eq;
 import static com.mongodb.client.model.Filters.exists;
 import static com.mongodb.client.model.Filters.or;
 import static com.mongodb.client.model.Filters.regex;
-import static com.mongodb.client.model.Sorts.ascending;
-import static com.mongodb.client.model.Sorts.descending;
 
 /**
  * V6 Rename Migration — rewrites legacy eddi:// URIs, store paths, environment
@@ -83,15 +81,6 @@ public class V6RenameMigration {
 
     /** The field {@link #ENVIRONMENT_REWRITES} applies to. */
     private static final String FIELD_ENVIRONMENT = "environment";
-
-    /**
-     * How many documents each end of the URI sample in
-     * {@link #sampleHoldsLegacyUri} reads. Small on purpose: on the staging
-     * database these documents averaged 410 KB, so every sampled document is real
-     * I/O, and the point of the pre-check is not to pay for the pass it is
-     * avoiding.
-     */
-    private static final int URI_SAMPLE_PER_END = 10;
 
     /**
      * Field-name rewrites for deployment/conversation documents (old Java name →
@@ -498,7 +487,19 @@ public class V6RenameMigration {
      * time in Java. A read-only {@code mongodump} of the same collection took 14
      * minutes on the same cluster, so the read pass dominates. On production
      * volumes that is the difference between minutes and hours of downtime, so the
-     * collection is asked up front whether it holds anything to migrate at all.
+     * collection is asked up front whether it holds anything to rewrite at all.
+     * </p>
+     *
+     * <p>
+     * Be precise about what that buys, because it is less than it looks. Two of the
+     * three conditions are server-side counts and cost nothing. The third — a URI
+     * nested at arbitrary depth — cannot be expressed as a filter at all, so
+     * proving its absence means reading the collection. So the pre-check removes
+     * the rewrite pass, not the read, and a collection with nothing to rewrite was
+     * already performing no writes in that pass. Removing the read as well would
+     * mean moving the rewrite itself server-side ({@code updateMany} with
+     * {@code $rename} and {@code $set} for the two field conditions), which is a
+     * larger change than this one and is not attempted here.
      * </p>
      */
     private int migrateEnvironments(String collectionName) {
@@ -575,15 +576,24 @@ public class V6RenameMigration {
      * The loop compares with {@code equalsIgnoreCase}, so the filter has to be
      * case-insensitive — a literal {@code $in} would miss {@code "Unrestricted"}
      * and silently skip real work.</li>
-     * <li>a v5 URI. This one is a <em>sample</em>, not a proof; see
-     * {@link #sampleHoldsLegacyUri}.</li>
+     * <li>a v5 URI, which no filter can express and no sample may stand in for; see
+     * {@link #holdsLegacyUri}.</li>
      * </ol>
+     *
+     * <p>
+     * The order is deliberate: the two conditions a count can answer come first and
+     * short-circuit, so a collection that is obviously dirty — the common case on a
+     * first boot, where every conversation still carries {@code botId} — never pays
+     * for the scan behind them.
+     * </p>
      *
      * <p>
      * Everything that goes wrong here answers "there is work to do": an exception,
      * an unreadable collection, a count that cannot be established. A pre-check
-     * that wrongly skips is a data-migration bug, while one that wrongly proceeds
-     * only costs what this code already cost before it existed.
+     * that wrongly skips is a data-migration bug — {@code runIfNeeded} would go on
+     * to record the migration as complete, so the work would never be retried —
+     * while one that wrongly proceeds only costs what this code already cost before
+     * it existed.
      * </p>
      */
     private boolean hasNothingToMigrate(MongoCollection<Document> collection, String collectionName) {
@@ -592,20 +602,12 @@ public class V6RenameMigration {
                 return false;
             }
 
-            long total = collection.countDocuments();
-            if (sampleHoldsLegacyUri(collection, ascending(ID_FIELD)) || sampleHoldsLegacyUri(collection, descending(ID_FIELD))) {
+            if (holdsLegacyUri(collection)) {
                 return false;
             }
 
-            if (total <= 2L * URI_SAMPLE_PER_END) {
-                LOGGER.infof("  %s: nothing to migrate — no legacy field name, no legacy environment value and no v5 "
-                        + "URI in any of its %d documents. Skipping the rewrite pass.", collectionName, total);
-            } else {
-                LOGGER.infof("  %s: nothing to migrate — no legacy field name and no legacy environment value in any of "
-                        + "its %d documents, and no v5 URI in the %d oldest or the %d newest. Skipping the rewrite "
-                        + "pass. (The URI part is a sample: a URI nested at arbitrary depth cannot be counted "
-                        + "server-side.)", collectionName, total, URI_SAMPLE_PER_END, URI_SAMPLE_PER_END);
-            }
+            LOGGER.infof("  %s: nothing to migrate — no legacy field name, no legacy environment value and no v5 URI in "
+                    + "any of its documents. Skipping the rewrite pass.", collectionName);
             return true;
         } catch (Exception e) {
             LOGGER.warnf("  Could not pre-check %s (%s) — running the full rewrite pass", collectionName, e.getMessage());
@@ -638,34 +640,33 @@ public class V6RenameMigration {
     }
 
     /**
-     * Whether the {@code URI_SAMPLE_PER_END} documents at one end of the collection
-     * hold a URI the rewrite would change.
+     * Whether any document in the collection holds a URI the rewrite would change.
      *
      * <p>
-     * This is the one condition that is <strong>not</strong> sound, and it is
-     * deliberate rather than an oversight. The rewrite changes a document when any
-     * string at any depth contains a legacy authority or store path, and MongoDB's
-     * query language cannot express "some string anywhere in this document contains
-     * X": there is no wildcard field path, {@code $regexMatch} needs a string input
-     * and no aggregation expression stringifies a document of arbitrary depth, and
-     * the alternatives ({@code $where}, {@code $function}) are server-side
-     * JavaScript, which is disabled on many deployments. An exhaustive check would
-     * have to read every document, which is exactly the cost this pre-check exists
-     * to avoid, so the check is bounded and the log says so.
+     * Exhaustive, and it has to be. The rewrite fires when any string at any depth
+     * contains a legacy authority or store path, and MongoDB's query language
+     * cannot express "some string anywhere in this document contains X": there is
+     * no wildcard field path ({@code $**} is an index specification, not a
+     * queryable path), {@code $regexMatch} needs a string input and no aggregation
+     * expression stringifies a document of arbitrary depth, and the constructs that
+     * could — {@code $where}, {@code $function} — are server-side JavaScript,
+     * disabled on many deployments. So this condition cannot be answered by a
+     * count, and it cannot be answered by a sample either: a legacy URI that a
+     * sample missed would be skipped, {@code runIfNeeded} would then record the
+     * migration as complete, and that document would never be rewritten or retried.
+     * A slow migration is recoverable; that is not.
      * </p>
      *
      * <p>
-     * Both ends are sampled, by {@code _id} rather than in natural order, because
-     * an ObjectId's leading bytes are the insert timestamp: v5 documents are the
-     * oldest ones, and natural order is neither insertion order nor stable. A
-     * legacy URI in a conversation comes from the agent configuration it ran, so it
-     * is a systematic property of a whole era of documents rather than a
-     * one-in-a-thousand accident — which is what makes a sample of the oldest
-     * documents worth anything at all.
+     * It stops at the first document that needs rewriting, so the systematically
+     * dirty collection — the common case on a first boot — pays for one document
+     * rather than for the scan. The price of soundness is that a collection whose
+     * only stale URI sits at the very end is read twice: once here and once by the
+     * pass. That is the worst case, and it is bounded at two reads.
      * </p>
      */
-    private boolean sampleHoldsLegacyUri(MongoCollection<Document> collection, Bson order) {
-        try (MongoCursor<Document> cursor = collection.find().sort(order).limit(URI_SAMPLE_PER_END).iterator()) {
+    private boolean holdsLegacyUri(MongoCollection<Document> collection) {
+        try (MongoCursor<Document> cursor = collection.find().iterator()) {
             while (cursor.hasNext()) {
                 if (containsLegacyUri(cursor.next())) {
                     return true;

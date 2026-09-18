@@ -23,6 +23,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
 
@@ -1016,10 +1017,8 @@ class V6RenameMigrationTest {
     class EnvironmentPreCheckTests {
 
         private MongoCollection<Document> envCol;
-        /** What {@code find()} answers — iterating THIS is the unbounded full pass. */
-        private FindIterable<Document> fullPass;
-        /** What {@code find().sort(…)} answers — the bounded URI sample. */
-        private FindIterable<Document> sample;
+        /** What {@code find()} answers, for both the URI scan and the rewrite pass. */
+        private FindIterable<Document> reads;
 
         /**
          * A collection holding one document, whose {@code countDocuments(filter)}
@@ -1027,8 +1026,12 @@ class V6RenameMigrationTest {
          * answers 1, anything else answers 0. That is what lets one condition be armed
          * at a time.
          */
-        @SuppressWarnings("unchecked")
         private void givenCollection(Document doc, String... countedBy) {
+            givenCollection(List.of(doc), countedBy);
+        }
+
+        @SuppressWarnings("unchecked")
+        private void givenCollection(List<Document> docs, String... countedBy) {
             envCol = mock(MongoCollection.class);
             when(envCol.estimatedDocumentCount()).thenReturn(1L);
             when(envCol.countDocuments()).thenReturn(1L);
@@ -1043,13 +1046,23 @@ class V6RenameMigrationTest {
                 return 0L;
             });
 
-            fullPass = mock(FindIterable.class);
-            sample = mock(FindIterable.class);
-            when(envCol.find()).thenReturn(fullPass);
-            when(fullPass.sort(any(Bson.class))).thenReturn(sample);
-            when(sample.limit(anyInt())).thenReturn(sample);
-            when(fullPass.iterator()).thenAnswer(invocation -> cursorOver(doc));
-            when(sample.iterator()).thenAnswer(invocation -> cursorOver(doc));
+            reads = mock(FindIterable.class);
+            when(envCol.find()).thenReturn(reads);
+            when(reads.iterator()).thenAnswer(invocation -> cursorOver(docs));
+            // sort() and limit() are honoured rather than ignored, so an implementation
+            // that went back to reading only one end of the collection would really see
+            // only that end here — which is what makes
+            // legacyUriInTheMiddleTriggersTheFullPass able to fail.
+            when(reads.sort(any(Bson.class))).thenReturn(reads);
+            when(reads.limit(anyInt())).thenAnswer(invocation -> {
+                int limit = invocation.getArgument(0);
+                FindIterable<Document> truncated = mock(FindIterable.class);
+                List<Document> head = docs.subList(0, Math.min(limit, docs.size()));
+                when(truncated.sort(any(Bson.class))).thenReturn(truncated);
+                when(truncated.limit(anyInt())).thenReturn(truncated);
+                when(truncated.iterator()).thenAnswer(inner -> cursorOver(head));
+                return truncated;
+            });
 
             MongoCollection<Document> emptyCol = mock(MongoCollection.class);
             when(emptyCol.estimatedDocumentCount()).thenReturn(0L);
@@ -1061,32 +1074,32 @@ class V6RenameMigrationTest {
             when(migrationLogStore.readMigrationLog(anyString())).thenReturn(null);
         }
 
-        /**
-         * A fresh cursor per call: the sample reads both ends, so it iterates twice.
-         */
+        /** A fresh cursor per call, since a collection can be read more than once. */
         @SuppressWarnings("unchecked")
-        private MongoCursor<Document> cursorOver(Document doc) {
+        private MongoCursor<Document> cursorOver(List<Document> docs) {
             MongoCursor<Document> cursor = mock(MongoCursor.class);
-            when(cursor.hasNext()).thenReturn(true, false);
-            when(cursor.next()).thenReturn(doc);
+            Iterator<Document> documents = docs.iterator();
+            when(cursor.hasNext()).thenAnswer(invocation -> documents.hasNext());
+            when(cursor.next()).thenAnswer(invocation -> documents.next());
             return cursor;
         }
 
         /**
-         * Nothing to migrate: no document is rewritten, and the unbounded pass is never
-         * iterated at all — the only reads are the two bounded ends of the URI sample.
+         * Nothing to migrate: the collection is read once — by the URI scan, which
+         * cannot be a count and must be exhaustive — and the rewrite pass does not run
+         * at all, so nothing is written. {@code migrateEnvironments} is called for two
+         * collections, hence two reads rather than the four a scan plus a pass would
+         * make.
          */
         @Test
-        @DisplayName("a collection with nothing to migrate is never iterated or rewritten")
+        @DisplayName("a collection with nothing to migrate is read once and never rewritten")
         void skipsACleanCollection() {
             givenCollection(new Document("environment", "production").append("agentId", "a1").append("_id", new ObjectId()));
 
             migration.runIfNeeded();
 
-            verify(fullPass, never()).iterator();
             verify(envCol, never()).replaceOne(any(), any(Document.class));
-            // and what it did read was bounded, both ends, for each of the two collections
-            verify(sample, times(4)).limit(10);
+            verify(envCol, times(2)).find();
         }
 
         /**
@@ -1139,10 +1152,10 @@ class V6RenameMigrationTest {
         }
 
         /**
-         * Condition 3, the sampled one. A nested v5 URI is invisible to
-         * {@code countDocuments} — there is no wildcard field path and nothing that
-         * stringifies a document of arbitrary depth — so it is found by reading the
-         * sample, and finding it has to cancel the skip.
+         * Condition 3. A nested v5 URI is invisible to {@code countDocuments} — there
+         * is no wildcard field path and nothing that stringifies a document of
+         * arbitrary depth — so it is found by reading, and finding it has to cancel the
+         * skip.
          */
         @Test
         @DisplayName("a v5 URI nested in a sampled document still triggers the full pass")
@@ -1156,6 +1169,37 @@ class V6RenameMigrationTest {
 
             assertEquals("eddi://ai.labs.agent/agentstore/agents/abc123?version=1", nested.get("uri"),
                     "the full pass must have run and rewritten the nested URI");
+            verify(envCol, atLeastOnce()).replaceOne(any(), any(Document.class));
+        }
+
+        /**
+         * The URI scan must be exhaustive, not sampled. The first version of this
+         * pre-check read the ten oldest and ten newest documents, which CodeRabbit
+         * pointed out on PR #781 is unsound in a way that cannot be recovered from: a
+         * legacy URI in the middle of the collection is missed, the pass is skipped,
+         * {@code runIfNeeded} records the migration as complete, and that document is
+         * never rewritten or retried. This collection is exactly that shape — 41
+         * documents, only the middle one holding a v5 URI — so any bounded sample of
+         * the ends would skip it.
+         */
+        @Test
+        @DisplayName("a v5 URI that a sample of the two ends would have missed still triggers the full pass")
+        void legacyUriInTheMiddleTriggersTheFullPass() {
+            var documents = new ArrayList<Document>();
+            for (int i = 0; i < 20; i++) {
+                documents.add(new Document("environment", "production").append("agentId", "clean").append("_id", new ObjectId()));
+            }
+            var buried = new Document("uri", "eddi://ai.labs.package/packagestore/packages/abc123?version=1");
+            documents.add(new Document("environment", "production").append("step", buried).append("_id", new ObjectId()));
+            for (int i = 0; i < 20; i++) {
+                documents.add(new Document("environment", "production").append("agentId", "clean").append("_id", new ObjectId()));
+            }
+            givenCollection(documents);
+
+            migration.runIfNeeded();
+
+            assertEquals("eddi://ai.labs.workflow/workflowstore/workflows/abc123?version=1", buried.get("uri"),
+                    "a URI outside the ends of the collection must still be rewritten");
             verify(envCol, atLeastOnce()).replaceOne(any(), any(Document.class));
         }
 

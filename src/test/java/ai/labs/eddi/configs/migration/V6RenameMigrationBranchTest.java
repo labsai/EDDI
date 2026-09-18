@@ -15,6 +15,7 @@ import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.RenameCollectionOptions;
 import org.bson.BsonDocument;
 import org.bson.Document;
+import org.bson.conversions.Bson;
 import org.bson.types.ObjectId;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -444,6 +445,11 @@ class V6RenameMigrationBranchTest {
 
             MongoCollection<Document> collection = mock(MongoCollection.class);
             when(collection.estimatedDocumentCount()).thenReturn(1L);
+            // This document really does carry the legacy field names, so the pre-check
+            // has to count them: unstubbed it counts zero, concludes there is nothing to
+            // rewrite and skips the pass. The pre-check's own conditions are covered by
+            // EnvironmentPreCheckTests in V6RenameMigrationTest.
+            when(collection.countDocuments(any(Bson.class))).thenReturn(1L);
 
             FindIterable<Document> iterable = mock(FindIterable.class);
             MongoCursor<Document> cursor = mock(MongoCursor.class);

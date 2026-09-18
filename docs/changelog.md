@@ -60,13 +60,12 @@ workflows still held a v5 URI when checked at 22:14. The remaining ~20 minutes w
 `migrateEnvironments("conversationmemories")` alone: 195 documents averaging 410 KB, i.e. 80 MB read
 and rewritten one document at a time in Java. For calibration a read-only `mongodump` of that same
 collection took 14 minutes on the same cluster, so the read pass dominates. The cost scales with total
-conversation bytes rather than with the work to be done, so on production volumes this is the
-difference between minutes and hours of downtime.
+conversation bytes rather than with the work to be done.
 
 ### What changed
 
-`migrateEnvironments(String)` asks the collection up front whether it holds anything to rewrite, and
-returns 0 without reading it when the answer is no. The three conditions mirror, one for one, the three
+`migrateEnvironments(String)` asks the collection up front whether anything in it would be rewritten,
+and skips the rewrite pass when the answer is no. The three conditions mirror, one for one, the three
 things the rewrite loop can change, and each is derived from the constant the loop itself uses so the
 two cannot drift apart:
 
@@ -77,58 +76,69 @@ two cannot drift apart:
    filter would count zero for `"Unrestricted"` and silently skip a document that does need rewriting.
    The value is `Pattern.quote`d so a future rewrite source containing a metacharacter cannot become a
    different pattern.
-3. **a v5 URI** — a bounded sample, and the one condition that is *not* sound. See below.
+3. **a v5 URI**, which no filter can express — so this one is an exhaustive scan that stops at the
+   first document needing work.
 
-It logs at INFO when it skips, naming the collection and saying whether the URI part was exhaustive or
-sampled, so an operator can see why a migration finished instantly. Anything that goes wrong in the
-pre-check — an exception, a count that cannot be established — answers "there is work to do" and runs
+The two conditions a count can answer come first and short-circuit, so a collection that is obviously
+dirty — the common case on a first boot, where every conversation still carries `botId` — never pays for
+the scan behind them. It logs at INFO when it skips, naming the collection. Anything that goes wrong in
+the pre-check — an exception, a count that cannot be established — answers "there is work to do" and runs
 the full pass.
 
-### The URI condition is a sample, and that is a deliberate limitation
+### Why the URI condition is exhaustive, and what that costs
 
-A sound `countDocuments` filter for "contains a v5 URI" **does not exist**. The rewrite changes a
-document when any string at any depth contains a legacy authority or store path, and MongoDB's query
-language cannot express that: there is no wildcard field path (`$**` is an index spec, not a queryable
-path), `$regexMatch` needs a string input and no aggregation expression stringifies a document of
-arbitrary depth, and the only constructs that could — `$where` and `$function` — are server-side
-JavaScript, disabled on many deployments. An exhaustive check has to read every document, which is
-exactly the cost the pre-check exists to avoid.
+A `countDocuments` filter for "contains a v5 URI" **does not exist**. The rewrite changes a document
+when any string at any depth contains a legacy authority or store path, and MongoDB's query language
+cannot express that: there is no wildcard field path (`$**` is an index spec, not a queryable path),
+`$regexMatch` needs a string input and no aggregation expression stringifies a document of arbitrary
+depth, and the only constructs that could — `$where`, `$function` — are server-side JavaScript, disabled
+on many deployments.
 
-So the URI condition reads `URI_SAMPLE_PER_END` (10) documents from **each end of the `_id` order** and
-asks the real `rewriteUriString` whether either holds a legacy URI. Both ends, by `_id` rather than in
-natural order, because an ObjectId's leading bytes are the insert timestamp: v5 documents are the
-oldest ones and natural order is neither insertion order nor stable. A legacy URI in a conversation
-comes from the agent configuration that conversation ran, so it is a systematic property of a whole era
-of documents rather than a one-in-a-thousand accident — which is what makes a sample worth anything at
-all. It is still a heuristic, not a proof, and the skip log says so.
+The first version of this change read the ten oldest and ten newest documents instead and accepted the
+false negative. **CodeRabbit was right to reject that** (PR #781): a legacy URI in the middle of a
+collection would be missed, the pass skipped, and `runIfNeeded()` would then record the migration as
+**complete** — so that document would never be rewritten and never retried. An unsound pre-check here is
+not "slightly stale data", it is a permanent silent data-migration miss, which is categorically worse
+than a slow migration. The scan is therefore exhaustive. It stops at the first document that needs
+rewriting, so the systematically dirty collection pays for one document; the worst case is a collection
+whose only stale URI sits at the very end, which is read twice — once by the scan, once by the pass — and
+that is bounded at two reads.
 
-### What this does and does not buy
+### What this does and does not buy — honestly, less than the headline
 
-The pre-check only skips when there is genuinely nothing to do, so it does **not** shorten the run it
-was measured on: those conversation documents carry `botId`/`botVersion`, condition 1 counts them, and
-the full pass runs exactly as before. What it removes is paying 20 minutes to discover that a
-collection is already clean — a retry after a partial run, a database where conversations happen to
-hold none of the three, and the `deployments` collection on every run.
+Two of the three conditions cost nothing, but proving the absence of a nested URI means reading the
+collection. So **the pre-check removes the rewrite pass, not the read** — and a collection with nothing
+to rewrite was already performing no writes in that pass. It also does **not** shorten the run that was
+measured: those conversation documents carry `botId`/`botVersion`, condition 1 counts them immediately,
+and the full pass runs exactly as before.
+
+What it does buy: no second walk over a clean collection, no mutation work on documents that do not need
+it, and an immediate, logged answer for `deployments` and for any collection the two counts can clear
+where the scan short-circuits early. **Removing the measured 20 minutes needs a different change** — the
+rewrite itself moved server-side, `updateMany` with `$rename`/`$set` for the two field conditions, which
+would not stream 80 MB through the client at all. That is a larger change and is not attempted here.
 
 ### Tests
 
-Five tests in a new `EnvironmentPreCheckTests`, each arming exactly one condition (its
-`countDocuments` mock answers from the filter it is given, so conditions can be triggered
-independently): a clean collection is never iterated (`verify(fullPass, never()).iterator()`) and never
-written, and reads only the bounded sample; each of the three conditions still triggers the full pass;
-and a pre-check that throws runs the full pass. The environment test additionally captures the filter
-and asserts it is a case-insensitive regex rather than merely mentioning the value.
+Six tests in a new `EnvironmentPreCheckTests`, each arming exactly one condition (its `countDocuments`
+mock answers from the filter it is given, so conditions can be triggered independently): a clean
+collection is read once and never written; each of the three conditions still triggers the full pass; a
+v5 URI buried in the middle of a 41-document collection — outside any sample of the two ends — still
+triggers it; and a pre-check that throws runs the full pass. The fixture honours `sort()` and `limit()`,
+so an implementation that went back to sampling really would see only one end of the collection.
 
-Mutation-checked, all five caught: dropping the field-name condition, dropping the environment
-condition, making the environment filter case-sensitive (`eq` instead of the regex), dropping the URI
-sample, and dropping the pre-check call altogether.
+Mutation-checked, all caught: dropping the field-name condition, dropping the environment condition,
+making the environment filter case-sensitive (`eq` instead of the regex), replacing the exhaustive scan
+with a bounded `limit(10)` sample, dropping the URI condition, and dropping the pre-check call.
 
 ### Files
 
 - `src/main/java/ai/labs/eddi/configs/migration/V6RenameMigration.java` — `hasNothingToMigrate`,
-  `legacyFieldNameFilter`, `legacyEnvironmentFilter`, `sampleHoldsLegacyUri`, `containsLegacyUri`,
-  plus a `FIELD_ENVIRONMENT` constant so the loop and the filter cannot drift
+  `legacyFieldNameFilter`, `legacyEnvironmentFilter`, `holdsLegacyUri`, `containsLegacyUri`, plus a
+  `FIELD_ENVIRONMENT` constant so the loop and the filter cannot drift
 - `src/test/java/ai/labs/eddi/configs/migration/V6RenameMigrationTest.java`
+- `src/test/java/ai/labs/eddi/configs/migration/V6RenameMigrationBranchTest.java` — one existing test
+  now stubs the pre-check's count, because its document genuinely does carry the legacy field names
 
 ---
 
