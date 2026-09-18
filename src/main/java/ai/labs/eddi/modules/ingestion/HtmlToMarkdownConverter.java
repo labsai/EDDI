@@ -192,7 +192,7 @@ public class HtmlToMarkdownConverter {
             case "div", "section", "article", "main", "body", "li", "dd", "dt", "header" ->
                 appendBlock(output, element, baseUrl, depth);
             case "span", "label", "small", "time", "cite", "abbr" -> appendInline(output, element, baseUrl, depth);
-            case "a" -> appendLink(output, element, baseUrl, depth);
+            case "a" -> appendLink(output, element, baseUrl);
             case "img" -> appendImage(output, element, baseUrl);
             case "strong", "b" -> appendInlineFormatted(output, element, baseUrl, "**", depth);
             case "em", "i" -> appendInlineFormatted(output, element, baseUrl, "*", depth);
@@ -464,7 +464,7 @@ public class HtmlToMarkdownConverter {
         return normalizeWhitespace(text).trim().replace("|", "\\|");
     }
 
-    private void appendLink(StringBuilder output, Element element, String baseUrl, int depth) {
+    private void appendLink(StringBuilder output, Element element, String baseUrl) {
         String href = element.attr("href");
         String text = element.text().trim();
 
