@@ -1508,8 +1508,9 @@ public class AgentSetupService {
         }
         warn(resources, agentName, "Vault key '" + metadata.keyName() + "' is granted only to " + metadata.allowedAgents()
                 + ". The agent being created cannot be on that list yet, so with eddi.vault.grant-enforcement=enforce its "
-                + "deployment will be blocked until the grant is widened to '*' or to the new agent's ID (secrets REST API, "
-                + "PATCH allowedAgents).");
+                + "deployment will be blocked until the grant is widened to the new agent's ID — PUT "
+                + "/secretstore/secrets/{tenantId}/{keyName}/grant, which does not need the secret's value (add ?dryRun=true to "
+                + "preview it first).");
     }
 
     /** Log a non-fatal vault problem and return it to the caller. */
@@ -1546,8 +1547,9 @@ public class AgentSetupService {
      * {@code allowedAgents} unset, empty or {@code ["*"]} — usable by any agent.
      */
     private static boolean isUnrestricted(SecretMetadata metadata) {
-        List<String> allowed = metadata.allowedAgents();
-        return allowed == null || allowed.isEmpty() || allowed.contains("*");
+        // Delegates rather than repeating the three shapes, so this cannot drift from
+        // the deploy-time check's idea of "everyone".
+        return SecretMetadata.grantsAllAgents(metadata.allowedAgents());
     }
 
     /**

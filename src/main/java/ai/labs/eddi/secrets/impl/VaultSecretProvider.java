@@ -95,6 +95,7 @@ public class VaultSecretProvider implements ISecretProvider {
     private Counter storeCounter;
     private Counter deleteCounter;
     private Counter rotateCounter;
+    private Counter grantUpdateCounter;
     private Counter errorCounter;
     private Timer resolveTimer;
     private Timer storeTimer;
@@ -127,6 +128,10 @@ public class VaultSecretProvider implements ISecretProvider {
         this.storeCounter = meterRegistry.counter("eddi.vault.store.count");
         this.deleteCounter = meterRegistry.counter("eddi.vault.delete.count");
         this.rotateCounter = meterRegistry.counter("eddi.vault.rotate.count");
+        // Counted separately from stores, not folded into them: a spike in grant
+        // widening is a different operational signal from a spike in key rotation,
+        // and folding the two would hide it.
+        this.grantUpdateCounter = meterRegistry.counter("eddi.vault.grant.update.count");
         this.errorCounter = meterRegistry.counter("eddi.vault.errors.count");
         this.resolveTimer = meterRegistry.timer("eddi.vault.resolve.duration");
         this.storeTimer = meterRegistry.timer("eddi.vault.store.duration");
@@ -210,8 +215,10 @@ public class VaultSecretProvider implements ISecretProvider {
      */
     private void updateLastAccessed(EncryptedSecret secret) {
         try {
-            secret.setLastAccessedAt(Instant.now());
-            persistence.upsertSecret(secret);
+            // A single-field write, never upsertSecret(secret): re-upserting the row
+            // read at the start of resolve() wrote back every field as it was then, so a
+            // grant edit (or rotation) landing in between was silently reverted.
+            persistence.touchLastAccessed(secret.getTenantId(), secret.getKeyName(), Instant.now());
         } catch (PersistenceException e) {
             LOGGER.debugf("Failed to update lastAccessedAt for %s/%s: %s", sanitize(secret.getTenantId()), sanitize(secret.getKeyName()),
                     e.getMessage());
@@ -250,6 +257,56 @@ public class VaultSecretProvider implements ISecretProvider {
             throw new SecretProviderException("Encryption failure for " + describe(reference), e);
         } finally {
             sample.stop(storeTimer);
+        }
+    }
+
+    @Override
+    public SecretMetadata updateGrant(SecretReference reference, List<String> allowedAgents, String description)
+            throws SecretNotFoundException, SecretProviderException {
+        ensureAvailable();
+
+        try {
+            var existingOpt = persistence.findSecret(reference.tenantId(), reference.keyName());
+            if (existingOpt.isEmpty()) {
+                throw new SecretNotFoundException("Secret not found: " + describe(reference));
+            }
+            EncryptedSecret existing = existingOpt.get();
+
+            List<String> grant = SecretMetadata.canonicalGrant(allowedAgents);
+            // Null means "keep", so the existing value is passed back down: the
+            // persistence call sets both fields unconditionally and knows nothing
+            // about request semantics.
+            String effectiveDescription = description != null ? description : existing.getDescription();
+
+            // No activeDek() call anywhere on this path. The DEK is only needed to seal
+            // or open a value, and this method does neither — which is also why a grant
+            // edit does not care whether the tenant's newest DEK generation is the one
+            // its row names.
+            if (!persistence.updateSecretGrant(reference.tenantId(), reference.keyName(), grant, effectiveDescription)) {
+                // The row was there a moment ago and is not now: a concurrent delete.
+                // Reported as not-found rather than as a server error, because that is
+                // what the caller should now believe about the secret.
+                throw new SecretNotFoundException("Secret not found: " + describe(reference));
+            }
+
+            // Logged at INFO with both lists: the grant is a security control, and
+            // "who may use this key" changing is the kind of thing an operator needs to
+            // be able to reconstruct afterwards. Agent IDs are not secrets.
+            // Counted only once written: a 404 or a persistence failure is not a grant
+            // update, and counting it as one would hide a spike of failed attempts.
+            grantUpdateCounter.increment();
+            LOGGER.infof("Secret grant updated: %s (allowedAgents %s -> %s)", describe(reference),
+                    sanitize(String.valueOf(existing.getAllowedAgents())), sanitize(String.valueOf(grant)));
+
+            // Built from the row that was read plus the two fields just written, rather
+            // than re-read. createdAt, lastRotatedAt, lastAccessedAt and the checksum
+            // are carried through unchanged — visible proof, in the response the
+            // operator sees, that a grant edit did not touch the value.
+            return new SecretMetadata(existing.getTenantId(), existing.getKeyName(), existing.getCreatedAt(), existing.getLastAccessedAt(),
+                    existing.getLastRotatedAt(), existing.getChecksum(), effectiveDescription, grant);
+        } catch (PersistenceException e) {
+            errorCounter.increment();
+            throw new SecretProviderException("Persistence failure while updating the grant of " + describe(reference), e);
         }
     }
 
