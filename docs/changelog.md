@@ -50,6 +50,148 @@ bottom of this file and are never archived.
 
 ---
 
+## ⚡ perf(conversation): append the turn's steps instead of rewriting the document (2026-09-18)
+
+**Repo:** EDDI (`fix/conversation-turn-concurrency`, follows the revision-guard commit)
+
+Appending one step used to rewrite the whole conversation document. On a production 5.x
+database conversations average **410 KB**, so every turn sent 410 KB over the wire,
+rewrote the document and put the whole document in the oplog — to add a few kilobytes.
+The same whole-document cost is what made the 6.x startup migration take 24 minutes on
+that database.
+
+It is also what forced the previous commit to *report* a lost update rather than repair
+it: a full-document replace has no safe retry, because re-applying it is the overwrite
+the revision guard exists to refuse.
+
+### What changed
+
+- **`IConversationMemory.getPersistedStepCount()`** — how many steps the document held
+  when this memory was loaded. Set on load by `convertConversationMemorySnapshot` (only
+  when the stored steps and outputs agree in count), carried into the snapshot by
+  `convertConversationMemory`, and refreshed by `ConversationStepRunner` after every
+  successful write.
+- **Both stores take an append path when the write is a pure append** — the count is
+  known, steps and outputs are still in step, and the count grew.
+  - MongoDB: `$set` of every field the snapshot emitted, `$unset` of every
+    `ConversationMemorySnapshot.TOP_LEVEL_KEYS` entry it did not, `$pushEach` of the new
+    steps and outputs, `$inc` of `_rev` — all under the same revision filter.
+  - PostgreSQL: `(body - 'conversationSteps' - 'conversationOutputs') || jsonb_build_object(…)`
+    so the arrays are concatenated server-side.
+- **A conflict on the append path is retried — but only over another append.** Every
+  full-document write (insert, replace, conditional replace: undo, redo, rerun, a HITL
+  pause or resume commit) now stamps a second marker, `_histRev`, with the revision it
+  creates; an append leaves it alone. So `_histRev <= loadedRevision` holds exactly when
+  every write since this turn loaded was an append, and only then is pushing our tail after
+  the winner's correct. Each attempt's filter also requires a state a say turn may complete
+  over (not `ENDED`, `AWAITING_HUMAN` or `IN_PROGRESS`). When those hold, the retry
+  (up to `MAX_APPEND_ATTEMPTS` = 5) re-applies the same push and both turns survive in
+  commit order — the "reload and re-apply" option the previous commit deferred. When they
+  do not, the append throws `ConcurrentConversationModificationException` and the say path
+  reports it exactly as commit 1 does.
+- **A merged append leaves the memory marked stale.** After a retry the document also holds
+  the winner's step, which the live memory does not; the snapshot stays on the loaded
+  revision with an unknown step baseline, so a second write from that memory is refused
+  instead of erasing the winner's step.
+- **Only the tail is encoded.** Both stores serialize the snapshot with the two arrays
+  swapped for their new tails (Mongo) or emptied (Postgres body), so the stored history is
+  neither re-serialized nor re-sent.
+- **Everything that is not a pure append keeps the full-document write**: a rerun (it
+  re-executes the current step without starting a new one, so the count does not grow), an
+  undo or a redo (`ConversationMemory.undoLastStep`/`redoLastStep` drop the baseline
+  explicitly — a redo grows the count by one and would otherwise look like a fresh turn),
+  and a document whose steps and outputs had drifted (the replace also repairs the drift).
+
+### Decisions
+
+- **The `$set` field list is derived from the encoded snapshot, never hand-written.** A
+  maintained list would silently stop persisting the next field somebody adds — a worse
+  bug than the one being fixed. Everything the codec emits is `$set`; the complement of
+  `TOP_LEVEL_KEYS` is `$unset`, which is what makes the non-array part of the document
+  come out exactly as `replaceOne` would have left it.
+- **`TOP_LEVEL_KEYS` exists because the serialization omits nulls** (`NON_NULL`) while
+  `$set` merges. Without the `$unset` half, a field the turn cleared would keep its stale
+  value — and every fresh turn after a resolved pause clears the HITL bookmark via
+  `Conversation.clearStaleToolPauseState`. It is derived by reflection over the declared
+  instance fields, and `ConversationMemorySnapshotTopLevelKeysTest` fails if a future
+  `@JsonProperty` rename is not mapped, because under-inclusion is the dangerous direction
+  (over-inclusion is a no-op `$unset`).
+- **Postgres gets the append for the merge, not for the bytes.** MVCC rewrites the row
+  either way; what matters there is that a retry concatenates instead of replacing.
+- **Cross-instance.** The guard and the retry preconditions live in one filtered
+  `updateOne` / `UPDATE … WHERE`, evaluated by the database, so they hold between pods.
+  This matters more than it first appears, and an earlier draft of this commit got it
+  wrong: it retried unconditionally and claimed identical behaviour on one pod or ten.
+  Within one pod a say turn's persist runs before the coordinator releases the next turn,
+  so the only concurrent writers are the uncoordinated REST paths (undo, redo, end). Across
+  pods a HITL pause committed on pod 1 can land between pod 2's load and its persist; an
+  unconditional retry would then `$set` READY and `$unset` the bookmark, erasing a pending
+  approval whose timeout stays armed. The `_histRev` and state preconditions are what make
+  the retry safe in both settings. They also close a pre-existing cross-pod hole:
+  `endConversation`'s narrow `setConversationState(ENDED)` does not bump the revision, so
+  an in-flight turn elsewhere used to resurrect the conversation as READY.
+- **What leaving the prefix untouched rests on — a convention, not a type.** Earlier steps
+  are handed out as `IConversationStep` (no `storeData`), but the `IData` they return has
+  setters, and their outputs — like every entry of `getConversationOutputs()` — are
+  mutable maps. No production code mutates a prior step today (the readers were checked:
+  InputParserTask, MemoryItemConverter, the behavior-rule matchers, PropertySetterTask,
+  ConversationHistoryBuilder, ConversationSummarizer, ContextualToolsProvider;
+  LifecycleManager's strict-write handling touches the current step only). A future caller
+  that did would have its change dropped on the next append, which is why this is written
+  down in `ConversationMemoryStore.isPureAppend`.
+
+### Known residual
+
+The `$set` fields — `conversationProperties`, `conversationState`,
+`pendingLongTermWrites`, the HITL bookmark — remain last-writer-wins on a retry, so two
+genuinely concurrent turns can still have the later one's property map win. That is the
+pre-existing semantics and unchanged for sequential turns; before this branch such a turn
+lost its whole step *and* its properties. Field-level property merging (dotted `$set`
+paths) would close it and is deliberately out of scope here.
+
+Not tested: retry exhaustion (`MAX_APPEND_ATTEMPTS`) needs five interleaved writers
+between one attempt's filter and its write, which the store offers no seam to force.
+
+Pre-existing and out of scope: startup migrations (`MigrationManager`,
+`V6RenameMigration.migrateEnvironments`) replace raw documents without touching `_rev` or
+`_histRev`, so during a rolling upgrade they can revert a concurrent append on another pod.
+The Postgres append falls back to `IN_PROGRESS` for a null state where the full-row path
+throws — an inconsistency copied from the existing conditional store.
+
+A second, separate improvement is also out of scope: `ConversationService.say` returns
+HTTP 200 from inside the pipeline callable (`Conversation.runStep`'s
+`outputProvider.renderOutput`) while the persist happens afterwards, and it loads the
+memory on the REST thread before `conversationCoordinator.submitInOrder`. That is what
+makes the window wide enough for a strictly sequential client to hit. The append makes it
+harmless rather than closing it.
+
+### Files
+
+- `src/main/java/ai/labs/eddi/engine/memory/ConversationMemoryStore.java`
+- `src/main/java/ai/labs/eddi/datastore/postgres/PostgresConversationMemoryStore.java`
+- `src/main/java/ai/labs/eddi/engine/memory/model/ConversationMemorySnapshot.java`,
+  `IConversationMemory.java`, `ConversationMemory.java`, `ConversationMemoryUtilities.java`
+- `src/main/java/ai/labs/eddi/engine/internal/ConversationStepRunner.java`
+- `src/test/java/ai/labs/eddi/engine/memory/model/ConversationMemorySnapshotTopLevelKeysTest.java` (new)
+- `src/test/java/ai/labs/eddi/datastore/mongo/MongoConversationTurnConcurrencyTest.java` —
+  plus: an append does not merge over a pause, an undo, an undo hidden by a later append,
+  or an `ENDED` state committed after its load; a merged append refuses a second write
+- `src/test/java/ai/labs/eddi/datastore/postgres/PostgresConversationMemoryStoreTest.java` —
+  the same pause/undo/ended cases, the conditional store's revision guard at SQL level, and
+  an append on a row deleted mid-turn
+
+### Mutation check
+
+Forcing `isPureAppend` to false fails 3 MongoDB tests — `overlappingTurnsBothSurvive` and
+`threeOverlappingTurnsAllSurvive` raise `ConcurrentConversationModificationException`, and
+`appendDoesNotRewriteThePrefix` finds its out-of-band sentinel erased — and 1 Postgres test
+(`overlappingTurnsBothSurvive`). Removing the retry preconditions (filter and re-check) on
+both backends fails 7 tests: the four Mongo rewrite/ended cases and the three Postgres ones.
+Replacing the merged-append invalidation with a normal stamp fails
+`mergedAppendInvalidatesTheMemory`.
+
+---
+
 ## 🐛 fix(conversation): optimistic concurrency on the conversation document (2026-09-18)
 
 **Repo:** EDDI (`fix/conversation-turn-concurrency`)

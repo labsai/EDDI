@@ -513,6 +513,13 @@ class ConversationStepRunner {
         // again, a resume that commits twice) presents the revision it just created
         // rather than the superseded one it loaded.
         conversationMemory.setRevision(memorySnapshot.getRevision());
+        // Same for the append baseline, as the store reports it: the step count the
+        // document now holds when this memory mirrors it, or UNKNOWN after a merged
+        // append (the document then also holds another turn's steps, and the store left
+        // the revision on the loaded value so a second write from this memory is
+        // refused
+        // rather than allowed to erase them).
+        conversationMemory.setPersistedStepCount(memorySnapshot.getPersistedStepCount());
         return conversationId;
     }
 
@@ -532,6 +539,7 @@ class ConversationStepRunner {
         boolean stored = conversationMemoryStore.storeConversationMemorySnapshotIfState(memorySnapshot, expectedState);
         if (stored) {
             conversationMemory.setRevision(memorySnapshot.getRevision());
+            conversationMemory.setPersistedStepCount(memorySnapshot.getPersistedStepCount());
         } else {
             diagnoseConditionalStoreMiss(conversationMemory, expectedState);
         }

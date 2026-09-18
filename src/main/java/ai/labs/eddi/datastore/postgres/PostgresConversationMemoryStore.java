@@ -27,7 +27,9 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.LinkedList;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import static ai.labs.eddi.engine.model.Context.ContextType.valueOf;
@@ -55,6 +57,12 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
                 data JSONB NOT NULL
             )
             """;
+
+    /**
+     * How many times an append re-applies itself on a newer revision before giving
+     * up and reporting the conflict. Mirrors the MongoDB store's bound.
+     */
+    private static final int MAX_APPEND_ATTEMPTS = 5;
 
     private static final String CREATE_INDEX_STATE = "CREATE INDEX IF NOT EXISTS idx_conv_state ON conversation_memories (conversation_state)";
     private static final String CREATE_INDEX_AGENT = "CREATE INDEX IF NOT EXISTS idx_conv_agent ON conversation_memories (AGENT_ID, AGENT_VERSION)";
@@ -90,11 +98,19 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
             String conversationId = snapshot.getConversationId();
 
             if (conversationId != null) {
+                if (isPureAppend(snapshot)) {
+                    appendConversationSteps(snapshot);
+                    return conversationId;
+                }
                 long expectedRevision = snapshot.getRevision();
                 // The revision the write CREATES, stamped before serializing: the row
                 // stores the snapshot verbatim, so the persisted _rev must be the new one
                 // or the guard below would keep matching the same revision forever.
+                long loadedHistoryRevision = snapshot.getHistoryRevision();
                 snapshot.setRevision(expectedRevision + 1);
+                // A full-row write may rewrite the history, so it records itself as the
+                // latest rewrite; an append in flight elsewhere reads this before retrying.
+                snapshot.setHistoryRevision(expectedRevision + 1);
                 json = jsonSerialization.serialize(snapshot);
                 // Update existing, guarded on the revision this write was derived from.
                 // COALESCE because a row written before _rev existed carries no such key
@@ -121,9 +137,11 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
                         // Leave the caller's snapshot describing the revision it was actually
                         // derived from, so a retry re-presents that one.
                         snapshot.setRevision(expectedRevision);
+                        snapshot.setHistoryRevision(loadedHistoryRevision);
                         throw conversationNotWritten(conn, conversationId, expectedRevision);
                     }
                 }
+                snapshot.setPersistedStepCount(snapshot.getConversationSteps().size());
             } else {
                 // Insert new
                 conversationId = UUID.randomUUID().toString();
@@ -131,6 +149,8 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
                 // A fresh conversation starts at revision 1, so a legacy-shaped row (no
                 // _rev, read as UNVERSIONED_REVISION) can never be mistaken for one.
                 snapshot.setRevision(ConversationMemorySnapshot.UNVERSIONED_REVISION + 1);
+                snapshot.setHistoryRevision(ConversationMemorySnapshot.UNVERSIONED_REVISION + 1);
+                snapshot.setPersistedStepCount(snapshot.getConversationSteps().size());
                 String json2 = jsonSerialization.serialize(snapshot); // re-serialize with ID and revision
                 String sql = """
                         INSERT INTO conversation_memories (id, AGENT_ID, AGENT_VERSION, conversation_state, data)
@@ -166,7 +186,9 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
         }
         try {
             long expectedRevision = snapshot.getRevision();
+            long loadedHistoryRevision = snapshot.getHistoryRevision();
             snapshot.setRevision(expectedRevision + 1);
+            snapshot.setHistoryRevision(expectedRevision + 1);
             String json = jsonSerialization.serialize(snapshot);
             // Atomic compare-and-store on BOTH arbiters: the state column (see
             // compareAndSetState), so a concurrent terminal writer that moved the row off
@@ -188,13 +210,167 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
                 ps.setString(6, expectedState.name());
                 ps.setLong(7, expectedRevision);
                 if (ps.executeUpdate() > 0) {
+                    snapshot.setPersistedStepCount(snapshot.getConversationSteps().size());
                     return true;
                 }
                 snapshot.setRevision(expectedRevision);
+                snapshot.setHistoryRevision(loadedHistoryRevision);
                 return false;
             }
         } catch (IOException | SQLException e) {
             throw new IResourceStore.ResourceStoreException("Failed to conditionally store conversation memory", e);
+        }
+    }
+
+    /**
+     * Whether this write only <em>adds</em> steps to the row it was derived from,
+     * which is what every ordinary turn does. Same three conditions as the MongoDB
+     * store — see {@code ConversationMemoryStore.isPureAppend} for why each one
+     * matters and what makes leaving the prefix untouched safe.
+     */
+    private static boolean isPureAppend(ConversationMemorySnapshot snapshot) {
+        int baseline = snapshot.getPersistedStepCount();
+        int steps = snapshot.getConversationSteps().size();
+        int outputs = snapshot.getConversationOutputs().size();
+        return baseline >= 0 && steps == outputs && steps > baseline;
+    }
+
+    /**
+     * Persists a pure-append turn by concatenating only the new steps and outputs
+     * onto the stored arrays, server-side.
+     * <p>
+     * PostgreSQL rewrites the row either way (MVCC), so unlike MongoDB this is not
+     * about write amplification — it is about the merge. Re-applying a
+     * concatenation on top of whatever a concurrent writer committed keeps both
+     * turns; re-applying a whole-row replace would be exactly the overwrite the
+     * revision guard exists to refuse.
+     * <p>
+     * {@code (bodyWithoutArrays) || jsonb_build_object(arrays…)} is shallow object
+     * merge with the right side winning, so the result carries exactly the new
+     * document's keys plus the concatenated arrays — nothing the snapshot omitted
+     * survives. That is what makes this equivalent to the full replace without a
+     * field list, and why Postgres needs no counterpart to the MongoDB store's
+     * {@code $unset} of the unemitted keys.
+     */
+    private void appendConversationSteps(ConversationMemorySnapshot snapshot) throws IResourceStore.ResourceStoreException {
+        String conversationId = snapshot.getConversationId();
+        int baseline = snapshot.getPersistedStepCount();
+        int totalSteps = snapshot.getConversationSteps().size();
+        // The revision this turn was LOADED at — the retry precondition compares
+        // against
+        // it and a conflict report names it, so it must not move with the attempts.
+        final long loadedRevision = snapshot.getRevision();
+
+        String newStepsJson;
+        String newOutputsJson;
+        String bodyJson;
+        var steps = snapshot.getConversationSteps();
+        var outputs = snapshot.getConversationOutputs();
+        try {
+            newStepsJson = jsonSerialization.serialize(List.copyOf(steps.subList(baseline, totalSteps)));
+            newOutputsJson = jsonSerialization.serialize(List.copyOf(outputs.subList(baseline, outputs.size())));
+            // The body is serialized with EMPTY arrays, so the stored history is neither
+            // re-serialized nor shipped; the SQL supplies the arrays by concatenation.
+            snapshot.setConversationSteps(new LinkedList<>());
+            snapshot.setConversationOutputs(new LinkedList<>());
+            bodyJson = jsonSerialization.serialize(snapshot);
+        } catch (IOException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to serialize the conversation turn", e);
+        } finally {
+            snapshot.setConversationSteps(steps);
+            snapshot.setConversationOutputs(outputs);
+        }
+
+        // `-` drops the body's (empty) arrays before the merge so the concatenation is
+        // what
+        // lands. `_histRev` is carried over from the stored row: an append does not
+        // rewrite
+        // the history and must not reset the marker a concurrent append relies on.
+        // The last two WHERE clauses are the retry preconditions — see
+        // ConversationMemoryStore.appendPreconditions for why each exists.
+        String sql = """
+                UPDATE conversation_memories
+                SET AGENT_ID = ?, AGENT_VERSION = ?, conversation_state = ?,
+                    data = ((?::jsonb) - 'conversationSteps' - 'conversationOutputs')
+                           || jsonb_build_object(
+                                '_rev', COALESCE((data->>'_rev')::bigint, 0) + 1,
+                                '_histRev', COALESCE((data->>'_histRev')::bigint, 0),
+                                'conversationSteps',
+                                    COALESCE(data->'conversationSteps', '[]'::jsonb) || ?::jsonb,
+                                'conversationOutputs',
+                                    COALESCE(data->'conversationOutputs', '[]'::jsonb) || ?::jsonb)
+                WHERE id = ?::uuid AND COALESCE((data->>'_rev')::bigint, 0) = ?
+                  AND COALESCE((data->>'_histRev')::bigint, 0) <= ?
+                  AND conversation_state NOT IN ('ENDED', 'AWAITING_HUMAN', 'IN_PROGRESS')
+                """;
+
+        long attemptRevision = loadedRevision;
+        try (Connection conn = dataSourceInstance.get().getConnection()) {
+            for (int attempt = 1;; attempt++) {
+                try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                    ps.setString(1, snapshot.getAgentId());
+                    ps.setInt(2, snapshot.getAgentVersion());
+                    ps.setString(3, snapshot.getConversationState() != null ? snapshot.getConversationState().name() : "IN_PROGRESS");
+                    ps.setString(4, bodyJson);
+                    ps.setString(5, newStepsJson);
+                    ps.setString(6, newOutputsJson);
+                    ps.setString(7, conversationId);
+                    ps.setLong(8, attemptRevision);
+                    ps.setLong(9, loadedRevision);
+                    if (ps.executeUpdate() > 0) {
+                        if (attempt == 1) {
+                            snapshot.setRevision(loadedRevision + 1);
+                            snapshot.setPersistedStepCount(totalSteps);
+                        } else {
+                            // Merged on top of another turn's append: the live memory no longer
+                            // mirrors the row. Leave it on the loaded revision so any further
+                            // write from it is refused instead of erasing the winner's step.
+                            snapshot.setRevision(loadedRevision);
+                            snapshot.setPersistedStepCount(ConversationMemorySnapshot.UNKNOWN_PERSISTED_STEP_COUNT);
+                        }
+                        return;
+                    }
+                }
+                StoredMarkers stored = readMarkers(conn, conversationId);
+                if (stored == null) {
+                    throw new IResourceStore.ResourceStoreException(
+                            "Conversation '" + conversationId + "' no longer exists — the turn was NOT persisted. "
+                                    + "The conversation row was deleted concurrently (e.g. erasure or retention cleanup).");
+                }
+                if (stored.historyRevision() > loadedRevision || NON_APPENDABLE_STATES.contains(stored.state())) {
+                    // The winner rewrote the history or moved the conversation into a state a
+                    // say turn must never overwrite — see the Mongo store. Refuse and report.
+                    throw new ConcurrentConversationModificationException(conversationId, loadedRevision);
+                }
+                if (attempt >= MAX_APPEND_ATTEMPTS) {
+                    LOGGER.warnf("Gave up appending the turn of conversation %s after %d attempts (loaded revision %d, now %d)",
+                            conversationId, attempt, loadedRevision, stored.revision());
+                    throw new ConcurrentConversationModificationException(conversationId, loadedRevision);
+                }
+                // Every write since the load was an append: re-apply the SAME concatenation.
+                attemptRevision = stored.revision();
+            }
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to append the conversation turn", e);
+        }
+    }
+
+    /** States a say turn's append must never be applied over. */
+    private static final Set<String> NON_APPENDABLE_STATES = Set.of(ENDED.name(),
+            ConversationState.AWAITING_HUMAN.name(), ConversationState.IN_PROGRESS.name());
+
+    private record StoredMarkers(long revision, long historyRevision, String state) {
+    }
+
+    /** The row's concurrency markers, or null when the row no longer exists. */
+    private StoredMarkers readMarkers(Connection conn, String conversationId) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT COALESCE((data->>'_rev')::bigint, 0) AS rev, COALESCE((data->>'_histRev')::bigint, 0) AS hist, "
+                        + "conversation_state FROM conversation_memories WHERE id = ?::uuid")) {
+            ps.setString(1, conversationId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? new StoredMarkers(rs.getLong("rev"), rs.getLong("hist"), rs.getString("conversation_state")) : null;
+            }
         }
     }
 

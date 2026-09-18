@@ -319,6 +319,40 @@ public interface IConversationMemory extends Serializable {
         // no-op by default
     }
 
+    /**
+     * How many steps the stored conversation document held when this memory was
+     * loaded, or {@code ConversationMemorySnapshot.UNKNOWN_PERSISTED_STEP_COUNT}
+     * when that is not known.
+     * <p>
+     * This is what lets a write APPEND the new steps instead of rewriting the whole
+     * document: when the count is known and the memory now holds more steps than
+     * it, the difference is exactly what this turn added, and the persisted prefix
+     * is still the prefix of this memory.
+     * <p>
+     * It reports "unknown" for every case where that does not hold — a memory that
+     * was never loaded, a document whose step and output counts had drifted, and a
+     * history that was <em>rewritten</em> rather than extended:
+     * {@link #undoLastStep()} and {@link #redoLastStep()} both reset it. A rerun
+     * needs no reset because it re-executes the current step without starting a new
+     * one, so the count does not grow and the append condition fails on its own.
+     *
+     * @since 6.4.1
+     */
+    default int getPersistedStepCount() {
+        return -1;
+    }
+
+    /**
+     * Records the persisted step count. Set by
+     * {@code ConversationMemoryUtilities.convertConversationMemorySnapshot} on
+     * load, and again by the store path after a successful write.
+     *
+     * @since 6.4.1
+     */
+    default void setPersistedStepCount(int persistedStepCount) {
+        // no-op by default
+    }
+
     interface IConversationStepStack {
         <T> IData<T> getLatestData(String key);
 

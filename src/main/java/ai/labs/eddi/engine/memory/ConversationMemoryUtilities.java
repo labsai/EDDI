@@ -76,6 +76,10 @@ public class ConversationMemoryUtilities {
         // store filters on it and increments it, so a turn built on a snapshot that
         // another writer has already superseded is refused instead of overwriting it.
         snapshot.setRevision(conversationMemory.getRevision());
+        // How many steps the document held when this memory was loaded. Lets the store
+        // append the steps this turn added instead of rewriting the whole document; see
+        // IConversationMemory#getPersistedStepCount.
+        snapshot.setPersistedStepCount(conversationMemory.getPersistedStepCount());
 
         if (conversationMemory.getUserId() != null) {
             snapshot.setUserId(conversationMemory.getUserId());
@@ -179,6 +183,14 @@ public class ConversationMemoryUtilities {
                     + "pairing by index and skipping the drift.", LogSanitizer.sanitize(snapshot.getConversationId()), conversationSteps.size(),
                     conversationOutputs.size());
         }
+        // The append baseline, and ONLY when the two lists agree: on a drifted document
+        // the steps this turn adds cannot be identified by a single count, and leaving
+        // it unknown routes the next write through the full-document replace, which
+        // also repairs the drift.
+        conversationMemory.setPersistedStepCount(conversationSteps.size() == conversationOutputs.size()
+                ? conversationSteps.size()
+                : ConversationMemorySnapshot.UNKNOWN_PERSISTED_STEP_COUNT);
+
         for (int i = 0; i < conversationOutputs.size(); i++) {
             var conversationOutput = conversationOutputs.get(i);
             if (i > 0) {
