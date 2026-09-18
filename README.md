@@ -502,7 +502,7 @@ EDDI provides built-in infrastructure for regulatory compliance:
 | **Maven**      | 3.9+    | Bundled via `mvnw` / `mvnw.cmd` wrapper — no install needed       |
 | **MongoDB**    | 6.0+    | Local instance or Docker (`docker run -d -p 27017:27017 mongo:7`) |
 | **Docker**     | Latest  | For integration tests and container builds                        |
-| **Node.js**    | —       | Not required: Maven downloads Node 20 into `ui/node/` to build the Manager and Chat UIs. Install it only to run `npm run dev` in `ui/manager` or `ui/chat` |
+| **Node.js**    | —       | Not required: Maven downloads Node 22 into `ui/node/` to build the Manager and Chat UIs. Install it only to run `npm run dev` in `ui/manager` or `ui/chat` |
 
 > **Windows users:** Replace `./mvnw` with `.\mvnw.cmd` in all commands below.
 
