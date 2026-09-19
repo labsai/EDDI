@@ -270,14 +270,31 @@ Rules that hold across all three:
   base shows a Manager confirmation naming the consequence. It is not blocked:
   an operator indexing a shared handbook drive for every employee is making a
   legitimate choice.
-- **`DOCUMENT_ACL` needs identity mapping, and that is why it is later.** EDDI
-  user ids are OIDC subjects. Drive ACLs are Google emails and groups; SharePoint
-  ACLs are Entra object ids and groups. Mapping needs (a) a trusted email or
-  `oid` claim on the EDDI identity, and (b) group expansion, fetched per user
-  and cached. The vector stores differ in filter support (langchain4j `Filter`
-  works on pgvector, Qdrant, Elasticsearch, Chroma, Mongo Atlas and in-memory,
-  with different performance on large `IN` lists). Build it once, test it against
-  every store type, and gate it per store type if one cannot do it.
+- **`DOCUMENT_ACL` maps identities through token claims** (decided 2026-09-19).
+  EDDI user ids are OIDC subjects. Drive ACLs are Google emails and groups;
+  SharePoint ACLs are Entra object ids and groups. The mapping reads claims from
+  the verified EDDI token, with no separate account-linking step. Three rules
+  keep that safe:
+  - **Email only when verified.** A Google principal comes from the `email`
+    claim and is used only if `email_verified` is `true`. Otherwise a user who can
+    set their own profile email could claim someone else's documents. No verified
+    email means no ACL match, which means no context (fail closed).
+  - **Microsoft by `oid`, never by email.** Entra's email and UPN are mutable
+    and not guaranteed unique; the object id is. With Keycloak brokering Entra,
+    an identity-provider mapper stores `oid` as a user attribute and a protocol
+    mapper puts it in the EDDI token. The docs ship both mappers.
+  - **Claim names are configuration.** `eddi.rag.acl.email-claim` (default
+    `email`) and `eddi.rag.acl.object-id-claim` (default `oid`), because EDDI
+    runs against IdPs other than Keycloak.
+
+  Group expansion is fetched from the provider per user and cached with a short
+  TTL: Graph `transitiveMemberOf`, and the Cloud Identity or Admin SDK groups API
+  for Google (needs admin consent — the reason Drive `DOCUMENT_ACL` can ship
+  user-level ACLs before group-level ones). The vector stores differ in filter
+  support (langchain4j `Filter` works on pgvector, Qdrant, Elasticsearch, Chroma,
+  Mongo Atlas and in-memory, with different performance on large `IN` lists).
+  Build it once, test it against every store type, and gate it per store type if
+  one cannot do it.
 - **ACL drift.** Revoking a user's access to a file changes the file's
   permissions, and the next delta run must re-write that document's chunks'
   metadata. Drive and Graph both surface permission changes in their change
@@ -412,6 +429,62 @@ names:
 
 `MetricsDashboardCoverageTest` forces the dashboard row and the `docs/metrics.md`
 entry, which is the intended effect.
+
+### 3.13 Embedding cost control
+
+Decided 2026-09-19. Embedding is the one cost that grows with a source's size,
+and the sources this plan adds are large (a mailbox, a drive). The design
+follows the `AGENTS.md` rule of dollar ceilings over counts, with one exception
+where a count is the better control.
+
+**Three layers, each answering a different failure:**
+
+| Layer | Setting | Stops | Default |
+|---|---|---|---|
+| Per run | `maxSegmentsPerRun` (exists today) | A runaway single run: a sitemap that suddenly lists a million URLs, a converter bug that multiplies text | 20,000 |
+| Per source, per month | `settings.maxCostPerMonthUsd` | Slow bleed across runs: a large backfill, a source whose content churns every night | Unset (off) |
+| Per tenant, per month | the existing `TenantQuota.maxMonthlyCostUsd` | The deployment's total, across every source and every other metered feature | As configured by the operator |
+
+Why not the lifetime cap proposed earlier: a lifetime budget punishes exactly
+the sources that behave well. A stable source spends almost all its cost once,
+on backfill, and a few cents a month after that. A lifetime cap eventually
+blocks it for no reason, while a monthly cap bounds the risk that actually
+exists (ongoing churn) and resets on its own.
+
+**Cost is computed from tokens, not segments.** Embedding providers price per
+token, and a segment can hold anywhere from 50 to 1,000 tokens. The pipeline
+counts tokens with the embedding model's own tokenizer where langchain4j exposes
+one, and falls back to a characters-per-token estimate otherwise. The price comes
+from a new `costPerMillionTokens` on the knowledge base's embedding
+configuration, replacing today's report-only `costPerThousandSegments`. A local
+model (Ollama, in-process ONNX) has a price of zero, so only the segment cap
+applies to it, which is correct.
+
+**What happens at a ceiling:**
+
+- The run stops before the embedding request that would cross it, with stop
+  reason `BUDGET_EXHAUSTED`. Coverage is `PARTIAL`, so **nothing is tombstoned**.
+  A budget stop must never read as "the documents are gone".
+- The cursor or backfill offset commits up to the last embedded document, so the
+  next run (in the next budget period) resumes rather than restarts.
+- A metric (`eddi.ingestion.budget.exhausted{scope}`) and a run-history entry
+  name the ceiling that fired, so the Manager can say "paused until 1 October:
+  monthly budget of $20 reached".
+
+**Estimate before the expensive part.** A first run or a cursor reset triggers a
+full backfill. Preview mode already walks the source without embedding; it gains
+a cost estimate (documents, tokens, dollars). The Manager shows it before the
+first real run and asks for confirmation when it exceeds a threshold
+(`eddi.rag.ingestion.confirm-above-usd`, default $10). The REST API gets the
+same through an explicit `?confirmCost=true` on `run`. Scheduled runs never ask:
+they are bounded by the monthly cap instead.
+
+**Ingestion becomes the first real consumer of tenant cost metering.**
+`TenantQuotaService.checkCostBudget` exists, but its Javadoc notes that nothing
+in production adds cost to it yet, so it always passes (its `recordCost` has
+no production caller). Ingestion calls `recordCost` after each embedding batch
+and `checkCostBudget` before the next one. This wires the tenant ceiling for real, with ingestion as
+the proving ground, and lets the LLM path adopt the same accounting later.
 
 ---
 
@@ -817,12 +890,23 @@ N times.
   without domain-wide delegation, which §6 rules out. So Gmail is **per user**:
   a `PER_USER` grant with `gmail.readonly` (a restricted scope, same note as
   §6) held by the mailbox's own account. For a shared mailbox that is a
-  Workspace account an operator signs into once. Its knowledge base can be
-  `AGENT_USERS` only with an explicit operator acknowledgement: this is a
-  mailbox intentionally shared, and the §3.4 owner-only rule gets a documented,
-  logged exception flag (`sharedMailboxAcknowledged`), refused on `PER_USER`
-  connections whose principal is a person's primary account. §13.3 is the
-  question of whether this exception exists at all.
+  Workspace account an operator signs into once.
+- **Shared mailboxes are supported** (decided 2026-09-19). A shared support
+  inbox on Gmail may feed an `AGENT_USERS` knowledge base through the flag
+  `sharedMailboxAcknowledged`, the one documented exception to the §3.4
+  owner-only rule. It is guarded as follows:
+  - Only `eddi-admin` may set it. EDIT permission on the knowledge base is not
+    enough, because the flag widens who can read someone's mail.
+  - The configured `mail.mailbox` must equal the address the grant actually
+    belongs to, read from Gmail `users.getProfile` on save and again on every run.
+    A grant re-linked to a different account stops the source rather than
+    silently ingesting the new mailbox.
+  - The mailbox must **not** be the linking user's own login address: if it
+    equals the verified `email` claim of the EDDI user who linked the grant, the
+    flag is refused. That is a person's primary mailbox, not a shared one, and it
+    stays `OWNER`-only.
+  - Setting or clearing the flag writes an audit-ledger entry, and the Manager
+    shows the knowledge base with a "shared mailbox" badge.
 - **Listing.** `users.messages.list` with `q` (labels, `after:`, category
   filters) for backfill, `users.history.list` from the stored `historyId` for
   incremental. `404` on a stale `historyId` becomes `CURSOR_INVALID`.
@@ -915,7 +999,7 @@ the most-tested foundation.
 
 | Phase | Content | Effort | Depends on |
 |---|---|---|---|
-| **F** | §3.1 connector interface (web source moved onto it, tests unchanged); §3.2 cursors; §3.3 two deletion models; §3.6 (1) context framing; §3.10 budgets; §3.12 meters. First consumer: **sitemap** (§4) | M (about 1.5–2 weeks) | Ingestion PRs merged |
+| **F** | §3.1 connector interface (web source moved onto it, tests unchanged); §3.2 cursors; §3.3 two deletion models; §3.6 (1) context framing; §3.10 budgets; §3.12 meters; §3.13 token-based cost and monthly caps. First consumer: **sitemap** (§4) | M (about 1.5–2 weeks) | Ingestion PRs merged |
 | **U** | **Upload** source (§5) + the §3.7 converters (PDF, DOCX, PPTX, XLSX) with bomb tests | M | F |
 | **S1** | **SharePoint, organisational mode** (§7): proves authenticated `SERVICE` sources with no new auth type | M | F, U (converters) |
 | **G1** | **Google Drive, Shared Drives** (§6a) + `OAUTH2_JWT_BEARER` auth type | M–L | F, U |
@@ -978,8 +1062,7 @@ checked by removing it and confirming the test fails. Keep that bar.
 
 - **Not ship a per-user source into a shared knowledge base.** A personal grant
   feeds only an `OWNER` audience (§3.4, §3.5). The single documented exception
-  is §8's acknowledged shared mailbox, and §13.3 asks whether even that
-  should exist.
+  is §8's admin-acknowledged shared mailbox, with its address checks.
 - **Not offer domain-wide delegation, `Sites.Read.All`, `Files.Read.All`, or
   unrestricted `Mail.Read` as a default** or in a quick-start. Least privilege
   (`Sites.Selected`, Shared Drive membership, mailbox-restricted app access) is
@@ -1010,16 +1093,14 @@ checked by removing it and confirming the test fails. Keep that bar.
 1. **Audience default for new service sources.** Should a new Drive or
    SharePoint source default its knowledge base to `AGENT_USERS` with a warning
    (proposed), or require an explicit choice every time?
-2. **Identity claims for `DOCUMENT_ACL`.** Is it acceptable to require an
-   `email` or `oid` claim in EDDI tokens (a Keycloak mapper), or does ACL
-   mapping need its own user-to-provider-identity linking step?
-3. **Shared mailboxes on Gmail.** Is the `sharedMailboxAcknowledged` exception
-   (§8) acceptable, or should Gmail be personal-only, with shared support
-   mailboxes pointed at the Microsoft 365 or IMAP transports?
-4. **Cost ceilings.** `maxSegmentsPerRun` bounds embedding volume. A mailbox
-   backfill can still be expensive in total across runs. Is a per-source
-   **lifetime** embedding budget (with an operator override) wanted, in line with
-   the dollar-based `maxCostPerRun` guidance in `AGENTS.md`?
+2. ~~Identity claims for `DOCUMENT_ACL`~~ — **decided 2026-09-19:** token
+   claims, verified email for Google, `oid` for Microsoft, claim names
+   configurable (§3.5).
+3. ~~Shared mailboxes on Gmail~~ — **decided 2026-09-19:** supported, through
+   the admin-only `sharedMailboxAcknowledged` flag with address checks (§8).
+4. ~~Cost ceilings~~ — **decided 2026-09-19:** no lifetime cap. A per-run
+   segment cap, a per-source monthly dollar cap, and the tenant monthly budget,
+   with a cost estimate and a confirmation before large backfills (§3.13).
 5. **Group conversations.** Inherited from `docs/connections.md`: when a group
    member agent retrieves from an `OWNER` knowledge base, whose identity counts?
    Proposed: the verified user of the group conversation, and nothing if none —
