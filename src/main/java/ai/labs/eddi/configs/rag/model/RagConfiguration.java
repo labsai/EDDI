@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.rag.model;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -228,8 +229,15 @@ public class RagConfiguration {
             throw new IllegalArgumentException(unsupported);
         }
         if (sources != null) {
+            Set<String> keys = new HashSet<>();
             for (IngestionSource source : sources) {
                 source.validate();
+                // Ingestion state is keyed by this. Two sources sharing it would share
+                // one document history, so each run would tombstone the other's pages.
+                if (!keys.add(source.effectiveId())) {
+                    throw new IllegalArgumentException("Two ingestion sources share the id or name '"
+                            + source.effectiveId() + "' — each source needs its own");
+                }
             }
         }
     }
