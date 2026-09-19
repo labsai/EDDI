@@ -247,4 +247,50 @@ describe("useActivateOperator — retiring the superseded operator", () => {
     // From the backend's self-url endpoint, not from the test origin.
     expect(result.current.data?.config.apiBaseUrl).toBe("http://127.0.0.1:7070");
   });
+
+  /**
+   * Retirement waits for verification. A replacement that fails its gate check is
+   * rolled back — and if the predecessor had already been retired by then, the
+   * deployment was left with no operator at all. It must instead still be
+   * deployed, and the config handed back to it.
+   */
+  it("keeps the predecessor and restores its config when the replacement fails verification", async () => {
+    const spy = freshSpy();
+    serveReconfigure(spy);
+    const predecessor = existingOperator({ scope: "read_write" });
+    const writes: OperatorConfig[] = [];
+    let stored: string | null = JSON.stringify(predecessor);
+    server.use(
+      // The replacement's document comes back WITHOUT a gate: read_write must roll it back.
+      http.get("*/agentstore/agents/:id", ({ params }) => HttpResponse.json({ id: params.id })),
+      http.get(VAR_URL, () =>
+        stored === null
+          ? HttpResponse.text("not found", { status: 404 })
+          : HttpResponse.json({ key: OPERATOR_VARIABLE_KEY, value: stored }),
+      ),
+      http.put(VAR_URL, async ({ request }) => {
+        const body = (await request.json()) as { value: string };
+        stored = body.value;
+        writes.push(JSON.parse(body.value) as OperatorConfig);
+        return new HttpResponse(null, { status: 204 });
+      }),
+      http.delete(VAR_URL, () => {
+        stored = null;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+
+    const { result } = renderHook(() => useActivateOperator(), { wrapper });
+    result.current.mutate({ agentName: "EDDI Platform Operator", config: predecessor, apiKey: "sk-test" });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    // The replacement was torn down; the predecessor was not touched.
+    expect(spy.deletes).toContain(NEW_AGENT);
+    expect(spy.deletes).not.toContain(OLD_AGENT);
+    expect(spy.undeploys.map((entry) => entry.agentId)).not.toContain(OLD_AGENT);
+    // And the config points at the predecessor again.
+    expect(writes[writes.length - 1]?.agentId).toBe(OLD_AGENT);
+    expect(result.current.error?.message).toContain(OLD_AGENT);
+    expect(result.current.error?.message).toMatch(/still the active one/i);
+  });
 });

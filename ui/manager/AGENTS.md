@@ -273,7 +273,10 @@ what it finds. Off by default. Worth knowing before touching it:
   `resolveOperatorApiBaseUrl`: an explicit value on the config first, then EDDI's
   own `GET /administration/operator/self-url` (`eddi.self.base-url`, else loopback
   on `quarkus.http.port`), and only on a backend that 404s that endpoint the
-  browser's origin — with a `console.warn`. `provisionOperator` throws on a blank
+  browser's origin — with a `console.warn`. A backend that *answers*
+  `source: "unresolved"` (random port, no override) is not a 404: the Manager
+  throws and asks for the base URL explicitly rather than falling back to the
+  browser's origin. `provisionOperator` throws on a blank
   one rather than guessing. The two coincide on a single-host deployment with
   nothing in between, which is exactly why `window.location.origin` survived to
   production: on a tunnelled staging instance it provisioned all 22 resources with

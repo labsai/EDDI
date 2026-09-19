@@ -20,7 +20,7 @@ import {
   type OperatorScope,
 } from "@/lib/operator/tool-scopes";
 import { extractVaultKeyName, toVaultRef } from "@/lib/operator/vault-ref";
-import { normalizeBaseUrl, type OperatorConfig, type OperatorAuthMode } from "@/lib/api/operator";
+import { isOriginOnlyBaseUrl, normalizeBaseUrl, type OperatorConfig, type OperatorAuthMode } from "@/lib/api/operator";
 import type { ActivationStage } from "@/hooks/use-operator";
 import { cn } from "@/lib/utils";
 
@@ -171,11 +171,10 @@ export function OperatorActivation({
    * NOT allowed is a value that cannot be a base URL at all, which would be
    * baked into 22 resources before anything noticed.
    */
-  // Anchored, and checked on the normalised value: scheme://host[:port] and
-  // nothing else. A path would be prepended to every generated tool's path, and
-  // trailing text would be baked into all of them.
-  const apiBaseUrlInvalid =
-    apiBaseUrl.trim().length > 0 && !/^https?:\/\/[^\s/]+$/i.test(normalizeBaseUrl(apiBaseUrl));
+  // Checked on the normalised value: scheme://host[:port] and nothing else. A
+  // path would be prepended to every generated tool's path, a query would
+  // swallow it, and credentials would be baked into all of them.
+  const apiBaseUrlInvalid = apiBaseUrl.trim().length > 0 && !isOriginOnlyBaseUrl(normalizeBaseUrl(apiBaseUrl));
   /**
    * The server's own answer, normalised the way activation will normalise the
    * field, so the two can be compared. A stored value from an earlier activation

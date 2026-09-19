@@ -371,6 +371,33 @@ export function normalizeBaseUrl(value: string | null | undefined): string {
   return (value ?? "").trim().replace(/\/+$/, "");
 }
 
+/**
+ * Whether a (normalised) value is a bare origin — `http(s)://host[:port]` and
+ * nothing else. Parsed with `URL` rather than matched with a pattern alone: a
+ * character class that merely excludes `/` still admits `?tenant=x` (every
+ * generated path would become query content) and `user:pass@` (credentials baked
+ * into 22 resources). The textual check in front catches what `URL` normalises
+ * away, such as a trailing `/.`, so the value provisioned is the value validated.
+ */
+export function isOriginOnlyBaseUrl(value: string): boolean {
+  if (!/^https?:\/\/[^\s/?#@\\]+$/i.test(value)) return false;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  return (
+    (url.protocol === "http:" || url.protocol === "https:") &&
+    url.hostname.length > 0 &&
+    url.username === "" &&
+    url.password === "" &&
+    url.search === "" &&
+    url.hash === "" &&
+    url.pathname === "/"
+  );
+}
+
 /** What the backend reports as its own reachable address. */
 export interface PlatformSelfUrl {
   /** `null` when `source` is `unresolved`. */

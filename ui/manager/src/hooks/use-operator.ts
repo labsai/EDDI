@@ -199,6 +199,12 @@ export function useActivateOperator() {
       const apiBaseUrl = await resolveOperatorApiBaseUrl(config);
       const effectiveConfig: OperatorConfig = { ...config, apiBaseUrl };
 
+      // The stored config this activation replaces, captured BEFORE anything is
+      // written, so a replacement that fails verification can hand the deployment
+      // back to it. Best-effort: without it, a failed reconfigure still rolls the
+      // new agent back, it just cannot re-point the config at the old one.
+      const previous = config.agentId ? await readOperatorConfig().catch(() => null) : null;
+
       onStage?.("provisioning");
       const result = await provisionOperator({ agentName, config: effectiveConfig, apiKey, baseUrl, spec });
       // 201 does not mean deployed, and the id can come back as "unknown".
@@ -239,8 +245,73 @@ export function useActivateOperator() {
         throw provisioningError;
       }
 
+      // Read the gate back from the document we just created — never trust that
+      // sending hitlConfig means it landed. This is what actually proves
+      // isWriteScopeAvailable's "backend accepts hitlConfig" fact.
+      //
+      // For read_only this stays REPORTED, not enforced: a caught exception or a
+      // negative result means an operator that can only read is also unverified,
+      // which is useless rather than dangerous.
+      //
+      // For read_write it is ENFORCED, and that distinction is load-bearing.
+      // `isWriteScopeAvailable` no longer demands a gate verified on a PREVIOUS
+      // operator, on the stated grounds that activation proves the gate about the
+      // agent it actually creates — so this read-back has to be a gate rather
+      // than a status line, or that justification is false. Reporting it and
+      // proceeding would leave exactly the hole the old two-step bootstrap
+      // existed to close.
+      //
+      // The gate dry-run below is NOT a substitute for this check. It
+      // classifies one endpoint (`PATCH /descriptorstore/descriptors/{id}`),
+      // so it proves the patch pattern is gated and says nothing about
+      // `http.post:*`, `http.put:*` or `http.delete:*`. A document whose gate
+      // covers only some write methods passes the dry-run while leaving the
+      // rest ungated; `gateLooksInstalled` is what inspects the whole pattern
+      // set. The two are complementary: this one checks the pattern set is
+      // complete, the dry-run checks the classifier actually gates the target.
+      onStage?.("verifying-gate");
+      let gate: GateVerificationResult;
+      let policyVerified: boolean | null;
+      try {
+        gate = await verifyGateInstalled(result.agentId);
+        await reportOperatorGateStatus(gate.verified);
+        if (next.scope === "read_write" && !gate.verified) {
+          await rollBackUnsafeOperator(
+            next,
+            `The approval gate could not be verified on the operator's own agent document${gate.reason ? ` (${gate.reason})` : ""}.`,
+          );
+        }
+
+        // The deterministic half of write verification (backend gate-dry-run):
+        // classifies the probe's target write against the STORED policy — pure
+        // function of policy + call address, cannot flake, writes nothing. A
+        // proven-ungated policy (or a failed verification) rolls back fail-closed
+        // inside. This is the ONLY write check activation still waits on.
+        //
+        // The LLM probes — read canary and live write probe — deliberately do
+        // NOT run here anymore. Each drives a real model conversation and was
+        // the bulk of the activation wait (a minute of "connection check" after
+        // the operator was already deployed and usable), and an inconclusive
+        // outcome proved nothing anyway. They run in the background via
+        // runPostActivationProbes once the admin is already in the chat; the
+        // write probe still tears the operator down on a PROVEN gate breach.
+        //
+        // `next`, NOT `config`: the check has to run against the agent that was
+        // just provisioned. `config` still carries the PREVIOUS agentId, which on
+        // a reconfigure is still deployed at this point — retired only below, once
+        // the replacement has passed every check that can roll it back.
+        policyVerified = await enforceGateDryRun(next, spec);
+      } catch (verificationError) {
+        await handBackToPredecessor(verificationError, previous, config, result.agentId);
+        throw verificationError;
+      }
+
       // Retire the agent this activation replaced, so repeated reconfiguration
       // doesn't accumulate deployed operators.
+      //
+      // Only NOW, after the gate read-back and the dry-run: either can roll the
+      // replacement back, and retiring the predecessor before them left a
+      // deployment with no operator at all whenever they did.
       //
       // Reported, not swallowed. `setup-api` always builds a NEW agent id, so a
       // reconfigure is a replacement, and a replacement whose retirement quietly
@@ -272,59 +343,6 @@ export function useActivateOperator() {
             "so changes made to the old one will have no effect.";
         }
       }
-
-      // Read the gate back from the document we just created — never trust that
-      // sending hitlConfig means it landed. This is what actually proves
-      // isWriteScopeAvailable's "backend accepts hitlConfig" fact.
-      //
-      // For read_only this stays REPORTED, not enforced: a caught exception or a
-      // negative result means an operator that can only read is also unverified,
-      // which is useless rather than dangerous.
-      //
-      // For read_write it is ENFORCED, and that distinction is load-bearing.
-      // `isWriteScopeAvailable` no longer demands a gate verified on a PREVIOUS
-      // operator, on the stated grounds that activation proves the gate about the
-      // agent it actually creates — so this read-back has to be a gate rather
-      // than a status line, or that justification is false. Reporting it and
-      // proceeding would leave exactly the hole the old two-step bootstrap
-      // existed to close.
-      //
-      // The gate dry-run below is NOT a substitute for this check. It
-      // classifies one endpoint (`PATCH /descriptorstore/descriptors/{id}`),
-      // so it proves the patch pattern is gated and says nothing about
-      // `http.post:*`, `http.put:*` or `http.delete:*`. A document whose gate
-      // covers only some write methods passes the dry-run while leaving the
-      // rest ungated; `gateLooksInstalled` is what inspects the whole pattern
-      // set. The two are complementary: this one checks the pattern set is
-      // complete, the dry-run checks the classifier actually gates the target.
-      onStage?.("verifying-gate");
-      const gate = await verifyGateInstalled(result.agentId);
-      await reportOperatorGateStatus(gate.verified);
-      if (next.scope === "read_write" && !gate.verified) {
-        await rollBackUnsafeOperator(
-          next,
-          `The approval gate could not be verified on the operator's own agent document${gate.reason ? ` (${gate.reason})` : ""}.`,
-        );
-      }
-
-      // The deterministic half of write verification (backend gate-dry-run):
-      // classifies the probe's target write against the STORED policy — pure
-      // function of policy + call address, cannot flake, writes nothing. A
-      // proven-ungated policy (or a failed verification) rolls back fail-closed
-      // inside. This is the ONLY write check activation still waits on.
-      //
-      // The LLM probes — read canary and live write probe — deliberately do
-      // NOT run here anymore. Each drives a real model conversation and was
-      // the bulk of the activation wait (a minute of "connection check" after
-      // the operator was already deployed and usable), and an inconclusive
-      // outcome proved nothing anyway. They run in the background via
-      // runPostActivationProbes once the admin is already in the chat; the
-      // write probe still tears the operator down on a PROVEN gate breach.
-      //
-      // `next`, NOT `config`: the check has to run against the agent that was
-      // just provisioned. `config` still carries the PREVIOUS agentId, which on
-      // a reconfigure `removeSupersededAgent` deleted a few lines above.
-      const policyVerified = await enforceGateDryRun(next, spec);
 
       onStage?.("done");
       return { config: next, gate, policyVerified, spec, supersededWarning };
@@ -424,6 +442,63 @@ async function rollBackUnsafeOperator(config: OperatorConfig, failure: string): 
     `${failure} The operator has been deactivated and removed rather than left deployed ` +
       "with write tools behind a gate that could not be verified.",
   );
+}
+
+/**
+ * After a replacement failed verification, decide what happens to the operator
+ * it was replacing — which, because retirement now waits for verification, is
+ * still deployed.
+ *
+ * - The replacement was rolled back (the config variable is gone): write the
+ *   predecessor's stored config back, so the screen and the deployment agree
+ *   that the old operator is the active one. The error message says so.
+ * - The replacement is still recorded (a check threw without rolling back):
+ *   it is the live one, so retire the predecessor exactly as a success would
+ *   have, rather than leave two operators deployed.
+ *
+ * Never throws: the verification failure is what the admin needs to see, so
+ * this only ever appends to its message.
+ */
+async function handBackToPredecessor(
+  verificationError: unknown,
+  previous: OperatorConfig | null,
+  config: OperatorConfig,
+  newAgentId: string,
+): Promise<void> {
+  if (!config.agentId || config.agentId === newAgentId) return;
+  const append = (note: string) => {
+    if (verificationError instanceof Error) verificationError.message = `${verificationError.message} ${note}`;
+  };
+  let current: OperatorConfig | null | undefined;
+  try {
+    current = await readOperatorConfig();
+  } catch {
+    current = undefined;
+  }
+  if (current === null) {
+    if (previous?.agentId !== config.agentId) {
+      append(
+        `The operator it was replacing (${config.agentId}) was left deployed, but its configuration could not be restored — reconfigure the operator to manage it again.`,
+      );
+      return;
+    }
+    try {
+      await writeOperatorConfig(previous);
+      append(`The operator it was replacing (${config.agentId}) was left in place and is still the active one.`);
+    } catch {
+      append(
+        `The operator it was replacing (${config.agentId}) was left deployed, but restoring its configuration failed — reconfigure the operator to manage it again.`,
+      );
+    }
+    return;
+  }
+  if (current?.agentId === newAgentId && config.version != null) {
+    try {
+      await removeSupersededAgent(config);
+    } catch {
+      append(`The operator it was replacing (${config.agentId}) could not be removed and may still be deployed.`);
+    }
+  }
 }
 
 /**

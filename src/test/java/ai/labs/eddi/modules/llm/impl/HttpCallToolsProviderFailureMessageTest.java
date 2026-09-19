@@ -96,8 +96,10 @@ class HttpCallToolsProviderFailureMessageTest {
                     "the attempted URL must be in the message: " + message);
             assertTrue(message.contains("GET"), message);
             assertTrue(message.contains("base URL"), "the message must point at the configured base URL: " + message);
-            assertTrue(message.contains("NOT a fault in the service behind it"),
-                    "the message must contradict the 'the service is down' reading: " + message);
+            assertTrue(message.contains("before any response was received"),
+                    "the message must say the failure happened at the transport level: " + message);
+            assertTrue(message.contains("a service is listening there"),
+                    "a refused connect can also be a stopped listener, so the message must name it: " + message);
         }
 
         /**
@@ -247,18 +249,20 @@ class HttpCallToolsProviderFailureMessageTest {
             assertTrue(message.contains("SSRF protection"), message);
             assertTrue(message.contains("eddi.self.base-url"), message);
             assertTrue(message.contains("http://localhost:7080/agentstore/agents/descriptors"), message);
-            assertFalse(message.contains("network failure"), message);
+            assertFalse(message.contains("transport failure"), message);
+            assertTrue(message.contains("No request was sent"), message);
+            assertFalse(message.contains("Report it to the administrator"), message);
         }
 
         /**
          * A READ timeout means the service accepted the connection and was slow — the
-         * one case the "not a fault in the service" wording must never cover.
+         * one case the "before any response was received" wording must never cover.
          */
         @Test
         @DisplayName("a read timeout is not dressed up as a connect failure")
         void readTimeoutIsNotAConnectFailure() {
             String message = describe(new RuntimeException("Read timed out", new SocketTimeoutException("Read timed out")));
-            assertFalse(message.contains("NOT a fault in the service"), message);
+            assertFalse(message.contains("before any response was received"), message);
         }
 
         /**
@@ -376,8 +380,8 @@ class HttpCallToolsProviderFailureMessageTest {
 
             assertTrue(result.contains("http://localhost:7080/agentstore/agents/descriptors"),
                     "the tool result must name the address that was tried: " + result);
-            assertTrue(result.contains("NOT a fault in the service behind it"),
-                    "the tool result must contradict the 'the platform is down' reading: " + result);
+            assertTrue(result.contains("before any response was received"),
+                    "the tool result must say the failure happened at the transport level: " + result);
             assertTrue(result.contains("base URL"), result);
             // Still the one JSON-object shape a tool result takes.
             assertTrue(result.startsWith("{\"error\": \""), result);

@@ -73,7 +73,10 @@ than degrading quietly:
   `eddi.self.base-url`, otherwise `http://127.0.0.1:${quarkus.http.port}` — never
   from an agent config or a request header. So a config naming a third-party host
   cannot exfiltrate a user's token, and no allow-list is needed for this to be safe
-  by default.
+  by default. With `quarkus.http.port=0` (a random port) and no
+  `eddi.self.base-url`, the self address is *unresolved*: nothing is derived, and
+  the token is released to the caller's origin only — set `eddi.self.base-url` or
+  a fixed port for the self release to apply.
 
   The second half exists for the Platform Operator, whose tools must call EDDI at
   an address the *server* can reach, which behind a tunnel, a port mapping or a
@@ -87,8 +90,14 @@ than degrading quietly:
 
   With `eddi.security.ssrf-protection.enabled=true`, the loopback default is
   refused before any request is made (loopback is exactly what that protection
-  blocks), so such a deployment must set `eddi.self.base-url` to a non-loopback
-  address the server can reach.
+  blocks), so such a deployment must set `eddi.self.base-url` to an address the
+  server can reach *and* that passes the full SSRF target policy — which also
+  rejects private and link-local addresses, so an in-cluster service name that
+  resolves to a private IP stays blocked. `eddi.self.base-url` must be a bare
+  `scheme://host[:port]`; a value with a path, query, fragment or credentials is
+  ignored (logged at ERROR). A plain-`http` value naming a non-loopback host is
+  accepted but logged at WARN, since the caller's token would cross the network
+  unencrypted unless a mesh or network layer protects it.
 - **Headers only.** `${caller:token}` in a query parameter, request body or
   request path is rejected. Tokens in URLs leak through access logs, proxies and
   browser history, and nothing outside a header is substituted anyway — a

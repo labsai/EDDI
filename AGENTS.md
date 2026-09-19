@@ -859,7 +859,9 @@ Resolution is narrow and fails loudly rather than degrading quietly:
   `scheme://host:port` the caller addressed (read from the inbound request, not
   config), or to this deployment's own address (`SelfUrlResolver`:
   `eddi.self.base-url`, else `http://127.0.0.1:${quarkus.http.port}` — deployment
-  config only, never agent config or a request). A config naming a third-party
+  config only, never agent config or a request; on a random port
+  (`quarkus.http.port=0`) with no override it is *unresolved* and only the
+  caller's origin qualifies). A config naming a third-party
   host cannot exfiltrate the token. The self address bypasses any reverse proxy,
   so EDDI's own authorization is what guards it; a deployment that also relies on
   proxy path rules sets `eddi.caller-identity.self-release.enabled=false`. A

@@ -509,8 +509,14 @@ class HttpCallToolsProvider implements ToolSourceProvider {
      * "the documentation service is currently unavailable" and "this indicates a
      * problem with the platform's internal services". That sent the admin to check
      * EDDI's health, which was fine, instead of to the one field that was wrong. So
-     * a connect-class failure now names the address that was tried and says
-     * outright that the configured base URL is the thing to suspect.
+     * a connect-class failure now names the address that was tried, the configured
+     * base URL, and what to check.
+     * <p>
+     * Facts and checks only, never reporting policy: how an agent phrases a failure
+     * to its user is agent configuration (its prompt), not something the engine
+     * dictates. And a refused connect does not by itself prove the address is wrong
+     * — a stopped service refuses too — so the listener is named alongside the base
+     * URL rather than ruled out.
      *
      * <h3>What may and may not go in here</h3> This string reaches the model and
      * therefore, in paraphrase, the chat surface. The target URL goes in: it is the
@@ -531,10 +537,10 @@ class HttpCallToolsProvider implements ToolSourceProvider {
             // private self-URL can never work, and the model would otherwise be left to
             // guess what "internal/local addresses" means for the platform's health.
             return SecretRedactionFilter.redact("EDDI refused to call " + attemptedTarget(targetServerUrl, apiCall)
-                    + " because SSRF protection (eddi.security.ssrf-protection.enabled) blocks private and loopback "
-                    + "addresses (" + stripUserInfo(raw) + "). This is a configuration problem with the tool's base URL, not an "
-                    + "outage: on a deployment with SSRF protection on, a tool that calls EDDI itself needs a non-loopback "
-                    + "base URL (eddi.self.base-url). Report it to the administrator as such.");
+                    + " because SSRF protection (eddi.security.ssrf-protection.enabled) blocks loopback, private and "
+                    + "link-local addresses (" + stripUserInfo(raw) + "). No request was sent. The base URL configured for "
+                    + "this tool (" + describeBase(targetServerUrl) + ") is such an address; with SSRF protection on, a tool "
+                    + "that calls EDDI itself needs a base URL (eddi.self.base-url) that passes the SSRF target policy.");
         }
         String connectFailure = connectFailureKind(e);
         if (connectFailure == null) {
@@ -545,10 +551,10 @@ class HttpCallToolsProvider implements ToolSourceProvider {
                 : "the request";
         String attempted = attemptedTarget(targetServerUrl, apiCall);
         return SecretRedactionFilter.redact(connectFailure + " while trying to reach " + method + " " + attempted + " (" + stripUserInfo(raw) + "). "
-                + "This is a network failure reaching that address, NOT a fault in the service behind it. "
-                + "The base URL configured for this tool (" + describeBase(targetServerUrl) + ") must be an address the EDDI "
-                + "server itself can reach — not the address a browser uses to reach EDDI. Report this to the administrator "
-                + "as a configuration problem with the tool's base URL, and do not speculate about the state of the target service.");
+                + "This is a transport failure: the request failed before any response was received. "
+                + "Things to check: that the base URL configured for this tool (" + describeBase(targetServerUrl) + ") is an "
+                + "address the EDDI server itself can reach — not the address a browser uses to reach EDDI — that the network "
+                + "path to it is open, and that a service is listening there.");
     }
 
     /**
@@ -570,7 +576,7 @@ class HttpCallToolsProvider implements ToolSourceProvider {
             }
             // Connect-phase timeouts only. SocketTimeoutException also covers READ
             // timeouts, where the service accepted the connection and then was slow —
-            // exactly the case this message must not call "not a fault in the service".
+            // exactly the case this message must not call a failure "before any response".
             // Netty's ConnectTimeoutException (what Vert.x raises when a firewall drops
             // the SYN) extends ConnectException, so it is matched by name, and before
             // the ConnectException branch that would otherwise call it "refused".

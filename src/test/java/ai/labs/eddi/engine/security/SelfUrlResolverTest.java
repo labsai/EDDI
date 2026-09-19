@@ -125,9 +125,11 @@ class SelfUrlResolverTest {
          * anyone set the property.
          */
         @Test
-        @DisplayName("an unusable value falls back to loopback instead of failing startup")
+        @DisplayName("an unusable value — including anything but a bare origin — falls back to loopback instead of failing startup")
         void unusableValueFallsBack() {
-            for (String bad : new String[]{"not a url", "ftp://eddi:7070", "file:///etc/passwd", "/agentstore", "http://"}) {
+            for (String bad : new String[]{"not a url", "ftp://eddi:7070", "file:///etc/passwd", "/agentstore", "http://",
+                    "https://eddi.internal/base", "http://eddi:7070?tenant=x", "http://eddi:7070#frag",
+                    "http://user:pass@eddi:7070"}) {
                 var resolver = configured(bad);
                 assertEquals("http://127.0.0.1:7070", resolver.baseUrl(), bad + " should have fallen back");
                 assertEquals(SelfUrlResolver.SOURCE_LOOPBACK, resolver.source(), bad + " should not report as configured");

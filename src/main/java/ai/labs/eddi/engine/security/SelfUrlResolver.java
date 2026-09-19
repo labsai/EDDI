@@ -11,6 +11,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
+import java.util.Locale;
 import java.util.Optional;
 
 /**
@@ -104,13 +105,15 @@ public class SelfUrlResolver {
             if (normalized != null) {
                 resolved = normalized;
                 resolvedSource = SOURCE_CONFIGURED;
+                warnIfPlaintextOffHost(normalized);
             } else {
                 // Falling back rather than failing startup: a malformed override must not
                 // take the whole deployment down, and loopback is the answer that was
                 // correct before anyone set the property. Logged at ERROR because the
                 // operator asked for something specific and is not getting it.
-                LOGGER.errorf("%s is not a usable http(s) base URL ('%s') — ignoring it. "
-                        + "Set it to a scheme://host[:port] this process can reach itself at.", CONFIG_KEY, candidate);
+                LOGGER.errorf("%s is not a usable http(s) origin ('%s') — ignoring it. "
+                        + "Set it to a bare scheme://host[:port] (no path, query, fragment or credentials) "
+                        + "this process can reach itself at.", CONFIG_KEY, candidate);
             }
         }
         if (resolved == null) {
@@ -167,7 +170,16 @@ public class SelfUrlResolver {
     }
 
     /**
-     * Strip a trailing slash and require an {@code http(s)} URL with a host.
+     * Strip a trailing slash and require a bare {@code http(s)} origin:
+     * {@code scheme://host[:port]} and nothing else.
+     * <p>
+     * A path, query, fragment or userinfo is rejected rather than carried along.
+     * Every consumer appends an API path to this value verbatim — the Manager's
+     * generated tools and {@code ApiCallExecutor} alike — so
+     * {@code https://eddi.internal/base} would silently retarget every call under
+     * {@code /base}, and {@code http://eddi:7070?tenant=x} would turn every path
+     * into query content. Credentials have no business in a value that is echoed to
+     * the Manager and into tool configs.
      * <p>
      * {@code validateUrlSyntax} rather than the full SSRF check on purpose: the
      * whole point of this value is to name a loopback or private address, which the
@@ -186,10 +198,44 @@ public class SelfUrlResolver {
             return null;
         }
         try {
-            UrlValidationUtils.validateUrlSyntax(trimmed);
-            return trimmed;
+            URI uri = UrlValidationUtils.validateUrlSyntax(trimmed);
+            boolean bareOrigin = uri.getRawUserInfo() == null && (uri.getRawPath() == null || uri.getRawPath().isEmpty())
+                    && uri.getRawQuery() == null && uri.getRawFragment() == null;
+            return bareOrigin ? trimmed : null;
         } catch (IllegalArgumentException e) {
             return null;
         }
+    }
+
+    /**
+     * Warn when the override sends plaintext HTTP to a host other than loopback.
+     * <p>
+     * Not refused: an in-cluster service name over plain HTTP — behind a mesh that
+     * encrypts pod-to-pod traffic, or on a pod-local network — is exactly the case
+     * the override exists for, and a same-origin {@code http://} caller has always
+     * been able to receive its own token back. But {@code ${caller:token}} is
+     * released to this address, so an operator who set it should be told, once and
+     * loudly, that the token will cross the network unencrypted unless something
+     * below HTTP protects it.
+     */
+    private static void warnIfPlaintextOffHost(String baseUrl) {
+        URI uri = URI.create(baseUrl);
+        if (!"http".equalsIgnoreCase(uri.getScheme()) || isLoopbackHost(uri.getHost())) {
+            return;
+        }
+        LOGGER.warnf("%s is plain HTTP to a non-loopback host (%s). ${caller:token} is released to this address, "
+                + "so the caller's bearer token will cross the network unencrypted unless a mesh or network layer "
+                + "protects it. Prefer https, or set eddi.caller-identity.self-release.enabled=false.", CONFIG_KEY, baseUrl);
+    }
+
+    private static boolean isLoopbackHost(String host) {
+        if (host == null) {
+            return false;
+        }
+        String h = host.toLowerCase(Locale.ROOT);
+        if (h.startsWith("[") && h.endsWith("]")) {
+            h = h.substring(1, h.length() - 1);
+        }
+        return h.equals("localhost") || h.startsWith("127.") || h.equals("::1") || h.equals("0:0:0:0:0:0:0:1");
     }
 }

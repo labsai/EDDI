@@ -4097,13 +4097,13 @@
       "tools": "부여될 도구 ({{toolCount}}개)",
       "activate": "활성화 및 배포",
       "callerIdentityNote": "EDDI가 호출 시점에 토큰을 넣습니다. 대화에 저장되지 않으며 이 배포로만 전송됩니다.",
-      "rebuildWarning": "저장하면 오포레이턼가 교안됩니다. 새 에이전트가 생성되고 현재 에이전트({{agentId}})는 배포 해제 후 삭제됩니다. 기존 오포레이턼 대화는 이어지지 않으며, 이후 이 화면은 새 에이전트를 대상으로 합니다.",
+      "rebuildWarning": "저장하면 오퍼레이터가 교체됩니다. 새 에이전트가 생성되고 현재 에이전트({{agentId}})는 배포 해제 후 삭제됩니다. 기존 오퍼레이터 대화는 이어지지 않으며, 이후 이 화면은 새 에이전트를 대상으로 합니다.",
       "environmentHint": "오퍼레이터 에이전트 자체가 실행되는 곳입니다. 어느 환경이든 읽을 수 있습니다.",
-      "platformBaseUrl": "프랫폼 기본 URL",
-      "platformBaseUrlHint": "EDDI가 자신에게 도달할 수 있는 주소입니다. 오포레이턼의 도구는 서버 내부에서 이 주소를 호출하므로 본인의 및 본에 보이는 주소와 다릅니다. 다른 사정이 없다면 미리 채워진 값을 그대로 두세요.",
+      "platformBaseUrl": "플랫폼 기본 URL",
+      "platformBaseUrlHint": "EDDI가 자신에게 도달할 수 있는 주소입니다. 오퍼레이터의 도구는 서버 내부에서 이 주소를 호출하므로 브라우저가 사용하는 주소와 다릅니다. 다른 사정이 없다면 미리 채워진 값을 그대로 두세요.",
       "platformBaseUrlInvalid": "http:// 또는 https:// 로 시작하는 절대 URL이어야 합니다. 예: http://127.0.0.1:7070",
-      "platformBaseUrlUnknown": "이 EDDI 배포는 자신의 주소를 알려줄 수 없어 본인의 및 본 오리진으로 대심합니다. 본인의 및 본와 EDDI 사이에 태널, 포트 매핑, 리버스 프록시가 전혀 없을 때만 올바른 값이므로, 그렇지 않다면 여기에 주소를 입력하세요.",
-      "platformBaseUrlLoopback": "이 배포의 HTTP 포트에서 유도했습니다. EDDI를 서버스 이름이나 프로세스 내 TLS로 지정해야 하면 값을 바꾸세요.",
+      "platformBaseUrlUnknown": "이 EDDI 배포는 자신의 주소를 알려줄 수 없어 브라우저 오리진으로 대체합니다. 브라우저와 EDDI 사이에 터널, 포트 매핑, 리버스 프록시가 전혀 없을 때만 올바른 값이므로, 그렇지 않다면 여기에 주소를 입력하세요.",
+      "platformBaseUrlLoopback": "이 배포의 HTTP 포트에서 유도했습니다. EDDI를 서비스 이름이나 프로세스 내 TLS로 지정해야 하면 값을 바꾸세요.",
       "platformBaseUrlAuto": "서버에서 확인",
       "platformBaseUrlDiffers": "이 배포는 현재 자신의 주소를 {{serverUrl}}(으)로 보고합니다. 위의 값은 이와 다릅니다. 의도적으로 설정한 경우에만 유지하세요.",
       "platformBaseUrlQueryFailed": "서버에 자신의 주소를 물어볼 수 없었습니다. 여기에 입력하지 않으면 활성화가 실패합니다. 다시 시도하려면 페이지를 새로 고침하세요.",
@@ -4157,7 +4157,7 @@
       "gateNotVerified": "게이트 확인 안 됨",
       "gateUnverifiedHelp": "이 에이전트 문서에서 승인 게이트를 확인할 수 없습니다.",
       "agentId": "에이전트",
-      "platformBaseUrl": "프랫폼 호출 주소",
+      "platformBaseUrl": "플랫폼 호출 주소",
       "platformBaseUrlUnknown": "기록되지 않음"
     },
     "chat": {
@@ -4272,7 +4272,7 @@
       "stepCount_other": "{{count}}단계"
     },
     "superseded": {
-      "title": "이전 오포레이턼 에이전트가 여전하 배포되어 있습니다."
+      "title": "이전 오퍼레이터 에이전트가 여전히 배포되어 있습니다."
     }
   },
   "groupWorkspace": {

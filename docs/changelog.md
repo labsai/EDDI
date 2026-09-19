@@ -50,6 +50,52 @@ bottom of this file and are never archived.
 
 ---
 
+## 🐛 fix(operator): review follow-ups on the self-URL fix — stricter origin, later retirement, factual tool errors (2026-09-19)
+
+**Repo:** EDDI (`fix/operator-self-url`) — backend and `ui/manager/`, follow-up to the entry below (PR #795 review)
+
+**What changed**
+
+- **`eddi.self.base-url` must be a bare origin.** `SelfUrlResolver` now rejects a value
+  with a path, query, fragment or userinfo (falls back to loopback, logged at ERROR).
+  Every consumer appends an API path verbatim, so `https://eddi.internal/base` silently
+  retargeted every call and `http://eddi:7070?tenant=x` turned every path into query
+  content. The Manager's activation form applies the same rule by parsing with `URL`
+  (`isOriginOnlyBaseUrl` in `lib/api/operator.ts`) instead of a character class that
+  still admitted `?` and `user:pass@`.
+- **Plain-HTTP, non-loopback self URL is warned about, not refused.** `${caller:token}`
+  is released to that address, so the resolver logs a WARN at startup that the token will
+  cross the network unencrypted unless a mesh protects it. Refusing it would break the
+  in-cluster service-name case the override exists for.
+- **The superseded operator is retired only after the replacement passes verification.**
+  `useActivateOperator` used to undeploy and delete the predecessor before
+  `verifyGateInstalled` / `enforceGateDryRun`; when either rolled the replacement back,
+  the deployment had no operator at all. Retirement now runs last, and a failed
+  verification hands the config back to the predecessor (`handBackToPredecessor`), which
+  is still deployed. New test in `use-operator-supersede.test.tsx`, mutation-checked
+  against the old ordering.
+- **Tool failure messages state facts, not reporting policy.** `HttpCallToolsProvider`
+  no longer tells the model "report this to the administrator" or that a refused
+  connection is "NOT a fault in the service" — a stopped listener refuses too. The
+  connect-class message now says the request failed before any response and lists what
+  to check (base URL reachable from the server, network path, listener); the SSRF
+  message says no request was sent and that the base URL must pass the full SSRF policy.
+- **Docs:** the SSRF guidance now says the self URL must pass the *whole* target policy
+  (private and link-local are refused too, so an in-cluster name usually stays blocked);
+  the `unresolved` self-URL case is documented in `httpcalls.md`, `hitl.md`, `AGENTS.md`
+  and `ui/manager/AGENTS.md`; `eddi.self.base-url` and
+  `eddi.caller-identity.self-release.enabled` are added to
+  `configuration-reference.md` (CI's `ConfigurationReferenceCoverageTest` was red on
+  their absence).
+- **i18n:** corrected misspelled terms in the new `hi`, `ja`, `ko` and `th` strings.
+
+**Design decisions:** the transport-security finding is answered with a startup warning
+rather than a refusal, for the reason above; the tool message keeps its diagnostics in
+the engine (every agent needs them) but drops the imperatives, which belong in an agent's
+prompt.
+
+---
+
 ## 🐛 fix(operator): the Platform Operator's self-URL, its replacement, and its error message (2026-09-18)
 
 **Repo:** EDDI (`fix/operator-self-url`) — backend and `ui/manager/`, in one branch so the two halves are tested together

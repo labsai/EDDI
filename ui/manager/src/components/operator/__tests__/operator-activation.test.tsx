@@ -184,6 +184,19 @@ describe("OperatorActivation", () => {
       expect(screen.queryByTestId("operator-platform-base-url-unknown")).not.toBeInTheDocument();
     });
 
+    it("rejects a base URL carrying a query, fragment or credentials", async () => {
+      renderActivation({
+        initial: { ...defaultOperatorConfig("Body text."), credentialKey: "operator-llm-key" },
+      });
+      const field = screen.getByLabelText(/platform base url/i);
+      await waitFor(() => expect(field).toHaveValue("http://127.0.0.1:7070"));
+      for (const bad of ["http://eddi:7070?tenant=x", "http://eddi:7070#frag", "http://user:pass@eddi:7070"]) {
+        await userEvent.clear(field);
+        await userEvent.type(field, bad);
+        expect(await screen.findByTestId("operator-platform-base-url-invalid")).toBeInTheDocument();
+      }
+    });
+
     it("rejects a base URL carrying a path or trailing text", async () => {
       renderActivation({
         initial: { ...defaultOperatorConfig("Body text."), credentialKey: "operator-llm-key" },
