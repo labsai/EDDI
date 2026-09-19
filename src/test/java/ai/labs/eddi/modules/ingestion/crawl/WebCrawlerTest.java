@@ -760,8 +760,9 @@ class WebCrawlerTest {
                     .filter(command -> command.url().contains("/sitemap-"))
                     .count();
             assertTrue(sitemapRequests <= 20, "requested " + sitemapRequests + " sitemaps");
-            assertTrue(summary.fetchAttempts() >= sitemapRequests + 1,
-                    "sitemap requests must count as fetch attempts, was " + summary.fetchAttempts());
+            // robots.txt, the sitemaps and the seed page: every request is counted.
+            assertEquals(site.requests().size(), summary.fetchAttempts(),
+                    "every metadata request must count as a fetch attempt");
         }
 
         @Test
