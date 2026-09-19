@@ -721,6 +721,67 @@ class WebCrawlerTest {
         }
 
         @Test
+        @DisplayName("each host's own Crawl-delay applies, not the seed host's")
+        void crawlDelayIsPerHost() {
+            // The seed host asks for no delay; the second host asks for one second.
+            // Using the seed's delay for every request ignored the second host's.
+            FakeSite site = new FakeSite()
+                    .page(SITE + "/", linkTo("https://other.test/p"))
+                    .robots("https://other.test", "User-agent: *\nCrawl-delay: 1")
+                    .page("https://other.test/p", "<html><body>elsewhere</body></html>");
+            var request = new CrawlRequest(SITE + "/", new Scope(false, false, null, 3, null), Limits.defaults(),
+                    new Politeness(Duration.ZERO, "EDDI-Crawler/1.0", true));
+
+            long start = System.nanoTime();
+            new WebCrawler(site).crawl(request, new RecordingSink());
+            long elapsedMillis = (System.nanoTime() - start) / 1_000_000;
+
+            assertTrue(site.wasRequested("https://other.test/p"));
+            assertTrue(elapsedMillis >= 900, "waited only " + elapsedMillis + "ms before the second host");
+        }
+
+        @Test
+        @DisplayName("sitemap requests are capped and counted against the fetch budget")
+        void sitemapRequestsAreBudgeted() {
+            // robots.txt is the site's to write. Every Sitemap line was fetched before
+            // the crawl loop's budgets applied, so one file could order thousands of
+            // requests that no limit saw.
+            StringBuilder robots = new StringBuilder("User-agent: *\n");
+            for (int i = 0; i < 100; i++) {
+                robots.append("Sitemap: ").append(SITE).append("/sitemap-").append(i).append(".xml\n");
+            }
+            FakeSite site = new FakeSite()
+                    .robots(SITE, robots.toString())
+                    .page(SITE + "/", "<html><body>home</body></html>");
+
+            CrawlSummary summary = new WebCrawler(site).crawl(politeRequest(SITE + "/"), new RecordingSink());
+
+            long sitemapRequests = site.requests().stream()
+                    .filter(command -> command.url().contains("/sitemap-"))
+                    .count();
+            assertTrue(sitemapRequests <= 20, "requested " + sitemapRequests + " sitemaps");
+            assertTrue(summary.fetchAttempts() >= sitemapRequests + 1,
+                    "sitemap requests must count as fetch attempts, was " + summary.fetchAttempts());
+        }
+
+        @Test
+        @DisplayName("a robots.txt that disallows everything is not coverage")
+        void robotsBlockingEverythingIsNotCoverage() {
+            // A staging robots.txt deployed by mistake is common. Nothing fetched and
+            // nothing failed, and treating that as a complete crawl would delete the
+            // whole knowledge base after the missed-runs threshold.
+            FakeSite site = new FakeSite()
+                    .robots(SITE, "User-agent: *\nDisallow: /")
+                    .page(SITE + "/", "<html><body>home</body></html>");
+
+            CrawlSummary summary = new WebCrawler(site).crawl(politeRequest(SITE + "/"), new RecordingSink());
+
+            assertEquals(StopReason.COMPLETED, summary.stopReason());
+            assertEquals(0, summary.errors());
+            assertFalse(summary.coveredWholeSource());
+        }
+
+        @Test
         @DisplayName("a sitemap page still has to satisfy the scope")
         void sitemapUrlsRespectScope() {
             FakeSite site = new FakeSite()
