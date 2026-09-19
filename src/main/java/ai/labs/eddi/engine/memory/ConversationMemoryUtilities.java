@@ -72,6 +72,14 @@ public class ConversationMemoryUtilities {
         // read as legacy — a snapshot built from live memory is current by
         // definition and must say so explicitly.
         snapshot.setSchemaVersion(ConversationMemorySnapshot.CURRENT_SCHEMA_VERSION);
+        // The revision this write is DERIVED from, not the one it will create: the
+        // store filters on it and increments it, so a turn built on a snapshot that
+        // another writer has already superseded is refused instead of overwriting it.
+        snapshot.setRevision(conversationMemory.getRevision());
+        // How many steps the document held when this memory was loaded. Lets the store
+        // append the steps this turn added instead of rewriting the whole document; see
+        // IConversationMemory#getPersistedStepCount.
+        snapshot.setPersistedStepCount(conversationMemory.getPersistedStepCount());
 
         if (conversationMemory.getUserId() != null) {
             snapshot.setUserId(conversationMemory.getUserId());
@@ -143,6 +151,10 @@ public class ConversationMemoryUtilities {
                 snapshot.getUserId());
 
         conversationMemory.setConversationState(snapshot.getConversationState());
+        // The revision this memory is a view of. Every write derived from this memory
+        // carries it, so the store can tell "built on the current document" from
+        // "built on a document someone else has since replaced".
+        conversationMemory.setRevision(snapshot.getRevision());
         conversationMemory.setResolutionProvenance(snapshot.getResolutionProvenance());
         conversationMemory.setHitlPausedWorkflowId(snapshot.getHitlPausedWorkflowId());
         conversationMemory.setHitlPausedAbsoluteTaskIndex(snapshot.getHitlPausedAbsoluteTaskIndex());
@@ -171,6 +183,14 @@ public class ConversationMemoryUtilities {
                     + "pairing by index and skipping the drift.", LogSanitizer.sanitize(snapshot.getConversationId()), conversationSteps.size(),
                     conversationOutputs.size());
         }
+        // The append baseline, and ONLY when the two lists agree: on a drifted document
+        // the steps this turn adds cannot be identified by a single count, and leaving
+        // it unknown routes the next write through the full-document replace, which
+        // also repairs the drift.
+        conversationMemory.setPersistedStepCount(conversationSteps.size() == conversationOutputs.size()
+                ? conversationSteps.size()
+                : ConversationMemorySnapshot.UNKNOWN_PERSISTED_STEP_COUNT);
+
         for (int i = 0; i < conversationOutputs.size(); i++) {
             var conversationOutput = conversationOutputs.get(i);
             if (i > 0) {

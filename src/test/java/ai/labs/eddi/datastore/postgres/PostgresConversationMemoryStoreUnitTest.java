@@ -6,6 +6,7 @@ package ai.labs.eddi.datastore.postgres;
 
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.memory.ConcurrentConversationModificationException;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import jakarta.enterprise.inject.Instance;
@@ -23,6 +24,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.startsWith;
 import static org.mockito.Mockito.*;
 
 class PostgresConversationMemoryStoreUnitTest {
@@ -82,23 +84,72 @@ class PostgresConversationMemoryStoreUnitTest {
     }
 
     /**
-     * G12 parity with the MongoDB store: an UPDATE that matches no row means the
-     * conversation was deleted mid-turn. Before the fix the count was discarded and
-     * the conversation id was returned as if the turn had been persisted, so
+     * G12 parity with the MongoDB store: an UPDATE that matches no row means either
+     * the conversation was deleted mid-turn or another writer moved it to a newer
+     * revision. Before the fix the count was discarded and the conversation id was
+     * returned as if the turn had been persisted, so
      * {@code ConversationService.onComplete} never reached
-     * {@code logConversationError}.
+     * {@code logConversationError}. The existence probe stubbed here is what tells
+     * the two causes apart.
      */
     @Test
     void storeSnapshot_conversationDeletedMidTurn_throwsResourceStoreException() throws Exception {
         ConversationMemorySnapshot snapshot = createSnapshot("conv-123");
         when(jsonSerialization.serialize(snapshot)).thenReturn("{\"test\":true}");
         when(preparedStatement.executeUpdate()).thenReturn(0);
+        ResultSet probeResult = stubConversationExists(false);
 
         var thrown = assertThrows(IResourceStore.ResourceStoreException.class,
                 () -> store.storeConversationMemorySnapshot(snapshot));
 
         assertTrue(thrown.getMessage().contains("conv-123"), thrown.getMessage());
         assertTrue(thrown.getMessage().contains("NOT persisted"), thrown.getMessage());
+        assertFalse(thrown instanceof ConcurrentConversationModificationException,
+                "an erased conversation has nothing to retry against — it must not be reported as a revision conflict");
+        verify(probeResult).close();
+    }
+
+    /**
+     * Postgres parity for the optimistic-concurrency guard: the row is still there,
+     * only at a different revision, so this is a conflict a retry from a fresh load
+     * can still resolve — not a deletion.
+     */
+    @Test
+    void storeSnapshot_concurrentWriter_throwsConcurrentModification() throws Exception {
+        ConversationMemorySnapshot snapshot = createSnapshot("conv-123");
+        snapshot.setRevision(4L);
+        when(jsonSerialization.serialize(snapshot)).thenReturn("{\"test\":true}");
+        when(preparedStatement.executeUpdate()).thenReturn(0);
+        ResultSet probeResult = stubConversationExists(true);
+
+        var thrown = assertThrows(ConcurrentConversationModificationException.class,
+                () -> store.storeConversationMemorySnapshot(snapshot));
+
+        assertEquals("conv-123", thrown.getConversationId());
+        assertEquals(4L, thrown.getExpectedRevision());
+        assertEquals(4L, snapshot.getRevision(),
+                "a refused write must leave the snapshot on the revision it was derived from");
+        // The guard has to reach the SQL, not just the exception mapping.
+        verify(preparedStatement).setLong(6, 4L);
+        verify(probeResult).close();
+    }
+
+    /**
+     * Stubs the existence probe the store runs after a zero-row write to tell "the
+     * row is gone" apart from "the row moved to another revision".
+     * <p>
+     * The probe gets its own statement and result set rather than reusing the
+     * shared update mocks, and the test verifies the store closes both — the probe
+     * runs in try-with-resources, and a leaked cursor per refused write would be a
+     * real leak.
+     */
+    private ResultSet stubConversationExists(boolean exists) throws SQLException {
+        PreparedStatement probeStatement = mock(PreparedStatement.class);
+        ResultSet probeResult = mock(ResultSet.class);
+        when(connection.prepareStatement(startsWith("SELECT 1 FROM conversation_memories"))).thenReturn(probeStatement);
+        when(probeStatement.executeQuery()).thenReturn(probeResult);
+        when(probeResult.next()).thenReturn(exists);
+        return probeResult;
     }
 
     @Test

@@ -70,7 +70,7 @@ class ConversationMemoryStoreTest {
         stubReplaceMatching(snapshot, 1L);
 
         assertEquals(VALID_ID, store.storeConversationMemorySnapshot(snapshot));
-        verify(objectCollection).replaceOne(any(Document.class), eq(snapshot));
+        verify(objectCollection).replaceOne(any(Bson.class), eq(snapshot));
     }
 
     @Test
@@ -79,10 +79,12 @@ class ConversationMemoryStoreTest {
         ConversationMemorySnapshot snapshot = new ConversationMemorySnapshot();
         snapshot.setId(VALID_ID);
 
-        // matchedCount 0 == the document vanished between load and store (GDPR
-        // erasure, retention sweep). Swallowing this lost the whole turn while the
-        // caller still saw a normal response.
+        // matchedCount 0 == either the document vanished between load and store (GDPR
+        // erasure, retention sweep) or another writer moved it to a newer revision.
+        // Swallowing this lost the whole turn while the caller still saw a normal
+        // response. The existence probe stubbed here is what tells the two apart.
         stubReplaceMatching(snapshot, 0L);
+        stubConversationExists(false);
 
         var exception = assertThrows(IResourceStore.ResourceStoreException.class,
                 () -> store.storeConversationMemorySnapshot(snapshot));
@@ -91,14 +93,26 @@ class ConversationMemoryStoreTest {
                 "the failure must name the conversation whose turn was lost, got: " + exception.getMessage());
         // The turn must NOT be resurrected behind the erasure, neither by an upsert
         // nor by falling through to the insert branch.
-        verify(objectCollection, never()).replaceOne(any(Document.class), eq(snapshot), any(ReplaceOptions.class));
+        verify(objectCollection, never()).replaceOne(any(Bson.class), eq(snapshot), any(ReplaceOptions.class));
         verify(objectCollection, never()).insertOne(any(ConversationMemorySnapshot.class));
     }
 
     private void stubReplaceMatching(ConversationMemorySnapshot snapshot, long matchedCount) {
         UpdateResult result = mock(UpdateResult.class);
         when(result.getMatchedCount()).thenReturn(matchedCount);
-        when(objectCollection.replaceOne(any(Document.class), eq(snapshot))).thenReturn(result);
+        when(objectCollection.replaceOne(any(Bson.class), eq(snapshot))).thenReturn(result);
+    }
+
+    /**
+     * Stubs the existence probe the store runs after a zero-match write to tell
+     * "the conversation is gone" apart from "the conversation moved to another
+     * revision".
+     */
+    private void stubConversationExists(boolean exists) {
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        when(documentCollection.find(any(Bson.class))).thenReturn(iterable);
+        when(iterable.projection(any(Document.class))).thenReturn(iterable);
+        when(iterable.first()).thenReturn(exists ? new Document("_id", new ObjectId(VALID_ID)) : null);
     }
 
     // ==================== loadConversationMemorySnapshot ====================
@@ -295,7 +309,7 @@ class ConversationMemoryStoreTest {
 
         Integer result = store.update(VALID_ID, 0, snapshot);
         assertEquals(0, result);
-        verify(objectCollection).replaceOne(any(Document.class), eq(snapshot));
+        verify(objectCollection).replaceOne(any(Bson.class), eq(snapshot));
     }
 
     @Test
@@ -305,6 +319,7 @@ class ConversationMemoryStoreTest {
         snapshot.setId(VALID_ID);
 
         stubReplaceMatching(snapshot, 0L);
+        stubConversationExists(false);
 
         // update() must not report success (return 0) for a write that matched nothing.
         var exception = assertThrows(IResourceStore.ResourceStoreException.class,
