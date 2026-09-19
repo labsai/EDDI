@@ -9938,6 +9938,17 @@
               "editorMode": "code",
               "range": true,
               "legendFormat": "rotate"
+            },
+            {
+              "refId": "E",
+              "expr": "sum(rate(eddi_vault_grant_update_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "grant update"
             }
           ],
           "fieldConfig": {

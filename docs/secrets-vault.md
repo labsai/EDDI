@@ -619,6 +619,7 @@ The vault emits metrics under the `eddi.vault.*` namespace for Grafana/Prometheu
 | `eddi.vault.store.count`     | Counter | Total store operations                     |
 | `eddi.vault.delete.count`    | Counter | Total delete operations                    |
 | `eddi.vault.rotate.count`    | Counter | Total rotation operations (DEK + KEK)      |
+| `eddi.vault.grant.update.count` | Counter | Successful grant edits (`PUT …/grant`) — counted apart from stores so a spike in widening is visible |
 | `eddi.vault.errors.count`    | Counter | Total error count (persistence + crypto)   |
 | `eddi.vault.resolve.duration`| Timer   | Duration of resolve operations             |
 | `eddi.vault.store.duration`  | Timer   | Duration of store operations               |
