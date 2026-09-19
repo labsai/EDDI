@@ -128,7 +128,23 @@ Mutations, each failing the intended test: both flags removed; `sendThinking` on
 `gatingAssistantMessageOf` back to `getLast()`; the bare degraded rebuild; the field written with
 a kept transcript; either leak strip removed; the Vertex warning call removed from `build()`.
 
-Not yet verified: a live run of the patched build; the tests use the stub.
+**Live run of the patched build** (`5be8d02f1`, real Gemini API, `gemini-3.5-flash`, an agent with the
+calculator and datetime built-in tools and a system prompt forcing tool use; the same driver script run
+against both builds):
+
+| Scenario | Patched `5be8d02f1` | Unpatched 6.4.0 release image |
+| --- | --- | --- |
+| Non-streaming turn 1 (tool call) | correct, READY | ERROR |
+| Non-streaming turn 2 (history holds a tool turn) | correct, READY | ERROR |
+| Non-streaming turn 3 (two tool calls in one turn) | correct, READY | ERROR |
+| Streaming SSE tool turn | correct, READY (`task_start`, `tool_call`, `token`, `task_complete`, `done`) | ERROR (`task_failed`) |
+| HITL `requireApproval: ["builtin:*"]` — pause before the tool runs | AWAITING_HUMAN | AWAITING_HUMAN |
+| HITL — resume with APPROVED | correct, READY | ERROR |
+| **Total** | **6/6** | **1/6** |
+
+The unpatched container logged 33 Gemini 400s, "Function call is missing a thought_signature in
+functionCall parts". Not covered live: the degraded resume path (transcript over its cap), which is
+exercised only by the unit tests.
 
 ### Provider survey — the same defect class elsewhere
 
