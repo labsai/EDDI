@@ -266,17 +266,20 @@ class SafeHttpPageFetcherTest {
         when(response.uri()).thenReturn(URI.create("https://example.com/a"));
         when(response.headers()).thenReturn(HttpHeaders.of(Map.of("Content-Type", List.of("text/html")),
                 (k, v) -> true));
-        when(response.body()).thenReturn(new StallingStream("<p>partial"));
-        when(httpClient.sendValidated(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
-                .thenReturn(response);
+        // Closed on every exit, so a failing run does not leave a reader blocked.
+        try (StallingStream stalling = new StallingStream("<p>partial")) {
+            when(response.body()).thenReturn(stalling);
+            when(httpClient.sendValidated(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                    .thenReturn(response);
 
-        FetchedPage page = assertTimeoutPreemptively(Duration.ofSeconds(10),
-                () -> fetcher.fetch(new FetchCommand("https://example.com/a", "EDDI-Crawler/1.0",
-                        Duration.ofMillis(50), null, null, 10_000_000)));
+            FetchedPage page = assertTimeoutPreemptively(Duration.ofSeconds(10),
+                    () -> fetcher.fetch(new FetchCommand("https://example.com/a", "EDDI-Crawler/1.0",
+                            Duration.ofMillis(50), null, null, 10_000_000)));
 
-        assertTrue(page.truncated(), "a stalled body must come back truncated");
-        assertEquals("<p>partial", new String(page.body(), StandardCharsets.UTF_8),
-                "what arrived before the stall is kept");
+            assertTrue(page.truncated(), "a stalled body must come back truncated");
+            assertEquals("<p>partial", new String(page.body(), StandardCharsets.UTF_8),
+                    "what arrived before the stall is kept");
+        }
     }
 
     @Test
