@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { screen, waitFor, fireEvent } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { server } from "@/test/mocks/server";
@@ -707,6 +707,14 @@ describe("Workforce Components – Coverage Batch 2", () => {
 
   // ── ExportMenu (37.06% → covered) ───────────────────────────────
   describe("ExportMenu", () => {
+    // The download tests spy on document.createElement. Restore it after each
+    // test: Vitest 4 hands back the SAME mock when a method is spied twice, so a
+    // leaked spy makes the next test's "original" createElement the mock itself
+    // (infinite recursion) and breaks every later describe in this file.
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
     it("renders disabled trigger when conversation is null", () => {
       renderWithProviders(
         <ExportMenu conversation={null} />,

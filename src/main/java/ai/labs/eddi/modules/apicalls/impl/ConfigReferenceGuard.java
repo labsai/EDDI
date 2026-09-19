@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.modules.apicalls.impl;
 
+import ai.labs.eddi.secrets.model.SecretReference;
+
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
@@ -31,9 +33,15 @@ import java.util.regex.Pattern;
  * what a {@code scope: "secret"} property instruction stores). Anything else
  * came from data, and the call is refused rather than resolved.
  * <p>
- * {@code ${vars:...}} is not guarded: global variables hold configuration such
- * as model names and base URLs, not secrets, and resolving one a user typed
- * reveals nothing an agent configuration could not already show.
+ * {@code ${vars:...}} is not itself a credential reference: global variables
+ * hold configuration such as model names and base URLs, and resolving one a
+ * user typed reveals nothing an agent configuration could not already show. A
+ * variable MAY however hold a credential reference, which makes a data-supplied
+ * {@code ${vars:...}} an indirection to one — so
+ * {@code ApiCallExecutor#resolveGuardedVariables} calls this again after
+ * variable expansion, with the configured template expanded the same way. This
+ * class is unchanged by that: it only ever compares the references of a
+ * configured value against the references of a rendered one.
  */
 final class ConfigReferenceGuard {
 
@@ -90,9 +98,29 @@ final class ConfigReferenceGuard {
     }
 
     /**
-     * The auto-vault references of the properties {@code template} names. Only an
-     * exact {@code ${vault:<agentId>.<name>}} (optionally tenant-qualified) counts,
-     * so a property that merely holds text a user typed never qualifies.
+     * The auto-vault references of the properties {@code template} names.
+     * <p>
+     * A property qualifies only when its value is character-for-character one of
+     * the references {@code PropertySetterTask.autoVaultSecret} could have written
+     * for <em>that</em> property: the key is {@code <agentId>.<name>} for this
+     * conversation's agent and the name the template reads, and the tenant is this
+     * conversation's own. Built by string comparison rather than a pattern compiled
+     * per call, so there is no dynamic regex to reason about.
+     * <p>
+     * <b>What this is and is not.</b> It is a shape test, not a provenance test:
+     * {@code Property} carries no marker saying "auto-vaulted" (a {@code secret}
+     * instruction stores the reference with {@code scope: conversation}, exactly
+     * like any other), so a property populated from data with that exact string is
+     * accepted too. The bound on that is what makes it acceptable: the reference is
+     * derived from this agent and this property name, so data cannot choose WHICH
+     * secret is read, and the endpoint it would be sent to is the one the
+     * configuration names. Pinning the tenant is what closes the part that did
+     * matter — the earlier pattern accepted any {@code <tenant>/} prefix, so a
+     * user-supplied value could read another tenant's secret of the same key name.
+     * The residual path is a configuration that writes the {@code tenantId}
+     * property from conversation data, which redirects legitimate auto-vaulting the
+     * same way. A real provenance check needs a marker on {@code Property} and is
+     * tracked separately.
      */
     private static Set<String> autoVaultReferences(String template, Map<String, Object> templateData) {
         Set<String> found = new LinkedHashSet<>();
@@ -103,11 +131,18 @@ final class ConfigReferenceGuard {
         if (agentId == null || !(templateData.get("properties") instanceof Map<?, ?> properties)) {
             return found;
         }
+        String tenantId = tenantId(properties);
         Matcher access = PROPERTY_ACCESS.matcher(template);
         while (access.find()) {
             String name = access.group(1);
-            if (properties.get(name) instanceof String value
-                    && value.matches("\\$\\{(?:vault|eddivault):(?:[^/}]+/)?" + Pattern.quote(agentId + "." + name) + "\\}")) {
+            if (!(properties.get(name) instanceof String value)) {
+                continue;
+            }
+            String key = SecretReference.DEFAULT_TENANT.equals(tenantId) ? agentId + "." + name : tenantId + "/" + agentId + "." + name;
+            // The legacy prefix too: a conversation property stored before the
+            // ${eddivault:…} → ${vault:…} rename still holds the old spelling, and the
+            // vault still resolves it.
+            if (value.equals("${vault:" + key + "}") || value.equals("${eddivault:" + key + "}")) {
                 found.add(value);
             }
         }
@@ -119,5 +154,14 @@ final class ConfigReferenceGuard {
             return String.valueOf(info.get("agentId"));
         }
         return null;
+    }
+
+    /**
+     * The conversation's tenant, read the same way
+     * {@code PropertySetterTask.autoVaultSecret} reads it: the {@code tenantId}
+     * property, defaulting to {@code default}.
+     */
+    private static String tenantId(Map<?, ?> properties) {
+        return properties.get("tenantId") instanceof String tenantId && !tenantId.isBlank() ? tenantId : SecretReference.DEFAULT_TENANT;
     }
 }

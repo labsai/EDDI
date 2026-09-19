@@ -43,6 +43,10 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * buffered entry — including entries that record no input themselves, such as a
  * task-failure entry whose error message quotes the offending token, and
  * entries built after the property setter already replaced the recorded input.
+ * Context values the client marked {@code "secret": true} are removed from
+ * every entry the same way, whether or not the input was a secret — they are
+ * replaced by {@link MemoryKeys#SECRET_CONTEXT_PLACEHOLDER} and the recorded
+ * input is left as it is.
  * <p>
  * Not thread-safe beyond what a single turn needs: the pipeline runs its tasks
  * sequentially, but {@link #collect} is synchronized anyway because a buffer
@@ -105,6 +109,18 @@ public final class TurnAuditBuffer implements IAuditEntryCollector {
      * order. A failing submit is logged and does not stop the rest.
      */
     public void flush(IConversationMemory memory) {
+        flush(memory, List.of());
+    }
+
+    /**
+     * {@link #flush(IConversationMemory)}, additionally removing
+     * {@code secretContextValues} from every entry.
+     *
+     * @param secretContextValues
+     *            the turn's secret context values to redact, longest first; the
+     *            caller has already dropped values too short to search for
+     */
+    public void flush(IConversationMemory memory, List<String> secretContextValues) {
         memory.setAuditCollector(delegate);
         List<AuditEntry> pending;
         Set<String> inputs;
@@ -117,7 +133,11 @@ public final class TurnAuditBuffer implements IAuditEntryCollector {
         boolean secretInput = inputWasScrubbed(memory);
         for (AuditEntry entry : pending) {
             try {
-                delegate.collect(secretInput ? redact(entry, inputs) : entry);
+                AuditEntry submitted = secretInput ? redact(entry, inputs) : entry;
+                if (secretContextValues != null && !secretContextValues.isEmpty()) {
+                    submitted = redactValues(submitted, secretContextValues, MemoryKeys.SECRET_CONTEXT_PLACEHOLDER);
+                }
+                delegate.collect(submitted);
             } catch (RuntimeException e) {
                 LOGGER.warnf(e, "Audit entry for task '%s' of conversation '%s' could not be submitted",
                         sanitize(entry.taskId()), sanitize(entry.conversationId()));
@@ -150,31 +170,51 @@ public final class TurnAuditBuffer implements IAuditEntryCollector {
         if (input != null && input.containsKey(USER_INPUT)) {
             input.put(USER_INPUT, MemoryKeys.SECRET_INPUT_PLACEHOLDER);
         }
-        return entry.withPayload(redactMap(input, needles), redactMap(entry.output(), needles), redactMap(entry.llmDetail(), needles),
-                redactMap(entry.toolCalls(), needles));
+        return withRedactedPayload(entry, input, needles, MemoryKeys.SECRET_INPUT_PLACEHOLDER);
+    }
+
+    /**
+     * The entry with every occurrence of {@code needles} (searched in the given
+     * order) replaced by {@code placeholder} in all four payload maps.
+     */
+    static AuditEntry redactValues(AuditEntry entry, List<String> needles, String placeholder) {
+        return withRedactedPayload(entry, entry.input(), needles, placeholder);
+    }
+
+    private static AuditEntry withRedactedPayload(AuditEntry entry, Map<String, Object> input, List<String> needles, String placeholder) {
+        return entry.withPayload(redactMap(input, needles, placeholder), redactMap(entry.output(), needles, placeholder),
+                redactMap(entry.llmDetail(), needles, placeholder), redactMap(entry.toolCalls(), needles, placeholder));
     }
 
     @SuppressWarnings("unchecked")
-    private static Map<String, Object> redactMap(Map<String, Object> map, List<String> needles) {
-        return map == null || needles.isEmpty() ? map : (Map<String, Object>) redactValue(map, needles);
+    private static Map<String, Object> redactMap(Map<String, Object> map, List<String> needles, String placeholder) {
+        return map == null || needles.isEmpty() ? map : (Map<String, Object>) redactValue(map, needles, placeholder);
     }
 
-    private static Object redactValue(Object value, List<String> needles) {
+    private static Object redactValue(Object value, List<String> needles, String placeholder) {
         if (value instanceof String text) {
-            String redacted = text;
-            for (String needle : needles) {
-                redacted = redacted.replace(needle, MemoryKeys.SECRET_INPUT_PLACEHOLDER);
-            }
-            return redacted;
+            return redactText(text, needles, placeholder);
+        }
+        if (value instanceof Number number) {
+            // A number cannot hold part of a secret without being the secret.
+            return needles.contains(String.valueOf(number)) ? placeholder : number;
         }
         if (value instanceof Map<?, ?> map) {
             Map<String, Object> copy = new LinkedHashMap<>();
-            map.forEach((key, nested) -> copy.put(String.valueOf(key), redactValue(nested, needles)));
+            map.forEach((key, nested) -> copy.put(redactText(String.valueOf(key), needles, placeholder), redactValue(nested, needles, placeholder)));
             return copy;
         }
         if (value instanceof List<?> list) {
-            return list.stream().map(nested -> redactValue(nested, needles)).toList();
+            return list.stream().map(nested -> redactValue(nested, needles, placeholder)).toList();
         }
         return value;
+    }
+
+    private static String redactText(String text, List<String> needles, String placeholder) {
+        String redacted = text;
+        for (String needle : needles) {
+            redacted = redacted.replace(needle, placeholder);
+        }
+        return redacted;
     }
 }

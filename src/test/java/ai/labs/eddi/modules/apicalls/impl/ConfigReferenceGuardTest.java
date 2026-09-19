@@ -77,4 +77,26 @@ class ConfigReferenceGuardTest {
         assertThrows(IllegalArgumentException.class, () -> ConfigReferenceGuard.requireConfiguredReferences("{\"q\":\"{memory.current.input}\"}",
                 "{\"q\":\"${vault:agent1.apiKey}\"}", "a request body", DATA));
     }
+
+    @Test
+    @DisplayName("the auto-vault exception does not reach another tenant's secret of the same key name")
+    void autoVaultTenantIsPinned() {
+        // The property holds the right key for the right agent, but under a tenant this
+        // conversation is not in. Accepting it reads a foreign tenant's secret, which
+        // is
+        // what an unpinned <tenant>/ prefix allowed.
+        Map<String, Object> foreignTenant = Map.of("conversationInfo", Map.of("agentId", "agent1"), "properties",
+                Map.of("apiKey", "${vault:victim-tenant/agent1.apiKey}"));
+        assertThrows(IllegalArgumentException.class, () -> ConfigReferenceGuard.requireConfiguredReferences("Bearer {properties.apiKey}",
+                "Bearer ${vault:victim-tenant/agent1.apiKey}", "header", foreignTenant));
+    }
+
+    @Test
+    @DisplayName("a tenant-qualified auto-vault reference is allowed when it is the conversation's own tenant")
+    void autoVaultOwnTenant() {
+        Map<String, Object> ownTenant = Map.of("conversationInfo", Map.of("agentId", "agent1"), "properties",
+                Map.of("tenantId", "acme", "apiKey", "${vault:acme/agent1.apiKey}"));
+        assertDoesNotThrow(() -> ConfigReferenceGuard.requireConfiguredReferences("Bearer {properties.apiKey}",
+                "Bearer ${vault:acme/agent1.apiKey}", "header", ownTenant));
+    }
 }

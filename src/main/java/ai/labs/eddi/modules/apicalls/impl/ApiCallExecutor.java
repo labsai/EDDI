@@ -19,6 +19,7 @@ import ai.labs.eddi.engine.httpclient.IResponse;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
+import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
@@ -32,6 +33,8 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -532,7 +535,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
             throws IRequest.HttpRequestException, ExecutionException, InterruptedException {
 
         LOGGER.info(call.getName() + " Request: " + (amountOfExecutions > 0 ? amountOfExecutions + ". retry - " : "")
-                + RequestRedactor.redactResolvedSecrets(request.toString(), resolvedSecrets));
+                + RequestRedactor.safeRequestLog(request, resolvedSecrets));
         int delayInMillis = getDelayInMillis(call, retryCall, amountOfExecutions);
 
         long executionStart = currentTimeMillis();
@@ -559,21 +562,35 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 batchRequest.setExecuteCallsSequentially(false);
             }
 
-            // A batch runs on a thread of its own, where the caller binding does not
-            // follow, so ${caller:...} in these requests would fail closed without
-            // propagate() carrying it across.
-            runtime.submitCallable(callerIdentityContext.propagate(() -> {
-                List<Object> batchIterationList = prePostUtils.buildIterationValues(batchRequest.getIterationObjectName(),
-                        batchRequest.getPathToTargetArray(), batchRequest.getTemplateFilterExpression(), templateDataObjects);
+            // Every request is built here, on the turn's own thread, and only the sending
+            // goes to the background. A request that cannot be built — an unsatisfiable
+            // ${caller:...} or ${connection:...} reference, an expired secret context
+            // value — then fails the turn exactly as a single fire-and-forget call does,
+            // instead of being logged by a worker nobody reads while the turn reports
+            // success. It also means the request sees the turn's template data as it is
+            // now, not as it is when a worker gets to it. Each request gets its own copy of
+            // the template data, so the iteration variable never leaks into the calls that
+            // run after this one.
+            List<Object> batchIterationList = prePostUtils.buildIterationValues(batchRequest.getIterationObjectName(),
+                    batchRequest.getPathToTargetArray(), batchRequest.getTemplateFilterExpression(), templateDataObjects);
+            // Each request is kept as the BuiltRequest it came back as, not just its
+            // IRequest: the plaintexts the build resolved are what the log line below has
+            // to be redacted by, and only the build knows them.
+            List<BuiltRequest> requests = new ArrayList<>(batchIterationList.size());
+            for (Object iterationObject : batchIterationList) {
+                Map<String, Object> iterationData = new LinkedHashMap<>(templateDataObjects);
+                iterationData.put(batchRequest.getIterationObjectName(), iterationObject);
+                requests.add(buildRequest(targetServerUrl, call, iterationData));
+            }
 
-                for (Object iterationObject : batchIterationList) {
-                    templateDataObjects.put(batchRequest.getIterationObjectName(), iterationObject);
-                    BuiltRequest built = buildRequest(targetServerUrl, call, templateDataObjects);
+            // The sending runs on a thread of its own; propagate() keeps the turn's
+            // bindings available there for anything the send itself resolves.
+            runtime.submitCallable(callerIdentityContext.propagate(() -> {
+                for (BuiltRequest built : requests) {
                     IRequest request = built.request();
                     if (batchRequest.getExecuteCallsSequentially()) {
                         long executionStart = currentTimeMillis();
-                        LOGGER.info(
-                                callName + " Batch Request: " + RequestRedactor.redactResolvedSecrets(request.toString(), built.resolvedSecrets()));
+                        LOGGER.info(callName + " Batch Request: " + RequestRedactor.safeRequestLog(request, built.resolvedSecrets()));
                         IResponse response = request.send();
                         logExecutionResponse(response, callName, executionStart, currentTimeMillis(), false);
                     } else {
@@ -590,7 +607,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
     private static void executeFireAndForgetCall(BuiltRequest built, String httpCallsName) throws IRequest.HttpRequestException {
 
         IRequest request = built.request();
-        LOGGER.info(httpCallsName + " Request (f'n'f): " + RequestRedactor.redactResolvedSecrets(request.toString(), built.resolvedSecrets()));
+        LOGGER.info(httpCallsName + " Request (f'n'f): " + RequestRedactor.safeRequestLog(request, built.resolvedSecrets()));
         long executionStart = currentTimeMillis();
         request.send(res -> logExecutionResponse(res, httpCallsName, executionStart, currentTimeMillis(), true));
     }
@@ -767,21 +784,20 @@ public class ApiCallExecutor implements IApiCallExecutor {
         var targetDestination = !path.startsWith("http") ? targetServerUrl + path : path;
         var resolvedSecrets = new HashSet<String>();
         var targetUriStr = prePostUtils.templateValues(targetDestination, pathSafeView(templateDataObjects));
-        ConfigReferenceGuard.requireConfiguredReferences(targetDestination, targetUriStr, "the request path", templateDataObjects);
         // Resolve global variable references, then vault references in URL
-        targetUriStr = globalVariableResolver.resolveValue(targetUriStr);
-        targetUriStr = resolveSecrets(targetUriStr, resolvedSecrets);
+        targetUriStr = resolveGuardedVariables(targetDestination, targetUriStr, "the request path", templateDataObjects);
+        targetUriStr = resolveSecrets(targetUriStr, resolvedSecrets, "the request path");
         // The path is not caller-resolved either, and a surviving reference would
         // reach URI.create() to fail as "Illegal character in path" — an error that
         // names the symptom and not the cause.
         callerIdentityResolver.rejectAnyReference(targetUriStr, "the request path");
         rejectConnectionReference(targetUriStr, "the request path");
+        rejectExpiredSecretContext(targetUriStr, "the request path");
         var targetUri = URI.create(targetUriStr);
         var requestBody = prePostUtils.templateValues(requestConfig.getBody(), templateDataObjects);
-        ConfigReferenceGuard.requireConfiguredReferences(requestConfig.getBody(), requestBody, "a request body", templateDataObjects);
         // Resolve global variable references, then vault references in request body
-        requestBody = globalVariableResolver.resolveValue(requestBody);
-        requestBody = resolveSecrets(requestBody, resolvedSecrets);
+        requestBody = resolveGuardedVariables(requestConfig.getBody(), requestBody, "a request body", templateDataObjects);
+        requestBody = resolveSecrets(requestBody, resolvedSecrets, "a request body");
 
         // SSRF protection (opt-in): validate the fully-resolved target and disable
         // redirect-following so a 3xx cannot bounce the request to an internal host.
@@ -822,6 +838,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
         // shipping nonsense to the API.
         callerIdentityResolver.rejectAnyReference(requestBody, "a request body");
         rejectConnectionReference(requestBody, "a request body");
+        rejectExpiredSecretContext(requestBody, "a request body");
 
         Map<String, String> headers = requestConfig.getHeaders();
         // Header names already written to this request, lower-cased because HTTP
@@ -834,11 +851,9 @@ public class ApiCallExecutor implements IApiCallExecutor {
         var connectionOwnedHeaders = new HashSet<String>();
         for (String headerName : headers.keySet()) {
             String headerValue = prePostUtils.templateValues(headers.get(headerName), templateDataObjects);
-            ConfigReferenceGuard.requireConfiguredReferences(headers.get(headerName), headerValue, "header '" + headerName + "'",
-                    templateDataObjects);
             // Resolve global variable references, then vault references in headers
-            headerValue = globalVariableResolver.resolveValue(headerValue);
-            headerValue = resolveSecrets(headerValue, resolvedSecrets);
+            headerValue = resolveGuardedVariables(headers.get(headerName), headerValue, "header '" + headerName + "'", templateDataObjects);
+            headerValue = resolveSecrets(headerValue, resolvedSecrets, "header '" + headerName + "'");
             // Caller identity resolves last and needs the target URI: the token is
             // only released when the call goes back to the caller's own origin.
             headerValue = callerIdentityResolver.resolveValue(headerValue, targetUri);
@@ -882,24 +897,58 @@ public class ApiCallExecutor implements IApiCallExecutor {
             if (Boolean.TRUE.equals(claimedHeaders.putIfAbsent(headerName.toLowerCase(Locale.ROOT), Boolean.FALSE))) {
                 throw connectionHeaderCollision(headerName);
             }
+            rejectExpiredSecretContext(headerValue, "header '" + headerName + "'");
             request.setHttpHeader(headerName, headerValue);
         }
 
         Map<String, String> queryParams = requestConfig.getQueryParams();
         for (String queryParam : queryParams.keySet()) {
             var qpValue = prePostUtils.templateValues(queryParams.get(queryParam), templateDataObjects);
-            ConfigReferenceGuard.requireConfiguredReferences(queryParams.get(queryParam), qpValue, "query parameter '" + queryParam + "'",
-                    templateDataObjects);
             // Resolve global variable references, then vault references in query params
-            qpValue = globalVariableResolver.resolveValue(qpValue);
-            qpValue = resolveSecrets(qpValue, resolvedSecrets);
+            qpValue = resolveGuardedVariables(queryParams.get(queryParam), qpValue, "query parameter '" + queryParam + "'",
+                    templateDataObjects);
+            qpValue = resolveSecrets(qpValue, resolvedSecrets, "query parameter '" + queryParam + "'");
             // A token in a query string leaks via access logs and proxies.
             callerIdentityResolver.rejectTokenReference(qpValue, "a query parameter");
             rejectConnectionReference(qpValue, "a query parameter");
             qpValue = callerIdentityResolver.resolveValue(qpValue, targetUri);
+            rejectExpiredSecretContext(qpValue, "query parameter '" + queryParam + "'");
             request.setQueryParam(queryParam, qpValue);
         }
         return new BuiltRequest(request, Set.copyOf(connectionOwnedHeaders), Set.copyOf(resolvedSecrets));
+    }
+
+    /**
+     * Guard the rendered value, resolve its {@code ${vars:…}} references, and guard
+     * it again.
+     * <p>
+     * Twice, because a global variable is an indirection to a credential reference:
+     * {@code ${vars:credential}} is allowed to hold {@code ${vault:…}} or
+     * {@code ${connection:…}}. The first pass stops a credential reference
+     * conversation data wrote directly. It cannot stop one data wrote as
+     * {@code ${vars:…}} — that is not a credential reference yet, and looks exactly
+     * like a configured one until the variable expands. So the second pass runs
+     * after expansion, against the configured template expanded the same way: a
+     * reference a CONFIGURED variable produced is in the allowed set, and one a
+     * data-supplied variable produced is not.
+     *
+     * @param template
+     *            the configured value of the field, before templating
+     * @param rendered
+     *            the same value after templating
+     * @param location
+     *            human-readable field name for the error, e.g. "a request body"
+     * @param templateData
+     *            the data the template was rendered with
+     * @return {@code rendered} with its global variable references resolved
+     */
+    private String resolveGuardedVariables(String template, String rendered, String location, Map<String, Object> templateData) {
+        ConfigReferenceGuard.requireConfiguredReferences(template, rendered, location, templateData);
+        String resolved = globalVariableResolver.resolveValue(rendered);
+        if (resolved != null && !resolved.equals(rendered)) {
+            ConfigReferenceGuard.requireConfiguredReferences(globalVariableResolver.resolveValue(template), resolved, location, templateData);
+        }
+        return resolved;
     }
 
     /**
@@ -907,20 +956,88 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * was substituted so the request can be redacted by value wherever it is
      * recorded — a vault secret need not look like a credential, so name and shape
      * heuristics alone would miss it.
+     * <p>
+     * Every reference is resolved exactly ONCE, and the string this returns is
+     * built from those same resolutions. Resolving a second time to produce the
+     * value would open a window: a secret rotated (and the resolver cache
+     * invalidated) between the two passes puts the NEW plaintext in the request
+     * while only the old one is in the redaction set, so the value actually sent is
+     * the one that survives into memory, previews and logs.
+     * <p>
+     * A reference that cannot be resolved is left in place by
+     * {@link SecretResolver#resolveValue} — the vault is disabled, the provider
+     * failed, or the secret does not exist. This method then refuses the call
+     * instead of sending the literal {@code ${vault:name}} as the credential, the
+     * same fail-closed rule {@link SecretResolver#requireResolved} applies to the
+     * parameters of an outbound LLM client. The message names the reference, which
+     * is a name and not a secret.
+     *
+     * @param location
+     *            human-readable field name for the error, e.g. "a request body"
      */
-    private String resolveSecrets(String value, Set<String> resolvedSecrets) {
+    private String resolveSecrets(String value, Set<String> resolvedSecrets, String location) {
         if (value == null) {
             return null;
         }
         Matcher references = SecretReference.compiledPattern().matcher(value);
+        StringBuilder resolved = new StringBuilder();
+        String unresolved = null;
         while (references.find()) {
             String reference = references.group();
             String plaintext = secretResolver.resolveValue(reference);
-            if (plaintext != null && !plaintext.isEmpty() && !plaintext.equals(reference)) {
+            if (plaintext == null || plaintext.equals(reference)) {
+                unresolved = reference;
+            } else if (!plaintext.isEmpty()) {
+                // An empty plaintext resolved fine, but redacting "" would replace
+                // every character boundary in the request with the marker.
                 resolvedSecrets.add(plaintext);
             }
+            references.appendReplacement(resolved, Matcher.quoteReplacement(plaintext == null ? reference : plaintext));
         }
-        return secretResolver.resolveValue(value);
+        references.appendTail(resolved);
+        if (unresolved != null) {
+            throw new IllegalArgumentException(location + " references " + unresolved
+                    + ", which could not be resolved — the secret does not exist, the vault failed, or the vault is not configured"
+                    + " (EDDI_VAULT_MASTER_KEY). Refusing to send the unresolved reference.");
+        }
+        return resolved.toString();
+    }
+
+    /**
+     * Refuse a request that would carry
+     * {@link MemoryKeys#SECRET_CONTEXT_PLACEHOLDER}.
+     * <p>
+     * A context value the client marked {@code "secret": true} is replaced by the
+     * placeholder when its turn stops, so a template that reads it afterwards — a
+     * call that runs after a HITL approval resumed the turn, or one in a later turn
+     * — resolves to the placeholder. Sending that would authenticate as nobody and
+     * surface as a 401 from the API with nothing naming the cause; failing here
+     * names it.
+     */
+    static void rejectExpiredSecretContext(String value, String location) {
+        if (value == null) {
+            return;
+        }
+        if (value.contains(MemoryKeys.SECRET_CONTEXT_PLACEHOLDER) || urlDecodedContainsSecretContextPlaceholder(value)) {
+            throw new IllegalArgumentException("This API call would send " + MemoryKeys.SECRET_CONTEXT_PLACEHOLDER + " in " + location
+                    + ": it references a context value marked secret, and those only exist during the request that carried "
+                    + "them. This turn no longer has it — it resumed after a human approval, or a later turn referenced it. "
+                    + "Send the value again in the context of the request that makes this call.");
+        }
+    }
+
+    /**
+     * The path is templated URL-encoded, so the placeholder arrives encoded there.
+     */
+    private static boolean urlDecodedContainsSecretContextPlaceholder(String value) {
+        if (value.indexOf('%') < 0) {
+            return false;
+        }
+        try {
+            return URLDecoder.decode(value, StandardCharsets.UTF_8).contains(MemoryKeys.SECRET_CONTEXT_PLACEHOLDER);
+        } catch (IllegalArgumentException malformedEscape) {
+            return false;
+        }
     }
 
     /**

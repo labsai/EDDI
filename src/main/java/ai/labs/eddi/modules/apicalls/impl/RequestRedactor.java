@@ -290,6 +290,74 @@ public class RequestRedactor {
     }
 
     /**
+     * How long a body may be in a log line before it is cut, matching
+     * {@code HttpClientWrapper.truncateAndClean}.
+     */
+    private static final int LOG_BODY_LIMIT = 150;
+
+    /**
+     * A request formatted for a log line, with every resolved secret plaintext
+     * removed BEFORE the line is built.
+     * <p>
+     * Order is the whole point. {@code RequestWrapper.toString()} normalises
+     * newlines to spaces and truncates the body to {@value #LOG_BODY_LIMIT}
+     * characters, so redacting its output by exact value misses a secret that
+     * contains a newline (a PEM key) or that straddles the cut — part or all of the
+     * plaintext then survives into the log. This reads the request's RAW components
+     * ({@link IRequest#toMap()}), redacts those, and normalises afterwards.
+     * <p>
+     * Headers are deliberately absent, exactly as they are from
+     * {@code RequestWrapper.toString()}: the credential a request carries is
+     * usually a header, and a log line is the one place that never needed them.
+     *
+     * @param request
+     *            the request to describe; {@code null} yields {@code "null"}
+     * @param resolvedSecrets
+     *            the plaintexts the build substituted, from
+     *            {@code ApiCallExecutor.BuiltRequest#resolvedSecrets}
+     * @return a single-line, redacted description of the request
+     */
+    public static String safeRequestLog(IRequest request, Set<String> resolvedSecrets) {
+        if (request == null) {
+            return "null";
+        }
+        Map<String, Object> raw;
+        try {
+            raw = request.toMap();
+        } catch (RuntimeException notDescribable) {
+            raw = null;
+        }
+        if (raw == null) {
+            // No raw view to work from. Redacting the formatted string is what this
+            // method exists to improve on, but it is still strictly better than not
+            // redacting at all.
+            return redactResolvedSecrets(request.toString(), resolvedSecrets);
+        }
+        String uri = redactResolvedSecrets(asString(raw.get(IRequest.KEY_URI)), resolvedSecrets);
+        String method = asString(raw.get(IRequest.KEY_METHOD));
+        String queryParams = redactResolvedSecrets(asString(raw.get(IRequest.KEY_QUERY_PARAMS)), resolvedSecrets);
+        String body = truncateAndClean(redactResolvedSecrets(asString(raw.get(IRequest.KEY_BODY)), resolvedSecrets));
+        return "Request{uri=" + uri + ", method=" + method + ", requestBody=\"" + body + "\", queryParams=" + queryParams + "}";
+    }
+
+    private static String asString(Object value) {
+        return value == null ? null : value.toString();
+    }
+
+    /**
+     * One line, bounded in length — the same shape
+     * {@code HttpClientWrapper.truncateAndClean} produces, applied only AFTER
+     * redaction.
+     */
+    private static String truncateAndClean(String text) {
+        if (text == null) {
+            return null;
+        }
+        String cleaned = text.replaceAll("\\r?\\n", " ");
+        return cleaned.length() > LOG_BODY_LIMIT ? cleaned.substring(0, LOG_BODY_LIMIT) + "..." : cleaned;
+    }
+
+    /**
      * Redact a query-parameter map, preserving its multi-valued shape.
      * <p>
      * Values arrive as {@code List<String>} from the default implementation but a

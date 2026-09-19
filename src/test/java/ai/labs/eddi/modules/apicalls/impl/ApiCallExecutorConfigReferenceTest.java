@@ -27,8 +27,11 @@ import ai.labs.eddi.secrets.SecretResolver;
 import io.quarkus.qute.Engine;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.invocation.InvocationOnMock;
+import org.mockito.stubbing.Answer;
 
 import java.net.URI;
 import java.util.HashMap;
@@ -246,5 +249,130 @@ class ApiCallExecutorConfigReferenceTest {
         assertNotNull(preview.fingerprint());
         assertFalse(String.valueOf(preview).contains(SECRET), "preview: " + preview);
         assertEquals("{\"key\":\"" + RequestRedactor.REDACTED + "\"}", preview.body());
+    }
+
+    @Nested
+    @DisplayName("a global variable is an indirection to a credential reference")
+    class VariableIndirection {
+
+        /**
+         * A variable that holds a vault reference — which global variables are
+         * explicitly allowed to do — is the indirection: {@code ${vars:credential}} is
+         * not a credential reference, so it passes a guard that runs before variable
+         * expansion, and becomes one afterwards.
+         */
+        @BeforeEach
+        void variableHoldingACredentialReference() {
+            when(globalVariableResolver.resolveValue(any())).thenAnswer(inv -> {
+                String value = inv.getArgument(0);
+                return value == null
+                        ? null
+                        : value.replace("${vars:host}", "vars.example.com").replace("${vars:credential}", "${vault:api-key}");
+            });
+        }
+
+        @Test
+        @DisplayName("the configuration's own variable still resolves through to the secret")
+        void configuredVariableStillWorks() throws Exception {
+            when(request.toMap()).thenReturn(storedRequestRecord("{}", Map.of("X-Api-Key", SECRET)));
+
+            executor.execute(call(Map.of("X-Api-Key", "${vars:credential}"), "{}"), memory, data("hi"), SERVER);
+
+            verify(request).setHttpHeader("X-Api-Key", SECRET);
+        }
+
+        @Test
+        @DisplayName("a variable reference typed by the user is refused in the body")
+        void refusedInBody() throws Exception {
+            var failure = assertThrows(LifecycleException.class, () -> executor
+                    .execute(call(Map.of(), "{\"q\":\"{memory.current.input}\"}"), memory, data("${vars:credential}"), SERVER));
+
+            assertTrue(failure.getMessage().contains("a request body contains the reference ${vault:api-key}"), failure.getMessage());
+            verify(request, never()).send();
+        }
+
+        @Test
+        @DisplayName("a variable reference typed by the user is refused in a header")
+        void refusedInHeader() throws Exception {
+            var failure = assertThrows(LifecycleException.class,
+                    () -> executor.execute(call(Map.of("X-Api-Key", "{memory.current.input}"), "{}"), memory, data("${vars:credential}"), SERVER));
+
+            assertTrue(failure.getMessage().contains("header 'X-Api-Key' contains the reference ${vault:api-key}"), failure.getMessage());
+            verify(request, never()).send();
+        }
+
+        @Test
+        @DisplayName("in the path the reference never forms at all: data is percent-encoded into it")
+        void neutralisedInPath() throws Exception {
+            // The path has a second, stronger protection the other three fields do not:
+            // every value substituted into it goes through pathSafeView, so a '${' a user
+            // typed arrives percent-encoded and is no reference any resolver can see.
+            // Asserted rather than assumed — it is why the guard alone is not what keeps
+            // the path safe.
+            ApiCall call = call(Map.of(), "{}");
+            call.getRequest().setPath("/v1/{memory.current.input}");
+            when(request.toMap()).thenReturn(storedRequestRecord("{}", Map.of()));
+
+            executor.execute(call, memory, data("${vars:credential}"), SERVER);
+
+            ArgumentCaptor<URI> uri = ArgumentCaptor.forClass(URI.class);
+            verify(httpClient, atLeastOnce()).newRequest(uri.capture(), any());
+            assertFalse(uri.getValue().toString().contains("${"), uri.getValue().toString());
+            assertFalse(uri.getValue().toString().contains(SECRET), uri.getValue().toString());
+        }
+
+        @Test
+        @DisplayName("a variable reference typed by the user is refused in a query parameter")
+        void refusedInQueryParam() throws Exception {
+            ApiCall call = call(Map.of(), "{}");
+            call.getRequest().getQueryParams().put("q", "{memory.current.input}");
+
+            var failure = assertThrows(LifecycleException.class, () -> executor.execute(call, memory, data("${vars:credential}"), SERVER));
+
+            assertTrue(failure.getMessage().contains("query parameter 'q' contains the reference ${vault:api-key}"), failure.getMessage());
+            verify(request, never()).send();
+        }
+    }
+
+    @Test
+    @DisplayName("a configured vault reference that cannot be resolved refuses the call instead of sending the literal")
+    void unresolvableVaultReferenceFailsClosed() throws Exception {
+        // What a disabled vault, a failed provider or a missing key looks like:
+        // SecretResolver leaves the reference in place.
+        when(secretResolver.resolveValue(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        var failure = assertThrows(LifecycleException.class,
+                () -> executor.execute(call(Map.of("X-Api-Key", "${vault:api-key}"), "{}"), memory, data("hi"), SERVER));
+
+        assertTrue(failure.getMessage().contains("header 'X-Api-Key' references ${vault:api-key}"), failure.getMessage());
+        assertTrue(failure.getMessage().contains("EDDI_VAULT_MASTER_KEY"), failure.getMessage());
+        verify(request, never()).setHttpHeader("X-Api-Key", "${vault:api-key}");
+        verify(request, never()).send();
+    }
+
+    @Test
+    @DisplayName("the plaintext that is sent is the one recorded for redaction, even if the secret rotates mid-build")
+    void rotationCannotOutrunTheRedactionSet() throws Exception {
+        // The bookkeeping pass and the substitution pass used to resolve separately. A
+        // rotation between them put the NEW plaintext in the request while only the old
+        // one was in the redaction set — so the value actually sent was the one that
+        // survived into memory. One resolution per reference is what closes it.
+        when(secretResolver.resolveValue(any())).thenAnswer(new Answer<String>() {
+            private int calls;
+
+            @Override
+            public String answer(InvocationOnMock inv) {
+                String value = inv.getArgument(0);
+                return value == null ? null : value.replace("${vault:api-key}", calls++ == 0 ? SECRET : "rotated-secret-value-9999");
+            }
+        });
+        when(request.toMap()).thenReturn(storedRequestRecord("{\"key\":\"" + SECRET + "\"}", Map.of()));
+
+        executor.execute(call(Map.of(), "{\"key\":\"${vault:api-key}\"}"), memory, data("hi"), SERVER);
+
+        verify(request).setBodyEntity(eq("{\"key\":\"" + SECRET + "\"}"), any(), any());
+        ArgumentCaptor<Object> record = ArgumentCaptor.forClass(Object.class);
+        verify(prePostUtils).createMemoryEntry(any(), record.capture(), eq("downstreamRequest"), any());
+        assertFalse(String.valueOf(record.getValue()).contains(SECRET), "stored: " + record.getValue());
     }
 }

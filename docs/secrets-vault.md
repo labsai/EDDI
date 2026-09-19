@@ -66,8 +66,22 @@ conversation data — user input, a model reply, an API response, client context
 instead of being resolved, with an error naming the field. Grants are checked at deploy time, so
 without this rule a user could have a template substitute any secret of the tenant.
 
+This holds through `${vars:…}` as well. A global variable may itself hold a vault or connection
+reference, so a `${vars:…}` the configuration wrote still resolves through to the secret, while one
+that arrived through conversation data refuses the call — the check runs again after variable
+expansion, against the configured template expanded the same way. The auto-vaulted-property case is
+narrow on purpose: the reference must name this agent and the property the template reads, **under
+this conversation's own tenant**, so nothing in the data can choose which secret is read.
+
+A configured reference that **cannot** be resolved — no such secret, the provider failed, or the
+vault is disabled — also refuses the call, naming the field and the reference. The literal
+`${vault:name}` is never sent as a credential: it would come back as the API's own "invalid key",
+with nothing naming the cause.
+
 The plaintext EDDI substitutes is redacted by value from everything it records about the request:
-the request record in conversation memory, the HITL approval preview and the request log line.
+the request record in conversation memory, the HITL approval preview and the request log line. The
+log line is built from the request's raw components and redacted *before* it is shortened, so a
+secret carrying a newline, or one longer than the log's body limit, cannot survive the formatting.
 
 ### Resolution Behavior
 
@@ -238,6 +252,11 @@ When the **client flags input as secret** (via the `secretInput` context key):
 2. `storeUserInputInMemory()` replaces the display value with `<secret input>` in conversation output
 3. The actual plaintext still flows through lifecycle data so `PropertySetterTask` can vault it
 4. The conversation log and API responses show `<secret input>` — **plaintext is never persisted**
+
+When the **client sends a credential as context** — for example the caller's token for a
+downstream API — it marks that context entry `"secret": true`. The value works for that one
+turn and is replaced by `<secret context>` in everything that outlives it. See
+[Passing Context Information → Secret Context Values](passing-context-information.md#secret-context-values).
 
 ### Output InputField Directive
 
