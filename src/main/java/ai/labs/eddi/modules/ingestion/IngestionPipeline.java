@@ -147,7 +147,7 @@ public class IngestionPipeline {
         }
 
         Instant startedAt = Instant.now();
-        Collector collector = new Collector(ragConfigId, knowledgeBase, knowledgeBaseId, source, sourceKey, runId, mode);
+        Collector collector = new Collector(knowledgeBase, knowledgeBaseId, source, sourceKey, runId, mode);
 
         // Everything after the run is claimed is guarded, and by Throwable rather
         // than Exception. A claimed run that is never finished blocks its source for
@@ -335,7 +335,7 @@ public class IngestionPipeline {
         private boolean tombstoningSkipped;
         private boolean budgetExhausted;
 
-        private Collector(String ragConfigId, RagConfiguration knowledgeBase, String knowledgeBaseId,
+        private Collector(RagConfiguration knowledgeBase, String knowledgeBaseId,
                 IngestionSource source, String sourceKey, String runId, Mode mode) {
             this.knowledgeBase = knowledgeBase;
             this.knowledgeBaseId = knowledgeBaseId;
