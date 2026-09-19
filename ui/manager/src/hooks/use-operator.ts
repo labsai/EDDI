@@ -18,12 +18,13 @@ import {
   reportOperatorGateStatus,
   fetchPlatformSelfUrl,
   resolveOperatorApiBaseUrl,
+  isNotFound,
   type PlatformSelfUrl,
   type GateVerificationResult,
   type OperatorConfig,
   type FetchedSpec,
 } from "@/lib/api/operator";
-import { undeployAgent, deleteAgent } from "@/lib/api/agents";
+import { undeployAgent, deleteAgent, getAgent } from "@/lib/api/agents";
 import { endpointsForScope } from "@/lib/operator/tool-scopes";
 import {
   enforceGateDryRun,
@@ -446,15 +447,23 @@ async function rollBackUnsafeOperator(config: OperatorConfig, failure: string): 
 
 /**
  * After a replacement failed verification, decide what happens to the operator
- * it was replacing — which, because retirement now waits for verification, is
+ * it was replacing — which, because retirement waits for verification, is
  * still deployed.
  *
- * - The replacement was rolled back (the config variable is gone): write the
- *   predecessor's stored config back, so the screen and the deployment agree
- *   that the old operator is the active one. The error message says so.
- * - The replacement is still recorded (a check threw without rolling back):
- *   it is the live one, so retire the predecessor exactly as a success would
- *   have, rather than leave two operators deployed.
+ * The predecessor is NEVER retired on this path. Activation failed, so the one
+ * operator known to work is the last thing to destroy; the worst outcome here
+ * is two deployed operators and an error that names both, never zero.
+ *
+ * What happens to the config depends on whether the replacement still EXISTS,
+ * asked of the agent store directly rather than inferred from the config
+ * variable: `resetOperator` deletes the agent before it clears the variable, so
+ * a failed clear leaves a config naming an agent that is already gone.
+ *
+ * - Replacement gone: write the predecessor's stored config back, so the screen
+ *   and the deployment agree the old operator is the active one.
+ * - Replacement still there (its rollback failed, or a check threw without
+ *   rolling back): leave both, and say so.
+ * - Cannot tell: change nothing, and say that.
  *
  * Never throws: the verification failure is what the admin needs to see, so
  * this only ever appends to its message.
@@ -469,35 +478,42 @@ async function handBackToPredecessor(
   const append = (note: string) => {
     if (verificationError instanceof Error) verificationError.message = `${verificationError.message} ${note}`;
   };
-  let current: OperatorConfig | null | undefined;
-  try {
-    current = await readOperatorConfig();
-  } catch {
-    current = undefined;
-  }
-  if (current === null) {
-    if (previous?.agentId !== config.agentId) {
-      append(
-        `The operator it was replacing (${config.agentId}) was left deployed, but its configuration could not be restored — reconfigure the operator to manage it again.`,
-      );
-      return;
-    }
-    try {
-      await writeOperatorConfig(previous);
-      append(`The operator it was replacing (${config.agentId}) was left in place and is still the active one.`);
-    } catch {
-      append(
-        `The operator it was replacing (${config.agentId}) was left deployed, but restoring its configuration failed — reconfigure the operator to manage it again.`,
-      );
-    }
+  const replacement = await agentPresence(newAgentId);
+  if (replacement === "unknown") {
+    append(
+      `Whether the new agent (${newAgentId}) was removed could not be confirmed. The operator it was replacing (${config.agentId}) was left deployed — check the Agents screen before reconfiguring.`,
+    );
     return;
   }
-  if (current?.agentId === newAgentId && config.version != null) {
-    try {
-      await removeSupersededAgent(config);
-    } catch {
-      append(`The operator it was replacing (${config.agentId}) could not be removed and may still be deployed.`);
-    }
+  if (replacement === "present") {
+    append(
+      `The new agent (${newAgentId}) is still present, and the operator it was replacing (${config.agentId}) was left deployed as well — remove the one you do not want from the Agents screen.`,
+    );
+    return;
+  }
+  if (previous?.agentId !== config.agentId) {
+    append(
+      `The operator it was replacing (${config.agentId}) was left deployed, but its configuration could not be restored — reconfigure the operator to manage it again.`,
+    );
+    return;
+  }
+  try {
+    await writeOperatorConfig(previous);
+    append(`The operator it was replacing (${config.agentId}) was left in place and is still the active one.`);
+  } catch {
+    append(
+      `The operator it was replacing (${config.agentId}) was left deployed, but restoring its configuration failed — reconfigure the operator to manage it again.`,
+    );
+  }
+}
+
+/** Whether an agent document still exists: a 404 is "absent", any other failure "unknown". */
+async function agentPresence(agentId: string): Promise<"present" | "absent" | "unknown"> {
+  try {
+    await getAgent(agentId);
+    return "present";
+  } catch (error) {
+    return isNotFound(error) ? "absent" : "unknown";
   }
 }
 

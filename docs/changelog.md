@@ -70,10 +70,14 @@ bottom of this file and are never archived.
 - **The superseded operator is retired only after the replacement passes verification.**
   `useActivateOperator` used to undeploy and delete the predecessor before
   `verifyGateInstalled` / `enforceGateDryRun`; when either rolled the replacement back,
-  the deployment had no operator at all. Retirement now runs last, and a failed
-  verification hands the config back to the predecessor (`handBackToPredecessor`), which
-  is still deployed. New test in `use-operator-supersede.test.tsx`, mutation-checked
-  against the old ordering.
+  the deployment had no operator at all. Retirement now runs last, and the failure path
+  (`handBackToPredecessor`) never retires the predecessor. It asks the agent store
+  whether the replacement still exists rather than inferring it from the config
+  variable (`resetOperator` deletes the agent before clearing the variable, so a failed
+  clear leaves a config naming a deleted agent): gone means the predecessor's config is
+  written back; still present — including a predecessor with no recorded version — means
+  both are left and the error names both. Tests in `use-operator-supersede.test.tsx`,
+  mutation-checked against the old ordering and the first version of the hand-back.
 - **Tool failure messages state facts, not reporting policy.** `HttpCallToolsProvider`
   no longer tells the model "report this to the administrator" or that a refused
   connection is "NOT a fault in the service" — a stopped listener refuses too. The

@@ -249,20 +249,34 @@ describe("useActivateOperator — retiring the superseded operator", () => {
   });
 
   /**
-   * Retirement waits for verification. A replacement that fails its gate check is
-   * rolled back — and if the predecessor had already been retired by then, the
-   * deployment was left with no operator at all. It must instead still be
-   * deployed, and the config handed back to it.
+   * A reconfigure whose replacement fails the gate read-back (read_write, no gate
+   * on the new document). The store is stateful so the helper sees what the
+   * server would: a deleted agent 404s, a cleared variable 404s.
+   *
+   * @param variableDeleteFails the DELETE of the config variable answers 500 —
+   *            the replacement is gone but its config is still readable.
+   * @param replacementDeleteFails the DELETE of the new agent answers 500 — the
+   *            rollback failed and the replacement is still there.
    */
-  it("keeps the predecessor and restores its config when the replacement fails verification", async () => {
-    const spy = freshSpy();
-    serveReconfigure(spy);
-    const predecessor = existingOperator({ scope: "read_write" });
+  function failVerification(
+    spy: Retirement,
+    predecessor: OperatorConfig,
+    { variableDeleteFails = false, replacementDeleteFails = false } = {},
+  ) {
     const writes: OperatorConfig[] = [];
     let stored: string | null = JSON.stringify(predecessor);
     server.use(
-      // The replacement's document comes back WITHOUT a gate: read_write must roll it back.
-      http.get("*/agentstore/agents/:id", ({ params }) => HttpResponse.json({ id: params.id })),
+      http.get("*/agentstore/agents/:id", ({ params }) =>
+        spy.deletes.includes(String(params.id)) && !(replacementDeleteFails && params.id === NEW_AGENT)
+          ? HttpResponse.text("not found", { status: 404 })
+          : HttpResponse.json({ id: params.id }),
+      ),
+      http.delete("*/agentstore/agents/:id", ({ params }) => {
+        spy.deletes.push(String(params.id));
+        return replacementDeleteFails && params.id === NEW_AGENT
+          ? HttpResponse.text("boom", { status: 500 })
+          : new HttpResponse(null, { status: 200 });
+      }),
       http.get(VAR_URL, () =>
         stored === null
           ? HttpResponse.text("not found", { status: 404 })
@@ -275,10 +289,25 @@ describe("useActivateOperator — retiring the superseded operator", () => {
         return new HttpResponse(null, { status: 204 });
       }),
       http.delete(VAR_URL, () => {
+        if (variableDeleteFails) return HttpResponse.text("boom", { status: 500 });
         stored = null;
         return new HttpResponse(null, { status: 204 });
       }),
     );
+    return writes;
+  }
+
+  /**
+   * Retirement waits for verification. A replacement that fails its gate check is
+   * rolled back — and if the predecessor had already been retired by then, the
+   * deployment was left with no operator at all. It must instead still be
+   * deployed, and the config handed back to it.
+   */
+  it("keeps the predecessor and restores its config when the replacement fails verification", async () => {
+    const spy = freshSpy();
+    serveReconfigure(spy);
+    const predecessor = existingOperator({ scope: "read_write" });
+    const writes = failVerification(spy, predecessor);
 
     const { result } = renderHook(() => useActivateOperator(), { wrapper });
     result.current.mutate({ agentName: "EDDI Platform Operator", config: predecessor, apiKey: "sk-test" });
@@ -293,4 +322,48 @@ describe("useActivateOperator — retiring the superseded operator", () => {
     expect(result.current.error?.message).toContain(OLD_AGENT);
     expect(result.current.error?.message).toMatch(/still the active one/i);
   });
+
+  /**
+   * The rollback deleted the replacement but could not clear the variable, so the
+   * stored config still names an agent that no longer exists. Read as "the
+   * replacement is live", that retired the predecessor and left no operator.
+   */
+  it("restores the predecessor when the replacement is gone but its config could not be cleared", async () => {
+    const spy = freshSpy();
+    serveReconfigure(spy);
+    const predecessor = existingOperator({ scope: "read_write" });
+    const writes = failVerification(spy, predecessor, { variableDeleteFails: true });
+
+    const { result } = renderHook(() => useActivateOperator(), { wrapper });
+    result.current.mutate({ agentName: "EDDI Platform Operator", config: predecessor, apiKey: "sk-test" });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(spy.deletes).not.toContain(OLD_AGENT);
+    expect(writes[writes.length - 1]?.agentId).toBe(OLD_AGENT);
+  });
+
+  /**
+   * The replacement's rollback failed, so it is still there. Activation failed,
+   * so the predecessor is not destroyed on top of that — both are named instead.
+   * Holds for a predecessor with no recorded version too, which used to be
+   * skipped without a word.
+   */
+  it.each([2, null])(
+    "never retires the predecessor (version %s) when the replacement is still present",
+    async (version) => {
+      const spy = freshSpy();
+      serveReconfigure(spy);
+      const predecessor = existingOperator({ scope: "read_write", version });
+      failVerification(spy, predecessor, { replacementDeleteFails: true });
+
+      const { result } = renderHook(() => useActivateOperator(), { wrapper });
+      result.current.mutate({ agentName: "EDDI Platform Operator", config: predecessor, apiKey: "sk-test" });
+
+      await waitFor(() => expect(result.current.isError).toBe(true));
+      expect(spy.deletes).not.toContain(OLD_AGENT);
+      expect(spy.undeploys.map((entry) => entry.agentId)).not.toContain(OLD_AGENT);
+      expect(result.current.error?.message).toContain(OLD_AGENT);
+      expect(result.current.error?.message).toContain(NEW_AGENT);
+    },
+  );
 });
