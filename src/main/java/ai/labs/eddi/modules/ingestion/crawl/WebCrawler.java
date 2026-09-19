@@ -72,6 +72,12 @@ public class WebCrawler {
      */
     private static final int MAX_SITEMAP_URLS = 5_000;
 
+    /**
+     * Cap on sitemaps read from one robots.txt. The file is the site's to write and
+     * may list thousands; each is a request made before the first page is fetched.
+     */
+    private static final int MAX_SITEMAPS = 20;
+
     /** Cap on the robots.txt and sitemap bodies. */
     private static final long MAX_METADATA_BYTES = 1024L * 1024;
 
@@ -122,11 +128,12 @@ public class WebCrawler {
         // maxPages 50,000 with typical navigation that is millions of entries.
         Set<String> queued = new HashSet<>();
         Queue<Candidate> queue = new ArrayDeque<>();
-        enqueueSeeds(request, robots, queue, queued, seedHost, excludes);
-
         Instant deadline = start.plus(request.limits().timeBudget());
+        int sitemapsRead = enqueueSeeds(request, sink, robots, delay, deadline, counters, queue, queued, seedHost,
+                excludes);
+
         StopReason stopReason = StopReason.COMPLETED;
-        boolean firstRequest = true;
+        boolean firstRequest = sitemapsRead == 0;
 
         while (!queue.isEmpty()) {
             if (sink.isCancelled() || Thread.currentThread().isInterrupted()) {
@@ -168,14 +175,13 @@ public class WebCrawler {
                 continue;
             }
 
-            if (!firstRequest && !delay.isZero()) {
-                try {
-                    Thread.sleep(delay.toMillis());
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    stopReason = StopReason.CANCELLED;
-                    break;
-                }
+            // The candidate host's Crawl-delay, not the seed's: a crawl that reaches a
+            // second host would otherwise ignore the one directive that keeps it from
+            // being blocked there.
+            Duration candidateDelay = effectiveDelay(request, candidateRobots);
+            if (!firstRequest && !pause(candidateDelay)) {
+                stopReason = StopReason.CANCELLED;
+                break;
             }
             firstRequest = false;
 
@@ -298,17 +304,35 @@ public class WebCrawler {
         }
     }
 
-    private void enqueueSeeds(CrawlRequest request, RobotsPolicy robots, Queue<Candidate> queue,
-                              Set<String> queued, String seedHost, List<UrlPattern> excludes) {
+    /**
+     * Queues the seed and whatever the site's sitemaps list.
+     *
+     * @return how many sitemaps were requested
+     */
+    private int enqueueSeeds(CrawlRequest request, CrawlSink sink, RobotsPolicy robots, Duration delay,
+                             Instant deadline, Counters counters, Queue<Candidate> queue, Set<String> queued,
+                             String seedHost, List<UrlPattern> excludes) {
 
         queue.add(new Candidate(CrawlUrls.stripFragment(request.seedUrl()),
                 CrawlUrls.canonicalize(request.seedUrl()), 0));
 
         // Sitemaps are the cheapest and most reliable discovery there is: the site
         // lists its own pages, so nothing depends on link structure or on a page
-        // having changed since the last run.
+        // having changed since the last run. They are requests all the same, made
+        // before the crawl loop's own checks run, so they answer to the same
+        // budgets, cancellation and politeness here.
+        int sitemapsRead = 0;
         for (String sitemapUrl : robots.sitemaps()) {
-            for (String url : fetchSitemapUrls(sitemapUrl, request)) {
+            if (sitemapsRead >= MAX_SITEMAPS
+                    || sink.isCancelled() || Thread.currentThread().isInterrupted()
+                    || Instant.now().isAfter(deadline)
+                    || counters.fetchAttempts >= request.limits().maxFetchAttempts()
+                    || counters.bytesDownloaded >= request.limits().maxTotalBytes()
+                    || !pause(delay)) {
+                break;
+            }
+            sitemapsRead++;
+            for (String url : fetchSitemapUrls(sitemapUrl, request, counters)) {
                 String canonical = CrawlUrls.canonicalize(url);
                 // A sitemap is written by the site, not by the operator, and may list
                 // anything at all — so it earns no exemption from the scope.
@@ -317,6 +341,26 @@ public class WebCrawler {
                     queue.add(new Candidate(CrawlUrls.stripFragment(url), canonical, 0));
                 }
             }
+        }
+        return sitemapsRead;
+    }
+
+    /**
+     * Waits out a politeness delay.
+     *
+     * @return false if the wait was interrupted, which means the crawl is being
+     *         cancelled
+     */
+    private static boolean pause(Duration delay) {
+        if (delay.isZero() || delay.isNegative()) {
+            return true;
+        }
+        try {
+            Thread.sleep(delay.toMillis());
+            return true;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
         }
     }
 
@@ -411,10 +455,12 @@ public class WebCrawler {
         }
     }
 
-    private List<String> fetchSitemapUrls(String sitemapUrl, CrawlRequest request) {
+    private List<String> fetchSitemapUrls(String sitemapUrl, CrawlRequest request, Counters counters) {
         try {
+            counters.fetchAttempts++;
             FetchedPage page = fetcher.fetch(new FetchCommand(sitemapUrl, request.politeness().userAgent(),
                     request.limits().requestTimeout(), null, null, MAX_METADATA_BYTES));
+            counters.bytesDownloaded += page.body() == null ? 0 : page.body().length;
             if (!page.isOk() || page.body() == null || page.body().length == 0) {
                 return List.of();
             }
@@ -524,16 +570,17 @@ public class WebCrawler {
          * Whether the crawl covered its whole scope, so absence means deletion.
          *
          * <p>
-         * A crawl that could not reach the source at all also ends as
-         * {@code COMPLETED}: an unreachable seed leaves nothing queued. Counting that
-         * as coverage would have an outage report every document as gone. So a crawl
-         * where nothing arrived and every error was an outage-type failure is not
-         * coverage. A 404 still is — that is the server saying the page is gone — and
-         * so is a dead link on a site that otherwise answered.
+         * A crawl that reached no page proves nothing about which pages exist, yet it
+         * also ends as {@code COMPLETED}: an unreachable seed, or a robots.txt that
+         * briefly disallows everything, leaves nothing queued. Counting that as
+         * coverage would report every document as gone. So a crawl that fetched nothing
+         * is coverage only when the server answered that the content is gone — a 404 on
+         * the seed is the deletion of the start page, not an outage. A dead link on a
+         * site that otherwise answered still counts too.
          */
         public boolean coveredWholeSource() {
-            boolean nothingReached = pagesFetched + pagesUnchanged == 0 && errors > 0
-                    && unreachableErrors == errors;
+            boolean nothingReached = pagesFetched + pagesUnchanged == 0
+                    && (errors == 0 || unreachableErrors == errors);
             return stopReason == StopReason.COMPLETED && !nothingReached;
         }
     }
