@@ -5,7 +5,6 @@
 package ai.labs.eddi.configs.migration;
 
 import ai.labs.eddi.configs.migration.model.MigrationLog;
-import com.mongodb.MongoClientSettings;
 import com.mongodb.MongoCommandException;
 import com.mongodb.MongoNamespace;
 import com.mongodb.client.FindIterable;
@@ -14,7 +13,6 @@ import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.RenameCollectionOptions;
 import org.bson.Document;
-import org.bson.conversions.Bson;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -23,7 +21,6 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
 
@@ -676,10 +673,6 @@ class V6RenameMigrationTest {
 
             MongoCollection<Document> envCol = mock(MongoCollection.class);
             when(envCol.estimatedDocumentCount()).thenReturn(1L);
-            // The pre-check must see this collection as having work to do, or it skips
-            // it and there is nothing for the assertions below to observe. Its own
-            // conditions are covered in EnvironmentPreCheckTests.
-            when(envCol.countDocuments(any(Bson.class))).thenReturn(1L);
 
             FindIterable<Document> envIterable = mock(FindIterable.class);
             MongoCursor<Document> envCursor = mock(MongoCursor.class);
@@ -710,6 +703,43 @@ class V6RenameMigrationTest {
             assertEquals(2, envDoc.get("agentVersion"));
             assertFalse(envDoc.containsKey("botVersion"));
             assertEquals("production", envDoc.get("environment"));
+        }
+
+        /**
+         * One document that cannot be written must not stop the others, and must keep
+         * the migration from being recorded as complete: recording it would leave that
+         * document under its v5 names with nothing ever retrying it.
+         */
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("a document that cannot be written does not stop the rest, and keeps the migration incomplete")
+        void unwritableDocumentKeepsTheMigrationIncomplete() {
+            when(migrationLogStore.readMigrationLog(anyString())).thenReturn(null);
+
+            var broken = new Document("botId", "agent-broken").append("environment", "production").append("_id", new ObjectId());
+            var fine = new Document("botId", "agent-fine").append("environment", "production").append("_id", new ObjectId());
+
+            MongoCollection<Document> envCol = mock(MongoCollection.class);
+            when(envCol.estimatedDocumentCount()).thenReturn(2L);
+            FindIterable<Document> envIterable = mock(FindIterable.class);
+            MongoCursor<Document> envCursor = mock(MongoCursor.class);
+            when(envCursor.hasNext()).thenReturn(true, true, false);
+            when(envCursor.next()).thenReturn(broken, fine);
+            when(envIterable.iterator()).thenReturn(envCursor);
+            when(envCol.find()).thenReturn(envIterable);
+            when(envCol.replaceOne(any(), eq(broken))).thenThrow(new IllegalStateException("write refused"));
+
+            MongoCollection<Document> emptyCol = mock(MongoCollection.class);
+            when(emptyCol.estimatedDocumentCount()).thenReturn(0L);
+            when(database.getCollection(anyString()))
+                    .thenAnswer(invocation -> "conversationmemories".equals(invocation.getArgument(0)) ? envCol : emptyCol);
+            when(database.getName()).thenReturn("eddi");
+
+            migration.runIfNeeded();
+
+            assertEquals("agent-fine", fine.get("agentId"), "the document after the failing one must still be migrated");
+            verify(envCol).replaceOne(any(), eq(fine));
+            verify(migrationLogStore, never()).createMigrationLog(any(MigrationLog.class));
         }
     }
 
@@ -896,9 +926,6 @@ class V6RenameMigrationTest {
 
             MongoCollection<Document> envCol = mock(MongoCollection.class);
             when(envCol.estimatedDocumentCount()).thenReturn(1L);
-            // The pre-check must see the legacy environment value, or it skips this
-            // collection. Its own conditions are covered in EnvironmentPreCheckTests.
-            when(envCol.countDocuments(any(Bson.class))).thenReturn(1L);
 
             FindIterable<Document> envIterable = mock(FindIterable.class);
             MongoCursor<Document> envCursor = mock(MongoCursor.class);
@@ -997,224 +1024,6 @@ class V6RenameMigrationTest {
                     .thenThrow(new IllegalStateException("mongo down"));
 
             assertTrue(migration.isPending());
-        }
-    }
-
-    // ───────────────────────────────────────────────────────────
-    // migrateEnvironments pre-check
-    // ───────────────────────────────────────────────────────────
-
-    /**
-     * The pre-check exists because this pass costs total conversation bytes rather
-     * than the work it does: on a real staging upgrade it was ~20 of the 24 minutes
-     * the startup migrations took, for 195 documents averaging 410 KB. Its three
-     * conditions mirror the three things the rewrite loop can change, and each test
-     * below arms exactly one of them, so dropping any single condition leaves a
-     * test failing.
-     */
-    @Nested
-    @DisplayName("migrateEnvironments — pre-check")
-    class EnvironmentPreCheckTests {
-
-        private MongoCollection<Document> envCol;
-        /** What {@code find()} answers, for both the URI scan and the rewrite pass. */
-        private FindIterable<Document> reads;
-
-        /**
-         * A collection holding one document, whose {@code countDocuments(filter)}
-         * answers from the filter itself: a filter naming any of {@code countedBy}
-         * answers 1, anything else answers 0. That is what lets one condition be armed
-         * at a time.
-         */
-        private void givenCollection(Document doc, String... countedBy) {
-            givenCollection(List.of(doc), countedBy);
-        }
-
-        @SuppressWarnings("unchecked")
-        private void givenCollection(List<Document> docs, String... countedBy) {
-            envCol = mock(MongoCollection.class);
-            when(envCol.estimatedDocumentCount()).thenReturn(1L);
-            when(envCol.countDocuments()).thenReturn(1L);
-            when(envCol.countDocuments(any(Bson.class))).thenAnswer(invocation -> {
-                String filter = invocation.getArgument(0, Bson.class)
-                        .toBsonDocument(Document.class, MongoClientSettings.getDefaultCodecRegistry()).toString();
-                for (String needle : countedBy) {
-                    if (filter.contains(needle)) {
-                        return 1L;
-                    }
-                }
-                return 0L;
-            });
-
-            reads = mock(FindIterable.class);
-            when(envCol.find()).thenReturn(reads);
-            when(reads.iterator()).thenAnswer(invocation -> cursorOver(docs));
-            // sort() and limit() are honoured rather than ignored, so an implementation
-            // that went back to reading only one end of the collection would really see
-            // only that end here — which is what makes
-            // legacyUriInTheMiddleTriggersTheFullPass able to fail.
-            when(reads.sort(any(Bson.class))).thenReturn(reads);
-            when(reads.limit(anyInt())).thenAnswer(invocation -> {
-                int limit = invocation.getArgument(0);
-                FindIterable<Document> truncated = mock(FindIterable.class);
-                List<Document> head = docs.subList(0, Math.min(limit, docs.size()));
-                when(truncated.sort(any(Bson.class))).thenReturn(truncated);
-                when(truncated.limit(anyInt())).thenReturn(truncated);
-                when(truncated.iterator()).thenAnswer(inner -> cursorOver(head));
-                return truncated;
-            });
-
-            MongoCollection<Document> emptyCol = mock(MongoCollection.class);
-            when(emptyCol.estimatedDocumentCount()).thenReturn(0L);
-            when(database.getCollection(anyString())).thenAnswer(invocation -> {
-                String name = invocation.getArgument(0);
-                return "conversationmemories".equals(name) || "deployments".equals(name) ? envCol : emptyCol;
-            });
-            when(database.getName()).thenReturn("eddi");
-            when(migrationLogStore.readMigrationLog(anyString())).thenReturn(null);
-        }
-
-        /** A fresh cursor per call, since a collection can be read more than once. */
-        @SuppressWarnings("unchecked")
-        private MongoCursor<Document> cursorOver(List<Document> docs) {
-            MongoCursor<Document> cursor = mock(MongoCursor.class);
-            Iterator<Document> documents = docs.iterator();
-            when(cursor.hasNext()).thenAnswer(invocation -> documents.hasNext());
-            when(cursor.next()).thenAnswer(invocation -> documents.next());
-            return cursor;
-        }
-
-        /**
-         * Nothing to migrate: the collection is read once — by the URI scan, which
-         * cannot be a count and must be exhaustive — and the rewrite pass does not run
-         * at all, so nothing is written. {@code migrateEnvironments} is called for two
-         * collections, hence two reads rather than the four a scan plus a pass would
-         * make.
-         */
-        @Test
-        @DisplayName("a collection with nothing to migrate is read once and never rewritten")
-        void skipsACleanCollection() {
-            givenCollection(new Document("environment", "production").append("agentId", "a1").append("_id", new ObjectId()));
-
-            migration.runIfNeeded();
-
-            verify(envCol, never()).replaceOne(any(), any(Document.class));
-            verify(envCol, times(2)).find();
-        }
-
-        /**
-         * Condition 1. The loop looks at {@code doc.containsKey}, so {@code $exists} on
-         * the source names of {@code FIELD_NAME_REWRITES} answers it exactly.
-         */
-        @Test
-        @DisplayName("a legacy field name still triggers the full pass")
-        void legacyFieldNameTriggersTheFullPass() {
-            var doc = new Document("botId", "agent-1").append("botVersion", 2).append("environment", "production")
-                    .append("_id", new ObjectId());
-            givenCollection(doc, "botId");
-
-            migration.runIfNeeded();
-
-            assertEquals("agent-1", doc.get("agentId"), "the full pass must have run and renamed botId");
-            assertFalse(doc.containsKey("botId"));
-            verify(envCol, atLeastOnce()).replaceOne(any(), any(Document.class));
-        }
-
-        /**
-         * Condition 2, and the reason that filter is a case-insensitive regex rather
-         * than an {@code $in} over the literal values: the loop compares with
-         * {@code equalsIgnoreCase}, so a literal filter would answer zero for
-         * {@code "Unrestricted"} and skip a document that does need rewriting.
-         */
-        @Test
-        @DisplayName("a legacy environment value still triggers the full pass, whatever its case")
-        void legacyEnvironmentValueTriggersTheFullPass() {
-            var doc = new Document("environment", "Unrestricted").append("agentId", "a1").append("_id", new ObjectId());
-            givenCollection(doc, "unrestricted");
-
-            migration.runIfNeeded();
-
-            assertEquals("production", doc.get("environment"), "the full pass must have run and rewritten the environment");
-            verify(envCol, atLeastOnce()).replaceOne(any(), any(Document.class));
-
-            // And the filter itself must be case-insensitive, not merely mention the
-            // value: a literal $in would count zero here and skip a document that does
-            // need rewriting. This is what a real server would be asked.
-            ArgumentCaptor<Bson> filters = ArgumentCaptor.forClass(Bson.class);
-            verify(envCol, atLeastOnce()).countDocuments(filters.capture());
-            String rendered = filters.getAllValues().stream()
-                    .map(f -> f.toBsonDocument(Document.class, MongoClientSettings.getDefaultCodecRegistry()).toString())
-                    .reduce("", (a, b) -> a + " " + b);
-            assertTrue(rendered.contains("$regularExpression") || rendered.contains("$regex"),
-                    "the environment pre-check filter must be a regex, got: " + rendered);
-            assertTrue(rendered.contains("options\": \"i\""),
-                    "the environment pre-check regex must carry the case-insensitive option, got: " + rendered);
-        }
-
-        /**
-         * Condition 3. A nested v5 URI is invisible to {@code countDocuments} — there
-         * is no wildcard field path and nothing that stringifies a document of
-         * arbitrary depth — so it is found by reading, and finding it has to cancel the
-         * skip.
-         */
-        @Test
-        @DisplayName("a v5 URI nested in a sampled document still triggers the full pass")
-        void nestedLegacyUriTriggersTheFullPass() {
-            var nested = new Document("uri", "eddi://ai.labs.bot/botstore/bots/abc123?version=1");
-            var doc = new Document("environment", "production").append("agentId", "a1").append("step", nested)
-                    .append("_id", new ObjectId());
-            givenCollection(doc);
-
-            migration.runIfNeeded();
-
-            assertEquals("eddi://ai.labs.agent/agentstore/agents/abc123?version=1", nested.get("uri"),
-                    "the full pass must have run and rewritten the nested URI");
-            verify(envCol, atLeastOnce()).replaceOne(any(), any(Document.class));
-        }
-
-        /**
-         * The URI scan must be exhaustive, not sampled. The first version of this
-         * pre-check read the ten oldest and ten newest documents, which CodeRabbit
-         * pointed out on PR #781 is unsound in a way that cannot be recovered from: a
-         * legacy URI in the middle of the collection is missed, the pass is skipped,
-         * {@code runIfNeeded} records the migration as complete, and that document is
-         * never rewritten or retried. This collection is exactly that shape — 41
-         * documents, only the middle one holding a v5 URI — so any bounded sample of
-         * the ends would skip it.
-         */
-        @Test
-        @DisplayName("a v5 URI that a sample of the two ends would have missed still triggers the full pass")
-        void legacyUriInTheMiddleTriggersTheFullPass() {
-            var documents = new ArrayList<Document>();
-            for (int i = 0; i < 20; i++) {
-                documents.add(new Document("environment", "production").append("agentId", "clean").append("_id", new ObjectId()));
-            }
-            var buried = new Document("uri", "eddi://ai.labs.package/packagestore/packages/abc123?version=1");
-            documents.add(new Document("environment", "production").append("step", buried).append("_id", new ObjectId()));
-            for (int i = 0; i < 20; i++) {
-                documents.add(new Document("environment", "production").append("agentId", "clean").append("_id", new ObjectId()));
-            }
-            givenCollection(documents);
-
-            migration.runIfNeeded();
-
-            assertEquals("eddi://ai.labs.workflow/workflowstore/workflows/abc123?version=1", buried.get("uri"),
-                    "a URI outside the ends of the collection must still be rewritten");
-            verify(envCol, atLeastOnce()).replaceOne(any(), any(Document.class));
-        }
-
-        /** A pre-check that cannot answer must not become a pre-check that skips. */
-        @Test
-        @DisplayName("a pre-check that fails runs the full pass")
-        void anUnansweredPreCheckRunsTheFullPass() {
-            var doc = new Document("botId", "agent-1").append("environment", "production").append("_id", new ObjectId());
-            givenCollection(doc);
-            when(envCol.countDocuments(any(Bson.class))).thenThrow(new IllegalStateException("no count for you"));
-
-            migration.runIfNeeded();
-
-            assertEquals("agent-1", doc.get("agentId"), "the full pass must have run");
-            verify(envCol, atLeastOnce()).replaceOne(any(), any(Document.class));
         }
     }
 }

@@ -53,15 +53,22 @@ public class MongoDeploymentStorage implements IDeploymentStorage {
     private static final String FIELD_DUPLICATE_COUNT = "duplicateCount";
 
     /**
-     * MongoDB {@code IndexOptionsConflict} — an index of this name already exists
-     * with different options.
+     * MongoDB {@code IndexOptionsConflict} — an index on this key pattern exists
+     * under a different name with different options.
      */
     private static final int INDEX_OPTIONS_CONFLICT_ERROR_CODE = 85;
     /**
-     * MongoDB {@code IndexKeySpecsConflict} — an index on this key pattern already
-     * exists under a different name.
+     * MongoDB {@code IndexKeySpecsConflict} — an index of this <em>name</em> exists
+     * with a different specification. The difference may be the options alone, and
+     * on current servers that is how an earlier release's non-partial index on the
+     * same key under the same auto-generated name is reported; or it may be a
+     * different key pattern, i.e. some other index that is not ours to drop.
      */
     private static final int INDEX_KEY_SPECS_CONFLICT_ERROR_CODE = 86;
+
+    /** The deployment key as {@code listIndexes} reports an index's key pattern. */
+    private static final Document DEPLOYMENT_KEY_PATTERN = new Document(FIELD_ENVIRONMENT, 1).append(FIELD_AGENT_ID, 1)
+            .append(FIELD_AGENT_VERSION, 1);
 
     /** The deployment key that the unique index is built on. */
     private static final Bson DEPLOYMENT_KEY = Indexes.ascending(FIELD_ENVIRONMENT, FIELD_AGENT_ID, FIELD_AGENT_VERSION);
@@ -164,15 +171,23 @@ public class MongoDeploymentStorage implements IDeploymentStorage {
      *
      * <p>
      * Mongo does not quietly re-shape an index that is already there. An earlier
-     * EDDI built this same key pattern WITHOUT the partial filter, and
-     * {@code createIndex} answers a differing specification on an existing index
-     * with {@code IndexOptionsConflict} (85) — or {@code IndexKeySpecsConflict}
-     * (86) when the name differs too — rather than with a no-op. Every installation
-     * that already has the unrestricted index would therefore keep it, and keep the
-     * behaviour described above, while logging something that reads like a warning
-     * about duplicate rows. So a conflicting index is dropped and rebuilt. Only
-     * those two codes are handled here: anything else (E11000 above all) still goes
-     * up to {@link #createDeploymentKeyIndex()}, which dedupes and retries.
+     * EDDI built this same key pattern WITHOUT the partial filter, so every
+     * installation that ran it already has the unrestricted index — which it would
+     * keep, and keep the behaviour described above, while logging something that
+     * reads like a warning about duplicate rows. So that index is dropped and
+     * rebuilt.
+     * </p>
+     *
+     * <p>
+     * Which error the server raises for it is not something to reason about from
+     * the codes alone. Current servers report the same key under the same
+     * auto-generated name with different options as {@code IndexKeySpecsConflict}
+     * (86), not {@code IndexOptionsConflict} (85); 86 also covers a same-named
+     * index on a different key, which is someone else's. So on either code the
+     * index that actually sits on this key pattern is looked up and dropped <em>by
+     * name</em>, and if no index sits on it, the conflict is with some other index
+     * and is left alone. Anything else (E11000 above all) goes up to
+     * {@link #createDeploymentKeyIndex()}, which dedupes and retries.
      * </p>
      */
     private void createUniqueKeyIndex() {
@@ -183,16 +198,52 @@ public class MongoDeploymentStorage implements IDeploymentStorage {
             if (e.getErrorCode() != INDEX_OPTIONS_CONFLICT_ERROR_CODE && e.getErrorCode() != INDEX_KEY_SPECS_CONFLICT_ERROR_CODE) {
                 throw e;
             }
-            LOGGER.warnf("The deployment-key index on '%s' exists with a different specification (%s). Dropping and "
-                    + "rebuilding it as a partial index, so that rows predating the 6.x rename migration stay out of "
-                    + "it.", COLLECTION_DEPLOYMENTS, e.getErrorMessage());
+            String staleIndex = indexOnDeploymentKey();
+            if (staleIndex == null) {
+                // The conflict is with an index on some other key pattern, e.g. one that
+                // happens to have this name. Not ours: leave it and report.
+                throw e;
+            }
+            LOGGER.warnf("The deployment-key index '%s' on '%s' exists with a different specification (%s). Dropping "
+                    + "and rebuilding it as a partial index, so that rows predating the 6.x rename migration stay out "
+                    + "of it.", staleIndex, COLLECTION_DEPLOYMENTS, e.getErrorMessage());
+            deploymentsCollection.dropIndex(staleIndex);
         }
 
         // Rebuilt outside the catch so an E11000 here — duplicates the old index did
         // not constrain — reaches createDeploymentKeyIndex's dedupe-and-retry rather
         // than being mistaken for another conflict.
-        deploymentsCollection.dropIndex(DEPLOYMENT_KEY);
         deploymentsCollection.createIndex(DEPLOYMENT_KEY, uniqueKeyIndexOptions());
+    }
+
+    /**
+     * The name of the index whose key pattern is exactly the deployment key, or
+     * null. Compared field by field and in order, since a compound index's field
+     * order is part of what it is; the direction values are compared numerically,
+     * because the server may report {@code 1} as an int, a long or a double.
+     */
+    private String indexOnDeploymentKey() {
+        for (Document index : deploymentsCollection.listIndexes()) {
+            Object key = index.get("key");
+            if (key instanceof Document pattern && sameKeyPattern(pattern)) {
+                return index.getString("name");
+            }
+        }
+        return null;
+    }
+
+    private static boolean sameKeyPattern(Document pattern) {
+        var expected = new ArrayList<>(DEPLOYMENT_KEY_PATTERN.keySet());
+        var actual = new ArrayList<>(pattern.keySet());
+        if (!expected.equals(actual)) {
+            return false;
+        }
+        for (String field : expected) {
+            if (!(pattern.get(field) instanceof Number direction) || direction.doubleValue() != 1d) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

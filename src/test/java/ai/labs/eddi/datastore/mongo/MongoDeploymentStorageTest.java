@@ -115,10 +115,18 @@ class MongoDeploymentStorageTest extends MongoTestBase {
 
     /**
      * An installation that already ran an earlier 6.x release carries this key
-     * pattern without the partial filter, and Mongo answers a differing
-     * specification on an existing index with IndexOptionsConflict (85) rather than
-     * re-shaping it. Unhandled, the conflicting index would simply stay, and with
-     * it the behaviour {@link #preRenameRowsSurviveConstruction()} describes.
+     * pattern without the partial filter, and Mongo refuses to re-shape an existing
+     * index rather than doing so. Unhandled, the conflicting index would simply
+     * stay, and with it the behaviour {@link #preRenameRowsSurviveConstruction()}
+     * describes.
+     *
+     * <p>
+     * This is the test that establishes which error that is, because it asks a real
+     * server: the same key under the same auto-generated name with different
+     * options comes back as {@code IndexKeySpecsConflict} (86), not
+     * {@code IndexOptionsConflict} (85). Handling 85 alone passes every mocked test
+     * and fails this one.
+     * </p>
      */
     @Test
     @DisplayName("an existing non-partial unique index is rebuilt as the partial one")

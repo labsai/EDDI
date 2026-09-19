@@ -50,98 +50,6 @@ bottom of this file and are never archived.
 
 ---
 
-## ⚡ perf(migration): skip the conversation rewrite pass when there is nothing to rewrite (2026-09-18)
-
-**Repo:** EDDI (`fix/first-boot-migration-order`, PR #781)
-
-Measured on the same staging upgrade as the entry below. The startup migrations took **24 minutes**
-(22:10:21 → 22:34:18). The config work was done in the first ~4 minutes — 0 of 1373 descriptors and 0
-workflows still held a v5 URI when checked at 22:14. The remaining ~20 minutes was
-`migrateEnvironments("conversationmemories")` alone: 195 documents averaging 410 KB, i.e. 80 MB read
-and rewritten one document at a time in Java. For calibration a read-only `mongodump` of that same
-collection took 14 minutes on the same cluster, so the read pass dominates. The cost scales with total
-conversation bytes rather than with the work to be done.
-
-### What changed
-
-`migrateEnvironments(String)` asks the collection up front whether anything in it would be rewritten,
-and skips the rewrite pass when the answer is no. The three conditions mirror, one for one, the three
-things the rewrite loop can change, and each is derived from the constant the loop itself uses so the
-two cannot drift apart:
-
-1. **a legacy field name** from `FIELD_NAME_REWRITES` — `{$or: [{botId: {$exists: true}}, …]}`. The
-   loop tests `doc.containsKey`, i.e. the top level only, so `$exists` answers it exactly.
-2. **a legacy `environment` value** from `ENVIRONMENT_REWRITES` — a **case-insensitive anchored regex
-   per value**, not an `$in` over the literals. The loop compares with `equalsIgnoreCase`, so a literal
-   filter would count zero for `"Unrestricted"` and silently skip a document that does need rewriting.
-   The value is `Pattern.quote`d so a future rewrite source containing a metacharacter cannot become a
-   different pattern.
-3. **a v5 URI**, which no filter can express — so this one is an exhaustive scan that stops at the
-   first document needing work.
-
-The two conditions a count can answer come first and short-circuit, so a collection that is obviously
-dirty — the common case on a first boot, where every conversation still carries `botId` — never pays for
-the scan behind them. It logs at INFO when it skips, naming the collection. Anything that goes wrong in
-the pre-check — an exception, a count that cannot be established — answers "there is work to do" and runs
-the full pass.
-
-### Why the URI condition is exhaustive, and what that costs
-
-A `countDocuments` filter for "contains a v5 URI" **does not exist**. The rewrite changes a document
-when any string at any depth contains a legacy authority or store path, and MongoDB's query language
-cannot express that: there is no wildcard field path (`$**` is an index spec, not a queryable path),
-`$regexMatch` needs a string input and no aggregation expression stringifies a document of arbitrary
-depth, and the only constructs that could — `$where`, `$function` — are server-side JavaScript, disabled
-on many deployments.
-
-The first version of this change read the ten oldest and ten newest documents instead and accepted the
-false negative. **CodeRabbit was right to reject that** (PR #781): a legacy URI in the middle of a
-collection would be missed, the pass skipped, and `runIfNeeded()` would then record the migration as
-**complete** — so that document would never be rewritten and never retried. An unsound pre-check here is
-not "slightly stale data", it is a permanent silent data-migration miss, which is categorically worse
-than a slow migration. The scan is therefore exhaustive. It stops at the first document that needs
-rewriting, so the systematically dirty collection pays for one document; the worst case is a collection
-whose only stale URI sits at the very end, which is read twice — once by the scan, once by the pass — and
-that is bounded at two reads.
-
-### What this does and does not buy — honestly, less than the headline
-
-Two of the three conditions cost nothing, but proving the absence of a nested URI means reading the
-collection. So **the pre-check removes the rewrite pass, not the read** — and a collection with nothing
-to rewrite was already performing no writes in that pass. It also does **not** shorten the run that was
-measured: those conversation documents carry `botId`/`botVersion`, condition 1 counts them immediately,
-and the full pass runs exactly as before.
-
-What it does buy: no second walk over a clean collection, no mutation work on documents that do not need
-it, and an immediate, logged answer for `deployments` and for any collection the two counts can clear
-where the scan short-circuits early. **Removing the measured 20 minutes needs a different change** — the
-rewrite itself moved server-side, `updateMany` with `$rename`/`$set` for the two field conditions, which
-would not stream 80 MB through the client at all. That is a larger change and is not attempted here.
-
-### Tests
-
-Six tests in a new `EnvironmentPreCheckTests`, each arming exactly one condition (its `countDocuments`
-mock answers from the filter it is given, so conditions can be triggered independently): a clean
-collection is read once and never written; each of the three conditions still triggers the full pass; a
-v5 URI buried in the middle of a 41-document collection — outside any sample of the two ends — still
-triggers it; and a pre-check that throws runs the full pass. The fixture honours `sort()` and `limit()`,
-so an implementation that went back to sampling really would see only one end of the collection.
-
-Mutation-checked, all caught: dropping the field-name condition, dropping the environment condition,
-making the environment filter case-sensitive (`eq` instead of the regex), replacing the exhaustive scan
-with a bounded `limit(10)` sample, dropping the URI condition, and dropping the pre-check call.
-
-### Files
-
-- `src/main/java/ai/labs/eddi/configs/migration/V6RenameMigration.java` — `hasNothingToMigrate`,
-  `legacyFieldNameFilter`, `legacyEnvironmentFilter`, `holdsLegacyUri`, `containsLegacyUri`, plus a
-  `FIELD_ENVIRONMENT` constant so the loop and the filter cannot drift
-- `src/test/java/ai/labs/eddi/configs/migration/V6RenameMigrationTest.java`
-- `src/test/java/ai/labs/eddi/configs/migration/V6RenameMigrationBranchTest.java` — one existing test
-  now stubs the pre-check's count, because its document genuinely does carry the legacy field names
-
----
-
 ## 🛠️ fix(migration): four first-boot defects found upgrading a real 5.5.1 database (2026-09-17)
 
 **Repo:** EDDI (`fix/first-boot-migration-order`)
@@ -195,21 +103,24 @@ are fixed here with tests, including three that drive a real MongoDB through Tes
   without rewriting the ~25 existing `checkDeployments()` tests, which call it directly on a freshly
   constructed object.
 - **A conflicting index is dropped and rebuilt.** Mongo does not re-shape an existing index: adding
-  `partialFilterExpression` to a key pattern that already carries the non-partial unique index answers
-  `IndexOptionsConflict` (85), not a no-op. Every installation already running 6.x would otherwise have
-  kept the destructive index while logging something that reads like a warning about duplicate rows.
-  Only codes 85 and 86 drop-and-rebuild; E11000 still goes to the dedupe-and-retry path, because there
-  the *rows* are wrong and dropping the index would throw the constraint away instead of fixing them.
+  `partialFilterExpression` to a key pattern that already carries the non-partial unique index is
+  refused, not a no-op. Every installation already running 6.x would otherwise have kept the destructive
+  index while logging something that reads like a warning about duplicate rows. On either conflict code
+  the index actually sitting on the deployment key is looked up and dropped **by name**; if none does,
+  the conflict is with someone else's index and is left alone. E11000 still goes to the
+  dedupe-and-retry path, because there the *rows* are wrong and dropping the index would throw the
+  constraint away instead of fixing them.
 - **The partial filter uses `$exists`, not a null check**, so a row that legitimately carries a null
   `agentVersion` stays inside the uniqueness constraint. Only rows missing the field entirely — i.e.
   pre-rename rows — fall out of the index.
 - **Not marking the Qute migration complete on a failure re-scans on every boot.** That is accepted:
   `TEMPLATE_COLLECTIONS` is four config collections plus their `.history` counterparts, the scan is
   cheap, and a migrated document contains no Thymeleaf syntax so nothing is rewritten twice. Shipping a
-  half-migrated database silently is the worse trade. A collection that cannot be *read* at all is
-  still not counted as a failure: only some of these names exist on any given database and some driver
-  versions answer `estimatedDocumentCount` on a missing namespace with an exception, so counting it
-  would leave the migration permanently incomplete on a database with nothing to migrate.
+  half-migrated database silently is the worse trade. A collection that cannot be counted is a
+  failure too, with one exception: `NamespaceNotFound` (26). Only some of these names exist on any given
+  database and some driver versions answer `estimatedDocumentCount` on a missing namespace with that
+  error rather than zero, so counting it would leave the migration permanently incomplete on a
+  database with nothing to migrate; any other count failure means a collection nobody has read.
 - **An empty part of a concat expression is now skipped rather than rendered as `{}`.** An empty
   operand only arises from a leading, trailing or doubled `+`, i.e. from an expression that was already
   malformed; `{}` is a broken Qute expression where nothing at all is a dropped empty operand.
@@ -237,6 +148,44 @@ as a failure and keeps the migration incomplete. A pre-existing test
 does not contact the server, so it never fails merely because a collection is absent — and now
 asserts the corrected contract under the name `runIfNeeded_collectionAccessFailureBlocksCompletion`.
 
+A final independent review found five more things; all are fixed here.
+
+- **A v5 database with two deployment rows that become one v6 key never finished migrating, and so
+  never deployed an agent again.** `ENVIRONMENT_REWRITES` maps both `unrestricted` and `restricted` to
+  `production`, and v5's own check-then-act upsert wrote same-environment duplicates. The unique index
+  `MongoDeploymentStorage` builds at construction already exists when the migration runs, so the second
+  row's write failed E11000 on every boot — the first row already rewritten, the second never could be
+  — and with the sweep waiting on the migration, nothing deployed. Before this PR the dedupe deleted
+  rows but boot completed; the PR had turned lossy-but-booting into never-deploying. A collision is now
+  resolved with the store's own rule: one row per key, the newest `_id` kept, so every node picks the
+  same survivor. `migrateEnvironments` also isolates documents: one that cannot be written is logged,
+  the rest still go through, and the migration is left incomplete rather than aborted. Three
+  Testcontainers tests cover both collision shapes and the no-collision control. The staging rehearsal
+  could not have caught this: it held no such pair.
+- **A pre-check on `migrateEnvironments` was removed.** An earlier commit on this branch added one to
+  skip a clean collection, motivated by the staging measurement: the startup migrations took 24
+  minutes, ~20 of them this pass on `conversationmemories` (195 documents averaging 410 KB; a read-only
+  `mongodump` of the collection took 14 minutes on the same cluster). It could not help. Two of its
+  three conditions were server-side counts, but the third — a legacy URI nested at arbitrary depth —
+  has no filter form, and a sampled version was rejected because a miss is permanent once the migration
+  records completion; an exhaustive one reads the whole collection, which is the entire cost. Clean
+  collection: one read either way; dirty: two counts plus the same pass. It was net zero at best and
+  the PR described it as a speedup. Removing the 20 minutes needs the rewrite moved server-side
+  (`updateMany` with `$rename`/`$set`); that is follow-up work, not in this PR.
+- **The index-conflict handling had the error codes wrong.** The review suggested handling 85 alone,
+  and the real-server test showed why that is also wrong: an old non-partial index on the same key under
+  the same auto-generated name comes back as `IndexKeySpecsConflict` (86) on current servers. Handling 85
+  only passed every mocked test and left the destructive index in place. Now either code triggers a
+  lookup of the index on the deployment key, dropped by name; a same-named index on another key is not
+  touched.
+- **`/q/health/ready` reported ready with nothing deployed.** With the rename migration pending the
+  sweep is parked, yet `autoDeployAgents()` still set readiness. It now stays not-ready, with an ERROR
+  saying why; the migration only runs at startup, so that lasts until a restart after the cause is fixed.
+  The "sweep parked" warning is logged once instead of every ten seconds.
+- **This entry contradicted itself** on whether an unreadable collection counts as a failure; corrected
+  above to match the code.
+
+
 ### Files
 
 - `src/main/java/ai/labs/eddi/configs/migration/TemplateSyntaxMigrator.java`
@@ -245,14 +194,16 @@ asserts the corrected contract under the name `runIfNeeded_collectionAccessFailu
 - `src/main/java/ai/labs/eddi/configs/deployment/mongo/MongoDeploymentStorage.java`
 - `src/main/java/ai/labs/eddi/engine/runtime/internal/AgentDeploymentManagement.java`
 - `src/test/java/ai/labs/eddi/configs/migration/TemplateSyntaxMigratorTest.java`,
-  `V6QuteMigrationTest.java`, `V6RenameMigrationTest.java` — fixtures use synthetic identifiers; the
-  concat fixture reproduces the shape of the crashing template, not its content, and still fails with
-  the original `StringIndexOutOfBoundsException` against the pre-fix code
+  `V6QuteMigrationTest.java`, `V6RenameMigrationTest.java` — the concat fixture fails with the
+  original `StringIndexOutOfBoundsException` against the pre-fix splitter
 - `src/test/java/ai/labs/eddi/configs/deployment/mongo/MongoDeploymentStorageTest.java` (mocked) and
   `src/test/java/ai/labs/eddi/datastore/mongo/MongoDeploymentStorageTest.java` (Testcontainers —
   pre-rename rows survive construction, a non-partial index is rebuilt as partial, and the dedupe
   spares pre-rename rows on a half-migrated collection)
-- `src/test/java/ai/labs/eddi/engine/runtime/internal/AgentDeploymentManagementTest.java`
+- `src/test/java/ai/labs/eddi/datastore/mongo/V6RenameMigrationDeploymentsTest.java` (Testcontainers —
+  deployment rows that collapse onto one v6 key)
+- `src/test/java/ai/labs/eddi/engine/runtime/internal/AgentDeploymentManagementTest.java`,
+  `AgentDeploymentManagementBranchTest.java`
 
 ### Verification
 
@@ -3384,6 +3335,7 @@ _For recording decisions that come up during implementation that aren't in the p
 | 2026-09-13 | Buffer a turn's audit entries and flush them after the pipeline, redacting a vaulted input | E2E: parser/rules entries carried a `scope: secret` plaintext into the append-only ledger | Redact after submission — impossible, entries are signed and immutable |
 | 2026-09-13 | Exclude stateful tools from the tool cache by reflecting over their `@Tool` classes | E2E: group members share a user, so `listArtifacts()` was served stale | Make caching opt-in per tool — changes every existing cached tool |
 | 2026-09-13 | New group save-time checks (member agentId, negative limits, preset roles, nesting cycles) are hard errors | E2E: all saved fine and failed at run time | Warn only — the invalid configs cannot run as written, and shipped templates pass |
+| 2026-09-18 | Keep the v5→v6 conversation rewrite a client-side pass; no skip-if-clean pre-check | Staging: 20 of 24 startup minutes in `migrateEnvironments` over 80 MB | A pre-check was built and removed: a nested legacy URI has no filter form, so proving a collection clean costs the same read. Server-side `updateMany` is the real fix, left as follow-up |
 |            |                                                                       |                                       |                                                             |
 
 ---

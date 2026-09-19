@@ -216,11 +216,10 @@ class TemplateSyntaxMigratorTest {
     }
 
     /**
-     * The shape of a template found in a customer deployment's configuration, with
-     * its identifiers replaced: three literals concatenated so that the rendered
-     * output is itself a template expression, for a generated agent configuration.
-     * Malformed, never used, and it stopped the whole migration. Whatever it
-     * converts to, it must not throw.
+     * The shape of a template found in a real configuration: three literals
+     * concatenated so that the rendered output is itself a template expression, for
+     * a generated agent configuration. Malformed, never used, and it stopped the
+     * whole migration. Whatever it converts to, it must not throw.
      */
     @Test
     void migrateStringConcat_nestedTemplateLiterals_doesNotThrow() {

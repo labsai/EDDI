@@ -109,6 +109,27 @@ class AgentDeploymentManagementBranchTest {
             verify(agentsReadiness).setAgentsReadiness(true);
         }
 
+        /**
+         * A rename migration that did not complete leaves the deployment sweep parked,
+         * so nothing is deployed — and the migration only runs at startup, so nothing
+         * will be for the life of the process. Reporting ready anyway would route
+         * traffic to an instance with no agents.
+         */
+        @Test
+        @DisplayName("stays not-ready while the rename migration is pending, and deploys nothing")
+        void staysNotReadyWhileTheRenameMigrationIsPending() throws Exception {
+            when(v6RenameMigration.isPending()).thenReturn(true);
+            doAnswer(inv -> {
+                ((IMigrationManager.IMigrationFinished) inv.getArgument(0)).onComplete();
+                return null;
+            }).when(migrationManager).startMigrationIfFirstTimeRun(any());
+
+            management.autoDeployAgents();
+
+            verify(agentsReadiness, never()).setAgentsReadiness(true);
+            verify(deploymentStore, never()).readDeploymentInfos(any());
+        }
+
         @Test
         @DisplayName("v6 rename migration exception is caught")
         void v6RenameException() throws Exception {

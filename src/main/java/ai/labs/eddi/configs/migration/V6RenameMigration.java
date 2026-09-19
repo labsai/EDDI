@@ -5,10 +5,11 @@
 package ai.labs.eddi.configs.migration;
 
 import ai.labs.eddi.configs.migration.model.MigrationLog;
+import com.mongodb.ErrorCategory;
 import com.mongodb.MongoCommandException;
 import com.mongodb.MongoNamespace;
+import com.mongodb.MongoWriteException;
 import com.mongodb.client.MongoCollection;
-import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.RenameCollectionOptions;
 import org.bson.Document;
@@ -20,13 +21,11 @@ import org.jboss.logging.Logger;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import java.util.*;
-import java.util.regex.Pattern;
 
 import static ai.labs.eddi.datastore.mongo.MongoResourceStorage.ID_FIELD;
+import static com.mongodb.client.model.Filters.and;
 import static com.mongodb.client.model.Filters.eq;
-import static com.mongodb.client.model.Filters.exists;
-import static com.mongodb.client.model.Filters.or;
-import static com.mongodb.client.model.Filters.regex;
+import static com.mongodb.client.model.Filters.ne;
 
 /**
  * V6 Rename Migration — rewrites legacy eddi:// URIs, store paths, environment
@@ -81,6 +80,15 @@ public class V6RenameMigration {
 
     /** The field {@link #ENVIRONMENT_REWRITES} applies to. */
     private static final String FIELD_ENVIRONMENT = "environment";
+
+    /**
+     * The v6 deployment key fields, i.e. the targets of
+     * {@link #FIELD_NAME_REWRITES}.
+     */
+    private static final String FIELD_AGENT_ID = "agentId";
+    private static final String FIELD_AGENT_VERSION = "agentVersion";
+
+    private static final String COLLECTION_DEPLOYMENTS = "deployments";
 
     /**
      * Field-name rewrites for deployment/conversation documents (old Java name →
@@ -213,8 +221,17 @@ public class V6RenameMigration {
         totalMigrated += migrateDescriptors("descriptors.history");
 
         // 4. Rewrite environment fields in deployment/conversation documents
-        totalMigrated += migrateEnvironments("conversationmemories");
-        totalMigrated += migrateEnvironments("deployments");
+        int failed = 0;
+        for (String collectionName : List.of("conversationmemories", COLLECTION_DEPLOYMENTS)) {
+            EnvironmentResult result = migrateEnvironments(collectionName);
+            totalMigrated += result.migrated();
+            failed += result.failed();
+        }
+        if (failed > 0) {
+            LOGGER.errorf("V6 rename migration migrated %d document(s), but %d could not be migrated (logged above). "
+                    + "The migration was NOT marked complete and will run again on the next start.", totalMigrated, failed);
+            return;
+        }
 
         LOGGER.infof("V6 rename migration complete: %d documents migrated", totalMigrated);
 
@@ -475,49 +492,46 @@ public class V6RenameMigration {
         return migrated;
     }
 
+    /** What one {@link #migrateEnvironments(String)} pass did. */
+    private record EnvironmentResult(int migrated, int failed) {
+    }
+
     /**
-     * Migrate environment fields in conversation memory documents.
+     * Migrate environment fields in conversation memory and deployment documents.
      *
      * <p>
-     * This is the expensive step of the migration, and it is expensive in
-     * proportion to total conversation bytes rather than to the work it has to do.
-     * On a real staging upgrade the startup migrations took 24 minutes, of which
-     * about 20 were this method on {@code conversationmemories} alone: 195
-     * documents averaging 410 KB, so 80 MB read and rewritten one document at a
-     * time in Java. A read-only {@code mongodump} of the same collection took 14
-     * minutes on the same cluster, so the read pass dominates. On production
-     * volumes that is the difference between minutes and hours of downtime, so the
-     * collection is asked up front whether it holds anything to rewrite at all.
+     * This is the expensive step of the migration, and its cost follows total
+     * conversation bytes rather than the work it does: on a real staging upgrade it
+     * was about 20 of the 24 minutes the startup migrations took, for 195 documents
+     * averaging 410 KB, each read and rewritten one at a time in Java. A pre-check
+     * that skips a clean collection cannot shorten that — proving there is no
+     * legacy URI nested anywhere in a document means reading the document, which is
+     * the whole cost. The fix, when it is made, is to move the rewrite server-side
+     * ({@code updateMany} with {@code $rename} and {@code $set}), so the bytes
+     * never cross the client.
      * </p>
      *
      * <p>
-     * Be precise about what that buys, because it is less than it looks. Two of the
-     * three conditions are server-side counts and cost nothing. The third — a URI
-     * nested at arbitrary depth — cannot be expressed as a filter at all, so
-     * proving its absence means reading the collection. So the pre-check removes
-     * the rewrite pass, not the read, and a collection with nothing to rewrite was
-     * already performing no writes in that pass. Removing the read as well would
-     * mean moving the rewrite itself server-side ({@code updateMany} with
-     * {@code $rename} and {@code $set} for the two field conditions), which is a
-     * larger change than this one and is not attempted here.
+     * Documents are written one at a time, and one that cannot be written does not
+     * stop the rest: it is logged, counted, and keeps the migration from being
+     * recorded as complete, so it runs again on the next start. A deployment row
+     * whose v6 key another row already holds is not such a failure — it is
+     * resolved; see {@link #resolveDeploymentKeyCollision}.
      * </p>
      */
-    private int migrateEnvironments(String collectionName) {
+    private EnvironmentResult migrateEnvironments(String collectionName) {
         MongoCollection<Document> collection;
         try {
             collection = database.getCollection(collectionName);
             if (collection.estimatedDocumentCount() == 0) {
-                return 0;
+                return new EnvironmentResult(0, 0);
             }
         } catch (Exception e) {
-            return 0;
-        }
-
-        if (hasNothingToMigrate(collection, collectionName)) {
-            return 0;
+            return new EnvironmentResult(0, 0);
         }
 
         int migrated = 0;
+        int failed = 0;
         for (Document doc : collection.find()) {
             boolean changed = false;
 
@@ -546,162 +560,103 @@ public class V6RenameMigration {
             Document uriRewritten = rewriteUrisInDocument(doc);
             changed = changed || uriRewritten != null;
 
-            if (changed) {
-                var query = eq(ID_FIELD, doc.get(ID_FIELD));
-                collection.replaceOne(query, doc);
+            if (!changed) {
+                continue;
+            }
+            try {
+                writeMigrated(collection, collectionName, doc);
                 migrated++;
+            } catch (Exception e) {
+                failed++;
+                LOGGER.errorf("  %s/%s could not be migrated — leaving it unchanged and continuing: %s", collectionName,
+                        doc.get(ID_FIELD), e.toString());
             }
         }
 
         if (migrated > 0) {
-            LOGGER.infof("  %s: migrated %d conversation documents", collectionName, migrated);
+            LOGGER.infof("  %s: migrated %d documents", collectionName, migrated);
         }
-        return migrated;
+        return new EnvironmentResult(migrated, failed);
     }
 
     /**
-     * Whether {@link #migrateEnvironments(String)} can be skipped for this
-     * collection, i.e. whether nothing in it would be rewritten.
-     *
-     * <p>
-     * The three conditions mirror, one for one, the three things the rewrite loop
-     * can change, and each is derived from the same constant the loop uses so the
-     * two cannot drift apart:
-     * </p>
-     * <ol>
-     * <li>a legacy field name from {@link #FIELD_NAME_REWRITES}. The loop looks at
-     * {@code doc.containsKey}, i.e. the top level only, so {@code $exists} answers
-     * it exactly.</li>
-     * <li>a legacy value from {@link #ENVIRONMENT_REWRITES} in {@code environment}.
-     * The loop compares with {@code equalsIgnoreCase}, so the filter has to be
-     * case-insensitive — a literal {@code $in} would miss {@code "Unrestricted"}
-     * and silently skip real work.</li>
-     * <li>a v5 URI, which no filter can express and no sample may stand in for; see
-     * {@link #holdsLegacyUri}.</li>
-     * </ol>
-     *
-     * <p>
-     * The order is deliberate: the two conditions a count can answer come first and
-     * short-circuit, so a collection that is obviously dirty — the common case on a
-     * first boot, where every conversation still carries {@code botId} — never pays
-     * for the scan behind them.
-     * </p>
-     *
-     * <p>
-     * Everything that goes wrong here answers "there is work to do": an exception,
-     * an unreadable collection, a count that cannot be established. A pre-check
-     * that wrongly skips is a data-migration bug — {@code runIfNeeded} would go on
-     * to record the migration as complete, so the work would never be retried —
-     * while one that wrongly proceeds only costs what this code already cost before
-     * it existed.
-     * </p>
+     * Writes a migrated document back, resolving a deployment key collision rather
+     * than failing on it.
      */
-    private boolean hasNothingToMigrate(MongoCollection<Document> collection, String collectionName) {
+    private void writeMigrated(MongoCollection<Document> collection, String collectionName, Document doc) {
         try {
-            if (collection.countDocuments(legacyFieldNameFilter()) > 0 || collection.countDocuments(legacyEnvironmentFilter()) > 0) {
-                return false;
+            collection.replaceOne(eq(ID_FIELD, doc.get(ID_FIELD)), doc);
+        } catch (MongoWriteException e) {
+            if (e.getError().getCategory() != ErrorCategory.DUPLICATE_KEY || !COLLECTION_DEPLOYMENTS.equals(collectionName)) {
+                throw e;
             }
-
-            if (holdsLegacyUri(collection)) {
-                return false;
-            }
-
-            LOGGER.infof("  %s: nothing to migrate — no legacy field name, no legacy environment value and no v5 URI in "
-                    + "any of its documents. Skipping the rewrite pass.", collectionName);
-            return true;
-        } catch (Exception e) {
-            LOGGER.warnf("  Could not pre-check %s (%s) — running the full rewrite pass", collectionName, e.getMessage());
-            return false;
+            resolveDeploymentKeyCollision(collection, doc);
         }
-    }
-
-    /** {@code {$or: [{botId: {$exists: true}}, …]}}, straight off the constant. */
-    private static Bson legacyFieldNameFilter() {
-        var clauses = new ArrayList<Bson>();
-        for (String[] mapping : FIELD_NAME_REWRITES) {
-            clauses.add(exists(mapping[0]));
-        }
-        return or(clauses);
     }
 
     /**
-     * {@code environment} matching a legacy value, case-insensitively because the
-     * loop uses {@code equalsIgnoreCase}. The value is quoted, so a rewrite whose
-     * source ever contains a regex metacharacter cannot turn into a different
-     * pattern. Anchored with {@code ^…$}, which over-matches a value ending in a
-     * newline — over-counting only costs a rewrite pass that finds nothing.
-     */
-    private static Bson legacyEnvironmentFilter() {
-        var clauses = new ArrayList<Bson>();
-        for (String[] mapping : ENVIRONMENT_REWRITES) {
-            clauses.add(regex(FIELD_ENVIRONMENT, "^" + Pattern.quote(mapping[0]) + "$", "i"));
-        }
-        return or(clauses);
-    }
-
-    /**
-     * Whether any document in the collection holds a URI the rewrite would change.
+     * A v5 deployment row that becomes the same v6 key as a row already written.
      *
      * <p>
-     * Exhaustive, and it has to be. The rewrite fires when any string at any depth
-     * contains a legacy authority or store path, and MongoDB's query language
-     * cannot express "some string anywhere in this document contains X": there is
-     * no wildcard field path ({@code $**} is an index specification, not a
-     * queryable path), {@code $regexMatch} needs a string input and no aggregation
-     * expression stringifies a document of arbitrary depth, and the constructs that
-     * could — {@code $where}, {@code $function} — are server-side JavaScript,
-     * disabled on many deployments. So this condition cannot be answered by a
-     * count, and it cannot be answered by a sample either: a legacy URI that a
-     * sample missed would be skipped, {@code runIfNeeded} would then record the
-     * migration as complete, and that document would never be rewritten or retried.
-     * A slow migration is recoverable; that is not.
+     * Two v5 shapes do this. {@link #ENVIRONMENT_REWRITES} maps both
+     * {@code unrestricted} and {@code restricted} to {@code production}, so an
+     * agent deployed to both becomes one key; and v5's own check-then-act
+     * {@code setDeploymentInfo} wrote same-environment duplicates outright. The
+     * unique index {@code MongoDeploymentStorage} builds when it is constructed
+     * already exists by the time this migration runs, so the second write fails
+     * with a duplicate-key error — and it used to fail on every boot, because the
+     * first row had already been rewritten and the second never could be. The
+     * migration then never completed, and with the deployment sweep waiting on it,
+     * no agent was ever deployed again.
      * </p>
      *
      * <p>
-     * It stops at the first document that needs rewriting, so the systematically
-     * dirty collection — the common case on a first boot — pays for one document
-     * rather than for the scan. The price of soundness is that a collection whose
-     * only stale URI sits at the very end is read twice: once here and once by the
-     * pass. That is the worst case, and it is bounded at two reads.
+     * It is resolved with the rule the store itself applies when it deduplicates:
+     * one row per key, the newest by {@code _id} kept. An ObjectId's leading bytes
+     * are its insert time, so every node running this during a rolling restart
+     * picks the same survivor. The rows differ only in status, and the newest is
+     * the operator's last word; any single row is a consistent answer where two are
+     * not. Ids that are not ObjectIds cannot be ordered that way, so that case is
+     * left to fail — and so to be counted, logged, and keep the migration
+     * incomplete — rather than guessed at.
      * </p>
      */
-    private boolean holdsLegacyUri(MongoCollection<Document> collection) {
-        try (MongoCursor<Document> cursor = collection.find().iterator()) {
-            while (cursor.hasNext()) {
-                if (containsLegacyUri(cursor.next())) {
-                    return true;
-                }
-            }
+    private void resolveDeploymentKeyCollision(MongoCollection<Document> collection, Document doc) {
+        Object id = doc.get(ID_FIELD);
+        Bson sameKey = and(eq(FIELD_ENVIRONMENT, doc.get(FIELD_ENVIRONMENT)), eq(FIELD_AGENT_ID, doc.get(FIELD_AGENT_ID)),
+                eq(FIELD_AGENT_VERSION, doc.get(FIELD_AGENT_VERSION)), ne(ID_FIELD, id));
+        Document holder = collection.find(sameKey).first();
+        if (holder == null) {
+            // The row that held the key has gone since the write failed; nothing is
+            // in the way any more.
+            collection.replaceOne(eq(ID_FIELD, id), doc);
+            return;
         }
-        return false;
-    }
 
-    /**
-     * Whether {@link #rewriteUrisInDocument} would change anything in this value —
-     * asked by running the very same {@link #rewriteUriString} over it, so the
-     * pre-check cannot disagree with the rewrite about what a legacy URI is.
-     */
-    private boolean containsLegacyUri(Object value) {
-        if (value instanceof String str) {
-            return !rewriteUriString(str).equals(str);
+        Object holderId = holder.get(ID_FIELD);
+        if (!(id instanceof ObjectId mine) || !(holderId instanceof ObjectId theirs)) {
+            throw new IllegalStateException(String.format("deployment rows %s and %s both become %s/%s/%s, and their ids are "
+                    + "not ObjectIds, so which is newer cannot be told; keep one by hand", id, holderId,
+                    doc.get(FIELD_ENVIRONMENT), doc.get(FIELD_AGENT_ID), doc.get(FIELD_AGENT_VERSION)));
         }
-        if (value instanceof Document doc) {
-            for (String key : doc.keySet()) {
-                if (containsLegacyUri(doc.get(key))) {
-                    return true;
-                }
-            }
-            return false;
+
+        Object keptId;
+        Object removedId;
+        if (mine.compareTo(theirs) > 0) {
+            // This row is the newer one: it takes the key. Delete first — the unique
+            // index will not let both exist, and if this stops in between, the row
+            // being migrated is still there under its v5 names for the next start.
+            collection.deleteOne(eq(ID_FIELD, holderId));
+            collection.replaceOne(eq(ID_FIELD, id), doc);
+            keptId = id;
+            removedId = holderId;
+        } else {
+            collection.deleteOne(eq(ID_FIELD, id));
+            keptId = holderId;
+            removedId = id;
         }
-        if (value instanceof List<?> list) {
-            for (Object item : list) {
-                if (containsLegacyUri(item)) {
-                    return true;
-                }
-            }
-            return false;
-        }
-        return false;
+        LOGGER.warnf("  deployments: rows %s and %s both become %s/%s/%s under v6 names — kept %s (the newer), removed %s",
+                id, holderId, doc.get(FIELD_ENVIRONMENT), doc.get(FIELD_AGENT_ID), doc.get(FIELD_AGENT_VERSION), keptId, removedId);
     }
 
     /**
