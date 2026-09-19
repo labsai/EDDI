@@ -704,6 +704,43 @@ class V6RenameMigrationTest {
             assertFalse(envDoc.containsKey("botVersion"));
             assertEquals("production", envDoc.get("environment"));
         }
+
+        /**
+         * One document that cannot be written must not stop the others, and must keep
+         * the migration from being recorded as complete: recording it would leave that
+         * document under its v5 names with nothing ever retrying it.
+         */
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("a document that cannot be written does not stop the rest, and keeps the migration incomplete")
+        void unwritableDocumentKeepsTheMigrationIncomplete() {
+            when(migrationLogStore.readMigrationLog(anyString())).thenReturn(null);
+
+            var broken = new Document("botId", "agent-broken").append("environment", "production").append("_id", new ObjectId());
+            var fine = new Document("botId", "agent-fine").append("environment", "production").append("_id", new ObjectId());
+
+            MongoCollection<Document> envCol = mock(MongoCollection.class);
+            when(envCol.estimatedDocumentCount()).thenReturn(2L);
+            FindIterable<Document> envIterable = mock(FindIterable.class);
+            MongoCursor<Document> envCursor = mock(MongoCursor.class);
+            when(envCursor.hasNext()).thenReturn(true, true, false);
+            when(envCursor.next()).thenReturn(broken, fine);
+            when(envIterable.iterator()).thenReturn(envCursor);
+            when(envCol.find()).thenReturn(envIterable);
+            when(envCol.replaceOne(any(), eq(broken))).thenThrow(new IllegalStateException("write refused"));
+
+            MongoCollection<Document> emptyCol = mock(MongoCollection.class);
+            when(emptyCol.estimatedDocumentCount()).thenReturn(0L);
+            when(database.getCollection(anyString()))
+                    .thenAnswer(invocation -> "conversationmemories".equals(invocation.getArgument(0)) ? envCol : emptyCol);
+            when(database.getName()).thenReturn("eddi");
+
+            migration.runIfNeeded();
+
+            assertEquals("agent-fine", fine.get("agentId"), "the document after the failing one must still be migrated");
+            verify(envCol).replaceOne(any(), eq(fine));
+            verify(migrationLogStore, never()).createMigrationLog(any(MigrationLog.class));
+        }
     }
 
     // ───────────────────────────────────────────────────────────
@@ -912,6 +949,81 @@ class V6RenameMigrationTest {
             migration.runIfNeeded();
 
             assertEquals("production", envDoc.get("environment"));
+        }
+    }
+
+    /**
+     * The deployment sweep in {@code AgentDeploymentManagement} asks this before it
+     * retires a deployment whose agent config it cannot find. On a first boot
+     * against an EDDI 5 database the configs are still in {@code bots}, so the
+     * honest answer there is what keeps the sweep from deleting every deployment
+     * row in the database.
+     */
+    @Nested
+    @DisplayName("isPending")
+    class IsPendingTests {
+
+        @Test
+        @DisplayName("pending while enabled and the migration log has no completion entry")
+        void pendingWhenEnabledAndNotYetRun() {
+            when(migrationLogStore.readMigrationLog("v6-rename-migration-complete")).thenReturn(null);
+
+            assertTrue(migration.isPending());
+        }
+
+        @Test
+        @DisplayName("not pending once the migration has completed")
+        void notPendingAfterCompletion() {
+            when(migrationLogStore.readMigrationLog("v6-rename-migration-complete"))
+                    .thenReturn(new MigrationLog("v6-rename-migration-complete"));
+
+            assertFalse(migration.isPending());
+        }
+
+        /**
+         * The property defaults to false, so "no completion entry" is the permanent
+         * state of every installation that never needed the migration. Reading that as
+         * pending would park the deployment sweep forever on every normal EDDI 6
+         * database.
+         */
+        @Test
+        @DisplayName("never pending when the migration is disabled, and the log is not even read")
+        void notPendingWhenDisabled() {
+            var disabled = new V6RenameMigration(database, migrationLogStore, false);
+
+            assertFalse(disabled.isPending());
+            verify(migrationLogStore, never()).readMigrationLog(anyString());
+        }
+
+        /**
+         * Once complete it stays complete, so a sweep on a ten-second schedule does not
+         * re-read the migration log for the lifetime of the process.
+         */
+        @Test
+        @DisplayName("completion is latched — the migration log is read once, not on every call")
+        void completionIsLatched() {
+            when(migrationLogStore.readMigrationLog("v6-rename-migration-complete"))
+                    .thenReturn(new MigrationLog("v6-rename-migration-complete"));
+
+            assertFalse(migration.isPending());
+            assertFalse(migration.isPending());
+            assertFalse(migration.isPending());
+
+            verify(migrationLogStore, times(1)).readMigrationLog("v6-rename-migration-complete");
+        }
+
+        /**
+         * Pending is the fail-safe answer. A caller that waits loses ten seconds; a
+         * caller that proceeds on an unknown answer deletes the deployment rows it
+         * could not verify.
+         */
+        @Test
+        @DisplayName("a migration log that cannot be read counts as pending")
+        void unreadableLogCountsAsPending() {
+            when(migrationLogStore.readMigrationLog("v6-rename-migration-complete"))
+                    .thenThrow(new IllegalStateException("mongo down"));
+
+            assertTrue(migration.isPending());
         }
     }
 }

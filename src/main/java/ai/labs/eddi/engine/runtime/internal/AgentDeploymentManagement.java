@@ -52,6 +52,7 @@ import java.util.Date;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static ai.labs.eddi.configs.deployment.model.DeploymentInfo.DeploymentStatus.deployed;
 import static ai.labs.eddi.configs.deployment.model.DeploymentInfo.DeploymentStatus.undeployed;
@@ -86,6 +87,8 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     private Instant lastDeploymentCheck = null;
     private static final Logger LOGGER = Logger.getLogger(AgentDeploymentManagement.class);
     private final List<DeploymentInfo> deploymentInfos = new LinkedList<>();
+    /** Whether the "sweep parked" warning has been logged; see checkDeployments. */
+    private final AtomicBoolean sweepParkedLogged = new AtomicBoolean();
 
     @Inject
     public AgentDeploymentManagement(IDeploymentStore deploymentStore, IAgentFactory agentFactory, IAgentStore agentStore,
@@ -152,11 +155,21 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
 
         migrationManager.startMigrationIfFirstTimeRun(() -> {
             checkDeployments();
+            if (v6RenameMigration.isPending()) {
+                // The sweep above was parked, so nothing has been deployed, and nothing will
+                // be for the life of this process: the rename migration only runs at startup.
+                // Reporting ready now would send traffic to an instance with no agents.
+                LOGGER.error("Not reporting ready: the V6 rename migration has not completed, so no agent has been "
+                        + "deployed. Its own error is logged above; resolve it and restart.");
+                return;
+            }
             agentsReadiness.setAgentsReadiness(true);
         });
 
         LOGGER.info("Finished deployment of agents.");
-        LOGGER.info("E.D.D.I is ready!");
+        if (!v6RenameMigration.isPending()) {
+            LOGGER.info("E.D.D.I is ready!");
+        }
     }
 
     // delayed, not delay: Scheduled#delayUnit defaults to MINUTES, so the numeric
@@ -164,6 +177,27 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     // SKIP because a slow pass must not overlap the next tick and double-deploy.
     @Scheduled(every = "10s", delayed = "10s", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     public void checkDeployments() {
+        // This sweep retires — deletes — the deployment row of any agent whose config
+        // it cannot read, and it runs on its own schedule rather than after the
+        // startup migrations. While the 6.x rename migration is outstanding the agent
+        // configs are still in `bots` and `agents` does not exist, so every deployed
+        // agent reads as deleted: on a real staging upgrade this deleted the
+        // deployment rows of both deployed agents before the migration had started. A
+        // migration that failed keeps the sweep parked deliberately — the collection
+        // names are then genuinely unknown, and not deploying beats deleting the
+        // record of what was deployed.
+        if (v6RenameMigration.isPending()) {
+            // Logged once: this runs every ten seconds, and a migration that takes minutes
+            // would otherwise print the same warning over and over.
+            if (sweepParkedLogged.compareAndSet(false, true)) {
+                LOGGER.warn("Deployment sweep parked: the V6 rename migration has not completed, so agent configs "
+                        + "cannot be read yet and every deployment would look stale. It stays parked until the "
+                        + "migration completes.");
+            } else {
+                LOGGER.debug("Deployment sweep still parked: the V6 rename migration has not completed.");
+            }
+            return;
+        }
         try {
             deploymentStore.readDeploymentInfos(deployed).stream()
                     .filter(deploymentInfo -> deploymentInfo.getAgentId() != null && deploymentInfo.getAgentVersion() != null)

@@ -5,12 +5,15 @@
 package ai.labs.eddi.configs.migration;
 
 import ai.labs.eddi.configs.migration.model.MigrationLog;
+import com.mongodb.ErrorCategory;
 import com.mongodb.MongoCommandException;
 import com.mongodb.MongoNamespace;
+import com.mongodb.MongoWriteException;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.RenameCollectionOptions;
 import org.bson.Document;
+import org.bson.conversions.Bson;
 import org.bson.types.ObjectId;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -20,7 +23,9 @@ import jakarta.inject.Inject;
 import java.util.*;
 
 import static ai.labs.eddi.datastore.mongo.MongoResourceStorage.ID_FIELD;
+import static com.mongodb.client.model.Filters.and;
 import static com.mongodb.client.model.Filters.eq;
+import static com.mongodb.client.model.Filters.ne;
 
 /**
  * V6 Rename Migration — rewrites legacy eddi:// URIs, store paths, environment
@@ -73,6 +78,18 @@ public class V6RenameMigration {
     /** Environment value rewrites. */
     private static final String[][] ENVIRONMENT_REWRITES = {{"unrestricted", "production"}, {"restricted", "production"},};
 
+    /** The field {@link #ENVIRONMENT_REWRITES} applies to. */
+    private static final String FIELD_ENVIRONMENT = "environment";
+
+    /**
+     * The v6 deployment key fields, i.e. the targets of
+     * {@link #FIELD_NAME_REWRITES}.
+     */
+    private static final String FIELD_AGENT_ID = "agentId";
+    private static final String FIELD_AGENT_VERSION = "agentVersion";
+
+    private static final String COLLECTION_DEPLOYMENTS = "deployments";
+
     /**
      * Field-name rewrites for deployment/conversation documents (old Java name →
      * new Java name).
@@ -95,12 +112,60 @@ public class V6RenameMigration {
     private final IMigrationLogStore migrationLogStore;
     private final boolean enabled;
 
+    /**
+     * Latches once the migration is known not to be pending, so that
+     * {@link #isPending()} stops reading the migration log on every call. Only ever
+     * set from false to true, and only after a completed migration has been
+     * observed, so a stale read cannot un-complete it.
+     */
+    private volatile boolean knownNotPending;
+
     @Inject
     public V6RenameMigration(MongoDatabase database, IMigrationLogStore migrationLogStore,
             @ConfigProperty(name = "eddi.migration.v6-rename.enabled", defaultValue = "false") boolean enabled) {
         this.database = database;
         this.migrationLogStore = migrationLogStore;
         this.enabled = enabled;
+    }
+
+    /**
+     * Whether this migration has been asked for but has not completed yet — i.e.
+     * whether the collections may still be under their EDDI 5 names.
+     *
+     * <p>
+     * A caller that would read an absent config as "the config is gone" has to wait
+     * for this to be false. The agent configs live in {@code bots} until this
+     * migration renames them, and {@code agents} does not exist at all, so on a
+     * first boot against an EDDI 5 database every deployed agent reads as deleted.
+     * That is what made {@code AgentDeploymentManagement.checkDeployments()} —
+     * which runs on its own ten-second schedule, not after the migrations — retire
+     * the deployment rows of every agent in the database.
+     * </p>
+     *
+     * <p>
+     * Disabled means not pending: nobody asked for a rename, so the collection
+     * names are whatever they already are. That distinction matters because the
+     * property defaults to false, so "no completion entry" is the permanent state
+     * of every installation that never needed the migration. Pending is otherwise
+     * the fail-safe answer — a migration log that cannot be read leaves the
+     * question open, and the caller that waits loses ten seconds where the caller
+     * that proceeds deletes data.
+     * </p>
+     */
+    public boolean isPending() {
+        if (!enabled || knownNotPending) {
+            return false;
+        }
+        try {
+            if (migrationLogStore.readMigrationLog(MIGRATION_KEY) == null) {
+                return true;
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("Could not read the V6 rename migration log (%s) — treating the migration as still pending", e.getMessage());
+            return true;
+        }
+        knownNotPending = true;
+        return false;
     }
 
     /**
@@ -156,8 +221,17 @@ public class V6RenameMigration {
         totalMigrated += migrateDescriptors("descriptors.history");
 
         // 4. Rewrite environment fields in deployment/conversation documents
-        totalMigrated += migrateEnvironments("conversationmemories");
-        totalMigrated += migrateEnvironments("deployments");
+        int failed = 0;
+        for (String collectionName : List.of("conversationmemories", COLLECTION_DEPLOYMENTS)) {
+            EnvironmentResult result = migrateEnvironments(collectionName);
+            totalMigrated += result.migrated();
+            failed += result.failed();
+        }
+        if (failed > 0) {
+            LOGGER.errorf("V6 rename migration migrated %d document(s), but %d could not be migrated (logged above). "
+                    + "The migration was NOT marked complete and will run again on the next start.", totalMigrated, failed);
+            return;
+        }
 
         LOGGER.infof("V6 rename migration complete: %d documents migrated", totalMigrated);
 
@@ -418,21 +492,46 @@ public class V6RenameMigration {
         return migrated;
     }
 
+    /** What one {@link #migrateEnvironments(String)} pass did. */
+    private record EnvironmentResult(int migrated, int failed) {
+    }
+
     /**
-     * Migrate environment fields in conversation memory documents.
+     * Migrate environment fields in conversation memory and deployment documents.
+     *
+     * <p>
+     * This is the expensive step of the migration, and its cost follows total
+     * conversation bytes rather than the work it does: on a real staging upgrade it
+     * was about 20 of the 24 minutes the startup migrations took, for 195 documents
+     * averaging 410 KB, each read and rewritten one at a time in Java. A pre-check
+     * that skips a clean collection cannot shorten that — proving there is no
+     * legacy URI nested anywhere in a document means reading the document, which is
+     * the whole cost. The fix, when it is made, is to move the rewrite server-side
+     * ({@code updateMany} with {@code $rename} and {@code $set}), so the bytes
+     * never cross the client.
+     * </p>
+     *
+     * <p>
+     * Documents are written one at a time, and one that cannot be written does not
+     * stop the rest: it is logged, counted, and keeps the migration from being
+     * recorded as complete, so it runs again on the next start. A deployment row
+     * whose v6 key another row already holds is not such a failure — it is
+     * resolved; see {@link #resolveDeploymentKeyCollision}.
+     * </p>
      */
-    private int migrateEnvironments(String collectionName) {
+    private EnvironmentResult migrateEnvironments(String collectionName) {
         MongoCollection<Document> collection;
         try {
             collection = database.getCollection(collectionName);
             if (collection.estimatedDocumentCount() == 0) {
-                return 0;
+                return new EnvironmentResult(0, 0);
             }
         } catch (Exception e) {
-            return 0;
+            return new EnvironmentResult(0, 0);
         }
 
         int migrated = 0;
+        int failed = 0;
         for (Document doc : collection.find()) {
             boolean changed = false;
 
@@ -446,11 +545,11 @@ public class V6RenameMigration {
             }
 
             // Rewrite environment field
-            Object envObj = doc.get("environment");
+            Object envObj = doc.get(FIELD_ENVIRONMENT);
             if (envObj instanceof String envStr) {
                 for (String[] mapping : ENVIRONMENT_REWRITES) {
                     if (envStr.equalsIgnoreCase(mapping[0])) {
-                        doc.put("environment", mapping[1]);
+                        doc.put(FIELD_ENVIRONMENT, mapping[1]);
                         changed = true;
                         break;
                     }
@@ -461,17 +560,103 @@ public class V6RenameMigration {
             Document uriRewritten = rewriteUrisInDocument(doc);
             changed = changed || uriRewritten != null;
 
-            if (changed) {
-                var query = eq(ID_FIELD, doc.get(ID_FIELD));
-                collection.replaceOne(query, doc);
+            if (!changed) {
+                continue;
+            }
+            try {
+                writeMigrated(collection, collectionName, doc);
                 migrated++;
+            } catch (Exception e) {
+                failed++;
+                LOGGER.errorf("  %s/%s could not be migrated — leaving it unchanged and continuing: %s", collectionName,
+                        doc.get(ID_FIELD), e.toString());
             }
         }
 
         if (migrated > 0) {
-            LOGGER.infof("  %s: migrated %d conversation documents", collectionName, migrated);
+            LOGGER.infof("  %s: migrated %d documents", collectionName, migrated);
         }
-        return migrated;
+        return new EnvironmentResult(migrated, failed);
+    }
+
+    /**
+     * Writes a migrated document back, resolving a deployment key collision rather
+     * than failing on it.
+     */
+    private void writeMigrated(MongoCollection<Document> collection, String collectionName, Document doc) {
+        try {
+            collection.replaceOne(eq(ID_FIELD, doc.get(ID_FIELD)), doc);
+        } catch (MongoWriteException e) {
+            if (e.getError().getCategory() != ErrorCategory.DUPLICATE_KEY || !COLLECTION_DEPLOYMENTS.equals(collectionName)) {
+                throw e;
+            }
+            resolveDeploymentKeyCollision(collection, doc);
+        }
+    }
+
+    /**
+     * A v5 deployment row that becomes the same v6 key as a row already written.
+     *
+     * <p>
+     * Two v5 shapes do this. {@link #ENVIRONMENT_REWRITES} maps both
+     * {@code unrestricted} and {@code restricted} to {@code production}, so an
+     * agent deployed to both becomes one key; and v5's own check-then-act
+     * {@code setDeploymentInfo} wrote same-environment duplicates outright. The
+     * unique index {@code MongoDeploymentStorage} builds when it is constructed
+     * already exists by the time this migration runs, so the second write fails
+     * with a duplicate-key error — and it used to fail on every boot, because the
+     * first row had already been rewritten and the second never could be. The
+     * migration then never completed, and with the deployment sweep waiting on it,
+     * no agent was ever deployed again.
+     * </p>
+     *
+     * <p>
+     * It is resolved with the rule the store itself applies when it deduplicates:
+     * one row per key, the newest by {@code _id} kept. An ObjectId's leading bytes
+     * are its insert time, so every node running this during a rolling restart
+     * picks the same survivor. The rows differ only in status, and the newest is
+     * the operator's last word; any single row is a consistent answer where two are
+     * not. Ids that are not ObjectIds cannot be ordered that way, so that case is
+     * left to fail — and so to be counted, logged, and keep the migration
+     * incomplete — rather than guessed at.
+     * </p>
+     */
+    private void resolveDeploymentKeyCollision(MongoCollection<Document> collection, Document doc) {
+        Object id = doc.get(ID_FIELD);
+        Bson sameKey = and(eq(FIELD_ENVIRONMENT, doc.get(FIELD_ENVIRONMENT)), eq(FIELD_AGENT_ID, doc.get(FIELD_AGENT_ID)),
+                eq(FIELD_AGENT_VERSION, doc.get(FIELD_AGENT_VERSION)), ne(ID_FIELD, id));
+        Document holder = collection.find(sameKey).first();
+        if (holder == null) {
+            // The row that held the key has gone since the write failed; nothing is
+            // in the way any more.
+            collection.replaceOne(eq(ID_FIELD, id), doc);
+            return;
+        }
+
+        Object holderId = holder.get(ID_FIELD);
+        if (!(id instanceof ObjectId mine) || !(holderId instanceof ObjectId theirs)) {
+            throw new IllegalStateException(String.format("deployment rows %s and %s both become %s/%s/%s, and their ids are "
+                    + "not ObjectIds, so which is newer cannot be told; keep one by hand", id, holderId,
+                    doc.get(FIELD_ENVIRONMENT), doc.get(FIELD_AGENT_ID), doc.get(FIELD_AGENT_VERSION)));
+        }
+
+        Object keptId;
+        Object removedId;
+        if (mine.compareTo(theirs) > 0) {
+            // This row is the newer one: it takes the key. Delete first — the unique
+            // index will not let both exist, and if this stops in between, the row
+            // being migrated is still there under its v5 names for the next start.
+            collection.deleteOne(eq(ID_FIELD, holderId));
+            collection.replaceOne(eq(ID_FIELD, id), doc);
+            keptId = id;
+            removedId = holderId;
+        } else {
+            collection.deleteOne(eq(ID_FIELD, id));
+            keptId = holderId;
+            removedId = id;
+        }
+        LOGGER.warnf("  deployments: rows %s and %s both become %s/%s/%s under v6 names — kept %s (the newer), removed %s",
+                id, holderId, doc.get(FIELD_ENVIRONMENT), doc.get(FIELD_AGENT_ID), doc.get(FIELD_AGENT_VERSION), keptId, removedId);
     }
 
     /**
