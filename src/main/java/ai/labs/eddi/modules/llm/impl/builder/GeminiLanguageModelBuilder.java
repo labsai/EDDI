@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl.builder;
 
+import dev.langchain4j.http.client.HttpClient;
 import dev.langchain4j.http.client.HttpClientBuilder;
 import dev.langchain4j.http.client.jdk.JdkHttpClient;
 import dev.langchain4j.model.chat.ChatModel;
@@ -97,8 +98,7 @@ public class GeminiLanguageModelBuilder implements ILanguageModelBuilder {
     /**
      * Seam for the round-trip test. The HTTP client is the only place the effect of
      * these two flags is observable — asserting on the flags themselves would just
-     * restate this code, while a fake
-     * {@link dev.langchain4j.http.client.HttpClient} runs langchain4j's real
+     * restate this code, while a fake {@link HttpClient} runs langchain4j's real
      * request/response mapping and shows whether the signature reaches the wire.
      * Production goes through {@link #build(Map)}.
      */

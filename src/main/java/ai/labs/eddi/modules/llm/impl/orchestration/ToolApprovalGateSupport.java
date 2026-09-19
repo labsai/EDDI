@@ -329,10 +329,12 @@ public class ToolApprovalGateSupport {
         // message the runner appended before classifying its tool requests.
         batch.setInterimText(interimTextOf(currentMessages));
         // …and that message verbatim, but only when the transcript that already carries
-        // it was omitted. See PendingToolCallBatch#gatingAssistantMessageJson.
+        // it was omitted. Its own cap, not the transcript's: a small configured
+        // transcript cap is exactly what omits the transcript, and must not drop this
+        // too. See PendingToolCallBatch#gatingAssistantMessageJson.
         if (codecResult.omitted()) {
             batch.setGatingAssistantMessageJson(chatTranscriptCodec.serializeMessage(gatingAssistantMessageOf(currentMessages),
-                    Math.min(transcriptMaxBytes, PendingToolCallBatch.GATING_MESSAGE_MAX_BYTES)));
+                    PendingToolCallBatch.GATING_MESSAGE_MAX_BYTES));
         }
 
         // Per gated call: cap raw args, redact + cap redacted args, carry gate reason.

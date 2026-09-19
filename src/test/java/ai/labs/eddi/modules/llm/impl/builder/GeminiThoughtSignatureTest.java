@@ -55,8 +55,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * flags.</b> Asserting {@code returnThinking == true} would only restate
  * {@link GeminiLanguageModelBuilder}; it would pass whatever langchain4j then
  * did with the flag, and the defect lives precisely in what reaches the wire.
- * Substituting langchain4j's own pluggable
- * {@link dev.langchain4j.http.client.HttpClient} runs the real
+ * Substituting langchain4j's own pluggable {@link HttpClient} runs the real
  * {@code GoogleAiGeminiChatModel}, the real {@code PartsAndContentsMapper} in
  * both directions and the real JSON codec, with only the socket replaced — so
  * this exercises the complete round trip without a network or an API key.

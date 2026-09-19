@@ -86,7 +86,8 @@ and re-sends it only when `sendThinking == true`. EDDI set neither. Four places 
 4. **`ToolLoopResumer`, degraded resume** (transcript over its byte cap) replayed a bare
    `AiMessage.from(requests)`. `PendingToolCallBatch.gatingAssistantMessageJson` now keeps the
    gating message — written only when the transcript was omitted (a kept transcript already
-   carries it, and a codec change would break both copies alike), capped at 64 KB, shedding text
+   carries it, and a codec change would break both copies alike), capped at 64 KB on its own —
+   never by the transcript's cap, since a small transcript cap is what triggers this path — shedding text
    then thinking before its attributes. `gatingExchange` replays it **unchanged**, original parts in
    original order, answering each ungated call with `HANDLED_BEFORE_PAUSE` — handled, not "ran",
    since an ungated call may have been refused or failed, and the outcome is what this path lost.

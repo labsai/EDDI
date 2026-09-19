@@ -20,6 +20,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -263,6 +264,26 @@ class ToolLoopResumerGatingMessageTest {
         assertNotNull(batch.getChatTranscriptJson());
         assertNull(batch.getGatingAssistantMessageJson(),
                 "a second copy would only add size to a document that must stay under 16 MB");
+    }
+
+    @Test
+    @DisplayName("a small transcript cap does not also drop the gating message")
+    void gatingMessageHasItsOwnCap() {
+        // An operator-configured transcript cap smaller than the gating message itself:
+        // the cap omits the transcript — the one case this field exists for — so it
+        // must not bound the field as well, or the degraded resume loses the signature.
+        List<ChatMessage> transcript = List.of(UserMessage.from("deploy"), modelTurn());
+        var gateResult = new ToolApprovalGate.GateResult(List.of(request("c2", "deployAgent")),
+                List.of(request("c1", "getStatus")), Map.of());
+        int tinyTranscriptCap = 64;
+        assertTrue(codec.serializeMessage(modelTurn(), PendingToolCallBatch.GATING_MESSAGE_MAX_BYTES)
+                .getBytes(StandardCharsets.UTF_8).length > tinyTranscriptCap, "precondition: the message exceeds that cap");
+
+        PendingToolCallBatch batch = snapshot(transcript, gateResult, tinyTranscriptCap);
+
+        assertTrue(batch.isTranscriptOmitted());
+        assertNotNull(batch.getGatingAssistantMessageJson());
+        assertTrue(batch.getGatingAssistantMessageJson().contains(SIGNATURE));
     }
 
     private PendingToolCallBatch snapshot(List<ChatMessage> transcript, ToolApprovalGate.GateResult gateResult, int transcriptMaxBytes) {
