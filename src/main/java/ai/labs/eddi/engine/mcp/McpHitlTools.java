@@ -150,6 +150,13 @@ public class McpHitlTools {
         }
     }
 
+    /**
+     * MCP mirror of {@code GET /agents/{id}/approval-status}. {@code detail=full}
+     * must serve exactly what the REST surface serves: the snapshot passed through
+     * {@link ConversationMemoryUtilities#sanitizePendingToolCallsForApprover},
+     * never a partial projection of it — the raw tool arguments and the frozen LLM
+     * transcript on the pending batch are resume machinery, not approver material.
+     */
     @Tool(name = "get_approval_status",
           description = "Read the approval status of a paused regular conversation. detail=summary (default) returns "
                   + "pause metadata incl. pauseType (RULE or TOOL_CALL); detail=full returns the full memory snapshot "
