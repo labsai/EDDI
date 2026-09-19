@@ -773,6 +773,60 @@ class WebCrawlerTest {
         }
 
         @Test
+        @DisplayName("a robots.txt request that spends the last fetch leaves no room for the page")
+        void robotsRequestCountsBeforeThePageFetch() {
+            // A second host's robots.txt is fetched inside the loop, after its budget
+            // checks. The page fetch did not check again, so a limit of three requests
+            // produced four: seed robots.txt, seed page, other robots.txt, other page.
+            FakeSite site = new FakeSite()
+                    .robots(SITE, "User-agent: *\nAllow: /")
+                    .page(SITE + "/", linkTo("https://other.test/p"))
+                    .robots("https://other.test", "User-agent: *\nAllow: /")
+                    .page("https://other.test/p", "<html><body>elsewhere</body></html>");
+            var request = new CrawlRequest(SITE + "/", new Scope(false, false, null, 3, null),
+                    new Limits(10, 3, 0, 0, Duration.ofMinutes(1), Duration.ofSeconds(5)),
+                    new Politeness(Duration.ZERO, "EDDI-Crawler/1.0", true));
+
+            CrawlSummary summary = new WebCrawler(site).crawl(request, new RecordingSink());
+
+            assertEquals(3, site.requests().size(), "requested " + site.requests());
+            assertFalse(site.wasRequested("https://other.test/p"));
+            assertEquals(StopReason.FETCH_LIMIT, summary.stopReason());
+        }
+
+        @Test
+        @DisplayName("a crawl cancelled before it starts does not even fetch robots.txt")
+        void cancelledCrawlFetchesNothing() {
+            FakeSite site = new FakeSite()
+                    .robots(SITE, "User-agent: *\nAllow: /")
+                    .page(SITE + "/", "<html><body>home</body></html>");
+
+            CrawlSummary summary = new WebCrawler(site).crawl(politeRequest(SITE + "/"),
+                    new RecordingSink().cancelAfter(0));
+
+            assertTrue(site.requests().isEmpty(), "requested " + site.requests());
+            assertEquals(StopReason.CANCELLED, summary.stopReason());
+        }
+
+        @Test
+        @DisplayName("the seed page waits out the delay after its robots.txt request")
+        void seedPageIsSpacedFromItsRobotsRequest() {
+            // Two requests to one host back to back: the robots.txt request counted as
+            // nothing, so the seed page was treated as the crawl's first request.
+            FakeSite site = new FakeSite()
+                    .robots(SITE, "User-agent: *\nAllow: /")
+                    .page(SITE + "/", "<html><body>home</body></html>");
+            var request = new CrawlRequest(SITE + "/", Scope.defaults(), Limits.defaults(),
+                    new Politeness(Duration.ofMillis(300), "EDDI-Crawler/1.0", true));
+
+            long start = System.nanoTime();
+            new WebCrawler(site).crawl(request, new RecordingSink());
+            long elapsedMillis = (System.nanoTime() - start) / 1_000_000;
+
+            assertTrue(elapsedMillis >= 250, "the seed page followed robots.txt after " + elapsedMillis + "ms");
+        }
+
+        @Test
         @DisplayName("a robots.txt that disallows everything is not coverage")
         void robotsBlockingEverythingIsNotCoverage() {
             // A staging robots.txt deployed by mistake is common. Nothing fetched and
