@@ -346,6 +346,27 @@ class WebCrawlerTest {
         }
 
         @Test
+        @DisplayName("a seed answering 503 is an outage, not coverage")
+        void serverErrorSeedIsNotCoverage() {
+            FakeSite site = new FakeSite().status(SITE + "/", 503);
+
+            CrawlSummary summary = new WebCrawler(site).crawl(request(SITE + "/"), new RecordingSink());
+
+            assertFalse(summary.coveredWholeSource(), "a 503 says nothing about which pages exist");
+        }
+
+        @Test
+        @DisplayName("a seed answering 404 is coverage — the server said the page is gone")
+        void notFoundSeedIsCoverage() {
+            FakeSite site = new FakeSite().status(SITE + "/", 404);
+
+            CrawlSummary summary = new WebCrawler(site).crawl(request(SITE + "/"), new RecordingSink());
+
+            assertTrue(summary.coveredWholeSource(),
+                    "a removed start page is a deletion, and treating it as an outage would keep its vectors forever");
+        }
+
+        @Test
         @DisplayName("a dead link on a reachable site still counts as coverage")
         void deadLinkStillCoversTheSource() {
             FakeSite site = new FakeSite()
