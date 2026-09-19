@@ -264,7 +264,7 @@ schedule — ignoring robots gets the installation blocked and its operator a co
   pages into mojibake, and mojibake embeds without complaint.
 
 Identity is the URL after redirects, re-checked against the scope: a 301 to another host satisfied
-`sameDomainOnly` on the pre-redirect host and smuggled a foreign page into the knowledge base.
+`sameSiteOnly` on the pre-redirect host and smuggled a foreign page into the knowledge base.
 `<link rel="canonical">` is honoured, but only when it stays on the same host.
 
 Sitemaps from robots.txt are crawled without needing a link — the cheapest discovery there is, and the
@@ -273,7 +273,7 @@ not re-read that run.
 
 ### Tests
 
-**98 unit tests, no network, no container, no test server.** The `PageFetcher` seam is there for exactly
+**113 unit tests, no network, no container, no test server.** The `PageFetcher` seam is there for exactly
 this: `FakeSite` serves an in-memory website, so scope decisions, budgets, redirect identity, robots,
 conditional requests, charset handling and error accounting all run in the unit gate. The draft's only
 coverage was one Testcontainers test the unit run does not execute, which is why none of these defects
