@@ -24,6 +24,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.startsWith;
 import static org.mockito.Mockito.*;
 
 class PostgresConversationMemoryStoreUnitTest {
@@ -96,7 +97,7 @@ class PostgresConversationMemoryStoreUnitTest {
         ConversationMemorySnapshot snapshot = createSnapshot("conv-123");
         when(jsonSerialization.serialize(snapshot)).thenReturn("{\"test\":true}");
         when(preparedStatement.executeUpdate()).thenReturn(0);
-        stubConversationExists(false);
+        ResultSet probeResult = stubConversationExists(false);
 
         var thrown = assertThrows(IResourceStore.ResourceStoreException.class,
                 () -> store.storeConversationMemorySnapshot(snapshot));
@@ -105,6 +106,7 @@ class PostgresConversationMemoryStoreUnitTest {
         assertTrue(thrown.getMessage().contains("NOT persisted"), thrown.getMessage());
         assertFalse(thrown instanceof ConcurrentConversationModificationException,
                 "an erased conversation has nothing to retry against — it must not be reported as a revision conflict");
+        verify(probeResult).close();
     }
 
     /**
@@ -118,7 +120,7 @@ class PostgresConversationMemoryStoreUnitTest {
         snapshot.setRevision(4L);
         when(jsonSerialization.serialize(snapshot)).thenReturn("{\"test\":true}");
         when(preparedStatement.executeUpdate()).thenReturn(0);
-        stubConversationExists(true);
+        ResultSet probeResult = stubConversationExists(true);
 
         var thrown = assertThrows(ConcurrentConversationModificationException.class,
                 () -> store.storeConversationMemorySnapshot(snapshot));
@@ -129,15 +131,25 @@ class PostgresConversationMemoryStoreUnitTest {
                 "a refused write must leave the snapshot on the revision it was derived from");
         // The guard has to reach the SQL, not just the exception mapping.
         verify(preparedStatement).setLong(6, 4L);
+        verify(probeResult).close();
     }
 
     /**
      * Stubs the existence probe the store runs after a zero-row write to tell "the
      * row is gone" apart from "the row moved to another revision".
+     * <p>
+     * The probe gets its own statement and result set rather than reusing the
+     * shared update mocks, and the test verifies the store closes both — the probe
+     * runs in try-with-resources, and a leaked cursor per refused write would be a
+     * real leak.
      */
-    private void stubConversationExists(boolean exists) throws SQLException {
-        when(preparedStatement.executeQuery()).thenReturn(resultSet);
-        when(resultSet.next()).thenReturn(exists);
+    private ResultSet stubConversationExists(boolean exists) throws SQLException {
+        PreparedStatement probeStatement = mock(PreparedStatement.class);
+        ResultSet probeResult = mock(ResultSet.class);
+        when(connection.prepareStatement(startsWith("SELECT 1 FROM conversation_memories"))).thenReturn(probeStatement);
+        when(probeStatement.executeQuery()).thenReturn(probeResult);
+        when(probeResult.next()).thenReturn(exists);
+        return probeResult;
     }
 
     @Test

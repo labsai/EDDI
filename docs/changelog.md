@@ -61,6 +61,10 @@ beside undo/redo in the conversation-operations panel (legend "store conflict") 
 Metrics reference. A non-zero rate means turn, undo/redo or resume writes that were refused because another
 writer changed the conversation first. Before the revision guard, those were silent data loss.
 
+Review follow-up in the same PR: `PostgresConversationMemoryStoreUnitTest` now stubs the existence probe
+with its own statement and result set, and verifies the store closes the probe's result set. Before, it
+reused the shared update mocks, which a code-quality bot reported as a possible `ResultSet` leak.
+
 ---
 
 ## ⚡ perf(conversation): append the turn's steps instead of rewriting the document (2026-09-18)
