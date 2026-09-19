@@ -501,9 +501,19 @@ public class WebCrawler {
             Duration duration,
             StopReason stopReason) {
 
-        /** Whether the crawl covered its whole scope, so absence means deletion. */
+        /**
+         * Whether the crawl covered its whole scope, so absence means deletion.
+         *
+         * <p>
+         * A crawl that failed on every page it tried also ends as {@code COMPLETED}: an
+         * unreachable seed leaves nothing queued. Counting that as coverage would have
+         * an outage report every document as gone. Errors alongside pages that did
+         * arrive still count — a dead link on a live site must not block deletion
+         * forever — and the store's missed-runs threshold absorbs a transient failure.
+         */
         public boolean coveredWholeSource() {
-            return stopReason == StopReason.COMPLETED;
+            boolean reachedTheSource = errors == 0 || pagesFetched + pagesUnchanged > 0;
+            return stopReason == StopReason.COMPLETED && reachedTheSource;
         }
     }
 

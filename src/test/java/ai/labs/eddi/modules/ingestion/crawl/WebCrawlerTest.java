@@ -334,6 +334,33 @@ class WebCrawlerTest {
         }
 
         @Test
+        @DisplayName("an unreachable seed is not coverage, although the crawl completed")
+        void unreachableSeedIsNotCoverage() {
+            FakeSite site = new FakeSite().failure(SITE + "/", "connection refused");
+
+            CrawlSummary summary = new WebCrawler(site).crawl(request(SITE + "/"), new RecordingSink());
+
+            assertEquals(StopReason.COMPLETED, summary.stopReason());
+            assertFalse(summary.coveredWholeSource(),
+                    "an outage saw nothing — treating that as coverage reports every document as deleted");
+        }
+
+        @Test
+        @DisplayName("a dead link on a reachable site still counts as coverage")
+        void deadLinkStillCoversTheSource() {
+            FakeSite site = new FakeSite()
+                    .page(SITE + "/", linkTo(SITE + "/a", SITE + "/gone"))
+                    .page(SITE + "/a", "<html><body>A</body></html>")
+                    .status(SITE + "/gone", 404);
+
+            CrawlSummary summary = new WebCrawler(site).crawl(request(SITE + "/"), new RecordingSink());
+
+            assertEquals(1, summary.errors());
+            assertTrue(summary.coveredWholeSource(),
+                    "one broken link must not stop deletions from ever being reconciled");
+        }
+
+        @Test
         @DisplayName("bounds total requests, not just emitted pages")
         void boundsFetchAttempts() {
             // maxPages alone bounds nothing: a docs site linking 5,000 assets fetches
