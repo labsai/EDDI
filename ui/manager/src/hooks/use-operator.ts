@@ -24,7 +24,7 @@ import {
   type OperatorConfig,
   type FetchedSpec,
 } from "@/lib/api/operator";
-import { undeployAgent, deleteAgent, getAgent } from "@/lib/api/agents";
+import { undeployAgent, deleteAgent, getAgentCurrentVersion } from "@/lib/api/agents";
 import { endpointsForScope } from "@/lib/operator/tool-scopes";
 import {
   enforceGateDryRun,
@@ -507,10 +507,15 @@ async function handBackToPredecessor(
   }
 }
 
-/** Whether an agent document still exists: a 404 is "absent", any other failure "unknown". */
+/**
+ * Whether an agent still exists, via `/currentversion`: 200 is "present", 404
+ * "absent", anything else "unknown". Not the version-less
+ * `GET /agentstore/agents/{id}` — that answers 400 for an existing agent and an
+ * unknown id alike, so every answer would have been "unknown".
+ */
 async function agentPresence(agentId: string): Promise<"present" | "absent" | "unknown"> {
   try {
-    await getAgent(agentId);
+    await getAgentCurrentVersion(agentId);
     return "present";
   } catch (error) {
     return isNotFound(error) ? "absent" : "unknown";

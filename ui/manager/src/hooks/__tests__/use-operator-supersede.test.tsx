@@ -71,8 +71,11 @@ function serveReconfigure(spy: Retirement, deleteOldFails = false) {
       HttpResponse.json({ agentId: NEW_AGENT, deployed: true, deploymentStatus: "READY" }, { status: 201 }),
     ),
     http.get("*/agentstore/agents/:id/currentversion", () => HttpResponse.json(1)),
-    http.get("*/agentstore/agents/:id", ({ params }) =>
-      HttpResponse.json({ id: params.id, hitlConfig: GOOD_GATE }),
+    // Version-less reads answer 400 on a real 6.4 backend; only ?version=N returns the document.
+    http.get("*/agentstore/agents/:id", ({ params, request }) =>
+      new URL(request.url).searchParams.has("version")
+        ? HttpResponse.json({ id: params.id, hitlConfig: GOOD_GATE })
+        : HttpResponse.text("bad request", { status: 400 }),
     ),
     http.get("*/administration/:env/deploymentstatus/:agentId", () => HttpResponse.json({ status: "READY" })),
     http.put(VAR_URL, () => new HttpResponse(null, { status: 204 })),
@@ -257,6 +260,15 @@ describe("useActivateOperator — retiring the superseded operator", () => {
    *            the replacement is gone but its config is still readable.
    * @param replacementDeleteFails the DELETE of the new agent answers 500 — the
    *            rollback failed and the replacement is still there.
+   * @returns the config writes, and every agentstore GET in order (path plus
+   *          query), so a test can assert which endpoint answered "is it there?".
+   *
+   * The agentstore mocks mirror a real 6.4 backend, measured: the version-less
+   * `GET /agentstore/agents/{id}` answers 400 for an existing agent and an
+   * unknown id alike; `/currentversion` and `?version=N` answer 200 while the
+   * agent exists and 404 once it is deleted. A mock that answered the
+   * version-less GET with the document hid a presence check that could never
+   * work.
    */
   function failVerification(
     spy: Retirement,
@@ -264,13 +276,25 @@ describe("useActivateOperator — retiring the superseded operator", () => {
     { variableDeleteFails = false, replacementDeleteFails = false } = {},
   ) {
     const writes: OperatorConfig[] = [];
+    const agentReads: string[] = [];
     let stored: string | null = JSON.stringify(predecessor);
+    const gone = (id: string) => spy.deletes.includes(id) && !(replacementDeleteFails && id === NEW_AGENT);
     server.use(
-      http.get("*/agentstore/agents/:id", ({ params }) =>
-        spy.deletes.includes(String(params.id)) && !(replacementDeleteFails && params.id === NEW_AGENT)
+      http.get("*/agentstore/agents/:id/currentversion", ({ params, request }) => {
+        const url = new URL(request.url);
+        agentReads.push(url.pathname + url.search);
+        return gone(String(params.id))
+          ? HttpResponse.text("No document found for id", { status: 404 })
+          : HttpResponse.json(1);
+      }),
+      http.get("*/agentstore/agents/:id", ({ params, request }) => {
+        const url = new URL(request.url);
+        agentReads.push(url.pathname + url.search);
+        if (!url.searchParams.has("version")) return HttpResponse.text("bad request", { status: 400 });
+        return gone(String(params.id))
           ? HttpResponse.text("not found", { status: 404 })
-          : HttpResponse.json({ id: params.id }),
-      ),
+          : HttpResponse.json({ id: params.id });
+      }),
       http.delete("*/agentstore/agents/:id", ({ params }) => {
         spy.deletes.push(String(params.id));
         return replacementDeleteFails && params.id === NEW_AGENT
@@ -294,7 +318,14 @@ describe("useActivateOperator — retiring the superseded operator", () => {
         return new HttpResponse(null, { status: 204 });
       }),
     );
-    return writes;
+    return { writes, agentReads };
+  }
+
+  /** The presence question must have been asked of `/currentversion`, after the rollback. */
+  function expectPresenceAskedOfCurrentVersion(spy: Retirement, agentReads: string[]) {
+    expect(spy.deletes).toContain(NEW_AGENT);
+    expect(agentReads[agentReads.length - 1]).toMatch(new RegExp(`/agentstore/agents/${NEW_AGENT}/currentversion$`));
+    expect(agentReads).not.toContainEqual(expect.stringMatching(new RegExp(`/agentstore/agents/${NEW_AGENT}$`)));
   }
 
   /**
@@ -307,7 +338,7 @@ describe("useActivateOperator — retiring the superseded operator", () => {
     const spy = freshSpy();
     serveReconfigure(spy);
     const predecessor = existingOperator({ scope: "read_write" });
-    const writes = failVerification(spy, predecessor);
+    const { writes, agentReads } = failVerification(spy, predecessor);
 
     const { result } = renderHook(() => useActivateOperator(), { wrapper });
     result.current.mutate({ agentName: "EDDI Platform Operator", config: predecessor, apiKey: "sk-test" });
@@ -321,6 +352,7 @@ describe("useActivateOperator — retiring the superseded operator", () => {
     expect(writes[writes.length - 1]?.agentId).toBe(OLD_AGENT);
     expect(result.current.error?.message).toContain(OLD_AGENT);
     expect(result.current.error?.message).toMatch(/still the active one/i);
+    expectPresenceAskedOfCurrentVersion(spy, agentReads);
   });
 
   /**
@@ -332,7 +364,7 @@ describe("useActivateOperator — retiring the superseded operator", () => {
     const spy = freshSpy();
     serveReconfigure(spy);
     const predecessor = existingOperator({ scope: "read_write" });
-    const writes = failVerification(spy, predecessor, { variableDeleteFails: true });
+    const { writes, agentReads } = failVerification(spy, predecessor, { variableDeleteFails: true });
 
     const { result } = renderHook(() => useActivateOperator(), { wrapper });
     result.current.mutate({ agentName: "EDDI Platform Operator", config: predecessor, apiKey: "sk-test" });
@@ -340,6 +372,7 @@ describe("useActivateOperator — retiring the superseded operator", () => {
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(spy.deletes).not.toContain(OLD_AGENT);
     expect(writes[writes.length - 1]?.agentId).toBe(OLD_AGENT);
+    expectPresenceAskedOfCurrentVersion(spy, agentReads);
   });
 
   /**
@@ -354,7 +387,7 @@ describe("useActivateOperator — retiring the superseded operator", () => {
       const spy = freshSpy();
       serveReconfigure(spy);
       const predecessor = existingOperator({ scope: "read_write", version });
-      failVerification(spy, predecessor, { replacementDeleteFails: true });
+      const { agentReads } = failVerification(spy, predecessor, { replacementDeleteFails: true });
 
       const { result } = renderHook(() => useActivateOperator(), { wrapper });
       result.current.mutate({ agentName: "EDDI Platform Operator", config: predecessor, apiKey: "sk-test" });
@@ -364,6 +397,9 @@ describe("useActivateOperator — retiring the superseded operator", () => {
       expect(spy.undeploys.map((entry) => entry.agentId)).not.toContain(OLD_AGENT);
       expect(result.current.error?.message).toContain(OLD_AGENT);
       expect(result.current.error?.message).toContain(NEW_AGENT);
+      // Present means present, not "could not tell": the 200 came from /currentversion.
+      expect(result.current.error?.message).toMatch(/still present/i);
+      expectPresenceAskedOfCurrentVersion(spy, agentReads);
     },
   );
 });

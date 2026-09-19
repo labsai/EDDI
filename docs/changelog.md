@@ -72,12 +72,19 @@ bottom of this file and are never archived.
   `verifyGateInstalled` / `enforceGateDryRun`; when either rolled the replacement back,
   the deployment had no operator at all. Retirement now runs last, and the failure path
   (`handBackToPredecessor`) never retires the predecessor. It asks the agent store
-  whether the replacement still exists rather than inferring it from the config
+  whether the replacement still exists — via `GET /agentstore/agents/{id}/currentversion`
+  (200 present, 404 absent; new `getAgentCurrentVersion` in `lib/api/agents.ts`), NOT the
+  version-less `GET /agentstore/agents/{id}`, which a live 6.4 answers with 400 for an
+  existing agent and an unknown id alike — rather than inferring it from the config
   variable (`resetOperator` deletes the agent before clearing the variable, so a failed
   clear leaves a config naming a deleted agent): gone means the predecessor's config is
   written back; still present — including a predecessor with no recorded version — means
   both are left and the error names both. Tests in `use-operator-supersede.test.tsx`,
-  mutation-checked against the old ordering and the first version of the hand-back.
+  mutation-checked against the old ordering and the first version of the hand-back. Their
+  agentstore mocks mirror the measured 6.4 behaviour (version-less GET → 400) and assert
+  the exact URL the presence check calls: the first cut of this check used the
+  version-less GET, and a mock that answered it with the document let it pass while it
+  could only ever return "unknown" against a real backend.
 - **Tool failure messages state facts, not reporting policy.** `HttpCallToolsProvider`
   no longer tells the model "report this to the administrator" or that a refused
   connection is "NOT a fault in the service" — a stopped listener refuses too. The
