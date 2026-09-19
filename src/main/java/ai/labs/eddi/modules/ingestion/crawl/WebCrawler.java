@@ -117,6 +117,13 @@ public class WebCrawler {
         // several hosts, and applying the seed's robots.txt to all of them means
         // obeying one site's rules while ignoring another's.
         Map<String, RobotsPolicy> robotsByHost = new HashMap<>();
+        Instant deadline = start.plus(request.limits().timeBudget());
+        // The seed's robots.txt is a request like any other, so it answers to the
+        // same checks — made before it, not only once the loop starts.
+        StopReason beforeStart = limitReached(request, sink, counters, deadline);
+        if (beforeStart != null) {
+            return counters.summarize(start, beforeStart);
+        }
         RobotsPolicy robots = request.politeness().respectRobots()
                 ? robotsFor(request, request.seedUrl(), robotsByHost, counters)
                 : RobotsPolicy.allowAll();
@@ -128,32 +135,17 @@ public class WebCrawler {
         // maxPages 50,000 with typical navigation that is millions of entries.
         Set<String> queued = new HashSet<>();
         Queue<Candidate> queue = new ArrayDeque<>();
-        Instant deadline = start.plus(request.limits().timeBudget());
-        int sitemapsRead = enqueueSeeds(request, sink, robots, delay, deadline, counters, queue, queued, seedHost,
-                excludes);
+        enqueueSeeds(request, sink, robots, delay, deadline, counters, queue, queued, seedHost, excludes);
 
         StopReason stopReason = StopReason.COMPLETED;
-        boolean firstRequest = sitemapsRead == 0;
+        // robots.txt and sitemap requests count: the seed page waits out the delay
+        // after them like any other request to the same host.
+        boolean firstRequest = counters.fetchAttempts == 0;
 
         while (!queue.isEmpty()) {
-            if (sink.isCancelled() || Thread.currentThread().isInterrupted()) {
-                stopReason = StopReason.CANCELLED;
-                break;
-            }
-            if (counters.pagesFetched >= request.limits().maxPages()) {
-                stopReason = StopReason.PAGE_LIMIT;
-                break;
-            }
-            if (counters.fetchAttempts >= request.limits().maxFetchAttempts()) {
-                stopReason = StopReason.FETCH_LIMIT;
-                break;
-            }
-            if (counters.bytesDownloaded >= request.limits().maxTotalBytes()) {
-                stopReason = StopReason.BYTE_LIMIT;
-                break;
-            }
-            if (Instant.now().isAfter(deadline)) {
-                stopReason = StopReason.TIME_LIMIT;
+            StopReason limit = limitReached(request, sink, counters, deadline);
+            if (limit != null) {
+                stopReason = limit;
                 break;
             }
 
@@ -184,6 +176,15 @@ public class WebCrawler {
                 break;
             }
             firstRequest = false;
+
+            // A new host's robots.txt, fetched above, may have spent the last of a
+            // budget, and the wait may have run past the deadline. Checked again so
+            // the page fetch cannot overshoot either.
+            StopReason spent = limitReached(request, sink, counters, deadline);
+            if (spent != null) {
+                stopReason = spent;
+                break;
+            }
 
             processCandidate(request, sink, candidate, seedHost, excludes, queue, queued, visited, counters);
         }
@@ -306,12 +307,10 @@ public class WebCrawler {
 
     /**
      * Queues the seed and whatever the site's sitemaps list.
-     *
-     * @return how many sitemaps were requested
      */
-    private int enqueueSeeds(CrawlRequest request, CrawlSink sink, RobotsPolicy robots, Duration delay,
-                             Instant deadline, Counters counters, Queue<Candidate> queue, Set<String> queued,
-                             String seedHost, List<UrlPattern> excludes) {
+    private void enqueueSeeds(CrawlRequest request, CrawlSink sink, RobotsPolicy robots, Duration delay,
+                              Instant deadline, Counters counters, Queue<Candidate> queue, Set<String> queued,
+                              String seedHost, List<UrlPattern> excludes) {
 
         queue.add(new Candidate(CrawlUrls.stripFragment(request.seedUrl()),
                 CrawlUrls.canonicalize(request.seedUrl()), 0));
@@ -324,10 +323,7 @@ public class WebCrawler {
         int sitemapsRead = 0;
         for (String sitemapUrl : robots.sitemaps()) {
             if (sitemapsRead >= MAX_SITEMAPS
-                    || sink.isCancelled() || Thread.currentThread().isInterrupted()
-                    || Instant.now().isAfter(deadline)
-                    || counters.fetchAttempts >= request.limits().maxFetchAttempts()
-                    || counters.bytesDownloaded >= request.limits().maxTotalBytes()
+                    || limitReached(request, sink, counters, deadline) != null
                     || !pause(delay)) {
                 break;
             }
@@ -342,7 +338,31 @@ public class WebCrawler {
                 }
             }
         }
-        return sitemapsRead;
+    }
+
+    /**
+     * The limit that stops the crawl before its next request, or null to go on. One
+     * definition for every request — pages, robots.txt and sitemaps — so no kind of
+     * request can slip past a budget the others respect.
+     */
+    private static StopReason limitReached(CrawlRequest request, CrawlSink sink, Counters counters,
+                                           Instant deadline) {
+        if (sink.isCancelled() || Thread.currentThread().isInterrupted()) {
+            return StopReason.CANCELLED;
+        }
+        if (counters.pagesFetched >= request.limits().maxPages()) {
+            return StopReason.PAGE_LIMIT;
+        }
+        if (counters.fetchAttempts >= request.limits().maxFetchAttempts()) {
+            return StopReason.FETCH_LIMIT;
+        }
+        if (counters.bytesDownloaded >= request.limits().maxTotalBytes()) {
+            return StopReason.BYTE_LIMIT;
+        }
+        if (Instant.now().isAfter(deadline)) {
+            return StopReason.TIME_LIMIT;
+        }
+        return null;
     }
 
     /**
