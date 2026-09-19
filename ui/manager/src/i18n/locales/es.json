@@ -4142,7 +4142,9 @@
       "platformBaseUrlUnknown": "Esta instalación de EDDI no puede informar de su propia dirección, así que se usará el origen de tu navegador. Eso solo es correcto si nada (ningún túnel, redirección de puertos ni proxy inverso) se interpone entre tu navegador y EDDI; en caso contrario, introduce aquí la dirección.",
       "platformBaseUrlLoopback": "Derivada del puerto HTTP de esta instalación. Sustitúyela si hay que dirigirse a EDDI por un nombre de servicio o mediante TLS en el propio proceso.",
       "platformBaseUrlAuto": "resuelta por el servidor",
-      "platformBaseUrlDiffers": "Esta instalación informa actualmente de su propia dirección como {{serverUrl}}. El valor de arriba es distinto: consérvalo solo si lo pusiste a propósito."
+      "platformBaseUrlDiffers": "Esta instalación informa actualmente de su propia dirección como {{serverUrl}}. El valor de arriba es distinto: consérvalo solo si lo pusiste a propósito.",
+      "platformBaseUrlQueryFailed": "No se pudo preguntar al servidor por su propia dirección. La activación fallará salvo que la introduzcas aquí, o recarga para volver a intentarlo.",
+      "platformBaseUrlUnresolved": "Esta instalación usa un puerto HTTP aleatorio y no tiene eddi.self.base-url, así que no puede indicar dónde alcanzarse a sí misma. Introduce aquí la dirección."
     },
     "authMode": {
       "none": {

@@ -157,14 +157,49 @@ describe("OperatorActivation", () => {
       expect(screen.queryByTestId("operator-platform-base-url-source")).not.toBeInTheDocument();
     });
 
-    it("treats an unresolved server answer like no answer", async () => {
+    /** Unresolved is an answer, not an old backend: activation will not fall back. */
+    it("says the server cannot determine its address, without promising a fallback", async () => {
       server.use(
         http.get("*/administration/operator/self-url", () =>
           HttpResponse.json({ baseUrl: null, source: "unresolved" }),
         ),
       );
       renderActivation();
-      expect(await screen.findByTestId("operator-platform-base-url-unknown")).toBeInTheDocument();
+      expect(await screen.findByTestId("operator-platform-base-url-unresolved")).toBeInTheDocument();
+      expect(screen.queryByTestId("operator-platform-base-url-unknown")).not.toBeInTheDocument();
+    });
+
+    /**
+     * A 403/500 is not "an old backend": activation rethrows it, so the form must
+     * not promise the browser-origin fallback it will not perform.
+     */
+    it("reports a failed query distinctly, and promptly", async () => {
+      server.use(
+        http.get("*/administration/operator/self-url", () =>
+          HttpResponse.json({ message: "boom" }, { status: 500 }),
+        ),
+      );
+      renderActivation();
+      expect(await screen.findByTestId("operator-platform-base-url-query-failed")).toBeInTheDocument();
+      expect(screen.queryByTestId("operator-platform-base-url-unknown")).not.toBeInTheDocument();
+    });
+
+    it("rejects a base URL carrying a path or trailing text", async () => {
+      renderActivation({
+        initial: { ...defaultOperatorConfig("Body text."), credentialKey: "operator-llm-key" },
+      });
+      const field = screen.getByLabelText(/platform base url/i);
+      await waitFor(() => expect(field).toHaveValue("http://127.0.0.1:7070"));
+      for (const bad of ["http://eddi:7070/eddi", "http://eddi:7070 extra"]) {
+        await userEvent.clear(field);
+        await userEvent.type(field, bad);
+        expect(await screen.findByTestId("operator-platform-base-url-invalid")).toBeInTheDocument();
+      }
+      await userEvent.clear(field);
+      await userEvent.type(field, "http://eddi:7070/");
+      await waitFor(() =>
+        expect(screen.queryByTestId("operator-platform-base-url-invalid")).not.toBeInTheDocument(),
+      );
     });
 
     /** Empty is legal: activation resolves it. It must not block the form. */

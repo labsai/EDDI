@@ -103,6 +103,9 @@ export function usePlatformSelfUrl(enabled = true) {
     queryFn: fetchPlatformSelfUrl,
     enabled,
     staleTime: Infinity,
+    // A failure here is an answer the form has to show (a 403, a 500), not a
+    // blip worth ~7 s of backoff with the field stuck on "…".
+    retry: false,
   });
 }
 

@@ -66,11 +66,29 @@ what the EDDI-Manager Platform Operator uses.
 Resolution is deliberately narrow, and each rule fails the call loudly rather
 than degrading quietly:
 
-- **Same origin only.** The token is released only when the call targets the
-  exact `scheme://host:port` the caller addressed. That origin is read from the
-  inbound request, not from configuration, so a config naming a third-party host
-  cannot exfiltrate a user's token — and no allow-list is needed for this to be
-  safe by default.
+- **Same origin, or EDDI itself.** The token is released only when the call
+  targets the exact `scheme://host:port` the caller addressed, or this
+  deployment's own address. The caller's origin is read from the inbound request;
+  the deployment's own address comes from deployment configuration alone —
+  `eddi.self.base-url`, otherwise `http://127.0.0.1:${quarkus.http.port}` — never
+  from an agent config or a request header. So a config naming a third-party host
+  cannot exfiltrate a user's token, and no allow-list is needed for this to be safe
+  by default.
+
+  The second half exists for the Platform Operator, whose tools must call EDDI at
+  an address the *server* can reach, which behind a tunnel, a port mapping or a
+  reverse proxy is not the address the browser used. Be aware of what it means:
+  the self address bypasses whatever sits in front of EDDI, so any agent that
+  targets it with `${caller:token}` reaches exactly what EDDI's own authorization
+  allows that user, not what the proxy would also permit. If a deployment relies
+  on its proxy for path or network restrictions on EDDI's API, set
+  `eddi.caller-identity.self-release.enabled=false`. A turn whose caller origin
+  could not be captured never gets the self release.
+
+  With `eddi.security.ssrf-protection.enabled=true`, the loopback default is
+  refused before any request is made (loopback is exactly what that protection
+  blocks), so such a deployment must set `eddi.self.base-url` to a non-loopback
+  address the server can reach.
 - **Headers only.** `${caller:token}` in a query parameter, request body or
   request path is rejected. Tokens in URLs leak through access logs, proxies and
   browser history, and nothing outside a header is substituted anyway — a

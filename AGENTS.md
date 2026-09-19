@@ -855,9 +855,15 @@ expires within the hour, cannot be least-privilege, and attributes every action
 to one synthetic principal.
 
 Resolution is narrow and fails loudly rather than degrading quietly:
-- **Same origin only** — released only to the exact `scheme://host:port` the
-  caller addressed (read from the inbound request, not config), so a config
-  naming a third-party host cannot exfiltrate the token.
+- **Same origin, or EDDI itself** — released only to the exact
+  `scheme://host:port` the caller addressed (read from the inbound request, not
+  config), or to this deployment's own address (`SelfUrlResolver`:
+  `eddi.self.base-url`, else `http://127.0.0.1:${quarkus.http.port}` — deployment
+  config only, never agent config or a request). A config naming a third-party
+  host cannot exfiltrate the token. The self address bypasses any reverse proxy,
+  so EDDI's own authorization is what guards it; a deployment that also relies on
+  proxy path rules sets `eddi.caller-identity.self-release.enabled=false`. A
+  caller whose origin could not be captured never gets the self release.
 - **Headers only** — `${caller:token}` in a query parameter, request body or
   path is rejected. `${caller:userId}` is allowed in headers and query
   parameters. An MCP server's `apiKey` may also carry it, which sends the tool

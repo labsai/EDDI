@@ -13,6 +13,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -55,11 +56,28 @@ class SelfUrlResolverTest {
             assertEquals("http://127.0.0.1:9443", loopbackOn(9443).baseUrl());
         }
 
+        /**
+         * quarkus.http.port=0 asks for a random port, which configuration cannot name.
+         * Answering 7070 anyway would be confidently wrong — and would make isSelf true
+         * for an address that is not this process.
+         */
         @Test
-        @DisplayName("an unset port falls back to 7070 rather than producing :-1 or :0")
-        void guardsAgainstAnUnsetPort() {
-            assertEquals("http://127.0.0.1:7070", loopbackOn(0).baseUrl());
-            assertEquals("http://127.0.0.1:7070", loopbackOn(-1).baseUrl());
+        @DisplayName("a random or unset port is reported as unresolved, not guessed")
+        void randomPortIsUnresolved() {
+            for (int port : new int[]{0, -1}) {
+                var resolver = loopbackOn(port);
+                assertNull(resolver.baseUrl());
+                assertEquals(SelfUrlResolver.SOURCE_UNRESOLVED, resolver.source());
+                assertFalse(resolver.isSelf(URI.create("http://127.0.0.1:7070/agentstore/agents")));
+            }
+        }
+
+        @Test
+        @DisplayName("an override still works when the port cannot be derived")
+        void overrideRescuesARandomPort() {
+            var resolver = new SelfUrlResolver(Optional.of("http://eddi:7070"), 0);
+            assertEquals("http://eddi:7070", resolver.baseUrl());
+            assertEquals(SelfUrlResolver.SOURCE_CONFIGURED, resolver.source());
         }
     }
 

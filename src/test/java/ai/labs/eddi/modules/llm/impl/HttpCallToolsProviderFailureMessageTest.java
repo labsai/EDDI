@@ -20,6 +20,7 @@ import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.service.tool.ToolExecutor;
+import io.netty.channel.ConnectTimeoutException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -29,6 +30,7 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.net.ConnectException;
 import java.net.NoRouteToHostException;
+import java.net.SocketTimeoutException;
 import java.net.URI;
 import java.net.UnknownHostException;
 import java.nio.channels.UnresolvedAddressException;
@@ -198,12 +200,84 @@ class HttpCallToolsProviderFailureMessageTest {
          * This string reaches the chat surface. A base URL that embeds credentials must
          * not travel with it.
          */
+        /**
+         * A PLAIN password — not secret-shaped. SecretRedactionFilter only recognises
+         * shapes (sk-..., Bearer ..., key=value), so this is what actually proves the
+         * userinfo is removed structurally. The sk-ant case below passed even when
+         * userinfo went through verbatim.
+         */
+        @Test
+        @DisplayName("userinfo in the base URL is dropped even when the password is not secret-shaped")
+        void stripsPlainUserInfo() {
+            String message = HttpCallToolsProvider.describeToolFailure(new ConnectException("Connection refused"),
+                    "https://admin:hunter2@eddi.example", call("GET", "/agentstore/agents"));
+            assertFalse(message.contains("hunter2"), message);
+            assertFalse(message.contains("admin:"), message);
+            assertTrue(message.contains("https://eddi.example/agentstore/agents"), message);
+        }
+
+        /**
+         * An un-encoded {@code @} inside the password must not leave its tail behind.
+         */
+        @Test
+        @DisplayName("userinfo with an @ inside the password is dropped whole")
+        void stripsUserInfoContainingAt() {
+            String message = HttpCallToolsProvider.describeToolFailure(new ConnectException("Connection refused"),
+                    "https://admin:p@ssw0rd@eddi.example", call("GET", "/agentstore/agents"));
+            assertFalse(message.contains("ssw0rd"), message);
+            assertTrue(message.contains("https://eddi.example/agentstore/agents"), message);
+        }
+
+        @Test
+        @DisplayName("userinfo is dropped from a non-connect failure's message too")
+        void stripsUserInfoFromOtherMessages() {
+            String message = describe(new IllegalArgumentException("bad target http://svc:hunter2@api.example.com/x"));
+            assertFalse(message.contains("hunter2"), message);
+            assertTrue(message.contains("http://api.example.com/x"), message);
+        }
+
+        /**
+         * With SSRF protection on, loopback is refused before any connection. That is a
+         * configuration problem with a specific remedy, not a network failure.
+         */
+        @Test
+        @DisplayName("an SSRF refusal names the protection and the remedy")
+        void explainsAnSsrfRefusal() {
+            String message = describe(new IllegalArgumentException("Access to internal/local addresses is not allowed: 127.0.0.1"));
+            assertTrue(message.contains("SSRF protection"), message);
+            assertTrue(message.contains("eddi.self.base-url"), message);
+            assertTrue(message.contains("http://localhost:7080/agentstore/agents/descriptors"), message);
+            assertFalse(message.contains("network failure"), message);
+        }
+
+        /**
+         * A READ timeout means the service accepted the connection and was slow — the
+         * one case the "not a fault in the service" wording must never cover.
+         */
+        @Test
+        @DisplayName("a read timeout is not dressed up as a connect failure")
+        void readTimeoutIsNotAConnectFailure() {
+            String message = describe(new RuntimeException("Read timed out", new SocketTimeoutException("Read timed out")));
+            assertFalse(message.contains("NOT a fault in the service"), message);
+        }
+
+        /**
+         * Netty's connect timeout extends ConnectException; it must read as a timeout,
+         * not as a refusal.
+         */
+        @Test
+        @DisplayName("Netty's connect timeout is a timeout, not a refusal")
+        void nettyConnectTimeoutIsATimeout() {
+            String message = describe(new RuntimeException(new ConnectTimeoutException("connection timed out: eddi/10.0.0.4:7070")));
+            assertTrue(message.contains("The connection timed out"), message);
+        }
+
         @Test
         @DisplayName("credentials embedded in the base URL are redacted, not echoed")
         void redactsCredentialsInTheBaseUrl() {
             String message = HttpCallToolsProvider.describeToolFailure(new ConnectException("Connection refused"),
-                    "https://admin:sk-ant-api03-ZmFrZUtleUZvclRlc3RzT25see12345678@eddi.example", call("GET", "/agentstore/agents"));
-            assertFalse(message.contains("sk-ant-api03-ZmFrZUtleUZvclRlc3RzT25see12345678"),
+                    "https://admin:sk-test-ZmFrZUtleUZvclRlc3RzT25see12345678@eddi.example", call("GET", "/agentstore/agents"));
+            assertFalse(message.contains("sk-test-ZmFrZUtleUZvclRlc3RzT25see12345678"),
                     "a secret-shaped value in the base URL must not reach the model: " + message);
         }
     }

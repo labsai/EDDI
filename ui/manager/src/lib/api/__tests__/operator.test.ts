@@ -333,7 +333,9 @@ describe("provisionOperator", () => {
    * Revert `provisionOperator` to `currentOrigin()` and this fails.
    */
   it("targets the address EDDI can reach ITSELF at, not the browser's origin", async () => {
-    const resolved = await resolveOperatorApiBaseUrl(config());
+    // apiBaseUrl: null, so the address really comes from the backend's answer
+    // rather than from the helper's pre-resolved default.
+    const resolved = await resolveOperatorApiBaseUrl(config({ apiBaseUrl: null }));
     await provisionOperator({
       agentName: "Op",
       config: config({ apiBaseUrl: resolved }),
@@ -1064,17 +1066,19 @@ describe("normalizeBaseUrl and trailing slashes", () => {
     );
   });
 
-  it("treats a server answer of null (an unresolved random port) as no answer", async () => {
+  /**
+   * The server answered that it CANNOT know (random port, no override). Falling
+   * back to the browser's origin would provision exactly the value the original
+   * defect provisioned; only a 404 (an old backend) earns that fallback.
+   */
+  it("refuses to guess when the server says it cannot determine its own address", async () => {
     server.use(
       http.get("*/administration/operator/self-url", () =>
         HttpResponse.json({ baseUrl: null, source: "unresolved" }),
       ),
     );
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.stubGlobal("location", { ...globalThis.location, origin: "https://eddi.example" });
-    await expect(resolveOperatorApiBaseUrl(config({ apiBaseUrl: null }))).resolves.toBe("https://eddi.example");
-    expect(warn).toHaveBeenCalled();
-    warn.mockRestore();
+    await expect(resolveOperatorApiBaseUrl(config({ apiBaseUrl: null }))).rejects.toThrow(/cannot determine its own address/i);
     vi.unstubAllGlobals();
   });
 });

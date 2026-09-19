@@ -33,7 +33,6 @@ import org.jboss.logging.Logger;
 import java.io.IOException;
 import java.net.ConnectException;
 import java.net.NoRouteToHostException;
-import java.net.SocketTimeoutException;
 import java.net.URI;
 import java.net.UnknownHostException;
 import java.net.http.HttpConnectTimeoutException;
@@ -87,6 +86,27 @@ class HttpCallToolsProvider implements ToolSourceProvider {
      * chain cannot spin.
      */
     private static final int MAX_CAUSE_DEPTH = 12;
+
+    /**
+     * Netty's connect timeout, matched by name so this class takes no Netty
+     * dependency.
+     */
+    private static final String NETTY_CONNECT_TIMEOUT = "io.netty.channel.ConnectTimeoutException";
+
+    /**
+     * {@code UrlValidationUtils}' two refusals, as ApiCallExecutor surfaces them.
+     */
+    private static final String SSRF_REFUSAL_PREFIX = "Access to internal/local addresses is not allowed";
+    private static final String SSRF_PRIVATE_PREFIX = "URL resolves to a private/internal address";
+
+    /**
+     * {@code scheme://userinfo@} — the userinfo part is dropped before a URL is
+     * echoed. Greedy up to the LAST {@code @} before the path: an admin-typed,
+     * un-encoded password such as {@code p@ss} would otherwise leave its tail
+     * behind. A legal authority has no {@code @} after the userinfo, so greedy is
+     * strictly the safer reading.
+     */
+    private static final Pattern URL_USERINFO = Pattern.compile("(?i)\\b([a-z][a-z0-9+.-]*://)[^/\\s]+@");
 
     /**
      * Keys produced by {@link IMemoryItemConverter#convert} that carry
@@ -505,15 +525,26 @@ class HttpCallToolsProvider implements ToolSourceProvider {
      */
     static String describeToolFailure(Exception e, String targetServerUrl, ApiCall apiCall) {
         String raw = e != null && e.getMessage() != null ? e.getMessage() : "Unknown error";
+        if (raw.startsWith(SSRF_REFUSAL_PREFIX) || raw.startsWith(SSRF_PRIVATE_PREFIX)) {
+            // Not a network failure: EDDI's own SSRF protection refused the address
+            // before any connection was attempted. With the protection on, a loopback or
+            // private self-URL can never work, and the model would otherwise be left to
+            // guess what "internal/local addresses" means for the platform's health.
+            return SecretRedactionFilter.redact("EDDI refused to call " + attemptedTarget(targetServerUrl, apiCall)
+                    + " because SSRF protection (eddi.security.ssrf-protection.enabled) blocks private and loopback "
+                    + "addresses (" + stripUserInfo(raw) + "). This is a configuration problem with the tool's base URL, not an "
+                    + "outage: on a deployment with SSRF protection on, a tool that calls EDDI itself needs a non-loopback "
+                    + "base URL (eddi.self.base-url). Report it to the administrator as such.");
+        }
         String connectFailure = connectFailureKind(e);
         if (connectFailure == null) {
-            return SecretRedactionFilter.redact(raw);
+            return SecretRedactionFilter.redact(stripUserInfo(raw));
         }
         String method = apiCall != null && apiCall.getRequest() != null && apiCall.getRequest().getMethod() != null
                 ? apiCall.getRequest().getMethod().toUpperCase(Locale.ROOT)
                 : "the request";
         String attempted = attemptedTarget(targetServerUrl, apiCall);
-        return SecretRedactionFilter.redact(connectFailure + " while trying to reach " + method + " " + attempted + " (" + raw + "). "
+        return SecretRedactionFilter.redact(connectFailure + " while trying to reach " + method + " " + attempted + " (" + stripUserInfo(raw) + "). "
                 + "This is a network failure reaching that address, NOT a fault in the service behind it. "
                 + "The base URL configured for this tool (" + describeBase(targetServerUrl) + ") must be an address the EDDI "
                 + "server itself can reach — not the address a browser uses to reach EDDI. Report this to the administrator "
@@ -537,7 +568,13 @@ class HttpCallToolsProvider implements ToolSourceProvider {
             if (cause instanceof UnknownHostException || cause instanceof UnresolvedAddressException) {
                 return "The host name could not be resolved";
             }
-            if (cause instanceof HttpConnectTimeoutException || cause instanceof SocketTimeoutException) {
+            // Connect-phase timeouts only. SocketTimeoutException also covers READ
+            // timeouts, where the service accepted the connection and then was slow —
+            // exactly the case this message must not call "not a fault in the service".
+            // Netty's ConnectTimeoutException (what Vert.x raises when a firewall drops
+            // the SYN) extends ConnectException, so it is matched by name, and before
+            // the ConnectException branch that would otherwise call it "refused".
+            if (cause instanceof HttpConnectTimeoutException || NETTY_CONNECT_TIMEOUT.equals(cause.getClass().getName())) {
                 return "The connection timed out";
             }
             if (cause instanceof NoRouteToHostException) {
@@ -558,7 +595,7 @@ class HttpCallToolsProvider implements ToolSourceProvider {
         if (message.contains("connection refused")) {
             return "The connection was refused";
         }
-        if (message.contains("unresolved") || message.contains("unknownhost") || message.contains("name or service not known")) {
+        if (message.contains("unresolved address") || message.contains("unknownhost") || message.contains("name or service not known")) {
             return "The host name could not be resolved";
         }
         return null;
@@ -574,7 +611,7 @@ class HttpCallToolsProvider implements ToolSourceProvider {
                 ? apiCall.getRequest().getPath().trim()
                 : "";
         if (path.startsWith("http")) {
-            return path;
+            return stripUserInfo(path);
         }
         if (!path.isEmpty() && !path.startsWith("/")) {
             path = "/" + path;
@@ -583,7 +620,19 @@ class HttpCallToolsProvider implements ToolSourceProvider {
     }
 
     private static String describeBase(String targetServerUrl) {
-        return targetServerUrl == null || targetServerUrl.isBlank() ? "<not configured>" : targetServerUrl.trim();
+        return targetServerUrl == null || targetServerUrl.isBlank() ? "<not configured>" : stripUserInfo(targetServerUrl.trim());
+    }
+
+    /**
+     * Drop the {@code user:password@} part of every URL in the text.
+     * <p>
+     * {@link SecretRedactionFilter} recognises secret-SHAPED values ({@code sk-…},
+     * {@code Bearer …}, {@code key=value}); a plain password in a URL's userinfo is
+     * none of those and went through it verbatim. Removed structurally instead,
+     * because the address is what is being diagnosed and the credential never is.
+     */
+    static String stripUserInfo(String text) {
+        return text == null ? null : URL_USERINFO.matcher(text).replaceAll("$1");
     }
 
     /**

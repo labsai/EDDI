@@ -4142,7 +4142,9 @@
       "platformBaseUrlUnknown": "Ce déploiement EDDI ne peut pas indiquer sa propre adresse : l'origine de votre navigateur sera utilisée par défaut. Cela n'est correct que si rien (tunnel, redirection de port ou proxy inverse) ne se trouve entre votre navigateur et EDDI — sinon, saisissez l'adresse ici.",
       "platformBaseUrlLoopback": "Déduite du port HTTP de ce déploiement. Remplacez-la si EDDI doit être joint par un nom de service ou via TLS dans le processus.",
       "platformBaseUrlAuto": "résolue par le serveur",
-      "platformBaseUrlDiffers": "Ce déploiement indique actuellement sa propre adresse comme {{serverUrl}}. La valeur ci-dessus diffère — ne la conservez que si vous l'avez définie délibérément."
+      "platformBaseUrlDiffers": "Ce déploiement indique actuellement sa propre adresse comme {{serverUrl}}. La valeur ci-dessus diffère — ne la conservez que si vous l'avez définie délibérément.",
+      "platformBaseUrlQueryFailed": "Impossible de demander au serveur sa propre adresse. L'activation échouera sauf si vous la saisissez ici — ou rechargez pour réessayer.",
+      "platformBaseUrlUnresolved": "Ce déploiement tourne sur un port HTTP aléatoire sans eddi.self.base-url : il ne peut pas indiquer où se joindre lui-même. Saisissez l'adresse ici."
     },
     "authMode": {
       "none": {

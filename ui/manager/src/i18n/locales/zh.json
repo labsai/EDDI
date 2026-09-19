@@ -4105,7 +4105,9 @@
       "platformBaseUrlUnknown": "此 EDDI 部署无法报告自身地址，因此将回退到你浏览器的来源地址。只有在浏览器与 EDDI 之间没有任何隧道、端口映射或反向代理时，该地址才是正确的；否则请在此处填写地址。",
       "platformBaseUrlLoopback": "由此部署的 HTTP 端口推导得出。如果必须通过服务名或进程内 TLS 访问 EDDI，请覆盖此值。",
       "platformBaseUrlAuto": "由服务器解析",
-      "platformBaseUrlDiffers": "此部署当前报告的自身地址为 {{serverUrl}}。上方的值与之不同——仅在你有意设置时才保留。"
+      "platformBaseUrlDiffers": "此部署当前报告的自身地址为 {{serverUrl}}。上方的值与之不同——仅在你有意设置时才保留。",
+      "platformBaseUrlQueryFailed": "无法向服务器查询其自身地址。除非在此处填写，否则激活将失败；也可刷新页面重试。",
+      "platformBaseUrlUnresolved": "此部署运行在随机 HTTP 端口上且未设置 eddi.self.base-url，因此无法告知访问自身的地址。请在此处填写地址。"
     },
     "authMode": {
       "none": {

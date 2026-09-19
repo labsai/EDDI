@@ -4105,7 +4105,9 @@
       "platformBaseUrlUnknown": "이 EDDI 배포는 자신의 주소를 알려줄 수 없어 본인의 및 본 오리진으로 대심합니다. 본인의 및 본와 EDDI 사이에 태널, 포트 매핑, 리버스 프록시가 전혀 없을 때만 올바른 값이므로, 그렇지 않다면 여기에 주소를 입력하세요.",
       "platformBaseUrlLoopback": "이 배포의 HTTP 포트에서 유도했습니다. EDDI를 서버스 이름이나 프로세스 내 TLS로 지정해야 하면 값을 바꾸세요.",
       "platformBaseUrlAuto": "서버에서 확인",
-      "platformBaseUrlDiffers": "이 배포는 현재 자신의 주소를 {{serverUrl}}(으)로 보고합니다. 위의 값은 이와 다릅니다. 의도적으로 설정한 경우에만 유지하세요."
+      "platformBaseUrlDiffers": "이 배포는 현재 자신의 주소를 {{serverUrl}}(으)로 보고합니다. 위의 값은 이와 다릅니다. 의도적으로 설정한 경우에만 유지하세요.",
+      "platformBaseUrlQueryFailed": "서버에 자신의 주소를 물어볼 수 없었습니다. 여기에 입력하지 않으면 활성화가 실패합니다. 다시 시도하려면 페이지를 새로 고침하세요.",
+      "platformBaseUrlUnresolved": "이 배포는 임의의 HTTP 포트에서 실행되고 eddi.self.base-url이 없어 자신에게 도달할 주소를 알려줄 수 없습니다. 여기에 주소를 입력하세요."
     },
     "authMode": {
       "none": {

@@ -74,7 +74,8 @@ public interface IRestOperatorMetrics {
                        + "otherwise http://127.0.0.1:${quarkus.http.port}). Deliberately independent of the inbound request: the caller's "
                        + "own origin is the browser's, which is not reachable from inside the server whenever a tunnel, a port mapping or a "
                        + "reverse proxy sits in between.")
-    @APIResponse(responseCode = "200", description = "The resolved base URL and where it came from.")
+    @APIResponse(responseCode = "200", description = "The resolved base URL and where it came from (source configured or loopback). "
+            + "baseUrl is null, with source unresolved, when quarkus.http.port is 0 (random) and eddi.self.base-url is not set.")
     OperatorSelfUrl selfUrl();
 
     @POST

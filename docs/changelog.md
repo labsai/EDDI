@@ -52,7 +52,7 @@ bottom of this file and are never archived.
 
 ## 🐛 fix(operator): the Platform Operator's self-URL, its replacement, and its error message (2026-09-18)
 
-**Repo:** EDDI (`fix/operator-self-url`) + EDDI-Manager (`fix/operator-self-url`)
+**Repo:** EDDI (`fix/operator-self-url`) — backend and `ui/manager/`, in one branch so the two halves are tested together
 
 The Platform Operator was dead on arrival on a customer deployment. The agent
 deployed, reported "Gate verified", and then failed **every** tool call — while telling
@@ -182,14 +182,24 @@ the more actionable of the two, and a 401 cannot have happened if nothing connec
 `CallerIdentitySelfOriginTest`, `HttpCallToolsProviderFailureMessageTest`,
 `RestOperatorMetricsTest`.
 
-**Manager:** `lib/api/operator.ts`, `hooks/use-operator.ts`,
+**Manager (`ui/manager/src/`):** `lib/api/operator.ts`, `hooks/use-operator.ts`,
 `components/operator/operator-activation.tsx`, `components/operator/operator-status.tsx`,
-`pages/operator.tsx`, `test/mocks/handlers.ts`,
-`test/mocks/__tests__/openapi-contract.test.ts` (exemption: the endpoint is ahead of the
-pinned 6.3.0 spec), all 11 locales, plus tests in `lib/api/__tests__/operator.test.ts`,
+`pages/operator.tsx`, `test/mocks/handlers.ts` (one handler for the new endpoint),
+`test/mocks/openapi-operations.json` (regenerated from this branch's own spec with
+`OPENAPI_FILE=../../target/openapi/openapi.json npm run openapi:refresh` — one line
+added, `GET /administration/operator/self-url`; no contract-test exemption needed), all
+11 locales, plus tests in `lib/api/__tests__/operator.test.ts`,
 `hooks/__tests__/use-operator-supersede.test.tsx` (new),
 `components/operator/__tests__/operator-activation.test.tsx`,
-`pages/__tests__/operator.test.tsx`.
+`pages/__tests__/operator.test.tsx`, `pages/__tests__/operator-superseded.test.tsx` (new).
+
+**How the halves line up.** The Manager calls `GET /administration/operator/self-url`
+and reads `{ baseUrl, source }` — the `OperatorSelfUrl` record exactly, with `baseUrl`
+typed nullable for the `unresolved` case. A 404 (a backend older than the endpoint)
+reads as "cannot tell" and falls back, with a warning; every other error, a 401/403
+included, propagates rather than being guessed past. The MSW handler answers the
+loopback shape the backend produces by default, and the snapshot the contract test
+checks it against was generated from this branch, so a drift in either direction fails.
 
 ### Mutation checks
 
@@ -224,6 +234,53 @@ along with the mutation. Copy the file aside and copy it back. And copy it back 
 source looks *older* than the `.class` Maven compiled from the mutated one, incremental
 compilation skips it, and every later run keeps testing the mutation. That reads exactly
 like a real regression.
+
+### Independent review, and what changed because of it
+
+A fresh reviewer that had not seen this work went through both halves adversarially.
+Its security pass on the `CallerIdentityResolver` change found the value provenance
+sound — `SelfUrlResolver` reads only `eddi.self.base-url` and `quarkus.http.port` at
+construction; nothing writes config at runtime; no agent config, global variable, vault
+reference, `Host` or `X-Forwarded-*` header reaches it — and the origin check sound
+against look-alikes: `OriginMatcher` compares parsed `scheme://host:port` with no DNS, so
+`https://`, `localhost`, `127.1`, `0.0.0.0`, `[::1]`, `[::ffff:127.0.0.1]`, another port
+and `http://127.0.0.1:7070@evil.example` are all refused, and the check runs on the final
+URI after template, global-variable and vault resolution, so nothing can alter the target
+after it. Every finding was addressed:
+
+| # | Finding | Resolution |
+| --- | --- | --- |
+| 1 | `describeToolFailure` claimed to redact URL credentials but `SecretRedactionFilter` only knows secret *shapes*; a plain `admin:hunter2@` went through, and the test passed only because it used an `sk-ant-` password | `stripUserInfo` removes `user:pass@` structurally from every URL in the message; new test with a plain password, mutation-checked |
+| 2 | `AGENTS.md`, `docs/httpcalls.md`, `docs/mcp-server.md` still stated same-origin as absolute | All three updated |
+| 3 | "Narrower than same-origin" was wrong: the self address bypasses the reverse proxy, so the reachable endpoints are what EDDI authorizes, not what the proxy also permits | Claim corrected in code and docs; new `eddi.caller-identity.self-release.enabled` (default true) for a deployment that relies on proxy rules too |
+| 4 | With SSRF protection on, loopback is refused and the model got a raw "internal/local addresses" message | Not exempted — that would weaken SSRF protection for every agent. Documented instead, and the tool result now names SSRF protection and the remedy (`eddi.self.base-url` to a non-loopback address) |
+| 5 | An identity with no captured origin became releasable to self (fail-closed to fail-open) | Kept fail-closed: `origin == null` never gets the self release; test added |
+| 6 | The page banner for a failed retirement was untested | `operator-superseded.test.tsx` drives the page's own wiring |
+| 7 | A stored address wins over the server's on reconfigure, and the "derived from HTTP port" note could sit under a different value | The form now says when the field differs from the server's current answer; the loopback note shows only when they match |
+| 8 | An admin-typed trailing slash became `//path` in every tool | `normalizeBaseUrl` strips it before provisioning |
+| 9 | Netty's connect timeout (a `ConnectException` subclass) read as "refused"; `SocketTimeoutException` also covers READ timeouts, where the service *is* at fault; the "unresolved" text fallback was too broad | Netty timeout matched first by name; `SocketTimeoutException` dropped; fallback narrowed to "unresolved address"; tests for both |
+| 10 | A predecessor with no recorded version was skipped silently | Reported through `supersededWarning` like any other failed retirement |
+| 11 | `quarkus.http.port=0` (random) answered a confident `:7070` | Now `source: unresolved`, `baseUrl: null`, `isSelf` false for everything; the Manager treats it as "cannot tell" |
+| 12 | Some operator strings are not i18n keys | Declined: matches every existing `toolError` string in the file; `i18n:check` is green |
+| 13 | `headersOnlyStillHolds` tested code this change never touched; the canary's "agent description" test used text none of the regexes matched | The first removed; the canary match is now anchored to the `{"error": …}` failure shape and the test uses a description containing the exact trigger phrases |
+
+Every review fix was mutation-checked the same way: R1–R7 in the backend (null
+origin, the switch, userinfo, the SSRF branch, Netty timeout, read timeout, random port)
+and U1–U9 in `ui/manager` — each reverted, each failing its named test.
+
+A second fresh review of the final branch, with the Manager in `ui/manager/`, found the
+security pass sound again (provenance, look-alikes, the URI checked being the URI sent,
+null-origin and opt-out wiring, no open redirect that would carry the header) and nine
+smaller findings, all addressed: `docs/hitl.md` still carried the retracted "narrower"
+claim; the form promised a browser-origin fallback on a 403/500 that activation would not
+perform (now a distinct notice, and `retry: false` so it appears at once); an `unresolved`
+answer fell back to the browser origin — the original defect's value — and now
+refuses with a clear message, the fallback reserved for a genuine 404; `stripUserInfo`
+stopped at the first `@`, leaking the tail of an un-encoded `p@ss` password; client
+validation accepted a path or trailing text; the regression test resolved through the
+helper's preset address instead of the backend (now `apiBaseUrl: null`); a note on
+`quarkus.http.test-port`; the notice icon; and an `sk-ant-` test fixture replaced with
+`sk-test-`. Mutation-checked: V1–V4, each failing its named test.
 
 ### Noted, not fixed
 

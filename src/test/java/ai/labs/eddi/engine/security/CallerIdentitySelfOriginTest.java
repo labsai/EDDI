@@ -129,13 +129,51 @@ class CallerIdentitySelfOriginTest {
     }
 
     /**
-     * The self-origin exception is about WHERE the token may go, not about the
-     * other guards. A token in a query parameter stays rejected regardless.
+     * Fail-closed is preserved for an identity whose origin could not be captured.
+     * {@code OriginMatcher.sameOrigin(null, ...)} is deliberately false, and before
+     * the self branch existed such an identity could never forward its token. It
+     * must not start now just because the target happens to be EDDI.
      */
     @Test
-    @DisplayName("the self exception does not relax the headers-only rule")
-    void headersOnlyStillHolds() {
-        assertThrows(CallerIdentityException.class,
-                () -> resolver.rejectTokenReference("access_token=${caller:token}", "a query parameter"));
+    @DisplayName("a caller with no captured origin does not get the self release")
+    void unknownOriginStaysFailClosed() {
+        when(context.current()).thenReturn(new CallerIdentity("tok-abc", "alice", null));
+        assertThrows(CallerIdentityException.class, () -> resolver.resolveValue("Bearer ${caller:token}", SELF_TARGET));
+    }
+
+    /**
+     * The opt-out for a deployment whose reverse proxy enforces rules EDDI does
+     * not: the self address bypasses the proxy.
+     */
+    @Test
+    @DisplayName("eddi.caller-identity.self-release.enabled=false restores strict same-origin")
+    void selfReleaseCanBeSwitchedOff() {
+        resolver.selfReleaseEnabled = false;
+        assertThrows(CallerIdentityException.class, () -> resolver.resolveValue("Bearer ${caller:token}", SELF_TARGET));
+        assertEquals("Bearer tok-abc",
+                resolver.resolveValue("Bearer ${caller:token}", URI.create(BROWSER_ORIGIN + "/agentstore/agents")));
+    }
+
+    /**
+     * Look-alikes of the self address. Origin comparison is on the parsed
+     * {@code scheme://host:port} with no DNS, so every one of these is a different
+     * origin — including {@code localhost}, which resolves to the same interface
+     * but is not the configured self address.
+     */
+    @Test
+    @DisplayName("addresses that merely resemble the self URL are refused")
+    void lookAlikesAreRefused() {
+        for (String lookAlike : new String[]{
+                "https://127.0.0.1:7070/agentstore/agents",
+                "http://localhost:7070/agentstore/agents",
+                "http://127.1:7070/agentstore/agents",
+                "http://0.0.0.0:7070/agentstore/agents",
+                "http://[::1]:7070/agentstore/agents",
+                "http://[::ffff:127.0.0.1]:7070/agentstore/agents",
+                "http://127.0.0.1:7070@evil.example/agentstore/agents",
+                "http://evil.example:7070/agentstore/agents"}) {
+            assertThrows(CallerIdentityException.class,
+                    () -> resolver.resolveValue("Bearer ${caller:token}", URI.create(lookAlike)), lookAlike);
+        }
     }
 }

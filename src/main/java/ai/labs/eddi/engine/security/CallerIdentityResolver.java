@@ -119,6 +119,22 @@ public class CallerIdentityResolver {
     @Inject
     SelfUrlResolver selfUrlResolver;
 
+    /**
+     * Whether {@code ${caller:token}} may be released to this deployment's own
+     * address ({@link SelfUrlResolver}) as well as to the caller's origin.
+     * <p>
+     * On by default because the Platform Operator depends on it. Off is for a
+     * deployment whose reverse proxy enforces path or network rules on EDDI's own
+     * API that EDDI itself does not: the self address bypasses the proxy, so with
+     * this on, an agent author can send a user's token to endpoints the proxy would
+     * have refused from outside. EDDI's own per-endpoint authorization still
+     * applies either way. Field-injected, like the two above, so a directly
+     * constructed instance keeps the default.
+     */
+    @Inject
+    @ConfigProperty(name = "eddi.caller-identity.self-release.enabled", defaultValue = "true")
+    boolean selfReleaseEnabled = true;
+
     private final CallerIdentityContext callerIdentityContext;
     private final boolean enabled;
 
@@ -303,10 +319,20 @@ public class CallerIdentityResolver {
             // a browser behind a tunnel, a port mapping or a reverse proxy used. The
             // token is handed back to the very process that issued the request it came
             // from — the same argument LoopbackCallerAuthFilter makes for the internal
-            // hop — so this is a narrower release than same-origin, not a wider one.
-            // SelfUrlResolver's value comes from deployment configuration only, never
-            // from an agent config or a request, so no config can nominate itself here.
-            if (!isSelf(target)) {
+            // hop. SelfUrlResolver's value comes from deployment configuration only,
+            // never from an agent config or a request, so no config can nominate itself.
+            //
+            // What this is NOT: narrower than same-origin. The self address bypasses
+            // whatever sits in front of EDDI — a proxy's path rules, an IP allow-list —
+            // so the endpoints reachable with the user's token are those EDDI itself
+            // authorizes, not those the proxy also permits. EDDI's own authorization is
+            // what protects them either way; eddi.caller-identity.self-release.enabled
+            // turns this off for a deployment that relies on the proxy as well.
+            //
+            // An identity whose origin could not be captured stays fail-closed: it could
+            // never forward its token before this branch existed, and "we do not know
+            // where this caller came from" is not a reason to start.
+            if (identity.origin() == null || !selfReleaseEnabled || !isSelf(target)) {
                 // Do not log the target's full URI at INFO — it may embed identifiers.
                 LOGGER.warnf("Refusing to forward the caller token to a different origin (caller=%s, target=%s)",
                         sanitize(identity.origin()), sanitize(OriginMatcher.normalize(target)));

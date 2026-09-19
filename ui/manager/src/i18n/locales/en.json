@@ -4105,7 +4105,9 @@
       "platformBaseUrlUnknown": "This EDDI deployment cannot report its own address, so it will fall back to your browser's origin. That is only correct when nothing (no tunnel, port mapping or reverse proxy) sits between your browser and EDDI — otherwise enter the address here.",
       "platformBaseUrlLoopback": "Derived from this deployment's HTTP port. Override it if EDDI must be addressed by a service name or through in-process TLS.",
       "platformBaseUrlAuto": "resolved from the server",
-      "platformBaseUrlDiffers": "This deployment currently reports its own address as {{serverUrl}}. The value above differs — keep it only if you set it on purpose."
+      "platformBaseUrlDiffers": "This deployment currently reports its own address as {{serverUrl}}. The value above differs — keep it only if you set it on purpose.",
+      "platformBaseUrlQueryFailed": "The server could not be asked for its own address. Activation will fail unless you enter it here — or reload to try again.",
+      "platformBaseUrlUnresolved": "This deployment runs on a random HTTP port and has no eddi.self.base-url, so it cannot say where it can reach itself. Enter the address here."
     },
     "authMode": {
       "none": {

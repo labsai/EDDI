@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, Loader2, Sparkles, ShieldCheck, ShieldAlert, Lock, Unlock } from "lucide-react";
+import { AlertTriangle, Info, Loader2, Sparkles, ShieldCheck, ShieldAlert, Lock, Unlock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -66,7 +66,7 @@ export function OperatorActivation({
    */
   const [apiBaseUrl, setApiBaseUrl] = useState(initial.apiBaseUrl ?? "");
   const [apiBaseUrlTouched, setApiBaseUrlTouched] = useState(false);
-  const { data: selfUrl, isLoading: selfUrlLoading } = usePlatformSelfUrl();
+  const { data: selfUrl, isLoading: selfUrlLoading, isError: selfUrlFailed } = usePlatformSelfUrl();
   useEffect(() => {
     // Fills a BLANK, untouched field and nothing else. All three conditions are
     // load-bearing: a value carried in from a previous activation and a value the
@@ -171,7 +171,11 @@ export function OperatorActivation({
    * NOT allowed is a value that cannot be a base URL at all, which would be
    * baked into 22 resources before anything noticed.
    */
-  const apiBaseUrlInvalid = apiBaseUrl.trim().length > 0 && !/^https?:\/\/[^\s/]+/i.test(apiBaseUrl.trim());
+  // Anchored, and checked on the normalised value: scheme://host[:port] and
+  // nothing else. A path would be prepended to every generated tool's path, and
+  // trailing text would be baked into all of them.
+  const apiBaseUrlInvalid =
+    apiBaseUrl.trim().length > 0 && !/^https?:\/\/[^\s/]+$/i.test(normalizeBaseUrl(apiBaseUrl));
   /**
    * The server's own answer, normalised the way activation will normalise the
    * field, so the two can be compared. A stored value from an earlier activation
@@ -342,7 +346,23 @@ export function OperatorActivation({
                   )}
                 </Notice>
               )}
-              {!selfUrlLoading && !serverBaseUrl && (
+              {selfUrlFailed && (
+                <Notice tone="warning" icon={AlertTriangle} testId="operator-platform-base-url-query-failed">
+                  {t(
+                    "operator.activation.platformBaseUrlQueryFailed",
+                    "The server could not be asked for its own address. Activation will fail unless you enter it here — or reload to try again.",
+                  )}
+                </Notice>
+              )}
+              {selfUrl?.source === "unresolved" && (
+                <Notice tone="warning" icon={AlertTriangle} testId="operator-platform-base-url-unresolved">
+                  {t(
+                    "operator.activation.platformBaseUrlUnresolved",
+                    "This deployment runs on a random HTTP port and has no eddi.self.base-url, so it cannot say where it can reach itself. Enter the address here.",
+                  )}
+                </Notice>
+              )}
+              {!selfUrlLoading && !selfUrlFailed && selfUrl === null && (
                 <Notice tone="warning" icon={AlertTriangle} testId="operator-platform-base-url-unknown">
                   {t(
                     "operator.activation.platformBaseUrlUnknown",
@@ -351,7 +371,7 @@ export function OperatorActivation({
                 </Notice>
               )}
               {differsFromServer && (
-                <Notice tone="info" icon={AlertTriangle} testId="operator-platform-base-url-differs">
+                <Notice tone="info" icon={Info} testId="operator-platform-base-url-differs">
                   {t(
                     "operator.activation.platformBaseUrlDiffers",
                     "This deployment currently reports its own address as {{serverUrl}}. The value above differs — keep it only if you set it on purpose.",

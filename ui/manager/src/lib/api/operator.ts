@@ -422,6 +422,16 @@ export async function resolveOperatorApiBaseUrl(config: OperatorConfig): Promise
   const self = await fetchPlatformSelfUrl();
   const answered = normalizeBaseUrl(self?.baseUrl);
   if (answered) return answered;
+  if (self) {
+    // The server ANSWERED, and its answer is that it cannot know (a random HTTP
+    // port and no eddi.self.base-url). Guessing the browser's origin here would be
+    // provisioning the one value known to be wrong on any proxied deployment —
+    // the original defect. Only a backend too old to answer (404 -> null) earns
+    // the fallback below.
+    throw new Error(
+      "This EDDI deployment cannot determine its own address (it runs on a random HTTP port and eddi.self.base-url is not set). Enter the platform base URL explicitly, or set eddi.self.base-url.",
+    );
+  }
 
   const origin = currentOrigin();
   // Checked BEFORE the warning: "falling back to ()" would be a misleading thing

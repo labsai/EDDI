@@ -72,17 +72,33 @@ public class SelfUrlResolver {
     /** {@link #source()} when the value was derived from the HTTP port. */
     public static final String SOURCE_LOOPBACK = "loopback";
 
+    /**
+     * {@link #source()} when neither the override nor a fixed HTTP port is
+     * available — {@code quarkus.http.port=0} asks for a random port, which
+     * configuration cannot name. {@link #baseUrl()} is then {@code null} and
+     * {@link #isSelf} answers {@code false} for everything: a confident wrong
+     * answer (the old 7070 fallback) is worse than none.
+     */
+    public static final String SOURCE_UNRESOLVED = "unresolved";
+
     private final String baseUrl;
     private final String origin;
     private final String source;
 
+    /**
+     * Note for tests: {@code @QuarkusTest} binds {@code quarkus.http.test-port}
+     * (8081 by default), not {@code quarkus.http.port}, so inside such a test the
+     * derived address names a port nothing listens on. {@code RestInterfaceFactory}
+     * has the same property. Unit tests construct this directly with the port they
+     * mean.
+     */
     @Inject
     public SelfUrlResolver(@ConfigProperty(name = CONFIG_KEY) Optional<String> configuredBaseUrl,
             @ConfigProperty(name = "quarkus.http.port", defaultValue = "7070") int httpPort) {
-        String loopback = loopbackUrl(httpPort);
+        String loopback = httpPort > 0 ? "http://127.0.0.1:" + httpPort : null;
         String candidate = configuredBaseUrl.map(String::trim).filter(value -> !value.isEmpty()).orElse(null);
         String resolved = loopback;
-        String resolvedSource = SOURCE_LOOPBACK;
+        String resolvedSource = loopback != null ? SOURCE_LOOPBACK : SOURCE_UNRESOLVED;
         if (candidate != null) {
             String normalized = normalize(candidate);
             if (normalized != null) {
@@ -93,17 +109,22 @@ public class SelfUrlResolver {
                 // take the whole deployment down, and loopback is the answer that was
                 // correct before anyone set the property. Logged at ERROR because the
                 // operator asked for something specific and is not getting it.
-                LOGGER.errorf("%s is not a usable http(s) base URL ('%s') — falling back to %s. "
-                        + "Set it to a scheme://host[:port] this process can reach itself at.", CONFIG_KEY, candidate, loopback);
+                LOGGER.errorf("%s is not a usable http(s) base URL ('%s') — ignoring it. "
+                        + "Set it to a scheme://host[:port] this process can reach itself at.", CONFIG_KEY, candidate);
             }
         }
+        if (resolved == null) {
+            LOGGER.warnf("quarkus.http.port is %d (random), so this deployment's own address cannot be derived. "
+                    + "Set %s for the Platform Operator's tools to have a target.", httpPort, CONFIG_KEY);
+        }
         this.baseUrl = resolved;
-        this.origin = OriginMatcher.normalize(URI.create(resolved));
+        this.origin = resolved != null ? OriginMatcher.normalize(URI.create(resolved)) : null;
         this.source = resolvedSource;
     }
 
     /**
-     * The base URL, without a trailing slash — {@code http://127.0.0.1:7070}.
+     * The base URL, without a trailing slash — {@code http://127.0.0.1:7070} — or
+     * {@code null} when {@link #source()} is {@link #SOURCE_UNRESOLVED}.
      * <p>
      * No trailing slash because callers append a path that starts with one, and
      * {@code ApiCallExecutor} concatenates the two verbatim: a stored
@@ -116,9 +137,10 @@ public class SelfUrlResolver {
     }
 
     /**
-     * {@link #SOURCE_CONFIGURED} or {@link #SOURCE_LOOPBACK} — surfaced so the
-     * Manager can say where the address it is about to provision came from, rather
-     * than presenting a guess and a deployment decision identically.
+     * {@link #SOURCE_CONFIGURED}, {@link #SOURCE_LOOPBACK} or
+     * {@link #SOURCE_UNRESOLVED} — surfaced so the Manager can say where the
+     * address it is about to provision came from, rather than presenting a guess
+     * and a deployment decision identically.
      */
     public String source() {
         return source;
@@ -142,10 +164,6 @@ public class SelfUrlResolver {
      */
     public boolean isSelf(URI target) {
         return origin != null && OriginMatcher.sameOrigin(origin, target);
-    }
-
-    private static String loopbackUrl(int httpPort) {
-        return "http://127.0.0.1:" + (httpPort > 0 ? httpPort : 7070);
     }
 
     /**
