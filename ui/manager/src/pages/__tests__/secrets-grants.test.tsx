@@ -301,6 +301,64 @@ describe("SecretsPage — agent grants", () => {
       agentsLosingAccess: [],
     });
 
+  it("calls exactly the endpoints the backend exposes, with exactly these queries", async () => {
+    // Pinned against a real EDDI built from this branch: a mock that answers any
+    // URL would keep passing if the path or query drifted to one the backend
+    // rejects. Every request the dialog makes is recorded and checked whole.
+    const user = userEvent.setup();
+    const grantCalls: { method: string; path: string; search: string; body: unknown }[] = [];
+    const descriptorQueries: string[] = [];
+    server.use(
+      http.put("*/secretstore/secrets/:tenantId/:keyName/grant", async ({ request }) => {
+        const url = new URL(request.url);
+        grantCalls.push({
+          method: request.method,
+          path: url.pathname,
+          search: url.search,
+          body: await request.json(),
+        });
+        return url.search === "?dryRun=true"
+          ? HttpResponse.json({ dryRun: true, agentsLosingAccess: [] })
+          : HttpResponse.json({ dryRun: false, allowedAgents: ["agent5"], agentsLosingAccess: [] });
+      }),
+      http.get("*/agentstore/agents/descriptors", ({ request }) => {
+        descriptorQueries.push(new URL(request.url).search);
+        return HttpResponse.json([]);
+      }),
+    );
+
+    renderSecrets();
+    await openEditor(user, "google-gemini-key");
+    await user.click(screen.getByTestId("grant-agent-remove-agent7"));
+    await waitFor(() => expect(screen.getByTestId("grant-save")).not.toBeDisabled());
+    await user.click(screen.getByTestId("grant-save"));
+    await waitFor(() => expect(grantCalls.some((c) => c.search === "")).toBe(true));
+
+    const path = "/secretstore/secrets/default/google-gemini-key/grant";
+    // Every preview: the grant path with exactly ?dryRun=true, and no description —
+    // a preview has no business proposing one. The dialog previews the list it
+    // opened with as well as the edited one; both must have this shape.
+    const previews = grantCalls.filter((c) => c.search !== "");
+    expect(previews.map((c) => c.search)).toEqual(previews.map(() => "?dryRun=true"));
+    expect(previews.find((c) => JSON.stringify(c.body) === '{"allowedAgents":["agent5"]}')).toEqual({
+      method: "PUT",
+      path,
+      search: "?dryRun=true",
+      body: { allowedAgents: ["agent5"] },
+    });
+    // The write: the same path with no query at all, and no value field. And it
+    // is the last request: saving must not trigger a preview nobody will read.
+    expect(grantCalls.filter((c) => c.search === "")).toHaveLength(1);
+    expect(grantCalls[grantCalls.length - 1]).toEqual({
+      method: "PUT",
+      path,
+      search: "",
+      body: { allowedAgents: ["agent5"] },
+    });
+    // The name lookup: limit and index spelled as the backend reads them.
+    expect(descriptorQueries).toContain("?limit=200&index=0");
+  });
+
   it("does not let a narrowing be saved while the impact check is still running", async () => {
     const user = userEvent.setup();
     let writes = 0;

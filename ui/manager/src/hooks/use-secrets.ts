@@ -83,8 +83,10 @@ export function useUpdateSecretGrant() {
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: secretKeys.list(vars.tenantId) });
       // Every cached impact answer for this key was computed against the old
-      // grant, so none of them describes reality any more.
-      qc.invalidateQueries({
+      // grant, so none of them describes reality any more. Removed rather than
+      // invalidated: invalidating refetched the one the closing dialog was still
+      // observing — a dry run nobody would read.
+      qc.removeQueries({
         queryKey: ["secrets", "grant-impact", vars.tenantId, vars.keyName],
       });
     },
