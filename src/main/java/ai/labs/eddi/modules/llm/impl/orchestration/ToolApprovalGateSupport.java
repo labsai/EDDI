@@ -21,6 +21,7 @@ import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import io.micrometer.core.instrument.Metrics;
 import org.jboss.logging.Logger;
 
@@ -124,15 +125,14 @@ public class ToolApprovalGateSupport {
     // ─── Approver-facing strings ───
 
     /**
-     * The redacted, capped text of the trailing {@link AiMessage} — the narration
-     * the model emitted in the same message as its gated tool calls — or null when
-     * the transcript does not end in an AiMessage or that message carries no text.
+     * The redacted, capped text of the gating {@link AiMessage} — the narration the
+     * model emitted in the same message as its gated tool calls — or null when
+     * there is no gating message (see {@link #gatingAssistantMessageOf}) or it
+     * carries no text.
      */
     static String interimTextOf(List<ChatMessage> currentMessages) {
-        if (currentMessages == null || currentMessages.isEmpty()) {
-            return null;
-        }
-        if (!(currentMessages.getLast() instanceof AiMessage ai)) {
+        AiMessage ai = gatingAssistantMessageOf(currentMessages);
+        if (ai == null) {
             return null;
         }
         String text = ai.text();
@@ -144,6 +144,40 @@ public class ToolApprovalGateSupport {
         return redacted.length() > INTERIM_TEXT_MAX_CHARS
                 ? redacted.substring(0, INTERIM_TEXT_MAX_CHARS - 1) + "…"
                 : redacted;
+    }
+
+    /**
+     * The assistant message whose tool calls are being gated, or null when there is
+     * none.
+     * <p>
+     * It is <em>not</em> simply the last message. In a mixed batch the runner
+     * executes the ungated calls before it snapshots the pause, so by the time
+     * {@link #buildPendingBatch} runs the transcript ends in their
+     * {@link ToolExecutionResultMessage}s and the gating message sits behind them.
+     * Reading only {@code getLast()} returned null there — which silently dropped
+     * the persisted gating message, and with it the provider's opaque fields, in
+     * exactly the case where the degraded resume needs them, and dropped the
+     * approver's interim narration along with it.
+     * <p>
+     * So this walks back over this batch's tool results only, and stops at the
+     * first message of any other kind: anything but a result between here and the
+     * assistant message means the transcript is not a live gated batch, and
+     * guessing further back would pick up an earlier turn's message.
+     */
+    static AiMessage gatingAssistantMessageOf(List<ChatMessage> currentMessages) {
+        if (currentMessages == null) {
+            return null;
+        }
+        for (int i = currentMessages.size() - 1; i >= 0; i--) {
+            ChatMessage message = currentMessages.get(i);
+            if (message instanceof AiMessage ai) {
+                return ai;
+            }
+            if (!(message instanceof ToolExecutionResultMessage)) {
+                return null;
+            }
+        }
+        return null;
     }
 
     /** First non-blank of the two, or null. */
@@ -195,6 +229,11 @@ public class ToolApprovalGateSupport {
      * the gate itself only records a reason per non-null id. Returns the message
      * unchanged when the gate is inert (pre-HITL byte-identical) or no id is
      * missing.
+     * <p>
+     * Rebuilds through {@link AiMessage#toBuilder()}: the
+     * {@code AiMessage.from(...)} factories carry only text and requests, and
+     * dropping {@code attributes()} lost Gemini 3.x's {@code thoughtSignature} on
+     * every gated turn.
      */
     public static AiMessage normalizeToolCallIds(AiMessage aiMessage, ToolApprovalsConfig effectiveToolApprovals) {
         boolean gateActive = effectiveToolApprovals != null
@@ -219,10 +258,15 @@ public class ToolApprovalGateSupport {
                 normalized.add(r);
             }
         }
+        // Blank text still collapses to null, as AiMessage.from(normalized) did: this
+        // message is replayed to the provider, and a whitespace-only text is sent as
+        // its own part (the Gemini mapper checks isNotNullOrEmpty, not isBlank) —
+        // which Anthropic rejects outright for text blocks.
         String text = aiMessage.text();
-        return text != null && !text.isBlank()
-                ? AiMessage.from(text, normalized)
-                : AiMessage.from(normalized);
+        return aiMessage.toBuilder()
+                .text(text != null && !text.isBlank() ? text : null)
+                .toolExecutionRequests(normalized)
+                .build();
     }
 
     // ─── The durable pause snapshot ───
@@ -284,6 +328,12 @@ public class ToolApprovalGateSupport {
         // PendingToolCallBatch#interimText. The gating AiMessage is the last
         // message the runner appended before classifying its tool requests.
         batch.setInterimText(interimTextOf(currentMessages));
+        // …and that message verbatim, but only when the transcript that already carries
+        // it was omitted. See PendingToolCallBatch#gatingAssistantMessageJson.
+        if (codecResult.omitted()) {
+            batch.setGatingAssistantMessageJson(chatTranscriptCodec.serializeMessage(gatingAssistantMessageOf(currentMessages),
+                    Math.min(transcriptMaxBytes, PendingToolCallBatch.GATING_MESSAGE_MAX_BYTES)));
+        }
 
         // Per gated call: cap raw args, redact + cap redacted args, carry gate reason.
         List<PendingToolCallBatch.PendingToolCall> calls = new ArrayList<>();
