@@ -169,10 +169,12 @@ public class McpHitlTools {
                     return errorJson("Full approval status is available to approvers only while awaiting approval — "
                             + "use the summary view", "FORBIDDEN", null);
                 }
-                // Same internal-fingerprint strip as the REST surface — this
-                // serializes the identical snapshot object, so leaving it out
-                // here would just move the leak to the other door.
-                return jsonSerialization.serialize(ConversationMemoryUtilities.stripRequestFingerprintsForRead(snapshot));
+                // The SAME approver projection the REST surface serves, through the
+                // same method — not a local subset of it. This door used to strip
+                // only the fingerprint, so argumentsRaw, the frozen LLM transcript
+                // and the running trace (all carrying raw tool arguments) reached
+                // every MCP caller the gate above admits.
+                return jsonSerialization.serialize(ConversationMemoryUtilities.sanitizePendingToolCallsForApprover(snapshot));
             }
             Map<String, String> summary = new LinkedHashMap<>();
             summary.put("conversationId", conversationId);

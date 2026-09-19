@@ -401,8 +401,14 @@ public class ConversationMemoryUtilities {
      * Mutates the passed snapshot, matching
      * {@link #redactRawPendingToolCallsForRead}: both operate on a snapshot freshly
      * loaded for one request, never on shared state.
+     * <p>
+     * Private on purpose: it is one step of
+     * {@link #sanitizePendingToolCallsForApprover}, never a projection on its own.
+     * While it was public the MCP mirror of {@code detail=full} called it directly
+     * and so served argumentsRaw and the transcript the REST surface strips — the
+     * two doors drifted because there were two methods to choose from.
      */
-    public static ConversationMemorySnapshot stripRequestFingerprintsForRead(ConversationMemorySnapshot snapshot) {
+    private static ConversationMemorySnapshot stripRequestFingerprintsForRead(ConversationMemorySnapshot snapshot) {
         if (snapshot == null || snapshot.getHitlPendingToolCalls() == null
                 || snapshot.getHitlPendingToolCalls().getCalls() == null) {
             return snapshot;
@@ -427,6 +433,11 @@ public class ConversationMemoryUtilities {
     /**
      * Sanitizes a snapshot about to be returned in FULL to an approver
      * ({@code approval-status?detail=full}, and the MCP mirror of it).
+     * <p>
+     * The ONE approver projection: both {@code RestAgentEngine#getApprovalStatus}
+     * and {@code McpHitlTools#getApprovalStatus} must call exactly this method, so
+     * a field added here is stripped on every surface at once. A new field on
+     * {@code PendingToolCallBatch} that carries raw tool arguments belongs here.
      * <p>
      * The approver's contract is the redacted arguments and the redacted request
      * preview — {@link #stripRequestFingerprintsForRead} handled the digest, but
