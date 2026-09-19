@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.rag.IRagStore;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import jakarta.ws.rs.BadRequestException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -48,7 +49,8 @@ class RestRagStoreWriteValidationTest {
     void setUp() throws Exception {
         ragStore = mock(IRagStore.class);
         restRagStore = new RestRagStore(ragStore, mock(IDocumentDescriptorStore.class), mock(IJsonSchemaCreator.class),
-                mock(ResourceAccessGuard.class));
+                mock(ResourceAccessGuard.class),
+                mock(RagSourceIngestionService.class));
 
         when(ragStore.create(any())).thenReturn(resourceId(RAG_ID, 1));
         when(ragStore.update(anyString(), anyInt(), any())).thenReturn(2);

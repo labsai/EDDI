@@ -50,6 +50,404 @@ bottom of this file and are never archived.
 
 ---
 
+## 🖥️ feat(manager): ingestion sources panel for knowledge bases (2026-09-18)
+
+**Repo:** EDDI (`feat/manager-ingestion-sources`, stacked on `feat/rag-ingestion-rest`)
+
+### What it adds
+
+A section inside the RAG editor listing a knowledge base's ingestion sources, with add, edit and remove,
+and — once the knowledge base is saved — run, preview, purge and recent run history.
+
+### Why a rewrite rather than a port
+
+The stale `labsai/EDDI-Manager#95` (now archived with that repository) targeted standalone
+`/ragstore/ingestion-sources` resources. Sources now live on the knowledge base as `sources[]`, so
+creating or editing one is an ordinary save of the RAG config, and only the four runtime verbs have
+endpoints of their own. The resulting component is considerably smaller than the 846-line original.
+
+### Decisions
+
+- **A new source cannot be run.** It has no id for the endpoints to address until the knowledge base is
+  saved; the panel says so instead of offering a button that 404s.
+- **Preview is headed "nothing was embedded".** A preview that looked like a run would be worse than none.
+- **Purge goes through `AlertDialog`**, since the next run re-embeds everything the source had ingested.
+- **Run history polls only while a run is `RUNNING`.** A crawl takes minutes and the start endpoint
+  answers 202; an idle screen should not tick forever.
+
+### Contract snapshot
+
+`ui/manager/src/test/mocks/openapi-operations.json` was regenerated from the OpenAPI document Maven
+produces. `openapi-contract.test.ts` failed until it was, because the new MSW handlers mocked endpoints the
+old snapshot did not know — and the regenerated diff was exactly the four new endpoints, nothing else.
+
+### Tests
+
+9 new cases in `resource-detail-rag-sources.test.tsx`; 6530 passing across 412 files. `lint`, `typecheck`,
+`i18n:check` and `build` all pass, with translations for all 11 locales in the same commit.
+
+---
+
+## 🔧 fix(rag): review findings on the ingestion salvage (2026-09-18)
+
+**Repo:** EDDI (`feat/rag-ingestion-rest` and the branches below it)
+
+A critical review of the six salvage branches returned ten must-fix findings. All are fixed, each with a
+test that fails when the fix is reverted. The headline four fixes the salvage was built around held up
+under mutation; every finding below was in a seam those tests did not reach.
+
+### Would not have started at all
+
+`PostgresIngestionStateStore` was `@ApplicationScoped` without `@DefaultBean` while `DataStoreProducers`
+also produces `IIngestionStateStore` — two non-default candidates, so ArC fails augmentation and nothing
+boots. Every sibling Postgres store carries `@DefaultBean` for exactly this reason. No unit test can see
+this; the review caught it by reading the pattern.
+
+### Silent data loss
+
+- **A tombstoned page that came back unchanged was never re-embedded.** Its vectors had been deleted, so
+  comparing hashes alone made it "unchanged" forever and permanently unretrievable. Two routes, both
+  closed: `hasChanged` is now true for a tombstoned document, and it is no longer revalidated with its
+  stored ETag (a 304 never re-embeds).
+- **Schedules were orphaned.** `syncSchedules` walked only the new document's sources, so a source
+  deleted from `sources[]` kept its schedule and went on crawling a third party on a cron with nothing
+  left in the configuration to switch it off. The previous version's source ids are now diffed.
+- **Deleting an old version killed the live version's schedules.** Removal now happens only when no
+  readable version remains.
+- **A duplicated knowledge base shared the original's ingestion identity.** Vector stores are keyed by
+  name, which a duplicate shares, so the copy's runs replaced and tombstoned the original's chunks while
+  the original's state still said "unchanged". A copy now gets fresh source ids and no cron.
+- **Vector removal ran after the tombstone was recorded**, and a tombstoned document is never reported
+  again — so a failed removal orphaned those vectors permanently. A failure now un-tombstones for retry.
+
+### Runs that wedged their own source
+
+- Only `crawler.crawl` was guarded and only `RuntimeException` caught, so a state-store failure or an
+  `Error` left the run `RUNNING` forever: every later manual run a 409, every scheduled fire a failure.
+  Everything after the claim is now guarded by `Throwable`, and `reapStaleRuns` is finally called before
+  claiming — nothing called it, although the interface said otherwise.
+- `ALREADY_RUNNING` and `SKIPPED` were mapped to `FireStatus.FAILED`. The schedule lease is five minutes
+  and a crawl's default budget is ten, so the schedule is legitimately re-claimed while the first run is
+  still going; the second fire lost the single-in-flight race and was recorded as a failure, dead-lettering
+  the schedule within days.
+- The converter's recursive walk had no depth cap. jsoup builds the full DOM — 60,000 levels if the page
+  says so — and a `StackOverflowError` is an `Error` that sails past every `catch (Exception)`.
+- Body reads had no time bound: `HttpRequest.timeout` covers headers only, so a server trickling one byte
+  per second held a virtual thread indefinitely.
+
+### Crawler correctness
+
+- Only successful pages entered the visited set, so a dead link in a site-wide footer was fetched once per
+  referring page — N errors, and a fetch budget so exhausted that the crawl never reported full coverage,
+  which silently disabled deletion reconciliation for that site on every run.
+- `isHtml()` matched any content type containing `xml`, so a linked sitemap or RSS feed became a
+  knowledge-base document of concatenated `<loc>` URLs.
+- robots.txt was fetched for the seed host and applied to every host reached.
+
+### Divergent backends
+
+The Postgres store swallowed every `SQLException` and returned a plausible answer — `lookup` said "never
+ingested" (re-embedding the page every run), `startRun` said "already running" (a 409 for a database
+fault), `finishRun` left the run `RUNNING`. Mongo threw. Both now fail identically through
+`IngestionStateStoreException`, which is the divergence the shared contract exists to prevent.
+
+### Also
+
+Preview was synchronous, unguarded and uncapped — up to a day on a request thread per click; it now runs
+with a two-minute budget. `runAsync` leaked an `ExecutorService` per call and swallowed `Error`s. Third-party
+titles are capped before being copied onto every segment. `ref`/`referrer` are no longer stripped as
+tracking parameters (they select content on plenty of sites). `RobotsPolicy` matched `User-agent` by
+substring, so `User-agent: a` captured every crawler.
+
+### Tests
+
+398 across the stack, up from 354: 20 new cases, one per finding, each mutation-checked. The repo's own
+`ImportStyleTest` caught two inline FQNs I had introduced.
+
+
+## ⏱️ feat(rag): REST and scheduling for ingestion sources (2026-09-17)
+
+**Repo:** EDDI (`feat/rag-ingestion-rest`)
+
+### What this adds
+
+The operable surface for the sources landed in the previous entry: four endpoints and a cron.
+
+| Method | Path | Access |
+| ------ | ---- | ------ |
+| `POST` | `…/sources/{sourceId}/run` | EDIT |
+| `POST` | `…/sources/{sourceId}/preview` | EDIT |
+| `GET` | `…/sources/{sourceId}/runs` | VIEW |
+| `DELETE` | `…/sources/{sourceId}/documents` | EDIT |
+
+**Running needs EDIT, not VIEW.** A published knowledge base grants VIEW to everyone by design, and a
+run rewrites what every agent using it retrieves — so gating a run on read access would let any editor
+point a source at any published knowledge base and poison it, on a schedule. The draft this replaces
+checked nothing at all. Preview is gated the same way: it writes nothing but still sends a visible
+amount of traffic to a third party's site.
+
+Runs are async on a virtual thread (a crawl takes minutes; an HTTP request cannot wait for it), with a
+409 rather than a second crawl when one is already in flight.
+
+### Scheduling
+
+A source with a `cron` gets a schedule carrying `ragIngestion` metadata, which `ScheduleFireExecutor`
+recognises as a fourth fast-path beside HITL timeouts, Dream consolidation and team cadences — the same
+shape of work, and the same reason: a maintenance job, not a conversation turn, that wants the cluster
+claim, lease, retry and fire log.
+
+Schedules are named `rag-ingestion:{ragConfigId}:{sourceId}`, so syncing is delete-by-name then create:
+no scan and no orphans. The draft searched `readAllSchedules(1000)`; past a thousand schedules — HITL
+timeouts and Dream cycles each create one — it silently failed to find the row, then created a duplicate
+on update and left a schedule still crawling a deleted source on delete. A sync failure is logged as an
+ERROR naming the consequence rather than swallowed behind a 201.
+
+Sources get a generated stable id on write. Addressing them by name would mean renaming a source
+orphaned everything it had ingested.
+
+### Tests
+
+15 for the service (schedule upsert, no-cron and disabled handling, surfaced store failures, scheduled
+fire against a deleted source or knowledge base, concurrent-run refusal, scoped purge) and 12 for the
+REST layer (access level per endpoint, refusals never reaching the service, 404s, 409, limit clamping).
+Four existing RAG REST tests were updated for the new constructor parameter.
+
+
+## 🔗 feat(rag): knowledge-base sources and the ingestion pipeline (2026-09-17)
+
+**Repo:** EDDI (`feat/rag-ingestion-pipeline`)
+
+### Why sources live on the knowledge base
+
+`RagConfiguration` gains `sources[]` rather than ingestion sources becoming a 13th resource type. The
+vector store is keyed by the knowledge base, so a source that could exist independently of one has to
+name its target by string — and that is exactly how the draft in PR #529 came to key ingestion on the
+**source's** name (`kbId = sourceConfig.name()`) while `RagContextProvider` keys retrieval on the
+**knowledge base's**. Crawled content went into one pgvector table and every query read another. The run
+reported success; the agent retrieved nothing. No test caught it because none performed a retrieval
+after an ingest. Ownership removes the possibility rather than documenting it.
+
+### The pipeline
+
+`IngestionPipeline` runs crawl → convert → compare → embed per document, then reconciles deletions:
+
+- **Re-ingesting replaces.** A document's chunks are removed by `documentId` metadata before its new
+  ones are added. The draft called `EmbeddingStoreIngestor.ingest`, which only appends and never
+  removed anything, so a page edited weekly left a year of stale versions retrievable beside the current
+  one. Where a store's driver cannot delete by metadata, the run says so (`replaceUnsupported`) instead
+  of quietly accumulating.
+- **A document is recorded only after its vectors are stored.** The draft committed the content hash
+  while *deciding* whether to ingest, with embedding afterwards inside a `catch` that only logged — so a
+  single 429 marked a page done forever.
+- **Only a crawl that covered the source may conclude anything is gone.** A run stopped by its page cap,
+  time budget or segment budget sets `tombstoningSkipped` and deletes nothing.
+- **Tombstoned documents lose their vectors.** In the draft, "stale detection" flipped a flag in a side
+  table nothing consulted at retrieval time, so a deleted page kept answering questions forever.
+- Segments carry `documentId`, `url`, `title`, `sourceName`, `runId` and `ingestedAt`, so an answer can
+  cite its source. Counts are the segments actually written, not `markdown.length() / chunkSize`.
+- `maxSegmentsPerRun` is the cost ceiling — exact without a pricing table; set
+  `costPerThousandSegments` to have runs report dollars too. `PREVIEW` mode crawls and reports what
+  would change without embedding or recording anything.
+
+### Tests
+
+**25 pipeline tests, 23 more for the in-memory state store.** The test double implements the same
+`IngestionStateStoreContract` as MongoDB and PostgreSQL, so it cannot quietly behave differently from
+production — the failure mode that let the draft's two stores drift apart.
+
+Mutation-checked against all four headline defects: keying the store on the source, appending instead of
+replacing, recording the hash before embedding, and tombstoning after a partial crawl each fail between
+one and seven tests.
+
+### Note on the branch
+
+This branch is stacked: it contains the converter, state store and crawler commits because the pipeline
+needs all three. Merge those three first, or review this as a stack.
+
+
+## 🕷️ feat(ingestion): web crawler — streaming, bounded, robots-aware (2026-09-17)
+
+**Repo:** EDDI (`feat/ingestion-web-crawler`)
+
+### Why a rewrite rather than a patch
+
+The crawler salvaged from PR #529 was competently written but wrong in shape: it buffered every page's
+full HTML in a `List` and returned it when the crawl finished, identified pages by the URL *requested*
+rather than the one reached, read every body with an unbounded `ofString()` **before** checking its
+Content-Type, and had no run budget. None of that is patchable without touching every line.
+
+It also had no `robots.txt` at all. EDDI installations crawl sites their operators do not own, on a
+schedule — ignoring robots gets the installation blocked and its operator a complaint.
+
+### What replaces it
+
+- **`WebCrawler`** — BFS, streaming to a `CrawlSink` one page at a time, so memory is independent of the
+  site's size. Budgets for pages, fetch attempts, bytes per page, total bytes and wall clock, each
+  reported as a `StopReason`. Cancellation checked between pages.
+- **`CrawlUrls`** — canonicalization. Lowercases scheme and host **but not the path**: the draft
+  lowercased the whole URL, so `/Docs/Guide` and `/docs/guide` collapsed into one entry and whichever
+  came second was silently never crawled. Also strips fragments, default ports, tracking parameters and
+  index filenames, and sorts query parameters, so one page is not ingested three times.
+- **`UrlPattern`** — exclude globs matched against the **path**, with every metacharacter escaped and
+  compiled once. Two defects fixed: the documented `*.pdf` could never match anything (`*` cannot cross
+  the slashes in `https://host/`), and a pattern containing `+` or `(` threw `PatternSyntaxException`
+  inside the crawl loop, where a blanket catch logged it as a *fetch* error and dropped the current
+  page's links — one bad pattern reduced a crawl to its seed URL.
+- **`RobotsPolicy`** — groups, longest-match `Allow`/`Disallow`, `*`/`$`, `Crawl-delay` and `Sitemap`.
+  Blank lines deliberately do not end a group: real files are full of them, and orphaning a group's
+  rules silently allows everything the site meant to block.
+- **`PageFetcher`/`SafeHttpPageFetcher`** — `sendValidated` per request (the crawler follows links
+  harvested from third-party pages, which is as user-controlled as a URL gets), with a hard cap on the
+  body read and charset taken from the header or sniffed from the document. Assuming UTF-8 turns legacy
+  pages into mojibake, and mojibake embeds without complaint.
+
+Identity is the URL after redirects, re-checked against the scope: a 301 to another host satisfied
+`sameSiteOnly` on the pre-redirect host and smuggled a foreign page into the knowledge base.
+`<link rel="canonical">` is honoured, but only when it stays on the same host.
+
+Sitemaps from robots.txt are crawled without needing a link — the cheapest discovery there is, and the
+mitigation for the one cost of conditional requests: a 304 has no body, so an unchanged page's links are
+not re-read that run.
+
+### Tests
+
+**113 unit tests, no network, no container, no test server.** The `PageFetcher` seam is there for exactly
+this: `FakeSite` serves an in-memory website, so scope decisions, budgets, redirect identity, robots,
+conditional requests, charset handling and error accounting all run in the unit gate. The draft's only
+coverage was one Testcontainers test the unit run does not execute, which is why none of these defects
+were caught.
+
+Three of the five failures on the first run were real bugs the tests found, not test bugs: sitemap URLs
+bypassed the scope check, `https://host/` and `https://host` canonicalized differently, and fetching the
+canonicalized form invented URLs the site never published (the crawler now fetches the address as
+published and uses the canonical form only as identity).
+
+Mutation-checked: reverting the final-URL identity and re-lowercasing the path fails four tests.
+
+### Next
+
+The source configuration and the pipeline that ties crawl → convert → state store → embed, with vector
+removal driven by the tombstone list, plus the Manager UI.
+## 📄 refactor(ingestion): HTML→Markdown converter, and WebScraperTool stops duplicating it (2026-09-17)
+
+**Repo:** EDDI (`feat/html-to-markdown-converter`)
+
+### Why
+
+Ingesting a web page for retrieval needs more than `Jsoup.text()`. Flat text loses the structure a
+chunker needs (heading boundaries, which section a passage came from) and merges neighbouring blocks
+into single tokens. `WebScraperTool` was doing exactly that, with its own inline
+`"script, style, nav, footer, header, aside"` strip — a second, weaker copy of the same rules.
+
+This lands the converter salvaged from the stale PR #529, with its defects fixed, and makes the
+existing tool use it instead of its own extraction.
+
+### Why not a library
+
+Checked the classpath first: jsoup and pdfbox are present; flexmark-html2md, commonmark and the
+langchain4j document parsers are not. A general HTML→Markdown library optimises for fidelity to the
+source document, while ingestion wants the opposite — aggressive removal of everything a reader skips.
+~450 lines with a 60-case suite is cheaper than a new supply-chain dependency for that job.
+
+### Defects fixed from the salvaged draft
+
+Each of these silently degraded what reached the vector store; all 46 of the draft's own tests passed
+with them present, which is the point — bad ingestion has no stack trace.
+
+- **Adjacent blocks merged.** `div`/`section`/`article` appended children with no separator, so
+  `<div>Hello</div><div>World</div>` embedded as `HelloWorld`.
+- **`<header>` stripped globally**, deleting the page title in the `<article><header><h1>` layout most
+  documentation themes use. Now only `body > header` (the site banner) is removed.
+- **Unescaped `|` in table cells**, which ends the column early and shifts every later value under the
+  wrong header — corruption that surfaces only as a wrongly cited number.
+- **Code blocks flattened**: `text()` collapses whitespace, so every multi-line sample became one line.
+  Uses `wholeText()`.
+- **Headings resolved links against `null`**, leaving them relative and useless as citations.
+- **`<dl>`, `<details>`, `<figure>` fell through to the default branch** and ran together — collapsed
+  `<details>` content is still content and is now ingested with its summary as the label.
+- Alt-less images emitted `![](url)`: tokens spent on nothing. Dropped.
+- Boilerplate selectors extended with `role=navigation|banner|contentinfo|complementary`, cookie
+  banners, buttons, `svg`, `template`, `aria-hidden`.
+- `maxLength <= 0` truncated everything; now falls back to the default.
+- Dead `inPreBlock` plumbing removed (never set true by any caller).
+
+### WebScraperTool
+
+`extractWebPageText` now returns Markdown from the converter rather than a `text()` dump prefixed with
+`Title: `. Same 5000-character cap. This is a visible change to an LLM tool's output, and a deliberate
+one: the model gets headings, lists and tables instead of one run-on paragraph. Its `extractMainContent`
+helper is gone — it was the duplicate.
+
+### Tests
+
+60 converter tests: all 46 inherited from the draft pass unchanged against the rewrite (useful evidence
+the behaviour was preserved where it was right), plus 14 in `HtmlToMarkdownConverterSalvageTest`, one per
+defect above. `WebScraperToolExtendedTest` gains a case asserting structure survives.
+
+Note: `WebScraperToolTest` cannot run in this environment — its `setUp` constructs a real
+`SafeHttpClient`, and creating an `HttpClient` here fails with "Unable to establish loopback
+connection". Pre-existing and environmental; CI covers it.
+## 🗃️ feat(ingestion): document state and run history for RAG sources (2026-09-17)
+
+**Repo:** EDDI (`feat/ingestion-state-store`)
+
+### Why
+
+Ingesting a source is a *reconciliation*, not an append: each run compares what the source offers now
+against what the knowledge base holds, and decides per document whether to skip, re-embed, or conclude
+it is gone. That needs durable state, and the shape of it is where the salvaged PR #529 went wrong —
+quietly, because a corrupted knowledge base has no stack trace. `IIngestionStateStore` is that state,
+designed so the draft's four failure modes are not expressible.
+
+### The two rules the API enforces
+
+- **A document is recorded only after its vectors are stored.** The draft's `shouldIngest(source, doc,
+  content)` upserted the new hash while *deciding* whether to ingest, and embedding happened afterwards
+  inside a `catch` that only logged. One 429 from the embedding provider therefore marked a page done
+  forever: the hash matched on every later run, so it reported "unchanged" and was never embedded. Here
+  `lookup` and `recordIngested` are separate calls and the Javadoc says which side of the embedding call
+  each belongs on.
+- **A document missing from one run is not a deleted document.** The draft marked everything not seen in
+  the current run as stale, unconditionally — so a site outage, a network blip, or simply hitting
+  `maxPages` flagged the remainder of the corpus. `tombstoneMissing` counts *consecutive* misses and only
+  tombstones at a threshold, and callers are told not to call it for a failed run at all.
+
+### What it stores
+
+Per (source, document): content hash, ETag and Last-Modified for conditional fetching, first/last
+ingested timestamps, last run id, consecutive miss count, tombstone flag. Per run: status, timings, the
+seen/ingested/unchanged/failed/tombstoned counters, segments stored, cost in dollars, and the error —
+so a failure is visible in the Manager rather than only in a log line.
+
+`startRun` returns empty when a run is already in flight, enforced by a **partial unique index** on
+`(source_id) WHERE status = 'RUNNING'` in both backends. This is what stops an operator clicking "run
+now" five times from starting five concurrent crawls into one knowledge base, and because the database
+enforces it, it holds across instances. `reapStaleRuns` releases a source whose run died with its
+process.
+
+`ContentHashes.sha256` is a static utility rather than an interface method: the draft had each backend
+carry its own copy, two chances to drift, and a drift silently re-embeds an entire knowledge base.
+
+### Tests
+
+**One shared contract, run against both backends** — `IngestionStateStoreContract` is a JUnit interface
+with 23 cases, implemented by `MongoIngestionStateStoreTest` and `PostgresIngestionStateStoreTest`
+(Testcontainers). The draft's two stores had drifted apart — one overwrote the first-ingest timestamp on
+every call while the other preserved it — and nothing failed, because each was only tested against
+itself. A knowledge base that behaves differently depending on the operator's database choice is a
+support problem with no error message.
+
+Plus 7 cases for `ContentHashes`, including a pinned published SHA-256 vector: if the hash ever changes,
+every deployed knowledge base re-embeds itself on the next run.
+
+53 tests, all green on both backends. Mutation-checked: reverting `setOnInsert` to `set` and ignoring the
+miss threshold fails three of them.
+
+### Next
+
+The crawler, then the source config plus the pipeline that ties fetch → convert → this store → embed,
+with vector removal driven by the tombstone list.
+
 ## ⬆️ chore(ui): Node 22 toolchain, Stryker 10, Vitest 5 for the Chat UI (2026-09-17)
 
 **Repo:** EDDI (`feat/node-22-toolchain`, stacked on `fix/ui-npm-vulnerabilities` / #770)

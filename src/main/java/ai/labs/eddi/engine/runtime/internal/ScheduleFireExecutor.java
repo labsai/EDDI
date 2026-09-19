@@ -6,6 +6,9 @@ package ai.labs.eddi.engine.runtime.internal;
 
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
+import ai.labs.eddi.modules.ingestion.IngestionPipeline.IngestionReport;
+import ai.labs.eddi.modules.ingestion.RagIngestionSchedules;
+import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import ai.labs.eddi.engine.api.IConversationService;
@@ -78,6 +81,9 @@ public class ScheduleFireExecutor {
     TeamCadenceService teamCadenceService;
 
     @Inject
+    RagSourceIngestionService ragSourceIngestionService;
+
+    @Inject
     ToolCostTracker toolCostTracker;
 
     /**
@@ -139,6 +145,13 @@ public class ScheduleFireExecutor {
             // (cluster-wide CAS claim, lease, retry/backoff, dead-lettering, fire
             // log) applies unchanged.
             return fireDreamConsolidation(schedule, instanceId, attemptNumber);
+        }
+
+        if (RagIngestionSchedules.isIngestionSchedule(md)) {
+            // RAG ingestion fast-path — a crawl of a knowledge base's source, not a
+            // conversation turn. Same reasoning and machinery as the Dream and team
+            // cadence fast-paths above.
+            return fireRagIngestion(schedule, instanceId, attemptNumber);
         }
 
         if (TeamCadenceService.isTeamCadenceSchedule(md)) {
@@ -347,6 +360,83 @@ public class ScheduleFireExecutor {
      * misconfigured dream schedule surfaces in the fire log, retries with backoff
      * and eventually dead-letters instead of appearing to run while doing nothing.
      */
+    /**
+     * Runs one ingestion source. Mirrors {@link #fireDreamConsolidation}: the
+     * failure is recorded in the fire log rather than thrown, so the schedule's
+     * retry and dead-lettering behave as they do for every other kind of fire.
+     */
+    private ScheduleFireLog fireRagIngestion(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {
+        Instant startedAt = Instant.now();
+        String status;
+        String errorMessage = null;
+        double cost = 0.0;
+        boolean interrupted = false;
+
+        Map<String, Object> md = schedule.getMetadata();
+        try {
+            var report = ragSourceIngestionService.processScheduledFire(
+                    RagIngestionSchedules.ragConfigId(md),
+                    RagIngestionSchedules.ragConfigVersion(md),
+                    RagIngestionSchedules.sourceId(md));
+            cost = report.costUsd();
+            if (report.isSuccess() || isBenignOutcome(report)) {
+                // ALREADY_RUNNING and SKIPPED are outcomes, not failures. The lease is
+                // five minutes and a crawl's default budget is ten, so the schedule is
+                // legitimately re-claimed while the first run is still going; the
+                // second fire then loses the database's single-in-flight race. Calling
+                // that FAILED increments failCount on every fire and dead-letters the
+                // schedule within days. fireTeamCadence treats the same case the same
+                // way.
+                status = ScheduleConfiguration.FireStatus.COMPLETED.name();
+                if (!report.isSuccess()) {
+                    LOGGER.infof("[SCHEDULE] Ingestion for schedule '%s' (id=%s) did not run: %s",
+                            schedule.getName(), schedule.getId(), report.message());
+                }
+                LOGGER.infof("[SCHEDULE] Ingestion for schedule '%s' (id=%s): %d ingested, %d unchanged, "
+                        + "%d tombstoned, %d failed, %d segments",
+                        schedule.getName(), schedule.getId(), report.documentsIngested(),
+                        report.documentsUnchanged(), report.documentsTombstoned(), report.documentsFailed(),
+                        report.segmentsStored());
+            } else {
+                status = ScheduleConfiguration.FireStatus.FAILED.name();
+                errorMessage = report.message();
+                LOGGER.errorf("[SCHEDULE] Ingestion failed for schedule '%s' (id=%s): %s",
+                        schedule.getName(), schedule.getId(), errorMessage);
+            }
+        } catch (Exception e) {
+            // Same ordering as the fast-paths above: a blocking call inside the crawl
+            // clears the interrupt flag when it throws InterruptedException, so
+            // remember it and re-assert it after the fire log is written.
+            if (e instanceof InterruptedException) {
+                interrupted = true;
+            }
+            status = ScheduleConfiguration.FireStatus.FAILED.name();
+            errorMessage = e.getClass().getSimpleName() + ": " + e.getMessage();
+            LOGGER.errorf(e, "[SCHEDULE] Ingestion threw for schedule '%s' (id=%s)", schedule.getName(),
+                    schedule.getId());
+        }
+
+        var fireLog = new ScheduleFireLog(UUID.randomUUID().toString(), schedule.getId(), schedule.getFireId(),
+                schedule.getNextFire(), startedAt, Instant.now(), status, instanceId, null, errorMessage,
+                attemptNumber, cost);
+        try {
+            scheduleStore.logFire(fireLog);
+        } catch (Exception e) {
+            LOGGER.errorf(e, "[SCHEDULE] Failed to log ingestion fire for schedule %s", schedule.getId());
+        } finally {
+            restoreInterrupt(interrupted);
+        }
+        return fireLog;
+    }
+
+    /**
+     * Whether a run that did not happen should still count as a successful fire.
+     */
+    private static boolean isBenignOutcome(IngestionReport report) {
+        var outcome = report.outcome();
+        return outcome == IngestionReport.Outcome.ALREADY_RUNNING || outcome == IngestionReport.Outcome.SKIPPED;
+    }
+
     private ScheduleFireLog fireDreamConsolidation(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {
         Instant startedAt = Instant.now();
         String status;

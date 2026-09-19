@@ -2331,6 +2331,31 @@ export const handlers = [
       chunkOverlap: 64,
       maxResults: 5,
       minScore: 0.6,
+      sources: [
+        {
+          id: "src-1",
+          name: "public-docs",
+          type: "web",
+          enabled: true,
+          cron: "0 2 * * *",
+          web: {
+            startUrl: "https://example.com/docs/",
+            sameSiteOnly: true,
+            includeSubdomains: false,
+            pathPrefix: "/docs/",
+            maxDepth: 3,
+            maxPages: 200,
+            excludePatterns: ["*.pdf"],
+            requestDelayMs: 500,
+            respectRobots: true,
+          },
+          settings: {
+            tombstoneAfterMissedRuns: 2,
+            maxSegmentsPerRun: 20000,
+            timeBudgetMinutes: 10,
+          },
+        },
+      ],
     });
   }),
 
@@ -2345,6 +2370,55 @@ export const handlers = [
     return HttpResponse.json({
       status: "completed",
     });
+  }),
+
+  // Ingestion source endpoints (mock)
+  http.get("*/ragstore/rags/:id/sources/:sourceId/runs", () => {
+    return HttpResponse.json([
+      {
+        runId: "run-1",
+        sourceId: "src-1",
+        status: "COMPLETED",
+        startedAt: "2026-09-17T02:00:00Z",
+        finishedAt: "2026-09-17T02:04:12Z",
+        documentsSeen: 42,
+        documentsIngested: 3,
+        documentsUnchanged: 39,
+        documentsFailed: 0,
+        documentsTombstoned: 1,
+        segmentsStored: 57,
+        costUsd: 0.0,
+        error: null,
+      },
+    ]);
+  }),
+
+  http.post("*/ragstore/rags/:id/sources/:sourceId/run", () => {
+    return HttpResponse.json({ status: "started", sourceId: "src-1" }, { status: 202 });
+  }),
+
+  http.post("*/ragstore/rags/:id/sources/:sourceId/preview", () => {
+    return HttpResponse.json({
+      runId: "preview",
+      sourceId: "src-1",
+      outcome: "PREVIEW",
+      documentsSeen: 42,
+      documentsIngested: 3,
+      documentsUnchanged: 39,
+      documentsSkipped: 0,
+      documentsFailed: 0,
+      documentsTombstoned: 0,
+      segmentsStored: 0,
+      costUsd: 0,
+      replaceUnsupported: false,
+      tombstoningSkipped: false,
+      stopReason: "COMPLETED",
+      message: null,
+    });
+  }),
+
+  http.delete("*/ragstore/rags/:id/sources/:sourceId/documents", () => {
+    return HttpResponse.json({ status: "purged", sourceId: "src-1" });
   }),
 
   // --- Group Store Mock Handlers ---

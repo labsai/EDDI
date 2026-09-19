@@ -12,6 +12,9 @@ import ai.labs.eddi.configs.rag.IRestRagStore;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
+import ai.labs.eddi.datastore.IResourceStore.IResourceId;
+import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
+import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.datastore.IResourceStore;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -21,6 +24,9 @@ import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.UUID;
 
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
@@ -35,13 +41,15 @@ public class RestRagStore implements IRestRagStore {
     private final IRagStore ragStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
     private final RestVersionInfo<RagConfiguration> restVersionInfo;
+    private final RagSourceIngestionService sourceIngestionService;
 
     @Inject
     public RestRagStore(IRagStore ragStore, IDocumentDescriptorStore documentDescriptorStore, IJsonSchemaCreator jsonSchemaCreator,
-            ResourceAccessGuard resourceAccessGuard) {
+            ResourceAccessGuard resourceAccessGuard, RagSourceIngestionService sourceIngestionService) {
         restVersionInfo = new RestVersionInfo<>(resourceURI, ragStore, documentDescriptorStore, resourceAccessGuard);
         this.ragStore = ragStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
+        this.sourceIngestionService = sourceIngestionService;
     }
 
     @Override
@@ -66,13 +74,102 @@ public class RestRagStore implements IRestRagStore {
     @Override
     public Response updateRag(String id, Integer version, RagConfiguration ragConfiguration) {
         prepareForWrite(ragConfiguration);
-        return restVersionInfo.update(id, version, ragConfiguration);
+        // Read before writing: a source removed from sources[] must lose its
+        // schedule, and afterwards there is nothing left to say which ones existed.
+        Set<String> previousSourceIds = sourceIdsOf(readQuietly(id, version));
+        Response response = restVersionInfo.update(id, version, ragConfiguration);
+        syncIngestionSchedules(response, id, ragConfiguration, previousSourceIds);
+        return response;
     }
 
     @Override
     public Response createRag(RagConfiguration ragConfiguration) {
         prepareForWrite(ragConfiguration);
-        return restVersionInfo.create(ragConfiguration);
+        Response response = restVersionInfo.create(ragConfiguration);
+        syncIngestionSchedules(response, null, ragConfiguration, Set.of());
+        return response;
+    }
+
+    /**
+     * Whether this knowledge base still has a current version after a delete.
+     * Schedules belong to the knowledge base rather than to one version, so they
+     * only go once nothing is left to crawl for.
+     *
+     * <p>
+     * One lookup. {@code getCurrentResourceId} throws once the current row is
+     * soft-deleted and succeeds while one exists, which is exactly this question.
+     * An earlier version probed every version number up to the one in the request —
+     * a loop sized by user input, so {@code ?version=2000000000} asked the server
+     * for two billion reads (CodeQL flagged the arithmetic; the loop was the real
+     * problem).
+     */
+    private boolean hasCurrentVersion(String id) {
+        try {
+            return restVersionInfo.getCurrentResourceId(id) != null;
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return false;
+        }
+    }
+
+    private RagConfiguration readQuietly(String id, Integer version) {
+        try {
+            return restVersionInfo.read(id, version);
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    private static Set<String> sourceIdsOf(RagConfiguration configuration) {
+        if (configuration == null || configuration.getSources() == null) {
+            return Set.of();
+        }
+        return configuration.getSources().stream()
+                .map(RagSourceIngestionService::sourceIdOf)
+                .collect(Collectors.toSet());
+    }
+
+    /**
+     * Makes the stored ingestion schedules match what was just written.
+     *
+     * <p>
+     * A failure here is logged loudly rather than thrown: the knowledge base itself
+     * saved correctly, and refusing the write would be worse. But it must be
+     * visible — the draft this replaces swallowed the same failure and returned 201
+     * for a source that looked scheduled and never ran.
+     */
+    private void syncIngestionSchedules(Response response, String knownId, RagConfiguration ragConfiguration,
+                                        Set<String> previousSourceIds) {
+        if (ragConfiguration == null
+                || ((ragConfiguration.getSources() == null || ragConfiguration.getSources().isEmpty())
+                        && previousSourceIds.isEmpty())) {
+            // Nothing to add and nothing that used to exist — no schedule work.
+            return;
+        }
+        IResourceId resourceId = resourceIdOf(response);
+        String id = knownId != null ? knownId : resourceId == null ? null : resourceId.getId();
+        if (id == null) {
+            LOGGER.errorf("Could not determine the id of the knowledge base just written, so its ingestion "
+                    + "schedules were NOT synchronised. Sources with a cron will not run until it is saved again.");
+            return;
+        }
+        Integer version = resourceId == null ? null : resourceId.getVersion();
+        try {
+            sourceIngestionService.syncSchedules(id, version, ragConfiguration, previousSourceIds);
+        } catch (RuntimeException e) {
+            LOGGER.errorf(e, "Ingestion schedules for knowledge base %s were NOT synchronised. Sources with a "
+                    + "cron will not run until it is saved again.", LogSanitizer.sanitize(id));
+        }
+    }
+
+    private static IResourceId resourceIdOf(Response response) {
+        if (response == null || response.getLocation() == null) {
+            return null;
+        }
+        try {
+            return RestUtilities.extractResourceId(response.getLocation());
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     /**
@@ -96,11 +193,47 @@ public class RestRagStore implements IRestRagStore {
         }
 
         normalizeLegacyChunkStrategy(ragConfiguration);
+        assignSourceIds(ragConfiguration);
 
         try {
             ragConfiguration.validate();
         } catch (IllegalArgumentException e) {
             throw new BadRequestException(e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Gives every ingestion source a stable id.
+     *
+     * <p>
+     * The id is what the run, preview, history and purge endpoints address, and
+     * what ingestion state is keyed by — so a source that arrives without one (the
+     * normal case when the Manager adds it) must get one that then never changes.
+     * Falling back to the source's <em>name</em> would mean renaming a source
+     * orphaned everything it had ingested.
+     */
+    /**
+     * Strips a copy's inherited ingestion identity: new ids, and no schedule until
+     * an operator asks for one.
+     */
+    private void detachIngestionSources(RagConfiguration ragConfiguration) {
+        if (ragConfiguration == null || ragConfiguration.getSources() == null) {
+            return;
+        }
+        for (var source : ragConfiguration.getSources()) {
+            source.setId(UUID.randomUUID().toString());
+            source.setCron(null);
+        }
+    }
+
+    private void assignSourceIds(RagConfiguration ragConfiguration) {
+        if (ragConfiguration.getSources() == null) {
+            return;
+        }
+        for (var source : ragConfiguration.getSources()) {
+            if (source.getId() == null || source.getId().isBlank()) {
+                source.setId(UUID.randomUUID().toString());
+            }
         }
     }
 
@@ -127,7 +260,24 @@ public class RestRagStore implements IRestRagStore {
 
     @Override
     public Response deleteRag(String id, Integer version, Boolean permanent) {
-        return restVersionInfo.delete(id, version, permanent);
+        // Read before deleting: afterwards there is nothing left to tell us which
+        // schedules belonged to this knowledge base, and an orphaned schedule keeps
+        // crawling a third-party site on behalf of a config that no longer exists.
+        RagConfiguration deleted = readQuietly(id, version);
+        Response response = restVersionInfo.delete(id, version, permanent);
+
+        // Only once no readable version is left. Deleting an OLD version of a
+        // knowledge base that is still deployed at a newer one used to remove the
+        // live version's schedules, so it silently stopped crawling.
+        if (deleted != null && !hasCurrentVersion(id)) {
+            try {
+                sourceIngestionService.removeSchedules(id, deleted);
+            } catch (RuntimeException e) {
+                LOGGER.errorf(e, "Could not remove ingestion schedules for knowledge base %s",
+                        LogSanitizer.sanitize(id));
+            }
+        }
+        return response;
     }
 
     @Override
@@ -138,6 +288,12 @@ public class RestRagStore implements IRestRagStore {
         // document must not be refused just because the rules tightened after it was
         // stored.
         normalizeLegacyChunkStrategy(config);
+        // A copy must not inherit its original's ingestion identity. Vector stores are
+        // keyed by the knowledge base NAME, which a duplicate shares, so a copied
+        // source with the same id and cron would run against the original's documents
+        // — replacing and tombstoning them while the original's state still says
+        // "unchanged".
+        detachIngestionSources(config);
         return restVersionInfo.create(config);
     }
 
