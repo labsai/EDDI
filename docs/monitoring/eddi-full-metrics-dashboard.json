@@ -665,6 +665,17 @@
               "editorMode": "code",
               "range": true,
               "legendFormat": "redo"
+            },
+            {
+              "refId": "G",
+              "expr": "sum(rate(eddi_conversation_store_conflict_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "store conflict"
             }
           ],
           "fieldConfig": {
