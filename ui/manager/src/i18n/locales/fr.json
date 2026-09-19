@@ -1670,11 +1670,11 @@
     "grantOnlyTheseAgents": "Uniquement ces agents",
     "grantAllHint": "Tous les agents de ce tenant peuvent référencer ce secret. Restreignez la liste pour limiter la portée d’une seule configuration compromise.",
     "grantAddAgent": "Ajouter un agent",
-    "grantEmptyError": "Ajoutez au moins un agent ou choisissez « Tous les agents ». Une liste vide signifie tous les agents.",
+    "grantEmptyError": "Ajoutez au moins un agent ou choisissez « Tous les agents ». Une liste vide n’est pas autorisée.",
     "grantCheckingImpact": "Vérification des agents déployés…",
     "grantLosingAccessTitle": "Agents déployés qui utilisent ce secret et perdraient l’accès ({{count}})",
     "grantLosingAccessBody": "Ils continuent de fonctionner pour l’instant — l’autorisation est vérifiée au déploiement d’un agent, pas à l’utilisation du secret — mais leur prochain déploiement sera refusé.",
-    "grantAcknowledge": "Je comprends que ces agents ne pourront plus être déployés tant qu’ils ne seront pas rajoutés ou que leur configuration continuera d’utiliser ce secret.",
+    "grantAcknowledge": "Je comprends que ces agents ne pourront plus être déployés tant qu’ils n’auront pas été rajoutés à la liste ou que leur configuration n’aura pas cessé d’utiliser ce secret.",
     "grantSaved": "Accès mis à jour pour « {{key}} »",
     "grantImpactFailed": "Impossible de vérifier quels agents déployés utilisent ce secret : n’importe lequel pourrait perdre l’accès.",
     "grantAcknowledgeUnchecked": "Enregistrer quand même, sans savoir quels agents déployés sont concernés."

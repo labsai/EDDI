@@ -1648,7 +1648,7 @@
     "grantOnlyTheseAgents": "仅这些智能体",
     "grantAllHint": "此租户中的每个智能体都可以引用此密钥。缩小范围可限制单个泄露配置所能触及的内容。",
     "grantAddAgent": "添加智能体",
-    "grantEmptyError": "请至少添加一个智能体，或选择“所有智能体”。空列表表示所有智能体。",
+    "grantEmptyError": "请至少添加一个智能体，或选择“所有智能体”。不允许空列表。",
     "grantCheckingImpact": "正在检查已部署的智能体…",
     "grantLosingAccessTitle": "使用此密钥并将失去访问权限的已部署智能体（{{count}}）",
     "grantLosingAccessBody": "它们目前仍在运行 — 授权在智能体部署时检查，而不是在使用密钥时 — 但下一次部署将被拒绝。",

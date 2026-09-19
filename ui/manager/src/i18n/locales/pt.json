@@ -1670,7 +1670,7 @@
     "grantOnlyTheseAgents": "Apenas estes agentes",
     "grantAllHint": "Todos os agentes deste tenant podem referenciar este segredo. Restrinja a lista para limitar o alcance de uma única configuração comprometida.",
     "grantAddAgent": "Adicionar um agente",
-    "grantEmptyError": "Adicione pelo menos um agente ou escolha “Todos os agentes”. Uma lista vazia significa todos os agentes.",
+    "grantEmptyError": "Adicione pelo menos um agente ou escolha “Todos os agentes”. Uma lista vazia não é permitida.",
     "grantCheckingImpact": "A verificar os agentes implementados…",
     "grantLosingAccessTitle": "Agentes implementados que usam este segredo e perderiam o acesso ({{count}})",
     "grantLosingAccessBody": "Por agora continuam a funcionar — a permissão é verificada quando um agente é implementado, não quando o segredo é usado — mas a próxima implementação será recusada.",

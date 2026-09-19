@@ -1648,7 +1648,7 @@
     "grantOnlyTheseAgents": "Nur diese Agenten",
     "grantAllHint": "Jeder Agent in diesem Tenant darf dieses Secret referenzieren. Schränke die Liste ein, um zu begrenzen, was eine einzelne kompromittierte Konfiguration erreichen kann.",
     "grantAddAgent": "Agent hinzufügen",
-    "grantEmptyError": "Füge mindestens einen Agenten hinzu oder wähle „Alle Agenten“. Eine leere Liste bedeutet alle Agenten.",
+    "grantEmptyError": "Füge mindestens einen Agenten hinzu oder wähle „Alle Agenten“. Eine leere Liste ist nicht zulässig.",
     "grantCheckingImpact": "Deployte Agenten werden geprüft…",
     "grantLosingAccessTitle": "Deployte Agenten, die dieses Secret verwenden und den Zugriff verlieren würden ({{count}})",
     "grantLosingAccessBody": "Sie laufen zunächst weiter — die Berechtigung wird beim Deployment eines Agenten geprüft, nicht bei der Verwendung des Secrets — aber ihr nächstes Deployment wird abgelehnt.",

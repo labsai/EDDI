@@ -77,6 +77,14 @@ export interface SecretGrantResponse {
   createdAt?: string;
   lastRotatedAt?: string;
   agentsLosingAccess: AffectedAgent[];
+  /**
+   * False when the backend could not list every environment, so the list above may
+   * be short. Absent on an older backend, which is why callers test `=== false`
+   * rather than falsiness — an absent flag is not a failed scan.
+   */
+  agentsLosingAccessComplete?: boolean;
+  /** Which node's deployments the list covers. */
+  agentsLosingAccessScope?: string;
   /** Only present when `agentsLosingAccess` is non-empty. */
   warning?: string;
 }

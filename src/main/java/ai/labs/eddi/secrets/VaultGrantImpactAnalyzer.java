@@ -72,27 +72,49 @@ public class VaultGrantImpactAnalyzer {
     }
 
     /**
+     * What the scan found, and whether it managed to look everywhere.
+     * <p>
+     * The two travel together because "no affected agents" and "could not tell"
+     * must not arrive as the same answer. They did: a failed environment listing
+     * was skipped and the remaining list returned as though complete, so a caller —
+     * and then the operator in front of the Manager — read an empty list as
+     * "nothing breaks" when the truth was "not known".
+     *
+     * @param agentsLosingAccess
+     *            the deployed agents that reference the secret and would not be
+     *            granted it, as far as the scan got
+     * @param complete
+     *            false when any environment could not be listed, so the list may be
+     *            short
+     */
+    public record GrantImpact(List<AffectedAgent> agentsLosingAccess, boolean complete) {
+    }
+
+    /**
      * The deployed agents that reference {@code secret} and are not granted it by
      * {@code proposedAllowedAgents}.
      *
      * @param proposedAllowedAgents
      *            the grant list the operator is about to store, in any of the
      *            shapes {@link SecretMetadata#grantsAllAgents} accepts
-     * @return the affected agents, empty when the proposed grant is the wildcard
-     *         (nothing can lose access to a secret everyone may use), when nothing
-     *         deployed references the secret, or when the analysis could not run.
-     *         Never null and never an exception: this feeds a warning on an
-     *         operation that must not fail because the warning could not be
-     *         computed
+     * @return the affected agents, plus whether every environment was actually
+     *         scanned. The list is empty when the proposed grant is the wildcard
+     *         (nothing can lose access to a secret everyone may use) or when
+     *         nothing deployed references the secret — those are complete answers.
+     *         An environment that could not be listed leaves {@code complete}
+     *         false, so a caller can tell that apart from "nothing breaks". Never
+     *         null and never an exception: this feeds a warning on an operation
+     *         that must not fail because the warning could not be computed
      */
-    public List<AffectedAgent> agentsLosingAccess(SecretReference secret, List<String> proposedAllowedAgents) {
+    public GrantImpact agentsLosingAccess(SecretReference secret, List<String> proposedAllowedAgents) {
         if (secret == null || SecretMetadata.grantsAllAgents(proposedAllowedAgents)) {
-            return List.of();
+            return new GrantImpact(List.of(), true);
         }
         Set<String> granted = new LinkedHashSet<>(proposedAllowedAgents);
 
         List<AffectedAgent> affected = new ArrayList<>();
         Set<String> seen = new LinkedHashSet<>();
+        boolean complete = true;
         for (Deployment.Environment environment : Deployment.Environment.values()) {
             List<IAgent> deployed;
             try {
@@ -103,6 +125,7 @@ public class VaultGrantImpactAnalyzer {
             } catch (Exception e) {
                 LOGGER.warnf("Could not list deployed agents in %s while assessing the grant change for %s: %s", environment,
                         sanitize(secret.toReferenceString()), sanitize(e.getMessage()));
+                complete = false;
                 continue;
             }
             for (IAgent agent : deployed) {
@@ -118,6 +141,6 @@ public class VaultGrantImpactAnalyzer {
                 }
             }
         }
-        return affected;
+        return new GrantImpact(affected, complete);
     }
 }

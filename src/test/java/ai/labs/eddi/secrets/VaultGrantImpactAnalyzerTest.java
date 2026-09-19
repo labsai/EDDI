@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -69,7 +70,7 @@ class VaultGrantImpactAnalyzerTest {
         deployedInProduction(agent("agentTwo", 3, Deployment.Status.READY));
         when(checker.references(eq("agentTwo"), anyInt(), eq(SECRET))).thenReturn(true);
 
-        List<AffectedAgent> affected = analyzer.agentsLosingAccess(SECRET, List.of("agentOne"));
+        List<AffectedAgent> affected = analyzer.agentsLosingAccess(SECRET, List.of("agentOne")).agentsLosingAccess();
 
         assertEquals(List.of(new AffectedAgent("agentTwo", 3, "production")), affected);
     }
@@ -79,7 +80,7 @@ class VaultGrantImpactAnalyzerTest {
     void skipsAgentsStillGranted() throws Exception {
         deployedInProduction(agent("agentOne", 1, Deployment.Status.READY));
 
-        assertTrue(analyzer.agentsLosingAccess(SECRET, List.of("agentOne")).isEmpty());
+        assertTrue(analyzer.agentsLosingAccess(SECRET, List.of("agentOne")).agentsLosingAccess().isEmpty());
 
         // Reading an agent's whole workflow tree to answer a question the grant
         // list already answers is wasted work on a page-load-blocking call.
@@ -92,7 +93,7 @@ class VaultGrantImpactAnalyzerTest {
         deployedInProduction(agent("agentThree", 2, Deployment.Status.READY));
         when(checker.references(eq("agentThree"), anyInt(), eq(SECRET))).thenReturn(false);
 
-        assertTrue(analyzer.agentsLosingAccess(SECRET, List.of("agentOne")).isEmpty());
+        assertTrue(analyzer.agentsLosingAccess(SECRET, List.of("agentOne")).agentsLosingAccess().isEmpty());
     }
 
     @Test
@@ -100,7 +101,7 @@ class VaultGrantImpactAnalyzerTest {
     void wildcardMeansNoImpact() throws Exception {
         deployedInProduction(agent("agentTwo", 3, Deployment.Status.READY));
 
-        assertTrue(analyzer.agentsLosingAccess(SECRET, List.of("*")).isEmpty());
+        assertTrue(analyzer.agentsLosingAccess(SECRET, List.of("*")).agentsLosingAccess().isEmpty());
 
         // And it does so without touching either collaborator, so widening a grant
         // costs no agent scan at all.
@@ -111,8 +112,8 @@ class VaultGrantImpactAnalyzerTest {
     @Test
     @DisplayName("null and empty grant lists short-circuit too — both already mean 'everyone'")
     void absentGrantMeansNoImpact() {
-        assertTrue(analyzer.agentsLosingAccess(SECRET, null).isEmpty());
-        assertTrue(analyzer.agentsLosingAccess(SECRET, List.of()).isEmpty());
+        assertTrue(analyzer.agentsLosingAccess(SECRET, null).agentsLosingAccess().isEmpty());
+        assertTrue(analyzer.agentsLosingAccess(SECRET, List.of()).agentsLosingAccess().isEmpty());
         verifyNoInteractions(agentFactory);
     }
 
@@ -123,7 +124,7 @@ class VaultGrantImpactAnalyzerTest {
         deployedInProduction(agent("agentTwo", 3, Deployment.Status.ERROR));
         when(checker.references(any(), any(), any())).thenReturn(true);
 
-        assertTrue(analyzer.agentsLosingAccess(SECRET, List.of("agentOne")).isEmpty());
+        assertTrue(analyzer.agentsLosingAccess(SECRET, List.of("agentOne")).agentsLosingAccess().isEmpty());
     }
 
     @Test
@@ -137,7 +138,7 @@ class VaultGrantImpactAnalyzerTest {
         when(agentFactory.getAllDeployedAgents(Deployment.Environment.test)).thenReturn(List.of(inTest));
         when(checker.references(any(), any(), eq(SECRET))).thenReturn(true);
 
-        List<AffectedAgent> affected = analyzer.agentsLosingAccess(SECRET, List.of("agentOne"));
+        List<AffectedAgent> affected = analyzer.agentsLosingAccess(SECRET, List.of("agentOne")).agentsLosingAccess();
 
         assertEquals(2, affected.size());
         assertEquals(List.of("production", "test"), affected.stream().map(AffectedAgent::environment).sorted().toList());
@@ -151,7 +152,8 @@ class VaultGrantImpactAnalyzerTest {
         deployedInProduction(agent("agentTwo", 3, Deployment.Status.ERROR), agent("agentTwo", 2, Deployment.Status.READY));
         when(checker.references(eq("agentTwo"), eq(2), eq(SECRET))).thenReturn(true);
 
-        assertEquals(List.of(new AffectedAgent("agentTwo", 2, "production")), analyzer.agentsLosingAccess(SECRET, List.of("agentOne")));
+        assertEquals(List.of(new AffectedAgent("agentTwo", 2, "production")),
+                analyzer.agentsLosingAccess(SECRET, List.of("agentOne")).agentsLosingAccess());
     }
 
     @Test
@@ -163,23 +165,53 @@ class VaultGrantImpactAnalyzerTest {
         when(checker.references(eq("agentTwo"), anyInt(), eq(SECRET))).thenReturn(true);
 
         assertEquals(List.of(new AffectedAgent("agentTwo", 1, "production"), new AffectedAgent("agentTwo", 2, "production")),
-                analyzer.agentsLosingAccess(SECRET, List.of("agentOne")));
+                analyzer.agentsLosingAccess(SECRET, List.of("agentOne")).agentsLosingAccess());
     }
 
     @Test
-    @DisplayName("a registry that cannot be listed yields no warning rather than an exception")
+    @DisplayName("a registry that cannot be listed yields no warning rather than an exception, and is reported as incomplete")
     void aFailedListingDoesNotPropagate() throws Exception {
         // This feeds a warning on a write that must not fail because the warning
         // could not be computed.
         when(agentFactory.getAllDeployedAgents(any())).thenThrow(new RuntimeException("registry unavailable"));
 
-        assertTrue(analyzer.agentsLosingAccess(SECRET, List.of("agentOne")).isEmpty());
+        var impact = analyzer.agentsLosingAccess(SECRET, List.of("agentOne"));
+
+        assertTrue(impact.agentsLosingAccess().isEmpty());
+        // The half that matters: an empty list from a failed scan must not read as
+        // "nothing breaks", or the caller narrows the grant on the strength of it.
+        assertFalse(impact.complete(), "a scan that could not list an environment is not complete");
+    }
+
+    @Test
+    @DisplayName("one unlistable environment leaves the answer incomplete, with what was found in the other")
+    void oneFailedEnvironmentIsStillIncomplete() throws Exception {
+        IAgent inProduction = agent("agentTwo", 3, Deployment.Status.READY);
+        when(agentFactory.getAllDeployedAgents(Deployment.Environment.production)).thenReturn(List.of(inProduction));
+        when(agentFactory.getAllDeployedAgents(Deployment.Environment.test)).thenThrow(new RuntimeException("registry unavailable"));
+        when(checker.references(eq("agentTwo"), anyInt(), eq(SECRET))).thenReturn(true);
+
+        var impact = analyzer.agentsLosingAccess(SECRET, List.of("agentOne"));
+
+        assertEquals(List.of(new AffectedAgent("agentTwo", 3, "production")), impact.agentsLosingAccess());
+        assertFalse(impact.complete());
+    }
+
+    @Test
+    @DisplayName("a scan that reached every environment is complete, including the wildcard short-circuit")
+    void successfulScansAreComplete() throws Exception {
+        deployedInProduction(agent("agentTwo", 3, Deployment.Status.READY));
+        when(checker.references(any(), any(), any())).thenReturn(false);
+
+        assertTrue(analyzer.agentsLosingAccess(SECRET, List.of("agentOne")).complete());
+        assertTrue(analyzer.agentsLosingAccess(SECRET, List.of("*")).complete());
+        assertTrue(analyzer.agentsLosingAccess(null, List.of("agentOne")).complete());
     }
 
     @Test
     @DisplayName("a null secret yields no warning")
     void nullSecretMeansNoImpact() {
-        assertTrue(analyzer.agentsLosingAccess(null, List.of("agentOne")).isEmpty());
+        assertTrue(analyzer.agentsLosingAccess(null, List.of("agentOne")).agentsLosingAccess().isEmpty());
         verifyNoInteractions(agentFactory);
     }
 
@@ -189,6 +221,6 @@ class VaultGrantImpactAnalyzerTest {
         deployedInProduction(agent(null, 1, Deployment.Status.READY));
         when(checker.references(any(), any(), any())).thenReturn(true);
 
-        assertTrue(analyzer.agentsLosingAccess(SECRET, List.of("agentOne")).isEmpty());
+        assertTrue(analyzer.agentsLosingAccess(SECRET, List.of("agentOne")).agentsLosingAccess().isEmpty());
     }
 }

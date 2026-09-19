@@ -4,6 +4,7 @@ import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { SecretsPage } from "@/pages/secrets";
 import { server } from "@/test/mocks/server";
 import { http, HttpResponse } from "msw";
+import { updateSecretGrant } from "@/lib/api/secrets";
 
 /**
  * The grant editor — changing `allowedAgents` without re-supplying the value.
@@ -306,21 +307,33 @@ describe("SecretsPage — agent grants", () => {
     // URL would keep passing if the path or query drifted to one the backend
     // rejects. Every request the dialog makes is recorded and checked whole.
     const user = userEvent.setup();
-    const grantCalls: { method: string; path: string; search: string; body: unknown }[] = [];
+    const grantCalls: {
+      method: string;
+      path: string;
+      search: string;
+      body: unknown;
+    }[] = [];
     const descriptorQueries: string[] = [];
     server.use(
-      http.put("*/secretstore/secrets/:tenantId/:keyName/grant", async ({ request }) => {
-        const url = new URL(request.url);
-        grantCalls.push({
-          method: request.method,
-          path: url.pathname,
-          search: url.search,
-          body: await request.json(),
-        });
-        return url.search === "?dryRun=true"
-          ? HttpResponse.json({ dryRun: true, agentsLosingAccess: [] })
-          : HttpResponse.json({ dryRun: false, allowedAgents: ["agent5"], agentsLosingAccess: [] });
-      }),
+      http.put(
+        "*/secretstore/secrets/:tenantId/:keyName/grant",
+        async ({ request }) => {
+          const url = new URL(request.url);
+          grantCalls.push({
+            method: request.method,
+            path: url.pathname,
+            search: url.search,
+            body: await request.json(),
+          });
+          return url.search === "?dryRun=true"
+            ? HttpResponse.json({ dryRun: true, agentsLosingAccess: [] })
+            : HttpResponse.json({
+                dryRun: false,
+                allowedAgents: ["agent5"],
+                agentsLosingAccess: [],
+              });
+        },
+      ),
       http.get("*/agentstore/agents/descriptors", ({ request }) => {
         descriptorQueries.push(new URL(request.url).search);
         return HttpResponse.json([]);
@@ -330,17 +343,27 @@ describe("SecretsPage — agent grants", () => {
     renderSecrets();
     await openEditor(user, "google-gemini-key");
     await user.click(screen.getByTestId("grant-agent-remove-agent7"));
-    await waitFor(() => expect(screen.getByTestId("grant-save")).not.toBeDisabled());
+    await waitFor(() =>
+      expect(screen.getByTestId("grant-save")).not.toBeDisabled(),
+    );
     await user.click(screen.getByTestId("grant-save"));
-    await waitFor(() => expect(grantCalls.some((c) => c.search === "")).toBe(true));
+    await waitFor(() =>
+      expect(grantCalls.some((c) => c.search === "")).toBe(true),
+    );
 
     const path = "/secretstore/secrets/default/google-gemini-key/grant";
     // Every preview: the grant path with exactly ?dryRun=true, and no description —
     // a preview has no business proposing one. The dialog previews the list it
     // opened with as well as the edited one; both must have this shape.
     const previews = grantCalls.filter((c) => c.search !== "");
-    expect(previews.map((c) => c.search)).toEqual(previews.map(() => "?dryRun=true"));
-    expect(previews.find((c) => JSON.stringify(c.body) === '{"allowedAgents":["agent5"]}')).toEqual({
+    expect(previews.map((c) => c.search)).toEqual(
+      previews.map(() => "?dryRun=true"),
+    );
+    expect(
+      previews.find(
+        (c) => JSON.stringify(c.body) === '{"allowedAgents":["agent5"]}',
+      ),
+    ).toEqual({
       method: "PUT",
       path,
       search: "?dryRun=true",
@@ -398,6 +421,39 @@ describe("SecretsPage — agent grants", () => {
     server.use(
       grantHandler({
         dryRun: () => HttpResponse.json({ error: "boom" }, { status: 500 }),
+        onWrite: () => (writes += 1),
+      }),
+    );
+
+    renderSecrets();
+    await openEditor(user, "google-gemini-key");
+    await user.click(screen.getByTestId("grant-agent-remove-agent7"));
+
+    expect(
+      await screen.findByTestId("grant-losing-access-warning"),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("grant-save")).toBeDisabled();
+    await user.click(screen.getByTestId("grant-save"));
+    expect(writes).toBe(0);
+
+    await user.click(screen.getByTestId("grant-acknowledge"));
+    await user.click(screen.getByTestId("grant-save"));
+    await waitFor(() => expect(writes).toBe(1));
+  });
+
+  it("treats an incomplete impact scan as a failed check, not as an empty one", async () => {
+    // The backend answers 200 with agentsLosingAccessComplete=false when it could
+    // not list every environment. An empty list from that is "could not tell".
+    const user = userEvent.setup();
+    let writes = 0;
+    server.use(
+      grantHandler({
+        dryRun: () =>
+          HttpResponse.json({
+            dryRun: true,
+            agentsLosingAccess: [],
+            agentsLosingAccessComplete: false,
+          }),
         onWrite: () => (writes += 1),
       }),
     );
@@ -504,7 +560,9 @@ describe("SecretsPage — agent grants", () => {
     // AccessibleDialog moves focus to its first control in a requestAnimationFrame
     // after opening. Wait for that, or it can land after the focus() below.
     const dialog = screen.getByTestId("edit-grant-dialog");
-    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
+    await waitFor(() =>
+      expect(dialog.contains(document.activeElement)).toBe(true),
+    );
     screen.getByTestId("grant-mode-specific").focus();
     await user.keyboard("{Home}");
     expect(screen.getByTestId("grant-mode-all")).toHaveAttribute(
@@ -582,3 +640,28 @@ describe("SecretsPage — agent grants", () => {
     expect(screen.getByTestId("edit-grant-dialog")).toBeInTheDocument();
   });
 });
+describe("the grant mock mirrors the backend's contract", () => {
+  it("rejects an empty allowedAgents, as the backend does", async () => {
+    // The UI refuses an empty list before sending one, so this is a net rather
+    // than a path: if that guard ever regresses, the mock must fail the test
+    // instead of answering 200 to a request a real EDDI rejects with 400.
+    await expect(
+      updateSecretGrant({
+        tenantId: "default",
+        keyName: "google-gemini-key",
+        allowedAgents: [],
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("accepts a non-empty list", async () => {
+    await expect(
+      updateSecretGrant({
+        tenantId: "default",
+        keyName: "google-gemini-key",
+        allowedAgents: ["agent5"],
+      }),
+    ).resolves.toMatchObject({ keyName: "google-gemini-key" });
+  });
+});
+

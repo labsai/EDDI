@@ -168,7 +168,7 @@ public class RestSecretStore implements IRestSecretStore {
             // no preview.
             SecretMetadata before = secretProvider.getMetadata(ref);
 
-            var losingAccess = grantImpactAnalyzer.agentsLosingAccess(ref, grant);
+            var impact = grantImpactAnalyzer.agentsLosingAccess(ref, grant);
 
             SecretMetadata after;
             if (dryRun) {
@@ -192,7 +192,7 @@ public class RestSecretStore implements IRestSecretStore {
                 // decrypt for every agent already using the key.
             }
 
-            return Response.ok(grantResponse(ref, before, after, losingAccess, dryRun)).build();
+            return Response.ok(grantResponse(ref, before, after, impact, dryRun)).build();
         } catch (ISecretProvider.SecretNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND)
                     .entity(Map.of("error", "Secret not found", "reference", ref.toReferenceString(), "action",
@@ -258,7 +258,8 @@ public class RestSecretStore implements IRestSecretStore {
      * first.
      */
     private static Map<String, Object> grantResponse(SecretReference ref, SecretMetadata before, SecretMetadata after,
-                                                     List<VaultGrantImpactAnalyzer.AffectedAgent> losingAccess, boolean dryRun) {
+                                                     VaultGrantImpactAnalyzer.GrantImpact impact, boolean dryRun) {
+        var losingAccess = impact.agentsLosingAccess();
         // LinkedHashMap, not Map.of: description is nullable and Map.of rejects nulls,
         // and a stable field order makes the response readable in a terminal.
         var response = new LinkedHashMap<String, Object>();
@@ -278,11 +279,26 @@ public class RestSecretStore implements IRestSecretStore {
         // agents deployed on the node that answered, and an API consumer should not
         // mistake it for the whole fleet.
         response.put("agentsLosingAccessScope", "this-node");
+        // False when an environment could not be listed. A caller must be able to
+        // tell "nothing breaks" from "could not tell", or it will read the empty
+        // list as the former and narrow the grant on that basis.
+        response.put("agentsLosingAccessComplete", impact.complete());
+        // One key, both reasons: an incomplete scan and a named casualty can be true
+        // at once, and a second put() would have silently dropped whichever came
+        // first.
+        var warnings = new ArrayList<String>();
         if (!losingAccess.isEmpty()) {
-            response.put("warning", losingAccess.size() + " deployed agent(s) reference this secret and are not on the new grant list. "
+            warnings.add(losingAccess.size() + " deployed agent(s) reference this secret and are not on the new grant list. "
                     + "They keep running — the grant is checked when an agent is deployed, not when a secret is resolved — but under "
                     + "eddi.vault.grant-enforcement=enforce their next deployment will be REFUSED. Add them to allowedAgents, or "
                     + "remove the reference from their configuration first.");
+        }
+        if (!impact.complete()) {
+            warnings.add("The deployed agents could not be listed in full, so this list may be short. Treat it as unknown "
+                    + "rather than as empty before narrowing the grant.");
+        }
+        if (!warnings.isEmpty()) {
+            response.put("warning", String.join(" ", warnings));
         }
         return response;
     }

@@ -1648,7 +1648,7 @@
     "grantOnlyTheseAgents": "이 에이전트만",
     "grantAllHint": "이 테넌트의 모든 에이전트가 이 시크릿을 참조할 수 있습니다. 범위를 제한하면 유출된 하나의 설정이 닿을 수 있는 범위가 줄어듭니다.",
     "grantAddAgent": "에이전트 추가",
-    "grantEmptyError": "에이전트를 하나 이상 추가하거나 ‘모든 에이전트’를 선택하십시오. 목록이 비어 있으면 모든 에이전트를 의미합니다.",
+    "grantEmptyError": "에이전트를 하나 이상 추가하거나 ‘모든 에이전트’를 선택하십시오. 빈 목록은 허용되지 않습니다.",
     "grantCheckingImpact": "배포된 에이전트를 확인하는 중…",
     "grantLosingAccessTitle": "이 시크릿을 사용하여 접속 권한을 상실할 배포된 에이전트({{count}})",
     "grantLosingAccessBody": "지금은 계속 실행됩니다 — 권한은 시크릿 사용 시가 아니라 에이전트 배포 시 확인됩니다 — 하지만 다음 배포는 거부됩니다.",

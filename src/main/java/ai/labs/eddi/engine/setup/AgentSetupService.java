@@ -1508,9 +1508,11 @@ public class AgentSetupService {
         }
         warn(resources, agentName, "Vault key '" + metadata.keyName() + "' is granted only to " + metadata.allowedAgents()
                 + ". The agent being created cannot be on that list yet, so with eddi.vault.grant-enforcement=enforce its "
-                + "deployment will be blocked until the grant is widened to the new agent's ID — PUT "
-                + "/secretstore/secrets/{tenantId}/{keyName}/grant, which does not need the secret's value (add ?dryRun=true to "
-                + "preview it first).");
+                + "deployment will be blocked until the grant is widened to the new agent's ID — PUT /secretstore/secrets/"
+                // The concrete path, not the template: an operator copies this line
+                // straight into curl, and {tenantId}/{keyName} would 404 there.
+                + metadata.tenantId() + "/" + metadata.keyName()
+                + "/grant, which does not need the secret's value (add ?dryRun=true to preview it first).");
     }
 
     /** Log a non-fatal vault problem and return it to the caller. */

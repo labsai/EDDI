@@ -43,7 +43,8 @@ class RestSecretStoreTest {
         secretResolver = mock(SecretResolver.class);
         grantImpactAnalyzer = mock(VaultGrantImpactAnalyzer.class);
         when(secretProvider.isAvailable()).thenReturn(true);
-        when(grantImpactAnalyzer.agentsLosingAccess(any(), any())).thenReturn(List.of());
+        when(grantImpactAnalyzer.agentsLosingAccess(any(), any()))
+                .thenReturn(new VaultGrantImpactAnalyzer.GrantImpact(List.of(), true));
         rest = new RestSecretStore(secretProvider, secretResolver, grantImpactAnalyzer);
     }
 
@@ -340,8 +341,8 @@ class RestSecretStoreTest {
     @Test
     void updateGrant_warnsAboutDeployedAgentsThatWouldLoseAccess() throws Exception {
         givenSecretGrantedTo(List.of("agentOne", "agentTwo"));
-        when(grantImpactAnalyzer.agentsLosingAccess(any(), eq(List.of("agentOne"))))
-                .thenReturn(List.of(new VaultGrantImpactAnalyzer.AffectedAgent("agentTwo", 3, "production")));
+        when(grantImpactAnalyzer.agentsLosingAccess(any(), eq(List.of("agentOne")))).thenReturn(new VaultGrantImpactAnalyzer.GrantImpact(
+                List.of(new VaultGrantImpactAnalyzer.AffectedAgent("agentTwo", 3, "production")), true));
 
         Response resp = rest.updateGrant("default", "llm-api-key", false, new IRestSecretStore.GrantRequest(List.of("agentOne"), null));
 
@@ -353,10 +354,35 @@ class RestSecretStoreTest {
     }
 
     @Test
+    void updateGrant_reportsAnIncompleteImpactScanRatherThanAnEmptyOne() throws Exception {
+        // "Could not tell" must not arrive looking like "nothing breaks".
+        givenSecretGrantedTo(List.of("agentOne", "agentTwo"));
+        when(grantImpactAnalyzer.agentsLosingAccess(any(), any()))
+                .thenReturn(new VaultGrantImpactAnalyzer.GrantImpact(List.of(), false));
+
+        Map<String, Object> body = entityOf(
+                rest.updateGrant("default", "llm-api-key", true, new IRestSecretStore.GrantRequest(List.of("agentOne"), null)));
+
+        assertEquals(Boolean.FALSE, body.get("agentsLosingAccessComplete"));
+        assertTrue(String.valueOf(body.get("warning")).contains("may be short"), () -> "got: " + body.get("warning"));
+    }
+
+    @Test
+    void updateGrant_marksACompleteImpactScanAsComplete() throws Exception {
+        givenSecretGrantedTo(List.of("agentOne", "agentTwo"));
+
+        Map<String, Object> body = entityOf(
+                rest.updateGrant("default", "llm-api-key", false, new IRestSecretStore.GrantRequest(List.of("agentOne"), null)));
+
+        assertEquals(Boolean.TRUE, body.get("agentsLosingAccessComplete"));
+        assertFalse(body.containsKey("warning"));
+    }
+
+    @Test
     void updateGrant_dryRunWritesNothingButStillReportsTheImpact() throws Exception {
         givenSecretGrantedTo(List.of("agentOne", "agentTwo"));
-        when(grantImpactAnalyzer.agentsLosingAccess(any(), eq(List.of("agentOne"))))
-                .thenReturn(List.of(new VaultGrantImpactAnalyzer.AffectedAgent("agentTwo", 3, "production")));
+        when(grantImpactAnalyzer.agentsLosingAccess(any(), eq(List.of("agentOne")))).thenReturn(new VaultGrantImpactAnalyzer.GrantImpact(
+                List.of(new VaultGrantImpactAnalyzer.AffectedAgent("agentTwo", 3, "production")), true));
 
         Response resp = rest.updateGrant("default", "llm-api-key", true,
                 new IRestSecretStore.GrantRequest(List.of("agentOne"), "would-be description"));

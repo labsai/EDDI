@@ -148,7 +148,11 @@ function GrantEditor({
    * whenever it failed — the one moment the warning exists for. */
   const impactPending =
     impactEnabled && (impact.isPending || impact.isFetching);
-  const impactFailed = impactEnabled && !impactPending && impact.isError;
+  // A scan the backend could not finish counts as failed, not as "nothing
+  // breaks": it answers 200 with a list that may be short.
+  const impactIncomplete = impact.data?.agentsLosingAccessComplete === false;
+  const impactFailed =
+    impactEnabled && !impactPending && (impact.isError || impactIncomplete);
   const losingAccess = impactEnabled
     ? (impact.data?.agentsLosingAccess ?? [])
     : [];
@@ -360,7 +364,7 @@ function GrantEditor({
               <span>
                 {t(
                   "secrets.grantEmptyError",
-                  "Add at least one agent, or choose “All agents”. An empty list means every agent.",
+                  "Add at least one agent, or choose “All agents”. An empty list is not allowed.",
                 )}
               </span>
             </p>

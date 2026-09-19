@@ -3691,9 +3691,12 @@ export const secretsHandlers = [
       if (!existing) {
         return HttpResponse.json({ error: "Secret not found" }, { status: 404 });
       }
-      if (!body.allowedAgents) {
+      // An empty array is truthy, so a bare falsiness check accepted `[]` — which
+      // the backend rejects, because everywhere else an empty list means "every
+      // agent". A mock that accepts it hides exactly the regression that matters.
+      if (!Array.isArray(body.allowedAgents) || body.allowedAgents.length === 0) {
         return HttpResponse.json(
-          { error: "allowedAgents is required" },
+          { error: "allowedAgents is required and must not be empty" },
           { status: 400 },
         );
       }
