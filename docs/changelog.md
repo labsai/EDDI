@@ -50,6 +50,44 @@ bottom of this file and are never archived.
 
 ---
 
+## ♿ fix(ui): closing a dialog hands focus back to what opened it (2026-09-19)
+
+**Repo:** EDDI (`fix/dialog-return-focus`)
+
+`AccessibleDialog` promises "return focus to trigger element on close". It did not keep that promise
+in either of the two ways the Manager closes a dialog, so keyboard and screen-reader users were left on
+`<body>` and had to find their place from the top of the page again.
+
+### What was wrong
+
+- **With an `autoFocus` field inside** (`CreateAgentDialog`'s Name, the dictionary picker's search),
+  "what had focus" was recorded in a `useEffect`. React applies `autoFocus` during commit, before any
+  effect runs, so the recorded element was the dialog's own field. On close it had unmounted, and
+  focusing it did nothing.
+- **When closed by unmounting.** `ShareDialog` (on the Agents, Workflows and resource list pages) and
+  the Triggers dialog are rendered as `{target && <X open … />}` and close by unmounting. Focus was
+  only restored on an `open === false` render, which an unmount never produces.
+
+### What changed
+
+- `ui/manager/src/components/ui/accessible-dialog.tsx`: the trigger is recorded while rendering the
+  opening render, before React commits the dialog. It is restored in the effect's cleanup, which runs
+  on close and on unmount alike, but only if focus was actually lost with the dialog (it sits on
+  `<body>`). That guard does two things: StrictMode runs the cleanup once on mount with the dialog
+  still up, where an unconditional restore pulled focus out of the open dialog, and focus the user
+  deliberately moved elsewhere is not taken back.
+- `ui/manager/src/components/ui/__tests__/accessible-dialog-focus-return.test.tsx` (new): autoFocus
+  close, unmount close, StrictMode mount, and focus moved elsewhere. Against `main` the first two fail;
+  with the `<body>` guard removed the last two fail.
+
+### Note
+
+This rewrites the same effect as #788 (initial focus no longer steals from a focused field). Whichever
+lands second takes a `main` merge with one conflict in that effect, and the result keeps both: the
+guarded, cancelled frame from #788 and the cleanup restore from here.
+
+---
+
 ## ⬆️ chore(ui): Node 22 toolchain, Stryker 10, Vitest 5 for the Chat UI (2026-09-17)
 
 **Repo:** EDDI (`feat/node-22-toolchain`, stacked on `fix/ui-npm-vulnerabilities` / #770)
