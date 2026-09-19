@@ -11805,6 +11805,172 @@
       ]
     },
     {
+      "id": 168,
+      "type": "row",
+      "title": "RAG Ingestion",
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
+      "panels": [
+        {
+          "id": 169,
+          "type": "timeseries",
+          "title": "Segments stored by knowledge base",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_ingestion_segments_stored_total` — chunks embedded and written to a knowledge base by source ingestion, per `knowledgeBase` and `source`. Flat while a crawl runs means nothing changed.",
+          "gridPos": {
+            "h": 6,
+            "w": 12,
+            "x": 0,
+            "y": 25
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (knowledgeBase, source) (rate(eddi_ingestion_segments_stored_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{knowledgeBase}} / {{source}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 170,
+          "type": "timeseries",
+          "title": "Ingestion errors by source",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_ingestion_errors_total` — pages that failed to fetch, convert or embed during source ingestion, per `knowledgeBase` and `source`.",
+          "gridPos": {
+            "h": 6,
+            "w": 12,
+            "x": 12,
+            "y": 25
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (knowledgeBase, source) (rate(eddi_ingestion_errors_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{knowledgeBase}} / {{source}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        }
+      ]
+    },
+    {
       "id": 152,
       "type": "row",
       "title": "Runtime context (Quarkus / JVM built-ins)",
@@ -11813,7 +11979,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 24
+        "y": 25
       },
       "panels": [
         {
@@ -11829,7 +11995,7 @@
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 24
+            "y": 25
           },
           "targets": [
             {
@@ -11904,7 +12070,7 @@
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 24
+            "y": 25
           },
           "targets": [
             {
@@ -12001,7 +12167,7 @@
             "h": 7,
             "w": 8,
             "x": 0,
-            "y": 31
+            "y": 32
           },
           "targets": [
             {
@@ -12087,7 +12253,7 @@
             "h": 7,
             "w": 8,
             "x": 8,
-            "y": 31
+            "y": 32
           },
           "targets": [
             {
@@ -12173,7 +12339,7 @@
             "h": 7,
             "w": 8,
             "x": 16,
-            "y": 31
+            "y": 32
           },
           "targets": [
             {
@@ -12248,7 +12414,7 @@
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 38
+            "y": 39
           },
           "targets": [
             {
@@ -12324,7 +12490,7 @@
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 38
+            "y": 39
           },
           "targets": [
             {
