@@ -94,6 +94,7 @@ public class WebCrawler {
         if (!CrawlUrls.isHttpScheme(request.seedUrl())) {
             sink.onError(new CrawlError(request.seedUrl(), "Seed URL must be http or https", 0));
             counters.errors++;
+            counters.unreachable++;
             return counters.summarize(start, StopReason.COMPLETED);
         }
 
@@ -101,6 +102,7 @@ public class WebCrawler {
         if (seedHost == null) {
             sink.onError(new CrawlError(request.seedUrl(), "Seed URL has no host", 0));
             counters.errors++;
+            counters.unreachable++;
             return counters.summarize(start, StopReason.COMPLETED);
         }
 
@@ -207,6 +209,7 @@ public class WebCrawler {
             return;
         } catch (IOException | RuntimeException e) {
             counters.errors++;
+            counters.unreachable++;
             sink.onError(new CrawlError(candidate.fetchUrl(), describe(e), 0));
             return;
         }
@@ -221,6 +224,9 @@ public class WebCrawler {
         }
         if (!page.isOk()) {
             counters.errors++;
+            if (saysNothingAboutContent(page.statusCode())) {
+                counters.unreachable++;
+            }
             sink.onError(new CrawlError(candidate.fetchUrl(), "HTTP " + page.statusCode(), page.statusCode()));
             return;
         }
@@ -483,8 +489,20 @@ public class WebCrawler {
     }
 
     /**
+     * A status that reports the server's condition rather than the page's: an
+     * outage, an overloaded origin or a rate limit. A 404 or 410 is the opposite —
+     * the server answering that the page is gone.
+     */
+    private static boolean saysNothingAboutContent(int statusCode) {
+        return statusCode >= 500 || statusCode == 408 || statusCode == 429;
+    }
+
+    /**
      * What a crawl did.
      *
+     * @param unreachableErrors
+     *            the errors that say nothing about the source's content — transport
+     *            failures, server errors, rate limits, an unusable seed
      * @param stopReason
      *            whether the crawl covered the source or ran out of budget. The
      *            caller needs this before concluding that an unseen document has
@@ -496,14 +514,27 @@ public class WebCrawler {
             int pagesUnchanged,
             int pagesSkipped,
             int errors,
+            int unreachableErrors,
             int fetchAttempts,
             long bytesDownloaded,
             Duration duration,
             StopReason stopReason) {
 
-        /** Whether the crawl covered its whole scope, so absence means deletion. */
+        /**
+         * Whether the crawl covered its whole scope, so absence means deletion.
+         *
+         * <p>
+         * A crawl that could not reach the source at all also ends as
+         * {@code COMPLETED}: an unreachable seed leaves nothing queued. Counting that
+         * as coverage would have an outage report every document as gone. So a crawl
+         * where nothing arrived and every error was an outage-type failure is not
+         * coverage. A 404 still is — that is the server saying the page is gone — and
+         * so is a dead link on a site that otherwise answered.
+         */
         public boolean coveredWholeSource() {
-            return stopReason == StopReason.COMPLETED;
+            boolean nothingReached = pagesFetched + pagesUnchanged == 0 && errors > 0
+                    && unreachableErrors == errors;
+            return stopReason == StopReason.COMPLETED && !nothingReached;
         }
     }
 
@@ -512,11 +543,13 @@ public class WebCrawler {
         private int unchanged;
         private int skipped;
         private int errors;
+        private int unreachable;
         private int fetchAttempts;
         private long bytesDownloaded;
 
         CrawlSummary summarize(Instant start, StopReason stopReason) {
-            return new CrawlSummary(pagesFetched, unchanged, skipped, errors, fetchAttempts, bytesDownloaded,
+            return new CrawlSummary(pagesFetched, unchanged, skipped, errors, unreachable, fetchAttempts,
+                    bytesDownloaded,
                     Duration.between(start, Instant.now()), stopReason);
         }
     }

@@ -75,6 +75,15 @@ public class IngestionSource {
         settings().validate(name);
     }
 
+    /**
+     * What this source's ingestion state is keyed by: its id, or its name when it
+     * has none. Two sources of one knowledge base must never share it — see
+     * {@code RagConfiguration.validate()}.
+     */
+    public String effectiveId() {
+        return id == null || id.isBlank() ? name : id;
+    }
+
     /** Never null — an absent settings block means "all defaults". */
     public IngestionSettings settings() {
         return settings == null ? new IngestionSettings() : settings;
@@ -333,6 +342,12 @@ public class IngestionSource {
             if (costPerThousandSegments != null && costPerThousandSegments < 0) {
                 throw new IllegalArgumentException(
                         "costPerThousandSegments of ingestion source '" + sourceName + "' must not be negative");
+            }
+            if (maxBytesPerPage != null && maxBytesPerPage <= 0) {
+                // The fetcher reads a non-positive cap as "no cap", so letting one
+                // through would turn a typo into unbounded downloads.
+                throw new IllegalArgumentException(
+                        "maxBytesPerPage of ingestion source '" + sourceName + "' must be positive");
             }
         }
 

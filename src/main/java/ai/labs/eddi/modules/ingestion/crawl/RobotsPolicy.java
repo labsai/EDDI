@@ -83,6 +83,7 @@ public final class RobotsPolicy {
 
         boolean inSpecificGroup = false;
         boolean inWildcardGroup = false;
+        boolean sawSpecificGroup = false;
         // A blank line ends a group; consecutive User-agent lines share one body.
         boolean lastLineWasUserAgent = false;
 
@@ -114,6 +115,7 @@ public final class RobotsPolicy {
                     String declared = value.toLowerCase(Locale.ROOT);
                     if (!declared.isEmpty() && !agent.isEmpty() && matchesAgent(agent, declared)) {
                         inSpecificGroup = true;
+                        sawSpecificGroup = true;
                     } else if ("*".equals(declared)) {
                         inWildcardGroup = true;
                     }
@@ -155,8 +157,10 @@ public final class RobotsPolicy {
         }
 
         // A group naming this crawler replaces the wildcard group entirely — it does
-        // not merge with it.
-        boolean hasSpecific = !specificRules.isEmpty() || specificDelay != null;
+        // not merge with it. Whether one exists is tracked by its declaration, not
+        // derived from its rules: "Disallow:" with nothing after it is how a site
+        // grants one crawler full access, and that group has no rules at all.
+        boolean hasSpecific = sawSpecificGroup;
         return new RobotsPolicy(
                 hasSpecific ? specificRules : wildcardRules,
                 hasSpecific ? specificDelay : wildcardDelay,

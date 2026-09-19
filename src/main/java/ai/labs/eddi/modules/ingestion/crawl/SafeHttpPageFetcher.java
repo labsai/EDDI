@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.ingestion.crawl;
 
 import ai.labs.eddi.engine.httpclient.SafeHttpClient;
+import ai.labs.eddi.engine.runtime.IRuntime;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -16,6 +17,9 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.Locale;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * The production {@link PageFetcher}: {@link SafeHttpClient} with a bounded
@@ -46,10 +50,12 @@ public class SafeHttpPageFetcher implements PageFetcher {
     private static final String ACCEPT_HTML = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
 
     private final SafeHttpClient httpClient;
+    private final IRuntime runtime;
 
     @Inject
-    public SafeHttpPageFetcher(SafeHttpClient httpClient) {
+    public SafeHttpPageFetcher(SafeHttpClient httpClient, IRuntime runtime) {
         this.httpClient = httpClient;
+        this.runtime = runtime;
     }
 
     @Override
@@ -92,17 +98,28 @@ public class SafeHttpPageFetcher implements PageFetcher {
      * Reads at most {@code maxBytes}, then stops. Closing the stream early aborts
      * the transfer rather than politely draining a response we have no use for.
      */
-    private static BoundedBody readBounded(InputStream stream, long maxBytes, Duration timeout) throws IOException {
+    private BoundedBody readBounded(InputStream stream, long maxBytes, Duration timeout) throws IOException {
         long cap = maxBytes > 0 ? maxBytes : Long.MAX_VALUE;
         // The request timeout covers the response HEADERS only. Without a deadline
         // on the body a server that trickles one byte per second holds this thread
         // for weeks — the crawl's own budget is checked between pages, not during
         // one.
-        long deadlineNanos = System.nanoTime() + readBudget(timeout).toNanos();
+        Duration budget = readBudget(timeout);
+        long deadlineNanos = System.nanoTime() + budget.toNanos();
 
+        // The check in the loop only runs when a read returns, and a server that
+        // sends its headers and then nothing never returns one. Closing the stream
+        // from outside is what unblocks a read stuck there: it throws, and what was
+        // collected so far comes back as truncated.
+        AtomicBoolean expired = new AtomicBoolean();
+        ScheduledFuture<?> watchdog = runtime.getScheduledExecutorService().schedule(() -> {
+            expired.set(true);
+            closeQuietly(stream);
+        }, budget.toMillis(), TimeUnit.MILLISECONDS);
+
+        ByteArrayOutputStream collected = new ByteArrayOutputStream();
         try (InputStream body = stream) {
             byte[] buffer = new byte[8192];
-            ByteArrayOutputStream collected = new ByteArrayOutputStream();
             long total = 0;
             int read;
             while ((read = body.read(buffer)) != -1) {
@@ -118,7 +135,14 @@ public class SafeHttpPageFetcher implements PageFetcher {
                 collected.write(buffer, 0, read);
                 total += read;
             }
-            return new BoundedBody(collected.toByteArray(), false);
+            return new BoundedBody(collected.toByteArray(), expired.get());
+        } catch (IOException e) {
+            if (expired.get()) {
+                return new BoundedBody(collected.toByteArray(), true);
+            }
+            throw e;
+        } finally {
+            watchdog.cancel(false);
         }
     }
 
