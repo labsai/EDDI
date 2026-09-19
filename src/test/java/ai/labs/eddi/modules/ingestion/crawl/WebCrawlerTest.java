@@ -439,8 +439,15 @@ class WebCrawlerTest {
             FakeSite site = new FakeSite().page(SITE + "/", linkTo(SITE + "/a"))
                     .page(SITE + "/a", "<html><body>A</body></html>");
             RecordingSink sink = new RecordingSink();
+            // Each fetch takes a few milliseconds, so the clock is certain to move past
+            // the 1ns budget. Without it the whole crawl could finish inside a single
+            // tick of a coarse clock (Windows) and the deadline check never fired.
+            PageFetcher slowSite = command -> {
+                Thread.sleep(5);
+                return site.fetch(command);
+            };
 
-            CrawlSummary summary = new WebCrawler(site).crawl(
+            CrawlSummary summary = new WebCrawler(slowSite).crawl(
                     request(SITE + "/", Scope.defaults(),
                             new Limits(100, 100, 0, 0, Duration.ofNanos(1), Duration.ofSeconds(5))),
                     sink);
