@@ -345,6 +345,12 @@ public class AgentFactory implements IAgentFactory {
         agentEnvironment.remove(new AgentId(agentId, version));
     }
 
+    @Override
+    public List<IAgent> getAllDeployedAgents(Deployment.Environment environment) {
+        // A snapshot: the registry is concurrently modified by deployments.
+        return List.copyOf(getAgentEnvironment(environment).values());
+    }
+
     private ConcurrentHashMap<AgentId, IAgent> getAgentEnvironment(Deployment.Environment environment) {
         return environments.get(environment);
     }

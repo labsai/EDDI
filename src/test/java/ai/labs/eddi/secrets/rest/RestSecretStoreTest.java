@@ -6,6 +6,7 @@ package ai.labs.eddi.secrets.rest;
 
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.VaultGrantImpactAnalyzer;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 import jakarta.ws.rs.core.Response;
@@ -16,8 +17,10 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -31,14 +34,17 @@ class RestSecretStoreTest {
 
     private ISecretProvider secretProvider;
     private SecretResolver secretResolver;
+    private VaultGrantImpactAnalyzer grantImpactAnalyzer;
     private RestSecretStore rest;
 
     @BeforeEach
     void setUp() {
         secretProvider = mock(ISecretProvider.class);
         secretResolver = mock(SecretResolver.class);
+        grantImpactAnalyzer = mock(VaultGrantImpactAnalyzer.class);
         when(secretProvider.isAvailable()).thenReturn(true);
-        rest = new RestSecretStore(secretProvider, secretResolver);
+        when(grantImpactAnalyzer.agentsLosingAccess(any(), any())).thenReturn(List.of());
+        rest = new RestSecretStore(secretProvider, secretResolver, grantImpactAnalyzer);
     }
 
     // ─── storeSecret ───
@@ -98,6 +104,300 @@ class RestSecretStoreTest {
         when(secretProvider.isAvailable()).thenReturn(false);
         Response resp = rest.storeSecret("default", "key", new IRestSecretStore.SecretRequest("val", null, null));
         assertEquals(503, resp.getStatus());
+    }
+
+    // ─── updateGrant ───
+
+    /** Metadata for an existing secret granted to {@code allowedAgents}. */
+    private static SecretMetadata existing(List<String> allowedAgents) {
+        return new SecretMetadata("default", "llm-api-key", Instant.parse("2024-01-01T00:00:00Z"), null, null, "checksum-abc",
+                "LLM provider key", allowedAgents);
+    }
+
+    /**
+     * Makes the provider behave like a real one: the secret exists, and an update
+     * echoes back the grant it was given.
+     */
+    @SuppressWarnings("unchecked")
+    private void givenSecretGrantedTo(List<String> allowedAgents) throws Exception {
+        SecretMetadata before = existing(allowedAgents);
+        when(secretProvider.getMetadata(any(SecretReference.class))).thenReturn(before);
+        when(secretProvider.updateGrant(any(SecretReference.class), any(), any())).thenAnswer(invocation -> {
+            List<String> grant = invocation.getArgument(1);
+            String description = invocation.getArgument(2);
+            return new SecretMetadata(before.tenantId(), before.keyName(), before.createdAt(), before.lastAccessedAt(), before.lastRotatedAt(),
+                    before.checksum(), description != null ? description : before.description(), grant);
+        });
+    }
+
+    @Test
+    void updateGrant_widensWithoutAValue() throws Exception {
+        givenSecretGrantedTo(List.of("agentOne", "agentTwo"));
+
+        Response resp = rest.updateGrant("default", "llm-api-key", false,
+                new IRestSecretStore.GrantRequest(List.of("agentOne", "agentTwo", "agentThree"), null));
+
+        assertEquals(200, resp.getStatus());
+        verify(secretProvider).updateGrant(any(SecretReference.class), eq(List.of("agentOne", "agentTwo", "agentThree")), isNull());
+        // The whole point: nothing on this path can write a value.
+        verify(secretProvider, never()).store(any(), any(), any(), any());
+
+        Map<String, Object> body = entityOf(resp);
+        assertEquals(List.of("agentOne", "agentTwo", "agentThree"), body.get("allowedAgents"));
+        assertEquals(List.of("agentOne", "agentTwo"), body.get("previousAllowedAgents"));
+        assertEquals(Boolean.FALSE, body.get("grantsAllAgents"));
+        assertFalse(body.containsKey("warning"));
+    }
+
+    @Test
+    void updateGrant_tightens() throws Exception {
+        givenSecretGrantedTo(List.of("agentOne", "agentTwo"));
+
+        Response resp = rest.updateGrant("default", "llm-api-key", false, new IRestSecretStore.GrantRequest(List.of("agentOne"), null));
+
+        assertEquals(200, resp.getStatus());
+        verify(secretProvider).updateGrant(any(SecretReference.class), eq(List.of("agentOne")), isNull());
+        assertEquals(List.of("agentOne"), entityOf(resp).get("allowedAgents"));
+    }
+
+    @Test
+    void updateGrant_setsTheWildcard() throws Exception {
+        givenSecretGrantedTo(List.of("agentOne"));
+
+        Response resp = rest.updateGrant("default", "llm-api-key", false, new IRestSecretStore.GrantRequest(List.of("*"), null));
+
+        assertEquals(200, resp.getStatus());
+        verify(secretProvider).updateGrant(any(SecretReference.class), eq(List.of("*")), isNull());
+        assertEquals(Boolean.TRUE, entityOf(resp).get("grantsAllAgents"));
+    }
+
+    @Test
+    void updateGrant_clearsTheWildcard() throws Exception {
+        givenSecretGrantedTo(List.of("*"));
+
+        Response resp = rest.updateGrant("default", "llm-api-key", false,
+                new IRestSecretStore.GrantRequest(List.of("agentOne", "agentTwo"), null));
+
+        assertEquals(200, resp.getStatus());
+        verify(secretProvider).updateGrant(any(SecretReference.class), eq(List.of("agentOne", "agentTwo")), isNull());
+        Map<String, Object> body = entityOf(resp);
+        assertEquals(Boolean.FALSE, body.get("grantsAllAgents"));
+        assertEquals(List.of("*"), body.get("previousAllowedAgents"));
+    }
+
+    @Test
+    void updateGrant_collapsesAWildcardMixedWithAgentIdsOntoTheWildcardAlone() throws Exception {
+        // ["*", "agentOne"] already means "everyone" to VaultGrantChecker. Storing it
+        // verbatim would read to the next operator as a narrow grant.
+        givenSecretGrantedTo(List.of("agentOne"));
+
+        rest.updateGrant("default", "llm-api-key", false, new IRestSecretStore.GrantRequest(List.of("*", "agentOne"), null));
+
+        verify(secretProvider).updateGrant(any(SecretReference.class), eq(List.of("*")), isNull());
+    }
+
+    @Test
+    void updateGrant_dropsDuplicatesButKeepsOrder() throws Exception {
+        givenSecretGrantedTo(List.of("agentOne"));
+
+        rest.updateGrant("default", "llm-api-key", false,
+                new IRestSecretStore.GrantRequest(List.of("agentTwo", "agentOne", "agentTwo"), null));
+
+        verify(secretProvider).updateGrant(any(SecretReference.class), eq(List.of("agentTwo", "agentOne")), isNull());
+    }
+
+    @Test
+    void updateGrant_replacesTheDescriptionWhenOneIsGiven() throws Exception {
+        givenSecretGrantedTo(List.of("agentOne"));
+
+        Response resp = rest.updateGrant("default", "llm-api-key", false,
+                new IRestSecretStore.GrantRequest(List.of("agentOne"), "LLM provider key (production)"));
+
+        verify(secretProvider).updateGrant(any(SecretReference.class), eq(List.of("agentOne")), eq("LLM provider key (production)"));
+        assertEquals("LLM provider key (production)", entityOf(resp).get("description"));
+    }
+
+    @Test
+    void updateGrant_returns404WhenTheSecretDoesNotExist() throws Exception {
+        when(secretProvider.getMetadata(any(SecretReference.class))).thenThrow(new ISecretProvider.SecretNotFoundException("not found"));
+
+        Response resp = rest.updateGrant("default", "no-such-key", false, new IRestSecretStore.GrantRequest(List.of("*"), null));
+
+        assertEquals(404, resp.getStatus());
+        // A grant edit must never conjure a secret: a typo has to fail, not create a
+        // valueless entry that later fails to decrypt.
+        verify(secretProvider, never()).updateGrant(any(), any(), any());
+    }
+
+    @Test
+    void updateGrant_returns404WhenTheSecretIsDeletedMidFlight() throws Exception {
+        when(secretProvider.getMetadata(any(SecretReference.class))).thenReturn(existing(List.of("agentOne")));
+        when(secretProvider.updateGrant(any(SecretReference.class), any(), any()))
+                .thenThrow(new ISecretProvider.SecretNotFoundException("not found"));
+
+        Response resp = rest.updateGrant("default", "llm-api-key", false, new IRestSecretStore.GrantRequest(List.of("*"), null));
+
+        assertEquals(404, resp.getStatus());
+    }
+
+    @Test
+    void updateGrant_returns400WhenAllowedAgentsIsOmitted() throws Exception {
+        givenSecretGrantedTo(List.of("agentOne"));
+
+        // storeSecret defaults a missing list to ["*"]. On an EDIT that would silently
+        // open a narrowed secret to every agent because a field was left out.
+        Response resp = rest.updateGrant("default", "llm-api-key", false, new IRestSecretStore.GrantRequest(null, "still here"));
+
+        assertEquals(400, resp.getStatus());
+        verify(secretProvider, never()).updateGrant(any(), any(), any());
+    }
+
+    @Test
+    void updateGrant_returns400OnAnEmptyList() throws Exception {
+        // [] means "everyone" everywhere else. On an edit, a client that filtered its
+        // list down to nothing must not open the secret with a 200.
+        givenSecretGrantedTo(List.of("agentOne"));
+
+        Response resp = rest.updateGrant("default", "llm-api-key", false, new IRestSecretStore.GrantRequest(List.of(), null));
+
+        assertEquals(400, resp.getStatus());
+        verify(secretProvider, never()).updateGrant(any(), any(), any());
+    }
+
+    @Test
+    void updateGrant_returns400WhenBodyIsNull() throws Exception {
+        Response resp = rest.updateGrant("default", "llm-api-key", false, null);
+        assertEquals(400, resp.getStatus());
+        verify(secretProvider, never()).updateGrant(any(), any(), any());
+    }
+
+    @Test
+    void updateGrant_returns400OnABlankEntry() throws Exception {
+        Response resp = rest.updateGrant("default", "llm-api-key", false,
+                new IRestSecretStore.GrantRequest(Arrays.asList("agentOne", "  "), null));
+        assertEquals(400, resp.getStatus());
+        verify(secretProvider, never()).updateGrant(any(), any(), any());
+    }
+
+    @Test
+    void updateGrant_returns400OnAnEntryThatIsNotAnAgentId() throws Exception {
+        Response resp = rest.updateGrant("default", "llm-api-key", false,
+                new IRestSecretStore.GrantRequest(List.of("../etc/passwd"), null));
+        assertEquals(400, resp.getStatus());
+        verify(secretProvider, never()).updateGrant(any(), any(), any());
+    }
+
+    @Test
+    void updateGrant_returns400OnAnAbsurdlyLongList() throws Exception {
+        List<String> tooMany = IntStream.range(0, 501).mapToObj(i -> "agent" + i).toList();
+
+        Response resp = rest.updateGrant("default", "llm-api-key", false, new IRestSecretStore.GrantRequest(tooMany, null));
+
+        assertEquals(400, resp.getStatus());
+        verify(secretProvider, never()).updateGrant(any(), any(), any());
+    }
+
+    @Test
+    void updateGrant_returns400OnAnInvalidKeyName() throws Exception {
+        Response resp = rest.updateGrant("default", "../etc/passwd", false, new IRestSecretStore.GrantRequest(List.of("*"), null));
+        assertEquals(400, resp.getStatus());
+        verify(secretProvider, never()).updateGrant(any(), any(), any());
+    }
+
+    @Test
+    void updateGrant_returns503WhenVaultUnavailable() throws Exception {
+        when(secretProvider.isAvailable()).thenReturn(false);
+        Response resp = rest.updateGrant("default", "llm-api-key", false, new IRestSecretStore.GrantRequest(List.of("*"), null));
+        assertEquals(503, resp.getStatus());
+        verify(secretProvider, never()).updateGrant(any(), any(), any());
+    }
+
+    @Test
+    void updateGrant_returns500OnAProviderFailure() throws Exception {
+        when(secretProvider.getMetadata(any(SecretReference.class))).thenReturn(existing(List.of("agentOne")));
+        when(secretProvider.updateGrant(any(SecretReference.class), any(), any()))
+                .thenThrow(new ISecretProvider.SecretProviderException("boom"));
+
+        Response resp = rest.updateGrant("default", "llm-api-key", false, new IRestSecretStore.GrantRequest(List.of("*"), null));
+
+        assertEquals(500, resp.getStatus());
+    }
+
+    @Test
+    void updateGrant_doesNotInvalidateTheSecretCache() throws Exception {
+        // storeSecret has to invalidate because the plaintext may have changed. Here
+        // it cannot have, and the cache plays no part in the grant decision — so
+        // invalidating would only force a needless decrypt for every agent using the
+        // key.
+        givenSecretGrantedTo(List.of("agentOne"));
+
+        rest.updateGrant("default", "llm-api-key", false, new IRestSecretStore.GrantRequest(List.of("agentOne", "agentTwo"), null));
+
+        verify(secretResolver, never()).invalidateCache(any());
+        verify(secretResolver, never()).invalidateAll();
+    }
+
+    @Test
+    void updateGrant_warnsAboutDeployedAgentsThatWouldLoseAccess() throws Exception {
+        givenSecretGrantedTo(List.of("agentOne", "agentTwo"));
+        when(grantImpactAnalyzer.agentsLosingAccess(any(), eq(List.of("agentOne"))))
+                .thenReturn(List.of(new VaultGrantImpactAnalyzer.AffectedAgent("agentTwo", 3, "production")));
+
+        Response resp = rest.updateGrant("default", "llm-api-key", false, new IRestSecretStore.GrantRequest(List.of("agentOne"), null));
+
+        assertEquals(200, resp.getStatus());
+        Map<String, Object> body = entityOf(resp);
+        assertEquals(List.of(new VaultGrantImpactAnalyzer.AffectedAgent("agentTwo", 3, "production")), body.get("agentsLosingAccess"));
+        assertTrue(String.valueOf(body.get("warning")).contains("next deployment"),
+                () -> "the warning should say what actually breaks, got: " + body.get("warning"));
+    }
+
+    @Test
+    void updateGrant_dryRunWritesNothingButStillReportsTheImpact() throws Exception {
+        givenSecretGrantedTo(List.of("agentOne", "agentTwo"));
+        when(grantImpactAnalyzer.agentsLosingAccess(any(), eq(List.of("agentOne"))))
+                .thenReturn(List.of(new VaultGrantImpactAnalyzer.AffectedAgent("agentTwo", 3, "production")));
+
+        Response resp = rest.updateGrant("default", "llm-api-key", true,
+                new IRestSecretStore.GrantRequest(List.of("agentOne"), "would-be description"));
+
+        assertEquals(200, resp.getStatus());
+        verify(secretProvider, never()).updateGrant(any(), any(), any());
+        Map<String, Object> body = entityOf(resp);
+        assertEquals(Boolean.TRUE, body.get("dryRun"));
+        // The projection, not the current state — otherwise the preview shows the
+        // operator what they already have.
+        assertEquals(List.of("agentOne"), body.get("allowedAgents"));
+        assertEquals(List.of("agentOne", "agentTwo"), body.get("previousAllowedAgents"));
+        assertEquals("would-be description", body.get("description"));
+        assertEquals(1, ((List<?>) body.get("agentsLosingAccess")).size());
+    }
+
+    @Test
+    void updateGrant_dryRunStill404sForAnUnknownKey() throws Exception {
+        when(secretProvider.getMetadata(any(SecretReference.class))).thenThrow(new ISecretProvider.SecretNotFoundException("not found"));
+
+        Response resp = rest.updateGrant("default", "no-such-key", true, new IRestSecretStore.GrantRequest(List.of("*"), null));
+
+        assertEquals(404, resp.getStatus());
+    }
+
+    @Test
+    void updateGrant_reportsTimestampsUnchanged() throws Exception {
+        // Echoed into the response so the operator can see for themselves that a
+        // grant edit was not a rotation.
+        givenSecretGrantedTo(List.of("agentOne"));
+
+        Map<String, Object> body = entityOf(
+                rest.updateGrant("default", "llm-api-key", false, new IRestSecretStore.GrantRequest(List.of("agentOne", "agentTwo"), null)));
+
+        assertEquals(Instant.parse("2024-01-01T00:00:00Z"), body.get("createdAt"));
+        assertNull(body.get("lastRotatedAt"));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> entityOf(Response response) {
+        return (Map<String, Object>) response.getEntity();
     }
 
     // ─── deleteSecret ───
@@ -421,7 +721,7 @@ class RestSecretStoreTest {
             var vaultProvider = mock(VaultSecretProvider.class);
             when(vaultProvider.isAvailable()).thenReturn(true);
             when(vaultProvider.rotateKek("oldkey123", "test-new-master-key")).thenReturn(5);
-            var vaultRest = new RestSecretStore(vaultProvider, secretResolver);
+            var vaultRest = new RestSecretStore(vaultProvider, secretResolver, grantImpactAnalyzer);
 
             Response resp = vaultRest.rotateKek(
                     new IRestSecretStore.KekRotationRequest("oldkey123", "test-new-master-key"));
@@ -439,7 +739,7 @@ class RestSecretStoreTest {
             when(vaultProvider.isAvailable()).thenReturn(true);
             when(vaultProvider.rotateKek(any(), any()))
                     .thenThrow(new ISecretProvider.SecretProviderException("Key derivation failed"));
-            var vaultRest = new RestSecretStore(vaultProvider, secretResolver);
+            var vaultRest = new RestSecretStore(vaultProvider, secretResolver, grantImpactAnalyzer);
 
             Response resp = vaultRest.rotateKek(
                     new IRestSecretStore.KekRotationRequest("oldkey123", "test-new-master-key"));

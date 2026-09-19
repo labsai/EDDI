@@ -8,6 +8,8 @@ import {
   rotateDek,
   rotateKek,
   resetTenant,
+  updateSecretGrant,
+  grantsAllAgents,
 } from "@/lib/api/secrets";
 
 /* ─── Query Keys ─── */
@@ -16,6 +18,13 @@ const secretKeys = {
   all: ["secrets"] as const,
   list: (tenantId: string) => ["secrets", "list", tenantId] as const,
   health: ["secrets", "health"] as const,
+  /**
+   * The dry-run impact of a proposed grant. Keyed on the candidate list itself,
+   * so each list is asked about once and editing back to a previous one is
+   * answered from cache instead of from the server.
+   */
+  grantImpact: (tenantId: string, keyName: string, allowedAgents: string[]) =>
+    ["secrets", "grant-impact", tenantId, keyName, allowedAgents] as const,
 };
 
 /* ─── Hooks ─── */
@@ -52,6 +61,62 @@ export function useStoreSecret() {
         queryKey: secretKeys.list(vars.tenantId),
       });
     },
+  });
+}
+
+/**
+ * Change which agents may use a secret, leaving the value alone.
+ *
+ * Separate from `useStoreSecret` because it is a different operation, not a
+ * cheaper spelling of the same one: no plaintext is sent, `lastRotatedAt` does
+ * not move, and it works on keys whose value nobody holds any more.
+ */
+export function useUpdateSecretGrant() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: {
+      tenantId: string;
+      keyName: string;
+      allowedAgents: string[];
+      description?: string;
+    }) => updateSecretGrant(args),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: secretKeys.list(vars.tenantId) });
+      // Every cached impact answer for this key was computed against the old
+      // grant, so none of them describes reality any more.
+      qc.invalidateQueries({
+        queryKey: ["secrets", "grant-impact", vars.tenantId, vars.keyName],
+      });
+    },
+  });
+}
+
+/**
+ * What a proposed grant would break, asked before it is applied.
+ *
+ * A dry run rather than a local computation: only the backend can tell which
+ * deployed agents actually reference the secret, and it has to walk each agent's
+ * workflows to find out. Disabled for the wildcard, where the answer is
+ * necessarily "nothing", so an operator opening up a grant pays no round trip.
+ */
+export function useSecretGrantImpact(args: {
+  tenantId: string;
+  keyName: string;
+  allowedAgents: string[];
+  enabled?: boolean;
+}) {
+  const { tenantId, keyName, allowedAgents, enabled = true } = args;
+  return useQuery({
+    queryKey: secretKeys.grantImpact(tenantId, keyName ?? "", allowedAgents),
+    queryFn: () =>
+      updateSecretGrant({
+        tenantId,
+        keyName,
+        allowedAgents,
+        dryRun: true,
+      }),
+    enabled:
+      enabled && allowedAgents.length > 0 && !grantsAllAgents(allowedAgents),
   });
 }
 
