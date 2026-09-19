@@ -215,6 +215,21 @@ class HtmlToMarkdownConverterSalvageTest {
         // it the conversion completes.
         String html = "<body>" + "<div>".repeat(20_000) + "deep content" + "</div>".repeat(20_000) + "</body>";
 
+        assertConvertsOnSmallStack(html);
+    }
+
+    @Test
+    @DisplayName("deeply nested lists do not overflow the stack")
+    void deepListNestingDoesNotOverflow() throws Exception {
+        // A list nested in a list item recurses through appendList directly, never
+        // through convertElement, so the cap there alone did not bound it.
+        String html = "<body>" + "<ul><li>".repeat(20_000) + "deep content" + "</li></ul>".repeat(20_000)
+                + "</body>";
+
+        assertConvertsOnSmallStack(html);
+    }
+
+    private void assertConvertsOnSmallStack(String html) throws InterruptedException {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         AtomicReference<String> output = new AtomicReference<>();
         Thread worker = new Thread(null, () -> {
