@@ -307,6 +307,12 @@ public class HtmlToMarkdownConverter {
     }
 
     private void appendList(StringBuilder output, Element element, String baseUrl, boolean ordered, int depth) {
+        if (depth > MAX_DEPTH) {
+            // A nested list recurses here directly, never through convertElement, so
+            // it needs the same bound or a page of nested lists overflows the stack.
+            output.append(normalizeWhitespace(element.text()));
+            return;
+        }
         output.append("\n");
         int number = 1;
         for (Element item : element.children()) {

@@ -5,8 +5,10 @@
 package ai.labs.eddi.modules.ingestion.crawl;
 
 import ai.labs.eddi.engine.httpclient.SafeHttpClient;
+import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.modules.ingestion.crawl.PageFetcher.FetchCommand;
 import ai.labs.eddi.modules.ingestion.crawl.PageFetcher.FetchedPage;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -24,12 +26,16 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -49,11 +55,20 @@ class SafeHttpPageFetcherTest {
 
     private SafeHttpClient httpClient;
     private SafeHttpPageFetcher fetcher;
+    private ScheduledExecutorService scheduler;
 
     @BeforeEach
     void setUp() {
         httpClient = mock(SafeHttpClient.class);
-        fetcher = new SafeHttpPageFetcher(httpClient);
+        scheduler = Executors.newSingleThreadScheduledExecutor();
+        IRuntime runtime = mock(IRuntime.class);
+        when(runtime.getScheduledExecutorService()).thenReturn(scheduler);
+        fetcher = new SafeHttpPageFetcher(httpClient, runtime);
+    }
+
+    @AfterEach
+    void tearDown() {
+        scheduler.shutdownNow();
     }
 
     private static FetchCommand command(long maxBytes) {
@@ -238,6 +253,88 @@ class SafeHttpPageFetcherTest {
 
         assertTrue(page.truncated(), "the read must give up rather than run forever");
         assertTrue(elapsedMillis < 5_000, "gave up after " + elapsedMillis + "ms");
+    }
+
+    @Test
+    @DisplayName("a body that stalls completely is cut off at the deadline")
+    void stalledBodyHitsTheReadDeadline() throws Exception {
+        // The trickle case above returns from read() often enough for the loop to
+        // check its deadline. A server that sends headers and then nothing never
+        // returns from read(), so only closing the stream from outside ends it.
+        HttpResponse<InputStream> response = mock(HttpResponse.class);
+        when(response.statusCode()).thenReturn(200);
+        when(response.uri()).thenReturn(URI.create("https://example.com/a"));
+        when(response.headers()).thenReturn(HttpHeaders.of(Map.of("Content-Type", List.of("text/html")),
+                (k, v) -> true));
+        when(response.body()).thenReturn(new StallingStream("<p>partial"));
+        when(httpClient.sendValidated(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(response);
+
+        FetchedPage page = assertTimeoutPreemptively(Duration.ofSeconds(10),
+                () -> fetcher.fetch(new FetchCommand("https://example.com/a", "EDDI-Crawler/1.0",
+                        Duration.ofMillis(50), null, null, 10_000_000)));
+
+        assertTrue(page.truncated(), "a stalled body must come back truncated");
+        assertEquals("<p>partial", new String(page.body(), StandardCharsets.UTF_8),
+                "what arrived before the stall is kept");
+    }
+
+    @Test
+    @DisplayName("a failure before the deadline still propagates")
+    void readFailureBeforeTheDeadlinePropagates() throws Exception {
+        HttpResponse<InputStream> response = mock(HttpResponse.class);
+        when(response.statusCode()).thenReturn(200);
+        when(response.uri()).thenReturn(URI.create("https://example.com/a"));
+        when(response.headers()).thenReturn(HttpHeaders.of(Map.of(), (k, v) -> true));
+        when(response.body()).thenReturn(new InputStream() {
+            @Override
+            public int read() throws IOException {
+                throw new IOException("connection reset");
+            }
+        });
+        when(httpClient.sendValidated(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(response);
+
+        assertThrows(IOException.class, () -> fetcher.fetch(command(0)));
+    }
+
+    /** Sends a prefix, then blocks until closed — a server that stopped talking. */
+    private static final class StallingStream extends InputStream {
+        private final byte[] prefix;
+        private final CountDownLatch closed = new CountDownLatch(1);
+        private boolean prefixSent;
+
+        StallingStream(String prefix) {
+            this.prefix = prefix.getBytes(StandardCharsets.UTF_8);
+        }
+
+        @Override
+        public int read() throws IOException {
+            byte[] one = new byte[1];
+            return read(one, 0, 1) == -1 ? -1 : one[0];
+        }
+
+        @Override
+        public int read(byte[] buffer, int offset, int length) throws IOException {
+            if (!prefixSent) {
+                prefixSent = true;
+                System.arraycopy(prefix, 0, buffer, offset, prefix.length);
+                return prefix.length;
+            }
+            try {
+                closed.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException(e);
+            }
+            // What the JDK's response stream does when closed under a blocked read.
+            throw new IOException("closed");
+        }
+
+        @Override
+        public void close() {
+            closed.countDown();
+        }
     }
 
     /** Never ends, and never blocks long enough to look like a network failure. */

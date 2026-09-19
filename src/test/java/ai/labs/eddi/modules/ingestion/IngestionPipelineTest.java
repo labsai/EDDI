@@ -647,6 +647,58 @@ class IngestionPipelineTest {
         }
 
         @Test
+        @DisplayName("a page size cap of zero or less is refused — the fetcher would read it as no cap")
+        void refusesNonPositivePageCap() {
+            for (long cap : new long[]{0L, -1L}) {
+                var settings = new IngestionSource.IngestionSettings();
+                settings.setMaxBytesPerPage(cap);
+                var source = source();
+                source.setSettings(settings);
+
+                var thrown = assertThrows(IllegalArgumentException.class, source::validate);
+                assertTrue(thrown.getMessage().contains("maxBytesPerPage"), thrown.getMessage());
+            }
+        }
+
+        @Test
+        @DisplayName("two sources sharing a state key are refused")
+        void refusesSourcesSharingAStateKey() {
+            // State is keyed by id, or by name when there is none. A shared key means
+            // one document history, so each source's runs tombstone the other's pages.
+            var first = source();
+            var sameId = source();
+            sameId.setName("another-name");
+            RagConfiguration config = knowledgeBase();
+            config.setSources(List.of(first, sameId));
+
+            var thrown = assertThrows(IllegalArgumentException.class, config::validate);
+            assertTrue(thrown.getMessage().contains("src-1"), thrown.getMessage());
+
+            // An id-less source falls back to its name, which can collide with an id.
+            var named = source();
+            named.setId(null);
+            named.setName("src-1");
+            config.setSources(List.of(first, named));
+            assertThrows(IllegalArgumentException.class, config::validate);
+        }
+
+        @Test
+        @DisplayName("distinct sources pass, and the state key is the one validation checks")
+        void distinctSourcesPass() {
+            var first = source();
+            var second = source();
+            second.setId("src-2");
+            RagConfiguration config = knowledgeBase();
+            config.setSources(List.of(first, second));
+
+            config.validate();
+            assertEquals("kb:src-2", IngestionPipeline.stateKey("kb", second));
+
+            second.setId(" ");
+            assertEquals("kb:" + second.getName(), IngestionPipeline.stateKey("kb", second));
+        }
+
+        @Test
         @DisplayName("the knowledge base validates its sources")
         void knowledgeBaseValidatesSources() {
             RagConfiguration config = knowledgeBase();

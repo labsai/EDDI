@@ -254,8 +254,7 @@ public class IngestionPipeline {
 
     /** State is scoped to a source of a knowledge base, not to a source name. */
     static String stateKey(String ragConfigId, IngestionSource source) {
-        String sourceId = source.getId() == null || source.getId().isBlank() ? source.getName() : source.getId();
-        return ragConfigId + ":" + sourceId;
+        return ragConfigId + ":" + source.effectiveId();
     }
 
     private static CrawlRequest toCrawlRequest(IngestionSource source) {

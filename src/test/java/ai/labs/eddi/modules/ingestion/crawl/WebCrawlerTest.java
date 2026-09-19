@@ -334,6 +334,54 @@ class WebCrawlerTest {
         }
 
         @Test
+        @DisplayName("an unreachable seed is not coverage, although the crawl completed")
+        void unreachableSeedIsNotCoverage() {
+            FakeSite site = new FakeSite().failure(SITE + "/", "connection refused");
+
+            CrawlSummary summary = new WebCrawler(site).crawl(request(SITE + "/"), new RecordingSink());
+
+            assertEquals(StopReason.COMPLETED, summary.stopReason());
+            assertFalse(summary.coveredWholeSource(),
+                    "an outage saw nothing — treating that as coverage reports every document as deleted");
+        }
+
+        @Test
+        @DisplayName("a seed answering 503 is an outage, not coverage")
+        void serverErrorSeedIsNotCoverage() {
+            FakeSite site = new FakeSite().status(SITE + "/", 503);
+
+            CrawlSummary summary = new WebCrawler(site).crawl(request(SITE + "/"), new RecordingSink());
+
+            assertFalse(summary.coveredWholeSource(), "a 503 says nothing about which pages exist");
+        }
+
+        @Test
+        @DisplayName("a seed answering 404 is coverage — the server said the page is gone")
+        void notFoundSeedIsCoverage() {
+            FakeSite site = new FakeSite().status(SITE + "/", 404);
+
+            CrawlSummary summary = new WebCrawler(site).crawl(request(SITE + "/"), new RecordingSink());
+
+            assertTrue(summary.coveredWholeSource(),
+                    "a removed start page is a deletion, and treating it as an outage would keep its vectors forever");
+        }
+
+        @Test
+        @DisplayName("a dead link on a reachable site still counts as coverage")
+        void deadLinkStillCoversTheSource() {
+            FakeSite site = new FakeSite()
+                    .page(SITE + "/", linkTo(SITE + "/a", SITE + "/gone"))
+                    .page(SITE + "/a", "<html><body>A</body></html>")
+                    .status(SITE + "/gone", 404);
+
+            CrawlSummary summary = new WebCrawler(site).crawl(request(SITE + "/"), new RecordingSink());
+
+            assertEquals(1, summary.errors());
+            assertTrue(summary.coveredWholeSource(),
+                    "one broken link must not stop deletions from ever being reconciled");
+        }
+
+        @Test
         @DisplayName("bounds total requests, not just emitted pages")
         void boundsFetchAttempts() {
             // maxPages alone bounds nothing: a docs site linking 5,000 assets fetches

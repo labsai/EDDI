@@ -110,7 +110,9 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
             statement.execute(CREATE_ACTIVE_RUN_INDEX);
             schemaInitialized = true;
         } catch (SQLException e) {
-            LOGGER.errorf(e, "Failed to create the rag_ingestion schema");
+            // Thrown, not only logged: carrying on would fail every later call on a
+            // missing table, with an error that no longer says why.
+            throw new IngestionStateStoreException("Failed to create the rag_ingestion schema", e);
         }
     }
 

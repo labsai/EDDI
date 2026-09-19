@@ -256,4 +256,22 @@ class RobotsPolicyTest {
         assertFalse(policy.isAllowed("/path0/x"), "rules within the cap still apply");
         assertTrue(policy.isAllowed("/unlisted"));
     }
+
+    @Test
+    @DisplayName("an empty Disallow in this crawler's own group grants full access over a wildcard block")
+    void emptyDisallowGroupOverridesWildcard() {
+        // The standard way to let one crawler in while keeping the rest out. The group
+        // has no rules at all, so deciding "is there a group for us" by counting its
+        // rules fell back to the wildcard block and crawled nothing.
+        RobotsPolicy policy = RobotsPolicy.parse("""
+                User-agent: *
+                Disallow: /
+
+                User-agent: EDDI-Crawler
+                Disallow:
+                """, AGENT);
+
+        assertTrue(policy.isAllowed("/docs/guide"));
+        assertTrue(policy.isAllowed("/"));
+    }
 }
