@@ -183,8 +183,8 @@ public interface IIngestionStateStore {
         }
 
         /**
-         * A run that reached its own limits rather than covering the source. Used to
-         * decide whether tombstoning is safe.
+         * A run that completed with no failed documents, as opposed to one that failed,
+         * was cancelled or lost pages. Used to decide whether tombstoning is safe.
          */
         public boolean completedCleanly() {
             return status == Status.COMPLETED && documentsFailed == 0;
