@@ -91,18 +91,24 @@ public class RestRagStore implements IRestRagStore {
     }
 
     /**
-     * Whether any other version of this knowledge base can still be read. Schedules
-     * belong to the knowledge base rather than to one version, so they only go when
-     * nothing is left to crawl for.
+     * Whether this knowledge base still has a current version after a delete.
+     * Schedules belong to the knowledge base rather than to one version, so they
+     * only go once nothing is left to crawl for.
+     *
+     * <p>
+     * One lookup. {@code getCurrentResourceId} throws once the current row is
+     * soft-deleted and succeeds while one exists, which is exactly this question.
+     * An earlier version probed every version number up to the one in the request —
+     * a loop sized by user input, so {@code ?version=2000000000} asked the server
+     * for two billion reads (CodeQL flagged the arithmetic; the loop was the real
+     * problem).
      */
-    private boolean anyVersionRemains(String id, Integer deletedVersion) {
-        int highest = deletedVersion == null ? 1 : deletedVersion;
-        for (int candidate = 1; candidate <= highest + 1; candidate++) {
-            if (candidate != highest && readQuietly(id, candidate) != null) {
-                return true;
-            }
+    private boolean hasCurrentVersion(String id) {
+        try {
+            return restVersionInfo.getCurrentResourceId(id) != null;
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return false;
         }
-        return false;
     }
 
     private RagConfiguration readQuietly(String id, Integer version) {
@@ -263,7 +269,7 @@ public class RestRagStore implements IRestRagStore {
         // Only once no readable version is left. Deleting an OLD version of a
         // knowledge base that is still deployed at a newer one used to remove the
         // live version's schedules, so it silently stopped crawling.
-        if (deleted != null && readQuietly(id, version) == null && !anyVersionRemains(id, version)) {
+        if (deleted != null && !hasCurrentVersion(id)) {
             try {
                 sourceIngestionService.removeSchedules(id, deleted);
             } catch (RuntimeException e) {
