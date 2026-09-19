@@ -66,9 +66,10 @@ IMAP), with shorter notes on Confluence, Notion, S3, Git, Slack and help-desk sy
   CONDSTORE) commit only with a successful run, and delta sources tombstone on explicit deletions instead
   of missed runs.
 - Credentials come from the existing connections framework. Scheduled runs use `SERVICE` connections;
-  a `PER_USER` grant is spent without its owner present only for a source that owner saved, and only into
-  a knowledge base whose `audience` is `OWNER`, enforced at retrieval in `RagContextProvider` and failing
-  closed without a verified principal.
+  a `PER_USER` grant is spent without its owner present only for a source that owner saved, and by default
+  only into a knowledge base whose `audience` is `OWNER` — enforced at retrieval in `RagContextProvider`
+  and failing closed without a verified principal. The one exception is an admin-acknowledged Gmail shared
+  support mailbox, which must match the linked grant's own address.
 - Ingested text is treated as attacker-writable: retrieved context is framed as data, hidden HTML is
   dropped, and mail sources carry sender filters, redaction before embedding, and mandatory retention.
 - Least privilege is the documented path: Shared Drive membership, `Sites.Selected`, mailbox-restricted

@@ -169,14 +169,48 @@ nightly run costs requests proportional to the changes, not to the source's
 size.
 
 - **Storage.** Add a cursor to the state store, one row per source:
-  `(sourceKey, cursor, cursorKind, updatedAt)`. The cursor is opaque to the
-  pipeline. Mongo and Postgres implementations join the existing
-  `IngestionStateStoreContract` suite.
-- **Commit only on success.** `finishRun` writes `nextCursor` in the same call
-  that closes the run, and only for a run whose status is `COMPLETED` and whose
-  document writes all succeeded. A crashed or failed run leaves the old cursor,
-  so the next run replays the window. Replay is safe because ingestion is
-  idempotent per document: content hash and version token.
+  `(sourceKey, cursor, cursorKind, updatedAt)`. The cursor is **one opaque
+  value**, written by one atomic update. It is not several columns, because a
+  backfill page token and the delta baseline it belongs with must never be
+  readable in a mismatched pair.
+- **One state machine.** The value is a small tagged envelope the pipeline
+  stores and the connector interprets:
+
+  ```json
+  { "v": 1, "phase": "BACKFILL", "listToken": "…", "deltaBaseline": "…" }
+  { "v": 1, "phase": "DELTA",    "deltaToken": "…" }
+  ```
+
+  | Transition | When | Written |
+  |---|---|---|
+  | none → `BACKFILL` | First run, or after a reset or `CURSOR_INVALID`. The connector takes the **delta baseline first** (Drive `changes.getStartPageToken`, Gmail's profile `historyId`, IMAP `HIGHESTMODSEQ`) and only then starts listing, so a change made during the backfill is not lost | With the baseline and an empty `listToken`, before the first page |
+  | `BACKFILL` → `BACKFILL` | Each listing page whose documents are durably recorded | `listToken` advanced, baseline untouched |
+  | `BACKFILL` → `DELTA` | The listing is exhausted | In the same atomic update as `finishRun`, `deltaToken` = the stored baseline |
+  | `DELTA` → `DELTA` | Each delta page fully applied | `deltaToken` advanced |
+
+  Graph is the simple case: its `delta` call is both phases, so `listToken` is
+  the `@odata.nextLink` and the final `@odata.deltaLink` is the transition.
+- **A cursor may advance only past work that is durably recorded.** That is the
+  rule, and it replaces "commit only at the end of the run" — which contradicted
+  the resumable backfill in §3.11 and the budget stop in §3.13. A checkpoint is
+  written after a page's documents are embedded and their state rows written,
+  which makes mid-run progress safe and crash replay cheap. Only the
+  `BACKFILL → DELTA` transition is tied to run completion, because only there
+  does the meaning of the cursor change.
+- **Replay is by design.** After a crash the next run resumes from the last
+  checkpoint and re-lists that page. Its documents are unchanged by hash or
+  version token, so they cost a listing request and no embedding.
+- **Error semantics.**
+  - A **run-level** failure (auth, transport, throttling exhausted) stops the
+    run and leaves the cursor at its last checkpoint.
+  - A **permanent per-document** failure (an unsupported format, an encrypted
+    file, a converter refusal, a 403 on one item) records the document as
+    failed, and the checkpoint **may** advance past it. Otherwise one poison
+    document blocks the source forever. Such documents are listed in run
+    history, counted separately from transient errors, and retried at the next
+    full resync (§3.3).
+  - A **budget stop** (§3.13) is a clean stop: the checkpoint stands, coverage is
+    `PARTIAL`, and nothing is tombstoned.
 - **Expiry is normal, not an error.** Gmail `historyId`s go stale, Graph delta
   tokens can be invalidated, and IMAP `UIDVALIDITY` can change. The connector
   reports `CURSOR_INVALID`, and the pipeline clears the cursor and schedules a
@@ -236,9 +270,14 @@ present. Design:
    never falls back to a service grant. Offboarding a user through the GDPR
    erasure cascade deletes the sources they own and purges their vectors
    (§3.9).
-5. Such a knowledge base is `audience: OWNER` (§3.5). This is the condition that
-   makes the design acceptable: the owner's credential only ever feeds context
-   the owner reads.
+5. Such a knowledge base is `audience: OWNER` **by default, and by exception
+   only** (§3.5). This is the condition that makes the design acceptable: the
+   owner's credential normally feeds only context the owner reads. The single
+   exception is a Gmail shared support mailbox under
+   `sharedMailboxAcknowledged` (§8), which is admin-only, requires the grant's
+   mailbox to match the configured address, refuses the linking user's own login
+   address, and writes an audit-ledger entry. Any future exception must clear the
+   same four bars.
 
 ### 3.5 Who may read what was ingested
 
@@ -255,7 +294,7 @@ Plan: an explicit `audience` on the knowledge base, enforced in
 | `audience` | Who retrieves | Required for |
 |---|---|---|
 | `AGENT_USERS` (default, today's behaviour) | Any conversation using the knowledge base | Web, sitemap, upload, service-account sources with an operator-declared audience |
-| `OWNER` | Only conversations whose `VERIFIED` user id equals the knowledge base's recorded owner | Every `PER_USER`-backed source. Enforced at save time: a `PER_USER` source cannot be added to an `AGENT_USERS` knowledge base |
+| `OWNER` | Only conversations whose `VERIFIED` user id equals the knowledge base's recorded owner | Every `PER_USER`-backed source by default. Enforced at save time: a `PER_USER` source cannot be added to an `AGENT_USERS` knowledge base, unless it carries the `sharedMailboxAcknowledged` exception of §8 |
 | `DOCUMENT_ACL` (later) | Per chunk: the conversation's verified principal must appear in the chunk's `acl.principals`, directly or through a group | Drive and SharePoint where file-level sharing must hold |
 
 Rules that hold across all three:
@@ -476,8 +515,25 @@ full backfill. Preview mode already walks the source without embedding; it gains
 a cost estimate (documents, tokens, dollars). The Manager shows it before the
 first real run and asks for confirmation when it exceeds a threshold
 (`eddi.rag.ingestion.confirm-above-usd`, default $10). The REST API gets the
-same through an explicit `?confirmCost=true` on `run`. Scheduled runs never ask:
-they are bounded by the monthly cap instead.
+same through an explicit `?confirmCost=true` on `run`.
+
+**Scheduled runs need a finite ceiling, and saving one is refused without it.**
+Nobody is present to confirm a scheduled run, so the per-run segment cap alone
+would let a churning source spend without bound across runs. A source may
+therefore be given a `cron` only when at least one monthly ceiling is finite:
+`settings.maxCostPerMonthUsd`, or the tenant's `maxMonthlyCostUsd`. Otherwise
+the save is refused with a 400 naming both settings. Two exemptions, checked in
+this order:
+
+- the knowledge base's embedding model has a price of zero (a local model), so
+  the segment cap is the whole cost story; or
+- the operator sets `settings.acknowledgeUnboundedCost: true`, which is recorded
+  in the audit ledger and shown on the source in the Manager.
+
+When a run stops, the run record names **which** ceiling fired —
+`segmentsPerRun`, `sourceMonthly` or `tenantMonthly` — because "paused, budget
+reached" without the name sends the operator to the wrong settings page. The
+first ceiling reached stops the run; they are not additive.
 
 **Ingestion becomes the first real consumer of tenant cost metering.**
 `TenantQuotaService.checkCostBudget` exists, but its Javadoc notes that nothing
@@ -858,6 +914,24 @@ chunk. Attachments are **child documents** (`{threadId}/{attachmentId}`) with
 their own converters and citation back to the thread.
 `documentGranularity: "message"` stays as an option for mailboxes that are
 notification streams rather than conversations.
+
+**A deletion is a thread rebuild, not a tombstone.** Gmail, Graph and IMAP all
+report deletions and scope changes **per message**, while the document is the
+thread. So a mail connector never maps a message event straight to
+`onDeleted`. On any message deletion, label or folder removal, or filter change
+that takes a message out of scope, it re-reads the thread's remaining in-scope
+messages and:
+
+- emits `onDocument(threadId)` with the rebuilt thread when any remain — the
+  thread is smaller, not gone;
+- emits `onDeleted(threadId)` only when none remain;
+- emits `onDeleted` for a child attachment only when it is absent from the
+  rebuilt message set, so an attachment on a surviving message is never removed.
+
+Without this, deleting one reply from a thread would delete the whole
+conversation from the knowledge base, which is the `DELTA` contract of §3.3
+applied at the wrong granularity. `documentGranularity: "message"` has no such
+problem and maps events directly.
 
 **Quoted history is removed.** Every reply repeats the thread below it. Strip
 quoted blocks (`>`-prefixed text, Outlook's "From: … Sent: …" separators, Gmail's
