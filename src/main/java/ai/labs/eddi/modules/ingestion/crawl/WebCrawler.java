@@ -118,7 +118,7 @@ public class WebCrawler {
         // obeying one site's rules while ignoring another's.
         Map<String, RobotsPolicy> robotsByHost = new HashMap<>();
         RobotsPolicy robots = request.politeness().respectRobots()
-                ? robotsFor(request, request.seedUrl(), robotsByHost)
+                ? robotsFor(request, request.seedUrl(), robotsByHost, counters)
                 : RobotsPolicy.allowAll();
         Duration delay = effectiveDelay(request, robots);
 
@@ -159,7 +159,7 @@ public class WebCrawler {
 
             Candidate candidate = queue.poll();
             RobotsPolicy candidateRobots = request.politeness().respectRobots()
-                    ? robotsFor(request, candidate.fetchUrl(), robotsByHost)
+                    ? robotsFor(request, candidate.fetchUrl(), robotsByHost, counters)
                     : robots;
             // Marked before the fetch, not after it. Recording only successes meant a
             // dead link in a site-wide footer was fetched once per referring page:
@@ -421,22 +421,30 @@ public class WebCrawler {
     /**
      * The robots policy for a URL's host, fetched once per host per crawl.
      */
-    private RobotsPolicy robotsFor(CrawlRequest request, String url, Map<String, RobotsPolicy> cache) {
+    private RobotsPolicy robotsFor(CrawlRequest request, String url, Map<String, RobotsPolicy> cache,
+                                   Counters counters) {
         String host = CrawlUrls.host(url).orElse(null);
         if (host == null) {
             return RobotsPolicy.allowAll();
         }
-        return cache.computeIfAbsent(host, ignored -> fetchRobots(request, url));
+        return cache.computeIfAbsent(host, ignored -> fetchRobots(request, url, counters));
     }
 
-    private RobotsPolicy fetchRobots(CrawlRequest request, String forUrl) {
+    /**
+     * Counted against the fetch and byte budgets like any other request. It runs
+     * once per host: for the seed before the loop, otherwise inside it after the
+     * loop's cancellation, deadline and budget checks.
+     */
+    private RobotsPolicy fetchRobots(CrawlRequest request, String forUrl, Counters counters) {
         String robotsUrl = robotsUrlFor(forUrl);
         if (robotsUrl == null) {
             return RobotsPolicy.allowAll();
         }
         try {
+            counters.fetchAttempts++;
             FetchedPage page = fetcher.fetch(new FetchCommand(robotsUrl, request.politeness().userAgent(),
                     request.limits().requestTimeout(), null, null, MAX_METADATA_BYTES));
+            counters.bytesDownloaded += page.body() == null ? 0 : page.body().length;
             if (!page.isOk() || page.body() == null) {
                 // No robots.txt, or it could not be read: absence means permission. A
                 // 500 from a robots endpoint must not silently halt an operator's
