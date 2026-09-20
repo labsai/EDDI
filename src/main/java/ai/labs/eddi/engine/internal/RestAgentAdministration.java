@@ -120,7 +120,19 @@ public class RestAgentAdministration implements IRestAgentAdministration {
                     deployError = "Deployment timed out";
                 } catch (ExecutionException e) {
                     Throwable cause = e.getCause();
-                    // Log full details server-side, expose only safe message to client
+                    // Log full details server-side, expose only safe message to client.
+                    //
+                    // The MESSAGE is sanitized; the throwable is deliberately not, and
+                    // cannot be. quarkus.log.console.format ends in %s%e, so %e renders
+                    // the stack trace whose first line is the throwable's own toString()
+                    // — a CR/LF in an exception message therefore still reaches the log
+                    // through that half. That is not a property of this call site: ~415
+                    // log calls in src/main/java pass a throwable, and the only fix that
+                    // covers them is a sanitizing log handler or formatter, because
+                    // LogSanitizer collapses newlines and would flatten any stack trace
+                    // it was pointed at. Dropping the throwable here is not the trade:
+                    // the client is told only "Check server logs for details", so this
+                    // stack trace is the sole diagnostic a failed deployment leaves.
                     log.warn("Deployment failed for Agent " + sanitize(agentId) + " v" + version + ": "
                             + sanitize(cause != null ? cause.getMessage() : e.getMessage()), cause != null ? cause : e);
                     deployError = "Deployment failed. Check server logs for details.";

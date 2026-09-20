@@ -166,6 +166,12 @@ class RestAgentAdministrationLogInjectionTest {
     void deployFails() throws Exception {
         // The cause's message is quoted into the line as well, and an agent's own
         // configuration can put a CR/LF there without touching the path.
+        //
+        // This pins the MESSAGE half only. The same call passes the throwable, which
+        // %e renders as a stack trace whose first line is its unsanitized toString(),
+        // and captureLogsOf reads getMessage()/getParameters() but never getThrown()
+        // — so nothing here would notice that. Deliberate: see the comment on the
+        // call site for why the throwable cannot be sanitized per-site.
         deployFutureFailingWith(new ExecutionException(new IllegalStateException("workflow broken" + FORGED_RECORD)));
 
         List<String> captured = captureLogsOf(RestAgentAdministration.class,
