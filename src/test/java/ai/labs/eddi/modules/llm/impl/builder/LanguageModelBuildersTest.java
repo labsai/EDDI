@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl.builder;
 
+import com.github.tjake.jlama.safetensors.DType;
 import dev.langchain4j.model.ollama.OllamaChatRequestParameters;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
@@ -533,6 +534,58 @@ class LanguageModelBuildersTest {
 
             StreamingChatModel model = builder.buildStreaming(params);
             assertNotNull(model);
+        }
+    }
+
+    // ==================== Jlama ====================
+
+    /**
+     * Jlama cannot be exercised through {@code build}: its constructor resolves the
+     * model through Jlama's registry, which downloads multi-gigabyte weights from
+     * Hugging Face. So the surface these tests guard is the one a misconfiguration
+     * actually travels through — the declared parameter set, which is what tells an
+     * agent designer a key is being dropped, and the quantization-type parse.
+     */
+    @Nested
+    @DisplayName("JlamaLanguageModelBuilder")
+    class JlamaTests {
+
+        private final JlamaLanguageModelBuilder builder = new JlamaLanguageModelBuilder();
+
+        @Test
+        @DisplayName("declares the deployment parameters Jlama actually reads")
+        void declaresDeploymentParameters() {
+            Set<String> recognised = builder.recognisedParameters();
+
+            assertTrue(recognised.containsAll(Set.of("modelCachePath", "threadCount",
+                    "quantizeModelAtRuntime", "workingDirectory", "workingQuantizedType")),
+                    "a parameter missing here is reported to the user as unrecognised and dropped, "
+                            + "even though the builder passes it to Jlama: " + recognised);
+        }
+
+        @Test
+        @DisplayName("does not declare baseUrl — Jlama runs in-process, there is no endpoint")
+        void doesNotDeclareBaseUrl() {
+            assertFalse(builder.recognisedParameters().contains("baseUrl"),
+                    "declaring baseUrl would suppress the warning that tells a user their "
+                            + "endpoint is being ignored");
+        }
+
+        @Test
+        @DisplayName("reads the working quantization type case-insensitively")
+        void parsesWorkingQuantizedType() {
+            assertEquals(DType.Q4, JlamaLanguageModelBuilder.workingQuantizedType(Map.of("workingQuantizedType", "q4")));
+            assertEquals(DType.BF16,
+                    JlamaLanguageModelBuilder.workingQuantizedType(Map.of("workingQuantizedType", " BF16 ")));
+        }
+
+        @Test
+        @DisplayName("keeps the model default for an absent, blank or unknown quantization type")
+        void ignoresUnusableWorkingQuantizedType() {
+            assertNull(JlamaLanguageModelBuilder.workingQuantizedType(Map.of()));
+            assertNull(JlamaLanguageModelBuilder.workingQuantizedType(Map.of("workingQuantizedType", "  ")));
+            assertNull(JlamaLanguageModelBuilder.workingQuantizedType(Map.of("workingQuantizedType", "Q9")),
+                    "an unknown type must leave Jlama's default in place, not fail the conversation");
         }
     }
 

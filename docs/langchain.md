@@ -374,6 +374,7 @@ Both stored shapes therefore keep working: a config that sets only `streamingTim
       "description": "Jlama local model chat",
       "parameters": {
         "modelName": "tjake/Llama-3.2-1B-Instruct-JQ4",
+        "modelCachePath": "/var/lib/eddi/jlama-models",
         "temperature": "0.7",
         "timeout": "30000",
         "systemMessage": "You are a helpful assistant",
@@ -385,6 +386,32 @@ Both stored shapes therefore keep working: a config that sets only `streamingTim
 ```
 
 **Note**: Jlama runs models locally in Java without requiring external services like Ollama.
+
+**`modelName` must be a Hugging Face repository id in `owner/name` form** — for
+example `tjake/Llama-3.2-1B-Instruct-JQ4` or
+`tjake/TinyLlama-1.1B-Chat-v1.0-Jlama-Q4`. Jlama resolves the model through its
+own registry, which downloads it from Hugging Face on first use; a bare name
+such as `llama-3.2-1b` has no owner to resolve and fails on the agent's first
+turn, long after the configuration was saved. Private repositories additionally
+need `authToken`.
+
+**There is no `baseUrl`.** Jlama runs *inside the EDDI JVM* — there is no model
+server to point at, and a `baseUrl` parameter is dropped with an
+"unrecognised parameter" warning.
+
+Beyond the common parameters, the Jlama builder reads:
+
+| Parameter                | Type    | Default                | Purpose                                                                                                                       |
+| ------------------------ | ------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `modelCachePath`         | path    | `~/.jlama/models`      | Where downloaded weights are cached. **Set this in a container**: the default lands on the ephemeral writable layer, so every pod restart re-downloads multiple gigabytes. Point it at a mounted volume. |
+| `threadCount`            | integer | Jlama's own default    | Inference threads. Bound it to the pod's CPU limit — Jlama otherwise sizes itself from the host's core count, which a cgroup quota does not change. |
+| `quantizeModelAtRuntime` | boolean | `false`                | Quantize a full-precision model while loading it, trading load time and accuracy for memory. Unnecessary for an already-quantized repo (`-JQ4`, `-Q4`). |
+| `workingDirectory`       | path    | a temporary directory  | Scratch space for the loader's memory-mapped working set.                                                                     |
+| `workingQuantizedType`   | enum    | Jlama's own default    | Working quantization type: `Q4`, `Q5`, `F32`, `BF16`, `F16`, `I8` and the rest of Jlama's `DType`. Case-insensitive; an unknown value is logged and the model default is kept. |
+
+Each of these is optional, and an unusable value (a malformed path, a
+non-numeric `threadCount`) is logged and skipped rather than failing the
+conversation — as with every other provider's parameters.
 
 #### Mistral AI
 

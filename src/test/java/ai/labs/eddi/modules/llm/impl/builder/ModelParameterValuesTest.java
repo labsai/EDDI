@@ -8,6 +8,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -204,6 +205,42 @@ class ModelParameterValuesTest {
         void returnsNullForMissing() {
             assertNull(doubleValue(params("topP", ""), "topP"));
             assertNull(doubleValue(params("topP", "0.9"), "missing"));
+        }
+    }
+
+    @Nested
+    @DisplayName("applyPath")
+    class ApplyPaths {
+
+        @Test
+        @DisplayName("hands the builder a parsed path")
+        void appliesPath() {
+            AtomicReference<Path> applied = new AtomicReference<>();
+            ModelParameterValues.applyPath(params("modelCachePath", "/var/lib/eddi/jlama-models"),
+                    "modelCachePath", applied::set);
+            assertEquals(Path.of("/var/lib/eddi/jlama-models"), applied.get());
+        }
+
+        @Test
+        @DisplayName("leaves the provider default for an absent or blank value")
+        void skipsMissing() {
+            AtomicReference<Path> applied = new AtomicReference<>();
+            ModelParameterValues.applyPath(params("modelCachePath", "  "), "modelCachePath", applied::set);
+            ModelParameterValues.applyPath(params("modelCachePath", "/tmp"), "workingDirectory", applied::set);
+            assertNull(applied.get());
+        }
+
+        @Test
+        @DisplayName("skips a path the platform cannot express rather than throwing")
+        void skipsUnusablePath() {
+            AtomicReference<Path> applied = new AtomicReference<>();
+            // NUL is rejected by every platform's path parser; a value the running
+            // platform cannot express is a config mistake, not a reason to fail the turn.
+            // Built from a char rather than written as a unicode escape: javac decodes
+            // those before parsing, so one in source would become a raw NUL byte.
+            String withNul = "bad" + (char) 0 + "path";
+            ModelParameterValues.applyPath(params("modelCachePath", withNul), "modelCachePath", applied::set);
+            assertNull(applied.get());
         }
     }
 }
