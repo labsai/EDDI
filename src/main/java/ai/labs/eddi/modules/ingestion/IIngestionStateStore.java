@@ -73,6 +73,19 @@ public interface IIngestionStateStore {
     void recordSeen(String sourceId, String documentId, String runId);
 
     /**
+     * Records that this run could not find out whether a document still exists —
+     * the server refused, failed, or asked us to come back later.
+     *
+     * <p>
+     * Neither a sighting nor a miss. The document keeps its miss counter and its
+     * hash, but this run no longer counts against it, so a page behind a 503, a 429
+     * or a WAF is not deleted for being unreachable. Without this, the same tail
+     * pages of a rate-limited site are tombstoned after
+     * {@code tombstoneAfterMissedRuns} runs while every run reports success.
+     */
+    void recordUnreachable(String sourceId, String documentId, String runId);
+
+    /**
      * Increments the miss counter for every live document this run did not see, and
      * tombstones those that have now been missed {@code missedRunsThreshold} times
      * in a row.
@@ -113,13 +126,20 @@ public interface IIngestionStateStore {
     List<IngestionRun> listRuns(String sourceId, int limit);
 
     /**
-     * Fails any run left {@code RUNNING} by a process that died, so a crashed
-     * instance does not block the source forever. Called at startup and before
-     * claiming a new run.
+     * Fails a run of <em>this source</em> left {@code RUNNING} by a process that
+     * died, so a crash does not block the source forever. Called before claiming a
+     * new run.
+     *
+     * <p>
+     * Scoped to the source on purpose. The staleness threshold is derived from the
+     * source's own time budget, so a store-wide sweep let a source with the default
+     * 10-minute budget reap the live run of a source configured for hours — and a
+     * reaped run is one whose source immediately accepts a second, concurrent
+     * crawl.
      *
      * @return how many runs were reaped
      */
-    int reapStaleRuns(Instant startedBefore);
+    int reapStaleRuns(String sourceId, Instant startedBefore);
 
     /**
      * What a previous run knows about a document.
