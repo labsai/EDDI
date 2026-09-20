@@ -218,6 +218,8 @@ Both surfaces delegate to `DocsService`, which owns the filesystem access and th
 
 EDDI uses **Streamable HTTP** transport at `http://localhost:7070/mcp`. How you connect depends on your client's transport support.
 
+> The configurations below are for an instance with authentication **off**. If OIDC is enabled, each one additionally needs a bearer token — see [Connecting to an authenticated instance](#connecting-to-an-authenticated-instance).
+
 #### Direct HTTP (Streamable HTTP clients)
 
 Clients that natively support HTTP transport (e.g., IDE plugins, custom MCP clients) can connect directly:
@@ -603,11 +605,15 @@ In `application.properties`:
 
 ```properties
 # MCP Server — Streamable HTTP at /mcp
-quarkus.mcp-server.http.root-path=/mcp
+quarkus.mcp.server.http.root-path=/mcp
 
 # Documentation path for MCP resources (default: docs/)
 eddi.docs.path=docs
 ```
+
+> The namespace is `quarkus.mcp.server.*` with dots. The hyphenated
+> `quarkus.mcp-server.*` is not a key the extension knows — setting it moves
+> nothing and only logs an "Unrecognized configuration key" warning.
 
 ## Tool Filtering
 
@@ -623,6 +629,53 @@ To add a new MCP tool: add its name to the `MCP_TOOLS` set in `McpToolFilter.jav
 - When auth is enabled (`quarkus.oidc.tenant-enabled=true`), MCP clients must provide valid tokens
 - Authorization is enforced **in-code**, not via `@RolesAllowed`: most tools call `requireRole(identity, authEnabled, "<role>")` (`McpToolUtils`), and the HITL tools use the shared `HitlAccessGuard` (per-conversation owner / `eddi-admin` / `eddi-approver`). When `authorization.enabled=false` (the default dev posture) `requireRole` is a no-op — production is guarded by `AuthStartupGuard`, which fails startup if OIDC is disabled.
 - **Future**: Per-agent MCP access control via agent configuration for multi-tenant SaaS
+
+### Connecting to an authenticated instance
+
+The [Quick Start](#quick-start) configurations above assume an instance with authentication off. When `quarkus.oidc.tenant-enabled=true`, `/mcp` carries an explicit `authenticated` HTTP policy and every request needs a bearer token.
+
+**EDDI does not yet advertise itself as an OAuth protected resource**, so a client that expects to log in by itself — a Claude Desktop connector, or `mcp-remote`'s automatic OAuth — receives a bare 401 with nothing to discover, and stops. Until that lands ([`planning/mcp-oauth-protected-resource-plan.md`](../planning/mcp-oauth-protected-resource-plan.md)), the token has to be supplied by hand.
+
+**1. Get a token.** The shipped realm's `eddi-frontend` client is public and permits the direct access grant:
+
+```bash
+curl -s -d grant_type=password -d client_id=eddi-frontend -d username=eddi -d password=YOUR_PASSWORD \
+  http://localhost:8180/realms/eddi/protocol/openid-connect/token
+```
+
+**2a. Clients that speak Streamable HTTP and accept headers** (IDE plugins, Antigravity, custom clients):
+
+```json
+{
+  "mcpServers": {
+    "eddi": {
+      "url": "http://localhost:7070/mcp",
+      "headers": { "Authorization": "Bearer <access_token>" }
+    }
+  }
+}
+```
+
+**2b. stdio-only clients** keep the `mcp-remote` bridge and pass the header through it. `mcp-remote` splits arguments on whitespace, so put the whole value in an environment variable:
+
+```json
+{
+  "mcpServers": {
+    "eddi": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "http://localhost:7070/mcp", "--header", "Authorization:${AUTH_HEADER}"],
+      "env": { "AUTH_HEADER": "Bearer <access_token>" }
+    }
+  }
+}
+```
+
+**Caveats, in the order they will bite you:**
+
+- **The token expires.** The shipped realm does not override Keycloak's default access-token lifespan of five minutes, and a static header never refreshes. This recipe is for trying things out, not for running an assistant against EDDI all day.
+- **There is no long-lived API key for `/mcp`.** The only api-key surface in EDDI is the `/v1` OpenAI-compatible adapter (`eddi.openai-compat.api-key`), which is a different protocol — see [Open WebUI integration](open-webui-integration.md).
+- **Roles decide which tools work, and there is no hierarchy.** A token whose realm roles are missing authenticates fine and then fails every tool with "requires role" — see [Role Mapping](#role-mapping) below.
+- **`/mcp` cannot be opened selectively.** `eddi.mcp.allow-unauthenticated` only lets a *fully* unauthenticated deployment boot past `HighValueSurfaceGuard`; it does not exempt `/mcp` on an instance where authentication is on.
 
 ### Role Mapping
 
