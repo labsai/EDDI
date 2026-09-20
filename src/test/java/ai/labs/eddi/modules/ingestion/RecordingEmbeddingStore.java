@@ -11,7 +11,6 @@ import dev.langchain4j.store.embedding.EmbeddingSearchRequest;
 import dev.langchain4j.store.embedding.EmbeddingSearchResult;
 import dev.langchain4j.store.embedding.EmbeddingStore;
 import dev.langchain4j.store.embedding.filter.Filter;
-import dev.langchain4j.store.embedding.filter.comparison.IsEqualTo;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -32,10 +31,17 @@ public final class RecordingEmbeddingStore implements EmbeddingStore<TextSegment
     private final List<TextSegment> segments = new ArrayList<>();
     private final List<Filter> removeFilters = new ArrayList<>();
     private boolean removalSupported = true;
+    private boolean removalFails;
 
     /** Simulates a backend whose driver cannot delete by metadata. */
     public RecordingEmbeddingStore withoutRemovalSupport() {
         this.removalSupported = false;
+        return this;
+    }
+
+    /** Simulates a store that accepts deletes and fails them — a sick backend. */
+    public RecordingEmbeddingStore withFailingRemoval() {
+        this.removalFails = true;
         return this;
     }
 
@@ -91,12 +97,15 @@ public final class RecordingEmbeddingStore implements EmbeddingStore<TextSegment
         if (!removalSupported) {
             throw new UnsupportedFeatureException("Not supported yet.");
         }
-        removeFilters.add(filter);
-        if (filter instanceof IsEqualTo isEqualTo) {
-            String key = isEqualTo.key();
-            String value = String.valueOf(isEqualTo.comparisonValue());
-            segments.removeIf(segment -> value.equals(segment.metadata().getString(key)));
+        if (removalFails) {
+            throw new IllegalStateException("vector store is unwell");
         }
+        removeFilters.add(filter);
+        // Evaluate the filter itself rather than pattern-matching one shape of it.
+        // Matching only IsEqualTo made every compound filter a silent no-op here,
+        // while the real stores honoured it — so the double disagreed with
+        // production exactly where replacement correctness is decided.
+        segments.removeIf(segment -> filter.test(segment.metadata()));
     }
 
     @Override

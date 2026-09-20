@@ -29,6 +29,7 @@ import org.jboss.logging.Logger;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -76,6 +77,18 @@ public class IngestionPipeline {
     public static final String METADATA_TITLE = "title";
     public static final String METADATA_SOURCE = "sourceName";
     public static final String METADATA_RUN_ID = "runId";
+
+    /**
+     * Which source's ingestion owns a chunk — the state key, not the source's name,
+     * because a name can be edited while the state cannot.
+     *
+     * <p>
+     * Without it, two sources of one knowledge base that overlap on a URL delete
+     * each other's chunks: removal matched the document id alone, so whichever
+     * source ran last owned the vectors while the other's state still claimed them,
+     * and its next run reported "unchanged" over an empty store.
+     */
+    public static final String METADATA_SOURCE_KEY = "sourceKey";
     public static final String METADATA_INGESTED_AT = "ingestedAt";
 
     private final WebCrawler crawler;
@@ -138,8 +151,9 @@ public class IngestionPipeline {
     public Optional<String> reserveRun(String ragConfigId, IngestionSource source) {
         // A run whose process died is still marked RUNNING and would block this
         // source indefinitely; nothing else calls this.
-        stateStore.reapStaleRuns(Instant.now().minus(staleRunThreshold(source)));
-        return stateStore.startRun(stateKey(ragConfigId, source));
+        String sourceKey = stateKey(ragConfigId, source);
+        stateStore.reapStaleRuns(sourceKey, Instant.now().minus(staleRunThreshold(source)));
+        return stateStore.startRun(sourceKey);
     }
 
     /**
@@ -190,7 +204,7 @@ public class IngestionPipeline {
             if (reservedRunId != null) {
                 runId = reservedRunId;
             } else {
-                stateStore.reapStaleRuns(Instant.now().minus(staleRunThreshold(source)));
+                stateStore.reapStaleRuns(sourceKey, Instant.now().minus(staleRunThreshold(source)));
                 var claimed = stateStore.startRun(sourceKey);
                 if (claimed.isEmpty()) {
                     // Not an error: an operator clicking "run now" while a scheduled run
@@ -271,32 +285,54 @@ public class IngestionPipeline {
                     + "the source", LogSanitizer.sanitize(source.getName()), summary.stopReason());
             return 0;
         }
+        boolean nothingUsable = collector.ingested + collector.unchanged == 0;
+        boolean nothingDefinitive = collector.failed == collector.unreachable;
+        if (nothingUsable && nothingDefinitive) {
+            // The crawler counts a page it handed over as fetched even when the sink
+            // discarded it as blank, so a site behind a JavaScript challenge or a
+            // maintenance page answers 200 for everything, "covers the source", and
+            // yields nothing. Two such runs would delete the whole corpus.
+            //
+            // Not simply "no usable document": a site whose pages have genuinely been
+            // deleted also yields none, and that is exactly when reconciliation should
+            // run. The distinction is whether anything definitive was learned — a 404
+            // or a 410 — rather than only failures that hide the content.
+            collector.tombstoningSkipped = true;
+            LOGGER.infof("Not reconciling deletions for source '%s': the crawl produced no usable document and "
+                    + "learned nothing definitive about what is gone", LogSanitizer.sanitize(source.getName()));
+            return 0;
+        }
 
-        List<DocumentState> gone = stateStore.tombstoneMissing(
+        List<DocumentState> gone = stateStore.bumpAndFindMissing(
                 sourceKey, runId, source.settings().tombstoneAfterMissedRunsOrDefault());
         if (gone.isEmpty()) {
             return 0;
         }
 
+        // Vectors first, tombstone afterwards, and only for what was actually
+        // removed. The other order is durable in the wrong direction: a crash or a
+        // store that refuses the delete leaves a document flagged gone with its
+        // chunks still retrievable, and a tombstoned document is never reported
+        // again — so nothing would ever come back for them.
         EmbeddingStore<TextSegment> store = collector.store();
-        int removed = 0;
+        List<String> removedIds = new ArrayList<>();
         for (DocumentState document : gone) {
             try {
-                store.removeAll(metadataKey(METADATA_DOCUMENT_ID).isEqualTo(document.documentId()));
-                removed++;
+                store.removeAll(metadataKey(METADATA_DOCUMENT_ID).isEqualTo(document.documentId())
+                        .and(metadataKey(METADATA_SOURCE_KEY).isEqualTo(sourceKey)));
+                removedIds.add(document.documentId());
             } catch (UnsupportedFeatureException e) {
+                // The store cannot delete at all. Tombstone anyway — the state is
+                // honest about what the source contains — and report it.
                 collector.replaceUnsupported = true;
+                removedIds.add(document.documentId());
             } catch (RuntimeException e) {
-                // Un-tombstone so the next run tries again. A tombstoned document is
-                // never reported a second time, so leaving the flag set would orphan
-                // these vectors permanently — retrievable content belonging to a page
-                // that no longer exists, with nothing left to point at it.
-                LOGGER.warnf(e, "Could not remove vectors for a deleted document of source '%s'; it will be "
-                        + "retried on the next run", LogSanitizer.sanitize(source.getName()));
-                stateStore.recordSeen(sourceKey, document.documentId(), runId);
+                LOGGER.warnf(e, "Could not remove vectors for a deleted document of source '%s'; it stays live "
+                        + "and the next run tries again", LogSanitizer.sanitize(source.getName()));
             }
         }
-        return removed;
+        stateStore.markTombstoned(sourceKey, removedIds);
+        return removedIds.size();
     }
 
     private void releaseIfReserved(Mode mode, String reservedRunId, String sourceKey, IngestionSource source,
@@ -395,6 +431,10 @@ public class IngestionPipeline {
         private int unchanged;
         private int skipped;
         private int failed;
+        /**
+         * Of those failures, the ones that said nothing about whether the page exists.
+         */
+        private int unreachable;
         private int segments;
         private int tombstoned;
         private boolean replaceUnsupported;
@@ -457,6 +497,17 @@ public class IngestionPipeline {
         public void onError(CrawlError error) {
             failed++;
             meterRegistry.counter("eddi.ingestion.errors", metricTags).increment();
+
+            if (mode != Mode.INGEST || error.documentId() == null || !error.contentUnknown()) {
+                return;
+            }
+            // The server refused, failed, or asked us to come back later, so this run
+            // learned nothing about whether the page still exists. Recording the run
+            // against the document stops it counting as a miss: otherwise the same
+            // tail pages of a rate-limited site are deleted after
+            // tombstoneAfterMissedRuns runs, with every run reporting success.
+            unreachable++;
+            stateStore.recordUnreachable(sourceKey, error.documentId(), runId);
         }
 
         @Override
@@ -526,22 +577,13 @@ public class IngestionPipeline {
         private int embed(CrawledPage page, String markdown) {
             EmbeddingStore<TextSegment> embeddingStore = store();
 
-            // Remove first: without this a page edited weekly leaves a year of stale
-            // versions retrievable beside the current one.
-            try {
-                embeddingStore.removeAll(metadataKey(METADATA_DOCUMENT_ID).isEqualTo(page.documentId()));
-            } catch (UnsupportedFeatureException e) {
-                // Surfaced in the report rather than swallowed: on a store that cannot
-                // delete, re-ingestion accumulates, and the operator has to know.
-                replaceUnsupported = true;
-            }
-
             Metadata metadata = Metadata.from(METADATA_DOCUMENT_ID, page.documentId())
                     .put(METADATA_URL, page.finalUrl())
                     // Capped: the title comes from a third-party page and is copied onto
                     // every segment of the document.
                     .put(METADATA_TITLE, cap(page.title(), MAX_TITLE_LENGTH))
                     .put(METADATA_SOURCE, String.valueOf(source.getName()))
+                    .put(METADATA_SOURCE_KEY, sourceKey)
                     .put(METADATA_RUN_ID, runId)
                     .put(METADATA_INGESTED_AT, Instant.now().toString());
 
@@ -554,8 +596,26 @@ public class IngestionPipeline {
                 return 0;
             }
 
+            // Add first, then drop what this run superseded.
+            //
+            // Removing first meant a provider failure between the delete and the add
+            // left the document with no vectors at all, while its state row still
+            // carried the old hash — so a page that changed, failed to embed, and then
+            // reverted was reported "unchanged" for ever with nothing in the store. A
+            // crash in that window did the same with no exception. This order costs a
+            // moment of duplication instead, which the runId filter then removes.
             var embeddings = model().embedAll(textSegments).content();
             embeddingStore.addAll(embeddings, textSegments);
+
+            try {
+                embeddingStore.removeAll(metadataKey(METADATA_DOCUMENT_ID).isEqualTo(page.documentId())
+                        .and(metadataKey(METADATA_SOURCE_KEY).isEqualTo(sourceKey))
+                        .and(metadataKey(METADATA_RUN_ID).isNotEqualTo(runId)));
+            } catch (UnsupportedFeatureException e) {
+                // Surfaced in the report rather than swallowed: on a store that cannot
+                // delete, re-ingestion accumulates, and the operator has to know.
+                replaceUnsupported = true;
+            }
             return textSegments.size();
         }
 

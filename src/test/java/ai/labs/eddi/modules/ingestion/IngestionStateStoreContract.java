@@ -349,7 +349,7 @@ public interface IngestionStateStoreContract {
     default void staleRunsAreReaped() {
         String runId = openRun(SOURCE);
 
-        int reaped = store().reapStaleRuns(Instant.now().plusSeconds(60));
+        int reaped = store().reapStaleRuns(SOURCE, Instant.now().plusSeconds(60));
 
         assertEquals(1, reaped);
         assertTrue(store().activeRun(SOURCE).isEmpty(), "a reaped run must release the source");
@@ -364,8 +364,104 @@ public interface IngestionStateStoreContract {
     default void healthyRunSurvivesReaping() {
         openRun(SOURCE);
 
-        assertEquals(0, store().reapStaleRuns(Instant.now().minusSeconds(3600)));
+        assertEquals(0, store().reapStaleRuns(SOURCE, Instant.now().minusSeconds(3600)));
         assertTrue(store().activeRun(SOURCE).isPresent());
+    }
+
+    @Test
+    @DisplayName("reaping one source never touches another source's run")
+    default void reapingIsScopedToOneSource() {
+        // The staleness threshold comes from the source's own time budget, so a
+        // store-wide sweep let a source with the default 10-minute budget reap the
+        // live run of a source configured for hours — and the reaped source then
+        // accepts a second, concurrent crawl.
+        String other = openRun(OTHER_SOURCE);
+
+        int reaped = store().reapStaleRuns(SOURCE, Instant.now().plusSeconds(60));
+
+        assertEquals(0, reaped, "no run of this source was in flight");
+        assertTrue(store().activeRun(OTHER_SOURCE).isPresent(),
+                "another source's run must survive: reaping it would let a second crawl start alongside it");
+        assertEquals(other, store().activeRun(OTHER_SOURCE).orElseThrow().runId());
+    }
+
+    @Test
+    @DisplayName("a reaped run's own result is discarded rather than resurrecting it")
+    default void finishingAReapedRunDoesNotResurrectIt() {
+        // The reaper has already declared the run dead and the source has been
+        // released, so a second run may be in flight by now. Letting the first
+        // worker's finishRun overwrite the record would report COMPLETED for a run
+        // nobody was waiting on, and hide the reaping entirely.
+        String runId = openRun(SOURCE);
+        store().reapStaleRuns(SOURCE, Instant.now().plusSeconds(60));
+
+        closeRun(runId, SOURCE, IngestionRun.Status.COMPLETED);
+
+        IngestionRun run = store().listRuns(SOURCE, 10).get(0);
+        assertEquals(IngestionRun.Status.FAILED, run.status(), "the reaped status must stand");
+        assertNotNull(run.error());
+    }
+
+    // === unreachable documents ===
+
+    @Test
+    @DisplayName("a document the run could not reach is neither a sighting nor a miss")
+    default void unreachableDocumentIsNotTombstoned() {
+        // A 503, a 429 or a WAF 403 says nothing about whether the page still
+        // exists. Counting it as a miss deletes the tail of a rate-limited site
+        // after two runs, while every run reports success.
+        String first = openRun(SOURCE);
+        store().recordIngested(SOURCE, DOC, "hash-1", null, null, first);
+        closeRun(first, SOURCE, IngestionRun.Status.COMPLETED);
+
+        for (int i = 0; i < 3; i++) {
+            String runId = openRun(SOURCE);
+            store().recordUnreachable(SOURCE, DOC, runId);
+            assertTrue(store().tombstoneMissing(SOURCE, runId, 1).isEmpty(),
+                    "an unreachable document must never be tombstoned, however often it is unreachable");
+            closeRun(runId, SOURCE, IngestionRun.Status.COMPLETED);
+        }
+
+        DocumentState state = store().lookup(SOURCE, DOC).orElseThrow();
+        assertFalse(state.tombstoned());
+        assertEquals("hash-1", state.contentHash(), "its content is unchanged, so its hash must be kept");
+    }
+
+    @Test
+    @DisplayName("being unreachable does not absolve a document that was already missing")
+    default void unreachableDoesNotResetTheMissCounter() {
+        // recordSeen forgives past misses; this must not, or a page that is missing
+        // and then unreachable never reaches the threshold.
+        String first = openRun(SOURCE);
+        store().recordIngested(SOURCE, DOC, "hash-1", null, null, first);
+        closeRun(first, SOURCE, IngestionRun.Status.COMPLETED);
+
+        String second = openRun(SOURCE);
+        store().tombstoneMissing(SOURCE, second, 2);
+        closeRun(second, SOURCE, IngestionRun.Status.COMPLETED);
+        assertEquals(1, store().lookup(SOURCE, DOC).orElseThrow().missedRuns());
+
+        String third = openRun(SOURCE);
+        store().recordUnreachable(SOURCE, DOC, third);
+        store().tombstoneMissing(SOURCE, third, 2);
+
+        assertEquals(1, store().lookup(SOURCE, DOC).orElseThrow().missedRuns(),
+                "the miss counter is neither raised nor cleared by a run that could not look");
+    }
+
+    @Test
+    @DisplayName("an ETag longer than a column can hold does not break the store")
+    default void longValidatorsAreStored() {
+        // Recorded after the vectors are written, so a failure here re-embeds and
+        // re-bills the page on every run. RFC 7232 puts no length limit on an ETag,
+        // and a source id carries an operator-chosen name.
+        String longSource = "kb-" + "x".repeat(400);
+        String longEtag = "\"" + "e".repeat(600) + "\"";
+        String runId = store().startRun(longSource).orElseThrow();
+
+        store().recordIngested(longSource, DOC, "hash-1", longEtag, "Wed, 21 Oct 2026 07:28:00 GMT", runId);
+
+        assertEquals(longEtag, store().lookup(longSource, DOC).orElseThrow().etag());
     }
 
     // === purge ===

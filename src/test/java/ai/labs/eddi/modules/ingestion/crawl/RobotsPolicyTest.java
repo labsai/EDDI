@@ -255,6 +255,26 @@ class RobotsPolicyTest {
 
         assertFalse(policy.isAllowed("/path0/x"), "rules within the cap still apply");
         assertTrue(policy.isAllowed("/unlisted"));
+        // Both assertions above hold with the cap removed, which is what made this
+        // test vacuous: the bound itself is what it exists to pin.
+        assertTrue(policy.isAllowed("/path4999/x"),
+                "a rule past the cap must be dropped, or one robots.txt can pin unbounded memory per host");
+    }
+
+    @Test
+    @DisplayName("a robots.txt written on Windows is still read")
+    void byteOrderMarkDoesNotSwallowTheFile() {
+        // A leading BOM made the first field "?user-agent", so no group opened and
+        // every rule was dropped — turning a site that forbids crawling into one
+        // that appears to allow it.
+        String withBom = (char) 0xFEFF + """
+                User-agent: *
+                Disallow: /private/
+                """;
+        RobotsPolicy policy = RobotsPolicy.parse(withBom, AGENT);
+
+        assertFalse(policy.isAllowed("/private/secret"));
+        assertTrue(policy.isAllowed("/public/page"));
     }
 
     @Test

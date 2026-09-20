@@ -346,6 +346,29 @@ class WebCrawlerTest {
         }
 
         @Test
+        @DisplayName("an error names the document it is about, and says whether the content is unknown")
+        void errorsCarryTheirDocumentAndWhetherContentIsUnknown() {
+            // A sink cannot tell "this page could not be read" from "this page is
+            // gone" without this, and counting the first as absence deletes pages a
+            // 503 or a rate limit merely hid.
+            FakeSite site = new FakeSite()
+                    .page(SITE + "/", linkTo(SITE + "/gone", SITE + "/down"))
+                    .status(SITE + "/gone", 404)
+                    .status(SITE + "/down", 503);
+            RecordingSink sink = new RecordingSink();
+
+            new WebCrawler(site).crawl(request(SITE + "/"), sink);
+
+            var gone = sink.errors().stream().filter(e -> (SITE + "/gone").equals(e.documentId())).findFirst()
+                    .orElseThrow(() -> new AssertionError("no error for the 404: " + sink.errors()));
+            var down = sink.errors().stream().filter(e -> (SITE + "/down").equals(e.documentId())).findFirst()
+                    .orElseThrow(() -> new AssertionError("no error for the 503: " + sink.errors()));
+
+            assertFalse(gone.contentUnknown(), "a 404 is the server saying the page is gone");
+            assertTrue(down.contentUnknown(), "a 503 says nothing about whether the page exists");
+        }
+
+        @Test
         @DisplayName("a seed answering 503 is an outage, not coverage")
         void serverErrorSeedIsNotCoverage() {
             FakeSite site = new FakeSite().status(SITE + "/", 503);

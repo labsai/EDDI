@@ -12,6 +12,7 @@ import jakarta.inject.Inject;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.Charset;
 import java.net.URI;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -185,7 +186,19 @@ public class SafeHttpPageFetcher implements PageFetcher {
             String trimmed = part.trim().toLowerCase(Locale.ROOT);
             if (trimmed.startsWith("charset=")) {
                 String charset = trimmed.substring("charset=".length()).replace("\"", "").trim();
-                return charset.isEmpty() ? null : charset;
+                if (charset.isEmpty()) {
+                    return null;
+                }
+                // A name the JVM does not know (utf8mb4) or cannot even parse
+                // ("utf-8, utf-8", which a broken proxy really does send) would throw
+                // out of the parser and lose the page — and a lost page counts as a
+                // miss, so two runs later it is deleted. Null instead: the parser
+                // sniffs the document's own meta charset.
+                try {
+                    return Charset.isSupported(charset) ? charset : null;
+                } catch (IllegalArgumentException e) {
+                    return null;
+                }
             }
         }
         return null;

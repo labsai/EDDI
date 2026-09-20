@@ -69,7 +69,19 @@ public final class RobotsPolicy {
      *            the crawler's token, matched case-insensitively against
      *            {@code User-agent} lines
      */
+    /**
+     * The byte-order mark, numerically — a '\uFEFF' literal is decoded by the
+     * formatter.
+     */
+    private static final char BOM = 0xFEFF;
+
     public static RobotsPolicy parse(String content, String userAgent) {
+        // A file written on Windows starts with a BOM, which would make the first
+        // field "?user-agent", open no group, and drop every rule in the file —
+        // silently turning a site that forbids crawling into one that allows it.
+        if (content != null && !content.isEmpty() && content.charAt(0) == BOM) {
+            content = content.substring(1);
+        }
         if (content == null || content.isBlank()) {
             return allowAll();
         }
