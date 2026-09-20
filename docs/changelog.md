@@ -93,7 +93,7 @@ audience validation (`OidcProvider.ANY_AUDIENCE`), which restores the old behavi
 
 - `src/main/resources/application.properties`
 - `src/test/java/ai/labs/eddi/deploy/DeploymentManifestsTest.java`
-- `docs/security.md`
+- `docs/security.md`, `docs/open-webui-integration.md`
 
 ---
 
