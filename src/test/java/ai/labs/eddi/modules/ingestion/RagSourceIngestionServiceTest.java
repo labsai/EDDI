@@ -56,6 +56,11 @@ class RagSourceIngestionServiceTest {
         scheduleStore = mock(IScheduleStore.class);
         ragStore = mock(IRagStore.class);
         service = new RagSourceIngestionService(pipeline, stateStore, scheduleStore, ragStore);
+        // The reservation is the real one, against the real store: with a bare mock it
+        // returns an empty Optional and every runAsync assertion below passes for the
+        // wrong reason.
+        when(pipeline.reserveRun(anyString(), any())).thenAnswer(invocation -> stateStore
+                .startRun(IngestionPipeline.stateKey(invocation.getArgument(0), invocation.getArgument(1))));
     }
 
     private static IngestionSource source(String cron) {
@@ -295,6 +300,24 @@ class RagSourceIngestionServiceTest {
 
             assertTrue(service.runAsync(KB_ID, knowledgeBase(source), source).isEmpty(),
                     "five clicks on 'run now' must not become five crawls");
+        }
+
+        @Test
+        @DisplayName("the run is claimed before the worker starts, and its id is returned")
+        void reservesBeforeStartingTheWorker() {
+            // The claim used to happen inside the worker, so two requests arriving
+            // together were both told "started" and one of them crawled nothing.
+            var source = source(null);
+            String sourceKey = IngestionPipeline.stateKey(KB_ID, source);
+
+            var runId = service.runAsync(KB_ID, knowledgeBase(source), source);
+
+            assertTrue(runId.isPresent());
+            var active = stateStore.activeRun(sourceKey);
+            assertTrue(active.isPresent(), "the run must be claimed by the time the caller is answered");
+            assertEquals(runId.get(), active.get().runId(), "the caller gets the run id, not the source key");
+            assertTrue(service.runAsync(KB_ID, knowledgeBase(source), source).isEmpty(),
+                    "a second request must be refused by the reservation, not by a later claim");
         }
 
         @Test

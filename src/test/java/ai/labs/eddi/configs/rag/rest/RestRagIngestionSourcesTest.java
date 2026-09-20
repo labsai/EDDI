@@ -121,6 +121,18 @@ class RestRagIngestionSourcesTest {
     }
 
     @Test
+    @DisplayName("a missing version is 400, not a 404 blaming the knowledge base")
+    void missingVersionIsBadRequest() {
+        // An omitted ?version binds as null; RestVersionInfo.read throws on it and the
+        // catch turned that into "RAG configuration not found", which sends the caller
+        // looking for the wrong problem.
+        Response response = rest.runSource(KB_ID, SOURCE_ID, null);
+
+        assertEquals(Response.Status.BAD_REQUEST.getStatusCode(), response.getStatus());
+        verify(sourceIngestionService, never()).runAsync(anyString(), any(), any());
+    }
+
+    @Test
     @DisplayName("an unknown source is 404 rather than a silent no-op")
     void unknownSourceIsNotFound() {
         Response response = rest.runSource(KB_ID, "does-not-exist", 1);

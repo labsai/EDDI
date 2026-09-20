@@ -7,6 +7,7 @@ package ai.labs.eddi.configs.rag.rest;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.rag.IRagStore;
+import ai.labs.eddi.configs.rag.model.IngestionSource;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -16,6 +17,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+
+import java.util.ArrayList;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -54,6 +57,21 @@ class RestRagStoreWriteValidationTest {
 
         when(ragStore.create(any())).thenReturn(resourceId(RAG_ID, 1));
         when(ragStore.update(anyString(), anyInt(), any())).thenReturn(2);
+    }
+
+    @Test
+    @DisplayName("a null entry in sources is a bad request, not a 500")
+    void createRejectsNullSourceEntry() {
+        // assignSourceIds ran before validation and dereferenced the entry, so a
+        // malformed body was answered with a server error.
+        var config = new RagConfiguration();
+        config.setName("kb");
+        var sources = new ArrayList<IngestionSource>();
+        sources.add(null);
+        config.setSources(sources);
+
+        var thrown = assertThrows(BadRequestException.class, () -> restRagStore.createRag(config));
+        assertTrue(thrown.getMessage().contains("null entry"), thrown.getMessage());
     }
 
     @Test
