@@ -50,6 +50,71 @@ bottom of this file and are never archived.
 
 ---
 
+## 🔐 feat(mcp): advertise `/mcp` as an OAuth protected resource, so clients sign themselves in (2026-09-20)
+
+**Repo:** EDDI (`feat/mcp-oauth-discovery`, stacked on `docs/mcp-oauth-plan`)
+
+Increment 1 of [`planning/mcp-oauth-protected-resource-plan.md`](../planning/mcp-oauth-protected-resource-plan.md).
+An MCP client now discovers where to authenticate and holds its own token, instead of an
+operator pasting a bearer that expires in five minutes.
+
+Quarkus OIDC 3.39.3 already serves the RFC 9728 document and appends `resource_metadata="…"`
+to the 401 challenge, so there is no new EDDI code — five properties and one permit rule.
+
+### What changed
+
+- **`application.properties`** — `quarkus.oidc.resource-metadata.*`: `enabled` tracks
+  `tenant-enabled` (an instance with auth off has no authorization server to name, and the
+  handler is not installed for a disabled tenant), `resource=/mcp`, `force-https-scheme=true`,
+  `scopes=openid`, and `authorization-server` preferring `token.issuer` over `auth-server-url`.
+- **`application.properties`** — a `permit` rule for `/.well-known/oauth-protected-resource`
+  and its path-inserted form, `GET,HEAD` only.
+- **`application.properties`** — the MCP security banner said 33 tools (there are 84) and
+  described a two-role model (there are four, with no hierarchy).
+- **`McpOAuthDiscoveryConfigTest`** (new, 8 cases) — the config *is* the feature, so it is what
+  gets asserted: the enabled expression, the resource matching the MCP root path, the issuer
+  preference, `openid` while `user-info-required` is on, the permit rule's policy/methods/paths,
+  what those paths match and do not match, and `/mcp` still being `authenticated`.
+- **`ui/manager/e2e/auth/auth.spec.ts`** — two cases in the Keycloak tier: the document is
+  readable with no token and names the issuer a real token carries; an unauthenticated `/mcp`
+  POST answers 401 with a challenge pointing at it.
+- **`ui/manager/docker-compose.integration-keycloak.yml`**, **`docker-compose.auth.yml`** — both
+  serve EDDI over plain http with authentication on, which is the one shape the forced https
+  identifier is wrong for, so both override `force-https-scheme`.
+- **`docs/mcp-server.md`**, **`docs/security.md`** — the discovery path as the preferred way in,
+  with the hand-pasted token demoted to a fallback; the new permit row, and why `@PermitAll`
+  alone does not make a path public.
+
+### Decisions
+
+- **The permit rule is mandatory, not defence in depth.** quarkus-oidc registers its handler as
+  `FilterBuildItem(handler, 50)` and `SecurityHandlerPriorities.AUTHORIZATION` is 100 — higher
+  runs first, so authorization would answer 401 before the document could be read, and
+  discovery could never start. Verified by `javap` on `OidcBuildStep`, and asserted over HTTP
+  in the auth E2E tier because no properties file can prove an ordering.
+- **Exact paths, never `/.well-known/*`.** A wildcard there would pre-permit whatever lands
+  under that prefix later. A test asserts what the patterns match *and* what they must not.
+- **`authorization-server` defaults to `token.issuer`.** `auth-server-url` is the
+  cluster-internal Keycloak address in both shipped deployments, so the default would have
+  advertised a host no client outside the cluster can resolve. RFC 8414 wants the advertised
+  server to equal the issuer regardless, and the E2E assertion compares it against the `iss`
+  claim of an accepted token rather than a hardcoded URL.
+- **`openid` is advertised deliberately.** `user-info-required=true` makes EDDI call userinfo
+  on every request, and Keycloak refuses userinfo for a token minted without that scope;
+  clients copy `scopes_supported` into the authorize request. A test pins the pair together so
+  removing one surfaces the other.
+- **https is forced by default.** `quarkus.http.proxy.*` is unset, so behind a TLS-terminating
+  ingress the identifier would be advertised as `http://`.
+
+### Files
+
+- `src/main/resources/application.properties`
+- `src/test/java/ai/labs/eddi/configs/McpOAuthDiscoveryConfigTest.java` (new)
+- `ui/manager/e2e/auth/auth.spec.ts`, `ui/manager/docker-compose.integration-keycloak.yml`
+- `docs/mcp-server.md`, `docs/security.md`
+
+---
+
 ## 📝 docs(mcp): how to reach an authenticated `/mcp`, and the plan to stop needing this (2026-09-20)
 
 **Repo:** EDDI (`docs/mcp-oauth-plan`)

@@ -231,6 +231,68 @@ test.describe("Authentication and authorization — Keycloak", () => {
     }
   });
 
+  /**
+   * MCP OAuth discovery (RFC 9728).
+   *
+   * The document has to be readable by a client that has no token — that is its
+   * entire job — while `/mcp` itself stays closed. Quarkus serves it from a Vert.x
+   * filter at priority 50 and runs authorization at 100, higher first, so without
+   * the explicit permit rule in `application.properties` the catch-all answers 401
+   * and a client can never read the thing that tells it how to authenticate. That
+   * ordering cannot be asserted from a properties file; it needs a running server
+   * with OIDC on, which is this tier.
+   */
+  test("the OAuth discovery document is readable without a token", async ({ request }) => {
+    const res = await request.get(`${API_BASE}/.well-known/oauth-protected-resource/mcp`);
+    expect(
+      res.status(),
+      "the RFC 9728 document must be anonymous, or MCP discovery cannot start",
+    ).toBe(200);
+
+    const doc = (await res.json()) as {
+      resource?: string;
+      authorization_servers?: string[];
+      scopes_supported?: string[];
+    };
+
+    // The identifier must name the endpoint the client is being challenged on.
+    // This tier overrides force-https-scheme, so the scheme is the one in use.
+    expect(doc.resource).toBe(`${API_BASE}/mcp`);
+
+    // RFC 8414: the advertised authorization server must be the issuer EDDI
+    // accepts. Comparing against a token's `iss` rather than a hardcoded URL keeps
+    // this honest across deployments — but note what it cannot see: this tier sets
+    // no QUARKUS_OIDC_TOKEN_ISSUER, so the configured expression falls back to
+    // auth-server-url and the two strings coincide here. That the expression
+    // PREFERS the public issuer is pinned in McpOAuthDiscoveryConfigTest instead.
+    const issuer = decodeClaims(await tokenFor(request, "admin")).iss;
+    expect(doc.authorization_servers).toEqual([issuer]);
+
+    // Clients copy these into the authorize request, and EDDI calls userinfo on
+    // every request — which Keycloak refuses for a token minted without `openid`.
+    expect(doc.scopes_supported).toContain("openid");
+  });
+
+  test("an unauthenticated /mcp call challenges with that document", async ({ request }) => {
+    const res = await request.post(`${API_BASE}/mcp`, {
+      headers: { Accept: "application/json, text/event-stream", "Content-Type": "application/json" },
+      data: { jsonrpc: "2.0", id: 1, method: "initialize", params: {} },
+    });
+    expect(res.status(), "/mcp must stay closed while the document beside it is open").toBe(401);
+
+    const challenge = res.headers()["www-authenticate"] ?? "";
+    const metadataUrl = /resource_metadata="?([^",\s]+)"?/i.exec(challenge)?.[1] ?? "";
+    expect(
+      metadataUrl,
+      `the 401 must point at the discovery document, or a client has nothing to follow. `
+        + `WWW-Authenticate was: ${challenge || "(absent)"}`,
+    ).not.toBe("");
+
+    // The path is what a client fetches; the origin is whatever the deployment
+    // advertises, so pinning the path keeps this honest without pinning a host.
+    expect(new URL(metadataUrl).pathname).toBe("/.well-known/oauth-protected-resource/mcp");
+  });
+
   for (const fixture of ["user", "viewer"] as const) {
     test(`${fixture} (${USERS[fixture].roles.join(", ")}) is authenticated but refused`, async ({
       request,

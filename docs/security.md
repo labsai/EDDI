@@ -90,7 +90,11 @@ When OIDC is enabled, the following permission rules apply (see `application.pro
 | `/q/metrics/*` | **Authenticated** — deliberately not permitted (metrics leak deployment shape); a Prometheus scraper must present a Bearer token |
 | `/`, `/manage`, `/manage/*`, `/chat`, `/chat/*` | **Permit** — SPA entry points (the SPA loads and handles Keycloak login via keycloak-js) |
 | `/scripts/*`, `/fonts/*`, `/css/*`, `/js/*`, `/img/*` | **Permit** — Static assets for Manager SPA |
+| `/.well-known/oauth-protected-resource`, `/.well-known/oauth-protected-resource/*` | **Permit** (GET/HEAD) — the RFC 9728 document that tells an MCP client where to authenticate. It must be anonymously readable or discovery cannot start, and it discloses only the public Keycloak URL, which `/manage/__auth_config__.js` already serves unauthenticated. See [MCP Server](mcp-server.md#connecting-to-an-authenticated-instance) |
+| `/mcp`, `/mcp/*`, `/secretstore`, `/secretstore/*` | **Authenticated** — named explicitly rather than inheriting the catch-all, so a future permit rule cannot open them by accident; `HighValueSurfaceGuard` refuses a production boot if either is reachable unauthenticated |
 | `/*` (catch-all) | **Authenticated** — All other API endpoints require a valid Bearer token |
+
+> **`@PermitAll` does not make a path public.** Quarkus evaluates these path policies *before* declarative RBAC, so an endpoint annotated `@PermitAll` but not named in a `permit` rule still answers `401`. That ordering is also why the discovery document above needs its own rule: quarkus-oidc serves it from a Vert.x filter at priority 50, and authorization runs at 100 — higher first.
 
 > **Note:** there is no HTTP-layer permit for conversation endpoints — `/agents/production/*` is caught by the catch-all `authenticated` policy and answers `401` before any resource method runs. The production exemption in `RestAgentManagement.checkUserAuthIfApplicable` (below) is an inner check only; to expose a production conversation surface anonymously you must add your own `quarkus.http.auth.permission.*` permit rule.
 
