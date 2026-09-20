@@ -85,8 +85,11 @@ class RestRagStoreScheduleSyncTest {
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Set<String>> previousIds = ArgumentCaptor.forClass(Set.class);
-        verify(sourceIngestionService).syncSchedules(eq(KB_ID), any(), any(RagConfiguration.class),
+        var version = ArgumentCaptor.forClass(Integer.class);
+        verify(sourceIngestionService).syncSchedules(eq(KB_ID), version.capture(), any(RagConfiguration.class),
                 previousIds.capture());
+        assertEquals(2, version.getValue(),
+                "the schedule must be re-pinned to the version this update created, or every fire reads the old one");
         assertEquals(Set.of("src-old"), previousIds.getValue(),
                 "a source removed by this update must be named, or its schedule keeps firing");
     }

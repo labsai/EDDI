@@ -12,6 +12,7 @@ import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
+import jakarta.ws.rs.WebApplicationException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -21,6 +22,7 @@ import java.util.List;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.atMost;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -96,12 +98,19 @@ class RestRagStoreScheduleCleanupTest {
     }
 
     @Test
-    @DisplayName("schedules survive while a current version remains")
+    @DisplayName("deleting an older version leaves the live version's schedules alone")
     void keepsSchedulesWhileACurrentVersionRemains() throws Exception {
+        // Both halves matter, and they answer differently: a soft delete of an older
+        // version is allowed, and it is the hasCurrentVersion check that stops it
+        // taking the deployed version's schedules with it. A permanent delete of a
+        // version that is not current is refused by the store before that check is
+        // ever reached.
         when(ragStore.getCurrentResourceId(KB_ID)).thenReturn(currentVersion(3));
 
         restRagStore.deleteRag(KB_ID, 1, false);
+        verify(sourceIngestionService, never()).removeSchedules(any(), any());
 
+        assertThrows(WebApplicationException.class, () -> restRagStore.deleteRag(KB_ID, 1, true));
         verify(sourceIngestionService, never()).removeSchedules(any(), any());
     }
 
