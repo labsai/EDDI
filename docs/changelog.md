@@ -81,7 +81,9 @@ it something to authenticate as.
 - **All three realm copies** — the seeded `eddi` administrator gains `eddi-viewer` alongside
   `eddi-admin`/`eddi-editor`. There is no role hierarchy, so without it the account an operator
   points their first MCP client at completes the login and is then refused all ~40 read tools.
-  A test pins it.
+  A test pins it. `scripts/make-test-realm.mjs` guards that fixture set against the realm and
+  fails the auth E2E run when the two drift, so `ROLE_FIXTURES` and `e2e/auth/auth-helpers.ts`
+  move with it — which is how CI caught this change the first time it ran.
 
 ### Decisions
 
