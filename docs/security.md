@@ -125,7 +125,7 @@ docker compose -f docker-compose.keycloak.yml up
 This starts Keycloak 26 on port 8180 with:
 
 - **Realm**: `eddi`
-- **Clients**: `eddi-frontend` (SPA, public), `eddi-backend` (bearer-only)
+- **Clients**: `eddi-frontend` (SPA, public), `eddi-backend` (bearer-only), `eddi-mcp` (public, code+PKCE only — what an MCP client logs in through; see [MCP Server](mcp-server.md#connecting-to-an-authenticated-instance))
 - **Roles**: `eddi-admin`, `eddi-editor`, `eddi-user`, `eddi-viewer` (plus `eddi-approver`, used by the HITL approval endpoints)
 - **Test users**: `viewer`/`viewer` (`eddi-viewer`), `user`/`user` (`eddi-user`), and `eddi` (`eddi-admin` + `eddi-editor`), which ships **without a password** — set one in the admin console at http://localhost:8180 (`admin`/`admin`)
 
