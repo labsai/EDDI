@@ -51,7 +51,9 @@ public class IngestionSource {
     private IngestionSettings settings;
 
     /**
-     * Quartz-style cron for scheduled runs; null means the source only runs when
+     * Standard five-field cron for scheduled runs — {@code min hour dom month dow},
+     * the form {@code CronParser} accepts. Not Quartz: a six- or seven-field
+     * expression with seconds is refused. Null means the source only runs when
      * triggered by hand.
      */
     private String cron;

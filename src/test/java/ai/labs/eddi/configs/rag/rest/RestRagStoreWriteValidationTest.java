@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.util.ArrayList;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -57,6 +58,26 @@ class RestRagStoreWriteValidationTest {
 
         when(ragStore.create(any())).thenReturn(resourceId(RAG_ID, 1));
         when(ragStore.update(anyString(), anyInt(), any())).thenReturn(2);
+    }
+
+    @Test
+    @DisplayName("a cron the scheduler cannot parse is refused at save time")
+    void createRejectsInvalidCron() {
+        // Stored, it becomes a schedule that never fires while every screen shows the
+        // source as scheduled. Six fields is the trap: Quartz takes seconds, the
+        // scheduler here does not.
+        var config = new RagConfiguration();
+        config.setName("kb");
+        var source = new IngestionSource();
+        source.setName("docs");
+        var web = new IngestionSource.WebSource();
+        web.setStartUrl("https://example.com/");
+        source.setWeb(web);
+        source.setCron("0 0 2 * * *");
+        config.setSources(List.of(source));
+
+        var thrown = assertThrows(BadRequestException.class, () -> restRagStore.createRag(config));
+        assertTrue(thrown.getMessage().contains("cron"), thrown.getMessage());
     }
 
     @Test

@@ -272,13 +272,23 @@ public class RagConfiguration {
         this.sources = sources == null ? new ArrayList<>() : sources;
     }
 
-    /** The source with this id, or null. */
+    /**
+     * The source addressed by this id, or null.
+     *
+     * <p>
+     * Matches {@link IngestionSource#effectiveId()} — the id, or the name when
+     * there is none — because that is what schedules, ingestion state and the REST
+     * paths are keyed by. Matching on the id alone meant an id-less source (a ZIP
+     * import goes straight to the store and never passes the REST layer that
+     * assigns ids) could be scheduled and have its state recorded, yet never be
+     * found again: every scheduled fire failed and every REST call answered 404.
+     */
     public IngestionSource findSource(String sourceId) {
         if (sourceId == null || sources == null) {
             return null;
         }
         return sources.stream()
-                .filter(source -> sourceId.equals(source.getId()))
+                .filter(source -> source != null && sourceId.equals(source.effectiveId()))
                 .findFirst()
                 .orElse(null);
     }

@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.rag.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.engine.runtime.internal.CronParser;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.rag.IRagStore;
@@ -201,6 +202,7 @@ public class RestRagStore implements IRestRagStore {
             requireNoNullSources(ragConfiguration);
             assignSourceIds(ragConfiguration);
             ragConfiguration.validate();
+            requireValidCronExpressions(ragConfiguration);
         } catch (IllegalArgumentException e) {
             throw new BadRequestException(e.getMessage(), e);
         }
@@ -236,6 +238,29 @@ public class RestRagStore implements IRestRagStore {
         }
         if (ragConfiguration.getSources().stream().anyMatch(Objects::isNull)) {
             throw new IllegalArgumentException("The sources list contains a null entry");
+        }
+    }
+
+    /**
+     * A cron the scheduler cannot parse is refused here, where the operator is
+     * waiting for an answer. Stored, it becomes a schedule that simply never fires,
+     * and the source looks scheduled on every screen that shows it.
+     */
+    private void requireValidCronExpressions(RagConfiguration ragConfiguration) {
+        if (ragConfiguration.getSources() == null) {
+            return;
+        }
+        for (var source : ragConfiguration.getSources()) {
+            String cron = source.getCron();
+            if (cron == null || cron.isBlank()) {
+                continue;
+            }
+            try {
+                CronParser.validate(cron);
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException(
+                        "Ingestion source '" + source.getName() + "' has an invalid cron: " + e.getMessage());
+            }
         }
     }
 
