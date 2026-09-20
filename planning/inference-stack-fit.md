@@ -178,7 +178,10 @@ nowhere — is the one option that must not persist.
 > pure Java and gets most of the benefit, while the native artifact would put
 > platform-specific, glibc-sensitive shared objects into a digest-pinned UBI image, add
 > Trivy scan surface and require `--enable-native-access`. The flag now ships in the
-> image, both Maven forks and `mise run dev`, guarded by `JlamaRuntimeFlagsTest` and
+> images, the Maven **Surefire** fork and both `mise` dev tasks — deliberately not the
+> Failsafe fork, where an explicit `argLine` would replace the implicit `${argLine}`
+> carrying the JaCoCo IT agent and Quarkus's module opens — guarded by
+> `JlamaRuntimeFlagsTest` and
 > `JlamaRuntimeSupportTest`. The "smoke test that runs a tiny model" is **not** included —
 > it would download gigabytes of weights from Hugging Face on every CI run. What replaced
 > it is stronger per unit of CI time: an assertion that the Vector API is genuinely
@@ -202,7 +205,7 @@ nowhere — is the one option that must not persist.
 > for a CPU limit. The genuine hazard is narrower: cgroup **shares** have been ignored
 > since JDK 19, so a pod with a CPU *request* and no *limit* sees the whole node. `[src]`
 >
-> A third correction is recorded against §4.6 rather than here: an earlier revision of
+> A third correction belongs here too: an earlier revision of
 > the fix probed whether `jdk.incubator.vector` was resolved, which is strictly weaker
 > than what Jlama asks. `MachineSpec` accepts only a 512- or 256-bit species (128 on
 > ARM), so a 128-bit x86 species — a hypervisor masking AVX2, `-XX:UseAVX=0` — resolves
@@ -519,9 +522,9 @@ Nothing below is approved; this is the order that makes sense if any of it is ta
 
 | Item | Work | Depends on |
 |---|---|---|
-| **A1** | Jlama: demote (preferred) or fix the image flags and add a real smoke test — §4.1 | — |
+| ~~**A1**~~ | ~~Jlama: demote or fix~~ — **done.** Fixed, not demoted: the Vector API flag in both images, the Surefire fork and both mise dev tasks; `modelCachePath` and the other dropped settings exposed. No `jlama-native` and no live-inference smoke test — see the §4.1 decision note for why, and for the three claims in this document that the implementation corrected | — |
 | **A2** | Documentation page: vLLM, llama-server, OpenShift AI/KServe, TrustyAI gateway — §4.2, §4.4 | — |
-| **A3** | Docs debt that A1 creates: the "12 providers" count and the Jlama section — §10 | A1 |
+| ~~**A3**~~ | ~~Docs debt A1 creates~~ — **moot.** Jlama was fixed rather than demoted, so the provider count stays true; the Jlama section of `docs/langchain.md` was rewritten instead | — |
 
 **Then the prerequisites the proposal skipped.**
 

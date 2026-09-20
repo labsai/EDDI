@@ -50,7 +50,6 @@ public class JlamaLanguageModelBuilder implements ILanguageModelBuilder {
     private static final String KEY_TEMPERATURE = "temperature";
     private static final String KEY_MAX_TOKENS = "maxTokens";
     private static final String KEY_MODEL_CACHE_PATH = "modelCachePath";
-    private static final String KEY_THREAD_COUNT = "threadCount";
     private static final String KEY_QUANTIZE_AT_RUNTIME = "quantizeModelAtRuntime";
     private static final String KEY_WORKING_DIRECTORY = "workingDirectory";
     private static final String KEY_WORKING_QUANTIZED_TYPE = "workingQuantizedType";
@@ -58,7 +57,7 @@ public class JlamaLanguageModelBuilder implements ILanguageModelBuilder {
     @Override
     public Set<String> recognisedParameters() {
         return Set.of(KEY_MODEL_NAME, KEY_AUTH_TOKEN, KEY_TEMPERATURE, KEY_MAX_TOKENS, KEY_MODEL_CACHE_PATH,
-                KEY_THREAD_COUNT, KEY_QUANTIZE_AT_RUNTIME, KEY_WORKING_DIRECTORY, KEY_WORKING_QUANTIZED_TYPE);
+                KEY_QUANTIZE_AT_RUNTIME, KEY_WORKING_DIRECTORY, KEY_WORKING_QUANTIZED_TYPE);
     }
 
     @Override
@@ -75,9 +74,10 @@ public class JlamaLanguageModelBuilder implements ILanguageModelBuilder {
      * and loads a model: a unit test that called {@link #build} would need network
      * access and gigabytes of disk, so the parameter mapping — the part that can
      * actually regress — would go untested, which is how it stayed at four of the
-     * nine settings Jlama accepts. Constructing and populating the builder is free,
-     * and its {@code toString()} exposes every field, so
-     * {@code LanguageModelBuildersTest} asserts on the mapping directly.
+     * nine settings Jlama accepts (one of which, threadCount, turns out to be
+     * unsafe to expose at all — see the note in the body). Constructing and
+     * populating the builder is free, and its {@code toString()} exposes every
+     * field, so {@code LanguageModelBuildersTest} asserts on the mapping directly.
      *
      * @param builder
      *            a fresh Jlama builder
@@ -110,12 +110,20 @@ public class JlamaLanguageModelBuilder implements ILanguageModelBuilder {
             builder.modelCachePath(Path.of(parameters.get(KEY_MODEL_CACHE_PATH)));
         }
 
-        // Jlama defaults to Math.max(2, availableProcessors() / 2). availableProcessors
-        // is container-aware for a CPU *limit*, so a pod with `limits.cpu` gets a
-        // sensible number without this. It is NOT aware of a CPU *request*: with a
-        // request and no limit the JVM sees the whole node, and half a 64-core node is
-        // 32 inference threads inside a pod entitled to two.
-        applyInt(parameters, KEY_THREAD_COUNT, builder::threadCount);
+        // NOTE: threadCount is deliberately NOT mapped, even though Jlama's builder
+        // accepts it. It is not a per-model setting: JlamaModel.Loader hands it to
+        // ModelSupport.loadModel, which calls the process-global
+        // PhysicalCoreExecutor.overrideThreadCount. That method is one-shot —
+        // if (!started.compareAndSet(false, true)) throw new IllegalStateException(...)
+        // — and the executor's memoized `instance` supplier ALSO sets `started`, so
+        // merely running inference once arms the latch. Exposing it per model would
+        // mean the second Jlama model built in a process throws "Executor already
+        // started" during load, even with an identical value; and since this registry
+        // rebuilds models on cache eviction, secret rotation and a 30-minute idle TTL,
+        // that second build is routine rather than exotic. Jlama offers no model-local
+        // thread configuration, so there is nothing correct to expose here. Operators
+        // size it by giving the pod a CPU *limit*: availableProcessors() honours a
+        // limit, and Jlama's default is max(2, availableProcessors() / 2).
 
         // applyBoolean, not Boolean.parseBoolean: the latter maps every typo to false
         // without a word, so "ture" would silently pin quantization off. See

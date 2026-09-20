@@ -397,7 +397,6 @@ below before deploying it; both describe defaults that fail in a container.
 | `modelName` | Hugging Face repo id, e.g. `tjake/Llama-3.2-1B-Instruct-JQ4`. Jlama downloads it on first use |
 | `modelCachePath` | Where weights are cached. **Set this in any container** — see below. Default: `${user.home}/.jlama/models` |
 | `authToken` | Hugging Face token, for gated or private repos. Use `${vault:...}` rather than a literal |
-| `threadCount` | Inference threads. Default: `max(2, availableProcessors() / 2)`. Set it if your pod has a CPU *request* but no *limit* — see below |
 | `quantizeModelAtRuntime` | `true` quantizes on load: slower startup, smaller memory footprint |
 | `workingDirectory` | Scratch space for the loader. Needs to be writable |
 | `workingQuantizedType` | Jlama `DType` name for working-set quantization, e.g. `F32`, `I8`. Case-insensitive; an unknown name is logged and ignored |
@@ -412,8 +411,10 @@ Jlama needs the Java Vector API for SIMD tensor operations:
 --add-modules=jdk.incubator.vector
 ```
 
-**EDDI sets this for you** in the container image, in the Maven test forks and in
-`mise run dev`. You only need to add it yourself if you launch `quarkus-run.jar` with
+**EDDI sets this for you** in both container images, in the Maven Surefire fork and in
+the `mise` dev tasks. (Deliberately not in the Failsafe fork — declaring an `argLine`
+there would replace the implicit `${argLine}` that carries the JaCoCo integration-test
+agent and Quarkus's module opens, and no integration test builds a Jlama model anyway.) You only need to add it yourself if you launch `quarkus-run.jar` with
 your own command line.
 
 The image carries it on **`JDK_JAVA_OPTIONS`**, deliberately, rather than on
@@ -450,12 +451,14 @@ is exactly why each is worth setting explicitly.
   Face before the first turn can be answered. Point it at a mounted volume. (The download
   happens on the *first turn*, not at deploy time, so a mistake here surfaces long after
   the agent was configured and saved.)
-- **`threadCount` — set it if your pod has a CPU request but no limit.** Jlama defaults to
-  `max(2, Runtime.availableProcessors() / 2)`, and `availableProcessors()` *is* container
-  aware for a CPU **limit** — a pod with `limits.cpu: 2` correctly sees 2. It is not aware
-  of a CPU **request**: cgroup shares have been ignored since JDK 19, so a pod with only
-  `requests.cpu` sees the whole node, and half of a 64-core node is 32 inference threads in
-  a pod entitled to two.
+- **Thread count — give the pod a CPU *limit*, not a parameter.** Jlama runs inference on
+  a process-global `PhysicalCoreExecutor` sized at `max(2, availableProcessors() / 2)`.
+  `availableProcessors()` honours a container CPU **limit**, so `limits.cpu: 4` yields two
+  inference threads. It does **not** honour a CPU **request**: cgroup shares have been
+  ignored since JDK 19, so a pod with only `requests.cpu` sees the whole node. EDDI
+  deliberately exposes no `threadCount` parameter — Jlama applies it through a one-shot
+  process-global latch that throws on its second call, so it cannot be a per-model setting.
+  If you must override it, size the pod.
 - **Memory — size for the weights, outside the heap.** Jlama memory-maps the safetensors
   files, so the weights land in RSS and page cache, not the Java heap. They still count
   against the container's memory limit. Size the pod for the model *plus* EDDI's heap, and

@@ -572,7 +572,6 @@ class LanguageModelBuildersTest {
             params.put("temperature", "0.7");
             params.put("maxTokens", "512");
             params.put("modelCachePath", "/models/jlama");
-            params.put("threadCount", "4");
             params.put("quantizeModelAtRuntime", "true");
             params.put("workingDirectory", "/tmp/jlama-work");
             params.put("workingQuantizedType", "F32");
@@ -582,7 +581,6 @@ class LanguageModelBuildersTest {
             assertTrue(state.contains("modelName=tjake/Llama-3.2-1B-Instruct-JQ4"), state);
             assertTrue(state.contains("temperature=0.7"), state);
             assertTrue(state.contains("maxTokens=512"), state);
-            assertTrue(state.contains("threadCount=4"), state);
             assertTrue(state.contains("quantizeModelAtRuntime=true"), state);
             // Path.of normalises separators per platform, so assert against a Path
             // rather than a literal that only holds on one OS.
@@ -607,7 +605,6 @@ class LanguageModelBuildersTest {
                     "temperature", "0.25",
                     "maxTokens", "99",
                     "modelCachePath", "/cache",
-                    "threadCount", "7",
                     "quantizeModelAtRuntime", "true",
                     "workingDirectory", "/work",
                     "workingQuantizedType", "F32");
@@ -650,7 +647,6 @@ class LanguageModelBuildersTest {
 
             assertTrue(state.contains("modelName=null"), state);
             assertTrue(state.contains("modelCachePath=null"), state);
-            assertTrue(state.contains("threadCount=null"), state);
             assertTrue(state.contains("authToken=null"), state);
         }
 
@@ -666,13 +662,11 @@ class LanguageModelBuildersTest {
             Map<String, String> params = new HashMap<>();
             params.put("temperature", "warm");
             params.put("maxTokens", "lots");
-            params.put("threadCount", "many");
 
             String state = applied(params);
 
             assertTrue(state.contains("temperature=null"), state);
             assertTrue(state.contains("maxTokens=null"), state);
-            assertTrue(state.contains("threadCount=null"), state);
         }
 
         /**
@@ -723,6 +717,35 @@ class LanguageModelBuildersTest {
 
             assertTrue(state.contains("workingQuantizedType=F32"),
                     "a value typed in the Manager should not have to match enum casing exactly: " + state);
+        }
+
+        /**
+         * {@code threadCount} must stay unmapped. Jlama's builder accepts it, but
+         * {@code JlamaModel.Loader} hands it to {@code ModelSupport.loadModel}, which
+         * calls the process-global {@code PhysicalCoreExecutor.overrideThreadCount} — a
+         * one-shot latch that throws {@code IllegalStateException("Executor already
+         * started")} on any second call, and which the executor's memoized
+         * {@code instance} supplier also arms just by running inference. Since this
+         * registry rebuilds models on cache eviction, secret rotation and a 30-minute
+         * idle TTL, a second build is routine, so exposing the parameter would turn a
+         * working deployment into one that fails on its second model load.
+         * <p>
+         * Pinned as a test because the setter is right there on the builder next to the
+         * ones that are mapped, and re-adding it looks like an obvious omission being
+         * corrected.
+         */
+        @Test
+        @DisplayName("threadCount stays unmapped: Jlama applies it to a process-global one-shot latch")
+        void threadCountIsDeliberatelyNotMapped() {
+            assertFalse(builder.recognisedParameters().contains("threadCount"),
+                    "threadCount reaches PhysicalCoreExecutor.overrideThreadCount, which throws on its second"
+                            + " call; a per-model parameter cannot honour a process-global one-shot setting");
+
+            Map<String, String> params = new HashMap<>();
+            params.put("threadCount", "4");
+
+            assertTrue(applied(params).contains("threadCount=null"),
+                    "even when configured, threadCount must not reach the Jlama builder");
         }
 
         /**

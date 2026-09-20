@@ -86,7 +86,8 @@ exercise the image over HTTP.
 - **`src/main/docker/Dockerfile.demo`** — the flag in the `ENTRYPOINT` array. The demo image
   starts EDDI with a bare `java` command, so it has neither `run-java.sh` nor any ENV to inherit
   from.
-- **`pom.xml`** — the flag on surefire's `argLine`, and deliberately **not** on failsafe's.
+- **`pom.xml`** — the flag on the Surefire fork's `argLine`, and deliberately **not** on the
+  Failsafe fork's.
   Failsafe's `argLine` *parameter* defaults to the `${argLine}` property, which both
   `jacoco:prepare-agent-integration` and the Quarkus Maven extension populate; declaring an
   explicit element there replaces the lot, dropping the JaCoCo IT agent that feeds the merged
@@ -102,13 +103,25 @@ exercise the image over HTTP.
   fixable by any flag). Warns rather than fails — a degraded Jlama still answers correctly, and
   failing closed would turn a slow deployment into a broken one on upgrade, for a condition the
   operator may not be able to fix.
-- **`JlamaLanguageModelBuilder`** — exposes the five settings Jlama accepts and EDDI was
-  dropping: `modelCachePath`, `threadCount`, `quantizeModelAtRuntime`, `workingDirectory`,
+- **`JlamaLanguageModelBuilder`** — exposes four of the five settings Jlama accepts and EDDI
+  was dropping: `modelCachePath`, `quantizeModelAtRuntime`, `workingDirectory`,
   `workingQuantizedType`. Booleans go through `ModelParameterValues.applyBoolean` rather than
   `Boolean.parseBoolean`, so `"ture"` leaves the provider default instead of silently meaning
   `false`; `workingQuantizedType` resolves against Jlama's `DType` enum with an unknown name
   logged and ignored rather than thrown on every turn. The parameter mapping moved into a
   package-visible `applyTo` that stops short of `build()`.
+- **`threadCount` is deliberately NOT exposed**, though Jlama's builder accepts it and an
+  earlier revision of this branch mapped it. `JlamaModel.Loader` hands the value to
+  `ModelSupport.loadModel`, which calls the process-global
+  `PhysicalCoreExecutor.overrideThreadCount` — a one-shot latch
+  (`if (!started.compareAndSet(false, true)) throw new IllegalStateException(...)`) that the
+  executor's memoized `instance` supplier also arms merely by running inference. A per-model
+  parameter cannot honour a process-global one-shot setting: the second Jlama model built in
+  a process would throw `"Executor already started"` during load, even with an identical
+  value. And `ChatModelRegistry` rebuilds models on cache eviction, secret rotation and a
+  30-minute idle TTL, so a second build is routine rather than exotic. Caught in review;
+  pinned by a test, because the setter sits on the builder right next to the mapped ones and
+  re-adding it looks like an obvious omission being corrected.
 
 `modelCachePath` is the one that matters operationally, though not for the reason that first
 looked obvious. Jlama caches weights under `${user.home}/.jlama/models`, and in the EDDI image
@@ -158,16 +171,17 @@ the build where the change was made. It also asserts the flag is on *exactly one
 re-adding it to failsafe fails here rather than quietly costing the IT coverage data.
 `JlamaRuntimeSupportTest` (10) proves the SIMD backend is genuinely selected in a running JVM —
 the two are complementary: a typo fails both, a flag written into a config block Maven never
-applies fails only the second. `LanguageModelBuildersTest.JlamaTests` (9) covers the parameter
+applies fails only the second. `LanguageModelBuildersTest.JlamaTests` (10) covers the parameter
 mapping, including that every key in `recognisedParameters()` actually changes builder state,
 that a mistyped boolean does not silently mean `false`, that an unknown `DType` name is ignored
-rather than thrown, and that the Hugging Face token stays masked.
+rather than thrown, that `threadCount` stays unmapped, and that the Hugging Face token stays
+masked.
 
 ### Docs
 
 `docs/langchain.md`'s Jlama section rewritten: a full parameter table, the required JVM flag and
 why its absence is silent, and the three container behaviours that differ without erroring —
-`modelCachePath` landing on the ephemeral layer, `threadCount` being container-aware for a CPU
+`modelCachePath` landing on the ephemeral layer, inference threads being sized from a CPU
 *limit* but not a *request* (cgroup shares have been ignored since JDK 19), and memory sizing for
 memory-mapped safetensors that count against the container limit but not the heap. Plus the
 air-gap caveat that an empty cache with no egress fails rather than degrades.
