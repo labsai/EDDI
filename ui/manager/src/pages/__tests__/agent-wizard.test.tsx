@@ -781,6 +781,64 @@ describe("AgentWizardPage", () => {
     ).toBeInTheDocument();
   });
 
+  // ── Jlama provider (in-process — no endpoint) ─────────────────
+
+  /**
+   * Jlama runs inside the EDDI JVM. The wizard used to offer it a Base URL with
+   * a `http://localhost:8080` placeholder; the backend drops the value, so an
+   * admin who filled it in got no error and no effect. Offering no field at all
+   * is the only honest option.
+   */
+  it("Jlama provider offers no base URL field", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<AgentWizardPage />, {
+      initialRoute: "/manage/agents/wizard",
+    });
+
+    await user.click(screen.getByTestId("type-standard"));
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.type(screen.getByTestId("wizard-agent-name"), "Local Agent");
+    await user.type(screen.getByTestId("wizard-system-prompt"), "Local help");
+    await user.click(screen.getByTestId("wizard-next"));
+
+    // Present for the default provider…
+    expect(screen.getByTestId("wizard-baseurl")).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByTestId("wizard-provider"), "jlama");
+
+    // …and gone once the model runs in-process.
+    expect(screen.queryByTestId("wizard-baseurl")).not.toBeInTheDocument();
+    expect(screen.getByTestId("wizard-jlama-note")).toBeInTheDocument();
+  });
+
+  it("Jlama provider suggests only loadable owner/name model ids", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<AgentWizardPage />, {
+      initialRoute: "/manage/agents/wizard",
+    });
+
+    await user.click(screen.getByTestId("type-standard"));
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.type(screen.getByTestId("wizard-agent-name"), "Local Agent");
+    await user.type(screen.getByTestId("wizard-system-prompt"), "Local help");
+    await user.click(screen.getByTestId("wizard-next"));
+
+    await user.selectOptions(screen.getByTestId("wizard-provider"), "jlama");
+
+    const datalist = document.getElementById("model-suggestions-jlama");
+    expect(datalist).not.toBeNull();
+    const offered = Array.from(datalist!.querySelectorAll("option")).map(
+      (option) => option.getAttribute("value") ?? "",
+    );
+    expect(offered.length).toBeGreaterThan(0);
+    for (const model of offered) {
+      expect(
+        model.split("/"),
+        `"${model}" is not an owner/name repository id — Jlama cannot resolve it`,
+      ).toHaveLength(2);
+    }
+  });
+
   // ── LLM step: base URL input ──────────────────────────────────────
 
   it("shows base URL input on LLM step", async () => {

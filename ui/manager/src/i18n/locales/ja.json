@@ -451,8 +451,12 @@
   },
   "setupWizard": {
     "baseUrlHintCloud": "プロキシ、プライベートデプロイ、または Azure OpenAI エンドポイントを使用する場合にのみ必要です",
+    "jlamaNoteTitle": "Jlama は EDDI 内部で動作します",
+    "jlamaNoteBody": "指定すべきモデルサーバーはありません。EDDI が自身のプロセスにモデルを読み込み、初回利用時に Hugging Face から重みをダウンロードするため、最初のメッセージには時間がかかることがあります。",
+    "jlamaNoteTuning": "EDDI をコンテナで実行していますか。作成後にエージェントの LLM 設定を開き、modelCachePath をマウント済みボリュームに設定してください。既定のキャッシュはコンテナの一時レイヤー上にあるため、再起動のたびにモデルが再ダウンロードされます。threadCount、quantizeModelAtRuntime、workingDirectory、workingQuantizedType も同じ場所で調整できます。",
     "baseUrlHintLocal": "必須 — ローカルモデルサーバーが稼働している URL",
     "modelHint": "プロバイダーがサポートする任意のモデル名を入力するか、候補から選択してください",
+    "modelHintJlama": "owner/name 形式の Hugging Face リポジトリ ID を指定してください（例: tjake/Llama-3.2-1B-Instruct-JQ4）。モデル名だけでは解決できず、エージェントは最初のメッセージで失敗します。",
     "modelPlaceholder": "例: {{model}}（またはプロバイダーがサポートする任意のモデル）",
     "title": "Agent 作成ウィザード",
     "subtitle": "数分で完全に設定された Agent を作成",

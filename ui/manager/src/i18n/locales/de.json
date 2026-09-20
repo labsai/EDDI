@@ -451,8 +451,12 @@
   },
   "setupWizard": {
     "baseUrlHintCloud": "Nur erforderlich bei Verwendung eines Proxys, einer privaten Bereitstellung oder eines Azure-OpenAI-Endpunkts",
+    "jlamaNoteTitle": "Jlama läuft innerhalb von EDDI",
+    "jlamaNoteBody": "Es gibt keinen Modellserver, auf den verwiesen werden könnte — EDDI lädt das Modell in den eigenen Prozess und holt die Gewichte beim ersten Mal von Hugging Face. Die erste Nachricht kann daher eine Weile dauern.",
+    "jlamaNoteTuning": "EDDI läuft in einem Container? Öffnen Sie anschließend die LLM-Konfiguration des Agenten und setzen Sie modelCachePath auf ein eingebundenes Volume — der Standard-Cache liegt auf der flüchtigen Container-Schicht, sodass das Modell bei jedem Neustart erneut heruntergeladen wird. Auch threadCount, quantizeModelAtRuntime, workingDirectory und workingQuantizedType lassen sich dort anpassen.",
     "baseUrlHintLocal": "Erforderlich — die URL, unter der Ihr lokaler Modellserver läuft",
     "modelHint": "Geben Sie einen beliebigen von Ihrem Anbieter unterstützten Modellnamen ein oder wählen Sie einen aus den Vorschlägen",
+    "modelHintJlama": "Muss eine Hugging-Face-Repository-ID in der Form owner/name sein, z. B. tjake/Llama-3.2-1B-Instruct-JQ4. Ein bloßer Modellname kann nicht aufgelöst werden und der Agent scheitert bei seiner ersten Nachricht.",
     "modelPlaceholder": "z. B. {{model}} (oder jedes von Ihrem Anbieter unterstützte Modell)",
     "title": "Agent-Assistent",
     "subtitle": "Erstellen Sie einen vollständig konfigurierten Agent in wenigen Minuten",

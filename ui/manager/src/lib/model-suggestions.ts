@@ -84,9 +84,15 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
     "phi4:mini",
     "deepseek-r1:8b",
   ],
+  // Jlama resolves a model through its own registry, which downloads it from
+  // Hugging Face — so a model name here is a HF *repository id* in `owner/name`
+  // form, not a friendly label. A bare name (`tinyllama`, `llama-3.2-1b`) has no
+  // owner to resolve and fails on the agent's first turn, long after the wizard
+  // reported success. Only ids this repository already treats as real are listed:
+  // any `owner/name` repo Jlama can load can still be typed by hand.
   jlama: [
-    "llama-3.2-1b",
-    "tinyllama",
+    "tjake/Llama-3.2-1B-Instruct-JQ4",
+    "tjake/TinyLlama-1.1B-Chat-v1.0-Jlama-Q4",
   ],
   huggingface: [
     "deepseek-ai/DeepSeek-V4",
@@ -159,7 +165,35 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
   ],
 };
 
-/** Whether a provider requires a base URL (local providers) or it's just optional */
+/**
+ * Providers that run the model inside the EDDI JVM rather than talking to a
+ * model server, so there is no endpoint to address and a base URL is not merely
+ * optional — it is meaningless.
+ *
+ * Jlama is the only one. `JlamaLanguageModelBuilder.recognisedParameters()` does
+ * not include `baseUrl`, and `AgentSetupService` drops it before the builder is
+ * even reached, so anything entered vanishes without a trace the user can see.
+ */
+const IN_PROCESS_PROVIDERS = new Set(["jlama"]);
+
+/**
+ * Whether a base URL field should be offered at all.
+ *
+ * False only for in-process providers. Everything else can legitimately be
+ * pointed at a proxy or a private deployment, even when it does not need to be.
+ */
+export function supportsBaseUrl(providerId: string): boolean {
+  return !IN_PROCESS_PROVIDERS.has(providerId);
+}
+
+/**
+ * Whether a provider requires a base URL — true for a local provider that talks
+ * to a model *server* the deployment has to name.
+ *
+ * Jlama used to be on this list and must not come back: it has no server, so
+ * requiring a URL blocked operator activation behind a field whose value was
+ * then thrown away.
+ */
 export function isBaseUrlRequired(providerId: string): boolean {
-  return providerId === "ollama" || providerId === "jlama";
+  return providerId === "ollama";
 }
