@@ -22,6 +22,9 @@ import org.junit.jupiter.api.Timeout;
 import org.mockito.ArgumentCaptor;
 
 import java.time.Duration;
+import ai.labs.eddi.modules.ingestion.IngestionPipeline;
+import ai.labs.eddi.modules.ingestion.RagIngestionSchedules;
+import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -42,6 +45,7 @@ class ScheduleFireExecutorTest {
     private DreamService dreamService;
     private TeamCadenceService teamCadenceService;
     private ToolCostTracker toolCostTracker;
+    private RagSourceIngestionService ragSourceIngestionService;
     private ScheduleFireExecutor executor;
 
     @BeforeEach
@@ -61,6 +65,8 @@ class ScheduleFireExecutorTest {
         setField(executor, "dreamService", dreamService);
         setField(executor, "teamCadenceService", teamCadenceService);
         setField(executor, "toolCostTracker", toolCostTracker);
+        ragSourceIngestionService = mock(RagSourceIngestionService.class);
+        setField(executor, "ragSourceIngestionService", ragSourceIngestionService);
     }
 
     /**
@@ -946,6 +952,70 @@ class ScheduleFireExecutorTest {
                 "policy", policy,
                 "surface", "regular",
                 "conversationId", conversationId));
+        return s;
+    }
+
+    // ==================== RAG ingestion fires ====================
+
+    @Test
+    void fire_ragIngestion_runsTheSourceAndRecordsTheRun() throws Exception {
+        var schedule = makeIngestionSchedule("rag-1", "kb-1", 2, "src-1");
+        when(ragSourceIngestionService.processScheduledFire("kb-1", 2, "src-1"))
+                .thenReturn(new IngestionPipeline.IngestionReport(null, "src-1",
+                        IngestionPipeline.IngestionReport.Outcome.COMPLETED, 3, 2, 1, 0, 0, 5, 5, 0.0,
+                        false, false, null, Duration.ZERO, null));
+
+        var log = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals(FireStatus.COMPLETED.name(), log.status());
+        verify(ragSourceIngestionService).processScheduledFire("kb-1", 2, "src-1");
+    }
+
+    @Test
+    void fire_ragIngestion_alreadyRunningIsNotAFailure() throws Exception {
+        // The lease is shorter than a crawl's budget, so the schedule is legitimately
+        // re-claimed while the first run is still going. Calling that FAILED
+        // increments failCount on every fire and dead-letters the schedule in days.
+        var schedule = makeIngestionSchedule("rag-2", "kb-1", 1, "src-1");
+        when(ragSourceIngestionService.processScheduledFire(any(), any(), any()))
+                .thenReturn(new IngestionPipeline.IngestionReport(null, "src-1",
+                        IngestionPipeline.IngestionReport.Outcome.ALREADY_RUNNING, 0, 0, 0, 0, 0, 0, 0, 0.0,
+                        false, false, null, Duration.ZERO, "A run is already in flight for this source"));
+
+        var log = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals(FireStatus.COMPLETED.name(), log.status());
+    }
+
+    @Test
+    void fire_ragIngestion_refusesAScheduleWhoseNameDoesNotMatchItsMetadata() throws Exception {
+        // A schedule naming one knowledge base under a name minted for another was
+        // never written by syncSchedules. The fire runs with no caller and no access
+        // check of its own, so crawling on the strength of client-supplied metadata
+        // is how the EDIT gate on the REST route gets bypassed.
+        var schedule = makeIngestionSchedule("rag-3", "victim-kb", 1, "src-1");
+        schedule.setName(RagIngestionSchedules.scheduleName("my-own-kb", "src-1"));
+
+        var log = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals(FireStatus.FAILED.name(), log.status());
+        assertNotNull(log.errorMessage());
+        verify(ragSourceIngestionService, never()).processScheduledFire(any(), any(), any());
+    }
+
+    private static ScheduleConfiguration makeIngestionSchedule(String id, String ragConfigId, int version,
+                                                               String sourceId) {
+        var s = new ScheduleConfiguration();
+        s.setId(id);
+        s.setName(RagIngestionSchedules.scheduleName(ragConfigId, sourceId));
+        s.setTriggerType(TriggerType.CRON);
+        s.setCronExpression("0 2 * * *");
+        s.setEnvironment("production");
+        s.setTimeZone("UTC");
+        s.setUserId("system:scheduler");
+        s.setFireStatus(FireStatus.CLAIMED);
+        s.setNextFire(Instant.now().minusSeconds(60));
+        s.setMetadata(RagIngestionSchedules.metadata(ragConfigId, version, sourceId));
         return s;
     }
 

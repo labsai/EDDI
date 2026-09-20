@@ -23,12 +23,14 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -104,6 +106,10 @@ class IngestionPipelineTest {
         source.setName(SOURCE_NAME);
         source.setWeb(web);
         return source;
+    }
+
+    private static String linkTo(String url) {
+        return "<html><head><title>Index</title></head><body><main><a href=\"" + url + "\">link</a></main></body></html>";
     }
 
     private static String pageWith(String body) {
@@ -393,6 +399,124 @@ class IngestionPipelineTest {
         }
 
         @Test
+        @DisplayName("an embedding failure never leaves a document with no vectors at all")
+        void embeddingFailureKeepsThePreviousVectors() {
+            // Removing before embedding meant a provider failure deleted the old
+            // chunks and stored nothing. The state row still carried the old hash, so
+            // if the page then reverted, the next run called it "unchanged" and the
+            // document stayed unretrievable for ever.
+            var site = new FakeSite().page(SITE + "/", pageWith("Price is ten."));
+            pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+            assertFalse(embeddingStore.segmentsOf(SITE).isEmpty());
+
+            doThrow(new RuntimeException("provider 429")).when(embeddingModel).embedAll(any());
+            var changed = new FakeSite().page(SITE + "/", pageWith("Price is twenty."));
+            IngestionReport failedRun = pipelineFor(changed).run(KB_RESOURCE_ID, knowledgeBase(), source(),
+                    Mode.INGEST);
+
+            assertEquals(1, failedRun.documentsFailed());
+            assertFalse(embeddingStore.segmentsOf(SITE).isEmpty(),
+                    "the page that was already retrievable must stay retrievable when the new version cannot embed");
+            assertTrue(embeddingStore.textsOf(SITE).stream().anyMatch(text -> text.contains("ten")),
+                    "and it must still be the version that did embed: " + embeddingStore.textsOf(SITE));
+        }
+
+        @Test
+        @DisplayName("two sources that overlap on a page do not delete each other's chunks")
+        void overlappingSourcesKeepTheirOwnChunks() {
+            // Removal matched the document id alone, so whichever source ran last
+            // owned the vectors while the other's state still claimed them — and that
+            // one then reported "unchanged" over an empty store, for ever.
+            var site = new FakeSite().page(SITE + "/", pageWith("Shared page."));
+            var first = source();
+            var second = source();
+            second.setId("src-2");
+            second.setName("second-source");
+
+            pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), first, Mode.INGEST);
+            pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), second, Mode.INGEST);
+
+            assertEquals(2, embeddingStore.segmentsOf(SITE).size(),
+                    "each source owns its own copy: " + embeddingStore.segmentsOf(SITE));
+
+            // The page disappears for the first source only, twice, so it tombstones.
+            var gone = new FakeSite().status(SITE + "/", 404);
+            pipelineFor(gone).run(KB_RESOURCE_ID, knowledgeBase(), first, Mode.INGEST);
+            pipelineFor(gone).run(KB_RESOURCE_ID, knowledgeBase(), first, Mode.INGEST);
+
+            assertFalse(embeddingStore.segmentsOf(SITE).isEmpty(),
+                    "the second source's chunks must survive the first source's tombstone");
+        }
+
+        @Test
+        @DisplayName("a page that could not be read is not a page that is gone")
+        void unreachablePageIsNotTombstoned() {
+            // The same tail pages of a rate-limited site fail on every run. Counting
+            // that as absence deletes them while every run reports success.
+            var site = new FakeSite()
+                    .page(SITE + "/", linkTo(SITE + "/a"))
+                    .page(SITE + "/a", pageWith("Still here."));
+            pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+
+            var throttled = new FakeSite()
+                    .page(SITE + "/", linkTo(SITE + "/a"))
+                    .status(SITE + "/a", 429);
+            pipelineFor(throttled).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+            IngestionReport third = pipelineFor(throttled).run(KB_RESOURCE_ID, knowledgeBase(), source(),
+                    Mode.INGEST);
+
+            assertEquals(0, third.documentsTombstoned(), "a 429 says nothing about whether the page exists");
+            assertFalse(embeddingStore.segmentsOf(SITE + "/a").isEmpty(),
+                    "its chunks must still be retrievable");
+        }
+
+        @Test
+        @DisplayName("a site that answers but yields nothing usable does not empty the knowledge base")
+        void blankSiteDoesNotTombstoneEverything() {
+            // A JavaScript challenge or a maintenance page answers 200 for every URL.
+            // The crawl "covers the source" and produces no document at all.
+            var site = new FakeSite()
+                    .page(SITE + "/", linkTo(SITE + "/a"))
+                    .page(SITE + "/a", pageWith("Real content."));
+            pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+
+            // No title either: a challenge page that yields a heading is a usable
+            // document, and then the knowledge base legitimately has something to
+            // reconcile against.
+            String challenge = "<html><body><script>checking(you)</script></body></html>";
+            var blocked = new FakeSite().page(SITE + "/", challenge).page(SITE + "/a", challenge);
+            pipelineFor(blocked).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+            IngestionReport third = pipelineFor(blocked).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+
+            assertEquals(0, third.documentsTombstoned());
+            assertTrue(third.tombstoningSkipped(), "the run must say it concluded nothing");
+            assertFalse(embeddingStore.segmentsOf(SITE + "/a").isEmpty(),
+                    "content must survive a site that stopped answering usefully");
+        }
+
+        @Test
+        @DisplayName("a document is tombstoned only once its vectors are actually gone")
+        void tombstoneFollowsRemoval() {
+            // Marking first is durable in the wrong order: a store that refuses the
+            // delete leaves a document flagged gone with its chunks still retrievable,
+            // and a tombstoned document is never reported again.
+            var site = new FakeSite().page(SITE + "/", pageWith("Here."));
+            pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+
+            when(storeFactory.getOrCreate(any(RagConfiguration.class), anyString()))
+                    .thenReturn(new RecordingEmbeddingStore().withFailingRemoval());
+
+            var gone = new FakeSite().status(SITE + "/", 404);
+            pipelineFor(gone).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+            IngestionReport third = pipelineFor(gone).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+
+            assertEquals(0, third.documentsTombstoned(), "nothing was removed, so nothing may be marked gone");
+            var state = stateStore.lookup(IngestionPipeline.stateKey(KB_RESOURCE_ID, source()), SITE)
+                    .orElseThrow();
+            assertFalse(state.tombstoned(), "a document whose vectors survive must stay reportable");
+        }
+
+        @Test
         @DisplayName("a run whose store fails is still closed, so the source is not blocked forever")
         void failingRunIsAlwaysClosed() {
             // Only crawler.crawl was guarded, and only RuntimeException was caught. A
@@ -400,7 +524,8 @@ class IngestionPipelineTest {
             // every scheduled fire a failure, until something reaps it — and nothing did.
             var exploding = new InMemoryIngestionStateStore() {
                 @Override
-                public synchronized List<DocumentState> tombstoneMissing(String sourceId, String runId, int threshold) {
+                public synchronized List<DocumentState> bumpAndFindMissing(String sourceId, String runId,
+                                                                           int threshold) {
                     throw new IngestionStateStoreException("database is unwell", new RuntimeException());
                 }
             };
@@ -462,20 +587,34 @@ class IngestionPipelineTest {
         @Test
         @DisplayName("an abandoned run is reaped so a dead process does not block the source")
         void abandonedRunIsReaped() {
-            // Nothing called reapStaleRuns in production, although the interface said it
-            // was called before claiming.
+            // The previous version of this test reaped the run itself and then asserted
+            // that a fresh run blocks — which it does whether or not the pipeline reaps
+            // anything. The state that matters is a RUNNING row older than the
+            // threshold, left behind by a process that died.
             String sourceKey = IngestionPipeline.stateKey(KB_RESOURCE_ID, source());
-            stateStore.startRun(sourceKey);
-            // Make it look old enough to be abandoned.
-            stateStore.reapStaleRuns(Instant.now().plusSeconds(1));
+            String abandoned = stateStore.startRun(sourceKey).orElseThrow();
+            stateStore.backdateRun(abandoned, Instant.now().minus(Duration.ofDays(1)));
+
+            IngestionReport report = pipelineFor(new FakeSite().page(SITE + "/", pageWith("x")))
+                    .run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+
+            assertEquals(IngestionReport.Outcome.COMPLETED, report.outcome(),
+                    "the dead run must be reaped on the way in rather than blocking this one");
+            assertNotEquals(abandoned, report.runId(), "this is a new run, not the abandoned one");
+            assertTrue(stateStore.activeRun(sourceKey).isEmpty(), "the new run closed cleanly");
+        }
+
+        @Test
+        @DisplayName("a run that is merely fresh still blocks a second one")
+        void freshRunStillBlocks() {
+            String sourceKey = IngestionPipeline.stateKey(KB_RESOURCE_ID, source());
             stateStore.startRun(sourceKey);
 
             IngestionReport report = pipelineFor(new FakeSite().page(SITE + "/", pageWith("x")))
                     .run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
 
-            // The stale claim is reaped on the way in rather than blocking this run.
             assertEquals(IngestionReport.Outcome.ALREADY_RUNNING, report.outcome(),
-                    "a genuinely fresh run still blocks — reaping only clears abandoned ones");
+                    "reaping only clears runs past the threshold, never a live one");
         }
 
         @Test

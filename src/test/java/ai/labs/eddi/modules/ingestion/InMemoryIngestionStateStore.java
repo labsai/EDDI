@@ -70,9 +70,22 @@ public class InMemoryIngestionStateStore implements IIngestionStateStore {
     }
 
     @Override
-    public synchronized List<DocumentState> tombstoneMissing(String sourceId, String runId, int missedRunsThreshold) {
+    public synchronized void recordUnreachable(String sourceId, String documentId, String runId) {
+        DocumentState existing = documents.get(key(sourceId, documentId));
+        if (existing == null) {
+            return;
+        }
+        // Not recordSeen: the miss counter and the tombstone flag stay as they are.
+        documents.put(key(sourceId, documentId), new DocumentState(sourceId, documentId, existing.contentHash(),
+                existing.etag(), existing.lastModified(), existing.firstIngestedAt(), existing.lastIngestedAt(),
+                runId, existing.missedRuns(), existing.tombstoned()));
+    }
+
+    @Override
+    public synchronized List<DocumentState> bumpAndFindMissing(String sourceId, String runId,
+                                                               int missedRunsThreshold) {
         int threshold = Math.max(1, missedRunsThreshold);
-        List<DocumentState> tombstoned = new ArrayList<>();
+        List<DocumentState> missing = new ArrayList<>();
 
         for (Map.Entry<String, DocumentState> entry : documents.entrySet()) {
             DocumentState state = entry.getValue();
@@ -83,16 +96,28 @@ public class InMemoryIngestionStateStore implements IIngestionStateStore {
             if (!runId.equals(state.lastRunId())) {
                 missed++;
             }
-            boolean nowTombstoned = missed >= threshold;
             DocumentState updated = new DocumentState(state.sourceId(), state.documentId(), state.contentHash(),
                     state.etag(), state.lastModified(), state.firstIngestedAt(), state.lastIngestedAt(),
-                    state.lastRunId(), missed, nowTombstoned);
+                    state.lastRunId(), missed, false);
             entry.setValue(updated);
-            if (nowTombstoned) {
-                tombstoned.add(updated);
+            if (missed >= threshold) {
+                missing.add(updated);
             }
         }
-        return tombstoned;
+        return missing;
+    }
+
+    @Override
+    public synchronized void markTombstoned(String sourceId, List<String> documentIds) {
+        for (String documentId : documentIds) {
+            DocumentState state = documents.get(key(sourceId, documentId));
+            if (state == null) {
+                continue;
+            }
+            documents.put(key(sourceId, documentId), new DocumentState(state.sourceId(), state.documentId(),
+                    state.contentHash(), state.etag(), state.lastModified(), state.firstIngestedAt(),
+                    state.lastIngestedAt(), state.lastRunId(), state.missedRuns(), true));
+        }
     }
 
     @Override
@@ -123,7 +148,10 @@ public class InMemoryIngestionStateStore implements IIngestionStateStore {
     @Override
     public synchronized void finishRun(IngestionRun run) {
         IngestionRun existing = runs.get(run.runId());
-        if (existing == null) {
+        if (existing == null || existing.status() != IngestionRun.Status.RUNNING) {
+            // Already closed — reaped while this worker was still going. Both real
+            // backends compare-and-set on RUNNING, so the double must too, or it
+            // hides the divergence it exists to catch.
             return;
         }
         runs.put(run.runId(), new IngestionRun(run.runId(), existing.sourceId(), run.status(),
@@ -148,12 +176,29 @@ public class InMemoryIngestionStateStore implements IIngestionStateStore {
                 .toList();
     }
 
+    /**
+     * Backdates a run, so a test can produce the one state that matters here: a
+     * RUNNING row older than the stale threshold, left by a process that died.
+     * Without it a reaping test can only reap runs it started moments ago, which
+     * the production threshold would never touch.
+     */
+    public synchronized void backdateRun(String runId, Instant startedAt) {
+        IngestionRun run = runs.get(runId);
+        if (run == null) {
+            throw new IllegalArgumentException("no such run: " + runId);
+        }
+        runs.put(runId, new IngestionRun(run.runId(), run.sourceId(), run.status(), startedAt, run.finishedAt(),
+                run.documentsSeen(), run.documentsIngested(), run.documentsUnchanged(), run.documentsFailed(),
+                run.documentsTombstoned(), run.segmentsStored(), run.costUsd(), run.error()));
+    }
+
     @Override
-    public synchronized int reapStaleRuns(Instant startedBefore) {
+    public synchronized int reapStaleRuns(String sourceId, Instant startedBefore) {
         int reaped = 0;
         for (Map.Entry<String, IngestionRun> entry : runs.entrySet()) {
             IngestionRun run = entry.getValue();
-            if (run.status() == IngestionRun.Status.RUNNING && run.startedAt().isBefore(startedBefore)) {
+            if (run.sourceId().equals(sourceId) && run.status() == IngestionRun.Status.RUNNING
+                    && run.startedAt().isBefore(startedBefore)) {
                 entry.setValue(new IngestionRun(run.runId(), run.sourceId(), IngestionRun.Status.FAILED,
                         run.startedAt(), Instant.now(), run.documentsSeen(), run.documentsIngested(),
                         run.documentsUnchanged(), run.documentsFailed(), run.documentsTombstoned(),

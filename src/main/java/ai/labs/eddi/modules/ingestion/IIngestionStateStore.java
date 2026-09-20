@@ -73,6 +73,19 @@ public interface IIngestionStateStore {
     void recordSeen(String sourceId, String documentId, String runId);
 
     /**
+     * Records that this run could not find out whether a document still exists —
+     * the server refused, failed, or asked us to come back later.
+     *
+     * <p>
+     * Neither a sighting nor a miss. The document keeps its miss counter and its
+     * hash, but this run no longer counts against it, so a page behind a 503, a 429
+     * or a WAF is not deleted for being unreachable. Without this, the same tail
+     * pages of a rate-limited site are tombstoned after
+     * {@code tombstoneAfterMissedRuns} runs while every run reports success.
+     */
+    void recordUnreachable(String sourceId, String documentId, String runId);
+
+    /**
      * Increments the miss counter for every live document this run did not see, and
      * tombstones those that have now been missed {@code missedRunsThreshold} times
      * in a row.
@@ -84,7 +97,30 @@ public interface IIngestionStateStore {
      * @return the documents tombstoned by this call, whose vectors the caller is
      *         then responsible for removing
      */
-    List<DocumentState> tombstoneMissing(String sourceId, String runId, int missedRunsThreshold);
+    default List<DocumentState> tombstoneMissing(String sourceId, String runId, int missedRunsThreshold) {
+        List<DocumentState> missing = bumpAndFindMissing(sourceId, runId, missedRunsThreshold);
+        markTombstoned(sourceId, missing.stream().map(DocumentState::documentId).toList());
+        return missing;
+    }
+
+    /**
+     * Counts this run's misses and returns the documents that have now been missed
+     * often enough to be considered gone — <em>without</em> tombstoning them.
+     *
+     * <p>
+     * Split from the marking so a caller can remove the vectors first. Marking
+     * first is durable in the wrong order: a crash, or a store that refuses the
+     * delete, leaves a document flagged as gone while its chunks stay retrievable,
+     * and a tombstoned document is never reported again — so nothing would ever
+     * remove them.
+     */
+    List<DocumentState> bumpAndFindMissing(String sourceId, String runId, int missedRunsThreshold);
+
+    /**
+     * Marks documents gone, after their vectors have actually been removed. Safe to
+     * call with an empty list, and safe to repeat.
+     */
+    void markTombstoned(String sourceId, List<String> documentIds);
 
     /** Every document known for a source, tombstoned ones included. */
     List<DocumentState> listDocuments(String sourceId, int limit);
@@ -113,13 +149,20 @@ public interface IIngestionStateStore {
     List<IngestionRun> listRuns(String sourceId, int limit);
 
     /**
-     * Fails any run left {@code RUNNING} by a process that died, so a crashed
-     * instance does not block the source forever. Called at startup and before
-     * claiming a new run.
+     * Fails a run of <em>this source</em> left {@code RUNNING} by a process that
+     * died, so a crash does not block the source forever. Called before claiming a
+     * new run.
+     *
+     * <p>
+     * Scoped to the source on purpose. The staleness threshold is derived from the
+     * source's own time budget, so a store-wide sweep let a source with the default
+     * 10-minute budget reap the live run of a source configured for hours — and a
+     * reaped run is one whose source immediately accepts a second, concurrent
+     * crawl.
      *
      * @return how many runs were reaped
      */
-    int reapStaleRuns(Instant startedBefore);
+    int reapStaleRuns(String sourceId, Instant startedBefore);
 
     /**
      * What a previous run knows about a document.

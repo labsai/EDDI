@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.configs.rag.model;
 
+import java.net.InetAddress;
+import java.net.URI;
+import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -187,12 +190,56 @@ public class IngestionSource {
                 throw new IllegalArgumentException(
                         "startUrl of ingestion source '" + sourceName + "' must be http or https, got: " + startUrl);
             }
+            requireRoutableHost(startUrl, sourceName);
             requirePositiveAtMost(maxDepth, 20, "maxDepth", sourceName);
             requirePositiveAtMost(maxPages, 50_000, "maxPages", sourceName);
             requirePositiveAtMost(timeoutSeconds, 300, "timeoutSeconds", sourceName);
             if (requestDelayMs != null && (requestDelayMs < 0 || requestDelayMs > 60_000)) {
                 throw new IllegalArgumentException("requestDelayMs of ingestion source '" + sourceName
                         + "' must be between 0 and 60000, got: " + requestDelayMs);
+            }
+        }
+
+        /**
+         * Refuses a start URL whose host is a literal address the fetcher will always
+         * reject — loopback, private, link-local, or the cloud metadata endpoint.
+         * Saving one produces a source that fails on every run with an error the
+         * operator only sees in the run history.
+         *
+         * <p>
+         * Literals only, deliberately. Resolving a hostname here would make saving a
+         * knowledge base depend on DNS and would reject a perfectly good configuration
+         * during an outage; the real check runs per request in {@code SafeHttpClient},
+         * where it belongs.
+         */
+        private static void requireRoutableHost(String startUrl, String sourceName) {
+            String host;
+            try {
+                host = URI.create(startUrl).getHost();
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException("startUrl of ingestion source '" + sourceName
+                        + "' is not a valid URL: " + startUrl);
+            }
+            if (host == null || host.isBlank()) {
+                throw new IllegalArgumentException(
+                        "startUrl of ingestion source '" + sourceName + "' has no host: " + startUrl);
+            }
+            boolean literal = host.chars().allMatch(c -> c == '.' || (c >= '0' && c <= '9'))
+                    || host.startsWith("[") || host.contains(":");
+            if (!literal && !"localhost".equalsIgnoreCase(host)) {
+                return;
+            }
+            try {
+                InetAddress address = InetAddress.getByName(host.replace("[", "").replace("]", ""));
+                if (address.isLoopbackAddress() || address.isLinkLocalAddress() || address.isSiteLocalAddress()
+                        || address.isAnyLocalAddress()) {
+                    throw new IllegalArgumentException("startUrl of ingestion source '" + sourceName
+                            + "' points at a local or private address (" + host + "), which the crawler refuses "
+                            + "on every run");
+                }
+            } catch (UnknownHostException e) {
+                throw new IllegalArgumentException(
+                        "startUrl of ingestion source '" + sourceName + "' has an unusable host: " + host);
             }
         }
 
