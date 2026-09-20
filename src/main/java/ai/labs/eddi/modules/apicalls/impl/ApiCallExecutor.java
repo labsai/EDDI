@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.apicalls.impl;
 
 import ai.labs.eddi.configs.apicalls.model.*;
 import ai.labs.eddi.configs.apicalls.model.HttpPostResponse;
+import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.connections.ConnectionException;
@@ -201,7 +202,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
             templateDataObjects = prePostUtils.executePreRequestPropertyInstructions(memory, templateDataObjects, preRequest);
 
             if (call.getFireAndForget()) {
-                executeFireAndForgetCalls(targetServerUrl, call, templateDataObjects);
+                executeFireAndForgetCalls(targetServerUrl, call, templateDataObjects, conversationPropertiesOf(memory));
                 return Collections.emptyMap();
             } else {
                 IRequest request;
@@ -220,7 +221,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     // otherwise inherit the failed attempt's error body next to
                     // its own 2xx code — a self-contradictory tool result.
                     result.clear();
-                    BuiltRequest built = buildRequest(targetServerUrl, call, templateDataObjects);
+                    // Re-read per attempt rather than hoisted: a post-response property
+                    // instruction can write a property between attempts, and the guard has to
+                    // judge the request it is actually about to send.
+                    BuiltRequest built = buildRequest(targetServerUrl, call, templateDataObjects, conversationPropertiesOf(memory));
                     request = built.request();
                     var objectName = call.getName() + "Request";
                     var requestMap = request.toMap();
@@ -407,7 +411,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
             // Note the absence of executePreRequestPropertyInstructions: it writes
             // to conversation memory, and previewing a call must not change the
             // conversation. See IApiCallExecutor#resolve for what that costs.
-            BuiltRequest built = buildRequest(targetServerUrl, call, templateDataObjects);
+            BuiltRequest built = buildRequest(targetServerUrl, call, templateDataObjects, conversationPropertiesOf(memory));
             var requestMap = built.request().toMap();
             var headers = requestMap.get(IRequest.KEY_HEADERS) instanceof Map<?, ?> h ? (Map<String, ?>) h : Map.<String, Object>of();
             var queryParams = normalizeQueryParams(requestMap.get(IRequest.KEY_QUERY_PARAMS));
@@ -550,7 +554,8 @@ public class ApiCallExecutor implements IApiCallExecutor {
         return response;
     }
 
-    private void executeFireAndForgetCalls(String targetServerUrl, ApiCall call, Map<String, Object> templateDataObjects)
+    private void executeFireAndForgetCalls(String targetServerUrl, ApiCall call, Map<String, Object> templateDataObjects,
+                                           Map<String, Property> conversationProperties)
             throws ITemplatingEngine.TemplateEngineException, IRequest.HttpRequestException {
 
         var preRequest = call.getPreRequest();
@@ -580,7 +585,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
             for (Object iterationObject : batchIterationList) {
                 Map<String, Object> iterationData = new LinkedHashMap<>(templateDataObjects);
                 iterationData.put(batchRequest.getIterationObjectName(), iterationObject);
-                requests.add(buildRequest(targetServerUrl, call, iterationData));
+                requests.add(buildRequest(targetServerUrl, call, iterationData, conversationProperties));
             }
 
             // The sending runs on a thread of its own; propagate() keeps the turn's
@@ -600,7 +605,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 return null;
             }), null);
         } else {
-            executeFireAndForgetCall(buildRequest(targetServerUrl, call, templateDataObjects), callName);
+            executeFireAndForgetCall(buildRequest(targetServerUrl, call, templateDataObjects, conversationProperties), callName);
         }
     }
 
@@ -773,7 +778,8 @@ public class ApiCallExecutor implements IApiCallExecutor {
     record BuiltRequest(IRequest request, Set<String> connectionOwnedHeaders, Set<String> resolvedSecrets) {
     }
 
-    private BuiltRequest buildRequest(String targetServerUrl, ApiCall call, Map<String, Object> templateDataObjects)
+    private BuiltRequest buildRequest(String targetServerUrl, ApiCall call, Map<String, Object> templateDataObjects,
+                                      Map<String, Property> conversationProperties)
             throws ITemplatingEngine.TemplateEngineException {
 
         Request requestConfig = call.getRequest();
@@ -785,7 +791,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
         var resolvedSecrets = new HashSet<String>();
         var targetUriStr = prePostUtils.templateValues(targetDestination, pathSafeView(templateDataObjects));
         // Resolve global variable references, then vault references in URL
-        targetUriStr = resolveGuardedVariables(targetDestination, targetUriStr, "the request path", templateDataObjects);
+        targetUriStr = resolveGuardedVariables(targetDestination, targetUriStr, "the request path", templateDataObjects, conversationProperties);
         targetUriStr = resolveSecrets(targetUriStr, resolvedSecrets, "the request path");
         // The path is not caller-resolved either, and a surviving reference would
         // reach URI.create() to fail as "Illegal character in path" — an error that
@@ -796,7 +802,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
         var targetUri = URI.create(targetUriStr);
         var requestBody = prePostUtils.templateValues(requestConfig.getBody(), templateDataObjects);
         // Resolve global variable references, then vault references in request body
-        requestBody = resolveGuardedVariables(requestConfig.getBody(), requestBody, "a request body", templateDataObjects);
+        requestBody = resolveGuardedVariables(requestConfig.getBody(), requestBody, "a request body", templateDataObjects, conversationProperties);
         requestBody = resolveSecrets(requestBody, resolvedSecrets, "a request body");
 
         // SSRF protection (opt-in): validate the fully-resolved target and disable
@@ -852,7 +858,8 @@ public class ApiCallExecutor implements IApiCallExecutor {
         for (String headerName : headers.keySet()) {
             String headerValue = prePostUtils.templateValues(headers.get(headerName), templateDataObjects);
             // Resolve global variable references, then vault references in headers
-            headerValue = resolveGuardedVariables(headers.get(headerName), headerValue, "header '" + headerName + "'", templateDataObjects);
+            headerValue = resolveGuardedVariables(headers.get(headerName), headerValue, "header '" + headerName + "'", templateDataObjects,
+                    conversationProperties);
             headerValue = resolveSecrets(headerValue, resolvedSecrets, "header '" + headerName + "'");
             // Caller identity resolves last and needs the target URI: the token is
             // only released when the call goes back to the caller's own origin.
@@ -906,7 +913,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
             var qpValue = prePostUtils.templateValues(queryParams.get(queryParam), templateDataObjects);
             // Resolve global variable references, then vault references in query params
             qpValue = resolveGuardedVariables(queryParams.get(queryParam), qpValue, "query parameter '" + queryParam + "'",
-                    templateDataObjects);
+                    templateDataObjects, conversationProperties);
             qpValue = resolveSecrets(qpValue, resolvedSecrets, "query parameter '" + queryParam + "'");
             // A token in a query string leaks via access logs and proxies.
             callerIdentityResolver.rejectTokenReference(qpValue, "a query parameter");
@@ -940,15 +947,41 @@ public class ApiCallExecutor implements IApiCallExecutor {
      *            human-readable field name for the error, e.g. "a request body"
      * @param templateData
      *            the data the template was rendered with
+     * @param conversationProperties
+     *            the live properties, which carry the auto-vault provenance marker
+     *            {@code templateData} has flattened away
      * @return {@code rendered} with its global variable references resolved
      */
-    private String resolveGuardedVariables(String template, String rendered, String location, Map<String, Object> templateData) {
-        ConfigReferenceGuard.requireConfiguredReferences(template, rendered, location, templateData);
+    private String resolveGuardedVariables(String template, String rendered, String location, Map<String, Object> templateData,
+                                           Map<String, Property> conversationProperties) {
+        ConfigReferenceGuard.requireConfiguredReferences(template, rendered, location, templateData, conversationProperties);
         String resolved = globalVariableResolver.resolveValue(rendered);
         if (resolved != null && !resolved.equals(rendered)) {
-            ConfigReferenceGuard.requireConfiguredReferences(globalVariableResolver.resolveValue(template), resolved, location, templateData);
+            ConfigReferenceGuard.requireConfiguredReferences(globalVariableResolver.resolveValue(template), resolved, location, templateData,
+                    conversationProperties);
         }
         return resolved;
+    }
+
+    /**
+     * The conversation's live properties, for the one question
+     * {@code templateDataObjects} cannot answer.
+     * <p>
+     * {@code ConversationProperties.toMap()} flattens each {@link Property} to its
+     * raw value, which is all a template needs and exactly what loses the
+     * auto-vault provenance marker {@link ConfigReferenceGuard} depends on. So the
+     * guard gets the {@code Property} objects themselves, read from memory at build
+     * time rather than captured earlier — a pre-request property instruction runs
+     * between {@code execute} being called and the request being built, and writes
+     * through to this same map.
+     * <p>
+     * Empty rather than null when memory carries no properties: the guard then has
+     * no auto-vault allowance to grant, which is the correct answer and not a
+     * reason to skip the guard.
+     */
+    private static Map<String, Property> conversationPropertiesOf(IConversationMemory memory) {
+        var properties = memory.getConversationProperties();
+        return properties != null ? properties : Map.of();
     }
 
     /**

@@ -50,6 +50,82 @@ bottom of this file and are never archived.
 
 ---
 
+## 🔒 fix(apicalls): auto-vaulted properties carry a provenance marker; the guard requires it (2026-09-20)
+
+**Repo:** EDDI (`fix/vault-references-in-templates`)
+
+### Why
+
+`ConfigReferenceGuard.autoVaultReferences` decided whether a conversation property named by an
+HTTP-call template may resolve a vault secret by **looking at the value**: it accepted the property
+when its value was character-for-character what `PropertySetterTask.autoVaultSecret` would have
+written for that property, under this conversation's agent and tenant. Two PR reviewers (Copilot,
+CodeRabbit) asked for a provenance check instead, and the previous entry recorded why it was not
+done then: `Property` carried no marker. A `scope: "secret"` instruction stores its vault reference
+with `scope: conversation`, indistinguishable on disk from a property a template wrote from user
+input, a model reply or an API response — so `${vault:<agentId>.apiKey}` was a string an attacker
+could simply produce, and the shape test accepted it.
+
+What that bought an attacker was bounded (the key is derived from the agent and the property name
+the template reads, and the request goes to the endpoint the configuration names), which is why it
+shipped. It is still a value the configuration never wrote being resolved into an outgoing request.
+
+### What changed
+
+- **`Property.autoVaulted`** (new, `Boolean`) — the provenance marker, set by
+  `PropertySetterTask.autoVaultSecret` and by **nothing else**. No property-instruction field maps to
+  it (`convertPropertyInstructions` reads a fixed key set), and no REST endpoint takes a `Property` as
+  a request body, so "marked" means "this process vaulted it" rather than "this value looks vaulted".
+- **`ConfigReferenceGuard`** requires the marker before it will allow a reference read through
+  `{properties.x}`. The agent/property/tenant comparison is kept behind it — redundant by
+  construction, since `autoVaultSecret` derives all three itself, and kept as the bound that still
+  holds if a marked `Property` ever reaches memory from somewhere other than that method.
+- **`ApiCallExecutor`** passes the live `Map<String, Property>` from `IConversationMemory` into
+  `buildRequest` → `resolveGuardedVariables` → the guard. `ConversationProperties.toMap()` — what
+  templates and, until now, the guard see — flattens each `Property` to its raw value and loses the
+  marker, so it needs a channel of its own. Read from memory at build time, not captured earlier: a
+  pre-request property instruction writes through to the same map between `execute` being called and
+  the request being built. Threaded through `execute`, `resolve` and `executeFireAndForgetCalls`.
+- **`MemoryCheckpoint.copyProperties`** carries the marker across the deep copy. It clones through the
+  all-args constructor, which does not take the new field — a rollback that dropped it would turn
+  every later API call using that secret into a refusal.
+- `docs/secrets-vault.md`: the auto-vaulted-property case now rests on provenance, and what an
+  unmarked property means.
+
+### Decision: unmarked is refused, not grandfathered
+
+`null` covers two cases that cannot be told apart — a property written from conversation data, and
+one written into a conversation document before the field existed. Accepting the pair for
+compatibility would leave the hole open permanently, because the attacker's property is unmarked
+too; the fix would be decorative. So unmarked fails closed.
+
+The cost is a conversation that auto-vaulted a secret under an earlier release and makes the API
+call after the upgrade: the call is refused with the error that names the field and the reference,
+and re-running the `scope: "secret"` instruction (the user supplies the secret again, or a new
+conversation starts) marks it. Bounded — it needs the vault enabled, which is not the shipped
+default — and recoverable. A permanent fail-open is neither.
+
+Deserialization stays backward compatible in the mechanical sense: the field is absent from every
+document already in MongoDB and reads back as `null` rather than failing, and EDDI's global
+`NON_NULL` inclusion means an unmarked property does not gain the field on write either.
+
+### Verification
+
+- `ConfigReferenceGuardTest` 10 → 13: the three existing auto-vault cases kept (`autoVaultProperty`,
+  `autoVaultTenantIsPinned`, `autoVaultOwnTenant`, now stating the marker explicitly — tenant pinning
+  still refuses a *marked* property under a foreign tenant, so provenance is necessary and not
+  sufficient), plus an unmarked property holding the exact reference, an explicit `FALSE`, and no
+  properties at all.
+- `ApiCallExecutorConfigReferenceTest` +1: the request `autoVaultedPropertyHeader` sends, refused
+  byte-for-byte when the same property is unmarked — the vault is never asked and nothing is sent.
+- `PropertySetterTaskSecretScrubTest` +2: a `scope: "secret"` write is marked; an ordinary write of
+  the identical string is not.
+- `PropertyTest` +5 (JSON round-trip, an unmarked property omits the field, a pre-marker document
+  reads back unmarked), `MemoryCheckpointTest` +1 (the marker survives the deep copy).
+- Mutation-checked one at a time: the guard ignoring the marker fails 3 tests, `autoVaultSecret` not
+  writing it fails 1, the checkpoint clone dropping it fails 1.
+- apicalls, properties, memory and secrets suites plus the repo-wide guards: 6479 tests green.
+
 ## 🔒 fix(apicalls): configuration references work in templated HTTP-call fields; data-supplied ones are refused (2026-09-17)
 
 **Repo:** EDDI (`fix/vault-references-in-templates`)
@@ -139,12 +215,13 @@ Five findings from the PR review, all in the security path:
   the value actually sent was the one that survived into memory, previews and logs. `resolveSecrets` now
   builds the string from the same resolutions it records.
 
-Not fixed, and why: the auto-vault exception is still a *shape* test rather than a provenance test. `Property`
-carries no "auto-vaulted" marker — a `scope: "secret"` instruction stores its vault reference with
-`scope: conversation`, exactly like any other property — so a real provenance check needs a marker on the
-persisted property model. What is left is bounded: the reference is derived from this agent and the property
-name the template reads, so data cannot choose which secret is read, and it goes only to the endpoint the
-configuration names. Tracked separately.
+Not fixed here, and why: the auto-vault exception was still a *shape* test rather than a provenance test.
+`Property` carried no "auto-vaulted" marker — a `scope: "secret"` instruction stores its vault reference with
+`scope: conversation`, exactly like any other property — so a real provenance check needed a marker on the
+persisted property model. What was left was bounded: the reference is derived from this agent and the
+property name the template reads, so data could not choose which secret is read, and it goes only to the
+endpoint the configuration names. **Closed on this branch by the 2026-09-20 entry above**, which adds that
+marker and makes the guard require it.
 
 ## ⬆️ chore(ui): Node 22 toolchain, Stryker 10, Vitest 5 for the Chat UI (2026-09-17)
 

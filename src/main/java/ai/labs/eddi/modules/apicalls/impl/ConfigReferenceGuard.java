@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.apicalls.impl;
 
+import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.secrets.model.SecretReference;
 
 import java.util.LinkedHashSet;
@@ -28,9 +29,8 @@ import java.util.regex.Pattern;
  * <p>
  * The rule: every credential reference in the rendered value must also appear
  * in the configuration template of that same field — or be the value of a
- * property the template names, where that value is exactly this agent's own
- * auto-vault reference for that property ({@code ${vault:<agentId>.<name>}},
- * what a {@code scope: "secret"} property instruction stores). Anything else
+ * property the template names that {@code PropertySetterTask.autoVaultSecret}
+ * itself wrote, which {@link Property#getAutoVaulted()} records. Anything else
  * came from data, and the call is refused rather than resolved.
  * <p>
  * {@code ${vars:...}} is not itself a credential reference: global variables
@@ -66,16 +66,20 @@ final class ConfigReferenceGuard {
      *            human-readable field name for the error, e.g. "a request body"
      * @param templateData
      *            the data the template was rendered with
+     * @param conversationProperties
+     *            the live properties of the conversation, carrying the provenance
+     *            marker that {@code templateData} has already flattened away
      * @throws IllegalArgumentException
      *             if {@code rendered} holds a credential reference the
      *             configuration did not write
      */
-    static void requireConfiguredReferences(String template, String rendered, String location, Map<String, Object> templateData) {
+    static void requireConfiguredReferences(String template, String rendered, String location, Map<String, Object> templateData,
+                                            Map<String, Property> conversationProperties) {
         if (rendered == null || !rendered.contains("${")) {
             return;
         }
         Set<String> allowed = references(template);
-        allowed.addAll(autoVaultReferences(template, templateData));
+        allowed.addAll(autoVaultReferences(template, templateData, conversationProperties));
         for (String reference : references(rendered)) {
             if (!allowed.contains(reference)) {
                 throw new IllegalArgumentException(location + " contains the reference " + reference
@@ -100,42 +104,52 @@ final class ConfigReferenceGuard {
     /**
      * The auto-vault references of the properties {@code template} names.
      * <p>
-     * A property qualifies only when its value is character-for-character one of
-     * the references {@code PropertySetterTask.autoVaultSecret} could have written
-     * for <em>that</em> property: the key is {@code <agentId>.<name>} for this
-     * conversation's agent and the name the template reads, and the tenant is this
-     * conversation's own. Built by string comparison rather than a pattern compiled
-     * per call, so there is no dynamic regex to reason about.
+     * A property qualifies only when {@code PropertySetterTask.autoVaultSecret}
+     * wrote its value — the {@link Property#getAutoVaulted()} marker, which that
+     * method is the only writer of. This is a provenance test, not a shape test:
+     * the value a {@code scope: "secret"} instruction stores is a plain
+     * conversation-scoped string, character-for-character reproducible by anyone
+     * who can write a property, so no amount of inspecting the value can establish
+     * where it came from. Only a marker set at the moment of vaulting can.
      * <p>
-     * <b>What this is and is not.</b> It is a shape test, not a provenance test:
-     * {@code Property} carries no marker saying "auto-vaulted" (a {@code secret}
-     * instruction stores the reference with {@code scope: conversation}, exactly
-     * like any other), so a property populated from data with that exact string is
-     * accepted too. The bound on that is what makes it acceptable: the reference is
-     * derived from this agent and this property name, so data cannot choose WHICH
-     * secret is read, and the endpoint it would be sent to is the one the
-     * configuration names. Pinning the tenant is what closes the part that did
-     * matter — the earlier pattern accepted any {@code <tenant>/} prefix, so a
-     * user-supplied value could read another tenant's secret of the same key name.
-     * The residual path is a configuration that writes the {@code tenantId}
-     * property from conversation data, which redirects legitimate auto-vaulting the
-     * same way. A real provenance check needs a marker on {@code Property} and is
-     * tracked separately.
+     * <b>The marker is necessary, not sufficient.</b> The value must still be this
+     * conversation's own auto-vault reference for the property the template names:
+     * key {@code <agentId>.<name>} for this conversation's agent, under this
+     * conversation's tenant. The marker already implies all three, because
+     * {@code autoVaultSecret} derives them itself — so the comparison is redundant
+     * by construction and deliberately kept anyway, as the bound that still holds
+     * if a marked {@code Property} ever reaches memory from somewhere other than
+     * that method (a restored document, a future writer). A marked property whose
+     * tenant has since been rewritten under it fails this comparison and the call
+     * is refused, which is the safe direction of that corner.
+     * <p>
+     * Built by string comparison rather than a pattern compiled per call, so there
+     * is no dynamic regex to reason about.
      */
-    private static Set<String> autoVaultReferences(String template, Map<String, Object> templateData) {
+    private static Set<String> autoVaultReferences(String template, Map<String, Object> templateData,
+                                                   Map<String, Property> conversationProperties) {
         Set<String> found = new LinkedHashSet<>();
-        if (template == null || templateData == null) {
+        if (template == null || templateData == null || conversationProperties == null || conversationProperties.isEmpty()) {
             return found;
         }
         String agentId = agentId(templateData);
-        if (agentId == null || !(templateData.get("properties") instanceof Map<?, ?> properties)) {
+        if (agentId == null) {
             return found;
         }
-        String tenantId = tenantId(properties);
+        String tenantId = tenantId(conversationProperties);
         Matcher access = PROPERTY_ACCESS.matcher(template);
         while (access.find()) {
             String name = access.group(1);
-            if (!(properties.get(name) instanceof String value)) {
+            Property property = conversationProperties.get(name);
+            // Unmarked is refused. A property written from conversation data and one
+            // written before the marker existed are the same null here, and one of the
+            // two is the attack — see Property#getAutoVaulted for why the pair is failed
+            // closed rather than grandfathered.
+            if (property == null || !Boolean.TRUE.equals(property.getAutoVaulted())) {
+                continue;
+            }
+            String value = property.getValueString();
+            if (value == null) {
                 continue;
             }
             String key = SecretReference.DEFAULT_TENANT.equals(tenantId) ? agentId + "." + name : tenantId + "/" + agentId + "." + name;
@@ -158,10 +172,12 @@ final class ConfigReferenceGuard {
 
     /**
      * The conversation's tenant, read the same way
-     * {@code PropertySetterTask.autoVaultSecret} reads it: the {@code tenantId}
-     * property, defaulting to {@code default}.
+     * {@code PropertySetterTask.autoVaultSecret} reads it: the {@code valueString}
+     * of the {@code tenantId} property, defaulting to {@code default}.
      */
-    private static String tenantId(Map<?, ?> properties) {
-        return properties.get("tenantId") instanceof String tenantId && !tenantId.isBlank() ? tenantId : SecretReference.DEFAULT_TENANT;
+    private static String tenantId(Map<String, Property> conversationProperties) {
+        Property tenant = conversationProperties.get("tenantId");
+        String tenantId = tenant != null ? tenant.getValueString() : null;
+        return tenantId != null && !tenantId.isBlank() ? tenantId : SecretReference.DEFAULT_TENANT;
     }
 }

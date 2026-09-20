@@ -59,8 +59,9 @@ ${vault:tenantId/keyName}
 | **Property Setter** (`property.json`) | Values with `scope: secret` auto-vault |
 
 In an HTTP call, a vault reference is resolved **only where the configuration wrote it**: in the
-template of that URL, header, body or query parameter, or as the value of an auto-vaulted property
-the template names (`Bearer {properties.apiKey}` holding `${vault:<agentId>.apiKey}`). The same
+template of that URL, header, body or query parameter, or as the value of a property the template
+names that EDDI itself auto-vaulted (`Bearer {properties.apiKey}` holding `${vault:<agentId>.apiKey}`).
+The same
 applies to `${eddivault:…}`, `${connection:…}` and `${caller:…}`. A reference that arrives through
 conversation data — user input, a model reply, an API response, client context — refuses the call
 instead of being resolved, with an error naming the field. Grants are checked at deploy time, so
@@ -69,9 +70,22 @@ without this rule a user could have a template substitute any secret of the tena
 This holds through `${vars:…}` as well. A global variable may itself hold a vault or connection
 reference, so a `${vars:…}` the configuration wrote still resolves through to the secret, while one
 that arrived through conversation data refuses the call — the check runs again after variable
-expansion, against the configured template expanded the same way. The auto-vaulted-property case is
-narrow on purpose: the reference must name this agent and the property the template reads, **under
-this conversation's own tenant**, so nothing in the data can choose which secret is read.
+expansion, against the configured template expanded the same way.
+
+The auto-vaulted-property case rests on **provenance, not on what the value looks like**. A
+`scope: secret` instruction stores its vault reference as an ordinary conversation property, so the
+string `${vault:<agentId>.apiKey}` is one anything that can write a property could produce — a
+`valueString` of `{memory.current.input}` and a user who types it, a model reply, an API response
+copied into a property. The property therefore carries an `autoVaulted` marker, written by the
+auto-vaulting code and by nothing else, and the reference is resolved only when that marker is
+present. On top of it the reference must still name this agent and the property the template reads,
+**under this conversation's own tenant**.
+
+A property with no marker is refused, which includes one stored in a conversation that began before
+this marker existed: an unmarked property and one written from conversation data are the same thing
+on disk, and accepting the pair would leave the case the marker exists to close open. Re-running the
+`scope: secret` instruction — having the user supply the secret again, or starting a new
+conversation — marks it.
 
 A configured reference that **cannot** be resolved — no such secret, the provider failed, or the
 vault is disabled — also refuses the call, naming the field and the reference. The literal

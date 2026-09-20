@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.apicalls.impl;
 
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.Request;
+import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.connections.ResolvedCredential;
@@ -15,7 +16,9 @@ import ai.labs.eddi.engine.httpclient.IRequest;
 import ai.labs.eddi.engine.httpclient.IResponse;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
+import ai.labs.eddi.engine.memory.IConversationMemory.IConversationProperties;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
+import ai.labs.eddi.engine.memory.model.ConversationProperties;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.CallerIdentityResolver;
@@ -74,6 +77,7 @@ class ApiCallExecutorConfigReferenceTest {
     private ConnectionResolver connectionResolver;
     private IHttpClient httpClient;
     private IConversationMemory memory;
+    private IConversationProperties conversationProperties;
     private IRequest request;
 
     @BeforeEach
@@ -112,6 +116,14 @@ class ApiCallExecutorConfigReferenceTest {
 
         memory = mock(IConversationMemory.class);
         when(memory.getCurrentStep()).thenReturn(mock(IWritableConversationStep.class));
+        // The live properties, which is where the auto-vault provenance marker lives —
+        // ConversationProperties.toMap() (what `data()` below stands in for) flattens
+        // each Property to its raw value and loses it. Stored exactly as
+        // PropertySetterTask.autoVaultSecret stores one: the vault reference,
+        // conversation scope, marked.
+        conversationProperties = new ConversationProperties(memory);
+        conversationProperties.put("apiKey", autoVaulted("apiKey", "${vault:agent1.apiKey}"));
+        when(memory.getConversationProperties()).thenReturn(conversationProperties);
 
         request = mock(IRequest.class);
         IResponse response = mock(IResponse.class);
@@ -123,6 +135,12 @@ class ApiCallExecutorConfigReferenceTest {
         when(response.getHttpCode()).thenReturn(200);
         when(response.getContentAsString()).thenReturn("ok");
         when(response.getHttpHeader()).thenReturn(new HashMap<>());
+    }
+
+    private static Property autoVaulted(String name, String reference) {
+        var property = new Property(name, reference, Property.Scope.conversation);
+        property.setAutoVaulted(Boolean.TRUE);
+        return property;
     }
 
     private static ApiCall call(Map<String, String> headers, String body) {
@@ -214,6 +232,25 @@ class ApiCallExecutorConfigReferenceTest {
         executor.execute(call(Map.of("Authorization", "Bearer {properties.apiKey}"), "{}"), memory, data("hi"), SERVER);
 
         verify(request).setHttpHeader("Authorization", "Bearer " + AUTO_VAULTED);
+    }
+
+    @Test
+    @DisplayName("the same property, unmarked, is refused: the vault is never asked and nothing is sent")
+    void unmarkedPropertyHeaderIsRefused() throws Exception {
+        // Byte-for-byte the request autoVaultedPropertyHeader sends. The only
+        // difference is provenance: this property was written by something other than
+        // autoVaultSecret — a valueString of {memory.current.input} and a user who
+        // typed the reference is enough — so it carries no marker, and the value alone
+        // cannot tell the two apart.
+        conversationProperties.put("apiKey", new Property("apiKey", "${vault:agent1.apiKey}", Property.Scope.conversation));
+
+        var failure = assertThrows(LifecycleException.class,
+                () -> executor.execute(call(Map.of("Authorization", "Bearer {properties.apiKey}"), "{}"), memory, data("hi"), SERVER));
+
+        assertInstanceOf(IllegalArgumentException.class, failure.getCause());
+        assertTrue(failure.getMessage().contains("header 'Authorization' contains the reference ${vault:agent1.apiKey}"), failure.getMessage());
+        verify(secretResolver, never()).resolveValue(contains("${vault:agent1.apiKey}"));
+        verify(request, never()).send();
     }
 
     @Test
