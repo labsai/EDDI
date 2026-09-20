@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi;
 
+import ai.labs.eddi.utils.LogSanitizer;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -50,7 +51,7 @@ import static org.junit.jupiter.api.Assertions.fail;
  * the alert it closed is still open upstream.
  * </p>
  *
- * @see ai.labs.eddi.utils.LogSanitizer
+ * @see LogSanitizer
  */
 @DisplayName("sanitized log sinks (CWE-117)")
 class SanitizedLogSinksTest {
@@ -163,7 +164,15 @@ class SanitizedLogSinksTest {
                 for (String expression : sink.expressions()) {
                     int occurrences = count(code, standalone(expression));
                     int wrapped = count(code, Pattern.compile("sanitize\\(\\s*" + Pattern.quote(expression) + "\\s*\\)"));
-                    if (occurrences != wrapped) {
+                    if (occurrences == 0) {
+                        // Without this branch the comparison below is vacuous at zero:
+                        // hoisting gc.getId() into an unsanitized local and logging that
+                        // makes both counts 0, and a re-opened sink passes the guard.
+                        failures.add(file.path() + ": the log call for \"" + abbreviate(sink.messageFragment())
+                                + "\" no longer passes " + expression + " at all. If the argument was renamed or hoisted into a"
+                                + " local, register the new expression here and check that IT is sanitized — an entry that"
+                                + " matches nothing guards nothing. Statement: " + abbreviate(oneLine(statement)));
+                    } else if (occurrences != wrapped) {
                         failures.add(file.path() + ": the log call for \"" + abbreviate(sink.messageFragment()) + "\" passes "
                                 + expression + " unsanitized (" + (occurrences - wrapped) + " of " + occurrences
                                 + " occurrences). CodeQL reported this exact sink as java/log-injection; wrap it in"
