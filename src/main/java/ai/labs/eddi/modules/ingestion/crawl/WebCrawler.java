@@ -564,11 +564,13 @@ public class WebCrawler {
 
     /**
      * A status that reports the server's condition rather than the page's: an
-     * outage, an overloaded origin or a rate limit. A 404 or 410 is the opposite —
-     * the server answering that the page is gone.
+     * outage, an overloaded origin, a rate limit, or a refusal to say anything at
+     * all (401, 403 — an expired credential, an IP block, a WAF). A 404 or 410 is
+     * the opposite: the server answering that the page is gone.
      */
     private static boolean saysNothingAboutContent(int statusCode) {
-        return statusCode >= 500 || statusCode == 408 || statusCode == 429;
+        return statusCode >= 500 || statusCode == 408 || statusCode == 429
+                || statusCode == 401 || statusCode == 403;
     }
 
     /**
