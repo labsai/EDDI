@@ -10,6 +10,16 @@ import ai.labs.eddi.modules.ingestion.IngestionPipeline.IngestionReport;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline.Mode;
 import ai.labs.eddi.modules.ingestion.crawl.FakeSite;
 import ai.labs.eddi.modules.ingestion.crawl.WebCrawler;
+import ai.labs.eddi.modules.ingestion.extract.CsvTextExtractor;
+import ai.labs.eddi.modules.ingestion.extract.DocumentExtractors;
+import ai.labs.eddi.modules.ingestion.extract.ExcelTextExtractor;
+import ai.labs.eddi.modules.ingestion.extract.HtmlDocumentExtractor;
+import ai.labs.eddi.modules.ingestion.extract.PdfTextExtractor;
+import ai.labs.eddi.modules.ingestion.extract.PlainTextExtractor;
+import ai.labs.eddi.modules.ingestion.extract.PowerPointTextExtractor;
+import ai.labs.eddi.modules.ingestion.extract.WordTextExtractor;
+import ai.labs.eddi.modules.ingestion.files.IIngestedFileStore.StoredFile;
+import ai.labs.eddi.modules.ingestion.files.InMemoryIngestedFileStore;
 import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
 import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
 import dev.langchain4j.data.embedding.Embedding;
@@ -26,6 +36,7 @@ import org.mockito.ArgumentCaptor;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -61,6 +72,7 @@ class IngestionPipelineTest {
     private static final String SOURCE_NAME = "docs-crawl";
 
     private InMemoryIngestionStateStore stateStore;
+    private final InMemoryIngestedFileStore fileStore = new InMemoryIngestedFileStore();
     private RecordingEmbeddingStore embeddingStore;
     private EmbeddingStoreFactory storeFactory;
     private EmbeddingModelFactory modelFactory;
@@ -84,7 +96,16 @@ class IngestionPipelineTest {
 
     private IngestionPipeline pipelineFor(FakeSite site) {
         return new IngestionPipeline(new WebCrawler(site), new HtmlToMarkdownConverter(), stateStore,
-                modelFactory, storeFactory, new SimpleMeterRegistry());
+                fileStore, extractors(), modelFactory, storeFactory, new SimpleMeterRegistry());
+    }
+
+    /**
+     * Every extractor this build ships, as the CDI producer would assemble them.
+     */
+    private static DocumentExtractors extractors() {
+        return new DocumentExtractors(List.of(new PdfTextExtractor(), new WordTextExtractor(),
+                new ExcelTextExtractor(), new PowerPointTextExtractor(), new PlainTextExtractor(),
+                new CsvTextExtractor(), new HtmlDocumentExtractor(new HtmlToMarkdownConverter())));
     }
 
     private static RagConfiguration knowledgeBase() {
@@ -106,6 +127,19 @@ class IngestionPipelineTest {
         source.setName(SOURCE_NAME);
         source.setWeb(web);
         return source;
+    }
+
+    private static IngestionSource uploadSource() {
+        var source = new IngestionSource();
+        source.setId("src-files");
+        source.setName("handbooks");
+        source.setType(IngestionSource.TYPE_UPLOAD);
+        return source;
+    }
+
+    /** The pipeline with no site behind it — an upload source never fetches. */
+    private IngestionPipeline uploadPipeline() {
+        return pipelineFor(new FakeSite());
     }
 
     private static String linkTo(String url) {
@@ -530,7 +564,8 @@ class IngestionPipelineTest {
                 }
             };
             var pipeline = new IngestionPipeline(new WebCrawler(new FakeSite().page(SITE + "/", pageWith("x"))),
-                    new HtmlToMarkdownConverter(), exploding, modelFactory, storeFactory, new SimpleMeterRegistry());
+                    new HtmlToMarkdownConverter(), exploding, fileStore, extractors(), modelFactory, storeFactory,
+                    new SimpleMeterRegistry());
 
             IngestionReport report = pipeline.run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
 
@@ -932,6 +967,224 @@ class IngestionPipelineTest {
             assertEquals(SOURCE_NAME, config.findSource("src-1").getName());
             assertEquals(null, config.findSource("nope"));
             assertEquals(null, config.findSource(null));
+        }
+    }
+
+    @Nested
+    @DisplayName("uploaded files")
+    class UploadedFiles {
+
+        private static final String SOURCE_KEY = KB_RESOURCE_ID + ":src-files";
+
+        @Test
+        @DisplayName("reads every stored file and embeds its text")
+        void readsStoredFiles() {
+            fileStore.store(SOURCE_KEY, "notes.md", "text/markdown",
+                    "# Leave policy\n\nYou get 30 days.".getBytes(StandardCharsets.UTF_8));
+
+            IngestionReport report = uploadPipeline()
+                    .run(KB_RESOURCE_ID, knowledgeBase(), uploadSource(), Mode.INGEST);
+
+            assertEquals(IngestionReport.Outcome.COMPLETED, report.outcome());
+            assertEquals(1, report.documentsIngested());
+            assertTrue(embeddingStore.segments().stream()
+                    .anyMatch(segment -> segment.text().contains("You get 30 days.")),
+                    "the file's text must reach the vector store");
+        }
+
+        @Test
+        @DisplayName("cites the file rather than inventing a URL for it")
+        void citesTheFile() {
+            fileStore.store(SOURCE_KEY, "handbook.pdf", "text/plain",
+                    "Contents".getBytes(StandardCharsets.UTF_8));
+
+            uploadPipeline().run(KB_RESOURCE_ID, knowledgeBase(), uploadSource(), Mode.INGEST);
+
+            var metadata = embeddingStore.segments().getFirst().metadata();
+            assertEquals("file:handbook.pdf", metadata.getString(IngestionPipeline.METADATA_URL));
+            assertEquals("handbook", metadata.getString(IngestionPipeline.METADATA_TITLE));
+        }
+
+        @Test
+        @DisplayName("does not re-embed a file whose bytes have not changed")
+        void skipsUnchangedFiles() {
+            fileStore.store(SOURCE_KEY, "notes.md", "text/markdown",
+                    "Stable text".getBytes(StandardCharsets.UTF_8));
+            var pipeline = uploadPipeline();
+            pipeline.run(KB_RESOURCE_ID, knowledgeBase(), uploadSource(), Mode.INGEST);
+            int afterFirstRun = embeddingStore.segments().size();
+
+            IngestionReport second = pipeline.run(KB_RESOURCE_ID, knowledgeBase(), uploadSource(), Mode.INGEST);
+
+            assertEquals(1, second.documentsUnchanged());
+            assertEquals(0, second.documentsIngested());
+            assertEquals(afterFirstRun, embeddingStore.segments().size());
+        }
+
+        @Test
+        @DisplayName("re-embeds a file that was replaced, and leaves no trace of the old one")
+        void reEmbedsReplacedFiles() {
+            fileStore.store(SOURCE_KEY, "notes.md", "text/markdown",
+                    "Old answer".getBytes(StandardCharsets.UTF_8));
+            var pipeline = uploadPipeline();
+            pipeline.run(KB_RESOURCE_ID, knowledgeBase(), uploadSource(), Mode.INGEST);
+
+            fileStore.store(SOURCE_KEY, "notes.md", "text/markdown",
+                    "New answer".getBytes(StandardCharsets.UTF_8));
+            pipeline.run(KB_RESOURCE_ID, knowledgeBase(), uploadSource(), Mode.INGEST);
+
+            var texts = embeddingStore.segments().stream().map(TextSegment::text).toList();
+            assertTrue(texts.stream().anyMatch(text -> text.contains("New answer")), texts.toString());
+            // Last month's answer retrievable beside this month's is worse than
+            // having no knowledge base at all.
+            assertFalse(texts.stream().anyMatch(text -> text.contains("Old answer")), texts.toString());
+        }
+
+        @Test
+        @DisplayName("removes the vectors of a file that has been deleted")
+        void tombstonesDeletedFiles() {
+            var stored = fileStore.store(SOURCE_KEY, "gone.md", "text/markdown",
+                    "Temporary".getBytes(StandardCharsets.UTF_8));
+            var source = uploadSource();
+            source.setSettings(tombstoneAfter(1));
+            var pipeline = uploadPipeline();
+            pipeline.run(KB_RESOURCE_ID, knowledgeBase(), source, Mode.INGEST);
+            assertFalse(embeddingStore.segments().isEmpty());
+
+            fileStore.deleteAll(SOURCE_KEY);
+            IngestionReport report = pipeline.run(KB_RESOURCE_ID, knowledgeBase(), source, Mode.INGEST);
+
+            // A source with no files left is not an unreachable source: the store
+            // was read and it is empty. Treating it as "nothing concluded" would
+            // leave the deleted document answering questions for ever, because an
+            // upload source has no next crawl to correct it.
+            assertEquals(1, report.documentsTombstoned());
+            assertTrue(embeddingStore.segmentsOf(stored.fileId()).isEmpty());
+        }
+
+        @Test
+        @DisplayName("an unreadable file does not count as a missing one")
+        void anUnreadableFileIsNotAMissingFile() {
+            fileStore.store(SOURCE_KEY, "readable.md", "text/markdown",
+                    "Fine".getBytes(StandardCharsets.UTF_8));
+            // Stored as a PDF, but the bytes are not a PDF — a file that is there
+            // and cannot be read.
+            fileStore.store(SOURCE_KEY, "broken.pdf", "application/pdf",
+                    "not really a pdf".getBytes(StandardCharsets.UTF_8));
+            var source = uploadSource();
+            source.setSettings(tombstoneAfter(1));
+
+            IngestionReport report = uploadPipeline()
+                    .run(KB_RESOURCE_ID, knowledgeBase(), source, Mode.INGEST);
+
+            assertEquals(1, report.documentsIngested());
+            assertEquals(1, report.documentsFailed());
+            // Counting it as absent would delete vectors the file never lost, and
+            // would do it again on every run while the file sits there.
+            assertEquals(0, report.documentsTombstoned());
+        }
+
+        @Test
+        @DisplayName("a store that cannot be listed concludes nothing")
+        void anUnavailableStoreConcludesNothing() {
+            fileStore.store(SOURCE_KEY, "present.md", "text/markdown",
+                    "Here".getBytes(StandardCharsets.UTF_8));
+            var source = uploadSource();
+            source.setSettings(tombstoneAfter(1));
+            uploadPipeline().run(KB_RESOURCE_ID, knowledgeBase(), source, Mode.INGEST);
+
+            var brokenStore = new InMemoryIngestedFileStore() {
+                @Override
+                public List<StoredFile> list(String sourceKey) {
+                    throw new IngestedFileStoreException("the database is unwell");
+                }
+            };
+            var pipeline = new IngestionPipeline(new WebCrawler(new FakeSite()), new HtmlToMarkdownConverter(),
+                    stateStore, brokenStore, extractors(), modelFactory, storeFactory, new SimpleMeterRegistry());
+
+            IngestionReport report = pipeline.run(KB_RESOURCE_ID, knowledgeBase(), source, Mode.INGEST);
+
+            // "No files came back" from a database outage must not read as "the
+            // operator deleted everything" — that empties the knowledge base over a
+            // blip, with the run reporting success.
+            assertEquals(0, report.documentsTombstoned());
+            assertTrue(report.tombstoningSkipped());
+            assertFalse(embeddingStore.segments().isEmpty());
+        }
+
+        @Test
+        @DisplayName("a preview reports what would change and embeds nothing")
+        void previewEmbedsNothing() {
+            fileStore.store(SOURCE_KEY, "notes.md", "text/markdown",
+                    "Draft".getBytes(StandardCharsets.UTF_8));
+
+            IngestionReport report = uploadPipeline()
+                    .run(KB_RESOURCE_ID, knowledgeBase(), uploadSource(), Mode.PREVIEW);
+
+            assertEquals(IngestionReport.Outcome.PREVIEW, report.outcome());
+            assertEquals(1, report.documentsIngested());
+            assertTrue(embeddingStore.segments().isEmpty());
+        }
+
+        @Test
+        @DisplayName("forgetting a document removes its vectors without waiting for a run")
+        void forgetDocumentRemovesVectorsNow() {
+            var stored = fileStore.store(SOURCE_KEY, "secret.md", "text/markdown",
+                    "Confidential".getBytes(StandardCharsets.UTF_8));
+            var pipeline = uploadPipeline();
+            pipeline.run(KB_RESOURCE_ID, knowledgeBase(), uploadSource(), Mode.INGEST);
+            assertFalse(embeddingStore.segments().isEmpty());
+
+            // By the file's own id, which is what the vectors are keyed by — the
+            // display name is not an identity.
+            boolean removed = pipeline.forgetDocument(KB_RESOURCE_ID, knowledgeBase(), uploadSource(),
+                    stored.fileId());
+
+            assertTrue(removed);
+            // Deferring this to the next run means a source with no cron keeps
+            // answering from a document the operator was told was deleted.
+            assertTrue(embeddingStore.segments().isEmpty());
+        }
+
+        @Test
+        @DisplayName("a document forgotten while the store could not delete says so")
+        void forgetDocumentReportsAnUndeletableStore() {
+            embeddingStore = new RecordingEmbeddingStore().withoutRemovalSupport();
+            when(storeFactory.getOrCreate(any(RagConfiguration.class), anyString())).thenReturn(embeddingStore);
+
+            boolean removed = uploadPipeline()
+                    .forgetDocument(KB_RESOURCE_ID, knowledgeBase(), uploadSource(), "secret.md");
+
+            assertFalse(removed, "the caller has to be able to tell the operator the chunks are still there");
+        }
+
+        @Test
+        @DisplayName("stops at the file limit rather than concluding the rest are gone")
+        void stopsAtTheFileLimit() {
+            for (int i = 0; i < 5; i++) {
+                fileStore.store(SOURCE_KEY, "doc" + i + ".md", "text/markdown",
+                        ("Body " + i).getBytes(StandardCharsets.UTF_8));
+            }
+            var source = uploadSource();
+            source.setSettings(tombstoneAfter(1));
+            var upload = new IngestionSource.UploadSource();
+            upload.setMaxFiles(2);
+            source.setUpload(upload);
+
+            IngestionReport report = uploadPipeline()
+                    .run(KB_RESOURCE_ID, knowledgeBase(), source, Mode.INGEST);
+
+            assertEquals(2, report.documentsIngested());
+            // The run saw two of five files, so it knows nothing about the other
+            // three — and must not delete them.
+            assertTrue(report.tombstoningSkipped());
+            assertEquals(0, report.documentsTombstoned());
+        }
+
+        private static IngestionSource.IngestionSettings tombstoneAfter(int runs) {
+            var settings = new IngestionSource.IngestionSettings();
+            settings.setTombstoneAfterMissedRuns(runs);
+            return settings;
         }
     }
 }

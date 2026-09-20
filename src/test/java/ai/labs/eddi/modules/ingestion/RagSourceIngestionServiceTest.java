@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.ingestion;
 
 import ai.labs.eddi.configs.rag.IRagStore;
 import ai.labs.eddi.configs.rag.model.IngestionSource;
+import ai.labs.eddi.modules.ingestion.files.InMemoryIngestedFileStore;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
@@ -55,7 +56,8 @@ class RagSourceIngestionServiceTest {
         stateStore = new InMemoryIngestionStateStore();
         scheduleStore = mock(IScheduleStore.class);
         ragStore = mock(IRagStore.class);
-        service = new RagSourceIngestionService(pipeline, stateStore, scheduleStore, ragStore);
+        service = new RagSourceIngestionService(pipeline, stateStore, scheduleStore, ragStore,
+                new InMemoryIngestedFileStore());
         // The reservation is the real one, against the real store: with a bare mock it
         // returns an empty Optional and every runAsync assertion below passes for the
         // wrong reason.

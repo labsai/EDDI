@@ -188,6 +188,16 @@ knowledge base (`sources[]` on the RAG configuration), because the vector store 
 knowledge base — a source that named its target by string could, and in an earlier draft did, write to
 one table while retrieval read another.
 
+There are two kinds, set by `type`:
+
+| `type` | Where documents come from | Config block |
+| --- | --- | --- |
+| `web` (default) | A crawl of a website | `web` |
+| `upload` | Files an operator uploaded, held by EDDI | `upload` (optional) |
+
+Everything that is not about *fetching* is the same for both: `settings`, `cron`, run history,
+preview, purge, and the deletion rules below.
+
 ```json
 {
   "name": "product-docs",
@@ -308,6 +318,117 @@ the knowledge base it names, and a fire refuses a schedule whose name does not m
 Without those, anyone who could create a schedule could have the server crawl, re-embed and delete from
 a knowledge base they have no access to.
 
+### Uploaded files (`type: "upload"`)
+
+An upload source reads files EDDI holds on its behalf. Dropping a file in stores it; **running the
+source** is what extracts its text and embeds it — the same verb every other source answers to.
+
+```json
+{
+  "name": "handbooks",
+  "type": "upload",
+  "upload": {
+    "maxFiles": 500,
+    "maxFileBytes": 26214400,
+    "maxTotalBytes": 524288000
+  },
+  "settings": { "maxContentLength": 100000 }
+}
+```
+
+| Field | Default | What it does |
+| --- | --- | --- |
+| `maxFiles` | `500` | Files this source may hold |
+| `maxFileBytes` | `25 MB` | Size of one file |
+| `maxTotalBytes` | `500 MB` | Size of everything the source holds |
+
+**The files are kept, not just their embeddings.** That is what makes this a source rather than a
+one-way import: changing the embedding model or the chunk size and re-running re-ingests from what is
+stored, a purge is recoverable, and deleting a file removes its vectors through the same reconciliation
+a crawl uses. Embedding on upload and keeping nothing would make each of those "ask the operator to
+upload two hundred files again".
+
+**A file is identified by its name.** Uploading `handbook.pdf` twice replaces it — the blob, the
+ingestion-state row and the vectors all key on an id derived from the name, so the corrected version
+supersedes the old one everywhere at once. A generated id would leave both retrievable with nothing to
+say which is current.
+
+**A run compares the file's bytes, not its text.** An unchanged 20 MB manual costs one metadata query
+per run rather than a download and a full parse, and improving an extractor does not silently re-embed
+every file in the knowledge base.
+
+#### What can be read
+
+| Format | Extensions | What comes out |
+| --- | --- | --- |
+| PDF | `.pdf` | Text, page by page. An encrypted PDF is refused; a scan with no text layer yields nothing rather than failing |
+| Word | `.docx` | Paragraphs, with headings kept as Markdown headings and numbered paragraphs as list items |
+| Excel | `.xlsx` | One Markdown table per sheet, under the sheet's name. Dates and currency are stored as numbers with a display format applied elsewhere, so a date reads as its serial |
+| PowerPoint | `.pptx` | One section per slide, in the deck's order, headed `## Slide N` |
+| Text | `.txt`, `.md`, `.markdown`, `.json`, `.xml`, `.yaml`, `.yml`, `.log` | As written. UTF-8 unless a byte-order mark or an invalid sequence says otherwise, in which case Windows-1252 |
+| Tabular | `.csv`, `.tsv` | A Markdown table. RFC 4180 quoting, and the delimiter (comma, semicolon or tab) is taken from the first line |
+| HTML | `.html`, `.htm` | Through the same converter the crawler uses, so a page saved to disk ingests as it would if crawled |
+
+The **content decides the format**, not the name or the MIME type the browser attached: `.docx`,
+`.xlsx` and `.pptx` are all ZIP archives, so neither distinguishes them, and a spreadsheet saved under
+a `.docx` name would otherwise be refused as corrupt. The extension is consulted only for the text
+formats, which have no signature to read.
+
+Older `.doc`, `.xls` and `.ppt` files are **not** supported — the message says to save them as the
+modern format. Images and scanned pages carry no text layer and there is no OCR; a PDF of scans
+produces an empty document.
+
+#### Limits, and why each one is there
+
+An uploaded file is not the operator's own data in any useful sense — it is whatever somebody dragged
+into a browser — so extraction is bounded in five ways:
+
+- **200,000 characters** per document by default (`settings.maxContentLength`), so one file cannot fill
+  a knowledge base.
+- **500 pages, slides or sheets**, and **5,000 rows × 64 columns** per sheet. A sheet can declare cells
+  out at column XFD whether or not anything was ever typed there.
+- **64 MB decompressed** across the text-bearing parts of an archive. A 1 MB ZIP can describe
+  gigabytes; this is the bound, and it is also roughly the peak memory one extraction takes.
+- **DTDs and external entities are refused** outright, so an Office file cannot expand entities into
+  gigabytes (the billion-laughs attack) or reach out to a URL while being parsed.
+- **An archive naming the same part twice is refused.** A real Office file never does, and two entries
+  under one name means two readers can disagree about the contents.
+
+Apache POI would read these formats too — at seven extra jars and about 14 MB, built on reflection and
+with a long history of parser CVEs. For pulling text out of a handful of known parts, the JDK's own ZIP
+and StAX readers are the smaller surface and the one whose limits can be stated exactly, as above. PDF
+goes through PDFBox, which EDDI already depends on.
+
+#### File endpoints
+
+| Method | Path | Access | Purpose |
+| ------ | ---- | ------ | ------- |
+| `POST` | `/ragstore/rags/{id}/sources/{sourceId}/files?version=N` | EDIT | Store files (`multipart/form-data`, parts named `files`). Each file is accepted or refused on its own |
+| `GET` | `/ragstore/rags/{id}/sources/{sourceId}/files?version=N` | VIEW | What the source holds: names, types, sizes, content hashes |
+| `DELETE` | `/ragstore/rags/{id}/sources/{sourceId}/files/{fileId}?version=N` | EDIT | Remove a file **and the vectors it produced**, at once |
+
+The upload answers `200` with `{"stored": [...], "rejected": [{"fileName", "reason"}]}` when anything
+was stored, and `400` with the same body when nothing was — a batch where one file of thirty failed is
+a success with a caveat, and a client that treats `4xx` as "nothing happened" would have the operator
+re-uploading files that are already there. `409` means the source is not of type `upload`.
+
+Deleting removes the vectors **before** the file, and immediately rather than at the next run: an
+operator who removes a document because it should not have been there is told it is gone, and a source
+with no cron has no next run to make that true. Where the vector store cannot delete by metadata, the
+answer carries a `warning` saying the text is still retrievable.
+
+Deleting a file is refused with `409` while a run is in flight — the run is reading those files and
+writing state rows for them.
+
+**Uploaded files are removed when their source is.** Removing a source from `sources[]` and saving, or
+deleting the last version of the knowledge base, deletes its files; nothing else can reach them
+afterwards. A **purge** deliberately does not: it forgets what was ingested so the next run re-ingests,
+which is only useful because the files are still there.
+
+**A ZIP export does not carry uploaded files.** An imported upload source arrives empty and its files
+have to be uploaded again — the backup format carries configuration, and a knowledge base's documents
+can be hundreds of megabytes of somebody's contracts.
+
 ### Ingestion source endpoints
 
 | Method | Path | Access | Purpose |
@@ -329,9 +450,16 @@ its history and re-embedded everything.
 
 ### In the Manager
 
-The knowledge-base editor has an **Ingestion Sources** section: add and remove sources, edit the scope
-and the limits, and for a source that has been saved once, **Run now**, **Preview**, **Purge state**
-and the run history with its counters and errors.
+The knowledge-base editor has an **Ingestion Sources** section: add and remove sources, choose between
+**Website** and **Files**, edit the scope and the limits, and for a source that has been saved once,
+**Run now**, **Preview**, **Purge state** and the run history with its counters and errors.
+
+A **Files** source shows a drop zone instead of the crawl settings. Files can be dropped or chosen,
+several at once, and each is uploaded on its own request with its own progress bar — so a batch that
+fails three quarters of the way through does not lose what had already arrived, and a file the server
+refuses shows the server's own sentence ("This PDF is encrypted") rather than a generic failure. Below
+it, the files the source holds, with their sizes and a delete that confirms first and says what it
+removes.
 
 Run and Preview address the source by id and version, so they crawl the **saved** configuration. While
 the editor has unsaved changes both are disabled, with a line saying why — otherwise editing a start
@@ -391,8 +519,12 @@ These are visible in the conversation memory snapshot and the audit ledger.
 - ✅ **Phase 8c-γ**: RAG provider expansion (8 embedding models + 6 vector stores)
 - ✅ **Phase 8c-M**: Manager UI — RAG editor with full provider parity + document ingestion
 - ✅ **REST ingestion endpoint**: `POST /ragstore/rags/{id}/ingest`
+- ✅ **Scheduled ingestion sources**: crawl a website, or upload PDF, Word, Excel, PowerPoint,
+  text, Markdown, CSV and HTML files
 
 ## Future Enhancements
 
+- More ingestion source types — sitemaps, email, Google Drive, OneDrive
+- OCR for scanned PDFs and images
 - Advanced retrieval: re-ranking, hybrid search, metadata filtering
 - ONNX in-process embeddings (air-gapped / edge deployments)

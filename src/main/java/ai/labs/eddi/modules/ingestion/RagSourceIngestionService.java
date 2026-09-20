@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.modules.ingestion.IIngestionStateStore.IngestionRun;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline.IngestionReport;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline.Mode;
+import ai.labs.eddi.modules.ingestion.files.IIngestedFileStore;
 import ai.labs.eddi.utils.LogSanitizer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -48,14 +49,16 @@ public class RagSourceIngestionService {
     private final IIngestionStateStore stateStore;
     private final IScheduleStore scheduleStore;
     private final IRagStore ragStore;
+    private final IIngestedFileStore fileStore;
 
     @Inject
     public RagSourceIngestionService(IngestionPipeline pipeline, IIngestionStateStore stateStore,
-            IScheduleStore scheduleStore, IRagStore ragStore) {
+            IScheduleStore scheduleStore, IRagStore ragStore, IIngestedFileStore fileStore) {
         this.pipeline = pipeline;
         this.stateStore = stateStore;
         this.scheduleStore = scheduleStore;
         this.ragStore = ragStore;
+        this.fileStore = fileStore;
     }
 
     /**
@@ -158,6 +161,7 @@ public class RagSourceIngestionService {
         capped.setEnabled(true);
         capped.setType(source.getType());
         capped.setWeb(source.getWeb());
+        capped.setUpload(source.getUpload());
         capped.setCron(null);
 
         var settings = new IngestionSource.IngestionSettings();
@@ -236,6 +240,10 @@ public class RagSourceIngestionService {
             for (String previousId : previousSourceIds) {
                 if (previousId != null && !currentIds.contains(previousId)) {
                     deleteScheduleQuietly(ragConfigId, previousId);
+                    // The source is gone, so nothing can ever list, read or delete its
+                    // uploaded files again. Left behind they would occupy the database
+                    // for the life of the deployment with nothing pointing at them.
+                    deleteFilesQuietly(ragConfigId, previousId);
                 }
             }
         }
@@ -276,13 +284,33 @@ public class RagSourceIngestionService {
         }
     }
 
-    /** Removes every ingestion schedule belonging to a knowledge base's sources. */
+    /**
+     * Removes every ingestion schedule belonging to a knowledge base's sources, and
+     * the files its upload sources held — called once the knowledge base itself has
+     * no readable version left.
+     */
     public void removeSchedules(String ragConfigId, RagConfiguration knowledgeBase) {
         if (knowledgeBase == null || knowledgeBase.getSources() == null) {
             return;
         }
         for (IngestionSource source : knowledgeBase.getSources()) {
             deleteScheduleQuietly(ragConfigId, sourceIdOf(source));
+            if (source.isUpload()) {
+                deleteFilesQuietly(ragConfigId, sourceIdOf(source));
+            }
+        }
+    }
+
+    private void deleteFilesQuietly(String ragConfigId, String sourceId) {
+        try {
+            long deleted = fileStore.deleteAll(IngestionPipeline.stateKeyForSourceId(ragConfigId, sourceId));
+            if (deleted > 0) {
+                LOGGER.infof("Deleted %d uploaded file(s) of removed source %s", deleted,
+                        LogSanitizer.sanitize(sourceId));
+            }
+        } catch (RuntimeException e) {
+            LOGGER.errorf(e, "Could not delete the uploaded files of removed source %s of knowledge base %s",
+                    LogSanitizer.sanitize(sourceId), LogSanitizer.sanitize(ragConfigId));
         }
     }
 

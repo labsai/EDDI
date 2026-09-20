@@ -18,6 +18,15 @@ import ai.labs.eddi.modules.ingestion.IngestionPipeline.IngestionReport;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline.Mode;
 import ai.labs.eddi.modules.ingestion.crawl.FakeSite;
 import ai.labs.eddi.modules.ingestion.crawl.WebCrawler;
+import ai.labs.eddi.modules.ingestion.extract.CsvTextExtractor;
+import ai.labs.eddi.modules.ingestion.extract.DocumentExtractors;
+import ai.labs.eddi.modules.ingestion.extract.ExcelTextExtractor;
+import ai.labs.eddi.modules.ingestion.extract.HtmlDocumentExtractor;
+import ai.labs.eddi.modules.ingestion.extract.PdfTextExtractor;
+import ai.labs.eddi.modules.ingestion.extract.PlainTextExtractor;
+import ai.labs.eddi.modules.ingestion.extract.PowerPointTextExtractor;
+import ai.labs.eddi.modules.ingestion.extract.WordTextExtractor;
+import ai.labs.eddi.modules.ingestion.files.InMemoryIngestedFileStore;
 import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
 import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
 import ai.labs.eddi.modules.llm.impl.RagContextProvider;
@@ -87,6 +96,7 @@ class IngestionRetrievalRoundTripTest {
     private final List<String> requestedKeys = new ArrayList<>();
 
     private InMemoryIngestionStateStore stateStore;
+    private final InMemoryIngestedFileStore fileStore = new InMemoryIngestedFileStore();
     private EmbeddingStoreFactory storeFactory;
     private EmbeddingModelFactory modelFactory;
     private RagContextProvider retrieval;
@@ -214,7 +224,16 @@ class IngestionRetrievalRoundTripTest {
 
     private IngestionPipeline pipelineFor(FakeSite site) {
         return new IngestionPipeline(new WebCrawler(site), new HtmlToMarkdownConverter(), stateStore,
-                modelFactory, storeFactory, new SimpleMeterRegistry());
+                fileStore, extractors(), modelFactory, storeFactory, new SimpleMeterRegistry());
+    }
+
+    /**
+     * Every extractor this build ships, as the CDI producer would assemble them.
+     */
+    private static DocumentExtractors extractors() {
+        return new DocumentExtractors(List.of(new PdfTextExtractor(), new WordTextExtractor(),
+                new ExcelTextExtractor(), new PowerPointTextExtractor(), new PlainTextExtractor(),
+                new CsvTextExtractor(), new HtmlDocumentExtractor(new HtmlToMarkdownConverter())));
     }
 
     private String retrieve(String query) {
