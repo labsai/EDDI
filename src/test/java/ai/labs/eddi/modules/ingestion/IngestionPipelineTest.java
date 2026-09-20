@@ -756,6 +756,22 @@ class IngestionPipelineTest {
         }
 
         @Test
+        @DisplayName("a source without an id is found by name, the way it is scheduled and keyed")
+        void findsIdLessSourceByName() {
+            // A ZIP import writes through IRagStore.create and never passes the REST
+            // layer that assigns ids. Schedules and ingestion state key such a source
+            // by its name, so a lookup by id alone failed every scheduled fire.
+            RagConfiguration config = knowledgeBase();
+            var idLess = source();
+            idLess.setId(null);
+            config.setSources(List.of(idLess));
+
+            assertEquals(idLess, config.findSource(idLess.getName()));
+            assertEquals(idLess.effectiveId(), IngestionPipeline.stateKey(KB_RESOURCE_ID, idLess)
+                    .substring(KB_RESOURCE_ID.length() + 1));
+        }
+
+        @Test
         @DisplayName("a null entry in the sources list is refused, not a NullPointerException")
         void refusesNullSourceEntry() {
             RagConfiguration config = knowledgeBase();
