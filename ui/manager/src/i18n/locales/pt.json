@@ -2109,7 +2109,18 @@
       "deleteFile": "Excluir {{fileName}}",
       "deleteFileTitle": "Excluir este arquivo?",
       "deleteFileDescription": "{{fileName}} e tudo o que a base de conhecimento aprendeu com ele são removidos. Os agentes param de responder com base nele imediatamente.",
-      "previewFiles": "Pré-visualizar alterações"
+      "previewFiles": "Pré-visualizar alterações",
+      "saveBeforeUpload": "Salve a base de conhecimento primeiro — os envios vão para a fonte salva, não para as alterações na tela.",
+      "foldersNotSupported": "Pastas não podem ser enviadas. Solte os arquivos que estão dentro delas.",
+      "filesAwaitingRun": "Há arquivos armazenados que ainda não estão na base de conhecimento. Execute a fonte para indexá-los.",
+      "retryUpload": "Tentar {{fileName}} novamente",
+      "fileIndexed": "Indexado",
+      "fileChanged": "Alterado",
+      "fileNotIndexed": "Não indexado",
+      "maxTotalMb": "Tamanho total máx. (MB)",
+      "maxTotalMbHint": "Para todos os arquivos desta fonte",
+      "removeTitle": "Remover esta fonte?",
+      "removeDescription": "Ao salvar, seus arquivos enviados e tudo o que a base de conhecimento aprendeu com eles são excluídos. Isso não pode ser desfeito."
     }
   },
   "onboarding": {

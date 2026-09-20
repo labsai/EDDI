@@ -207,4 +207,119 @@ describe("RAG upload source", () => {
     expect(await screen.findByTestId("ingestion-source-0-start-url")).toBeInTheDocument();
     expect(screen.queryByTestId("ingestion-source-0-dropzone")).not.toBeInTheDocument();
   });
+
+  it("says which files the knowledge base actually answers from", async () => {
+    server.use(
+      http.get("*/ragstore/rags/:id/sources/:sourceId/files", () =>
+        HttpResponse.json([
+          {
+            fileId: "aaaa",
+            fileName: "indexed.pdf",
+            mimeType: "application/pdf",
+            sizeBytes: 1024,
+            contentHash: "a1",
+            uploadedAt: "2026-09-18T09:12:00Z",
+            indexState: "INDEXED",
+          },
+          {
+            fileId: "bbbb",
+            fileName: "fresh.pdf",
+            mimeType: "application/pdf",
+            sizeBytes: 2048,
+            contentHash: "b2",
+            uploadedAt: "2026-09-18T09:13:00Z",
+            indexState: "NOT_INDEXED",
+          },
+        ]),
+      ),
+    );
+
+    const user = userEvent.setup();
+    renderRagPage();
+    await openTheSource(user);
+
+    // Without this, a file that was uploaded and one that is in the knowledge
+    // base look identical, and the only way to tell is to run the source and
+    // compare counters.
+    const list = await screen.findByTestId("ingestion-source-0-file-list");
+    expect(within(list).getByTestId("file-state-indexed")).toBeInTheDocument();
+    expect(within(list).getByTestId("file-state-not-indexed")).toBeInTheDocument();
+    expect(await screen.findByTestId("ingestion-source-0-awaiting-run")).toBeInTheDocument();
+  });
+
+  it("offers a run when files are waiting to be indexed", async () => {
+    let runStarted = false;
+    server.use(
+      // A file that is stored and not yet indexed, which is what the prompt to
+      // run is about.
+      http.get("*/ragstore/rags/:id/sources/:sourceId/files", () =>
+        HttpResponse.json([
+          {
+            fileId: "bbbb",
+            fileName: "fresh.pdf",
+            mimeType: "application/pdf",
+            sizeBytes: 2048,
+            contentHash: "b2",
+            uploadedAt: "2026-09-18T09:13:00Z",
+            indexState: "NOT_INDEXED",
+          },
+        ]),
+      ),
+      http.post("*/ragstore/rags/:id/sources/:sourceId/run", () => {
+        runStarted = true;
+        return HttpResponse.json({ status: "started" }, { status: 202 });
+      }),
+    );
+
+    const user = userEvent.setup();
+    renderRagPage();
+    await openTheSource(user);
+
+    await user.click(await screen.findByTestId("ingestion-source-0-run-from-files"));
+
+    // Uploading and running are two steps, and the panel is where the operator
+    // finds out that the second one is still owed.
+    await waitFor(() => expect(runStarted).toBe(true));
+  });
+
+  it("keeps the server's warning when the chunks could not be removed", async () => {
+    server.use(
+      http.delete("*/ragstore/rags/:id/sources/:sourceId/files/:fileId", () =>
+        HttpResponse.json({
+          status: "deleted",
+          fileId: "f1",
+          warning:
+            "The file is gone, but this knowledge base's vector store cannot delete by metadata, so the text it produced is still retrievable.",
+        }),
+      ),
+    );
+
+    const user = userEvent.setup();
+    renderRagPage();
+    await openTheSource(user);
+
+    await user.click(await screen.findByTestId("ingestion-source-0-file-delete"));
+    await user.click(await screen.findByRole("button", { name: /^delete$/i }));
+
+    // The dialog promised that agents stop answering from it immediately.
+    // Swallowing the one response that says otherwise would leave the operator
+    // believing the promise.
+    expect(
+      await screen.findByTestId("ingestion-source-0-file-delete-warning"),
+    ).toHaveTextContent(/still retrievable/i);
+  });
+
+  it("confirms before removing a source, because its files go with it", async () => {
+    const user = userEvent.setup();
+    renderRagPage();
+    await waitFor(() => expect(screen.getByTestId("rag-editor")).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: /ingestion sources/i }));
+
+    await user.click(await screen.findByTestId("ingestion-source-0-remove"));
+
+    // One unconfirmed click used to delete the only copy of every document the
+    // source held.
+    expect(screen.getByTestId("ingestion-source-0")).toBeInTheDocument();
+    expect(await screen.findByText(/cannot be undone/i)).toBeInTheDocument();
+  });
 });

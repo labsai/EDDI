@@ -76,7 +76,8 @@ class RestRagIngestionFilesTest {
 
         when(restRagStore.readRag(eq(KB_ID), anyInt())).thenReturn(knowledgeBase());
         when(sourceIngestionService.activeRun(anyString(), any())).thenReturn(Optional.empty());
-        when(ingestedFileService.list(anyString(), any())).thenReturn(List.of(storedFile()));
+        when(ingestedFileService.listWithStatus(anyString(), any())).thenReturn(List.of(
+                new IngestedFileService.FileStatus(storedFile(), IngestedFileService.IndexState.INDEXED)));
         when(ingestedFileService.upload(anyString(), any(), any()))
                 .thenReturn(new IngestedFileService.UploadOutcome(List.of(storedFile()), List.of()));
         when(ingestedFileService.delete(anyString(), any(), any(), anyString()))
@@ -251,6 +252,17 @@ class RestRagIngestionFilesTest {
     }
 
     @Test
+    @DisplayName("a delete that loses the race for the source's claim is a 409")
+    void aDeleteThatLosesTheClaimIsAConflict() {
+        when(ingestedFileService.delete(anyString(), any(), any(), anyString()))
+                .thenReturn(IngestedFileService.DeleteOutcome.BUSY);
+
+        // A run that started after the check above still has to exclude the delete,
+        // or it re-embeds the file being removed and clears its tombstone.
+        assertEquals(409, rest.deleteSourceFile(KB_ID, UPLOAD_SOURCE, "f1", 1).getStatus());
+    }
+
+    @Test
     @DisplayName("deleting a file that is not there is a 404")
     void deletingAnUnknownFileIsNotFound() {
         when(ingestedFileService.delete(anyString(), any(), any(), anyString()))
@@ -269,6 +281,9 @@ class RestRagIngestionFilesTest {
         assertEquals("handbook.pdf", file.get("fileName"));
         assertEquals("application/pdf", file.get("mimeType"));
         assertEquals(1024L, file.get("sizeBytes"));
+        // Whether the knowledge base actually answers from it — without which an
+        // uploaded file and an indexed one look identical in the Manager.
+        assertEquals("INDEXED", file.get("indexState"));
         // The source key is an internal address and says which knowledge base a
         // file belongs to; it has no business in an API response.
         assertTrue(file.get("fileId") != null);

@@ -2087,7 +2087,18 @@
       "deleteFile": "{{fileName}} löschen",
       "deleteFileTitle": "Diese Datei löschen?",
       "deleteFileDescription": "{{fileName}} und alles, was die Wissensdatenbank daraus gelernt hat, werden entfernt. Agenten antworten sofort nicht mehr daraus.",
-      "previewFiles": "Änderungen vorschauen"
+      "previewFiles": "Änderungen vorschauen",
+      "saveBeforeUpload": "Speichern Sie die Wissensdatenbank zuerst — Uploads gehen an die gespeicherte Quelle, nicht an die Änderungen auf dem Bildschirm.",
+      "foldersNotSupported": "Ordner können nicht hochgeladen werden. Ziehen Sie stattdessen die Dateien darin hierher.",
+      "filesAwaitingRun": "Dateien sind gespeichert, aber noch nicht in der Wissensdatenbank. Führen Sie die Quelle aus, um sie zu indizieren.",
+      "retryUpload": "{{fileName}} erneut versuchen",
+      "fileIndexed": "Indiziert",
+      "fileChanged": "Geändert",
+      "fileNotIndexed": "Nicht indiziert",
+      "maxTotalMb": "Max. Gesamtgröße (MB)",
+      "maxTotalMbHint": "Über alle Dateien dieser Quelle",
+      "removeTitle": "Diese Quelle entfernen?",
+      "removeDescription": "Beim Speichern werden die hochgeladenen Dateien und alles, was die Wissensdatenbank daraus gelernt hat, gelöscht. Das lässt sich nicht rückgängig machen."
     }
   },
   "onboarding": {

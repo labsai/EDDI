@@ -188,6 +188,7 @@ function SourceCard({
 }) {
   const { t } = useTranslation();
   const [confirmPurge, setConfirmPurge] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
   const [preview, setPreview] = useState<IngestionReport | null>(null);
   // A preview describes the configuration it ran against. Once that changes, it is
   // a claim about something that no longer exists.
@@ -257,7 +258,7 @@ function SourceCard({
           <Button
             variant="ghost"
             size="icon"
-            onClick={onRemove}
+            onClick={() => (isUpload ? setConfirmRemove(true) : onRemove())}
             aria-label={t("ragEditor.sources.remove", "Remove source")}
             data-testid={`${testId}-remove`}
           >
@@ -276,7 +277,20 @@ function SourceCard({
                 : t("ragEditor.sources.typeWebHint", "Crawl a website")
             }
           >
-            <div className="flex gap-2" role="radiogroup" aria-label={t("ragEditor.sources.type", "Source")}>
+            <div
+              className="flex gap-2"
+              role="radiogroup"
+              aria-label={t("ragEditor.sources.type", "Source")}
+              onKeyDown={(event) => {
+                // A radiogroup moves between its options with the arrow keys.
+                // Without this the only way to change the type is a pointer.
+                if (readOnly) return;
+                if (["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp"].includes(event.key)) {
+                  event.preventDefault();
+                  onChange({ type: isUpload ? "web" : "upload" });
+                }
+              }}
+            >
               <TypeChoice
                 label={t("ragEditor.sources.typeWeb", "Website")}
                 icon={Globe}
@@ -394,13 +408,32 @@ function SourceCard({
                   <Input
                     type="number"
                     min={1}
-                    max={200}
+                    max={50}
                     value={megabytesOf(source.upload?.maxFileBytes) ?? 25}
                     onChange={(e) =>
                       onChangeUpload({ maxFileBytes: bytesFromMegabytes(e.target.value) })
                     }
                     disabled={readOnly}
                     data-testid={`${testId}-max-file-mb`}
+                  />
+                </Field>
+                <Field
+                  label={t("ragEditor.sources.maxTotalMb", "Max total size (MB)")}
+                  hint={t("ragEditor.sources.maxTotalMbHint", "Across all of this source's files")}
+                >
+                  {/* Editable because the server's refusal tells the operator to
+                      raise it: a limit named in an error and settable nowhere is
+                      worse than no message at all. */}
+                  <Input
+                    type="number"
+                    min={1}
+                    max={20480}
+                    value={megabytesOf(source.upload?.maxTotalBytes) ?? 500}
+                    onChange={(e) =>
+                      onChangeUpload({ maxTotalBytes: bytesFromMegabytes(e.target.value) })
+                    }
+                    disabled={readOnly}
+                    data-testid={`${testId}-max-total-mb`}
                   />
                 </Field>
               </>
@@ -462,6 +495,9 @@ function SourceCard({
               sourceId={source.id}
               version={version}
               readOnly={readOnly}
+              hasUnsavedChanges={hasUnsavedChanges}
+              onRunSource={isSaved ? () => runMutation.mutate(source.id as string) : undefined}
+              isRunning={runMutation.isPending || Boolean(activeRun)}
               testId={testId}
             />
           )}
@@ -602,6 +638,23 @@ function SourceCard({
           )}
         </div>
       )}
+
+      <AlertDialog
+        open={confirmRemove}
+        onOpenChange={setConfirmRemove}
+        title={t("ragEditor.sources.removeTitle", "Remove this source?")}
+        description={t(
+          "ragEditor.sources.removeDescription",
+          "When you save, its uploaded files and everything the knowledge base learned from them are deleted. This cannot be undone.",
+        )}
+        confirmLabel={t("ragEditor.sources.remove", "Remove source")}
+        cancelLabel={t("common.cancel", "Cancel")}
+        variant="destructive"
+        onConfirm={() => {
+          setConfirmRemove(false);
+          onRemove();
+        }}
+      />
 
       <AlertDialog
         open={confirmPurge}

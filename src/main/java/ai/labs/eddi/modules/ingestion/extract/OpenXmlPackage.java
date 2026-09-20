@@ -75,8 +75,15 @@ final class OpenXmlPackage {
 
         try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(content))) {
             ZipEntry entry;
+            byte[] buffer = new byte[COPY_BUFFER];
             while ((entry = zip.getNextEntry()) != null && parts.size() < partCeiling) {
                 if (entry.isDirectory() || !wanted.test(entry.getName())) {
+                    // Drained through the same accounting rather than skipped. Moving
+                    // to the next entry inflates the rest of this one anyway, so a
+                    // file whose first entry deflates a thousand to one would cost
+                    // gigabytes of CPU per read with the budget untouched — an entry
+                    // nobody wanted was the cheapest place to hide a zip bomb.
+                    budget = drain(zip, buffer, budget, limits);
                     continue;
                 }
                 if (parts.containsKey(entry.getName())) {
@@ -87,16 +94,11 @@ final class OpenXmlPackage {
                             "This file contains the same part twice (" + entry.getName() + ") and was not read.");
                 }
                 ByteArrayOutputStream part = new ByteArrayOutputStream();
-                byte[] buffer = new byte[COPY_BUFFER];
                 int read;
                 while ((read = zip.read(buffer)) != -1) {
                     budget -= read;
                     if (budget < 0) {
-                        // The declared sizes in a ZIP header are not evidence; this is
-                        // what was actually produced.
-                        throw new UnreadableDocumentException(
-                                "This file expands to more than " + (limits.maxUncompressedBytes() / (1024 * 1024))
-                                        + " MB and was not read.");
+                        throw tooLarge(limits);
                     }
                     part.write(buffer, 0, read);
                 }
@@ -111,6 +113,33 @@ final class OpenXmlPackage {
     }
 
     /**
+     * Reads an entry to its end without keeping it, charging what it produced to
+     * the budget.
+     *
+     * <p>
+     * The declared sizes in a ZIP header are not evidence of anything; this is what
+     * the entry actually decompressed to.
+     */
+    private static long drain(ZipInputStream zip, byte[] buffer, long budget, ExtractionLimits limits)
+            throws IOException {
+
+        long remaining = budget;
+        int read;
+        while ((read = zip.read(buffer)) != -1) {
+            remaining -= read;
+            if (remaining < 0) {
+                throw tooLarge(limits);
+            }
+        }
+        return remaining;
+    }
+
+    private static UnreadableDocumentException tooLarge(ExtractionLimits limits) {
+        return new UnreadableDocumentException("This file expands to more than "
+                + (limits.maxUncompressedBytes() / (1024 * 1024)) + " MB and was not read.");
+    }
+
+    /**
      * Which Office format an archive actually is, from the parts it contains.
      *
      * <p>
@@ -120,7 +149,13 @@ final class OpenXmlPackage {
      *
      * @return the MIME type, or null when the archive is not an Office document
      */
-    static String detectOfficeFormat(byte[] content) {
+    static String detectOfficeFormat(byte[] content, ExtractionLimits limits) {
+        // Entry names only, and each entry is skipped without being read: moving to
+        // the next one still inflates the current one, so this runs under the same
+        // budget the full read does. It happens inside an upload request, which is
+        // exactly where an unbounded inflate hurts most.
+        long budget = limits.maxUncompressedBytes();
+        byte[] buffer = new byte[COPY_BUFFER];
         try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(content))) {
             ZipEntry entry;
             int inspected = 0;
@@ -135,7 +170,10 @@ final class OpenXmlPackage {
                 if (name.startsWith("ppt/")) {
                     return POWERPOINT_MIME;
                 }
+                budget = drain(zip, buffer, budget, limits);
             }
+        } catch (UnreadableDocumentException e) {
+            throw e;
         } catch (IOException | RuntimeException e) {
             return null;
         }
@@ -174,6 +212,30 @@ final class OpenXmlPackage {
         public void close() throws XMLStreamException {
             reader.close();
         }
+    }
+
+    /**
+     * The value of the {@code r:id} attribute — the relationship this element
+     * points at.
+     *
+     * <p>
+     * Not {@link #attribute}: {@code <p:sldId id="256" r:id="rId2"/>} carries two
+     * attributes whose local name is {@code id}, and taking the first gives the
+     * slide's own number instead of the relationship. That reads as a deck whose
+     * index points nowhere, so the index is ignored and the slides come back in
+     * part-name order — the exact thing reading the index was for.
+     */
+    static String relationshipId(XMLStreamReader xml) {
+        for (int i = 0; i < xml.getAttributeCount(); i++) {
+            String namespace = xml.getAttributeNamespace(i);
+            // Namespaced, and non-empty with it: a reader may report an unprefixed
+            // attribute's namespace as "" rather than null, and taking that as
+            // "namespaced" puts us straight back on the plain `id`.
+            if ("id".equals(xml.getAttributeLocalName(i)) && namespace != null && !namespace.isEmpty()) {
+                return xml.getAttributeValue(i);
+            }
+        }
+        return null;
     }
 
     /** The attribute's value regardless of which namespace prefix wrote it. */

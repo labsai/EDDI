@@ -116,6 +116,20 @@ class DocumentExtractorsTest {
         }
 
         @Test
+        @DisplayName("follows the deck's own index, not the part numbers")
+        void followsTheDeckIndex() {
+            // Reordering a deck in PowerPoint rewrites the index and leaves the part
+            // names alone, so slide1.xml is routinely not the first slide. Reading
+            // the numbers gives the order the slides were created in — wrong in a
+            // way nobody notices until a passage cites the wrong slide.
+            String markdown = extractor.extract(
+                    OfficeFixtures.pptxWithIndex("Opening remarks", "Closing remarks"), limits);
+
+            assertTrue(markdown.indexOf("Opening remarks") < markdown.indexOf("Closing remarks"), markdown);
+            assertTrue(markdown.indexOf("## Slide 1") < markdown.indexOf("Closing remarks"), markdown);
+        }
+
+        @Test
         @DisplayName("stops at the slide limit")
         void stopsAtTheSlideLimit() {
             String[] slides = new String[10];
@@ -183,6 +197,15 @@ class DocumentExtractorsTest {
         }
 
         @Test
+        @DisplayName("reads a cell that carries its text inline")
+        void readsInlineStrings() {
+            // Not every writer uses the shared-string table; a cell can carry its own
+            // text. Reading only the table leaves those cells empty.
+            assertTrue(extractor.extract(OfficeFixtures.xlsxWithInlineString("S", "Typed here"), limits)
+                    .contains("Typed here"));
+        }
+
+        @Test
         @DisplayName("refuses a file with no workbook")
         void refusesSomethingElse() {
             assertThrows(UnreadableDocumentException.class,
@@ -210,6 +233,17 @@ class DocumentExtractorsTest {
             // Not an error: a page of pixels simply has no text, and the caller
             // reports an empty document rather than a failure.
             assertEquals("", extractor.extract(OfficeFixtures.pdfWithNoText(), limits));
+        }
+
+        @Test
+        @DisplayName("refuses an encrypted PDF instead of embedding an empty document")
+        void refusesAnEncryptedPdf() {
+            // PDFBox opens some encrypted files with an empty password and then
+            // yields nothing useful. An empty document that reports success is worse
+            // than a refusal: the operator sees a file in the list and no answers.
+            var failure = assertThrows(UnreadableDocumentException.class,
+                    () -> extractor.extract(OfficeFixtures.encryptedPdf("Confidential"), limits));
+            assertTrue(failure.getMessage().contains("password"), failure.getMessage());
         }
 
         @Test
@@ -296,6 +330,32 @@ class DocumentExtractorsTest {
         }
 
         @Test
+        @DisplayName("charges an entry it does not want for what that entry decompresses to")
+        void countsSkippedEntries() {
+            // Moving to the next ZIP entry decompresses the rest of the current one,
+            // so an entry nobody wants is the cheapest place to hide a bomb: the
+            // work happens either way and nothing counts it.
+            byte[] bomb = OfficeFixtures.bombInAnIgnoredPart("word/document.xml", 4 * 1024 * 1024);
+            var tightLimits = new ExtractionLimits(200_000, 500, 5_000, 64, 1024 * 1024);
+
+            var failure = assertThrows(UnreadableDocumentException.class,
+                    () -> new WordTextExtractor().extract(bomb, tightLimits));
+            assertTrue(failure.getMessage().contains("expands to more than"), failure.getMessage());
+        }
+
+        @Test
+        @DisplayName("charges the same entry when only sniffing the format")
+        void countsSkippedEntriesWhileSniffing() {
+            // Format detection runs inside the upload request, which is where an
+            // unbounded inflate hurts most.
+            byte[] bomb = OfficeFixtures.bombInAnIgnoredPart("word/document.xml", 4 * 1024 * 1024);
+            var tightLimits = new ExtractionLimits(200_000, 500, 5_000, 64, 1024 * 1024);
+
+            assertThrows(UnreadableDocumentException.class,
+                    () -> extractors.resolveMimeType("big.docx", bomb, tightLimits));
+        }
+
+        @Test
         @DisplayName("refuses an archive that names the same part twice")
         void refusesDuplicateParts() {
             // Two readers can disagree about which copy is the document, which is how
@@ -328,13 +388,13 @@ class DocumentExtractorsTest {
             // DTDs are refused outright, so this fails rather than expanding. Either
             // outcome is acceptable — what must not happen is a successful parse
             // carrying the expansion.
-            var extractor = new WordTextExtractor();
-            try {
-                String markdown = extractor.extract(file, limits);
-                assertFalse(markdown.contains("lollollol"), "entities must not be expanded");
-            } catch (UnreadableDocumentException expected) {
-                assertNotNull(expected.getMessage());
-            }
+            // The DTD is refused outright, so this never reaches the expansion. A
+            // parser that merely declined to expand would leave the entity
+            // unresolved and still be safe, but this build refuses the document, and
+            // asserting the weaker property would pass even if DTDs were re-enabled.
+            var failure = assertThrows(UnreadableDocumentException.class,
+                    () -> new WordTextExtractor().extract(file, limits));
+            assertNotNull(failure.getMessage());
         }
     }
 
@@ -394,6 +454,30 @@ class DocumentExtractorsTest {
             var failure = assertThrows(UnreadableDocumentException.class,
                     () -> extractors.resolveMimeType("bundle.zip", archive));
             assertTrue(failure.getMessage().contains("ZIP archive"), failure.getMessage());
+        }
+
+        @Test
+        @DisplayName("text under a text name stays text, whatever its first two bytes are")
+        void readableTextBeatsAWeakSignature() {
+            // Magic-byte detection is a prefix match on short signatures: "BM" is a
+            // bitmap, "ID3" is an MP3, and "%PDF-" anywhere in the first kilobyte is
+            // a PDF. A Markdown file may legitimately begin with any of them.
+            byte[] looksLikeABitmap = "BMW service intervals\n".getBytes(StandardCharsets.UTF_8);
+            assertEquals("text/markdown", extractors.resolveMimeType("cars.md", looksLikeABitmap));
+
+            byte[] mentionsPdf = "See the %PDF- header for details".getBytes(StandardCharsets.UTF_8);
+            assertEquals("text/plain", extractors.resolveMimeType("notes.txt", mentionsPdf));
+        }
+
+        @Test
+        @DisplayName("accepts a UTF-16 text file rather than calling its NUL bytes binary")
+        void acceptsUtf16() {
+            // UTF-16 puts a NUL in every other byte of ASCII, which is exactly the
+            // test for "this is binary" — while the decoder handles it perfectly
+            // well. Refusing it would contradict what the documentation promises.
+            byte[] utf16 = new byte[]{(byte) 0xFF, (byte) 0xFE, 'h', 0, 'i', 0};
+            assertEquals("text/plain", extractors.resolveMimeType("notes.txt", utf16));
+            assertEquals("hi", new PlainTextExtractor().extract(utf16, limits));
         }
 
         @Test

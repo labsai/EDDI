@@ -95,7 +95,7 @@ public class ExcelTextExtractor implements DocumentTextExtractor {
             while (xml.hasNext()) {
                 if (xml.next() == XMLStreamConstants.START_ELEMENT && "sheet".equals(xml.getLocalName())) {
                     String name = OpenXmlPackage.attribute(xml, "name");
-                    String part = byRelationshipId.get(OpenXmlPackage.attribute(xml, "id"));
+                    String part = byRelationshipId.get(OpenXmlPackage.relationshipId(xml));
                     if (name != null && part != null && archive.has(part)) {
                         sheets.putIfAbsent(name, part);
                     }

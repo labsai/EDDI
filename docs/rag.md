@@ -339,7 +339,7 @@ source** is what extracts its text and embeds it — the same verb every other s
 | Field | Default | What it does |
 | --- | --- | --- |
 | `maxFiles` | `500` | Files this source may hold |
-| `maxFileBytes` | `25 MB` | Size of one file |
+| `maxFileBytes` | `25 MB` | Size of one file. Refused above 50 MB at save time: the request carrying it has to fit inside `quarkus.http.limits.max-body-size` (60 MB), and a larger file is refused by the server with a bare 413 before anything can explain why |
 | `maxTotalBytes` | `500 MB` | Size of everything the source holds |
 
 **The files are kept, not just their embeddings.** That is what makes this a source rather than a
@@ -364,8 +364,8 @@ every file in the knowledge base.
 | PDF | `.pdf` | Text, page by page. An encrypted PDF is refused; a scan with no text layer yields nothing rather than failing |
 | Word | `.docx` | Paragraphs, with headings kept as Markdown headings and numbered paragraphs as list items |
 | Excel | `.xlsx` | One Markdown table per sheet, under the sheet's name. Dates and currency are stored as numbers with a display format applied elsewhere, so a date reads as its serial |
-| PowerPoint | `.pptx` | One section per slide, in the deck's order, headed `## Slide N` |
-| Text | `.txt`, `.md`, `.markdown`, `.json`, `.xml`, `.yaml`, `.yml`, `.log` | As written. UTF-8 unless a byte-order mark or an invalid sequence says otherwise, in which case Windows-1252 |
+| PowerPoint | `.pptx` | One section per slide, in the order the presentation's own index lists them — not the part numbering, which survives a reorder — headed `## Slide N` |
+| Text | `.txt`, `.md`, `.markdown`, `.json`, `.xml`, `.yaml`, `.yml`, `.log` | As written. UTF-8 unless a byte-order mark says otherwise (UTF-8, UTF-16 either way round), or the bytes are not valid UTF-8, in which case Windows-1252 |
 | Tabular | `.csv`, `.tsv` | A Markdown table. RFC 4180 quoting, and the delimiter (comma, semicolon or tab) is taken from the first line |
 | HTML | `.html`, `.htm` | Through the same converter the crawler uses, so a page saved to disk ingests as it would if crawled |
 
@@ -383,12 +383,17 @@ produces an empty document.
 An uploaded file is not the operator's own data in any useful sense — it is whatever somebody dragged
 into a browser — so extraction is bounded in five ways:
 
-- **200,000 characters** per document by default (`settings.maxContentLength`), so one file cannot fill
-  a knowledge base.
+- **100,000 characters** per document (`settings.maxContentLength`, shared with the crawl), so one file
+  cannot fill a knowledge base. A document that hits it is logged by name — it is embedded truncated,
+  and silently embedding the first third of a manual as though it were the whole thing is the failure
+  worth naming.
 - **500 pages, slides or sheets**, and **5,000 rows × 64 columns** per sheet. A sheet can declare cells
   out at column XFD whether or not anything was ever typed there.
-- **64 MB decompressed** across the text-bearing parts of an archive. A 1 MB ZIP can describe
-  gigabytes; this is the bound, and it is also roughly the peak memory one extraction takes.
+- **64 MB decompressed per archive** — counted across *every* entry the reader walks over, not only the
+  ones it keeps. Moving to the next ZIP entry decompresses the rest of the current one, so an entry
+  nobody wants is otherwise the cheapest place to hide a bomb: the work happens either way and nothing
+  counts it. The same budget applies while merely working out which Office format a file is, because
+  that runs inside the upload request.
 - **DTDs and external entities are refused** outright, so an Office file cannot expand entities into
   gigabytes (the billion-laughs attack) or reach out to a URL while being parsed.
 - **An archive naming the same part twice is refused.** A real Office file never does, and two entries
@@ -415,19 +420,35 @@ re-uploading files that are already there. `409` means the source is not of type
 Deleting removes the vectors **before** the file, and immediately rather than at the next run: an
 operator who removes a document because it should not have been there is told it is gone, and a source
 with no cron has no next run to make that true. Where the vector store cannot delete by metadata, the
-answer carries a `warning` saying the text is still retrievable.
+answer carries a `warning` saying the text is still retrievable — the Manager shows it rather than
+reporting a clean success.
 
-Deleting a file is refused with `409` while a run is in flight — the run is reading those files and
-writing state rows for them.
+A delete takes the source's **run claim**, the same one a run takes, and answers `409` if it cannot get
+it. Merely checking for a run first is not enough: one that starts between the check and the delete
+lists the file, loads the bytes that are about to go, embeds them, and records the document as
+ingested — clearing the tombstone the delete just wrote. The file would be gone and its content still
+retrievable, for a source with no cron indefinitely. A delete therefore appears in the run history as a
+run that tombstoned one document.
 
-**Uploaded files are removed when their source is.** Removing a source from `sources[]` and saving, or
-deleting the last version of the knowledge base, deletes its files; nothing else can reach them
-afterwards. A **purge** deliberately does not: it forgets what was ingested so the next run re-ingests,
+**Removing an upload source takes its files *and* what the knowledge base learned from them.** Dropping
+it from `sources[]`, changing its `type` to `web`, or deleting the last version of the knowledge base
+all delete its files and remove its chunks from the vector store. Deleting the files and leaving the
+vectors would be the worst of the three outcomes: agents would keep citing a document the operator
+believes is gone, and no endpoint could list or delete it, because the source it belonged to is no
+longer in the configuration. The Manager confirms before removing an upload source, and says what goes.
+
+A **purge** deliberately does none of that: it forgets what was ingested so the next run re-ingests,
 which is only useful because the files are still there.
 
-**A ZIP export does not carry uploaded files.** An imported upload source arrives empty and its files
-have to be uploaded again — the backup format carries configuration, and a knowledge base's documents
-can be hundreds of megabytes of somebody's contracts.
+**A ZIP export does not carry uploaded files,** and neither does duplicating a knowledge base. An
+imported or duplicated upload source arrives empty and its files have to be uploaded again — the backup
+format carries configuration, and a knowledge base's documents can be hundreds of megabytes of
+somebody's contracts.
+
+**A run over uploaded files honours `settings.timeBudgetMinutes`,** as a crawl does. A run that
+outlived its budget would eventually be treated as abandoned, and the next fire would start a second
+worker embedding into the same store — each deleting the other's fresh chunks, because replacement
+filters on the run id.
 
 ### Ingestion source endpoints
 
@@ -458,8 +479,10 @@ A **Files** source shows a drop zone instead of the crawl settings. Files can be
 several at once, and each is uploaded on its own request with its own progress bar — so a batch that
 fails three quarters of the way through does not lose what had already arrived, and a file the server
 refuses shows the server's own sentence ("This PDF is encrypted") rather than a generic failure. Below
-it, the files the source holds, with their sizes and a delete that confirms first and says what it
-removes.
+it, the files the source holds, each marked **Indexed**, **Changed** or **Not indexed** — so an
+uploaded file, one that is in the knowledge base, and one that was replaced after it was indexed are
+told apart without running the source and comparing counters. While anything is waiting, a line says so
+with a **Run now** beside it. Deleting a file confirms first and says what it removes.
 
 Run and Preview address the source by id and version, so they crawl the **saved** configuration. While
 the editor has unsaved changes both are disabled, with a line saying why — otherwise editing a start

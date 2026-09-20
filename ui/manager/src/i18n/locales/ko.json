@@ -2087,7 +2087,18 @@
       "deleteFile": "{{fileName}} 삭제",
       "deleteFileTitle": "이 파일을 삭제할까요?",
       "deleteFileDescription": "{{fileName}}과(와) 지식 베이스가 거기서 배운 내용이 모두 삭제되며, 에이전트는 즉시 그 내용으로 답변하지 않습니다.",
-      "previewFiles": "변경 미리보기"
+      "previewFiles": "변경 미리보기",
+      "saveBeforeUpload": "지식 베이스를 먼저 저장하세요 — 업로드는 화면의 수정이 아니라 저장된 소스로 갑니다.",
+      "foldersNotSupported": "폴더는 업로드할 수 없습니다. 안에 있는 파일을 놓아 주세요.",
+      "filesAwaitingRun": "파일은 저장되었지만 아직 지식 베이스에 없습니다. 소스를 실행해 색인하세요.",
+      "retryUpload": "{{fileName}} 다시 시도",
+      "fileIndexed": "색인됨",
+      "fileChanged": "변경됨",
+      "fileNotIndexed": "색인 안 됨",
+      "maxTotalMb": "전체 최대 크기(MB)",
+      "maxTotalMbHint": "이 소스의 모든 파일 합계",
+      "removeTitle": "이 소스를 제거할까요?",
+      "removeDescription": "저장하면 업로드된 파일과 지식 베이스가 거기서 배운 내용이 모두 삭제되며 되돌릴 수 없습니다."
     }
   },
   "onboarding": {

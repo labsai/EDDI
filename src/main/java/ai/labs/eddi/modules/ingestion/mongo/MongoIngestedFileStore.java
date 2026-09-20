@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.ingestion.mongo;
 import ai.labs.eddi.modules.ingestion.ContentHashes;
 import ai.labs.eddi.modules.ingestion.files.IIngestedFileStore;
 import ai.labs.eddi.modules.ingestion.files.IngestedFileIds;
+import com.mongodb.MongoGridFSException;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.gridfs.GridFSBucket;
@@ -89,7 +90,7 @@ public class MongoIngestedFileStore implements IIngestedFileStore {
             Set<ObjectId> previous = objectIdsOf(byFileId(sourceKey, fileId));
             bucket.uploadFromStream(fileName, new ByteArrayInputStream(content),
                     new GridFSUploadOptions().metadata(metadata));
-            previous.forEach(bucket::delete);
+            previous.forEach(this::deleteIfPresent);
         } catch (RuntimeException e) {
             throw new IngestedFileStoreException("Could not store uploaded file '" + fileName + "'", e);
         }
@@ -103,7 +104,10 @@ public class MongoIngestedFileStore implements IIngestedFileStore {
         Map<String, StoredFile> newestByFileId = new LinkedHashMap<>();
         try {
             for (GridFSFile file : bucket.find(Filters.eq("metadata." + META_SOURCE_KEY, sourceKey))
-                    .sort(Sorts.ascending("uploadDate"))) {
+                    // _id breaks the tie: three uploads inside one millisecond share
+                    // an uploadDate, and an ambiguous sort makes the list order — and
+                    // which copy counts as current — a coin toss.
+                    .sort(Sorts.ascending("uploadDate", "_id"))) {
                 StoredFile stored = toStoredFile(file);
                 newestByFileId.put(stored.fileId(), stored);
             }
@@ -142,8 +146,7 @@ public class MongoIngestedFileStore implements IIngestedFileStore {
         boolean deleted = false;
         try {
             for (GridFSFile file : bucket.find(byFileId(sourceKey, fileId))) {
-                bucket.delete(file.getObjectId());
-                deleted = true;
+                deleted |= deleteIfPresent(file.getObjectId());
             }
         } catch (RuntimeException e) {
             throw new IngestedFileStoreException("Could not delete uploaded file " + fileId, e);
@@ -151,13 +154,29 @@ public class MongoIngestedFileStore implements IIngestedFileStore {
         return deleted;
     }
 
+    /**
+     * GridFS refuses to delete a file that is already gone, and two callers
+     * removing the same copy is ordinary rather than exceptional — a replace racing
+     * a delete. Reporting that as "could not store" would be a lie about an upload
+     * that succeeded.
+     */
+    private boolean deleteIfPresent(ObjectId id) {
+        try {
+            bucket.delete(id);
+            return true;
+        } catch (MongoGridFSException e) {
+            return false;
+        }
+    }
+
     @Override
     public long deleteAll(String sourceKey) {
         long deleted = 0;
         try {
             for (GridFSFile file : bucket.find(Filters.eq("metadata." + META_SOURCE_KEY, sourceKey))) {
-                bucket.delete(file.getObjectId());
-                deleted++;
+                if (deleteIfPresent(file.getObjectId())) {
+                    deleted++;
+                }
             }
         } catch (RuntimeException e) {
             throw new IngestedFileStoreException("Could not delete the uploaded files of source " + sourceKey, e);
@@ -170,8 +189,14 @@ public class MongoIngestedFileStore implements IIngestedFileStore {
         try {
             // Aggregated in the database: a source at its 500-file limit would
             // otherwise stream every file's metadata across the wire on every upload.
+            // Grouped by file id first: a spare copy left by a racing re-upload is
+            // one file to the operator, and counting it twice would push a source
+            // over its own limit for reasons nobody can see.
             Document totals = files.aggregate(List.of(
                     new Document("$match", new Document("metadata." + META_SOURCE_KEY, sourceKey)),
+                    new Document("$sort", new Document("uploadDate", 1).append("_id", 1)),
+                    new Document("$group", new Document("_id", "$metadata." + META_FILE_ID)
+                            .append("length", new Document("$last", "$length"))),
                     new Document("$group", new Document("_id", null)
                             .append("fileCount", new Document("$sum", 1))
                             .append("totalBytes", new Document("$sum", "$length")))))
@@ -187,7 +212,7 @@ public class MongoIngestedFileStore implements IIngestedFileStore {
 
     /** The current copy: the last one written wins. */
     private GridFSFile newest(String sourceKey, String fileId) {
-        return bucket.find(byFileId(sourceKey, fileId)).sort(Sorts.descending("uploadDate")).first();
+        return bucket.find(byFileId(sourceKey, fileId)).sort(Sorts.descending("uploadDate", "_id")).first();
     }
 
     private Set<ObjectId> objectIdsOf(Bson filter) {

@@ -23,7 +23,6 @@ import org.jboss.resteasy.reactive.multipart.FileUpload;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
-import java.io.IOException;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -219,23 +218,16 @@ public class RestRagIngestion implements IRestRagIngestion {
                     .build();
         }
 
-        List<IngestedFileService.IncomingFile> incoming = new ArrayList<>();
-        List<Map<String, Object>> unreadable = new ArrayList<>();
-        for (FileUpload file : files) {
-            try {
-                incoming.add(new IngestedFileService.IncomingFile(file.fileName(),
-                        Files.readAllBytes(file.uploadedFile())));
-            } catch (IOException e) {
-                // The part never made it to disk intact. Named rather than aborting the
-                // batch, so the other files still land.
-                LOGGER.warnf(e, "An uploaded part of source %s could not be read", sanitize(sourceId));
-                unreadable.add(Map.of("fileName", String.valueOf(file.fileName()),
-                        "reason", "This file could not be read from the request."));
-            }
-        }
+        // Handed over as suppliers, not as bytes: the service reads one file at a
+        // time, so a batch costs one file of memory rather than the whole request.
+        // The runtime has already spooled every part to disk.
+        List<IngestedFileService.IncomingFile> incoming = files.stream()
+                .map(file -> new IngestedFileService.IncomingFile(file.fileName(),
+                        () -> Files.readAllBytes(file.uploadedFile())))
+                .toList();
 
         var outcome = ingestedFileService.upload(ragConfigId, resolved.source(), incoming);
-        List<Map<String, Object>> rejected = new ArrayList<>(unreadable);
+        List<Map<String, Object>> rejected = new ArrayList<>();
         outcome.rejected().forEach(rejection -> rejected
                 .add(Map.of("fileName", rejection.fileName(), "reason", rejection.reason())));
 
@@ -267,7 +259,7 @@ public class RestRagIngestion implements IRestRagIngestion {
         if (wrongType != null) {
             return wrongType;
         }
-        return Response.ok(ingestedFileService.list(ragConfigId, resolved.source()).stream()
+        return Response.ok(ingestedFileService.listWithStatus(ragConfigId, resolved.source()).stream()
                 .map(RestRagIngestion::describeFile).toList()).build();
     }
 
@@ -297,6 +289,10 @@ public class RestRagIngestion implements IRestRagIngestion {
         return switch (outcome) {
             case NOT_FOUND -> Response.status(Response.Status.NOT_FOUND)
                     .entity(Map.of("error", "No file '" + fileId + "' on this source")).build();
+            case BUSY -> Response.status(Response.Status.CONFLICT)
+                    .entity(Map.of("error", "A run started for this source. Delete files once it has finished.",
+                            "sourceId", sourceId))
+                    .build();
             case DELETED -> Response.ok(Map.of("status", "deleted", "fileId", fileId)).build();
             case DELETED_BUT_CHUNKS_REMAIN -> Response.ok(Map.of(
                     "status", "deleted",
@@ -320,7 +316,8 @@ public class RestRagIngestion implements IRestRagIngestion {
                 .build();
     }
 
-    private static Map<String, Object> describeFile(IIngestedFileStore.StoredFile file) {
+    private static Map<String, Object> describeFile(IngestedFileService.FileStatus status) {
+        IIngestedFileStore.StoredFile file = status.file();
         Map<String, Object> described = new LinkedHashMap<>();
         described.put("fileId", file.fileId());
         described.put("fileName", file.fileName());
@@ -328,7 +325,17 @@ public class RestRagIngestion implements IRestRagIngestion {
         described.put("sizeBytes", file.sizeBytes());
         described.put("contentHash", file.contentHash());
         described.put("uploadedAt", file.uploadedAt().toString());
+        // Whether the knowledge base actually answers from this file. Without it an
+        // uploaded file, an indexed one and one that was changed after it was
+        // indexed are indistinguishable, and the only way to find out is to run the
+        // source and compare counters.
+        described.put("indexState", status.indexState().name());
         return described;
+    }
+
+    /** As above, for a file that has just been stored and has no state yet. */
+    private static Map<String, Object> describeFile(IIngestedFileStore.StoredFile file) {
+        return describeFile(new IngestedFileService.FileStatus(file, IngestedFileService.IndexState.NOT_INDEXED));
     }
 
     /**

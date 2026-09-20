@@ -2109,7 +2109,18 @@
       "deleteFile": "Eliminar {{fileName}}",
       "deleteFileTitle": "¿Eliminar este archivo?",
       "deleteFileDescription": "Se eliminan {{fileName}} y todo lo que la base de conocimiento aprendió de él. Los agentes dejan de responder a partir de él de inmediato.",
-      "previewFiles": "Previsualizar los cambios"
+      "previewFiles": "Previsualizar los cambios",
+      "saveBeforeUpload": "Guarda primero la base de conocimiento: las subidas van a la fuente guardada, no a los cambios en pantalla.",
+      "foldersNotSupported": "No se pueden subir carpetas. Suelta los archivos que contienen.",
+      "filesAwaitingRun": "Hay archivos guardados que aún no están en la base de conocimiento. Ejecuta la fuente para indexarlos.",
+      "retryUpload": "Reintentar {{fileName}}",
+      "fileIndexed": "Indexado",
+      "fileChanged": "Modificado",
+      "fileNotIndexed": "Sin indexar",
+      "maxTotalMb": "Tamaño total máx. (MB)",
+      "maxTotalMbHint": "Para todos los archivos de esta fuente",
+      "removeTitle": "¿Quitar esta fuente?",
+      "removeDescription": "Al guardar se eliminan sus archivos subidos y todo lo que la base de conocimiento aprendió de ellos. No se puede deshacer."
     }
   },
   "onboarding": {

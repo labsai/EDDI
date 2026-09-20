@@ -6,14 +6,19 @@ package ai.labs.eddi.modules.ingestion.files;
 
 import ai.labs.eddi.configs.rag.model.IngestionSource;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.modules.ingestion.IIngestionStateStore;
+import ai.labs.eddi.modules.ingestion.IIngestionStateStore.DocumentState;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline;
 import ai.labs.eddi.modules.ingestion.extract.DocumentExtractors;
 import ai.labs.eddi.modules.ingestion.extract.UnreadableDocumentException;
 import ai.labs.eddi.utils.LogSanitizer;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Tags;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -34,16 +39,27 @@ public class IngestedFileService {
 
     private static final Logger LOGGER = Logger.getLogger(IngestedFileService.class);
 
+    /**
+     * How many document-state rows to read when listing a source's files. Above the
+     * largest file count a source can hold, so the status of every file it has is
+     * covered.
+     */
+    private static final int MAX_DOCUMENT_STATES = 10_000;
+
     private final IIngestedFileStore fileStore;
     private final DocumentExtractors extractors;
     private final IngestionPipeline pipeline;
+    private final IIngestionStateStore stateStore;
+    private final MeterRegistry meterRegistry;
 
     @Inject
     public IngestedFileService(IIngestedFileStore fileStore, DocumentExtractors extractors,
-            IngestionPipeline pipeline) {
+            IngestionPipeline pipeline, IIngestionStateStore stateStore, MeterRegistry meterRegistry) {
         this.fileStore = fileStore;
         this.extractors = extractors;
         this.pipeline = pipeline;
+        this.stateStore = stateStore;
+        this.meterRegistry = meterRegistry;
     }
 
     /**
@@ -60,17 +76,19 @@ public class IngestedFileService {
         String sourceKey = IngestionPipeline.stateKey(ragConfigId, source);
         IngestionSource.UploadSource limits = source.upload();
 
-        IIngestedFileStore.Usage usage = fileStore.usage(sourceKey);
-        long usedBytes = usage.totalBytes();
-        int usedFiles = usage.fileCount();
         // What each name already occupies, so replacing a 10 MB file with a 1 MB one
         // frees space rather than counting both against the source's total. Kept up
         // to date as the batch proceeds: twenty files have to be measured against
         // each other, not only against what was there when the request arrived.
+        //
+        // One listing, not a listing plus a usage query: the totals are the listing
+        // summed, and two reads can disagree with each other.
         Map<String, Long> sizeByFileId = new HashMap<>();
         for (IIngestedFileStore.StoredFile stored : fileStore.list(sourceKey)) {
             sizeByFileId.put(stored.fileId(), stored.sizeBytes());
         }
+        long usedBytes = sizeByFileId.values().stream().mapToLong(Long::longValue).sum();
+        int usedFiles = sizeByFileId.size();
 
         List<IIngestedFileStore.StoredFile> accepted = new ArrayList<>();
         List<RejectedFile> rejected = new ArrayList<>();
@@ -78,7 +96,20 @@ public class IngestedFileService {
         for (IncomingFile file : incoming) {
             String fileName = IngestedFileIds.sanitize(file.fileName());
             String fileId = IngestedFileIds.forFileName(fileName);
-            byte[] content = file.content();
+
+            byte[] content;
+            try {
+                // Read here, one file at a time, so a batch holds one file's bytes
+                // rather than the whole request's. Reading them all up front made
+                // the peak cost of an upload the size of the request, per
+                // concurrent request.
+                content = file.content().read();
+            } catch (IOException e) {
+                LOGGER.warnf(e, "An uploaded part of source '%s' could not be read",
+                        LogSanitizer.sanitize(source.getName()));
+                rejected.add(new RejectedFile(fileName, "This file could not be read from the request."));
+                continue;
+            }
 
             Long replacedBytes = sizeByFileId.get(fileId);
             boolean isReplacement = replacedBytes != null;
@@ -118,6 +149,12 @@ public class IngestedFileService {
             }
             sizeByFileId.put(fileId, (long) content.length);
         }
+
+        // Tagged by source: a global counter says something is being refused but
+        // not which knowledge base, which is the part an operator needs.
+        Tags tags = Tags.of("source", String.valueOf(source.getName()));
+        meterRegistry.counter("eddi.ingestion.files.stored", tags).increment(accepted.size());
+        meterRegistry.counter("eddi.ingestion.files.rejected", tags).increment(rejected.size());
         return new UploadOutcome(accepted, rejected);
     }
 
@@ -139,9 +176,6 @@ public class IngestedFileService {
         if (otherBytes + content.length > limits.maxTotalBytesOrDefault()) {
             return "This source would exceed its total of " + megabytes(limits.maxTotalBytesOrDefault())
                     + " MB. Delete some files, or raise the limit in the source's settings.";
-        }
-        if (fileName.isBlank()) {
-            return "This file has no name.";
         }
         return null;
     }
@@ -175,12 +209,74 @@ public class IngestedFileService {
         if (fileStore.find(sourceKey, fileId).isEmpty()) {
             return DeleteOutcome.NOT_FOUND;
         }
-        // The vectors go first. Deleting the file first and then failing to remove
-        // its chunks would leave content in the knowledge base that the operator can
-        // no longer see, let alone delete.
-        boolean vectorsRemoved = pipeline.forgetDocument(ragConfigId, knowledgeBase, source, fileId);
-        fileStore.delete(sourceKey, fileId);
-        return vectorsRemoved ? DeleteOutcome.DELETED : DeleteOutcome.DELETED_BUT_CHUNKS_REMAIN;
+
+        // Under the source's run claim, not merely after checking for a run. A run
+        // that starts between a check and the delete lists the file, loads the bytes
+        // that are about to go, embeds them and records the document as ingested —
+        // which clears the tombstone the delete just wrote. The file would be gone
+        // and its content still retrievable, for a source with no cron indefinitely.
+        Optional<String> claim = pipeline.claimForMaintenance(ragConfigId, source);
+        if (claim.isEmpty()) {
+            return DeleteOutcome.BUSY;
+        }
+        try {
+            // The vectors go first. Deleting the file first and then failing to
+            // remove its chunks would leave content in the knowledge base that the
+            // operator can no longer see, let alone delete.
+            boolean vectorsRemoved = pipeline.forgetDocument(ragConfigId, knowledgeBase, source, fileId);
+            fileStore.delete(sourceKey, fileId);
+            meterRegistry.counter("eddi.ingestion.files.deleted",
+                    Tags.of("source", String.valueOf(source.getName()))).increment();
+            return vectorsRemoved ? DeleteOutcome.DELETED : DeleteOutcome.DELETED_BUT_CHUNKS_REMAIN;
+        } finally {
+            // Always, including after a failure: a claim that is never released
+            // blocks the source until it is reaped, which is a quarter of an hour of
+            // 409s for every run and every delete.
+            pipeline.releaseClaim(ragConfigId, source, claim.get(), 1);
+        }
+    }
+
+    /**
+     * Everything one source holds, with what the knowledge base currently knows
+     * about each file.
+     *
+     * <p>
+     * Worth the extra read: without it, a file that was uploaded, a file that was
+     * indexed, a file whose text could not be extracted and a file that has changed
+     * since the last run all look exactly the same in the Manager — and the only
+     * way to find out is to run the source and compare counters.
+     */
+    public List<FileStatus> listWithStatus(String ragConfigId, IngestionSource source) {
+        String sourceKey = IngestionPipeline.stateKey(ragConfigId, source);
+        Map<String, DocumentState> known = new HashMap<>();
+        try {
+            for (DocumentState state : stateStore.listDocuments(sourceKey, MAX_DOCUMENT_STATES)) {
+                known.put(state.documentId(), state);
+            }
+        } catch (RuntimeException e) {
+            // The files are the answer; their status is a detail. A state store that
+            // is unwell must not empty the operator's file list.
+            LOGGER.warnf(e, "Could not read the ingestion state of source '%s'; its files are listed without it",
+                    LogSanitizer.sanitize(source.getName()));
+        }
+
+        List<FileStatus> statuses = new ArrayList<>();
+        for (IIngestedFileStore.StoredFile file : fileStore.list(sourceKey)) {
+            statuses.add(new FileStatus(file, indexState(known.get(file.fileId()), file)));
+        }
+        return statuses;
+    }
+
+    private static IndexState indexState(DocumentState state, IIngestedFileStore.StoredFile file) {
+        if (state == null || state.lastIngestedAt() == null) {
+            return IndexState.NOT_INDEXED;
+        }
+        if (state.tombstoned()) {
+            // Removed from retrieval while the file is still here: it was deleted
+            // and re-uploaded, or a past run could not read it.
+            return IndexState.NOT_INDEXED;
+        }
+        return state.hasChanged(file.contentHash()) ? IndexState.CHANGED : IndexState.INDEXED;
     }
 
     /** Removes every file of a source — used when the source itself goes. */
@@ -188,8 +284,27 @@ public class IngestedFileService {
         return fileStore.deleteAll(IngestionPipeline.stateKey(ragConfigId, source));
     }
 
-    /** A file as it arrived, already read into memory. */
-    public record IncomingFile(String fileName, byte[] content) {
+    /**
+     * A file as it arrived, not yet read.
+     *
+     * <p>
+     * A supplier rather than the bytes: a request can carry several files, and
+     * materialising all of them before the first is examined makes an upload's peak
+     * memory the size of the request — for every request in flight. The runtime has
+     * already spooled each part to disk, so reading them one at a time costs
+     * nothing but the read.
+     */
+    public record IncomingFile(String fileName, FileContent content) {
+
+        /** For a caller that already holds the bytes, such as a test. */
+        public static IncomingFile of(String fileName, byte[] content) {
+            return new IncomingFile(fileName, () -> content);
+        }
+
+        @FunctionalInterface
+        public interface FileContent {
+            byte[] read() throws IOException;
+        }
     }
 
     public record RejectedFile(String fileName, String reason) {
@@ -199,6 +314,21 @@ public class IngestedFileService {
     }
 
     public enum DeleteOutcome {
-        DELETED, DELETED_BUT_CHUNKS_REMAIN, NOT_FOUND
+        DELETED, DELETED_BUT_CHUNKS_REMAIN, NOT_FOUND,
+        /** A run holds the source's claim; deleting under it would race with it. */
+        BUSY
+    }
+
+    /** Whether the knowledge base currently answers from a file. */
+    public enum IndexState {
+        /** Uploaded, and no completed run has embedded it yet. */
+        NOT_INDEXED,
+        /** Its text is in the knowledge base, and the file has not changed since. */
+        INDEXED,
+        /** It was re-uploaded after it was indexed; the next run picks it up. */
+        CHANGED
+    }
+
+    public record FileStatus(IIngestedFileStore.StoredFile file, IndexState indexState) {
     }
 }

@@ -2087,7 +2087,18 @@
       "deleteFile": "{{fileName}} を削除",
       "deleteFileTitle": "このファイルを削除しますか？",
       "deleteFileDescription": "{{fileName}} と、ナレッジベースがそこから学んだ内容が削除され、エージェントは直ちにそれを使って回答しなくなります。",
-      "previewFiles": "変更をプレビュー"
+      "previewFiles": "変更をプレビュー",
+      "saveBeforeUpload": "先にナレッジベースを保存してください — アップロードは画面上の編集ではなく、保存済みのソースに送られます。",
+      "foldersNotSupported": "フォルダーはアップロードできません。中のファイルをドロップしてください。",
+      "filesAwaitingRun": "ファイルは保存済みですが、まだナレッジベースには入っていません。ソースを実行してインデックスしてください。",
+      "retryUpload": "{{fileName}} を再試行",
+      "fileIndexed": "インデックス済み",
+      "fileChanged": "変更あり",
+      "fileNotIndexed": "未インデックス",
+      "maxTotalMb": "合計サイズの上限（MB）",
+      "maxTotalMbHint": "このソースの全ファイル合計",
+      "removeTitle": "このソースを削除しますか？",
+      "removeDescription": "保存すると、アップロードされたファイルとナレッジベースがそこから学んだ内容が削除されます。元には戻せません。"
     }
   },
   "onboarding": {

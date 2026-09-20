@@ -7,6 +7,8 @@ package ai.labs.eddi.modules.ingestion.files;
 import ai.labs.eddi.configs.rag.model.IngestionSource;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.modules.ingestion.HtmlToMarkdownConverter;
+import ai.labs.eddi.modules.ingestion.IIngestionStateStore;
+import ai.labs.eddi.modules.ingestion.InMemoryIngestionStateStore;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline;
 import ai.labs.eddi.modules.ingestion.extract.CsvTextExtractor;
 import ai.labs.eddi.modules.ingestion.extract.DocumentExtractors;
@@ -16,20 +18,28 @@ import ai.labs.eddi.modules.ingestion.extract.PdfTextExtractor;
 import ai.labs.eddi.modules.ingestion.extract.PlainTextExtractor;
 import ai.labs.eddi.modules.ingestion.extract.PowerPointTextExtractor;
 import ai.labs.eddi.modules.ingestion.extract.WordTextExtractor;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -52,13 +62,31 @@ class IngestedFileServiceTest {
 
     private InMemoryIngestedFileStore fileStore;
     private IngestionPipeline pipeline;
+    private InMemoryIngestionStateStore stateStore;
+    private SimpleMeterRegistry meterRegistry;
     private IngestedFileService service;
 
     @BeforeEach
     void setUp() {
         fileStore = new InMemoryIngestedFileStore();
         pipeline = mock(IngestionPipeline.class);
-        service = new IngestedFileService(fileStore, extractors(), pipeline);
+        stateStore = new InMemoryIngestionStateStore();
+        meterRegistry = new SimpleMeterRegistry();
+        // The claim is the real one, against the real store: a bare mock answers an
+        // empty Optional and every delete below would report BUSY.
+        when(pipeline.claimForMaintenance(anyString(), any()))
+                .thenAnswer(invocation -> stateStore.startRun(
+                        IngestionPipeline.stateKey(invocation.getArgument(0), invocation.getArgument(1))));
+        // And the release is real too: a mock that silently does nothing would make
+        // "the claim is released even on failure" a test of the mock.
+        doAnswer(invocation -> {
+            String sourceKey = IngestionPipeline.stateKey(invocation.getArgument(0), invocation.getArgument(1));
+            stateStore.finishRun(new IIngestionStateStore.IngestionRun(invocation.getArgument(2), sourceKey,
+                    IIngestionStateStore.IngestionRun.Status.COMPLETED, null, Instant.now(),
+                    0, 0, 0, 0, invocation.getArgument(3), 0, 0.0, null));
+            return null;
+        }).when(pipeline).releaseClaim(anyString(), any(), anyString(), anyInt());
+        service = new IngestedFileService(fileStore, extractors(), pipeline, stateStore, meterRegistry);
     }
 
     private static DocumentExtractors extractors() {
@@ -82,7 +110,7 @@ class IngestedFileServiceTest {
     }
 
     private static IngestedFileService.IncomingFile file(String name, int bytes) {
-        return new IngestedFileService.IncomingFile(name, "x".repeat(bytes).getBytes(StandardCharsets.UTF_8));
+        return IngestedFileService.IncomingFile.of(name, "x".repeat(bytes).getBytes(StandardCharsets.UTF_8));
     }
 
     @Nested
@@ -165,7 +193,7 @@ class IngestedFileServiceTest {
         void refusesAnUnreadableFile() {
             byte[] png = {(byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
             var outcome = service.upload(KB_ID, source(500, 100_000L, 1_000_000L),
-                    List.of(new IngestedFileService.IncomingFile("chart.png", png)));
+                    List.of(IngestedFileService.IncomingFile.of("chart.png", png)));
 
             assertTrue(outcome.accepted().isEmpty());
             assertFalse(outcome.rejected().getFirst().reason().isBlank());
@@ -175,7 +203,7 @@ class IngestedFileServiceTest {
         @DisplayName("refuses an empty file rather than storing nothing under a name")
         void refusesAnEmptyFile() {
             var outcome = service.upload(KB_ID, source(500, 100_000L, 1_000_000L),
-                    List.of(new IngestedFileService.IncomingFile("empty.txt", new byte[0])));
+                    List.of(IngestedFileService.IncomingFile.of("empty.txt", new byte[0])));
 
             assertEquals("This file is empty.", outcome.rejected().getFirst().reason());
         }
@@ -184,17 +212,70 @@ class IngestedFileServiceTest {
         @DisplayName("stores the type it worked out, not the one the name claimed")
         void storesTheResolvedType() {
             var outcome = service.upload(KB_ID, source(500, 100_000L, 1_000_000L),
-                    List.of(new IngestedFileService.IncomingFile("notes.csv",
+                    List.of(IngestedFileService.IncomingFile.of("notes.csv",
                             "a,b\n1,2\n".getBytes(StandardCharsets.UTF_8))));
 
             assertEquals("text/csv", outcome.accepted().getFirst().mimeType());
         }
 
         @Test
+        @DisplayName("names a file whose bytes could not be read, and keeps the rest")
+        void namesAFileThatCouldNotBeRead() {
+            var unreadable = new IngestedFileService.IncomingFile("truncated.txt", () -> {
+                throw new IOException("connection reset");
+            });
+
+            var outcome = service.upload(KB_ID, source(500, 100_000L, 1_000_000L),
+                    List.of(unreadable, file("fine.txt", 10)));
+
+            // The part never arrived intact. Aborting the batch here would lose the
+            // files that did, with nothing to say which those were.
+            assertEquals(1, outcome.accepted().size());
+            assertEquals("truncated.txt", outcome.rejected().getFirst().fileName());
+        }
+
+        @Test
+        @DisplayName("reads each file only when its turn comes")
+        void readsEachFileOnlyWhenItsTurnComes() {
+            // The batch must not be materialised up front: a request carrying
+            // several files would otherwise cost the whole request in heap, per
+            // request in flight.
+            List<String> readOrder = new ArrayList<>();
+            List<IngestedFileService.IncomingFile> batch = List.of(
+                    new IngestedFileService.IncomingFile("a.txt", () -> {
+                        readOrder.add("a.txt");
+                        return "a".getBytes(StandardCharsets.UTF_8);
+                    }),
+                    new IngestedFileService.IncomingFile("b.txt", () -> {
+                        readOrder.add("b.txt");
+                        // By the time this is asked for, the first file is stored.
+                        assertEquals(1, fileStore.list(IngestionPipeline.stateKey(KB_ID,
+                                source(500, 100_000L, 1_000_000L))).size());
+                        return "b".getBytes(StandardCharsets.UTF_8);
+                    }));
+
+            service.upload(KB_ID, source(500, 100_000L, 1_000_000L), batch);
+
+            assertEquals(List.of("a.txt", "b.txt"), readOrder);
+        }
+
+        @Test
+        @DisplayName("counts what it stored and what it refused")
+        void countsOutcomes() {
+            service.upload(KB_ID, source(500, 1024L, 1_000_000L),
+                    List.of(file("fine.txt", 10), file("huge.txt", 2048)));
+
+            assertEquals(1.0, meterRegistry.counter("eddi.ingestion.files.stored",
+                    "source", "handbooks").count());
+            assertEquals(1.0, meterRegistry.counter("eddi.ingestion.files.rejected",
+                    "source", "handbooks").count());
+        }
+
+        @Test
         @DisplayName("strips a path from a client-supplied file name")
         void stripsPaths() {
             var outcome = service.upload(KB_ID, source(500, 100_000L, 1_000_000L),
-                    List.of(new IngestedFileService.IncomingFile("../../etc/passwd.txt",
+                    List.of(IngestedFileService.IncomingFile.of("../../etc/passwd.txt",
                             "root:x".getBytes(StandardCharsets.UTF_8))));
 
             // Nothing here builds a filesystem path out of the name, but it is shown
@@ -216,10 +297,21 @@ class IngestedFileServiceTest {
                     List.of(file("notes.txt", 10))).accepted().getFirst();
             when(pipeline.forgetDocument(anyString(), any(), any(), anyString())).thenReturn(true);
 
+            // The file must still be there when the vectors go. The other order
+            // leaves content in the knowledge base that the operator can no longer
+            // see, let alone delete, if the removal fails.
+            AtomicBoolean fileStillPresentWhenVectorsWent = new AtomicBoolean();
+            when(pipeline.forgetDocument(anyString(), any(), any(), anyString())).thenAnswer(invocation -> {
+                fileStillPresentWhenVectorsWent.set(
+                        fileStore.find(IngestionPipeline.stateKey(KB_ID, source), stored.fileId()).isPresent());
+                return true;
+            });
+
             var outcome = service.delete(KB_ID, new RagConfiguration(), source, stored.fileId());
 
             assertEquals(IngestedFileService.DeleteOutcome.DELETED, outcome);
             verify(pipeline).forgetDocument(eq(KB_ID), any(), any(), eq(stored.fileId()));
+            assertTrue(fileStillPresentWhenVectorsWent.get(), "the vectors must go before the file");
             assertTrue(fileStore.find(IngestionPipeline.stateKey(KB_ID, source), stored.fileId()).isEmpty());
         }
 
@@ -236,6 +328,40 @@ class IngestedFileServiceTest {
             // The operator asked for the content to be gone. Reporting a plain
             // success while it stays retrievable is the worst of the three answers.
             assertEquals(IngestedFileService.DeleteOutcome.DELETED_BUT_CHUNKS_REMAIN, outcome);
+        }
+
+        @Test
+        @DisplayName("refuses while a run holds the source's claim")
+        void refusesWhileARunHoldsTheClaim() {
+            var source = source(500, 100_000L, 1_000_000L);
+            var stored = service.upload(KB_ID, source,
+                    List.of(file("notes.txt", 10))).accepted().getFirst();
+            // A run is in flight. Deleting under it would let it re-embed the file
+            // and clear the tombstone the delete wrote.
+            stateStore.startRun(IngestionPipeline.stateKey(KB_ID, source));
+
+            var outcome = service.delete(KB_ID, new RagConfiguration(), source, stored.fileId());
+
+            assertEquals(IngestedFileService.DeleteOutcome.BUSY, outcome);
+            verify(pipeline, never()).forgetDocument(anyString(), any(), any(), anyString());
+            assertTrue(fileStore.find(IngestionPipeline.stateKey(KB_ID, source), stored.fileId()).isPresent());
+        }
+
+        @Test
+        @DisplayName("releases the claim even when the store fails, so the source is not stuck")
+        void releasesTheClaimOnFailure() {
+            var source = source(500, 100_000L, 1_000_000L);
+            var stored = service.upload(KB_ID, source,
+                    List.of(file("notes.txt", 10))).accepted().getFirst();
+            when(pipeline.forgetDocument(anyString(), any(), any(), anyString()))
+                    .thenThrow(new IllegalStateException("vector store is unwell"));
+
+            assertThrows(IllegalStateException.class,
+                    () -> service.delete(KB_ID, new RagConfiguration(), source, stored.fileId()));
+
+            // A claim nobody releases blocks the source until it is reaped: a
+            // quarter of an hour of 409s for every run and every delete.
+            assertTrue(stateStore.activeRun(IngestionPipeline.stateKey(KB_ID, source)).isEmpty());
         }
 
         @Test

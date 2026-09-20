@@ -29,6 +29,9 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static java.nio.charset.StandardCharsets.UTF_8;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -48,6 +51,7 @@ class RagSourceIngestionServiceTest {
     private InMemoryIngestionStateStore stateStore;
     private IScheduleStore scheduleStore;
     private IRagStore ragStore;
+    private InMemoryIngestedFileStore fileStore;
     private RagSourceIngestionService service;
 
     @BeforeEach
@@ -56,8 +60,8 @@ class RagSourceIngestionServiceTest {
         stateStore = new InMemoryIngestionStateStore();
         scheduleStore = mock(IScheduleStore.class);
         ragStore = mock(IRagStore.class);
-        service = new RagSourceIngestionService(pipeline, stateStore, scheduleStore, ragStore,
-                new InMemoryIngestedFileStore());
+        fileStore = new InMemoryIngestedFileStore();
+        service = new RagSourceIngestionService(pipeline, stateStore, scheduleStore, ragStore, fileStore);
         // The reservation is the real one, against the real store: with a bare mock it
         // returns an empty Optional and every runAsync assertion below passes for the
         // wrong reason.
@@ -359,6 +363,128 @@ class RagSourceIngestionServiceTest {
             stateStore.startRun(key);
 
             assertEquals(1, service.listRuns(KB_ID, source, 10).size());
+        }
+    }
+
+    @Nested
+    @DisplayName("a source that stops owning its documents")
+    class RemovedSources {
+
+        private static final String KB_ID = "5a8b1c2d3e4f5a6b7c8d9e0f";
+
+        private IngestionSource uploadSource(String id) {
+            var source = new IngestionSource();
+            source.setId(id);
+            source.setName("handbooks");
+            source.setType(IngestionSource.TYPE_UPLOAD);
+            return source;
+        }
+
+        private RagConfiguration knowledgeBase(IngestionSource... sources) {
+            var config = new RagConfiguration();
+            config.setName("product-docs");
+            config.setSources(List.of(sources));
+            return config;
+        }
+
+        private String keyOf(IngestionSource source) {
+            return IngestionPipeline.stateKey(KB_ID, source);
+        }
+
+        @Test
+        @DisplayName("removing it takes its files AND what the knowledge base learned from them")
+        void removingASourceTakesBoth() {
+            var source = uploadSource("src-files");
+            fileStore.store(keyOf(source), "handbook.pdf", "application/pdf", "x".getBytes(UTF_8));
+            var before = knowledgeBase(source);
+
+            service.discardRemovedSources(KB_ID, before, knowledgeBase());
+
+            // Deleting the files and leaving the vectors is the worst of the three
+            // outcomes: agents keep citing a document the operator believes is gone,
+            // and no endpoint can list or delete it, because the source it belonged
+            // to is no longer in the configuration.
+            verify(pipeline).forgetSource(eq(KB_ID), any(), argThat(s -> "src-files".equals(s.getId())));
+            assertTrue(fileStore.list(keyOf(source)).isEmpty());
+        }
+
+        @Test
+        @DisplayName("turning it into a crawl takes them too")
+        void changingItsTypeTakesBoth() {
+            var source = uploadSource("src-files");
+            fileStore.store(keyOf(source), "handbook.pdf", "application/pdf", "x".getBytes(UTF_8));
+
+            var web = new IngestionSource.WebSource();
+            web.setStartUrl("https://example.com/");
+            var nowACrawl = new IngestionSource();
+            nowACrawl.setId("src-files");
+            nowACrawl.setName("handbooks");
+            nowACrawl.setWeb(web);
+
+            service.discardRemovedSources(KB_ID, knowledgeBase(source), knowledgeBase(nowACrawl));
+
+            // The id survives the change, so nothing else notices — and the files
+            // become unreachable, since the file endpoints refuse a source that is
+            // not an upload source.
+            verify(pipeline).forgetSource(eq(KB_ID), any(), any());
+            assertTrue(fileStore.list(keyOf(source)).isEmpty());
+        }
+
+        @Test
+        @DisplayName("leaves a source that is still there alone")
+        void keepsWhatIsStillThere() {
+            var source = uploadSource("src-files");
+            fileStore.store(keyOf(source), "handbook.pdf", "application/pdf", "x".getBytes(UTF_8));
+
+            service.discardRemovedSources(KB_ID, knowledgeBase(source), knowledgeBase(uploadSource("src-files")));
+
+            verify(pipeline, never()).forgetSource(anyString(), any(), any());
+            assertEquals(1, fileStore.list(keyOf(source)).size());
+        }
+
+        @Test
+        @DisplayName("says nothing about a crawl, which owns no files of its own")
+        void ignoresCrawlSources() {
+            var web = new IngestionSource.WebSource();
+            web.setStartUrl("https://example.com/");
+            var crawl = new IngestionSource();
+            crawl.setId("src-web");
+            crawl.setName("docs");
+            crawl.setWeb(web);
+
+            service.discardRemovedSources(KB_ID, knowledgeBase(crawl), knowledgeBase());
+
+            // A crawl's documents come back on the next run against the same site;
+            // dropping the source is not a statement that the site is wrong.
+            verify(pipeline, never()).forgetSource(anyString(), any(), any());
+        }
+
+        @Test
+        @DisplayName("deleting the knowledge base takes its upload sources with it")
+        void deletingTheKnowledgeBaseTakesFilesToo() {
+            var source = uploadSource("src-files");
+            fileStore.store(keyOf(source), "handbook.pdf", "application/pdf", "x".getBytes(UTF_8));
+
+            service.removeSchedules(KB_ID, knowledgeBase(source));
+
+            verify(pipeline).forgetSource(eq(KB_ID), any(), any());
+            assertTrue(fileStore.list(keyOf(source)).isEmpty());
+        }
+
+        @Test
+        @DisplayName("a vector store that refuses still lets the files go, loudly")
+        void survivesAVectorStoreThatRefuses() {
+            var source = uploadSource("src-files");
+            fileStore.store(keyOf(source), "handbook.pdf", "application/pdf", "x".getBytes(UTF_8));
+            doThrow(new IllegalStateException("vector store is unwell"))
+                    .when(pipeline).forgetSource(anyString(), any(), any());
+
+            service.discardRemovedSources(KB_ID, knowledgeBase(source), knowledgeBase());
+
+            // Refusing to delete the files because the vectors could not go would
+            // leave the operator with neither the content removed nor a way to try
+            // again — the configuration has already been written.
+            assertTrue(fileStore.list(keyOf(source)).isEmpty());
         }
     }
 }

@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.ingestion.extract;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.encryption.InvalidPasswordException;
 import org.apache.pdfbox.text.PDFTextStripper;
 
 import java.io.IOException;
@@ -57,6 +58,12 @@ public class PdfTextExtractor implements DocumentTextExtractor {
                 markdown.append(text);
             }
             return Extraction.capped(markdown.toString(), limits.maxCharacters());
+        } catch (InvalidPasswordException e) {
+            // The other way PDFBox refuses an encrypted file. Without this the
+            // operator is told their working PDF is corrupt, and the one thing they
+            // could do about it — save a copy without the password — goes unsaid.
+            throw new UnreadableDocumentException(
+                    "This PDF is encrypted. Upload a copy without a password.", e);
         } catch (UnreadableDocumentException e) {
             throw e;
         } catch (IOException | RuntimeException e) {

@@ -2167,7 +2167,18 @@
       "deleteFile": "Delete {{fileName}}",
       "deleteFileTitle": "Delete this file?",
       "deleteFileDescription": "{{fileName}} and everything the knowledge base learned from it are removed. Agents stop answering from it immediately.",
-      "previewFiles": "Preview changes"
+      "previewFiles": "Preview changes",
+      "saveBeforeUpload": "Save the knowledge base first — uploads go to the saved source, not to the edits on screen.",
+      "foldersNotSupported": "Folders cannot be uploaded. Drop the files inside them instead.",
+      "filesAwaitingRun": "Files are stored but not yet in the knowledge base. Run the source to index them.",
+      "retryUpload": "Try {{fileName}} again",
+      "fileIndexed": "Indexed",
+      "fileChanged": "Changed",
+      "fileNotIndexed": "Not indexed",
+      "maxTotalMb": "Max total size (MB)",
+      "maxTotalMbHint": "Across all of this source's files",
+      "removeTitle": "Remove this source?",
+      "removeDescription": "When you save, its uploaded files and everything the knowledge base learned from them are deleted. This cannot be undone."
     }
   },
   "onboarding": {

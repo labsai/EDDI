@@ -382,7 +382,77 @@ public class IngestionPipeline {
                     + "document '%s' remain retrievable", LogSanitizer.sanitize(knowledgeBase.getName()),
                     LogSanitizer.sanitize(documentId));
             return false;
+        } catch (RuntimeException e) {
+            // A store that is merely unwell. Reported the same way rather than
+            // thrown: the caller is deleting a file, and a 500 would leave the
+            // operator with a file still listed and no idea whether its content is
+            // still being answered from. The row is tombstoned either way, so the
+            // next run re-ingests rather than reporting it unchanged over nothing.
+            LOGGER.errorf(e, "Could not remove the chunks of document '%s' from knowledge base '%s'",
+                    LogSanitizer.sanitize(documentId), LogSanitizer.sanitize(knowledgeBase.getName()));
+            return false;
         }
+    }
+
+    /**
+     * Removes everything one source ever put into the knowledge base.
+     *
+     * <p>
+     * For a source that is being deleted, or that is changing into a kind of source
+     * that cannot own the documents it already has. Without it, removing an upload
+     * source deletes the only copy of its files while every vector they produced
+     * stays retrievable and unreachable: no endpoint lists them, because the source
+     * they belong to is gone.
+     *
+     * @return false when the vector store cannot delete by metadata, so the chunks
+     *         are still there
+     */
+    public boolean forgetSource(String ragConfigId, RagConfiguration knowledgeBase, IngestionSource source) {
+        String sourceKey = stateKey(ragConfigId, source);
+        try {
+            embeddingStoreFactory.getOrCreate(knowledgeBase, knowledgeBase.getName())
+                    .removeAll(metadataKey(METADATA_SOURCE_KEY).isEqualTo(sourceKey));
+            stateStore.purgeSource(sourceKey);
+            return true;
+        } catch (UnsupportedFeatureException e) {
+            LOGGER.warnf("The vector store of knowledge base '%s' cannot delete by metadata, so the chunks of "
+                    + "removed source '%s' remain retrievable", LogSanitizer.sanitize(knowledgeBase.getName()),
+                    LogSanitizer.sanitize(source.getName()));
+            stateStore.purgeSource(sourceKey);
+            return false;
+        } catch (RuntimeException e) {
+            LOGGER.errorf(e, "Could not remove the chunks of source '%s' from knowledge base '%s'; they stay "
+                    + "retrievable and nothing lists them any more",
+                    LogSanitizer.sanitize(source.getName()), LogSanitizer.sanitize(knowledgeBase.getName()));
+            return false;
+        }
+    }
+
+    /**
+     * Claims the source's run slot for something other than a run.
+     *
+     * <p>
+     * Deleting a file has to exclude a run, not merely notice one: a run that
+     * starts between the check and the delete lists the file, loads bytes that are
+     * about to go, embeds them, and records the document as ingested — which clears
+     * the tombstone the delete just wrote. The file is gone and its content is
+     * still retrievable, for a cron-less source indefinitely. Taking the same claim
+     * a run takes is what makes that impossible rather than unlikely.
+     *
+     * @return the claim to pass to {@link #releaseClaim}, or empty when a run holds
+     *         it
+     */
+    public Optional<String> claimForMaintenance(String ragConfigId, IngestionSource source) {
+        return reserveRun(ragConfigId, source);
+    }
+
+    /**
+     * Releases a claim from {@link #claimForMaintenance}, recording what it did.
+     */
+    public void releaseClaim(String ragConfigId, IngestionSource source, String claimId, int documentsTombstoned) {
+        stateStore.finishRun(new IngestionRun(claimId, stateKey(ragConfigId, source),
+                IngestionRun.Status.COMPLETED, null, Instant.now(),
+                0, 0, 0, 0, documentsTombstoned, 0, 0.0, null));
     }
 
     /**
@@ -463,6 +533,7 @@ public class IngestionPipeline {
      */
     private SourceRun readUploadedFiles(String sourceKey, IngestionSource source, Collector collector) {
         Instant start = Instant.now();
+        Instant deadline = uploadDeadline(start, source);
         List<StoredFile> files;
         try {
             files = fileStore.list(sourceKey);
@@ -485,6 +556,10 @@ public class IngestionPipeline {
                 stopReason = WebCrawler.StopReason.CANCELLED;
                 break;
             }
+            if (Instant.now().isAfter(deadline)) {
+                stopReason = WebCrawler.StopReason.TIME_LIMIT;
+                break;
+            }
             if (read >= source.upload().maxFilesOrDefault()) {
                 // The limit was lowered after the files were uploaded. Stopping short
                 // is not coverage, so nothing is concluded to be deleted.
@@ -492,14 +567,33 @@ public class IngestionPipeline {
                 break;
             }
             read++;
-            readOneFile(sourceKey, file, limits, collector);
+            readOneFile(sourceKey, source, file, limits, collector);
         }
 
         boolean covered = stopReason == WebCrawler.StopReason.COMPLETED;
         return new SourceRun(uploadSummary(collector, start, stopReason), covered);
     }
 
-    private void readOneFile(String sourceKey, StoredFile file, ExtractionLimits limits, Collector collector) {
+    /**
+     * When a run over uploaded files has to stop.
+     *
+     * <p>
+     * The same budget a crawl gets. Without it a run over a large source can
+     * outlive the point at which it is treated as abandoned, and the next fire
+     * starts a second worker embedding into the same store — each one deleting the
+     * other's fresh chunks, because replacement filters on the run id.
+     *
+     * <p>
+     * Its own method so a test can shorten it. The alternative is a test that
+     * blocks for the shortest budget the configuration allows, which is a minute,
+     * and a minute of wall clock in a unit suite is a minute nobody spends twice.
+     */
+    Instant uploadDeadline(Instant start, IngestionSource source) {
+        return start.plus(Duration.ofMinutes(source.settings().timeBudgetMinutesOrDefault()));
+    }
+
+    private void readOneFile(String sourceKey, IngestionSource source, StoredFile file,
+                             ExtractionLimits limits, Collector collector) {
         // Asked before the bytes are fetched: an unchanged file needs neither.
         var known = stateStore.lookup(sourceKey, file.fileId());
         if (known.isPresent() && !known.get().tombstoned() && !known.get().hasChanged(file.contentHash())) {
@@ -514,6 +608,13 @@ public class IngestionPipeline {
                 return;
             }
             String markdown = extractors.extract(content, file.mimeType(), limits);
+            if (markdown.length() >= limits.maxCharacters()) {
+                // Said once per file rather than silently embedding the first third
+                // of a manual as if it were the whole thing.
+                LOGGER.infof("File '%s' of source '%s' was truncated at %d characters (maxContentLength)",
+                        LogSanitizer.sanitize(file.fileName()), LogSanitizer.sanitize(source.getName()),
+                        limits.maxCharacters());
+            }
             collector.onExtractedDocument(file.fileId(), "file:" + file.fileName(),
                     titleOf(file.fileName()), markdown, file.contentHash());
         } catch (UnreadableDocumentException | IIngestedFileStore.IngestedFileStoreException e) {

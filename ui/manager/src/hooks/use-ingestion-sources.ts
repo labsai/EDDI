@@ -108,16 +108,3 @@ export function useDeleteSourceFile(
     },
   });
 }
-
-/** Lets an upload flow refresh the file list once its batch has finished. */
-export function useInvalidateSourceFiles(
-  kbId: string | undefined,
-  sourceId: string | undefined,
-  version: number,
-) {
-  const queryClient = useQueryClient();
-  return () =>
-    queryClient.invalidateQueries({
-      queryKey: ingestionKeys.files(kbId ?? "", sourceId ?? "", version),
-    });
-}

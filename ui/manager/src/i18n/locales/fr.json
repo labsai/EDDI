@@ -2109,7 +2109,18 @@
       "deleteFile": "Supprimer {{fileName}}",
       "deleteFileTitle": "Supprimer ce fichier ?",
       "deleteFileDescription": "{{fileName}} et tout ce que la base de connaissances en a tiré sont supprimés. Les agents cessent immédiatement d'y répondre.",
-      "previewFiles": "Prévisualiser les modifications"
+      "previewFiles": "Prévisualiser les modifications",
+      "saveBeforeUpload": "Enregistrez d'abord la base de connaissances — les téléversements vont à la source enregistrée, pas aux modifications à l'écran.",
+      "foldersNotSupported": "Les dossiers ne peuvent pas être téléversés. Déposez plutôt les fichiers qu'ils contiennent.",
+      "filesAwaitingRun": "Des fichiers sont stockés mais pas encore dans la base de connaissances. Exécutez la source pour les indexer.",
+      "retryUpload": "Réessayer {{fileName}}",
+      "fileIndexed": "Indexé",
+      "fileChanged": "Modifié",
+      "fileNotIndexed": "Non indexé",
+      "maxTotalMb": "Taille totale max. (Mo)",
+      "maxTotalMbHint": "Pour l'ensemble des fichiers de cette source",
+      "removeTitle": "Supprimer cette source ?",
+      "removeDescription": "À l'enregistrement, ses fichiers téléversés et tout ce que la base de connaissances en a tiré seront supprimés. C'est irréversible."
     }
   },
   "onboarding": {

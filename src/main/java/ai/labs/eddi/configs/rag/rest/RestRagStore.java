@@ -86,6 +86,9 @@ public class RestRagStore implements IRestRagStore {
         Set<String> previousSourceIds = sourceIdsOf(previous);
         Response response = restVersionInfo.update(id, version, ragConfiguration);
         forgetIngestionStateOnRename(id, previous, ragConfiguration);
+        // Before the schedules, and only once the write succeeded: a source that is
+        // gone from the document must not leave its documents answering questions.
+        discardRemovedSources(id, previous, ragConfiguration);
         syncIngestionSchedules(response, id, ragConfiguration, previousSourceIds);
         return response;
     }
@@ -126,6 +129,24 @@ public class RestRagStore implements IRestRagStore {
                         + "will report every document as unchanged until they are purged by hand",
                         LogSanitizer.sanitize(id));
             }
+        }
+    }
+
+    /**
+     * Takes back what a removed source put into the knowledge base.
+     *
+     * <p>
+     * Logged rather than thrown, like the schedule sync above: the knowledge base
+     * itself saved correctly and refusing the write would be worse. But the failure
+     * has to be visible — what is left behind is content the operator believes is
+     * gone.
+     */
+    private void discardRemovedSources(String id, RagConfiguration previous, RagConfiguration updated) {
+        try {
+            sourceIngestionService.discardRemovedSources(id, previous, updated);
+        } catch (RuntimeException e) {
+            LOGGER.errorf(e, "Could not remove what the sources dropped from knowledge base %s had ingested; "
+                    + "their chunks stay retrievable and nothing lists them", LogSanitizer.sanitize(id));
         }
     }
 

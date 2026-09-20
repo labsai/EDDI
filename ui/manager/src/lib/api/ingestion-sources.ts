@@ -101,6 +101,11 @@ export interface IngestedFile {
   sizeBytes: number;
   contentHash: string;
   uploadedAt: string;
+  /**
+   * Whether the knowledge base currently answers from this file. Absent on a
+   * response from a server older than this field.
+   */
+  indexState?: "NOT_INDEXED" | "INDEXED" | "CHANGED";
 }
 
 /** Per file, because the endpoint accepts and refuses each one on its own. */
@@ -143,6 +148,17 @@ export function getSourceFiles(kbId: string, sourceId: string, version: number) 
   return api.get<IngestedFile[]>(`${base(kbId, sourceId)}/files?version=${version}`);
 }
 
+/**
+ * What a delete did. `warning` is present when the file went and the chunks it
+ * produced could not, which is the one case the operator must not be left to
+ * assume went the other way.
+ */
+export interface DeleteFileResult {
+  status: string;
+  fileId: string;
+  warning?: string;
+}
+
 /** Removes a file and, at once, the chunks it produced. */
 export function deleteSourceFile(
   kbId: string,
@@ -150,7 +166,7 @@ export function deleteSourceFile(
   version: number,
   fileId: string,
 ) {
-  return api.delete<{ status: string; fileId: string; warning?: string }>(
+  return api.delete<DeleteFileResult>(
     `${base(kbId, sourceId)}/files/${encodeURIComponent(fileId)}?version=${version}`,
   );
 }
@@ -202,6 +218,18 @@ export function uploadSourceFile(
       }
       if (request.status >= 200 && request.status < 300) {
         resolve({ stored: [], rejected: [] });
+        return;
+      }
+      if (request.status === 413) {
+        // The server refused the request before the code that knows this
+        // source's limit could answer, so "Request Entity Too Large" is all the
+        // response carries. Saying it in words beats passing that through.
+        reject(
+          new Error(
+            "This file is too large for the server to accept. Ask an operator to raise " +
+              "quarkus.http.limits.max-body-size, or upload a smaller file.",
+          ),
+        );
         return;
       }
       void apiErrorFromResponse(

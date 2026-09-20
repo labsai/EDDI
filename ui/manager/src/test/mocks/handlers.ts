@@ -2431,6 +2431,7 @@ export const handlers = [
         sizeBytes: 1048576,
         contentHash: "a1b2c3",
         uploadedAt: "2026-09-18T09:12:00Z",
+        indexState: "INDEXED",
       },
     ]);
   }),
@@ -2445,6 +2446,7 @@ export const handlers = [
           sizeBytes: 64,
           contentHash: "d4e5f6",
           uploadedAt: "2026-09-18T09:20:00Z",
+          indexState: "NOT_INDEXED",
         },
       ],
       rejected: [],

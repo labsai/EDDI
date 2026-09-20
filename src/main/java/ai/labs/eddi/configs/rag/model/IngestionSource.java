@@ -392,12 +392,25 @@ public class IngestionSource {
      */
     public static class UploadSource {
 
+        /**
+         * The largest {@code maxFileBytes} that can be saved, held below
+         * {@code quarkus.http.limits.max-body-size} (60 MB) so that a file at the limit
+         * still reaches the code that knows what the limit is.
+         */
+        private static final long MAX_FILE_BYTES_CEILING = 50L * 1024 * 1024;
+
         /** Files this source may hold. */
         private Integer maxFiles = 500;
 
         /**
          * Bytes a single file may be. Twenty-five megabytes covers a long PDF with
          * images and stops an operator filling the database from a browser tab.
+         *
+         * <p>
+         * The ceiling below is not arbitrary: the request carrying the file has to fit
+         * inside {@code quarkus.http.limits.max-body-size}, and a file over that is
+         * refused by the server with a bare 413 before anything here can explain why.
+         * Raise the two together or not at all.
          */
         private Long maxFileBytes = 25L * 1024 * 1024;
 
@@ -406,7 +419,7 @@ public class IngestionSource {
 
         void validate(String sourceName) {
             requirePositiveAtMost(maxFiles, 10_000, "upload.maxFiles", sourceName);
-            requirePositiveAtMost(maxFileBytes, 200L * 1024 * 1024, "upload.maxFileBytes", sourceName);
+            requirePositiveAtMost(maxFileBytes, MAX_FILE_BYTES_CEILING, "upload.maxFileBytes", sourceName);
             requirePositiveAtMost(maxTotalBytes, 20L * 1024 * 1024 * 1024, "upload.maxTotalBytes", sourceName);
             if (maxFileBytes != null && maxTotalBytes != null && maxFileBytes > maxTotalBytes) {
                 // Otherwise every upload is refused: the first file is under its own

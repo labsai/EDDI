@@ -9,6 +9,8 @@ import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
 import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
+import org.apache.pdfbox.pdmodel.encryption.AccessPermission;
+import org.apache.pdfbox.pdmodel.encryption.StandardProtectionPolicy;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -183,6 +185,106 @@ final class OfficeFixtures {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    /** A PDF nobody can open without the password. */
+    static byte[] encryptedPdf(String text) {
+        try (PDDocument document = new PDDocument(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            PDPage page = new PDPage();
+            document.addPage(page);
+            try (PDPageContentStream content = new PDPageContentStream(document, page)) {
+                content.beginText();
+                content.setFont(new PDType1Font(Standard14Fonts.FontName.HELVETICA), 12);
+                content.newLineAtOffset(72, 700);
+                content.showText(text);
+                content.endText();
+            }
+            var permissions = new AccessPermission();
+            permissions.setCanExtractContent(false);
+            document.protect(new StandardProtectionPolicy("owner-secret", "user-secret", permissions));
+            document.save(out);
+            return out.toByteArray();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    /**
+     * A deck whose slide index puts {@code slide2.xml} first — what reordering a
+     * deck in PowerPoint produces, since it rewrites the index and leaves the part
+     * names where they were.
+     */
+    static byte[] pptxWithIndex(String firstInDeck, String secondInDeck) {
+        Map<String, String> parts = new LinkedHashMap<>();
+        parts.put("ppt/slides/slide1.xml", slideXml(secondInDeck));
+        parts.put("ppt/slides/slide2.xml", slideXml(firstInDeck));
+        parts.put("ppt/presentation.xml", """
+                <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+                <p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
+                                xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+                  <p:sldIdLst>
+                    <p:sldId id="256" r:id="rId2"/>
+                    <p:sldId id="257" r:id="rId1"/>
+                  </p:sldIdLst>
+                </p:presentation>
+                """);
+        parts.put("ppt/_rels/presentation.xml.rels", """
+                <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+                <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+                  <Relationship Id="rId1" Target="slides/slide1.xml"
+                      Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide"/>
+                  <Relationship Id="rId2" Target="slides/slide2.xml"
+                      Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide"/>
+                </Relationships>
+                """);
+        return zip(parts);
+    }
+
+    /**
+     * An archive whose oversized entry is one no extractor wants.
+     *
+     * <p>
+     * Moving to the next ZIP entry decompresses the rest of the current one, so an
+     * entry nobody asked for is the cheapest place to hide a bomb: skipping it
+     * costs the same CPU as reading it, with nothing counting the cost.
+     */
+    static byte[] bombInAnIgnoredPart(String wantedPart, int uncompressedBytes) {
+        Map<String, String> parts = new LinkedHashMap<>();
+        // Outside every prefix the format sniff recognises, so it is walked past
+        // rather than matched — which is what makes it a place to hide.
+        parts.put("docProps/thumbnail.bin", "a".repeat(uncompressedBytes));
+        parts.put(wantedPart, "<w:document xmlns:w=\"x\"><w:body/></w:document>");
+        return zip(parts);
+    }
+
+    /**
+     * An .xlsx whose cell carries its text inline instead of in the shared table.
+     */
+    static byte[] xlsxWithInlineString(String sheetName, String text) {
+        Map<String, String> parts = new LinkedHashMap<>();
+        parts.put("xl/workbook.xml", """
+                <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+                <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+                  <sheets><sheet name="%s" sheetId="1" r:id="rId1"/></sheets>
+                </workbook>
+                """.formatted(escape(sheetName)));
+        parts.put("xl/_rels/workbook.xml.rels", """
+                <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+                <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+                  <Relationship Id="rId1" Target="worksheets/sheet1.xml"
+                      Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"/>
+                </Relationships>
+                """);
+        parts.put("xl/worksheets/sheet1.xml", """
+                <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+                <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+                  <sheetData>
+                    <row r="1"><c r="A1" t="inlineStr"><is><t>%s</t></is></c></row>
+                  </sheetData>
+                </worksheet>
+                """.formatted(escape(text)));
+        return zip(parts);
     }
 
     /** A PDF page with no text at all — what a scan without OCR looks like. */

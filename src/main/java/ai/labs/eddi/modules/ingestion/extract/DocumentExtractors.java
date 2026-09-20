@@ -43,6 +43,11 @@ public class DocumentExtractors {
      */
     private static final int BINARY_SNIFF_WINDOW = 8192;
 
+    /** The types whose files carry no signature, so their extension decides. */
+    private static final Set<String> TEXT_MIMES = Set.of(
+            "text/plain", "text/markdown", "text/csv", "text/tab-separated-values",
+            "text/html", "application/json", "application/xml", "application/yaml");
+
     private final List<DocumentTextExtractor> extractors;
 
     @Inject
@@ -71,16 +76,32 @@ public class DocumentExtractors {
      *             when nothing here can read it
      */
     public String resolveMimeType(String fileName, byte[] content) {
+        return resolveMimeType(fileName, content, ExtractionLimits.defaults());
+    }
+
+    /** As above, with the budget the archive sniff runs under. */
+    public String resolveMimeType(String fileName, byte[] content, ExtractionLimits limits) {
         if (content == null || content.length == 0) {
             throw new UnreadableDocumentException("This file is empty.");
         }
+        // Asked first, and only for a name that claims a text format. Magic-byte
+        // detection is a prefix match on short signatures: a Markdown file that
+        // happens to begin "BM" is an image by that rule, and one containing the
+        // characters "%PDF-" anywhere in its first kilobyte is a PDF. Content that
+        // is plainly text, under a name that says which text format it is, is that
+        // format — and a real binary carries NUL bytes, so it never qualifies.
+        String claimed = MIME_BY_EXTENSION.get(extensionOf(fileName));
+        if (claimed != null && TEXT_MIMES.contains(claimed) && !looksBinary(content)) {
+            return claimed;
+        }
+
         String detected = MimeValidator.detectMime(content);
         switch (detected) {
             case "application/pdf" -> {
                 return "application/pdf";
             }
             case "application/zip" -> {
-                String office = OpenXmlPackage.detectOfficeFormat(content);
+                String office = OpenXmlPackage.detectOfficeFormat(content, limits);
                 if (office == null) {
                     throw new UnreadableDocumentException(
                             "This is a ZIP archive rather than a document. Upload the files inside it instead.");
@@ -150,7 +171,20 @@ public class DocumentExtractors {
         return true;
     }
 
+    /**
+     * Whether the bytes are something other than text.
+     *
+     * <p>
+     * A NUL byte is legal in no text format and common in every binary one — with
+     * one exception that matters here: UTF-16 encodes ASCII with a NUL in every
+     * other byte. A file that announces itself as UTF-16 is text, and refusing it
+     * as binary while the decoder handles it perfectly well is a contradiction the
+     * operator cannot see.
+     */
     private static boolean looksBinary(byte[] content) {
+        if (startsWith(content, 0xFE, 0xFF) || startsWith(content, 0xFF, 0xFE)) {
+            return false;
+        }
         int window = Math.min(content.length, BINARY_SNIFF_WINDOW);
         for (int i = 0; i < window; i++) {
             if (content[i] == 0) {
@@ -158,6 +192,18 @@ public class DocumentExtractors {
             }
         }
         return false;
+    }
+
+    private static boolean startsWith(byte[] content, int... signature) {
+        if (content.length < signature.length) {
+            return false;
+        }
+        for (int i = 0; i < signature.length; i++) {
+            if ((content[i] & 0xFF) != signature[i]) {
+                return false;
+            }
+        }
+        return true;
     }
 
     static String extensionOf(String fileName) {

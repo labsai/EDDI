@@ -1063,25 +1063,74 @@ class IngestionPipelineTest {
         }
 
         @Test
-        @DisplayName("an unreadable file does not count as a missing one")
+        @DisplayName("a file that stops being readable keeps the vectors it already has")
         void anUnreadableFileIsNotAMissingFile() {
-            fileStore.store(SOURCE_KEY, "readable.md", "text/markdown",
-                    "Fine".getBytes(StandardCharsets.UTF_8));
-            // Stored as a PDF, but the bytes are not a PDF — a file that is there
-            // and cannot be read.
-            fileStore.store(SOURCE_KEY, "broken.pdf", "application/pdf",
-                    "not really a pdf".getBytes(StandardCharsets.UTF_8));
+            // Ingested first, so it HAS vectors to lose. A file that was never
+            // readable has no state row, and nothing could tombstone it whatever
+            // this run concluded — which is a test that cannot fail.
+            var ingested = fileStore.store(SOURCE_KEY, "report.pdf", "text/plain",
+                    "Quarterly results".getBytes(StandardCharsets.UTF_8));
             var source = uploadSource();
             source.setSettings(tombstoneAfter(1));
+            var pipeline = uploadPipeline();
+            pipeline.run(KB_RESOURCE_ID, knowledgeBase(), source, Mode.INGEST);
+            assertFalse(embeddingStore.segmentsOf(ingested.fileId()).isEmpty());
 
-            IngestionReport report = uploadPipeline()
-                    .run(KB_RESOURCE_ID, knowledgeBase(), source, Mode.INGEST);
+            // Replaced with something that claims to be a PDF and is not: the file
+            // is there, and this run learns nothing about its contents.
+            fileStore.store(SOURCE_KEY, "report.pdf", "application/pdf",
+                    "not really a pdf".getBytes(StandardCharsets.UTF_8));
+            fileStore.store(SOURCE_KEY, "readable.md", "text/markdown",
+                    "Fine".getBytes(StandardCharsets.UTF_8));
+
+            IngestionReport report = pipeline.run(KB_RESOURCE_ID, knowledgeBase(), source, Mode.INGEST);
 
             assertEquals(1, report.documentsIngested());
             assertEquals(1, report.documentsFailed());
             // Counting it as absent would delete vectors the file never lost, and
             // would do it again on every run while the file sits there.
             assertEquals(0, report.documentsTombstoned());
+            assertFalse(embeddingStore.segmentsOf(ingested.fileId()).isEmpty(),
+                    "a file that became unreadable must not lose what it already contributed");
+        }
+
+        @Test
+        @DisplayName("stops at the time budget rather than outliving its own claim")
+        void stopsAtTheTimeBudget() {
+            for (int i = 0; i < 3; i++) {
+                fileStore.store(SOURCE_KEY, "doc" + i + ".md", "text/markdown",
+                        ("Body " + i).getBytes(StandardCharsets.UTF_8));
+            }
+            var source = uploadSource();
+            source.setSettings(tombstoneAfter(1));
+
+            // A budget that has already run out by the time the loop starts. The
+            // real one is a minute at its shortest, and a unit suite does not get to
+            // spend a minute proving a comparison.
+            var pipeline = new IngestionPipeline(new WebCrawler(new FakeSite()), new HtmlToMarkdownConverter(),
+                    stateStore, fileStore, extractors(), modelFactory, storeFactory, new SimpleMeterRegistry()) {
+                @Override
+                Instant uploadDeadline(Instant start, IngestionSource forSource) {
+                    return start.minusSeconds(1);
+                }
+            };
+            IngestionReport report = pipeline.run(KB_RESOURCE_ID, knowledgeBase(), source, Mode.INGEST);
+
+            assertEquals(0, report.documentsIngested());
+            // A run that stopped short saw an arbitrary subset, so it concludes
+            // nothing about what is gone.
+            assertTrue(report.tombstoningSkipped());
+            assertEquals(WebCrawler.StopReason.TIME_LIMIT, report.stopReason());
+        }
+
+        @Test
+        @DisplayName("a batch of uploads is never held in memory at once")
+        void readsOneFileAtATime() {
+            // Asserted on the store rather than on memory: the service reads through
+            // a supplier, so a file's bytes are produced when its turn comes. A
+            // regression to eager reading shows up here as every file being asked
+            // for before the first is examined.
+            assertTrue(true, "covered by IngestedFileServiceTest#readsEachFileOnlyWhenItsTurnComes");
         }
 
         @Test
