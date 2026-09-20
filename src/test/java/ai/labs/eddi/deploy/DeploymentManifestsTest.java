@@ -1937,8 +1937,8 @@ class DeploymentManifestsTest {
         /**
          * EDDI has no role hierarchy: {@code McpToolUtils.requireRole} is a literal
          * {@code hasRole}, so {@code eddi-admin} does not satisfy a tool that names
-         * {@code eddi-viewer} — and roughly forty of the MCP tools name exactly that,
-         * including every read tool in {@code McpConversationTools}.
+         * {@code eddi-viewer} — and 27 of the MCP tools name exactly that, including
+         * every read tool in {@code McpConversationTools}.
          * <p>
          * The seeded administrator is the account an operator points their first MCP
          * client at. Holding only {@code eddi-admin} and {@code eddi-editor}, it

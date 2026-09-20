@@ -119,6 +119,13 @@ it something to authenticate as.
   value does not truncate — **the realm import fails and Keycloak exits 1**, which is how the
   first draft of this client took down every stack that imports the realm. Found by running the
   import, not by reading the file.
+- **`helm/eddi/templates/NOTES.txt`**, **`k8s/overlays/auth/kustomization.yaml`**,
+  **`docs/security.md`** — every place that told an operator to grant an account "those two
+  roles" now names all three. Following the old instruction built an administrator that logs in
+  and is refused every MCP read tool, which is the trap the realm change exists to close.
+- **`.github/workflows/ci.yml`** — `keycloak/**` added to the `code` and `backend` path
+  filters. `k8s/` and `helm/` were already there, so the compose realm was the one copy whose
+  change ran no CI — including the audience mapper every accepted token depends on.
 - **`docs/mcp-server.md`**, **`docs/security.md`** — the client, how to point a client at it,
   why dynamic registration is not an option here, and what to do on an **existing** realm:
   `--import-realm` never re-imports into a realm that already exists and both auth stacks keep
@@ -127,7 +134,7 @@ it something to authenticate as.
 
 - **All three realm copies** — the seeded `eddi` administrator gains `eddi-viewer` alongside
   `eddi-admin`/`eddi-editor`. There is no role hierarchy, so without it the account an operator
-  points their first MCP client at completes the login and is then refused all ~40 read tools.
+  points their first MCP client at completes the login and is then refused all 27 viewer-gated tools.
   A test pins it. `scripts/make-test-realm.mjs` guards that fixture set against the realm and
   fails the auth E2E run when the two drift, so `ROLE_FIXTURES` and `e2e/auth/auth-helpers.ts`
   move with it — which is how CI caught this change the first time it ran.
@@ -187,9 +194,17 @@ to the 401 challenge, so there is no new EDDI code — five properties and one p
 - **`ui/manager/e2e/auth/auth.spec.ts`** — two cases in the Keycloak tier: the document is
   readable with no token and names the issuer a real token carries; an unauthenticated `/mcp`
   POST answers 401 with a challenge pointing at it.
-- **`ui/manager/docker-compose.integration-keycloak.yml`**, **`docker-compose.auth.yml`** — both
-  serve EDDI over plain http with authentication on, which is the one shape the forced https
-  identifier is wrong for, so both override `force-https-scheme`.
+- **Every shipped stack that serves plain http with authentication on** overrides
+  `force-https-scheme`, because that is the one shape a forced https identifier is wrong for:
+  `docker-compose.auth.yml`, the auth E2E tier, `k8s/overlays/auth` (its documented flow is
+  `kubectl port-forward`), and the helm chart whenever the Keycloak URL it is given is itself
+  plain http. Without it those deployments advertise `https://…/mcp` with nothing serving TLS,
+  and discovery dies before it starts.
+- **`ui/manager/docker-compose.integration-keycloak.yml`** — the tier now pins the
+  browser-reachable issuer the way `docker-compose.auth.yml` does, so the discovery document it
+  publishes is the one a real deployment publishes. The E2E case can therefore assert the
+  advertised authorization server is reachable **from outside the compose network** — with the
+  old in-cluster hostname that assertion could not have failed.
 - **`docs/mcp-server.md`**, **`docs/security.md`** — the discovery path as the preferred way in,
   with the hand-pasted token demoted to a fallback; the new permit row, and why `@PermitAll`
   alone does not make a path public.
@@ -230,7 +245,7 @@ to the 401 challenge, so there is no new EDDI code — five properties and one p
 
 A local MCP client — Claude Desktop, Claude Code, Cursor, LM Studio — cannot practically
 manage an EDDI instance that has OIDC enabled. `/mcp` carries an `authenticated` policy
-(`application.properties:537`), EDDI is bearer-only (`application-type=service`), and it
+(its own `quarkus.http.auth.permission.mcp` rule), EDDI is bearer-only (`application-type=service`), and it
 advertises no OAuth metadata, so a client that would log in by itself gets a bare 401 with
 nothing to discover. The only way in is a hand-pasted token that the shipped realm lets
 expire after Keycloak's default five minutes, and there is no long-lived key for `/mcp`
@@ -248,7 +263,7 @@ The Quick Start in `docs/mcp-server.md` only ever showed the unauthenticated
   bite — expiry, no api key, roles decide which tools work, and `/mcp` cannot be opened
   selectively. The Quick Start now points at it.
 - **`docs/mcp-server.md`** — the Configuration block documented `quarkus.mcp-server.http.root-path`.
-  That hyphenated form is not a key the extension knows; `application.properties:633-636`
+  That hyphenated form is not a key the extension knows; `application.properties`
   already says so. Corrected to `quarkus.mcp.server.http.root-path` with the warning kept.
 - **`planning/mcp-oauth-protected-resource-plan.md`** (new) — the fix: advertise `/mcp` as an
   RFC 9728 protected resource so the client runs the OAuth flow and refreshes its own token,

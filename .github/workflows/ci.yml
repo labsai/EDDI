@@ -75,6 +75,12 @@ jobs:
               - 'ui/**'
               - 'k8s/**'
               - 'helm/**'
+              # The compose stack's Keycloak realm. DeploymentManifestsTest grades
+              # all three copies — client ids, the audience mapper every accepted
+              # token needs, the seeded roles — and only this one lives outside
+              # k8s/ and helm/, so without it a change confined to the realm EDDI
+              # ships for docker-compose runs no CI at all.
+              - 'keycloak/**'
               - 'mvnw*'
               - '.mvn/**'
               - 'checkstyle.xml'
@@ -103,6 +109,12 @@ jobs:
               - 'mcp-sidecar/**'
               - 'k8s/**'
               - 'helm/**'
+              # The compose stack's Keycloak realm. DeploymentManifestsTest grades
+              # all three copies — client ids, the audience mapper every accepted
+              # token needs, the seeded roles — and only this one lives outside
+              # k8s/ and helm/, so without it a change confined to the realm EDDI
+              # ships for docker-compose runs no CI at all.
+              - 'keycloak/**'
               - 'mvnw*'
               - '.mvn/**'
               - 'checkstyle.xml'
