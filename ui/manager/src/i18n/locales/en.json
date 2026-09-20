@@ -2141,7 +2141,11 @@
       "statFailed": "Failed",
       "partialCrawl": "The crawl stopped at a limit, so nothing would be treated as deleted.",
       "saveBeforeRun": "Save the knowledge base first — a run crawls the saved configuration, not the edits on screen.",
-      "purgeFailed": "Could not purge the ingestion state."
+      "purgeFailed": "Could not purge the ingestion state.",
+      "previewFailed": "Could not preview this source.",
+      "previewNotCompleted": "The preview did not complete.",
+      "disabledNoRun": "This source is disabled. Enable and save it to run or schedule it.",
+      "purgeBlockedWhileRunning": "A run is in flight. Purging now would let a second run start alongside it."
     }
   },
   "onboarding": {

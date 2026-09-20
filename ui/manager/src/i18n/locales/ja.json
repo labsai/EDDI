@@ -2061,7 +2061,11 @@
       "statFailed": "失敗",
       "partialCrawl": "クロールが上限で停止したため、削除として扱われるものはありません。",
       "saveBeforeRun": "先にナレッジベースを保存してください。実行は画面上の編集ではなく、保存済みの設定をクロールします。",
-      "purgeFailed": "取り込み状態を消去できませんでした。"
+      "purgeFailed": "取り込み状態を消去できませんでした。",
+      "previewFailed": "このソースをプレビューできませんでした。",
+      "previewNotCompleted": "プレビューは完了しませんでした。",
+      "disabledNoRun": "このソースは無効です。実行またはスケジュールするには有効にして保存してください。",
+      "purgeBlockedWhileRunning": "実行中です。今消去すると、並行して 2 つ目の実行が始まる可能性があります。"
     }
   },
   "onboarding": {

@@ -2083,7 +2083,11 @@
       "statFailed": "Échecs",
       "partialCrawl": "L'exploration s'est arrêtée à une limite, rien ne sera donc considéré comme supprimé.",
       "saveBeforeRun": "Enregistrez d'abord la base de connaissances — une exécution explore la configuration enregistrée, pas les modifications à l'écran.",
-      "purgeFailed": "Impossible de purger l'état d'ingestion."
+      "purgeFailed": "Impossible de purger l'état d'ingestion.",
+      "previewFailed": "Impossible de prévisualiser cette source.",
+      "previewNotCompleted": "L'aperçu ne s'est pas terminé.",
+      "disabledNoRun": "Cette source est désactivée. Activez-la et enregistrez pour l'exécuter ou la planifier.",
+      "purgeBlockedWhileRunning": "Une exécution est en cours. Purger maintenant permettrait à une seconde de démarrer en parallèle."
     }
   },
   "onboarding": {

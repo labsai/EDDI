@@ -2061,7 +2061,11 @@
       "statFailed": "Fehlgeschlagen",
       "partialCrawl": "Der Crawl endete an einem Limit, daher gilt nichts als gelöscht.",
       "saveBeforeRun": "Speichern Sie die Knowledge Base zuerst — ein Lauf crawlt die gespeicherte Konfiguration, nicht die Änderungen auf dem Bildschirm.",
-      "purgeFailed": "Der Ingestion-Status konnte nicht gelöscht werden."
+      "purgeFailed": "Der Ingestion-Status konnte nicht gelöscht werden.",
+      "previewFailed": "Vorschau für diese Quelle nicht möglich.",
+      "previewNotCompleted": "Die Vorschau wurde nicht abgeschlossen.",
+      "disabledNoRun": "Diese Quelle ist deaktiviert. Aktivieren und speichern Sie sie, um sie auszuführen oder zu planen.",
+      "purgeBlockedWhileRunning": "Ein Lauf ist aktiv. Ein Löschen jetzt würde einen zweiten Lauf daneben zulassen."
     }
   },
   "onboarding": {

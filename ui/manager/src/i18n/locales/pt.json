@@ -2083,7 +2083,11 @@
       "statFailed": "Falharam",
       "partialCrawl": "O rastreio parou num limite, por isso nada será tratado como eliminado.",
       "saveBeforeRun": "Guarde primeiro a base de conhecimento — uma execução rastreia a configuração guardada, não as alterações no ecrã.",
-      "purgeFailed": "Não foi possível limpar o estado de ingestão."
+      "purgeFailed": "Não foi possível limpar o estado de ingestão.",
+      "previewFailed": "Não foi possível pré-visualizar esta fonte.",
+      "previewNotCompleted": "A pré-visualização não foi concluída.",
+      "disabledNoRun": "Esta fonte está desativada. Ative e guarde para a executar ou agendar.",
+      "purgeBlockedWhileRunning": "Há uma execução em curso. Limpar agora permitiria que uma segunda começasse em paralelo."
     }
   },
   "onboarding": {

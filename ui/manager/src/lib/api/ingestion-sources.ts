@@ -88,9 +88,9 @@ const base = (kbId: string, sourceId: string) =>
 
 /** Starts a run. The backend answers 202; progress is followed through the run history. */
 export function runSource(kbId: string, sourceId: string, version: number) {
-  return api.post<{ status: string; sourceId: string }>(
-    `${base(kbId, sourceId)}/run?version=${version}`,
-  );
+  // A 202 carries no body the client can read, so typing one invites a caller to
+  // use a value that is always undefined.
+  return api.post<void>(`${base(kbId, sourceId)}/run?version=${version}`);
 }
 
 /** Crawls and reports what would change, embedding and recording nothing. */

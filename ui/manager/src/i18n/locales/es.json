@@ -2083,7 +2083,11 @@
       "statFailed": "Fallidos",
       "partialCrawl": "El rastreo se detuvo en un límite, por lo que nada se considerará eliminado.",
       "saveBeforeRun": "Guarde primero la base de conocimiento: una ejecución rastrea la configuración guardada, no los cambios en pantalla.",
-      "purgeFailed": "No se pudo purgar el estado de ingesta."
+      "purgeFailed": "No se pudo purgar el estado de ingesta.",
+      "previewFailed": "No se pudo previsualizar esta fuente.",
+      "previewNotCompleted": "La vista previa no se completó.",
+      "disabledNoRun": "Esta fuente está desactivada. Actívela y guárdela para ejecutarla o programarla.",
+      "purgeBlockedWhileRunning": "Hay una ejecución en curso. Purgar ahora permitiría que empezara una segunda en paralelo."
     }
   },
   "onboarding": {

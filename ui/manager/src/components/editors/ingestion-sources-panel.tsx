@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   AlertCircle,
@@ -176,11 +176,21 @@ function SourceCard({
   const { t } = useTranslation();
   const [confirmPurge, setConfirmPurge] = useState(false);
   const [preview, setPreview] = useState<IngestionReport | null>(null);
+  // A preview describes the configuration it ran against. Once that changes, it is
+  // a claim about something that no longer exists.
+  useEffect(() => {
+    if (hasUnsavedChanges) {
+      setPreview(null);
+    }
+  }, [hasUnsavedChanges]);
 
   // Runtime actions need a saved source: the id is what the endpoints address.
   const isSaved = Boolean(kbId && source.id);
 
-  const runs = useIngestionRuns(kbId, source.id, version, isSaved && isOpen);
+  // Not `isSaved && isOpen`: a disabled query keeps its cached data, so collapsing
+    // a card froze its "Running" badge for ever and a scheduled run never showed one.
+    // Polling already stops itself once nothing is RUNNING.
+    const runs = useIngestionRuns(kbId, source.id, version, isSaved);
   const runMutation = useRunIngestionSource(kbId, version);
   const previewMutation = usePreviewIngestionSource(kbId, version);
   const purgeMutation = usePurgeIngestionSource(kbId, version);
@@ -285,8 +295,9 @@ function SourceCard({
               <Input
                 type="number"
                 min={1}
+                max={20}
                 value={source.web?.maxDepth ?? 3}
-                onChange={(e) => onChangeWeb({ maxDepth: Number(e.target.value) })}
+                onChange={(e) => onChangeWeb({ maxDepth: numberOrUndefined(e.target.value) })}
                 disabled={readOnly}
                 data-testid={`${testId}-max-depth`}
               />
@@ -295,8 +306,9 @@ function SourceCard({
               <Input
                 type="number"
                 min={1}
+                max={50000}
                 value={source.web?.maxPages ?? 200}
-                onChange={(e) => onChangeWeb({ maxPages: Number(e.target.value) })}
+                onChange={(e) => onChangeWeb({ maxPages: numberOrUndefined(e.target.value) })}
                 disabled={readOnly}
                 data-testid={`${testId}-max-pages`}
               />
@@ -338,19 +350,11 @@ function SourceCard({
               "Globs matched against the URL path, comma separated — * stays in one segment, ** crosses them",
             )}
           >
-            <Input
-              value={(source.web?.excludePatterns ?? []).join(", ")}
-              onChange={(e) =>
-                onChangeWeb({
-                  excludePatterns: e.target.value
-                    .split(",")
-                    .map((pattern) => pattern.trim())
-                    .filter(Boolean),
-                })
-              }
+            <PatternListInput
+              patterns={source.web?.excludePatterns ?? []}
+              onCommit={(patterns) => onChangeWeb({ excludePatterns: patterns })}
               disabled={readOnly}
-              placeholder="*.pdf, **/changelog/**"
-              data-testid={`${testId}-exclude-patterns`}
+              testId={`${testId}-exclude-patterns`}
             />
           </Field>
 
@@ -371,7 +375,8 @@ function SourceCard({
                     readOnly ||
                     runMutation.isPending ||
                     Boolean(activeRun) ||
-                    Boolean(hasUnsavedChanges)
+                    Boolean(hasUnsavedChanges) ||
+                    source.enabled === false
                   }
                   data-testid={`${testId}-run`}
                 >
@@ -394,13 +399,35 @@ function SourceCard({
                   size="sm"
                   variant="outline"
                   onClick={() => setConfirmPurge(true)}
-                  disabled={readOnly || purgeMutation.isPending}
+                  disabled={readOnly || purgeMutation.isPending || Boolean(activeRun)}
                   data-testid={`${testId}-purge`}
                 >
                   <Trash2 />
                   {t("ragEditor.sources.purge", "Purge state")}
                 </Button>
               </div>
+
+              {source.enabled === false && (
+                <StatusLine
+                  tone="warning"
+                  text={t(
+                    "ragEditor.sources.disabledNoRun",
+                    "This source is disabled. Enable and save it to run or schedule it.",
+                  )}
+                  testId={`${testId}-disabled-hint`}
+                />
+              )}
+
+              {Boolean(activeRun) && (
+                <StatusLine
+                  tone="warning"
+                  text={t(
+                    "ragEditor.sources.purgeBlockedWhileRunning",
+                    "A run is in flight. Purging now would let a second run start alongside it.",
+                  )}
+                  testId={`${testId}-running-hint`}
+                />
+              )}
 
               {hasUnsavedChanges && (
                 <StatusLine
@@ -432,7 +459,26 @@ function SourceCard({
                 />
               )}
 
-              {preview && (
+              {previewMutation.isError && (
+                <StatusLine
+                  tone="error"
+                  text={t("ragEditor.sources.previewFailed", "Could not preview this source.")}
+                  testId={`${testId}-preview-error`}
+                />
+              )}
+
+              {preview && preview.outcome !== "PREVIEW" && (
+                <StatusLine
+                  tone="error"
+                  text={
+                    preview.message ??
+                    t("ragEditor.sources.previewNotCompleted", "The preview did not complete.")
+                  }
+                  testId={`${testId}-preview-failed`}
+                />
+              )}
+
+              {preview && preview.outcome === "PREVIEW" && (
                 <PreviewResult report={preview} onDismiss={() => setPreview(null)} testId={testId} />
               )}
 
@@ -456,6 +502,7 @@ function SourceCard({
           "The next run will re-crawl and re-embed everything this source has ingested. Documents already stored are not removed by this.",
         )}
         confirmLabel={t("ragEditor.sources.purgeConfirm", "Purge")}
+        cancelLabel={t("common.cancel", "Cancel")}
         variant="warning"
         isPending={purgeMutation.isPending}
         onConfirm={async () => {
@@ -645,6 +692,60 @@ function Stat({ label, value }: { label: string; value: number }) {
   );
 }
 
+/** Empty means "use the server's default", not zero. */
+function numberOrUndefined(value: string): number | undefined {
+  const trimmed = value.trim();
+  return trimmed === "" ? undefined : Number(trimmed);
+}
+
+/**
+ * A comma-separated list that can actually be typed.
+ *
+ * <p>Deriving the field's value from the parsed array re-rendered `["a"]` as `"a"`
+ * on the keystroke that added the comma, so a second pattern could only be pasted.
+ * The raw text is local state; the parsed list is committed on blur.
+ */
+function PatternListInput({
+  patterns,
+  onCommit,
+  disabled,
+  testId,
+}: {
+  patterns: string[];
+  onCommit: (patterns: string[]) => void;
+  disabled?: boolean;
+  testId: string;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const text = draft ?? patterns.join(", ");
+
+  const commit = (value: string) => {
+    setDraft(null);
+    onCommit(
+      value
+        .split(",")
+        .map((pattern) => pattern.trim())
+        .filter(Boolean),
+    );
+  };
+
+  return (
+    <Input
+      value={text}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={(e) => commit(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          commit((e.target as HTMLInputElement).value);
+        }
+      }}
+      disabled={disabled}
+      placeholder="*.pdf, **/changelog/**"
+      data-testid={testId}
+    />
+  );
+}
+
 function StatusLine({
   tone,
   text,
@@ -660,6 +761,7 @@ function StatusLine({
         "mt-2 flex items-start gap-1.5 text-[11px]",
         tone === "error" ? "text-destructive" : "text-amber-700 dark:text-amber-400",
       )}
+      role={tone === "error" ? "alert" : undefined}
       data-testid={testId}
     >
       <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />

@@ -2061,7 +2061,11 @@
       "statFailed": "失败",
       "partialCrawl": "抓取因达到限制而停止，因此不会将任何内容视为已删除。",
       "saveBeforeRun": "请先保存知识库——运行将抓取已保存的配置，而不是屏幕上的修改。",
-      "purgeFailed": "无法清除摄取状态。"
+      "purgeFailed": "无法清除摄取状态。",
+      "previewFailed": "无法预览此来源。",
+      "previewNotCompleted": "预览未完成。",
+      "disabledNoRun": "此来源已禁用。启用并保存后才能运行或调度。",
+      "purgeBlockedWhileRunning": "有一次运行正在进行。此时清除会让第二次运行同时开始。"
     }
   },
   "onboarding": {

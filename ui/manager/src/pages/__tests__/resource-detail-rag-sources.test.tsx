@@ -93,10 +93,12 @@ describe("RAG ingestion sources", () => {
     const user = userEvent.setup();
     // Asserting on the button alone passes even if the click sends nothing: it is
     // enabled before the click and enabled after it. Record the request instead.
-    let runRequests = 0;
+    // The handler pattern matches any id, so counting alone would still pass if the
+    // UI addressed /sources/undefined/run?version=NaN. Record the URL.
+    const runUrls: string[] = [];
     server.use(
-      http.post("*/ragstore/rags/:id/sources/:sourceId/run", () => {
-        runRequests += 1;
+      http.post("*/ragstore/rags/:id/sources/:sourceId/run", ({ request }) => {
+        runUrls.push(request.url);
         return HttpResponse.json({ status: "started", sourceId: "src-1" }, { status: 202 });
       }),
     );
@@ -106,7 +108,8 @@ describe("RAG ingestion sources", () => {
     const runButton = await screen.findByTestId("ingestion-source-0-run");
     await user.click(runButton);
 
-    await waitFor(() => expect(runRequests).toBe(1));
+    await waitFor(() => expect(runUrls).toHaveLength(1));
+    expect(runUrls[0]).toMatch(/\/ragstore\/rags\/res1\/sources\/src-1\/run\?version=1$/);
     // The endpoint answers 202 and the history is refetched; the button stays
     // usable rather than leaving the operator guessing.
     await waitFor(() => expect(runButton).toBeEnabled());
@@ -153,6 +156,111 @@ describe("RAG ingestion sources", () => {
     expect(await screen.findByTestId("ingestion-source-0-purge-error")).toBeInTheDocument();
     // Closing on a rejected request left the operator believing it had worked.
     expect(screen.getByText(/purge ingestion state\?/i)).toBeInTheDocument();
+  });
+
+  it("says why a preview produced nothing instead of showing an empty crawl", async () => {
+    const user = userEvent.setup();
+    // The endpoint answers 200 with outcome FAILED — a mistyped start URL, a site
+    // that is down, a seed that 403s. Rendering the counters would tell the
+    // operator their site is empty.
+    server.use(
+      http.post("*/ragstore/rags/:id/sources/:sourceId/preview", () =>
+        HttpResponse.json({
+          runId: "preview",
+          sourceId: "src-1",
+          outcome: "FAILED",
+          documentsSeen: 0,
+          documentsIngested: 0,
+          documentsUnchanged: 0,
+          documentsFailed: 0,
+          documentsTombstoned: 0,
+          segmentsStored: 0,
+          costUsd: 0,
+          replaceUnsupported: false,
+          tombstoningSkipped: false,
+          message: "Seed URL must be http or https",
+        }),
+      ),
+    );
+    renderRagPage();
+    await openFirstSource(user);
+
+    await user.click(await screen.findByTestId("ingestion-source-0-preview"));
+
+    const failure = await screen.findByTestId("ingestion-source-0-preview-failed");
+    expect(failure).toHaveTextContent(/seed url must be http or https/i);
+    expect(screen.queryByTestId("ingestion-source-0-preview-result")).not.toBeInTheDocument();
+  });
+
+  it("reports a preview request that fails outright", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post("*/ragstore/rags/:id/sources/:sourceId/preview", () =>
+        HttpResponse.json({ error: "nope" }, { status: 500 }),
+      ),
+    );
+    renderRagPage();
+    await openFirstSource(user);
+
+    await user.click(await screen.findByTestId("ingestion-source-0-preview"));
+
+    expect(await screen.findByTestId("ingestion-source-0-preview-error")).toBeInTheDocument();
+  });
+
+  it("does not offer Purge while a run is in flight", async () => {
+    const user = userEvent.setup();
+    // Purging deletes the RUNNING row, which is the only thing stopping a second
+    // crawl into the same knowledge base.
+    server.use(
+      http.get("*/ragstore/rags/:id/sources/:sourceId/runs", () =>
+        HttpResponse.json([
+          {
+            runId: "run-1",
+            sourceId: "src-1",
+            status: "RUNNING",
+            startedAt: "2026-09-20T10:00:00Z",
+            documentsSeen: 0,
+            documentsIngested: 0,
+            documentsUnchanged: 0,
+            documentsFailed: 0,
+            documentsTombstoned: 0,
+            segmentsStored: 0,
+            costUsd: 0,
+          },
+        ]),
+      ),
+    );
+    renderRagPage();
+    await openFirstSource(user);
+
+    await waitFor(() => expect(screen.getByTestId("ingestion-source-0-purge")).toBeDisabled());
+    expect(screen.getByTestId("ingestion-source-0-run")).toBeDisabled();
+    expect(await screen.findByTestId("ingestion-source-0-running-hint")).toBeInTheDocument();
+  });
+
+  it("does not offer Run for a disabled source", async () => {
+    const user = userEvent.setup();
+    renderRagPage();
+    await openFirstSource(user);
+
+    await user.click(screen.getByTestId("ingestion-source-0-enabled"));
+
+    await waitFor(() => expect(screen.getByTestId("ingestion-source-0-run")).toBeDisabled());
+    expect(await screen.findByTestId("ingestion-source-0-disabled-hint")).toBeInTheDocument();
+  });
+
+  it("keeps a second exclude pattern that is typed rather than pasted", async () => {
+    const user = userEvent.setup();
+    renderRagPage();
+    await openFirstSource(user);
+
+    const field = await screen.findByTestId("ingestion-source-0-exclude-patterns");
+    await user.clear(field);
+    // Deriving the field's value from the parsed array ate the comma on the
+    // keystroke that added it, so only the first pattern survived.
+    await user.type(field, "*.pdf, **/changelog/**");
+
+    expect(field).toHaveValue("*.pdf, **/changelog/**");
   });
 
   it("asks before purging, because the next run re-embeds everything", async () => {
