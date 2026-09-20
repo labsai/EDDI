@@ -184,6 +184,32 @@ public final class CrawlUrls {
         }
     }
 
+    /**
+     * What a robots.txt rule is matched against: the path exactly as it goes on the
+     * wire, with the query attached.
+     *
+     * <p>
+     * Not {@link #path(String)}, which decodes: a rule reading
+     * {@code Disallow: /caf%C3%A9/} never matched the decoded form, and a rule
+     * reading {@code Disallow: /*?sort=} never matched anything at all, because the
+     * query was dropped before the comparison. Both are ordinary ways to keep a
+     * crawler out of a section or off a facet explosion, and silently ignoring them
+     * is what gets an installation's traffic blocked.
+     */
+    public static String pathAndQuery(String url) {
+        try {
+            URI uri = parseTolerantly(url);
+            if (uri.getHost() == null) {
+                return "/";
+            }
+            String path = uri.getRawPath() == null || uri.getRawPath().isEmpty() ? "/" : uri.getRawPath();
+            String query = uri.getRawQuery();
+            return query == null || query.isEmpty() ? path : path + "?" + query;
+        } catch (URISyntaxException | NullPointerException e) {
+            return "/";
+        }
+    }
+
     /** Whether the scheme is one the crawler will fetch. */
     public static boolean isHttpScheme(String url) {
         try {
