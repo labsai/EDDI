@@ -654,8 +654,14 @@
                 <version>${surefire-plugin.version}</version>
                 <configuration>
                     <skipTests>${skipUTs}</skipTests>
-                    <!-- @{argLine} preserves JaCoCo's injected agent arg -->
-                    <argLine>@{argLine} -ea -XX:+EnableDynamicAgentLoading -Xshare:off --enable-native-access=ALL-UNNAMED</argLine>
+                    <!-- @{argLine} preserves JaCoCo's injected agent arg.
+                         The jdk.incubator.vector add-modules flag mirrors the container
+                         image (src/main/docker/Dockerfile) and mise.toml, so the test JVM
+                         is the same shape as production. JlamaRuntimeSupportTest asserts
+                         the Vector API is actually reachable here, so dropping the flag
+                         fails the build rather than silently un-testing Jlama's SIMD
+                         path. -->
+                    <argLine>@{argLine} -ea -XX:+EnableDynamicAgentLoading -Xshare:off --enable-native-access=ALL-UNNAMED --add-modules=jdk.incubator.vector</argLine>
                     <excludes>
                         <exclude>**/*IT.java</exclude>
                     </excludes>
@@ -686,7 +692,20 @@
                     <!-- NOTE: @{argLine} for JaCoCo IT instrumentation is intentionally NOT added here.
                          On Windows, the JaCoCo agent path with backslashes breaks the Quarkus
                          FacadeClassLoader. CI (Linux) uses the quarkus-jacoco extension instead.
-                         See ContainerBaseIT.java line 24 for details. -->
+                         See ContainerBaseIT.java line 24 for details.
+                         Note what that does NOT mean. Failsafe's argLine PARAMETER defaults to
+                         the ${argLine} property, which both jacoco:prepare-agent-integration
+                         and the Quarkus Maven extension populate. Omitting the element is
+                         therefore not the same as running without the agent: the agent IS
+                         there, and jacoco-it.exec IS produced for the merged coverage gate.
+                         Declaring an explicit argLine element here replaces all of it at once,
+                         dropping the JaCoCo IT agent, the add-opens/add-exports that Quarkus
+                         injects, and the serialized app-model path (Quarkus prints a warning
+                         saying so). So there is deliberately no argLine element here. The
+                         Jlama Vector API flag lives on surefire only: ITs exercise the image
+                         over HTTP, the image carries the flag in its own ENV, and no IT builds
+                         a Jlama model in the test JVM, so adding it here would buy nothing and
+                         cost the IT coverage data. -->
                     <!-- Kill the forked test process if it hasn't completed in 15 minutes.
                          Prevents CI from hanging indefinitely when Docker image builds
                          or container startup fails to propagate errors. -->

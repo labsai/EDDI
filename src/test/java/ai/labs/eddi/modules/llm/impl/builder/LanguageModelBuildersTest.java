@@ -7,10 +7,12 @@ package ai.labs.eddi.modules.llm.impl.builder;
 import dev.langchain4j.model.ollama.OllamaChatRequestParameters;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
+import dev.langchain4j.model.jlama.JlamaChatModel;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -533,6 +535,211 @@ class LanguageModelBuildersTest {
 
             StreamingChatModel model = builder.buildStreaming(params);
             assertNotNull(model);
+        }
+    }
+
+    // ==================== Jlama ====================
+
+    /**
+     * Jlama is the one provider whose {@code build()} cannot be exercised here:
+     * {@link JlamaChatModel}'s constructor downloads the weights from Hugging Face
+     * and loads them into memory, so a test that called it would need network
+     * access and several gigabytes of disk. That is why the parameter mapping is
+     * factored into an {@code applyTo} that stops short of building, and why it is
+     * asserted through the Jlama builder's {@code toString()} — which prints every
+     * field, masking only the auth token.
+     * <p>
+     * Until this existed, Jlama's mapping was the least covered of the eleven
+     * providers while being the only one where a dropped parameter can leave a pod
+     * unable to load a model at all (see {@code modelCachePath}).
+     */
+    @Nested
+    @DisplayName("JlamaLanguageModelBuilder")
+    class JlamaTests {
+
+        private final JlamaLanguageModelBuilder builder = new JlamaLanguageModelBuilder();
+
+        private String applied(Map<String, String> params) {
+            return JlamaLanguageModelBuilder.applyTo(JlamaChatModel.builder(), params).toString();
+        }
+
+        @Test
+        @DisplayName("maps every recognised parameter onto the Jlama builder")
+        void mapsEveryRecognisedParameter() {
+            Map<String, String> params = new HashMap<>();
+            params.put("modelName", "tjake/Llama-3.2-1B-Instruct-JQ4");
+            params.put("authToken", "hf_secret");
+            params.put("temperature", "0.7");
+            params.put("maxTokens", "512");
+            params.put("modelCachePath", "/models/jlama");
+            params.put("threadCount", "4");
+            params.put("quantizeModelAtRuntime", "true");
+            params.put("workingDirectory", "/tmp/jlama-work");
+            params.put("workingQuantizedType", "F32");
+
+            String state = applied(params);
+
+            assertTrue(state.contains("modelName=tjake/Llama-3.2-1B-Instruct-JQ4"), state);
+            assertTrue(state.contains("temperature=0.7"), state);
+            assertTrue(state.contains("maxTokens=512"), state);
+            assertTrue(state.contains("threadCount=4"), state);
+            assertTrue(state.contains("quantizeModelAtRuntime=true"), state);
+            // Path.of normalises separators per platform, so assert against a Path
+            // rather than a literal that only holds on one OS.
+            assertTrue(state.contains("modelCachePath=" + Path.of("/models/jlama")), state);
+            assertTrue(state.contains("workingDirectory=" + Path.of("/tmp/jlama-work")), state);
+            assertTrue(state.contains("workingQuantizedType=F32"), state);
+        }
+
+        /**
+         * Every key this builder declares must actually reach the Jlama builder.
+         * {@code recognisedParameters()} is what suppresses the "parameter has no
+         * effect" warning, so a key listed there but never read is worse than one that
+         * was never listed at all: the agent designer is actively reassured their
+         * setting is fine.
+         */
+        @Test
+        @DisplayName("every declared parameter changes the resulting builder state")
+        void everyDeclaredParameterIsActuallyRead() {
+            Map<String, String> values = Map.of(
+                    "modelName", "some-model",
+                    "authToken", "hf_secret",
+                    "temperature", "0.25",
+                    "maxTokens", "99",
+                    "modelCachePath", "/cache",
+                    "threadCount", "7",
+                    "quantizeModelAtRuntime", "true",
+                    "workingDirectory", "/work",
+                    "workingQuantizedType", "F32");
+
+            assertEquals(values.keySet(), builder.recognisedParameters(),
+                    "this test enumerates the declared parameters; update both together");
+
+            String empty = applied(new HashMap<>());
+            for (Map.Entry<String, String> entry : values.entrySet()) {
+                Map<String, String> one = new HashMap<>();
+                one.put(entry.getKey(), entry.getValue());
+                assertNotEquals(empty, applied(one),
+                        "'" + entry.getKey() + "' is declared in recognisedParameters() but does not change the"
+                                + " Jlama builder, so configuring it silently does nothing");
+            }
+        }
+
+        /**
+         * The token must never be printable from the builder. This whole nested class
+         * asserts through {@code toString()}, so a masking regression here would also
+         * be a live credential-leak path into any log that prints it.
+         */
+        @Test
+        @DisplayName("the auth token is masked in the builder's own toString")
+        void authTokenIsMasked() {
+            Map<String, String> params = new HashMap<>();
+            params.put("authToken", "hf_super_secret_value");
+
+            String state = applied(params);
+
+            assertFalse(state.contains("hf_super_secret_value"),
+                    "the Hugging Face token must not be printable from the builder: " + state);
+            assertTrue(state.contains("authToken=********"), state);
+        }
+
+        @Test
+        @DisplayName("an empty parameter map leaves every Jlama default in place")
+        void emptyParametersLeaveDefaults() {
+            String state = applied(new HashMap<>());
+
+            assertTrue(state.contains("modelName=null"), state);
+            assertTrue(state.contains("modelCachePath=null"), state);
+            assertTrue(state.contains("threadCount=null"), state);
+            assertTrue(state.contains("authToken=null"), state);
+        }
+
+        /**
+         * A non-numeric value is a typo in the Manager, not a programming error:
+         * {@code ModelParameterValues} logs it and leaves the provider default in
+         * place. If it propagated instead, one bad character would take down every turn
+         * the agent serves.
+         */
+        @Test
+        @DisplayName("unparseable numbers fall back to the Jlama default instead of throwing")
+        void unparseableNumbersFallBackToDefaults() {
+            Map<String, String> params = new HashMap<>();
+            params.put("temperature", "warm");
+            params.put("maxTokens", "lots");
+            params.put("threadCount", "many");
+
+            String state = applied(params);
+
+            assertTrue(state.contains("temperature=null"), state);
+            assertTrue(state.contains("maxTokens=null"), state);
+            assertTrue(state.contains("threadCount=null"), state);
+        }
+
+        /**
+         * A mistyped boolean must not silently become {@code false}. That is the whole
+         * reason {@code ModelParameterValues.applyBoolean} exists instead of
+         * {@code Boolean.parseBoolean}, and the reason this builder must use it:
+         * {@code "ture"} pinning quantization off, with no log line, is worse than
+         * leaving Jlama's own default in place.
+         */
+        @Test
+        @DisplayName("a mistyped boolean leaves the Jlama default rather than silently meaning false")
+        void mistypedBooleanLeavesTheDefault() {
+            Map<String, String> params = new HashMap<>();
+            params.put("quantizeModelAtRuntime", "ture");
+
+            String state = applied(params);
+
+            assertTrue(state.contains("quantizeModelAtRuntime=null"),
+                    "Boolean.parseBoolean would have produced 'false' here, which is indistinguishable from an"
+                            + " explicit opt-out. Expected the value to be left unset: " + state);
+        }
+
+        /**
+         * {@code workingQuantizedType} is the one setting whose value space is a
+         * third-party enum, so an unrecognised name has to be handled rather than
+         * handed to {@code DType.valueOf} — which would throw on every turn the agent
+         * serves.
+         */
+        @Test
+        @DisplayName("an unknown workingQuantizedType is ignored rather than failing the turn")
+        void unknownWorkingQuantizedTypeIsIgnored() {
+            Map<String, String> params = new HashMap<>();
+            params.put("workingQuantizedType", "NOT_A_DTYPE");
+
+            String state = applied(params);
+
+            assertTrue(state.contains("workingQuantizedType=null"),
+                    "an unusable enum name must leave Jlama's default in place: " + state);
+        }
+
+        @Test
+        @DisplayName("workingQuantizedType is matched case-insensitively and trimmed")
+        void workingQuantizedTypeIsCaseInsensitive() {
+            Map<String, String> params = new HashMap<>();
+            params.put("workingQuantizedType", "  f32  ");
+
+            String state = applied(params);
+
+            assertTrue(state.contains("workingQuantizedType=F32"),
+                    "a value typed in the Manager should not have to match enum casing exactly: " + state);
+        }
+
+        /**
+         * {@code timeout} is honoured for Jlama by {@code ObservableChatModel} rather
+         * than by the provider, which is why it is a pipeline key rather than a
+         * recognised parameter. Pinned because the obvious "fix" — adding it to
+         * {@code recognisedParameters()} — would be wrong, and the obvious other "fix",
+         * deleting it from the documented example, would remove a setting that does
+         * work.
+         */
+        @Test
+        @DisplayName("timeout stays a pipeline key, not a Jlama builder parameter")
+        void timeoutIsNotABuilderParameter() {
+            assertFalse(builder.recognisedParameters().contains("timeout"),
+                    "JlamaChatModel.builder() has no timeout setter; the value is applied by ObservableChatModel"
+                            + " as a wall-clock bound, and ModelParameterValues.PIPELINE_KEYS is what stops it"
+                            + " being reported as unrecognised");
         }
     }
 
