@@ -78,10 +78,51 @@ public class RestRagStore implements IRestRagStore {
         prepareForWrite(ragConfiguration);
         // Read before writing: a source removed from sources[] must lose its
         // schedule, and afterwards there is nothing left to say which ones existed.
-        Set<String> previousSourceIds = sourceIdsOf(readQuietly(id, version));
+        RagConfiguration previous = readQuietly(id, version);
+        Set<String> previousSourceIds = sourceIdsOf(previous);
         Response response = restVersionInfo.update(id, version, ragConfiguration);
+        forgetIngestionStateOnRename(id, previous, ragConfiguration);
         syncIngestionSchedules(response, id, ragConfiguration, previousSourceIds);
         return response;
+    }
+
+    /**
+     * Forgets what each source has ingested when the knowledge base is renamed.
+     *
+     * <p>
+     * The vector store is addressed by the knowledge base's <em>name</em> while
+     * ingestion state is keyed by its id, so a rename moves retrieval to a new,
+     * empty namespace while every document still looks "unchanged" — runs keep
+     * reporting success and the agent retrieves nothing, for ever. Clearing the
+     * state makes the next run repopulate the new namespace.
+     *
+     * <p>
+     * The chunks under the old name are left where they are: they are no longer
+     * reachable through this configuration, and deleting data on a rename is worse
+     * than leaving it. Purge the old knowledge base if it is not wanted.
+     */
+    private void forgetIngestionStateOnRename(String id, RagConfiguration previous, RagConfiguration updated) {
+        if (previous == null || updated == null || previous.getName() == null
+                || previous.getName().equals(updated.getName())) {
+            return;
+        }
+        if (updated.getSources() == null || updated.getSources().isEmpty()) {
+            return;
+        }
+        LOGGER.warnf("Knowledge base %s was renamed from '%s' to '%s'. Its vector store is addressed by name, so "
+                + "ingestion state is being cleared and the next run of each source will re-ingest into the new "
+                + "store. Chunks stored under the old name are left untouched.",
+                LogSanitizer.sanitize(id), LogSanitizer.sanitize(previous.getName()),
+                LogSanitizer.sanitize(updated.getName()));
+        for (var source : updated.getSources()) {
+            try {
+                sourceIngestionService.purge(id, source);
+            } catch (RuntimeException e) {
+                LOGGER.errorf(e, "Could not clear ingestion state after renaming knowledge base %s; its sources "
+                        + "will report every document as unchanged until they are purged by hand",
+                        LogSanitizer.sanitize(id));
+            }
+        }
     }
 
     @Override

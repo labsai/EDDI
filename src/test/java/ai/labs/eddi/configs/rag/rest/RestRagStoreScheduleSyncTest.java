@@ -26,6 +26,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anySet;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -88,6 +89,37 @@ class RestRagStoreScheduleSyncTest {
                 previousIds.capture());
         assertEquals(Set.of("src-old"), previousIds.getValue(),
                 "a source removed by this update must be named, or its schedule keeps firing");
+    }
+
+    @Test
+    @DisplayName("renaming the knowledge base forgets what its sources ingested")
+    void renameClearsIngestionState() throws Exception {
+        // The vector store is addressed by name while ingestion state is keyed by id,
+        // so a rename moves retrieval to a new, empty namespace while every document
+        // still looks unchanged — runs keep succeeding and the agent retrieves
+        // nothing.
+        var stored = knowledgeBaseWithScheduledSource();
+        stored.setName("old-name");
+        when(ragStore.read(eq(KB_ID), anyInt())).thenReturn(stored);
+        when(ragStore.update(eq(KB_ID), anyInt(), any(RagConfiguration.class))).thenReturn(2);
+
+        var renamed = knowledgeBaseWithScheduledSource();
+        renamed.setName("new-name");
+        restRagStore.updateRag(KB_ID, 1, renamed);
+
+        verify(sourceIngestionService).purge(eq(KB_ID), any(IngestionSource.class));
+    }
+
+    @Test
+    @DisplayName("an update that keeps the name keeps the ingestion state")
+    void updateWithoutRenameKeepsState() throws Exception {
+        var stored = knowledgeBaseWithScheduledSource();
+        when(ragStore.read(eq(KB_ID), anyInt())).thenReturn(stored);
+        when(ragStore.update(eq(KB_ID), anyInt(), any(RagConfiguration.class))).thenReturn(2);
+
+        restRagStore.updateRag(KB_ID, 1, knowledgeBaseWithScheduledSource());
+
+        verify(sourceIngestionService, never()).purge(any(), any());
     }
 
     private static IResourceStore.IResourceId resourceId(String id, int version) {
