@@ -15,6 +15,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Tests for {@link HtmlToMarkdownConverter}.
+ *
+ * <p>
+ * Written by nic (christoph.niederer99@gmail.com) for
+ * <a href="https://github.com/labsai/EDDI/pull/529">PR #529</a> and kept here
+ * almost verbatim — the cases are theirs. What those cases did not cover is in
+ * HtmlToMarkdownConverterSalvageTest.
  */
 class HtmlToMarkdownConverterTest {
 
