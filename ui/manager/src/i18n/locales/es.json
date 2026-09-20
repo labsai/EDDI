@@ -2081,7 +2081,9 @@
       "statChanged": "Se ingerirían",
       "statUnchanged": "Sin cambios",
       "statFailed": "Fallidos",
-      "partialCrawl": "El rastreo se detuvo en un límite, por lo que nada se considerará eliminado."
+      "partialCrawl": "El rastreo se detuvo en un límite, por lo que nada se considerará eliminado.",
+      "saveBeforeRun": "Guarde primero la base de conocimiento: una ejecución rastrea la configuración guardada, no los cambios en pantalla.",
+      "purgeFailed": "No se pudo purgar el estado de ingesta."
     }
   },
   "onboarding": {

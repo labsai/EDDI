@@ -2081,7 +2081,9 @@
       "statChanged": "Seriam ingeridos",
       "statUnchanged": "Inalterados",
       "statFailed": "Falharam",
-      "partialCrawl": "O rastreio parou num limite, por isso nada será tratado como eliminado."
+      "partialCrawl": "O rastreio parou num limite, por isso nada será tratado como eliminado.",
+      "saveBeforeRun": "Guarde primeiro a base de conhecimento — uma execução rastreia a configuração guardada, não as alterações no ecrã.",
+      "purgeFailed": "Não foi possível limpar o estado de ingestão."
     }
   },
   "onboarding": {

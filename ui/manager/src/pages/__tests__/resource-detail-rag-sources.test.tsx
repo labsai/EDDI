@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { http, HttpResponse } from "msw";
 import { renderPage } from "@/test/test-utils";
+import { server } from "@/test/mocks/server";
 import { ResourceDetailPage } from "@/pages/resource-detail";
 
 function renderRagPage(id = "res1") {
@@ -89,15 +91,68 @@ describe("RAG ingestion sources", () => {
 
   it("starts a run", async () => {
     const user = userEvent.setup();
+    // Asserting on the button alone passes even if the click sends nothing: it is
+    // enabled before the click and enabled after it. Record the request instead.
+    let runRequests = 0;
+    server.use(
+      http.post("*/ragstore/rags/:id/sources/:sourceId/run", () => {
+        runRequests += 1;
+        return HttpResponse.json({ status: "started", sourceId: "src-1" }, { status: 202 });
+      }),
+    );
     renderRagPage();
     await openFirstSource(user);
 
     const runButton = await screen.findByTestId("ingestion-source-0-run");
     await user.click(runButton);
 
+    await waitFor(() => expect(runRequests).toBe(1));
     // The endpoint answers 202 and the history is refetched; the button stays
     // usable rather than leaving the operator guessing.
     await waitFor(() => expect(runButton).toBeEnabled());
+  });
+
+  it("refuses to run while the editor has unsaved changes", async () => {
+    const user = userEvent.setup();
+    let runRequests = 0;
+    server.use(
+      http.post("*/ragstore/rags/:id/sources/:sourceId/run", () => {
+        runRequests += 1;
+        return HttpResponse.json({ status: "started", sourceId: "src-1" }, { status: 202 });
+      }),
+    );
+    renderRagPage();
+    await openFirstSource(user);
+
+    // A run addresses the source by id and version, so the server would crawl the
+    // saved configuration while the screen shows something else.
+    const startUrl = await screen.findByTestId("ingestion-source-0-start-url");
+    await user.type(startUrl, "/changed");
+
+    expect(await screen.findByTestId("ingestion-source-0-save-before-run")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByTestId("ingestion-source-0-run")).toBeDisabled(),
+    );
+    expect(screen.getByTestId("ingestion-source-0-preview")).toBeDisabled();
+    expect(runRequests).toBe(0);
+  });
+
+  it("keeps the purge dialog open and reports the failure when purging fails", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.delete("*/ragstore/rags/:id/sources/:sourceId/documents", () =>
+        HttpResponse.json({ error: "nope" }, { status: 500 }),
+      ),
+    );
+    renderRagPage();
+    await openFirstSource(user);
+
+    await user.click(await screen.findByTestId("ingestion-source-0-purge"));
+    await user.click(await screen.findByRole("button", { name: /^purge$/i }));
+
+    expect(await screen.findByTestId("ingestion-source-0-purge-error")).toBeInTheDocument();
+    // Closing on a rejected request left the operator believing it had worked.
+    expect(screen.getByText(/purge ingestion state\?/i)).toBeInTheDocument();
   });
 
   it("asks before purging, because the next run re-embeds everything", async () => {

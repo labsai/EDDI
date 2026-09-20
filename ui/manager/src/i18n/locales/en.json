@@ -2139,7 +2139,9 @@
       "statChanged": "Would ingest",
       "statUnchanged": "Unchanged",
       "statFailed": "Failed",
-      "partialCrawl": "The crawl stopped at a limit, so nothing would be treated as deleted."
+      "partialCrawl": "The crawl stopped at a limit, so nothing would be treated as deleted.",
+      "saveBeforeRun": "Save the knowledge base first — a run crawls the saved configuration, not the edits on screen.",
+      "purgeFailed": "Could not purge the ingestion state."
     }
   },
   "onboarding": {

@@ -34,6 +34,12 @@ export interface IngestionSourcesPanelProps {
   kbId?: string;
   version: number;
   readOnly?: boolean;
+  /**
+   * Unsaved edits in the editor. Run and preview address the source by id and
+   * version, so the server would crawl the saved configuration, not what is on
+   * screen.
+   */
+  hasUnsavedChanges?: boolean;
 }
 
 const DEFAULT_SOURCE: IngestionSource = {
@@ -66,6 +72,7 @@ export function IngestionSourcesPanel({
   kbId,
   version,
   readOnly,
+  hasUnsavedChanges,
 }: IngestionSourcesPanelProps) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -125,6 +132,7 @@ export function IngestionSourcesPanel({
             kbId={kbId}
             version={version}
             readOnly={readOnly}
+            hasUnsavedChanges={hasUnsavedChanges}
             testId={`ingestion-source-${index}`}
           />
         );
@@ -150,6 +158,7 @@ function SourceCard({
   kbId,
   version,
   readOnly,
+  hasUnsavedChanges,
   testId,
 }: {
   source: IngestionSource;
@@ -161,6 +170,7 @@ function SourceCard({
   kbId?: string;
   version: number;
   readOnly?: boolean;
+  hasUnsavedChanges?: boolean;
   testId: string;
 }) {
   const { t } = useTranslation();
@@ -357,7 +367,12 @@ function SourceCard({
                 <Button
                   size="sm"
                   onClick={() => runMutation.mutate(source.id as string)}
-                  disabled={readOnly || runMutation.isPending || Boolean(activeRun)}
+                  disabled={
+                    readOnly ||
+                    runMutation.isPending ||
+                    Boolean(activeRun) ||
+                    Boolean(hasUnsavedChanges)
+                  }
                   data-testid={`${testId}-run`}
                 >
                   {runMutation.isPending ? <Loader2 className="animate-spin" /> : <Play />}
@@ -369,7 +384,7 @@ function SourceCard({
                   onClick={() =>
                     previewMutation.mutate(source.id as string, { onSuccess: setPreview })
                   }
-                  disabled={readOnly || previewMutation.isPending}
+                  disabled={readOnly || previewMutation.isPending || Boolean(hasUnsavedChanges)}
                   data-testid={`${testId}-preview`}
                 >
                   {previewMutation.isPending ? <Loader2 className="animate-spin" /> : <Eye />}
@@ -387,6 +402,17 @@ function SourceCard({
                 </Button>
               </div>
 
+              {hasUnsavedChanges && (
+                <StatusLine
+                  tone="warning"
+                  text={t(
+                    "ragEditor.sources.saveBeforeRun",
+                    "Save the knowledge base first — a run crawls the saved configuration, not the edits on screen.",
+                  )}
+                  testId={`${testId}-save-before-run`}
+                />
+              )}
+
               {runMutation.isError && (
                 <StatusLine
                   tone="error"
@@ -395,6 +421,14 @@ function SourceCard({
                     "Could not start the run. A run may already be in flight.",
                   )}
                   testId={`${testId}-run-error`}
+                />
+              )}
+
+              {purgeMutation.isError && (
+                <StatusLine
+                  tone="error"
+                  text={t("ragEditor.sources.purgeFailed", "Could not purge the ingestion state.")}
+                  testId={`${testId}-purge-error`}
                 />
               )}
 
@@ -424,9 +458,16 @@ function SourceCard({
         confirmLabel={t("ragEditor.sources.purgeConfirm", "Purge")}
         variant="warning"
         isPending={purgeMutation.isPending}
-        onConfirm={() => {
-          purgeMutation.mutate(source.id as string);
-          setConfirmPurge(false);
+        onConfirm={async () => {
+          // Awaited: mutate() returns before the request does, so the dialog used to
+          // close on a failure too and the only feedback was a run history that
+          // quietly stayed as it was.
+          try {
+            await purgeMutation.mutateAsync(source.id as string);
+            setConfirmPurge(false);
+          } catch {
+            // Reported by the status line below; the dialog stays open.
+          }
         }}
       />
     </div>

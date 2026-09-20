@@ -2059,7 +2059,9 @@
       "statChanged": "Würde erfassen",
       "statUnchanged": "Unverändert",
       "statFailed": "Fehlgeschlagen",
-      "partialCrawl": "Der Crawl endete an einem Limit, daher gilt nichts als gelöscht."
+      "partialCrawl": "Der Crawl endete an einem Limit, daher gilt nichts als gelöscht.",
+      "saveBeforeRun": "Speichern Sie die Knowledge Base zuerst — ein Lauf crawlt die gespeicherte Konfiguration, nicht die Änderungen auf dem Bildschirm.",
+      "purgeFailed": "Der Ingestion-Status konnte nicht gelöscht werden."
     }
   },
   "onboarding": {

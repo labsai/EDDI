@@ -2059,7 +2059,9 @@
       "statChanged": "수집 예정",
       "statUnchanged": "변경 없음",
       "statFailed": "실패",
-      "partialCrawl": "크롤링이 제한에 도달해 중지되었으므로 삭제로 처리되는 항목은 없습니다."
+      "partialCrawl": "크롤링이 제한에 도달해 중지되었으므로 삭제로 처리되는 항목은 없습니다.",
+      "saveBeforeRun": "먼저 지식 베이스를 저장하세요. 실행은 화면의 편집 내용이 아니라 저장된 구성을 크롤링합니다.",
+      "purgeFailed": "수집 상태를 지울 수 없습니다."
     }
   },
   "onboarding": {

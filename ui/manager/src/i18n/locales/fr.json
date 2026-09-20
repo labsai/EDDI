@@ -2081,7 +2081,9 @@
       "statChanged": "À ingérer",
       "statUnchanged": "Inchangés",
       "statFailed": "Échecs",
-      "partialCrawl": "L'exploration s'est arrêtée à une limite, rien ne sera donc considéré comme supprimé."
+      "partialCrawl": "L'exploration s'est arrêtée à une limite, rien ne sera donc considéré comme supprimé.",
+      "saveBeforeRun": "Enregistrez d'abord la base de connaissances — une exécution explore la configuration enregistrée, pas les modifications à l'écran.",
+      "purgeFailed": "Impossible de purger l'état d'ingestion."
     }
   },
   "onboarding": {
