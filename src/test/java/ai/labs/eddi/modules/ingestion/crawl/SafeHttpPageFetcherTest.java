@@ -156,6 +156,29 @@ class SafeHttpPageFetcherTest {
     }
 
     @Test
+    @DisplayName("a charset the JVM does not know is left unset so the parser can sniff")
+    void unsupportedCharsetIsIgnored() throws Exception {
+        // utf8mb4 is MySQL's name, and real sites send it. Passing it to the parser
+        // throws, which loses the page — and a lost page counts as missing, so two
+        // runs later it is deleted from the knowledge base.
+        respond(200, Map.of("Content-Type", List.of("text/html; charset=utf8mb4")), "<html>hi</html>".getBytes());
+
+        FetchedPage page = fetcher.fetch(command(0));
+
+        assertNull(page.declaredCharset(), "an unusable charset must be dropped, not forwarded");
+    }
+
+    @Test
+    @DisplayName("a malformed charset from a broken proxy is dropped too")
+    void malformedCharsetIsIgnored() throws Exception {
+        respond(200, Map.of("Content-Type", List.of("text/html; charset=utf-8, utf-8")), "<html>hi</html>".getBytes());
+
+        FetchedPage page = fetcher.fetch(command(0));
+
+        assertNull(page.declaredCharset());
+    }
+
+    @Test
     @DisplayName("a 304 comes back as not-modified with no body")
     void notModified() throws Exception {
         respond(304, Map.of("ETag", List.of("\"v1\"")), new byte[0]);

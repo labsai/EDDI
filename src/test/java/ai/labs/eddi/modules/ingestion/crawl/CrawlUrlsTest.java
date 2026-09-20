@@ -193,4 +193,26 @@ class CrawlUrlsTest {
             assertEquals("/", CrawlUrls.path("nonsense"));
         }
     }
+
+    @Test
+    @DisplayName("a URL with characters the RFC forbids is encoded rather than dropped")
+    void encodesIllegalCharacters() {
+        // jsoup resolves href="my doc.html" without percent-encoding it, and the
+        // single-argument URI constructor then refuses the space. The link used to
+        // be discarded with no error and no counter, which silently excluded whole
+        // sections of SharePoint and Confluence exports.
+        String canonical = CrawlUrls.canonicalize("https://example.com/docs/my doc.html");
+
+        assertTrue(CrawlUrls.isHttpScheme(canonical), "must still be a usable http URL: " + canonical);
+        assertEquals("https://example.com/docs/my%20doc.html", canonical);
+    }
+
+    @Test
+    @DisplayName("a pipe or a brace in a query survives canonicalization")
+    void encodesIllegalQueryCharacters() {
+        String canonical = CrawlUrls.canonicalize("https://example.com/search?q=a|b");
+
+        assertTrue(CrawlUrls.isHttpScheme(canonical), canonical);
+        assertTrue(canonical.startsWith("https://example.com/search?q=a"), canonical);
+    }
 }
