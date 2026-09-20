@@ -78,9 +78,17 @@ to the 401 challenge, so there is no new EDDI code — five properties and one p
 - **`ui/manager/e2e/auth/auth.spec.ts`** — two cases in the Keycloak tier: the document is
   readable with no token and names the issuer a real token carries; an unauthenticated `/mcp`
   POST answers 401 with a challenge pointing at it.
-- **`ui/manager/docker-compose.integration-keycloak.yml`**, **`docker-compose.auth.yml`** — both
-  serve EDDI over plain http with authentication on, which is the one shape the forced https
-  identifier is wrong for, so both override `force-https-scheme`.
+- **Every shipped stack that serves plain http with authentication on** overrides
+  `force-https-scheme`, because that is the one shape a forced https identifier is wrong for:
+  `docker-compose.auth.yml`, the auth E2E tier, `k8s/overlays/auth` (its documented flow is
+  `kubectl port-forward`), and the helm chart whenever the Keycloak URL it is given is itself
+  plain http. Without it those deployments advertise `https://…/mcp` with nothing serving TLS,
+  and discovery dies before it starts.
+- **`ui/manager/docker-compose.integration-keycloak.yml`** — the tier now pins the
+  browser-reachable issuer the way `docker-compose.auth.yml` does, so the discovery document it
+  publishes is the one a real deployment publishes. The E2E case can therefore assert the
+  advertised authorization server is reachable **from outside the compose network** — with the
+  old in-cluster hostname that assertion could not have failed.
 - **`docs/mcp-server.md`**, **`docs/security.md`** — the discovery path as the preferred way in,
   with the hand-pasted token demoted to a fallback; the new permit row, and why `@PermitAll`
   alone does not make a path public.
