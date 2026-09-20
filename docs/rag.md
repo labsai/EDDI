@@ -216,6 +216,44 @@ one table while retrieval read another.
 Every field has a default; omitting `settings` entirely means "all defaults". `excludePatterns` are
 globs matched against the URL **path** (`*` stays inside one segment, `**` crosses them).
 
+**`cron` is a standard five-field expression** — `min hour dom month dow` — the same form the schedule
+API takes. Six- and seven-field Quartz expressions with a seconds column are **refused when the
+knowledge base is saved**, with a 400 naming the source: stored, they would have become a schedule
+that never fires while every screen showed the source as scheduled. Omit `cron` for a source that only
+runs when someone asks.
+
+#### Every field
+
+`web` — what to crawl:
+
+| Field | Default | What it does |
+| --- | --- | --- |
+| `startUrl` | required | Where the crawl begins |
+| `sameSiteOnly` | `true` | Stay on the seed's site. Turning it off lets links take the crawl anywhere the other limits allow |
+| `includeSubdomains` | `false` | Treat `docs.example.com` as the same site as `example.com` |
+| `pathPrefix` | `/` | Only paths under this prefix are ingested |
+| `maxDepth` | `3` | How many links from the seed |
+| `maxPages` | `200` | Pages ingested per run |
+| `excludePatterns` | none | Globs matched against the path |
+| `requestDelayMs` | `500` | Politeness delay between requests to one host. A `Crawl-delay` in robots.txt wins when it is slower |
+| `timeoutSeconds` | `15` | Per-request timeout. The body gets a multiple of it before it is cut off |
+| `userAgent` | EDDI's default | Sent on every request, and matched against robots.txt groups |
+| `respectRobots` | `true` | Honour robots.txt, its `Crawl-delay` and its `Sitemap` entries |
+
+`settings` — what to do with what was crawled:
+
+| Field | Default | What it does |
+| --- | --- | --- |
+| `maxContentLength` | `100000` | Characters kept per document after conversion to Markdown. A longer page is truncated, never split across documents |
+| `maxBytesPerPage` | `5242880` | Cap on one response body. Must be positive — a non-positive value would read as "no cap" |
+| `maxSegmentsPerRun` | `20000` | Hard ceiling on embedded chunks per run: the cost control |
+| `costPerThousandSegments` | unset | Optional rate used to report a run's cost in the run history |
+| `tombstoneAfterMissedRuns` | `2` | Consecutive complete runs a document may be missing before its vectors go |
+| `timeBudgetMinutes` | `10` | Wall-clock ceiling for one run, 1–1440 |
+
+`enabled` (default `true`) is on the source itself: a disabled source keeps its configuration and its
+history, loses its schedule, and is skipped by a manual run.
+
 **What a run does.** Crawls within the scope, converts each page to Markdown, compares a content hash
 against the last successful ingest, and re-embeds only what changed — replacing that document's chunks
 rather than adding to them. Pages that disappear from the source lose their vectors after
@@ -225,6 +263,18 @@ costs one 304.
 
 `robots.txt` is honoured by default, including `Crawl-delay` and `Sitemap` discovery. Turn
 `respectRobots` off only for a site you own.
+
+**When absence counts as deletion.** Removing a document is the one irreversible thing a run does, so
+it happens only when the crawl actually saw the source. A run that stopped at a limit, was cancelled,
+or reached nothing at all concludes nothing. "Reached nothing" is deliberate: an unreachable seed, a
+connection failure, a 5xx, a 429, and a 401 or 403 are the server saying nothing about its content, and
+a robots.txt that disallows everything is the same. A **404 or 410 is the opposite** — the server
+saying the page is gone — so a start page that 404s does reconcile, and one dead link on a site that
+otherwise answered never blocks reconciliation.
+
+**One run at a time per source.** A run is claimed before the request is answered, so a second "run
+now" while one is in flight gets a 409 rather than a second crawl into the same store. A run whose
+process died is reaped, so it cannot block the source for ever.
 
 ### Ingestion source endpoints
 
@@ -239,7 +289,20 @@ Running needs EDIT rather than VIEW because a published knowledge base grants VI
 design, and a run rewrites what every agent using it retrieves.
 
 A source with a `cron` gets a schedule named `rag-ingestion:{ragConfigId}:{sourceId}`, kept in step with
-the configuration whenever the knowledge base is saved and removed when it is deleted.
+the configuration whenever the knowledge base is saved and removed when it is deleted. `{sourceId}` is
+the source's id, or its name when it has none — a source imported from a ZIP never passes the REST
+layer that assigns ids, and schedules, run history and the REST paths all address it the same way.
+
+### In the Manager
+
+The knowledge-base editor has an **Ingestion Sources** section: add and remove sources, edit the scope
+and the limits, and for a source that has been saved once, **Run now**, **Preview**, **Purge state**
+and the run history with its counters and errors.
+
+Run and Preview address the source by id and version, so they crawl the **saved** configuration. While
+the editor has unsaved changes both are disabled, with a line saying why — otherwise editing a start
+URL and pressing Run would silently crawl the old one. A source that has never been saved shows the
+same explanation instead of the buttons, because it has no id for the endpoints to address.
 
 ### Store support for replacement
 
