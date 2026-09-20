@@ -559,7 +559,7 @@ Every failure uses the OpenAI envelope:
 
 **Streaming looks like a hang behind a proxy.** The adapter sets `X-Accel-Buffering: no`, but some proxies need explicit configuration to stop buffering `text/event-stream`.
 
-**401 with a valid-looking token under OIDC.** In `http-policy=authenticated` mode the token must be a real OIDC token for your realm; an `sk-…` string is not.
+**401 with a valid-looking token under OIDC.** In `http-policy=authenticated` mode the token must be a real OIDC token for your realm; an `sk-…` string is not. It must also carry the **audience** EDDI requires — `quarkus.oidc.token.audience` defaults to `eddi-backend`, and Keycloak emits `aud` only through an explicit `oidc-audience-mapper` on the client that minted the token. A token from a client without that mapper authenticates everywhere else and is refused here. See [Security → Configuration Properties](security.md#configuration-properties).
 
 ---
 

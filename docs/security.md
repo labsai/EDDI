@@ -62,6 +62,23 @@ This starts Keycloak alongside EDDI with pre-configured realm, clients, and test
 | `quarkus.oidc.client-id`       | Runtime        | `eddi-backend`                      | OIDC client ID (bearer-only)                    |
 | `quarkus.oidc.application-type` | Runtime       | `service`                           | Bearer-only mode (no login redirects)           |
 | `authorization.enabled`        | Runtime        | `${quarkus.oidc.tenant-enabled}`    | Fine-grained `@RolesAllowed` authorization      |
+| `quarkus.oidc.token.audience`  | Runtime        | `eddi-backend`                      | The `aud` an access token must carry            |
+| `quarkus.oidc.token-cache.max-size` | Runtime   | `1000`                              | Caches the per-request userinfo lookup (`0` disables) |
+
+> **Audience validation.** Quarkus verifies `aud` on an *access* token only when
+> `quarkus.oidc.token.audience` is set. Without it EDDI accepts any token the realm
+> issued, for any client in it — and since roles come from `realm_access/roles`, which
+> is client-independent, such a token arrives with the user's full rights. The shipped
+> realm's `eddi-frontend` and `eddi-mcp` clients both carry an `eddi-backend-audience`
+> protocol mapper, so their tokens satisfy it. **If you provision your own realm, any
+> client whose tokens EDDI should accept needs that mapper** (`oidc-audience-mapper`,
+> `included.client.audience=eddi-backend`) — otherwise every request answers `401`.
+> Setting `QUARKUS_OIDC_TOKEN_AUDIENCE=any` returns to accepting every token in the realm:
+> `any` is quarkus-oidc's sentinel for skipping audience validation, and is the supported
+> way to opt out.
+>
+> This also applies to the `/v1` adapter when it runs in `authenticated` mode, and to any
+> deployment pointed at its own identity provider rather than the shipped realm.
 
 > **Important:** `quarkus.oidc.enabled` is a **build-time** property — it cannot be changed at container start. The OIDC extension must always be active in the binary. Use `quarkus.oidc.tenant-enabled` (runtime) to toggle auth on/off via environment variables.
 
