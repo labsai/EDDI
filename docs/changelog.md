@@ -121,7 +121,7 @@ to the 401 challenge, so there is no new EDDI code — five properties and one p
 
 A local MCP client — Claude Desktop, Claude Code, Cursor, LM Studio — cannot practically
 manage an EDDI instance that has OIDC enabled. `/mcp` carries an `authenticated` policy
-(`application.properties:537`), EDDI is bearer-only (`application-type=service`), and it
+(its own `quarkus.http.auth.permission.mcp` rule), EDDI is bearer-only (`application-type=service`), and it
 advertises no OAuth metadata, so a client that would log in by itself gets a bare 401 with
 nothing to discover. The only way in is a hand-pasted token that the shipped realm lets
 expire after Keycloak's default five minutes, and there is no long-lived key for `/mcp`
@@ -139,7 +139,7 @@ The Quick Start in `docs/mcp-server.md` only ever showed the unauthenticated
   bite — expiry, no api key, roles decide which tools work, and `/mcp` cannot be opened
   selectively. The Quick Start now points at it.
 - **`docs/mcp-server.md`** — the Configuration block documented `quarkus.mcp-server.http.root-path`.
-  That hyphenated form is not a key the extension knows; `application.properties:633-636`
+  That hyphenated form is not a key the extension knows; `application.properties`
   already says so. Corrected to `quarkus.mcp.server.http.root-path` with the warning kept.
 - **`planning/mcp-oauth-protected-resource-plan.md`** (new) — the fix: advertise `/mcp` as an
   RFC 9728 protected resource so the client runs the OAuth flow and refreshes its own token,
