@@ -8,12 +8,16 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import com.sun.management.ThreadMXBean;
+
+import java.lang.management.ManagementFactory;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * Defects carried by the draft this converter was salvaged from.
@@ -216,6 +220,44 @@ class HtmlToMarkdownConverterSalvageTest {
         String html = "<body>" + "<div>".repeat(20_000) + "deep content" + "</div>".repeat(20_000) + "</body>";
 
         assertConvertsOnSmallStack(html);
+    }
+
+    @Test
+    @DisplayName("nested lists allocate what they contain, not what they contain times their depth")
+    void nestedListsDoNotAllocateQuadratically() {
+        // Rendering each nested level into its own buffer and re-indenting every line
+        // copies the whole subtree once per level, so the allocation grows with
+        // items x depth even though the final string does not. A 200 KB page of
+        // nested lists measured 255 MB of heap that way, and a source may
+        // legitimately fetch 5 MB.
+        var threadBean = ManagementFactory.getThreadMXBean();
+        assumeTrue(threadBean instanceof ThreadMXBean, "allocation counters are a HotSpot extension");
+        var hotspot = (ThreadMXBean) threadBean;
+        assumeTrue(hotspot.isThreadAllocatedMemorySupported(), "allocation counters are not enabled");
+
+        int depth = 200;
+        String text = "x".repeat(200);
+        StringBuilder html = new StringBuilder("<body>");
+        for (int i = 0; i < depth; i++) {
+            html.append("<ul><li>").append(text);
+        }
+        for (int i = 0; i < depth; i++) {
+            html.append("</li></ul>");
+        }
+        String page = html.append("</body>").toString();
+        converter.convert(page, null, 50_000_000);
+
+        long threadId = Thread.currentThread().threadId();
+        long before = hotspot.getThreadAllocatedBytes(threadId);
+        String markdown = converter.convert(page, null, 50_000_000);
+        long allocated = hotspot.getThreadAllocatedBytes(threadId) - before;
+
+        assertTrue(markdown.contains(text), "the content itself must still be there");
+        // The page is about 45 KB. Linear handling costs a few megabytes including
+        // jsoup's own parse; the quadratic version cost over 60 MB here.
+        assertTrue(allocated < 32L * 1024 * 1024,
+                "converting a 45 KB nested list allocated " + (allocated / (1024 * 1024)) + " MB, which grows with "
+                        + "depth rather than with content");
     }
 
     @Test

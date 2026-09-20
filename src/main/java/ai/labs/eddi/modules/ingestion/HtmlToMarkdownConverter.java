@@ -5,6 +5,8 @@
 package ai.labs.eddi.modules.ingestion;
 
 import jakarta.enterprise.context.ApplicationScoped;
+import java.util.ArrayList;
+import java.util.List;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -313,44 +315,72 @@ public class HtmlToMarkdownConverter {
     }
 
     private void appendList(StringBuilder output, Element element, String baseUrl, boolean ordered, int depth) {
+        appendList(output, element, baseUrl, ordered, depth, 0);
+    }
+
+    /**
+     * A list, indenting nested levels as it writes them.
+     *
+     * <p>
+     * The obvious implementation renders a nested list into its own buffer and then
+     * re-indents every line of it — which copies the whole subtree once per level,
+     * so output grows with items × depth and the copies with it. A 200 KB page of
+     * nested lists measured 255 MB of heap that way, and the 5 MB a source may
+     * legitimately fetch would be gigabytes: an OutOfMemoryError from a page the
+     * operator does not control. Writing the indent directly keeps it linear.
+     *
+     * @param indentLevel
+     *            how deep this list is nested, in list levels rather than in
+     *            elements
+     */
+    private void appendList(StringBuilder output, Element element, String baseUrl, boolean ordered, int depth,
+                            int indentLevel) {
+
         if (depth > MAX_DEPTH) {
             // A nested list recurses here directly, never through convertElement, so
             // it needs the same bound or a page of nested lists overflows the stack.
             output.append(normalizeWhitespace(element.text()));
             return;
         }
-        output.append("\n");
+        if (indentLevel == 0) {
+            output.append("\n");
+        }
+        String indent = "    ".repeat(indentLevel);
         int number = 1;
         for (Element item : element.children()) {
             if (!item.tagName().equalsIgnoreCase("li")) {
                 continue;
             }
-            output.append(ordered ? number + "." : "-").append(" ");
 
+            // The item's own content, without its nested lists: small, and the only
+            // thing that needs re-indenting.
             StringBuilder itemContent = new StringBuilder();
+            List<Element> nestedLists = new ArrayList<>();
             for (Node child : item.childNodes()) {
                 if (child instanceof TextNode textNode) {
                     itemContent.append(normalizeWhitespace(textNode.text()));
                 } else if (child instanceof Element childElement) {
                     String childTag = childElement.tagName().toLowerCase();
                     if (childTag.equals("ul") || childTag.equals("ol")) {
-                        StringBuilder nested = new StringBuilder();
-                        appendList(nested, childElement, baseUrl, childTag.equals("ol"), depth + 1);
-                        for (String line : nested.toString().split("\\r?\\n")) {
-                            if (!line.isBlank()) {
-                                itemContent.append("\n    ").append(line.trim());
-                            }
-                        }
+                        nestedLists.add(childElement);
                     } else {
                         convertElement(childElement, itemContent, baseUrl, depth + 1);
                     }
                 }
             }
 
-            output.append(itemContent.toString().trim().replace("\n", "\n    ")).append("\n");
+            output.append(indent).append(ordered ? number + "." : "-").append(" ");
+            output.append(itemContent.toString().trim().replace("\n", "\n" + indent + "    ")).append("\n");
+
+            for (Element nested : nestedLists) {
+                appendList(output, nested, baseUrl, nested.tagName().equalsIgnoreCase("ol"), depth + 1,
+                        indentLevel + 1);
+            }
             number++;
         }
-        output.append("\n");
+        if (indentLevel == 0) {
+            output.append("\n");
+        }
     }
 
     /**
