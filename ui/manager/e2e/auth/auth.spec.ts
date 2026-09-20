@@ -91,7 +91,7 @@ test.describe("Authentication and authorization — Keycloak", () => {
   }) => {
     const token = await tokenFor(request, "admin");
 
-    // eddi-admin + eddi-editor.
+    // eddi-admin + eddi-editor + eddi-viewer.
     const descriptors = await request.get(`${API_BASE}/agentstore/agents/descriptors`, {
       headers: authHeaders(token),
     });

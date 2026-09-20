@@ -48,7 +48,7 @@ This starts Keycloak alongside EDDI with pre-configured realm, clients, and test
 
 | User | Password | Role | Notes |
 |------|----------|------|-------|
-| `eddi` | *none* | `eddi-admin`, `eddi-editor` | Full access. Ships without a password: set one at `http://localhost:8180/admin` (`admin`/`admin`) → Users → eddi → Credentials |
+| `eddi` | *none* | `eddi-admin`, `eddi-editor`, `eddi-viewer` | Full access (`eddi-viewer` included deliberately — there is no role hierarchy, so an admin without it is refused every MCP read tool). Ships without a password: set one at `http://localhost:8180/admin` (`admin`/`admin`) → Users → eddi → Credentials |
 | `viewer` | `viewer` | `eddi-viewer` | Read-only access. Development only: no password change is forced |
 | `user` | `user` | `eddi-user` | Standard user access. Development only: no password change is forced |
 
@@ -127,7 +127,7 @@ This starts Keycloak 26 on port 8180 with:
 - **Realm**: `eddi`
 - **Clients**: `eddi-frontend` (SPA, public), `eddi-backend` (bearer-only), `eddi-mcp` (public, code+PKCE only — what an MCP client logs in through; see [MCP Server](mcp-server.md#connecting-to-an-authenticated-instance))
 - **Roles**: `eddi-admin`, `eddi-editor`, `eddi-user`, `eddi-viewer` (plus `eddi-approver`, used by the HITL approval endpoints)
-- **Test users**: `viewer`/`viewer` (`eddi-viewer`), `user`/`user` (`eddi-user`), and `eddi` (`eddi-admin` + `eddi-editor`), which ships **without a password** — set one in the admin console at http://localhost:8180 (`admin`/`admin`)
+- **Test users**: `viewer`/`viewer` (`eddi-viewer`), `user`/`user` (`eddi-user`), and `eddi` (`eddi-admin` + `eddi-editor` + `eddi-viewer`), which ships **without a password** — set one in the admin console at http://localhost:8180 (`admin`/`admin`)
 
 > `keycloak/eddi-realm.json` is the source of truth for client ids. Provisioning a
 > realm by hand from a doc that names a different one gets you `invalid_client`

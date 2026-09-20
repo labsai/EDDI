@@ -72,6 +72,13 @@ it something to authenticate as.
   value does not truncate — **the realm import fails and Keycloak exits 1**, which is how the
   first draft of this client took down every stack that imports the realm. Found by running the
   import, not by reading the file.
+- **`helm/eddi/templates/NOTES.txt`**, **`k8s/overlays/auth/kustomization.yaml`**,
+  **`docs/security.md`** — every place that told an operator to grant an account "those two
+  roles" now names all three. Following the old instruction built an administrator that logs in
+  and is refused every MCP read tool, which is the trap the realm change exists to close.
+- **`.github/workflows/ci.yml`** — `keycloak/**` added to the `code` and `backend` path
+  filters. `k8s/` and `helm/` were already there, so the compose realm was the one copy whose
+  change ran no CI — including the audience mapper every accepted token depends on.
 - **`docs/mcp-server.md`**, **`docs/security.md`** — the client, how to point a client at it,
   why dynamic registration is not an option here, and what to do on an **existing** realm:
   `--import-realm` never re-imports into a realm that already exists and both auth stacks keep
@@ -80,7 +87,7 @@ it something to authenticate as.
 
 - **All three realm copies** — the seeded `eddi` administrator gains `eddi-viewer` alongside
   `eddi-admin`/`eddi-editor`. There is no role hierarchy, so without it the account an operator
-  points their first MCP client at completes the login and is then refused all ~40 read tools.
+  points their first MCP client at completes the login and is then refused all 27 viewer-gated tools.
   A test pins it. `scripts/make-test-realm.mjs` guards that fixture set against the realm and
   fails the auth E2E run when the two drift, so `ROLE_FIXTURES` and `e2e/auth/auth-helpers.ts`
   move with it — which is how CI caught this change the first time it ran.
