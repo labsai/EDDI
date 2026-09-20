@@ -212,9 +212,9 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
     }
 
     @Override
-    public List<DocumentState> tombstoneMissing(String sourceId, String runId, int missedRunsThreshold) {
+    public List<DocumentState> bumpAndFindMissing(String sourceId, String runId, int missedRunsThreshold) {
         int threshold = Math.max(1, missedRunsThreshold);
-        List<DocumentState> tombstoned = new ArrayList<>();
+        List<DocumentState> gone = new ArrayList<>();
 
         String bump = """
                 UPDATE rag_ingestion_documents
@@ -222,34 +222,50 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
                  WHERE source_id = ? AND tombstoned = FALSE
                    AND (last_run_id IS DISTINCT FROM ?)
                 """;
-        // RETURNING makes the select-and-mark one statement, so two runs finishing
-        // together cannot both report the same document as newly tombstoned.
-        String tombstone = """
-                UPDATE rag_ingestion_documents
-                   SET tombstoned = TRUE
-                 WHERE source_id = ? AND tombstoned = FALSE AND missed_runs >= ?
-                RETURNING *
+        String find = """
+                SELECT * FROM rag_ingestion_documents
+                 WHERE source_id = ? AND tombstoned = FALSE
+                   AND (last_run_id IS DISTINCT FROM ?)
+                   AND missed_runs >= ?
                 """;
-
         try (Connection connection = connection()) {
             try (PreparedStatement statement = connection.prepareStatement(bump)) {
                 statement.setString(1, sourceId);
                 statement.setString(2, runId);
                 statement.executeUpdate();
             }
-            try (PreparedStatement statement = connection.prepareStatement(tombstone)) {
+            try (PreparedStatement statement = connection.prepareStatement(find)) {
                 statement.setString(1, sourceId);
-                statement.setInt(2, threshold);
+                statement.setString(2, runId);
+                statement.setInt(3, threshold);
                 try (ResultSet resultSet = statement.executeQuery()) {
                     while (resultSet.next()) {
-                        tombstoned.add(toDocumentState(resultSet));
+                        gone.add(toDocumentState(resultSet));
                     }
                 }
             }
         } catch (SQLException e) {
-            throw new IngestionStateStoreException("Failed to tombstone missing documents", e);
+            throw new IngestionStateStoreException("Failed to reconcile missing documents", e);
         }
-        return tombstoned;
+        return gone;
+    }
+
+    @Override
+    public void markTombstoned(String sourceId, List<String> documentIds) {
+        if (documentIds == null || documentIds.isEmpty()) {
+            return;
+        }
+        String sql = "UPDATE rag_ingestion_documents SET tombstoned = TRUE WHERE source_id = ? AND document_id = ?";
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            for (String documentId : documentIds) {
+                statement.setString(1, sourceId);
+                statement.setString(2, documentId);
+                statement.addBatch();
+            }
+            statement.executeBatch();
+        } catch (SQLException e) {
+            throw new IngestionStateStoreException("Failed to tombstone documents", e);
+        }
     }
 
     @Override

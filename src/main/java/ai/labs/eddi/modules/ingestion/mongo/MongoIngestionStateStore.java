@@ -146,7 +146,7 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
     }
 
     @Override
-    public List<DocumentState> tombstoneMissing(String sourceId, String runId, int missedRunsThreshold) {
+    public List<DocumentState> bumpAndFindMissing(String sourceId, String runId, int missedRunsThreshold) {
         int threshold = Math.max(1, missedRunsThreshold);
 
         Bson missed = Filters.and(
@@ -156,19 +156,21 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
 
         documents.updateMany(missed, Updates.inc(FIELD_MISSED_RUNS, 1));
 
-        Bson dueForTombstone = Filters.and(
-                Filters.eq(FIELD_SOURCE_ID, sourceId),
-                Filters.ne(FIELD_TOMBSTONED, true),
-                Filters.gte(FIELD_MISSED_RUNS, threshold));
+        List<DocumentState> gone = new ArrayList<>();
+        for (Document document : documents.find(Filters.and(missed, Filters.gte(FIELD_MISSED_RUNS, threshold)))) {
+            gone.add(toDocumentState(document));
+        }
+        return gone;
+    }
 
-        List<DocumentState> tombstoned = new ArrayList<>();
-        for (Document document : documents.find(dueForTombstone)) {
-            tombstoned.add(toDocumentState(document));
+    @Override
+    public void markTombstoned(String sourceId, List<String> documentIds) {
+        if (documentIds == null || documentIds.isEmpty()) {
+            return;
         }
-        if (!tombstoned.isEmpty()) {
-            documents.updateMany(dueForTombstone, Updates.set(FIELD_TOMBSTONED, true));
-        }
-        return tombstoned;
+        documents.updateMany(
+                Filters.and(Filters.eq(FIELD_SOURCE_ID, sourceId), Filters.in(FIELD_DOCUMENT_ID, documentIds)),
+                Updates.set(FIELD_TOMBSTONED, true));
     }
 
     @Override

@@ -97,7 +97,30 @@ public interface IIngestionStateStore {
      * @return the documents tombstoned by this call, whose vectors the caller is
      *         then responsible for removing
      */
-    List<DocumentState> tombstoneMissing(String sourceId, String runId, int missedRunsThreshold);
+    default List<DocumentState> tombstoneMissing(String sourceId, String runId, int missedRunsThreshold) {
+        List<DocumentState> missing = bumpAndFindMissing(sourceId, runId, missedRunsThreshold);
+        markTombstoned(sourceId, missing.stream().map(DocumentState::documentId).toList());
+        return missing;
+    }
+
+    /**
+     * Counts this run's misses and returns the documents that have now been missed
+     * often enough to be considered gone — <em>without</em> tombstoning them.
+     *
+     * <p>
+     * Split from the marking so a caller can remove the vectors first. Marking
+     * first is durable in the wrong order: a crash, or a store that refuses the
+     * delete, leaves a document flagged as gone while its chunks stay retrievable,
+     * and a tombstoned document is never reported again — so nothing would ever
+     * remove them.
+     */
+    List<DocumentState> bumpAndFindMissing(String sourceId, String runId, int missedRunsThreshold);
+
+    /**
+     * Marks documents gone, after their vectors have actually been removed. Safe to
+     * call with an empty list, and safe to repeat.
+     */
+    void markTombstoned(String sourceId, List<String> documentIds);
 
     /** Every document known for a source, tombstoned ones included. */
     List<DocumentState> listDocuments(String sourceId, int limit);
