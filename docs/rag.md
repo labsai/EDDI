@@ -252,7 +252,8 @@ runs when someone asks.
 | `timeBudgetMinutes` | `10` | Wall-clock ceiling for one run, 1–1440 |
 
 `enabled` (default `true`) is on the source itself: a disabled source keeps its configuration and its
-history, loses its schedule, and is skipped by a manual run.
+history, loses its schedule, and is **refused** by a manual run with a 409 — rather than accepted and
+then recorded as a failure.
 
 **What a run does.** Crawls within the scope, converts each page to Markdown, compares a content hash
 against the last successful ingest, and re-embeds only what changed — replacing that document's chunks
@@ -272,16 +273,47 @@ a robots.txt that disallows everything is the same. A **404 or 410 is the opposi
 saying the page is gone — so a start page that 404s does reconcile, and one dead link on a site that
 otherwise answered never blocks reconciliation.
 
+**A page that could not be read is not a page that is gone.** A document behind a 5xx, a 429, a 401 or
+a 403, or one whose response could not be parsed, does not count as missing: the run records that it
+looked and learned nothing. Without that, the tail of a rate-limited site is deleted after
+`tombstoneAfterMissedRuns` runs while every run reports success.
+
+**A crawl that learns nothing definitive concludes nothing.** If a run produces no usable document and
+every failure was of the kind above — a site behind a JavaScript challenge or a maintenance page, which
+answers 200 for everything — the run reports `tombstoningSkipped` and removes nothing.
+
+**Vectors are replaced by adding first and removing afterwards.** A provider failure or a crash leaves
+the previous version of the document retrievable rather than leaving it with no vectors at all, and
+chunks record which source ingested them, so two sources of one knowledge base that overlap on a URL
+keep their own copies instead of deleting each other's.
+
+**A document is tombstoned only after its vectors are actually gone.** On a store that refuses the
+delete, the document stays live and the next run tries again, rather than being marked gone with its
+chunks still retrievable.
+
 **One run at a time per source.** A run is claimed before the request is answered, so a second "run
-now" while one is in flight gets a 409 rather than a second crawl into the same store. A run whose
-process died is reaped, so it cannot block the source for ever.
+now" while one is in flight gets a 409 rather than a second crawl into the same store. Purging is
+refused while a run is in flight, because it would delete the very row that guarantees this. A run
+whose process died is reaped — for that source only, so a short-budget source cannot reap the live run
+of one configured for hours.
+
+**Renaming the knowledge base clears what its sources have ingested.** The vector store is addressed by
+the knowledge base's name while ingestion state is keyed by its id, so a rename moves retrieval to a
+new, empty store. Clearing the state makes the next run repopulate it. The chunks under the old name
+are left where they are.
+
+**Ingestion schedules are minted by EDDI, not by clients.** A schedule whose metadata declares
+`ragIngestion` is refused by the schedule API on create and update, firing one by hand requires EDIT on
+the knowledge base it names, and a fire refuses a schedule whose name does not match that metadata.
+Without those, anyone who could create a schedule could have the server crawl, re-embed and delete from
+a knowledge base they have no access to.
 
 ### Ingestion source endpoints
 
 | Method | Path | Access | Purpose |
 | ------ | ---- | ------ | ------- |
 | `POST` | `/ragstore/rags/{id}/sources/{sourceId}/run?version=N` | EDIT | Start a run (202, or 409 if one is in flight) |
-| `POST` | `/ragstore/rags/{id}/sources/{sourceId}/preview?version=N` | EDIT | Crawl and report what would change, embedding nothing |
+| `POST` | `/ragstore/rags/{id}/sources/{sourceId}/preview?version=N` | EDIT | Crawl and report what would change, embedding nothing. Capped at 2 minutes and a small page count, and at three previews per instance — the rest get 429 with `Retry-After` |
 | `GET` | `/ragstore/rags/{id}/sources/{sourceId}/runs?version=N&limit=20` | VIEW | Run history with counters, cost and errors |
 | `DELETE` | `/ragstore/rags/{id}/sources/{sourceId}/documents?version=N` | EDIT | Forget what the source has ingested |
 
@@ -290,8 +322,10 @@ design, and a run rewrites what every agent using it retrieves.
 
 A source with a `cron` gets a schedule named `rag-ingestion:{ragConfigId}:{sourceId}`, kept in step with
 the configuration whenever the knowledge base is saved and removed when it is deleted. `{sourceId}` is
-the source's id, or its name when it has none — a source imported from a ZIP never passes the REST
-layer that assigns ids, and schedules, run history and the REST paths all address it the same way.
+the source's id, or its name when it has none. A ZIP import writes through the store rather than the
+REST layer, so it assigns the ids, validates the sources and creates their schedules itself — without
+that, an imported source was addressed by name, and the first save in the Manager re-keyed it, orphaned
+its history and re-embedded everything.
 
 ### In the Manager
 
@@ -306,9 +340,12 @@ same explanation instead of the buttons, because it has no id for the endpoints 
 
 ### Store support for replacement
 
-Replacing a document's chunks needs `removeAll(Filter)` on the vector store. `in-memory` and `pgvector`
-implement it. Where a store does not, the run still succeeds and reports `replaceUnsupported`, meaning
-re-ingested documents accumulate stale chunks on that backend.
+Replacing a document's chunks needs `removeAll(Filter)` on the vector store, with a compound filter
+(document id and owning source). Verified for `in-memory` and `pgvector`. The other supported stores —
+`mongodb-atlas`, `elasticsearch`, `qdrant`, `chroma` — are expected to support it through their
+langchain4j drivers but are not covered by these tests. Where a store does not, the run still succeeds
+and reports `replaceUnsupported`, meaning re-ingested documents accumulate stale chunks on that
+backend.
 
 ## Observability
 
