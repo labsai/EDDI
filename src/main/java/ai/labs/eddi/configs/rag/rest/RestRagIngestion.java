@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.rag.IRestRagIngestion;
 import ai.labs.eddi.configs.rag.IRestRagStore;
 import ai.labs.eddi.configs.rag.model.IngestionSource;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.modules.ingestion.PreviewBusyException;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import ai.labs.eddi.modules.rag.RagIngestionService;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -137,8 +138,18 @@ public class RestRagIngestion implements IRestRagIngestion {
         if (resolved.error() != null) {
             return resolved.error();
         }
-        return Response.ok(sourceIngestionService.preview(ragConfigId, resolved.knowledgeBase(), resolved.source()))
-                .build();
+        try {
+            return Response
+                    .ok(sourceIngestionService.preview(ragConfigId, resolved.knowledgeBase(), resolved.source()))
+                    .build();
+        } catch (PreviewBusyException e) {
+            // 429 rather than 500: nothing is wrong with the source or the request,
+            // there is simply no preview slot free right now.
+            return Response.status(429)
+                    .header("Retry-After", "30")
+                    .entity(Map.of("error", e.getMessage(), "sourceId", sourceId))
+                    .build();
+        }
     }
 
     @Override

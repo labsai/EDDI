@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.rag.model.IngestionSource;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.modules.ingestion.IIngestionStateStore;
+import ai.labs.eddi.modules.ingestion.PreviewBusyException;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
@@ -162,6 +163,18 @@ class RestRagIngestionSourcesTest {
 
         assertEquals(Response.Status.CONFLICT.getStatusCode(), response.getStatus());
         verify(sourceIngestionService, never()).purge(anyString(), any());
+    }
+
+    @Test
+    @DisplayName("a preview with no slot free is 429, not a server error")
+    void busyPreviewIsTooManyRequests() {
+        when(sourceIngestionService.preview(anyString(), any(), any()))
+                .thenThrow(new PreviewBusyException("Too many previews are running."));
+
+        Response response = rest.previewSource(KB_ID, SOURCE_ID, 1);
+
+        assertEquals(429, response.getStatus());
+        assertEquals("30", response.getHeaderString("Retry-After"));
     }
 
     @Test

@@ -75,6 +75,10 @@ public class RestRagStore implements IRestRagStore {
 
     @Override
     public Response updateRag(String id, Integer version, RagConfiguration ragConfiguration) {
+        // Before the body is judged: a caller without EDIT should be told that,
+        // rather than being handed validation errors about a resource they may not
+        // change — and the 400s would also confirm the resource exists.
+        restVersionInfo.requireEditAccess(id);
         prepareForWrite(ragConfiguration);
         // Read before writing: a source removed from sources[] must lose its
         // schedule, and afterwards there is nothing left to say which ones existed.

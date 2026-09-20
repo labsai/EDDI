@@ -23,6 +23,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.Optional;
+import java.util.concurrent.Semaphore;
 
 /**
  * Runs a knowledge base's ingestion sources, on demand or on a cron, and keeps
@@ -67,6 +68,14 @@ public class RagSourceIngestionService {
      * @return the reserved run id, or empty when a run is already in flight for
      *         this source
      */
+    /**
+     * How many previews may crawl at once across this instance. Small on purpose:
+     * each one holds a request thread and sends traffic to somebody else's site.
+     */
+    private static final int MAX_CONCURRENT_PREVIEWS = 3;
+
+    private final Semaphore previewSlots = new Semaphore(MAX_CONCURRENT_PREVIEWS);
+
     public Optional<String> runAsync(String ragConfigId, RagConfiguration knowledgeBase, IngestionSource source) {
         String sourceKey = IngestionPipeline.stateKey(ragConfigId, source);
         // Reserved here, not inside the worker: two requests arriving together both
@@ -126,7 +135,19 @@ public class RagSourceIngestionService {
      * previews running concurrently.
      */
     public IngestionReport preview(String ragConfigId, RagConfiguration knowledgeBase, IngestionSource source) {
-        return pipeline.run(ragConfigId, knowledgeBase, cappedForPreview(source), Mode.PREVIEW);
+        // A preview blocks a request thread for the length of a crawl, and nothing
+        // stops an operator (or a script) starting them faster than they finish.
+        // Bounded so a handful of previews cannot take the request pool with them;
+        // a run is bounded instead by its own one-per-source claim.
+        if (!previewSlots.tryAcquire()) {
+            throw new PreviewBusyException(
+                    "Too many previews are running. Try again in a moment, or run the source instead.");
+        }
+        try {
+            return pipeline.run(ragConfigId, knowledgeBase, cappedForPreview(source), Mode.PREVIEW);
+        } finally {
+            previewSlots.release();
+        }
     }
 
     /** A copy of the source with limits an operator can wait for. */
