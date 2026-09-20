@@ -83,7 +83,7 @@ old snapshot did not know — and the regenerated diff was exactly the four new 
 
 ### Tests
 
-9 new cases in `resource-detail-rag-sources.test.tsx`; 6530 passing across 412 files. `lint`, `typecheck`,
+16 cases in `resource-detail-rag-sources.test.tsx` (9 when this entry was written, 7 added by later review rounds); 6558 passing across 413 files. `lint`, `typecheck`,
 `i18n:check` and `build` all pass, with translations for all 11 locales in the same commit.
 
 ---
