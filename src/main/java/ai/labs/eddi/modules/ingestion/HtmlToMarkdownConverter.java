@@ -19,6 +19,12 @@ import java.net.URISyntaxException;
  * Converts HTML into Markdown suitable for embedding.
  *
  * <p>
+ * Derived from the draft by nic (christoph.niederer99@gmail.com) in
+ * <a href="https://github.com/labsai/EDDI/pull/529">PR #529</a>. The walk and
+ * its element handling are theirs; this version fixes the defects listed in
+ * HtmlToMarkdownConverterSalvageTest and adds the depth cap.
+ *
+ * <p>
  * This is tuned for retrieval, not for round-tripping a document: it keeps the
  * structure that carries meaning (headings, lists, tables, code, link text) and
  * drops the chrome that pollutes a vector store (navigation, cookie banners,
