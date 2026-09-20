@@ -50,13 +50,13 @@ We expect this of other servers and do not offer it ourselves. This plan ships t
 | # | Fact | Where |
 | --- | --- | --- |
 | F1 | `/mcp` and `/mcp/*` carry an explicit `authenticated` HTTP policy, deliberately independent of the catch-all so a future broad permit rule cannot open them | `quarkus.http.auth.permission.mcp.*` in `application.properties` |
-| F2 | EDDI is bearer-only: `quarkus.oidc.application-type=service`, so an unauthenticated request gets a bare 401, never a redirect | `application.properties:448`; [`docs/security.md:17`](../docs/security.md) |
+| F2 | EDDI is bearer-only: `quarkus.oidc.application-type=service`, so an unauthenticated request gets a bare 401, never a redirect | `quarkus.oidc.application-type` in `application.properties`; [`docs/security.md`](../docs/security.md) |
 | F3 | The catch-all `authenticated` policy covers `/` and `/*` for every method | `quarkus.http.auth.permission.authenticated.*` in `application.properties` |
-| F4 | **HTTP permission policies run before declarative RBAC.** `@PermitAll` on a JAX-RS method does *not* make a path reachable — it must also have its own `permit` entry | `application.properties:505-553` vs. `RestA2AEndpoint.java:79` |
-| F5 | Roles come from the realm, not the client: `quarkus.oidc.roles.role-claim-path=realm_access/roles` | `application.properties:445` |
+| F4 | **HTTP permission policies run before declarative RBAC.** `@PermitAll` on a JAX-RS method does *not* make a path reachable — it must also have its own `permit` entry | the `quarkus.http.auth.permission.*` block in `application.properties` vs. `RestA2AEndpoint`'s `@PermitAll` methods |
+| F5 | Roles come from the realm, not the client: `quarkus.oidc.roles.role-claim-path=realm_access/roles` | `quarkus.oidc.roles.role-claim-path` in `application.properties` |
 | F6 | **No `quarkus.oidc.token.audience` is configured.** `OidcIdentityProvider` passes `enforceAudienceVerification = idToken`, i.e. **false for bearer access tokens**, and with `token.audience` unset `OidcProvider` calls `setSkipDefaultAudienceValidation()`. A token minted for *any* client in the realm is accepted at `/mcp` and every REST endpoint. **Closed by Increment 2.** | absence in `application.properties`; `quarkus-oidc-3.39.3-sources.jar`: `OidcIdentityProvider` ~:218, `OidcProvider` ~:265-274 |
 | F7 | Per-tool authorization is in-code, a literal `hasRole` with no hierarchy, and a **no-op** when `authorization.enabled=false` | `McpToolUtils.requireRole:41` |
-| F8 | `authorization.enabled` tracks `quarkus.oidc.tenant-enabled`, and when false, `DisabledAuthController` switches HTTP permission checks off too | `application.properties:458`; `DisabledAuthController.java` |
+| F8 | `authorization.enabled` tracks `quarkus.oidc.tenant-enabled`, and when false, `DisabledAuthController` switches HTTP permission checks off too | `authorization.enabled` in `application.properties`; `DisabledAuthController` |
 | F9 | `HighValueSurfaceGuard` refuses a production boot where `/mcp` or `/secretstore` would be unauthenticated, unless narrowly opted out | `HighValueSurfaceGuard.java` |
 | F10 | `quarkus.oidc.authentication.user-info-required=true`, and no `quarkus.oidc.token-cache.*` was configured → one Keycloak userinfo round-trip per request. **Closed by Increment 2**, which also notes that this call doubles as the session-revocation check | `quarkus.oidc.authentication.user-info-required` in `application.properties` |
 
@@ -64,7 +64,7 @@ We expect this of other servers and do not offer it ourselves. This plan ships t
 
 | # | Fact | Where |
 | --- | --- | --- |
-| F11 | **Three** realm copies, not two: `helm/eddi/files/eddi-realm.json` and `k8s/overlays/auth/eddi-realm.json` are byte-identical; `keycloak/eddi-realm.json` (compose) differs — it adds `loginTheme: eddi` and lacks the `eddi.example.com` URIs. `DeploymentManifestsTest.realmCopiesDoNotDrift` (`:1845`) asserts all three agree on client ids, realm roles and seed users, so adding a client to one fails the unit run until all three have it. The auth E2E realm is generated from the helm copy by `ui/manager/scripts/make-test-realm.mjs:31` | verified by parsing all three |
+| F11 | **Three** realm copies, not two: `helm/eddi/files/eddi-realm.json` and `k8s/overlays/auth/eddi-realm.json` are byte-identical; `keycloak/eddi-realm.json` (compose) differs — it adds `loginTheme: eddi` and lacks the `eddi.example.com` URIs. `DeploymentManifestsTest.realmCopiesDoNotDrift` asserts all three agree on client ids, realm roles and seed users, so adding a client to one fails the unit run until all three have it. The auth E2E realm is generated from the helm copy by `ui/manager/scripts/make-test-realm.mjs`, which also pins its `ROLE_FIXTURES` against the realm's seed users | verified by parsing all three |
 | F12 | Clients: `eddi-backend` (confidential, no direct grant, no service accounts, one `groups` mapper) and `eddi-frontend` (public, direct grants, redirects `http://localhost:*` / `https://localhost:*` / `https://eddi.example.com/*`, `webOrigins` including `+`). Realm roles: `eddi-admin`, `eddi-editor`, `eddi-user`, `eddi-viewer`, `eddi-approver` | same |
 | F13 | **The realm defines no `roles` client scope.** `defaultDefaultClientScopes` is `openid, basic, profile, email, web-origins, acr`, and `eddi-frontend` gets `realm_access.roles` *only* from its own explicit `realm-roles` protocol mapper. It also carries `eddi-backend-audience` and `groups` | same |
 | F14 | Every shipped deployment points `auth-server-url` at an **internal** address — `http://keycloak:8080/realms/eddi` (`docker-compose.auth.yml:37`), `http://<release>-keycloak:8080/realms/eddi` (`helm/eddi/templates/configmap.yaml:215`) — and separately sets `QUARKUS_OIDC_TOKEN_ISSUER` to the public one (`docker-compose.auth.yml:53`, `configmap.yaml:262`) | as cited |
@@ -128,7 +128,7 @@ quarkus.http.auth.permission.oauth-resource-metadata.policy=permit
 quarkus.http.auth.permission.oauth-resource-metadata.methods=GET,HEAD
 ```
 
-Production overlays additionally set `quarkus.oidc.resource-metadata.force-https-scheme=true`, or render an absolute `resource` from the ingress host — otherwise the advertised identifier is `http://…` behind TLS-terminating ingress (F20). Pinning an absolute `resource` in production is preferable anyway, since the authority otherwise follows the `Host` header.
+`force-https-scheme` ships as `true`, because the scheme is otherwise read from a request a TLS-terminating ingress has already downgraded (F20). The deployments that need action are therefore the **plain-http** ones running with authentication on — both compose auth stacks, and the `kubectl port-forward` flows the helm chart and the k8s auth overlay document — each of which must set it to `false` or advertise a URL nothing is serving. Pinning an absolute `resource` is preferable again in production, since the authority otherwise follows the `Host` header.
 
 `scopes_supported` stays at `openid` until [Q2](#10-open-questions) decides whether MCP sessions have scopes at all. Advertising scopes we do not enforce is worse than advertising none.
 
@@ -136,7 +136,7 @@ Production overlays additionally set `quarkus.oidc.resource-metadata.force-https
 
 **Ship a pre-registered public client `eddi-mcp`. Treat dynamic client registration as a documented escape hatch, never the default.** The decisive reason is not policy preference, it is F13:
 
-> A client without an explicit `realm-roles` protocol mapper issues tokens that **authenticate** — valid JWT, userinfo succeeds — but carry no `realm_access.roles`. Every `requireRole` then throws. The failure mode is *"OAuth worked, and every single tool says forbidden"*, which is the same shape as the group-claim bug already documented at `application.properties:425-444`, and just as invisible to a smoke test run by an admin who happens to hold every role.
+> A client without an explicit `realm-roles` protocol mapper issues tokens that **authenticate** — valid JWT, userinfo succeeds — but carry no `realm_access.roles`. Every `requireRole` then throws. The failure mode is *"OAuth worked, and every single tool says forbidden"*, which is the same shape as the group-claim bug already documented beside `quarkus.oidc.roles.role-claim-path` in `application.properties`, and just as invisible to a smoke test run by an admin who happens to hold every role.
 
 A dynamically registered client cannot carry protocol mappers — RFC 7591 registration has no field for them **[ext: high]** — and Keycloak's default anonymous-registration policies (`Trusted Hosts` empty → refuse, `Full Scope Disabled`, `Allowed Client Scopes`, `Allowed Protocol Mapper Types`) would each have to be loosened, plus `roles` promoted to a realm default scope **[ext: medium-high]**. That is a lot of realm surgery to reach a worse security posture than one shipped client.
 
@@ -212,7 +212,7 @@ Not the 5-minute access token — the client refreshes that. It is Keycloak's de
 
 **Increment 1 — discovery (config + realms + docs; essentially no Java).** The `application.properties` block of §3.2; `eddi-mcp` in all three realm copies (F11); docs. After this, a client that supports the flow with a known client id connects and refreshes by itself.
 
-**Increment 2 — audience validation (separate PR).** `quarkus.oidc.token.audience=eddi-backend` (F6/S2) plus `quarkus.oidc.token-cache.*` sizing (F10 — an MCP client is chatty, and today every request costs a Keycloak userinfo round-trip). Depends on Increment 1 having given `eddi-mcp` the audience mapper; the auth E2E tier keeps working because it mints via `eddi-frontend`, which already has one (`ui/manager/e2e/auth/auth-helpers.ts:41-60`).
+**Increment 2 — audience validation (separate PR).** `quarkus.oidc.token.audience=eddi-backend` (F6/S2) plus `quarkus.oidc.token-cache.*` sizing (F10 — an MCP client is chatty, and today every request costs a Keycloak userinfo round-trip). Depends on Increment 1 having given `eddi-mcp` the audience mapper; the auth E2E tier keeps working because it mints via `eddi-frontend`, which already has one (`tokenFor` in `ui/manager/e2e/auth/auth-helpers.ts`).
 
 **Optional, later — DCR.** Behind a flag, default off, with a registration policy, only if a client that matters supports nothing else (§3.3).
 
@@ -239,7 +239,7 @@ Not the 5-minute access token — the client refreshes that. It is Keycloak's de
 - [`docs/configuration-reference.md`](../docs/configuration-reference.md) — only if an `eddi.*` key is introduced; `ConfigurationReferenceCoverageTest` checks both directions.
 - [`docs/changelog.md`](../docs/changelog.md) — same commit as the work, per `AGENTS.md` §2 rule 8.
 
-**Pre-existing drift found while reviewing, worth sweeping in the same PR:** `docs/mcp-server.md:606` documents `quarkus.mcp-server.http.root-path`, which `application.properties:633-636` explicitly says is *not* a recognised key; and the banner at `application.properties:615-630` still claims 33 tools and a viewer/admin-only role model.
+**Pre-existing drift found while reviewing, worth sweeping in the same PR:** `docs/mcp-server.md`'s Configuration block documents `quarkus.mcp-server.http.root-path`, which `application.properties` explicitly says is *not* a recognised key; and the MCP security banner in that file still claims 33 tools and a viewer/admin-only role model.
 
 ---
 
