@@ -31,6 +31,7 @@ import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.tenancy.QuotaRefusal;
+import ai.labs.eddi.utils.LogSanitizer;
 import io.micrometer.core.instrument.Counter;
 import org.jboss.logging.Logger;
 
@@ -568,7 +569,7 @@ public class MemberTurnExecutor {
                                                      String targetAgentId) {
         LOGGER.infof("Member agent '%s' TOOL_CALL-paused during group discussion %s (phase %d) — "
                 + "auto-rejecting the gated tool call(s) (system:group) and resuming for a tool-less answer",
-                member.agentId(), gc.getId(), phaseIdx);
+                LogSanitizer.sanitize(member.agentId()), LogSanitizer.sanitize(gc.getId()), phaseIdx);
 
         var decision = new HitlDecision();
         decision.setVerdict(HitlVerdict.REJECTED);
@@ -684,7 +685,7 @@ public class MemberTurnExecutor {
                                              GroupDiscussionEventListener listener) {
         LOGGER.warnf("Member agent '%s' paused for human approval during group discussion %s (phase %d) — "
                 + "member-level HITL is unsupported inside a group; skipping the turn and cancelling the pause",
-                member.agentId(), gc.getId(), phaseIdx);
+                LogSanitizer.sanitize(member.agentId()), LogSanitizer.sanitize(gc.getId()), phaseIdx);
         try {
             conversationService.cancelConversation(convId, ControlSignal.CANCEL_GRACEFUL, "system:group");
         } catch (Exception e) {
@@ -713,7 +714,8 @@ public class MemberTurnExecutor {
             String subGroupId = member.agentId();
             int nextDepth = gc.getDepth() + 1;
 
-            LOGGER.infof("Executing sub-group '%s' (depth %d) as member of parent group '%s'", subGroupId, nextDepth, gc.getGroupId());
+            LOGGER.infof("Executing sub-group '%s' (depth %d) as member of parent group '%s'", LogSanitizer.sanitize(subGroupId), nextDepth,
+                    LogSanitizer.sanitize(gc.getGroupId()));
 
             // Propagate the parent's attachments to the nested group so its members
             // receive them too (each nested member conversation is granted in turn).

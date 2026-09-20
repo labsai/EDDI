@@ -130,6 +130,50 @@ record renders byte-for-byte as before and keeps its throwable" and the config g
 must-not-change tests). Escaping the message but not the throwable fails exactly the 5
 throwable-half tests — so none of them pass on the strength of the message fix.
 
+### And the message-level alerts, folded in
+
+The handler above stops any of these forging a record at *runtime*, but CodeQL's
+`java/log-injection` is a dataflow rule and keeps flagging the call site regardless — and if
+the filter is ever detached from a handler, the call site is what is left. So the same branch
+also applies the ordinary one-line `LogSanitizer.sanitize(...)` to **38 sinks across the eight
+files** the alerts name:
+
+| File | Sinks | The tainted arguments |
+|---|---|---|
+| `GroupHitlCoordinator` | 16 | `gc.getId()`, `gc.getGroupId()`, `groupConversationId`, `entry.getKey()`, `e.getMessage()` |
+| `GroupConversationService` | 11 | `gc.getId()`, `gc.getGroupId()`, `phase.name()`, `outcome.reason()` |
+| `MemberTurnExecutor` | 3 | `member.agentId()`, `gc.getId()`, `gc.getGroupId()`, `subGroupId` |
+| `ConversationHitlService` | 3 | `conversationId` |
+| `PhaseExecutionEngine` | 2 | `gc.getId()`, `phase.name()`, `decision.outcome()` |
+| `AuditLedgerService` | 1 | `entry.agentId()`, `e.getMessage()` |
+| `AgentGroupStore` | 1 | `groupConfiguration.getName()`, the phase name |
+| `SlackGroupDiscussionListener` | 1 | `groupConversationId`, `e.getMessage()` |
+
+Only String-typed arguments are wrapped; the enums, `Instant`s and counters in the same calls
+are left alone. `MemberTurnExecutor` and `SlackGroupDiscussionListener` gained the import; each
+of the other six already had it, and each call follows the style its own file already used
+(qualified `LogSanitizer.sanitize` in six, the static import in `ConversationHitlService` and
+`AuditLedgerService`).
+
+The alert list was resolved through `gh api`, not read off `main` at HEAD: a CodeQL alert's
+line number is relative to `most_recent_instance.commit_sha`. Two of the 41 reported alerts
+turned out to be stale against an older sha — one line had already been sanitized, the other no
+longer exists — which is how 41 became 38. The eight files carry a further ~70 log arguments of
+the same shape that CodeQL has *not* flagged, overwhelmingly `e.getMessage()`; those are left
+alone, because sanitizing them is a codebase-wide policy question and not this PR's.
+
+**Tests.** `SanitizedLogSinksTest` pins all 38 at the source: each is keyed by a fragment of its
+own message rather than a line number, and every flagged argument must occur only inside a
+`sanitize(...)`. Dropping one fails the build with the file, the message and the expression
+named. `GroupHitlCoordinatorLogInjectionTest` covers the two sinks reachable through a public
+method with one mock — the forged-id and the forged-exception-message halves — in the
+`LogCaptureSupport` idiom the earlier regression tests established. Both mutation-checked.
+
+A source guard rather than 38 behavioural tests is a deliberate call and is argued in the test's
+own Javadoc: the rest sit inside a phase loop or a state-race `catch` that takes a whole group
+discussion to reach, and a test that builds one to observe a single WARN grades the harness more
+than the fix.
+
 ### What's next
 
 - `RestAgentAdministration`'s deploy-failed WARN carries a comment on branch
@@ -137,12 +181,10 @@ throwable-half tests — so none of them pass on the strength of the message fix
   sanitized and that only a log handler can fix it. That branch is not merged, so the comment
   does not exist on `main` and could not be updated here: **whichever of the two lands second
   must update it** to say the handler now exists.
-- ~40 further `java/log-injection` CodeQL alerts remain open on `main`, in `GroupHitlCoordinator`,
-  `GroupConversationService`, `MemberTurnExecutor`, `ConversationHitlService`,
-  `PhaseExecutionEngine`, `AuditLedgerService`, `AgentGroupStore` and
-  `SlackGroupDiscussionListener`. This change means none of them can forge a record at runtime
-  any more, but they are dataflow findings and CodeQL will still flag them: they still want the
-  ordinary one-line `sanitize(...)` at the call site. Kept out of this PR deliberately.
+- 110 further `java/log-injection` alerts remain open on `main` in files this PR does not touch —
+  `RestScheduleStore`, `RestUserMemoryStore`, `VaultSecretProvider`, the REST stores and others.
+  `RestAgentAdministration` and `AgentFactory` among them are PR #799's scope and were left to it.
+  None of them can forge a record at runtime now, so they are alert hygiene rather than exposure.
 
 ---
 
