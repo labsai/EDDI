@@ -37,6 +37,7 @@ import java.util.stream.Stream;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -1891,6 +1892,10 @@ class DeploymentManifestsTest {
                         rolesMapper = mapper;
                     }
                 }
+                // The assertion above already refuses a client without this mapper, so
+                // this cannot be null in practice — it is here so that a future edit
+                // which loosens that check fails with a sentence instead of an NPE.
+                assertNotNull(rolesMapper, realm + ": eddi-mcp has no realm-roles mapper to inspect");
                 assertEquals("realm_access.roles", rolesMapper.path("config").path("claim.name").asText(),
                         realm + ": eddi-mcp's roles mapper must write the claim quarkus.oidc.roles"
                                 + ".role-claim-path names (realm_access/roles)");
