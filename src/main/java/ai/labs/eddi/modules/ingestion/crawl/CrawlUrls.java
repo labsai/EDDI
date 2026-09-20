@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.ingestion.crawl;
 
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -52,6 +53,52 @@ public final class CrawlUrls {
     private CrawlUrls() {
     }
 
+    /** Characters a URI may never carry raw, whatever a page's author wrote. */
+    private static final String ILLEGAL_IN_URI = " \"<>|{}\\^`";
+
+    private static final char[] HEX = "0123456789ABCDEF".toCharArray();
+
+    /**
+     * Parses a URL that a page may have written loosely.
+     *
+     * <p>
+     * jsoup resolves {@code href="my doc.html"} to an absolute URL without
+     * percent-encoding it, and {@code new URI} then refuses the space. Such links
+     * were dropped silently — no error, no counter — which quietly excluded whole
+     * sections of SharePoint and Confluence exports.
+     *
+     * <p>
+     * Only characters that cannot legally appear raw are encoded, so an already
+     * encoded URL is left exactly as it is rather than being encoded twice.
+     */
+    private static URI parseTolerantly(String url) throws URISyntaxException {
+        try {
+            return new URI(url);
+        } catch (URISyntaxException direct) {
+            String encoded = encodeIllegal(url);
+            if (encoded.equals(url)) {
+                throw direct;
+            }
+            return new URI(encoded);
+        }
+    }
+
+    private static String encodeIllegal(String url) {
+        StringBuilder encoded = new StringBuilder(url.length() + 8);
+        for (int i = 0; i < url.length(); i++) {
+            char c = url.charAt(i);
+            boolean mustEncode = c <= 0x20 || c >= 0x7F || ILLEGAL_IN_URI.indexOf(c) >= 0;
+            if (!mustEncode) {
+                encoded.append(c);
+                continue;
+            }
+            for (byte b : String.valueOf(c).getBytes(StandardCharsets.UTF_8)) {
+                encoded.append('%').append(HEX[(b >> 4) & 0xF]).append(HEX[b & 0xF]);
+            }
+        }
+        return encoded.toString();
+    }
+
     /**
      * Canonical form used for visited-set membership and as a document id.
      *
@@ -67,7 +114,7 @@ public final class CrawlUrls {
         }
         String trimmed = stripFragment(url.trim());
         try {
-            URI uri = new URI(trimmed).normalize();
+            URI uri = parseTolerantly(trimmed).normalize();
             String scheme = uri.getScheme() == null ? null : uri.getScheme().toLowerCase(Locale.ROOT);
             String host = uri.getHost() == null ? null : uri.getHost().toLowerCase(Locale.ROOT);
             if (scheme == null || host == null) {

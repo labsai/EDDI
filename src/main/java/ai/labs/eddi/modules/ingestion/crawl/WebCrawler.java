@@ -78,6 +78,13 @@ public class WebCrawler {
      */
     private static final int MAX_SITEMAPS = 20;
 
+    /**
+     * Hard ceiling on the frontier. Reached only by a site whose URL space is
+     * generated rather than authored; past it, a crawl is collecting URLs it can
+     * never fetch within any budget an operator can configure.
+     */
+    private static final int MAX_QUEUED_URLS = 100_000;
+
     /** Cap on the robots.txt and sitemap bodies. */
     private static final long MAX_METADATA_BYTES = 1024L * 1024;
 
@@ -98,7 +105,7 @@ public class WebCrawler {
         Counters counters = new Counters();
 
         if (!CrawlUrls.isHttpScheme(request.seedUrl())) {
-            sink.onError(new CrawlError(request.seedUrl(), "Seed URL must be http or https", 0));
+            sink.onError(new CrawlError(null, request.seedUrl(), "Seed URL must be http or https", 0, true));
             counters.errors++;
             counters.unreachable++;
             return counters.summarize(start, StopReason.COMPLETED);
@@ -106,7 +113,7 @@ public class WebCrawler {
 
         String seedHost = CrawlUrls.host(request.seedUrl()).orElse(null);
         if (seedHost == null) {
-            sink.onError(new CrawlError(request.seedUrl(), "Seed URL has no host", 0));
+            sink.onError(new CrawlError(null, request.seedUrl(), "Seed URL has no host", 0, true));
             counters.errors++;
             counters.unreachable++;
             return counters.summarize(start, StopReason.COMPLETED);
@@ -217,7 +224,8 @@ public class WebCrawler {
         } catch (IOException | RuntimeException e) {
             counters.errors++;
             counters.unreachable++;
-            sink.onError(new CrawlError(candidate.fetchUrl(), describe(e), 0));
+            // A transport failure says nothing about the page: it was never read.
+            sink.onError(new CrawlError(candidate.canonicalId(), candidate.fetchUrl(), describe(e), 0, true));
             return;
         }
 
@@ -234,7 +242,8 @@ public class WebCrawler {
             if (saysNothingAboutContent(page.statusCode())) {
                 counters.unreachable++;
             }
-            sink.onError(new CrawlError(candidate.fetchUrl(), "HTTP " + page.statusCode(), page.statusCode()));
+            sink.onError(new CrawlError(candidate.canonicalId(), candidate.fetchUrl(),
+                    "HTTP " + page.statusCode(), page.statusCode(), saysNothingAboutContent(page.statusCode())));
             return;
         }
         if (!page.isHtml()) {
@@ -251,7 +260,10 @@ public class WebCrawler {
         Document document = parse(page, finalUrl);
         if (document == null) {
             counters.errors++;
-            sink.onError(new CrawlError(candidate.fetchUrl(), "Could not parse response as HTML", page.statusCode()));
+            // The server answered, but nothing could be made of it. That is a fact
+            // about this response, not evidence that the page is gone.
+            sink.onError(new CrawlError(candidate.canonicalId(), candidate.fetchUrl(),
+                    "Could not parse response as HTML", page.statusCode(), true));
             return;
         }
 
@@ -282,9 +294,17 @@ public class WebCrawler {
     }
 
     private void enqueueLinks(Document document, int depth, String seedHost, CrawlRequest request,
-                              List<UrlPattern> excludes, Queue<Candidate> queue, Set<String> queued, Set<String> visited) {
+                              List<UrlPattern> excludes, Queue<Candidate> queue, Set<String> queued,
+                              Set<String> visited) {
 
         for (Element link : document.select("a[href]")) {
+            if (!hasQueueRoom(queue)) {
+                // Deduplication bounds repeats, not breadth. Every distinct in-scope
+                // URL used to be retained however many could actually be fetched, and
+                // a site with sort/filter/page parameters has an unbounded URL space.
+                // Nothing past the remaining fetch budget can ever be polled.
+                break;
+            }
             String href = link.attr("abs:href");
             if (href == null || href.isBlank()) {
                 continue;
@@ -303,6 +323,25 @@ public class WebCrawler {
             queued.add(canonical);
             queue.add(new Candidate(CrawlUrls.stripFragment(href), canonical, depth));
         }
+    }
+
+    /**
+     * Whether the frontier may still grow.
+     *
+     * <p>
+     * Deduplication bounds repeats, not breadth: every distinct in-scope URL is
+     * remembered, and a site with sort, filter and page parameters has an
+     * effectively unbounded URL space, so both the queue and the {@code queued} set
+     * grow with the site rather than with the budget.
+     *
+     * <p>
+     * Bounded by an absolute cap rather than by the remaining fetch budget: a
+     * queued candidate does not always cost a fetch — it may turn out to be a
+     * duplicate or robots-disallowed when it is polled — so tying the frontier to
+     * the budget starves a crawl that would otherwise finish.
+     */
+    private static boolean hasQueueRoom(Queue<Candidate> queue) {
+        return queue.size() < MAX_QUEUED_URLS;
     }
 
     /**

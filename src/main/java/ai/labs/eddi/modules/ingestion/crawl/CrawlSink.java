@@ -89,9 +89,20 @@ public interface CrawlSink {
     /**
      * A URL that could not be crawled.
      *
+     * @param documentId
+     *            the document this failure is about — the same id {@link #onPage}
+     *            and {@link #onUnchanged} use — or null when the failure is about
+     *            the crawl itself rather than one document (an unusable seed). A
+     *            sink needs it to tell "this page could not be read" apart from
+     *            "this page is gone": counting the first as absence deletes pages
+     *            that a 503 or a rate limit merely hid.
      * @param statusCode
      *            the HTTP status, or 0 when the failure was not an HTTP response
+     * @param contentUnknown
+     *            whether the failure says nothing about whether the content still
+     *            exists — a transport failure, a 5xx, 408, 429, 401 or 403. A 404
+     *            or 410 is the opposite and leaves this false.
      */
-    record CrawlError(String url, String reason, int statusCode) {
+    record CrawlError(String documentId, String url, String reason, int statusCode, boolean contentUnknown) {
     }
 }
