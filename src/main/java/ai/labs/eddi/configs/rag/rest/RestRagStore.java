@@ -24,6 +24,7 @@ import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.UUID;
@@ -193,9 +194,12 @@ public class RestRagStore implements IRestRagStore {
         }
 
         normalizeLegacyChunkStrategy(ragConfiguration);
-        assignSourceIds(ragConfiguration);
 
         try {
+            // Before assignSourceIds, which would dereference a null entry and answer
+            // a bad request with a 500.
+            requireNoNullSources(ragConfiguration);
+            assignSourceIds(ragConfiguration);
             ragConfiguration.validate();
         } catch (IllegalArgumentException e) {
             throw new BadRequestException(e.getMessage(), e);
@@ -223,6 +227,15 @@ public class RestRagStore implements IRestRagStore {
         for (var source : ragConfiguration.getSources()) {
             source.setId(UUID.randomUUID().toString());
             source.setCron(null);
+        }
+    }
+
+    private void requireNoNullSources(RagConfiguration ragConfiguration) {
+        if (ragConfiguration.getSources() == null) {
+            return;
+        }
+        if (ragConfiguration.getSources().stream().anyMatch(Objects::isNull)) {
+            throw new IllegalArgumentException("The sources list contains a null entry");
         }
     }
 

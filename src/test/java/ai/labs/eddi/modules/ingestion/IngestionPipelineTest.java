@@ -24,6 +24,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -414,6 +415,51 @@ class IngestionPipelineTest {
         }
 
         @Test
+        @DisplayName("a reserved run is not claimed twice, and the reservation is the one that runs")
+        void reservationIsClaimedOnce() {
+            // Two requests arriving together both used to be told "started": the claim
+            // happened inside run(), on the worker thread, so the check the caller saw
+            // was only advisory.
+            var pipeline = pipelineFor(new FakeSite().page(SITE + "/", pageWith("x")));
+            var source = source();
+
+            var first = pipeline.reserveRun(KB_RESOURCE_ID, source);
+            var second = pipeline.reserveRun(KB_RESOURCE_ID, source);
+
+            assertTrue(first.isPresent(), "the first caller reserves the run");
+            assertTrue(second.isEmpty(), "the second caller must be refused before any work starts");
+
+            IngestionReport report = pipeline.run(KB_RESOURCE_ID, knowledgeBase(), source, Mode.INGEST, first.get());
+
+            assertEquals(IngestionReport.Outcome.COMPLETED, report.outcome(), report.message());
+            assertEquals(first.get(), report.runId(), "the reserved run is the one recorded");
+            assertTrue(stateStore.activeRun(IngestionPipeline.stateKey(KB_RESOURCE_ID, source)).isEmpty(),
+                    "the run must be closed when it finishes");
+        }
+
+        @Test
+        @DisplayName("a reservation is released when the run never starts")
+        void reservationIsReleasedOnEarlyExit() {
+            // A disabled source, an invalid one, or a worker thread that could not be
+            // started: the reservation would otherwise block the source until reaped.
+            var pipeline = pipelineFor(new FakeSite().page(SITE + "/", pageWith("x")));
+            var source = source();
+            source.setEnabled(false);
+            String sourceKey = IngestionPipeline.stateKey(KB_RESOURCE_ID, source);
+
+            String runId = pipeline.reserveRun(KB_RESOURCE_ID, source).orElseThrow();
+            IngestionReport report = pipeline.run(KB_RESOURCE_ID, knowledgeBase(), source, Mode.INGEST, runId);
+
+            assertEquals(IngestionReport.Outcome.SKIPPED, report.outcome());
+            assertTrue(stateStore.activeRun(sourceKey).isEmpty(), "a skipped run must not stay claimed");
+
+            // And the explicit release, for a worker that could not be started at all.
+            String second = pipeline.reserveRun(KB_RESOURCE_ID, source).orElseThrow();
+            pipeline.abandonReservation(KB_RESOURCE_ID, source, second, "worker thread could not be started");
+            assertTrue(stateStore.activeRun(sourceKey).isEmpty(), "an abandoned reservation must be released");
+        }
+
+        @Test
         @DisplayName("an abandoned run is reaped so a dead process does not block the source")
         void abandonedRunIsReaped() {
             // Nothing called reapStaleRuns in production, although the interface said it
@@ -707,6 +753,19 @@ class IngestionPipelineTest {
             config.setSources(List.of(broken));
 
             assertThrows(IllegalArgumentException.class, config::validate);
+        }
+
+        @Test
+        @DisplayName("a null entry in the sources list is refused, not a NullPointerException")
+        void refusesNullSourceEntry() {
+            RagConfiguration config = knowledgeBase();
+            var sources = new ArrayList<IngestionSource>();
+            sources.add(source());
+            sources.add(null);
+            config.setSources(sources);
+
+            var thrown = assertThrows(IllegalArgumentException.class, config::validate);
+            assertTrue(thrown.getMessage().contains("null entry"), thrown.getMessage());
         }
 
         @Test

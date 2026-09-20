@@ -163,6 +163,14 @@ public class RestRagIngestion implements IRestRagIngestion {
      * is a 403 rather than being masked as the 404 this produces.
      */
     private ResolvedSource resolveSource(String ragConfigId, String sourceId, Integer version) {
+        if (version == null) {
+            // An omitted ?version binds as null, which RestVersionInfo.read rejects
+            // with an IllegalArgumentException — caught below and answered as a 404,
+            // telling the caller the knowledge base does not exist when the request
+            // was simply incomplete.
+            return new ResolvedSource(null, null, Response.status(Response.Status.BAD_REQUEST)
+                    .entity(Map.of("error", "Query parameter 'version' is required")).build());
+        }
         RagConfiguration ragConfig;
         try {
             ragConfig = restRagStore.readRag(ragConfigId, version);

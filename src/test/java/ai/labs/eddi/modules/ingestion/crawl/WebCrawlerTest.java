@@ -356,6 +356,21 @@ class WebCrawlerTest {
         }
 
         @Test
+        @DisplayName("a seed refused with 401 or 403 is not coverage")
+        void refusedSeedIsNotCoverage() {
+            // An expired credential, an IP block or a WAF. The server refused to say
+            // anything about the content, so absence proves nothing about it.
+            for (int status : new int[]{401, 403}) {
+                FakeSite site = new FakeSite().status(SITE + "/", status);
+
+                CrawlSummary summary = new WebCrawler(site).crawl(request(SITE + "/"), new RecordingSink());
+
+                assertFalse(summary.coveredWholeSource(),
+                        "HTTP " + status + " must not authorise tombstoning the whole source");
+            }
+        }
+
+        @Test
         @DisplayName("a seed answering 404 is coverage — the server said the page is gone")
         void notFoundSeedIsCoverage() {
             FakeSite site = new FakeSite().status(SITE + "/", 404);

@@ -231,6 +231,11 @@ public class RagConfiguration {
         if (sources != null) {
             Set<String> keys = new HashSet<>();
             for (IngestionSource source : sources) {
+                if (source == null) {
+                    // A JSON array may hold a literal null. Said here rather than as the
+                    // NullPointerException the next line would throw.
+                    throw new IllegalArgumentException("The sources list contains a null entry");
+                }
                 source.validate();
                 // Ingestion state is keyed by this. Two sources sharing it would share
                 // one document history, so each run would tombstone the other's pages.

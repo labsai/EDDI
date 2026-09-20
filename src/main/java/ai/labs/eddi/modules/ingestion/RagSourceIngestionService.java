@@ -64,15 +64,19 @@ public class RagSourceIngestionService {
      * A crawl takes minutes; holding an HTTP request open for it would tie up a
      * worker and time out anyway. Progress is followed through {@link #listRuns}.
      *
-     * @return empty when a run is already in flight for this source
+     * @return the reserved run id, or empty when a run is already in flight for
+     *         this source
      */
     public Optional<String> runAsync(String ragConfigId, RagConfiguration knowledgeBase, IngestionSource source) {
         String sourceKey = IngestionPipeline.stateKey(ragConfigId, source);
-        if (stateStore.activeRun(sourceKey).isPresent()) {
-            // Checked here so the caller gets an immediate answer; the pipeline's own
-            // claim is the real guard against the race.
+        // Reserved here, not inside the worker: two requests arriving together both
+        // used to be answered "started", and whichever worker lost the claim crawled
+        // nothing while its caller believed a run had begun.
+        Optional<String> reserved = pipeline.reserveRun(ragConfigId, source);
+        if (reserved.isEmpty()) {
             return Optional.empty();
         }
+        String runId = reserved.get();
 
         // One virtual thread per run, as the existing RagIngestionService does for
         // single-document ingestion. Crawls block by design — on the fetch and on the
@@ -80,9 +84,23 @@ public class RagSourceIngestionService {
         // One virtual thread, started directly: an ExecutorService per call was never
         // closed. Throwable rather than RuntimeException so an Error is logged instead
         // of disappearing into a dead thread.
+        try {
+            startWorker(ragConfigId, knowledgeBase, source, sourceKey, runId);
+        } catch (RuntimeException e) {
+            // The reservation is claimed but nothing will work on it, and a claimed run
+            // blocks the source until it is reaped.
+            pipeline.abandonReservation(ragConfigId, source, runId, "the ingestion worker could not be started");
+            throw e;
+        }
+        return Optional.of(runId);
+    }
+
+    private void startWorker(String ragConfigId, RagConfiguration knowledgeBase, IngestionSource source,
+                             String sourceKey, String runId) {
+
         Thread.ofVirtual().name("rag-ingestion-" + sourceKey).start(() -> {
             try {
-                IngestionReport report = pipeline.run(ragConfigId, knowledgeBase, source, Mode.INGEST);
+                IngestionReport report = pipeline.run(ragConfigId, knowledgeBase, source, Mode.INGEST, runId);
                 LOGGER.infof("Ingestion of source '%s' finished: %s, %d ingested, %d unchanged, %d tombstoned",
                         LogSanitizer.sanitize(source.getName()), report.outcome(),
                         report.documentsIngested(), report.documentsUnchanged(), report.documentsTombstoned());
@@ -90,7 +108,6 @@ public class RagSourceIngestionService {
                 LOGGER.errorf(t, "Ingestion of source '%s' threw", LogSanitizer.sanitize(source.getName()));
             }
         });
-        return Optional.of(sourceKey);
     }
 
     /**
