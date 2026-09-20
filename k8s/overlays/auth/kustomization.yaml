@@ -115,6 +115,15 @@ patches:
       - op: add
         path: /data/QUARKUS_OIDC_TOKEN_ISSUER
         value: "http://localhost:8080/realms/eddi"
+      # EDDI advertises /mcp as an OAuth protected resource, and forces the
+      # advertised identifier to https by default because the scheme is otherwise
+      # read from a request a TLS-terminating ingress has already downgraded.
+      # This overlay's documented flow is `kubectl port-forward`, which is plain
+      # http, so leaving the default on would hand an MCP client a URL nothing
+      # here is serving. Drop this line once you put EDDI behind TLS.
+      - op: add
+        path: /data/QUARKUS_OIDC_RESOURCE_METADATA_FORCE_HTTPS_SCHEME
+        value: "false"
       # Close the escape hatches the base opens for the no-auth quickstart.
       # Leaving them on lets every request through unauthenticated, which would
       # make enabling OIDC decorative.

@@ -260,13 +260,22 @@ test.describe("Authentication and authorization — Keycloak", () => {
     expect(doc.resource).toBe(`${API_BASE}/mcp`);
 
     // RFC 8414: the advertised authorization server must be the issuer EDDI
-    // accepts. Comparing against a token's `iss` rather than a hardcoded URL keeps
-    // this honest across deployments — but note what it cannot see: this tier sets
-    // no QUARKUS_OIDC_TOKEN_ISSUER, so the configured expression falls back to
-    // auth-server-url and the two strings coincide here. That the expression
-    // PREFERS the public issuer is pinned in McpOAuthDiscoveryConfigTest instead.
-    const issuer = decodeClaims(await tokenFor(request, "admin")).iss;
-    expect(doc.authorization_servers).toEqual([issuer]);
+    // accepts, and a client outside the deployment must be able to reach it.
+    // This tier pins QUARKUS_OIDC_TOKEN_ISSUER to the browser-reachable Keycloak
+    // while EDDI fetches discovery over the compose network, so the two differ —
+    // which is what makes these assertions able to fail. Advertising
+    // auth-server-url instead would name `keycloak:8080`, and the fetch below,
+    // made from outside that network, is what would catch it.
+    const [advertised] = doc.authorization_servers ?? [];
+    expect(advertised).toBe(`${KEYCLOAK_BASE}/realms/${REALM}`);
+    expect(decodeClaims(await tokenFor(request, "admin")).iss).toBe(advertised);
+
+    const metadata = await request.get(`${advertised}/.well-known/openid-configuration`);
+    expect(
+      metadata.status(),
+      "the advertised authorization server is not reachable from where a client runs",
+    ).toBe(200);
+    expect((await metadata.json()).issuer).toBe(advertised);
 
     // Clients copy these into the authorize request, and EDDI calls userinfo on
     // every request — which Keycloak refuses for a token minted without `openid`.
