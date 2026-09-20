@@ -374,6 +374,18 @@ public class ScheduleFireExecutor {
 
         Map<String, Object> md = schedule.getMetadata();
         try {
+            // The name is minted from the same two ids the metadata carries, so a
+            // mismatch means this row was not written by syncSchedules. Refuse rather
+            // than crawl: the fire runs with no caller and no access check of its own,
+            // and the REST route to the same action requires EDIT on the knowledge
+            // base. Thrown so the existing catch records it like any other failure.
+            String expectedName = RagIngestionSchedules.scheduleName(
+                    RagIngestionSchedules.ragConfigId(md), RagIngestionSchedules.sourceId(md));
+            if (schedule.getName() == null || !schedule.getName().equals(expectedName)) {
+                throw new IllegalStateException("This ingestion schedule's name does not match the knowledge "
+                        + "base and source in its metadata");
+            }
+
             var report = ragSourceIngestionService.processScheduledFire(
                     RagIngestionSchedules.ragConfigId(md),
                     RagIngestionSchedules.ragConfigVersion(md),

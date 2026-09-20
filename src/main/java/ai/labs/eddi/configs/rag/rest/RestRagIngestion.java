@@ -111,6 +111,15 @@ public class RestRagIngestion implements IRestRagIngestion {
             return resolved.error();
         }
 
+        if (!resolved.source().isEnabled()) {
+            // Answering 202 and then writing a FAILED row into the history for a
+            // source the operator deliberately turned off reads as a bug in the run
+            // rather than as an answer to the request.
+            return Response.status(Response.Status.CONFLICT)
+                    .entity(Map.of("error", "This source is disabled. Enable it to run it.", "sourceId", sourceId))
+                    .build();
+        }
+
         return sourceIngestionService.runAsync(ragConfigId, resolved.knowledgeBase(), resolved.source())
                 .map(runKey -> Response.accepted(Map.of("status", "started", "sourceId", sourceId)).build())
                 .orElseGet(() -> Response.status(Response.Status.CONFLICT)
@@ -152,6 +161,15 @@ public class RestRagIngestion implements IRestRagIngestion {
         if (resolved.error() != null) {
             return resolved.error();
         }
+        if (sourceIngestionService.activeRun(ragConfigId, resolved.source()).isPresent()) {
+            // The purge deletes the run history, including the RUNNING row that is the
+            // only thing stopping a second crawl into the same knowledge base — and
+            // the worker still going would write its state rows back afterwards.
+            return Response.status(Response.Status.CONFLICT)
+                    .entity(Map.of("error", "A run is in flight for this source. Purge once it has finished.",
+                            "sourceId", sourceId))
+                    .build();
+        }
         sourceIngestionService.purge(ragConfigId, resolved.source());
         LOGGER.infof("Purged ingestion state for source %s of RAG config %s", sanitize(sourceId), sanitize(ragConfigId));
         return Response.ok(Map.of("status", "purged", "sourceId", sourceId)).build();
@@ -174,6 +192,17 @@ public class RestRagIngestion implements IRestRagIngestion {
         RagConfiguration ragConfig;
         try {
             ragConfig = restRagStore.readRag(ragConfigId, version);
+        } catch (IllegalArgumentException e) {
+            // A version that cannot be used at all — negative, say — is a bad request.
+            // Answering "not found" sends the caller looking for a knowledge base
+            // that is sitting there.
+            return new ResolvedSource(null, null, Response.status(Response.Status.BAD_REQUEST)
+                    .entity(Map.of("error", "Invalid request: " + e.getMessage())).build());
+        } catch (RuntimeException e) {
+            // A store that is down is not a missing knowledge base. Reporting 404 for
+            // an outage hides it behind a client error that nobody investigates.
+            LOGGER.errorf(e, "Failed to load RAG config %s v%d", sanitize(ragConfigId), version);
+            throw e;
         } catch (Exception e) {
             LOGGER.warnf("Failed to load RAG config %s v%d: %s", sanitize(ragConfigId), version, e.getMessage());
             return new ResolvedSource(null, null, Response.status(Response.Status.NOT_FOUND)

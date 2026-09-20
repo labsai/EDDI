@@ -110,6 +110,11 @@ public class RagSourceIngestionService {
         });
     }
 
+    /** The run in flight for this source, if there is one. */
+    public Optional<IIngestionStateStore.IngestionRun> activeRun(String ragConfigId, IngestionSource source) {
+        return stateStore.activeRun(IngestionPipeline.stateKey(ragConfigId, source));
+    }
+
     /**
      * Crawls and reports what would change, embedding and recording nothing.
      *

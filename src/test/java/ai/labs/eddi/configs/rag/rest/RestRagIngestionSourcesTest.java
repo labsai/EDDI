@@ -8,6 +8,8 @@ import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.rag.IRestRagStore;
 import ai.labs.eddi.configs.rag.model.IngestionSource;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.modules.ingestion.IIngestionStateStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
@@ -21,6 +23,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.time.Duration;
 import java.util.List;
+import java.time.Instant;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -121,6 +124,47 @@ class RestRagIngestionSourcesTest {
     }
 
     @Test
+    @DisplayName("a store that is down is not reported as a missing knowledge base")
+    void storeFailureIsNotANotFound() {
+        // Answering 404 for an outage hides it behind a client error: the caller is
+        // told their knowledge base does not exist while it is sitting there, and
+        // nobody goes to look at the database.
+        when(restRagStore.readRag(eq(KB_ID), anyInt())).thenThrow(new IllegalStateException("connection refused"));
+
+        assertThrows(IllegalStateException.class, () -> rest.runSource(KB_ID, SOURCE_ID, 1));
+        verify(sourceIngestionService, never()).runAsync(anyString(), any(), any());
+    }
+
+    @Test
+    @DisplayName("a disabled source is refused rather than started and then failed")
+    void disabledSourceIsConflict() {
+        var config = knowledgeBaseWithSource();
+        config.getSources().get(0).setEnabled(false);
+        when(restRagStore.readRag(eq(KB_ID), anyInt())).thenReturn(config);
+
+        Response response = rest.runSource(KB_ID, SOURCE_ID, 1);
+
+        assertEquals(Response.Status.CONFLICT.getStatusCode(), response.getStatus());
+        verify(sourceIngestionService, never()).runAsync(anyString(), any(), any());
+    }
+
+    @Test
+    @DisplayName("purging while a run is in flight is refused")
+    void purgeDuringRunIsConflict() {
+        // The purge deletes the RUNNING row, which is the only thing stopping a
+        // second crawl into the same knowledge base.
+        when(sourceIngestionService.activeRun(anyString(), any()))
+                .thenReturn(Optional.of(new IIngestionStateStore.IngestionRun("run-1", "kb:src-1",
+                        IIngestionStateStore.IngestionRun.Status.RUNNING, null, Instant.now(),
+                        0, 0, 0, 0, 0, 0, 0.0, null)));
+
+        Response response = rest.purgeSource(KB_ID, SOURCE_ID, 1);
+
+        assertEquals(Response.Status.CONFLICT.getStatusCode(), response.getStatus());
+        verify(sourceIngestionService, never()).purge(anyString(), any());
+    }
+
+    @Test
     @DisplayName("a missing version is 400, not a 404 blaming the knowledge base")
     void missingVersionIsBadRequest() {
         // An omitted ?version binds as null; RestVersionInfo.read throws on it and the
@@ -144,7 +188,11 @@ class RestRagIngestionSourcesTest {
     @Test
     @DisplayName("an unknown knowledge base is 404")
     void unknownKnowledgeBaseIsNotFound() {
-        when(restRagStore.readRag(eq(KB_ID), anyInt())).thenThrow(new RuntimeException("gone"));
+        // doAnswer, not thenThrow: readRag declares no checked exception and
+        // production sneaky-throws this one, which Mockito's thenThrow refuses.
+        when(restRagStore.readRag(eq(KB_ID), anyInt())).thenAnswer(invocation -> {
+            throw new IResourceStore.ResourceNotFoundException("gone");
+        });
 
         Response response = rest.runSource(KB_ID, SOURCE_ID, 1);
 

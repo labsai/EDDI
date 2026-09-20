@@ -18,6 +18,8 @@ import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
 import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.security.OwnershipValidator;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
+import ai.labs.eddi.modules.ingestion.RagIngestionSchedules;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -162,6 +164,11 @@ public class RestScheduleStore implements IRestScheduleStore {
                 return bodyGuard;
             }
 
+            Response ingestionGuard = rejectIngestionBody(schedule, "create");
+            if (ingestionGuard != null) {
+                return ingestionGuard;
+            }
+
             // A schedule runs AS its userId — refuse to mint one that acts as
             // somebody else (see requireOwnUserId).
             Response ownerGuard = requireOwnUserId(schedule != null ? schedule.getUserId() : null, "create");
@@ -221,6 +228,11 @@ public class RestScheduleStore implements IRestScheduleStore {
             Response bodyGuard = rejectHitlTimeoutBody(schedule, "update");
             if (bodyGuard != null) {
                 return bodyGuard;
+            }
+
+            Response ingestionGuard = rejectIngestionBody(schedule, "update");
+            if (ingestionGuard != null) {
+                return ingestionGuard;
             }
 
             // ONE read of the stored row, shared by every guard below and by the
@@ -375,6 +387,19 @@ public class RestScheduleStore implements IRestScheduleStore {
             // POST /agents/{conversationId}/resume, so refuse for EVERYONE — the
             // human decision must go through /resume or /cancel. Internal firing
             // via SchedulePollerService bypasses this REST surface and is unaffected.
+            if (RagIngestionSchedules.isIngestionSchedule(schedule != null ? schedule.getMetadata() : null)) {
+                // Firing one crawls, re-embeds and can tombstone a knowledge base, which
+                // the REST endpoints for the same action gate on EDIT of that knowledge
+                // base. Without this check, USE on any agent plus a schedule id is a
+                // standing bypass of it.
+                String ragConfigId = RagIngestionSchedules.ragConfigId(schedule.getMetadata());
+                if (ragConfigId == null || ragConfigId.isBlank()) {
+                    return Response.status(Response.Status.BAD_REQUEST)
+                            .entity("This ingestion schedule names no knowledge base and cannot be fired.").build();
+                }
+                resourceAccessGuard.requireAccess(ragConfigId, AccessLevel.EDIT, "RAG configuration");
+            }
+
             if (isHitlSchedule(schedule)) {
                 LOGGER.warnf("Refused manual fire of HITL timeout schedule %s (name=%s) — "
                         + "human decisions must go through /resume or /cancel", sanitize(scheduleId), sanitize(schedule.getName()));
@@ -647,6 +672,32 @@ public class RestScheduleStore implements IRestScheduleStore {
      * @return a 400 {@link Response} to short-circuit the caller when the body is a
      *         HITL timeout schedule; {@code null} when the operation may proceed
      */
+    /**
+     * Refuses a schedule body that claims to be a RAG ingestion schedule.
+     *
+     * <p>
+     * These are minted only by {@code RagSourceIngestionService.syncSchedules} when
+     * a knowledge base is saved, and a fire of one crawls, re-embeds and can
+     * tombstone that knowledge base — which the ingestion REST endpoints gate on
+     * EDIT of the knowledge base itself. Accepting the metadata from a client made
+     * that gate optional: anyone who could create a schedule could name any
+     * knowledge base in it, fire it, and have the server rewrite a knowledge base
+     * they have no access to. The ids needed are readable by anyone with VIEW.
+     */
+    private Response rejectIngestionBody(ScheduleConfiguration schedule, String operation) {
+        if (schedule != null && RagIngestionSchedules.isIngestionSchedule(schedule.getMetadata())) {
+            LOGGER.warnf("Refused %s of a schedule whose body declares %s — ingestion schedules are minted "
+                    + "internally only", operation, RagIngestionSchedules.METADATA_TYPE_KEY);
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity("Schedules marked as RAG ingestion (metadata "
+                            + RagIngestionSchedules.METADATA_TYPE_KEY + "=true) cannot be created or updated via "
+                            + "this API. They are managed automatically when a knowledge base is saved. "
+                            + "Run a source via POST /ragstore/rags/{id}/sources/{sourceId}/run.")
+                    .build();
+        }
+        return null;
+    }
+
     private Response rejectHitlTimeoutBody(ScheduleConfiguration schedule, String operation) {
         if (isHitlSchedule(schedule)) {
             LOGGER.warnf("Refused %s of a schedule whose body declares hitlType=%s — "
