@@ -694,6 +694,25 @@ class WebCrawlerTest {
         }
 
         @Test
+        @DisplayName("a rule matches the URL as it goes on the wire, query included")
+        void robotsMatchesRawPathAndQuery() {
+            // Matching the decoded path without its query made two ordinary rules
+            // no-ops: a percent-encoded path, and a facet block like /*?sort=.
+            FakeSite site = new FakeSite()
+                    .robots(SITE, "User-agent: *\nDisallow: /caf%C3%A9/\nDisallow: /*?sort=")
+                    .page(SITE + "/", linkTo(SITE + "/caf%C3%A9/menu", SITE + "/list?sort=price", SITE + "/ok"))
+                    .page(SITE + "/caf%C3%A9/menu", "<html><body>menu</body></html>")
+                    .page(SITE + "/list?sort=price", "<html><body>sorted</body></html>")
+                    .page(SITE + "/ok", "<html><body>fine</body></html>");
+
+            new WebCrawler(site).crawl(politeRequest(SITE + "/"), new RecordingSink());
+
+            assertFalse(site.wasRequested(SITE + "/caf%C3%A9/menu"), "an encoded path rule must apply");
+            assertFalse(site.wasRequested(SITE + "/list?sort=price"), "a query rule must apply");
+            assertTrue(site.wasRequested(SITE + "/ok"), "and everything else is still crawled");
+        }
+
+        @Test
         @DisplayName("a disallowed path is not fetched")
         void honoursDisallow() {
             FakeSite site = new FakeSite()
