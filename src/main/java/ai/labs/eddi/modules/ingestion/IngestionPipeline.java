@@ -30,6 +30,7 @@ import org.jboss.logging.Logger;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metadataKey;
 
@@ -118,30 +119,87 @@ public class IngestionPipeline {
      *            the knowledge base's resource id, used to scope ingestion state
      */
     public IngestionReport run(String ragConfigId, RagConfiguration knowledgeBase, IngestionSource source, Mode mode) {
-        source.validate();
+        return run(ragConfigId, knowledgeBase, source, mode, null);
+    }
 
-        String knowledgeBaseId = knowledgeBase.getName();
-        if (knowledgeBaseId == null || knowledgeBaseId.isBlank()) {
-            return IngestionReport.failed(null, source.getId(),
-                    "The knowledge base has no name, and its name is what the vector store is keyed by");
-        }
-        if (!source.isEnabled() && mode == Mode.INGEST) {
-            return IngestionReport.skipped(source.getId(), "Source is disabled");
-        }
+    /**
+     * Claims a run for this source before any work starts, so a caller that hands
+     * the work to another thread can answer its own caller truthfully.
+     *
+     * <p>
+     * Without this, two requests arriving together both saw no active run, both
+     * answered "started", and only one of the two workers won the claim inside
+     * {@link #run} — the other returned {@code ALREADY_RUNNING} into a log line
+     * nobody reads, having crawled nothing.
+     *
+     * @return the run id to pass back into {@code run}, or empty when a run is
+     *         already in flight
+     */
+    public Optional<String> reserveRun(String ragConfigId, IngestionSource source) {
+        // A run whose process died is still marked RUNNING and would block this
+        // source indefinitely; nothing else calls this.
+        stateStore.reapStaleRuns(Instant.now().minus(staleRunThreshold(source)));
+        return stateStore.startRun(stateKey(ragConfigId, source));
+    }
+
+    /**
+     * Releases a reservation that will never be worked on — the worker thread could
+     * not be started. Leaving it claimed would block the source until it is reaped.
+     */
+    public void abandonReservation(String ragConfigId, IngestionSource source, String runId, String reason) {
+        finish(Mode.INGEST, runId, stateKey(ragConfigId, source),
+                IngestionReport.failed(runId, source.getId(), reason), IngestionRun.Status.FAILED);
+    }
+
+    /**
+     * @param reservedRunId
+     *            a run already claimed by {@link #reserveRun}, or null to claim one
+     *            here. Passing one claimed elsewhere is what stops the claim being
+     *            taken twice.
+     */
+    public IngestionReport run(String ragConfigId, RagConfiguration knowledgeBase, IngestionSource source, Mode mode,
+                               String reservedRunId) {
 
         String sourceKey = stateKey(ragConfigId, source);
+        IngestionReport early;
+        try {
+            source.validate();
+            String name = knowledgeBase.getName();
+            if (name == null || name.isBlank()) {
+                early = IngestionReport.failed(reservedRunId, source.getId(),
+                        "The knowledge base has no name, and its name is what the vector store is keyed by");
+            } else if (!source.isEnabled() && mode == Mode.INGEST) {
+                early = IngestionReport.skipped(source.getId(), "Source is disabled");
+            } else {
+                early = null;
+            }
+        } catch (RuntimeException e) {
+            // Validation runs after the reservation exists, so an invalid source must
+            // not leave the run claimed.
+            releaseIfReserved(mode, reservedRunId, sourceKey, source, describe(e));
+            throw e;
+        }
+        if (early != null) {
+            releaseIfReserved(mode, reservedRunId, sourceKey, source, early.message());
+            return early;
+        }
+
+        String knowledgeBaseId = knowledgeBase.getName();
         String runId;
         if (mode == Mode.INGEST) {
-            // A run whose process died is still marked RUNNING and would block this
-            // source indefinitely; nothing else calls this.
-            stateStore.reapStaleRuns(Instant.now().minus(staleRunThreshold(source)));
-            var claimed = stateStore.startRun(sourceKey);
-            if (claimed.isEmpty()) {
-                // Not an error: an operator clicking "run now" while a scheduled run is
-                // in flight should be told, not start a second crawl into one store.
-                return IngestionReport.alreadyRunning(source.getId());
+            if (reservedRunId != null) {
+                runId = reservedRunId;
+            } else {
+                stateStore.reapStaleRuns(Instant.now().minus(staleRunThreshold(source)));
+                var claimed = stateStore.startRun(sourceKey);
+                if (claimed.isEmpty()) {
+                    // Not an error: an operator clicking "run now" while a scheduled run
+                    // is in flight should be told, not start a second crawl into one
+                    // store.
+                    return IngestionReport.alreadyRunning(source.getId());
+                }
+                runId = claimed.get();
             }
-            runId = claimed.get();
         } else {
             runId = "preview";
         }
@@ -239,6 +297,15 @@ public class IngestionPipeline {
             }
         }
         return removed;
+    }
+
+    private void releaseIfReserved(Mode mode, String reservedRunId, String sourceKey, IngestionSource source,
+                                   String reason) {
+        if (mode != Mode.INGEST || reservedRunId == null) {
+            return;
+        }
+        finish(mode, reservedRunId, sourceKey, IngestionReport.failed(reservedRunId, source.getId(), reason),
+                IngestionRun.Status.FAILED);
     }
 
     private void finish(Mode mode, String runId, String sourceKey, IngestionReport report,
