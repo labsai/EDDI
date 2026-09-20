@@ -5,6 +5,8 @@
 package ai.labs.eddi.modules.ingestion.mongo;
 
 import ai.labs.eddi.modules.ingestion.IIngestionStateStore;
+import ai.labs.eddi.utils.LogSanitizer;
+import org.jboss.logging.Logger;
 import ai.labs.eddi.modules.ingestion.IngestionStateStoreException;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
@@ -42,6 +44,8 @@ import java.util.UUID;
 @ApplicationScoped
 @DefaultBean
 public class MongoIngestionStateStore implements IIngestionStateStore {
+
+    private static final Logger LOGGER = Logger.getLogger(MongoIngestionStateStore.class);
 
     static final String DOCUMENTS_COLLECTION = "rag_ingestion_documents";
     static final String RUNS_COLLECTION = "rag_ingestion_runs";
@@ -132,6 +136,16 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
     }
 
     @Override
+    public void recordUnreachable(String sourceId, String documentId, String runId) {
+        // Only the run marker: the miss counter and the tombstone flag are left
+        // exactly as they were, so this run neither condemns the document nor
+        // absolves it.
+        documents.updateOne(byDocument(sourceId, documentId),
+                Updates.set(FIELD_LAST_RUN_ID, runId),
+                new UpdateOptions().upsert(false));
+    }
+
+    @Override
     public List<DocumentState> tombstoneMissing(String sourceId, String runId, int missedRunsThreshold) {
         int threshold = Math.max(1, missedRunsThreshold);
 
@@ -196,7 +210,8 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
 
     @Override
     public void finishRun(IngestionRun run) {
-        runs.updateOne(Filters.eq(FIELD_RUN_ID, run.runId()),
+        var result = runs.updateOne(Filters.and(Filters.eq(FIELD_RUN_ID, run.runId()),
+                Filters.eq(FIELD_STATUS, IngestionRun.Status.RUNNING.name())),
                 Updates.combine(
                         Updates.set(FIELD_STATUS, run.status().name()),
                         Updates.set(FIELD_FINISHED_AT,
@@ -209,6 +224,13 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
                         Updates.set(FIELD_SEGMENTS_STORED, run.segmentsStored()),
                         Updates.set(FIELD_COST_USD, run.costUsd()),
                         Updates.set(FIELD_ERROR, run.error())));
+        if (result.getMatchedCount() == 0) {
+            // The run was reaped while it was still working. Its own result is
+            // discarded — the reaper already declared it dead, and a second run may
+            // have started since — but it must not pass unrecorded.
+            LOGGER.warnf("Ingestion run %s was already closed (reaped) before it finished; its result is discarded",
+                    LogSanitizer.sanitize(run.runId()));
+        }
     }
 
     @Override
@@ -231,9 +253,10 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
     }
 
     @Override
-    public int reapStaleRuns(Instant startedBefore) {
+    public int reapStaleRuns(String sourceId, Instant startedBefore) {
         var result = runs.updateMany(
                 Filters.and(
+                        Filters.eq(FIELD_SOURCE_ID, sourceId),
                         Filters.eq(FIELD_STATUS, IngestionRun.Status.RUNNING.name()),
                         Filters.lt(FIELD_STARTED_AT, Date.from(startedBefore))),
                 Updates.combine(

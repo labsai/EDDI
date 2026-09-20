@@ -5,6 +5,7 @@
 package ai.labs.eddi.datastore.postgres;
 
 import ai.labs.eddi.modules.ingestion.IIngestionStateStore;
+import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.modules.ingestion.IngestionStateStoreException;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -42,11 +43,11 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
 
     private static final String CREATE_DOCUMENTS_TABLE = """
             CREATE TABLE IF NOT EXISTS rag_ingestion_documents (
-                source_id VARCHAR(255) NOT NULL,
+                source_id TEXT NOT NULL,
                 document_id TEXT NOT NULL,
-                content_hash VARCHAR(64),
-                etag VARCHAR(255),
-                last_modified VARCHAR(255),
+                content_hash TEXT,
+                etag TEXT,
+                last_modified TEXT,
                 first_ingested_at TIMESTAMP,
                 last_ingested_at TIMESTAMP,
                 last_run_id VARCHAR(64),
@@ -59,7 +60,7 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
     private static final String CREATE_RUNS_TABLE = """
             CREATE TABLE IF NOT EXISTS rag_ingestion_runs (
                 run_id VARCHAR(64) PRIMARY KEY,
-                source_id VARCHAR(255) NOT NULL,
+                source_id TEXT NOT NULL,
                 status VARCHAR(16) NOT NULL,
                 started_at TIMESTAMP NOT NULL,
                 finished_at TIMESTAMP,
@@ -192,6 +193,25 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
     }
 
     @Override
+    public void recordUnreachable(String sourceId, String documentId, String runId) {
+        // Only the run marker — see the interface. The miss counter and the
+        // tombstone flag stay as they are.
+        String sql = """
+                UPDATE rag_ingestion_documents
+                   SET last_run_id = ?
+                 WHERE source_id = ? AND document_id = ?
+                """;
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, runId);
+            statement.setString(2, sourceId);
+            statement.setString(3, documentId);
+            statement.executeUpdate();
+        } catch (SQLException e) {
+            throw new IngestionStateStoreException("Failed to record an unreachable document", e);
+        }
+    }
+
+    @Override
     public List<DocumentState> tombstoneMissing(String sourceId, String runId, int missedRunsThreshold) {
         int threshold = Math.max(1, missedRunsThreshold);
         List<DocumentState> tombstoned = new ArrayList<>();
@@ -295,7 +315,7 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
                    SET status = ?, finished_at = ?, documents_seen = ?, documents_ingested = ?,
                        documents_unchanged = ?, documents_failed = ?, documents_tombstoned = ?,
                        segments_stored = ?, cost_usd = ?, error = ?
-                 WHERE run_id = ?
+                 WHERE run_id = ? AND status = 'RUNNING'
                 """;
         try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, run.status().name());
@@ -309,7 +329,13 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
             statement.setDouble(9, run.costUsd());
             statement.setString(10, run.error());
             statement.setString(11, run.runId());
-            statement.executeUpdate();
+            if (statement.executeUpdate() == 0) {
+                // Reaped while it was still working: the reaper already declared it
+                // dead and another run may have started since, so this result is
+                // discarded rather than overwriting the record — but not silently.
+                LOGGER.warnf("Ingestion run %s was already closed (reaped) before it finished; "
+                        + "its result is discarded", LogSanitizer.sanitize(run.runId()));
+            }
         } catch (SQLException e) {
             // Losing this leaves the run RUNNING, which blocks the source until it
             // is reaped.
@@ -349,16 +375,17 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
     }
 
     @Override
-    public int reapStaleRuns(Instant startedBefore) {
+    public int reapStaleRuns(String sourceId, Instant startedBefore) {
         String sql = """
                 UPDATE rag_ingestion_runs
                    SET status = 'FAILED', finished_at = ?,
                        error = 'Run abandoned — no completion recorded before the stale threshold'
-                 WHERE status = 'RUNNING' AND started_at < ?
+                 WHERE source_id = ? AND status = 'RUNNING' AND started_at < ?
                 """;
         try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setTimestamp(1, Timestamp.from(Instant.now()));
-            statement.setTimestamp(2, Timestamp.from(startedBefore));
+            statement.setString(2, sourceId);
+            statement.setTimestamp(3, Timestamp.from(startedBefore));
             return statement.executeUpdate();
         } catch (SQLException e) {
             throw new IngestionStateStoreException("Failed to reap stale ingestion runs", e);
