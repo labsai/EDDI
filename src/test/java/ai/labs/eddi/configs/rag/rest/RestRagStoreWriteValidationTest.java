@@ -7,14 +7,22 @@ package ai.labs.eddi.configs.rag.rest;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.rag.IRagStore;
+import ai.labs.eddi.configs.rag.model.IngestionSource;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import jakarta.ws.rs.BadRequestException;
+
+import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -48,10 +56,46 @@ class RestRagStoreWriteValidationTest {
     void setUp() throws Exception {
         ragStore = mock(IRagStore.class);
         restRagStore = new RestRagStore(ragStore, mock(IDocumentDescriptorStore.class), mock(IJsonSchemaCreator.class),
-                mock(ResourceAccessGuard.class));
+                mock(ResourceAccessGuard.class),
+                mock(RagSourceIngestionService.class));
 
         when(ragStore.create(any())).thenReturn(resourceId(RAG_ID, 1));
         when(ragStore.update(anyString(), anyInt(), any())).thenReturn(2);
+    }
+
+    @Test
+    @DisplayName("a cron the scheduler cannot parse is refused at save time")
+    void createRejectsInvalidCron() {
+        // Stored, it becomes a schedule that never fires while every screen shows the
+        // source as scheduled. Six fields is the trap: Quartz takes seconds, the
+        // scheduler here does not.
+        var config = new RagConfiguration();
+        config.setName("kb");
+        var source = new IngestionSource();
+        source.setName("docs");
+        var web = new IngestionSource.WebSource();
+        web.setStartUrl("https://example.com/");
+        source.setWeb(web);
+        source.setCron("0 0 2 * * *");
+        config.setSources(List.of(source));
+
+        var thrown = assertThrows(BadRequestException.class, () -> restRagStore.createRag(config));
+        assertTrue(thrown.getMessage().contains("cron"), thrown.getMessage());
+    }
+
+    @Test
+    @DisplayName("a null entry in sources is a bad request, not a 500")
+    void createRejectsNullSourceEntry() {
+        // assignSourceIds ran before validation and dereferenced the entry, so a
+        // malformed body was answered with a server error.
+        var config = new RagConfiguration();
+        config.setName("kb");
+        var sources = new ArrayList<IngestionSource>();
+        sources.add(null);
+        config.setSources(sources);
+
+        var thrown = assertThrows(BadRequestException.class, () -> restRagStore.createRag(config));
+        assertTrue(thrown.getMessage().contains("null entry"), thrown.getMessage());
     }
 
     @Test
@@ -167,6 +211,60 @@ class RestRagStoreWriteValidationTest {
         config.setChunkStrategy("semantic");
 
         assertThrows(BadRequestException.class, () -> restRagStore.createRag(config));
+    }
+
+    @Test
+    @DisplayName("flags a plaintext credential in either parameter map, and never the value")
+    void flagsPlaintextSecrets() {
+        // Zero-entropy values on purpose: the classification here is by parameter
+        // NAME, and a random-looking value would let an entropy-based check pass
+        // this test even if the name matching were broken.
+        var config = new RagConfiguration();
+        config.setName("product-docs");
+        config.setEmbeddingParameters(Map.of("model", "text-embedding-3-small", "apiKey", "aaaaaaaaaaaa"));
+        config.setStoreParameters(Map.of("host", "db", "password", "aaaaaaaaaaaa"));
+
+        var flagged = RestRagStore.plaintextSecretParameters(config);
+
+        assertEquals(List.of("embeddingParameters.apiKey", "storeParameters.password"),
+                flagged.stream().sorted().toList());
+    }
+
+    @Test
+    @DisplayName("a vault or connection reference is not plaintext")
+    void referencesAreNotFlagged() {
+        var config = new RagConfiguration();
+        config.setName("product-docs");
+        config.setEmbeddingParameters(Map.of("apiKey", "${vault:tenant/agent/openai-key}"));
+        config.setStoreParameters(Map.of("password", "${connection:pgvector}", "connectionString", "{properties.dsn}"));
+
+        assertEquals(List.of(), RestRagStore.plaintextSecretParameters(config));
+    }
+
+    @Test
+    @DisplayName("a plaintext credential warns but still stores — rejecting would break vault-less instances")
+    void plaintextSecretStillStores() throws Exception {
+        // The deliberate trade-off RestLlmStore and RestChannelIntegrationStore
+        // already made. A 400 here would make every existing knowledge base on a
+        // vault-less instance un-updatable.
+        var config = new RagConfiguration();
+        config.setName("product-docs");
+        config.setStoreParameters(Map.of("password", "aaaaaaaaaaaa"));
+
+        var response = restRagStore.createRag(config);
+
+        assertEquals(201, response.getStatus());
+        verify(ragStore).create(any());
+    }
+
+    @Test
+    @DisplayName("a non-credential parameter is never flagged, whatever its value looks like")
+    void nonSecretParametersAreNotFlagged() {
+        var config = new RagConfiguration();
+        config.setName("product-docs");
+        config.setEmbeddingParameters(Map.of("model", "aaaaaaaaaaaa", "baseUrl", "http://localhost:11434"));
+
+        assertEquals(List.of(), RestRagStore.plaintextSecretParameters(config));
     }
 
     private static IResourceStore.IResourceId resourceId(String id, Integer version) {

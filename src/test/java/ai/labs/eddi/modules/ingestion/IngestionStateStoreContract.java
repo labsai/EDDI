@@ -86,6 +86,35 @@ public interface IngestionStateStoreContract {
                 "the reaper released a fence it had not taken, so the live run is writing into nothing");
     }
 
+    @Test
+    @DisplayName("a superseded run reports nothing as gone, so it deletes nobody's vectors")
+    default void supersededRunReportsNothingMissing() {
+        // Fencing the miss counter alone is not enough. The counter is shared: a
+        // document another run has already bumped to the threshold still satisfies
+        // an unfenced search, so a superseded run would hand its caller a list of
+        // documents to delete -- and the caller deletes the vectors before anyone
+        // checks who owned them. The search has to be fenced as well as the bump.
+        String runOne = openRun(SOURCE);
+        store().recordIngested(SOURCE, DOC, "hash", null, null, runOne);
+        closeRun(runOne, SOURCE, IngestionRun.Status.COMPLETED);
+
+        // A run that does not see the document, raising its miss count to one.
+        String runTwo = openRun(SOURCE);
+        assertTrue(store().bumpAndFindMissing(SOURCE, runTwo, 2).isEmpty(),
+                "one miss is below the threshold of two");
+        closeRun(runTwo, SOURCE, IngestionRun.Status.COMPLETED);
+
+        // A third run starts, and is then superseded: the document is claimed by
+        // someone else while this run is still going.
+        String runThree = openRun(SOURCE);
+        forceDocumentOwner(SOURCE, DOC, "the-run-that-took-over");
+
+        assertTrue(store().bumpAndFindMissing(SOURCE, runThree, 1).isEmpty(),
+                "a run that no longer owns the document must not report it as gone");
+        assertFalse(store().lookup(SOURCE, DOC).orElseThrow().tombstoned(),
+                "and it must certainly not have tombstoned it");
+    }
+
     // === document state ===
 
     @Test

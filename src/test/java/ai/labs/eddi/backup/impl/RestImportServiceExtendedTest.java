@@ -29,6 +29,7 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.core.Response;
+import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -77,7 +78,7 @@ class RestImportServiceExtendedTest {
                 zipArchive, jsonSerialization,
                 migrationManager, documentDescriptorStore,
                 templateSyntaxMigrator, structuralMatcher, upgradeExecutor, mock(IScheduleStore.class), mock(BackupMetrics.class),
-                mock(ResourceAccessGuard.class), mock(SpaceContext.class));
+                mock(ResourceAccessGuard.class), mock(SpaceContext.class), mock(RagSourceIngestionService.class));
     }
 
     // ==================== normalizeVaultReferences ====================

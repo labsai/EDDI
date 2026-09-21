@@ -2040,7 +2040,55 @@
     "ingestText": "Ingérer le texte",
     "ingestionHistory": "Statut d'ingestion",
     "saveFirstIngestion": "Enregistrez d'abord cette base pour autoriser l'ingestion.",
-    "addParam": "Ajout paramètre"
+    "addParam": "Ajout paramètre",
+    "sources": {
+      "title": "Sources d'ingestion",
+      "add": "Ajouter une source",
+      "remove": "Supprimer la source",
+      "unnamed": "Source sans nom",
+      "disabled": "Désactivée",
+      "enabled": "Activée",
+      "running": "En cours",
+      "emptyTitle": "Aucune source d'ingestion",
+      "emptyDescription": "Ajoutez une source pour que cette base de connaissances explore un site et reste à jour.",
+      "name": "Nom",
+      "namePlaceholder": "public-docs",
+      "startUrl": "URL de départ",
+      "pathPrefix": "Préfixe de chemin",
+      "pathPrefixHint": "N'explorer que sous ce chemin",
+      "cron": "Planification (cron)",
+      "cronHint": "Laisser vide pour exécuter manuellement uniquement",
+      "maxDepth": "Profondeur maximale",
+      "maxPages": "Pages maximales",
+      "respectRobots": "Respecter robots.txt",
+      "respectRobotsHint": "À désactiver uniquement pour un site vous appartenant",
+      "includeSubdomains": "Inclure les sous-domaines",
+      "excludePatterns": "Motifs d'exclusion",
+      "excludePatternsHint": "Globs appliqués au chemin de l'URL, séparés par des virgules — * reste dans un segment, ** les traverse",
+      "saveFirst": "Enregistrez la base de connaissances pour exécuter cette source, la prévisualiser ou voir son historique.",
+      "run": "Exécuter",
+      "runFailed": "Impossible de démarrer l'exécution. Une exécution est peut-être déjà en cours.",
+      "preview": "Aperçu",
+      "previewResult": "Aperçu — rien n'a été intégré",
+      "purge": "Purger l'état",
+      "purgeTitle": "Purger l'état d'ingestion ?",
+      "purgeDescription": "La prochaine exécution ré-explorera et ré-intégrera tout ce que cette source a ingéré. Les documents déjà stockés ne sont pas supprimés.",
+      "purgeConfirm": "Purger",
+      "history": "Exécutions récentes",
+      "noRuns": "Cette source n'a pas encore été exécutée.",
+      "runSummary": "{{ingested}} ingérés · {{unchanged}} inchangés",
+      "statSeen": "Vus",
+      "statChanged": "À ingérer",
+      "statUnchanged": "Inchangés",
+      "statFailed": "Échecs",
+      "partialCrawl": "L'exploration s'est arrêtée à une limite, rien ne sera donc considéré comme supprimé.",
+      "saveBeforeRun": "Enregistrez d'abord la base de connaissances — une exécution explore la configuration enregistrée, pas les modifications à l'écran.",
+      "purgeFailed": "Impossible de purger l'état d'ingestion.",
+      "previewFailed": "Impossible de prévisualiser cette source.",
+      "previewNotCompleted": "L'aperçu ne s'est pas terminé.",
+      "disabledNoRun": "Cette source est désactivée. Activez-la et enregistrez pour l'exécuter ou la planifier.",
+      "purgeBlockedWhileRunning": "Une exécution est en cours. Purger maintenant permettrait à une seconde de démarrer en parallèle."
+    }
   },
   "onboarding": {
     "welcome": {
@@ -4134,8 +4182,17 @@
       "tools": "Outils qui lui seront confiés ({{toolCount}})",
       "activate": "Activer et déployer",
       "callerIdentityNote": "EDDI insère votre jeton au moment de l'appel. Il n'est jamais enregistré dans la conversation et n'est renvoyé qu'à ce déploiement.",
-      "rebuildWarning": "L'enregistrement crée un nouvel agent opérateur et supprime l'actuel. Votre conversation d'opérateur existante ne sera pas conservée.",
-      "environmentHint": "Où s'exécute l'agent opérateur lui-même. Il peut toujours lire n'importe quel environnement."
+      "rebuildWarning": "L'enregistrement REMPLACE l'opérateur : un nouvel agent est créé, l'agent actuel ({{agentId}}) est retiré du déploiement puis supprimé. Votre conversation d'opérateur actuelle ne sera pas conservée, et cet écran s'adressera ensuite au nouvel agent.",
+      "environmentHint": "Où s'exécute l'agent opérateur lui-même. Il peut toujours lire n'importe quel environnement.",
+      "platformBaseUrl": "URL de base de la plateforme",
+      "platformBaseUrlHint": "L'adresse à laquelle EDDI peut se joindre lui-même — les outils de l'opérateur l'appellent depuis l'intérieur du serveur, ce n'est donc pas l'adresse utilisée par votre navigateur. Conservez la valeur pré-remplie sauf si vous savez qu'elle est incorrecte.",
+      "platformBaseUrlInvalid": "Cette valeur doit être une URL absolue http:// ou https://, par exemple http://127.0.0.1:7070.",
+      "platformBaseUrlUnknown": "Ce déploiement EDDI ne peut pas indiquer sa propre adresse : l'origine de votre navigateur sera utilisée par défaut. Cela n'est correct que si rien (tunnel, redirection de port ou proxy inverse) ne se trouve entre votre navigateur et EDDI — sinon, saisissez l'adresse ici.",
+      "platformBaseUrlLoopback": "Déduite du port HTTP de ce déploiement. Remplacez-la si EDDI doit être joint par un nom de service ou via TLS dans le processus.",
+      "platformBaseUrlAuto": "résolue par le serveur",
+      "platformBaseUrlDiffers": "Ce déploiement indique actuellement sa propre adresse comme {{serverUrl}}. La valeur ci-dessus diffère — ne la conservez que si vous l'avez définie délibérément.",
+      "platformBaseUrlQueryFailed": "Impossible de demander au serveur sa propre adresse. L'activation échouera sauf si vous la saisissez ici — ou rechargez pour réessayer.",
+      "platformBaseUrlUnresolved": "Ce déploiement tourne sur un port HTTP aléatoire sans eddi.self.base-url : il ne peut pas indiquer où se joindre lui-même. Saisissez l'adresse ici."
     },
     "authMode": {
       "none": {
@@ -4183,7 +4240,10 @@
       "gateUnknown": "Barrière non contrôlée",
       "gateVerified": "Barrière vérifiée",
       "gateNotVerified": "Barrière non vérifiée",
-      "gateUnverifiedHelp": "La barrière d'approbation n'a pas pu être vérifiée sur le document de cet agent."
+      "gateUnverifiedHelp": "La barrière d'approbation n'a pas pu être vérifiée sur le document de cet agent.",
+      "agentId": "Agent",
+      "platformBaseUrl": "Appelle la plateforme à",
+      "platformBaseUrlUnknown": "non enregistrée"
     },
     "chat": {
       "empty": "Interrogez votre déploiement. L'opérateur fait les recherches et vous montre chaque appel qu'il effectue.",
@@ -4297,6 +4357,9 @@
       "stepCount_one": "{{count}} étape",
       "stepCount_other": "{{count}} étapes",
       "stepCount_many": "{{count}} étapes"
+    },
+    "superseded": {
+      "title": "L'agent opérateur précédent est toujours déployé."
     }
   },
   "groupWorkspace": {

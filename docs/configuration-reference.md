@@ -137,6 +137,8 @@ Full narrative and metrics: [scheduling.md → Deployment Configuration](schedul
 | `eddi.mcp.allow-unauthenticated` | `false` | Exposes the MCP server without auth. Needs its own opt-in on top of `eddi.security.allow-unauthenticated` — inheriting one flag must not be enough to open agent CRUD |
 | `eddi.secretstore.allow-unauthenticated` | `false` | Same, for the secrets vault REST surface |
 | `eddi.caller-identity.enabled` | `true` | Enables `${caller:token}` / `${caller:userId}` in httpCall headers. See [httpcalls.md](httpcalls.md) |
+| `eddi.caller-identity.self-release.enabled` | `true` | Also releases `${caller:token}` to this deployment's own address (`eddi.self.base-url`), not only to the caller's origin — how the Platform Operator's tools call EDDI as the chatting user. The self address bypasses any reverse proxy in front of EDDI, so set `false` if that proxy enforces restrictions EDDI's own authorization does not. See [httpcalls.md](httpcalls.md) |
+| `eddi.self.base-url` | *(derived: `http://127.0.0.1:${quarkus.http.port}`)* | The address EDDI can reach **itself** at — what the Platform Operator's generated tools target. A bare `scheme://host[:port]`; a path, query, fragment or credentials make it ignored. Set it only when loopback is wrong (TLS terminated in-process, a mesh-required service name) or when SSRF protection is on — the value must then pass the full SSRF target policy. Required with `quarkus.http.port=0`, where nothing can be derived. Served at `GET /administration/operator/self-url` |
 | `eddi.keycloak.public.url` | *(empty)* | Browser-facing Keycloak URL when it differs from the in-cluster one |
 
 ### Workspaces & resource sharing
@@ -396,8 +398,8 @@ These run once against an existing database and then stay off.
 
 | Property | Default | Description |
 |---|---|---|
-| `eddi.migration.v6-rename.enabled` | `false` | Rewrite v5 resource URIs to v6 spellings |
-| `eddi.migration.v6-qute.enabled` | `false` | Convert Thymeleaf templates to Qute |
+| `eddi.migration.v6-rename.enabled` | `false` | Rewrite v5 resource URIs to v6 spellings, and rename the v5 collections (`bots` → `agents`, …). While this is on and has not completed, the ten-second deployment sweep is **parked**: before the rename the agent configs are still under their v5 names, so the sweep would read every deployed agent as deleted and retire its deployment row. Nothing is deployed or reconciled until the migration records completion, so a run that keeps failing shows as agents that never come back — read the migration's own ERROR line for why |
+| `eddi.migration.v6-qute.enabled` | `false` | Convert Thymeleaf templates to Qute. A document whose template cannot be converted is logged with its collection and id and left unchanged, and the migration is then *not* recorded as complete — so it runs again on the next start, and keeps doing so until that document is fixed or removed |
 | `eddi.migration.backupBeforeWrite` | `true` | Snapshot documents into `.history` collections before rewriting. **Leave this on** |
 | `eddi.migration.skipConversationMemories` | `false` | Skip conversation memories, which are the bulk of the data and rarely need rewriting |
 

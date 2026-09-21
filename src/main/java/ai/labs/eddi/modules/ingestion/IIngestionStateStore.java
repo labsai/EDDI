@@ -164,7 +164,34 @@ public interface IIngestionStateStore {
      * @return the documents tombstoned by this call, whose vectors the caller is
      *         then responsible for removing
      */
-    List<DocumentState> tombstoneMissing(String sourceId, String runId, int missedRunsThreshold);
+    default List<DocumentState> tombstoneMissing(String sourceId, String runId, int missedRunsThreshold) {
+        List<DocumentState> missing = bumpAndFindMissing(sourceId, runId, missedRunsThreshold);
+        markTombstoned(sourceId, missing.stream().map(DocumentState::documentId).toList());
+        // Restamped, because bumpAndFindMissing reports its candidates BEFORE they
+        // are marked and DocumentState is immutable -- so the list still says
+        // tombstoned=false although marking has just succeeded. A caller that
+        // believed it would re-report the same documents on the next run.
+        return missing.stream().map(DocumentState::asTombstoned).toList();
+    }
+
+    /**
+     * Counts this run's misses and returns the documents that have now been missed
+     * often enough to be considered gone — <em>without</em> tombstoning them.
+     *
+     * <p>
+     * Split from the marking so a caller can remove the vectors first. Marking
+     * first is durable in the wrong order: a crash, or a store that refuses the
+     * delete, leaves a document flagged as gone while its chunks stay retrievable,
+     * and a tombstoned document is never reported again — so nothing would ever
+     * remove them.
+     */
+    List<DocumentState> bumpAndFindMissing(String sourceId, String runId, int missedRunsThreshold);
+
+    /**
+     * Marks documents gone, after their vectors have actually been removed. Safe to
+     * call with an empty list, and safe to repeat.
+     */
+    void markTombstoned(String sourceId, List<String> documentIds);
 
     /** Every document known for a source, tombstoned ones included. */
     List<DocumentState> listDocuments(String sourceId, int limit);
@@ -259,6 +286,14 @@ public interface IIngestionStateStore {
          */
         public boolean hasChanged(String candidateHash) {
             return tombstoned || contentHash == null || !contentHash.equals(candidateHash);
+        }
+
+        /** The same document, reported as gone. */
+        public DocumentState asTombstoned() {
+            return tombstoned
+                    ? this
+                    : new DocumentState(sourceId, documentId, contentHash, etag, lastModified,
+                            firstIngestedAt, lastIngestedAt, lastRunId, missedRuns, true);
         }
     }
 

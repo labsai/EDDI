@@ -32,6 +32,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -187,6 +188,50 @@ class PropertySetterTaskSecretScrubTest {
         for (IData<?> data : step.getAllElements()) {
             assertFalse(String.valueOf(data.getResult()).contains("live_abc"), "a token of the secret survived in '" + data.getKey() + "'");
         }
+    }
+
+    @Test
+    @DisplayName("the stored vault reference carries the auto-vault provenance marker")
+    void autoVaultedPropertyIsMarked() throws Exception {
+        stepWithParsedInput();
+
+        task.execute(memory, secretPropertySetter(NORMALIZED_INPUT));
+
+        var stored = memory.getConversationProperties().get("apiKey");
+        assertEquals("${vault:agent-1.apiKey}", stored.getValueString());
+        // Scope alone says nothing: a secret instruction stores its reference as a
+        // plain conversation property, exactly like a template that copied user input
+        // into one. The marker is the only thing that separates the two, and
+        // ConfigReferenceGuard refuses to resolve the reference without it.
+        assertEquals(Scope.conversation, stored.getScope());
+        assertEquals(Boolean.TRUE, stored.getAutoVaulted(), "an auto-vaulted property must be marked as one");
+    }
+
+    @Test
+    @DisplayName("an ordinary property write is not marked as auto-vaulted")
+    void ordinaryPropertyIsNotMarked() throws Exception {
+        IWritableConversationStep step = memory.getCurrentStep();
+        step.storeData(new Data<>("input:initial", "hello"));
+        step.storeData(new Data<>("actions", List.of("store_secret")));
+
+        var instruction = new PropertyInstruction();
+        instruction.setName("apiKey");
+        // The value a user could type, written by an instruction with no secret scope.
+        instruction.setValueString("${vault:agent-1.apiKey}");
+        instruction.setScope(Scope.conversation);
+        instruction.setOverride(true);
+        var setOnActions = new SetOnActions();
+        setOnActions.setActions(List.of("store_secret"));
+        setOnActions.setSetProperties(List.of(instruction));
+        var propertySetter = mock(IPropertySetter.class);
+        when(propertySetter.getSetOnActionsList()).thenReturn(List.of(setOnActions));
+        when(propertySetter.extractProperties(any())).thenReturn(new LinkedList<>());
+
+        task.execute(memory, propertySetter);
+
+        var stored = memory.getConversationProperties().get("apiKey");
+        assertEquals("${vault:agent-1.apiKey}", stored.getValueString(), "byte-identical to what autoVaultSecret writes");
+        assertNull(stored.getAutoVaulted(), "nothing but autoVaultSecret may mark a property");
     }
 
     @Test

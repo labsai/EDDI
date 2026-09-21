@@ -2018,7 +2018,55 @@
     "ingestText": "摄入文本",
     "ingestionHistory": "摄入状态",
     "saveFirstIngestion": "使用前请先保存此知识库。",
-    "addParam": "添加参数"
+    "addParam": "添加参数",
+    "sources": {
+      "title": "采集源",
+      "add": "添加源",
+      "remove": "移除源",
+      "unnamed": "未命名的源",
+      "disabled": "已禁用",
+      "enabled": "已启用",
+      "running": "运行中",
+      "emptyTitle": "暂无采集源",
+      "emptyDescription": "添加一个源，让此知识库抓取网站并保持自身更新。",
+      "name": "名称",
+      "namePlaceholder": "public-docs",
+      "startUrl": "起始 URL",
+      "pathPrefix": "路径前缀",
+      "pathPrefixHint": "仅抓取此路径下的内容",
+      "cron": "计划 (cron)",
+      "cronHint": "留空则仅手动运行",
+      "maxDepth": "最大深度",
+      "maxPages": "最大页数",
+      "respectRobots": "遵循 robots.txt",
+      "respectRobotsHint": "仅对自己拥有的网站关闭",
+      "includeSubdomains": "包含子域名",
+      "excludePatterns": "排除模式",
+      "excludePatternsHint": "针对 URL 路径的通配符，以逗号分隔 — * 限于一个路径段，** 可跨段",
+      "saveFirst": "请先保存知识库，然后才能运行、预览此源或查看其历史记录。",
+      "run": "立即运行",
+      "runFailed": "无法启动运行。可能已有一次运行正在进行。",
+      "preview": "预览",
+      "previewResult": "预览 — 未嵌入任何内容",
+      "purge": "清除状态",
+      "purgeTitle": "清除采集状态？",
+      "purgeDescription": "下次运行将重新抓取并重新嵌入此源已采集的全部内容。已存储的文档不会因此被删除。",
+      "purgeConfirm": "清除",
+      "history": "最近运行",
+      "noRuns": "此源尚未运行。",
+      "runSummary": "已采集 {{ingested}} · 未变更 {{unchanged}}",
+      "statSeen": "已发现",
+      "statChanged": "将采集",
+      "statUnchanged": "未变更",
+      "statFailed": "失败",
+      "partialCrawl": "抓取因达到限制而停止，因此不会将任何内容视为已删除。",
+      "saveBeforeRun": "请先保存知识库——运行将抓取已保存的配置，而不是屏幕上的修改。",
+      "purgeFailed": "无法清除摄取状态。",
+      "previewFailed": "无法预览此来源。",
+      "previewNotCompleted": "预览未完成。",
+      "disabledNoRun": "此来源已禁用。启用并保存后才能运行或调度。",
+      "purgeBlockedWhileRunning": "有一次运行正在进行。此时清除会让第二次运行同时开始。"
+    }
   },
   "onboarding": {
     "welcome": {
@@ -4097,8 +4145,17 @@
       "tools": "将授予它的工具（{{toolCount}} 个）",
       "activate": "启用并部署",
       "callerIdentityNote": "EDDI 在发起调用时才代入你的令牌。它不会存入会话，也只会发回本部署。",
-      "rebuildWarning": "保存会新建一个操作员智能体并移除当前的。你现有的操作员会话不会保留。",
-      "environmentHint": "操作员智能体自身运行的位置。它仍可读取任意环境。"
+      "rebuildWarning": "保存将替换运维助手：系统会新建一个智能体，并将当前的智能体（{{agentId}}）下线并删除。现有的运维助手会话不会延续，此后本页面将指向新的智能体。",
+      "environmentHint": "操作员智能体自身运行的位置。它仍可读取任意环境。",
+      "platformBaseUrl": "平台基础 URL",
+      "platformBaseUrlHint": "EDDI 能够访问自身的地址。运维助手的工具是在服务器内部调用它的，因此不是你的浏览器所用的地址。除非你确知另有需要，请保留预填的值。",
+      "platformBaseUrlInvalid": "必须是以 http:// 或 https:// 开头的绝对 URL，例如 http://127.0.0.1:7070。",
+      "platformBaseUrlUnknown": "此 EDDI 部署无法报告自身地址，因此将回退到你浏览器的来源地址。只有在浏览器与 EDDI 之间没有任何隧道、端口映射或反向代理时，该地址才是正确的；否则请在此处填写地址。",
+      "platformBaseUrlLoopback": "由此部署的 HTTP 端口推导得出。如果必须通过服务名或进程内 TLS 访问 EDDI，请覆盖此值。",
+      "platformBaseUrlAuto": "由服务器解析",
+      "platformBaseUrlDiffers": "此部署当前报告的自身地址为 {{serverUrl}}。上方的值与之不同——仅在你有意设置时才保留。",
+      "platformBaseUrlQueryFailed": "无法向服务器查询其自身地址。除非在此处填写，否则激活将失败；也可刷新页面重试。",
+      "platformBaseUrlUnresolved": "此部署运行在随机 HTTP 端口上且未设置 eddi.self.base-url，因此无法告知访问自身的地址。请在此处填写地址。"
     },
     "authMode": {
       "none": {
@@ -4146,7 +4203,10 @@
       "gateUnknown": "门禁未检查",
       "gateVerified": "门禁已验证",
       "gateNotVerified": "门禁未验证",
-      "gateUnverifiedHelp": "无法在该代理的文档上验证审批门禁。"
+      "gateUnverifiedHelp": "无法在该代理的文档上验证审批门禁。",
+      "agentId": "智能体",
+      "platformBaseUrl": "调用平台地址",
+      "platformBaseUrlUnknown": "未记录"
     },
     "chat": {
       "empty": "来问问你的部署。操作员会去查，并向你展示它发出的每一次调用。",
@@ -4258,6 +4318,9 @@
       "noOpeningMessage": "(尚无消息)",
       "stepCount_one": "{{count}} 步",
       "stepCount_other": "{{count}} 步"
+    },
+    "superseded": {
+      "title": "之前的运维助手智能体仍处于部署状态。"
     }
   },
   "groupWorkspace": {

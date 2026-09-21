@@ -268,6 +268,28 @@ what it finds. Off by default. Worth knowing before touching it:
 - **Config is one atomic JSON blob** in the `platform.operator` global variable.
   Activation writes several values that must land together and the variable
   store has no transaction.
+- **`apiBaseUrl` is the address EDDI can reach ITSELF at, never this browser's
+  origin.** The generated tools call it from inside the server. It is resolved by
+  `resolveOperatorApiBaseUrl`: an explicit value on the config first, then EDDI's
+  own `GET /administration/operator/self-url` (`eddi.self.base-url`, else loopback
+  on `quarkus.http.port`), and only on a backend that 404s that endpoint the
+  browser's origin — with a `console.warn`. A backend that *answers*
+  `source: "unresolved"` (random port, no override) is not a 404: the Manager
+  throws and asks for the base URL explicitly rather than falling back to the
+  browser's origin. `provisionOperator` throws on a blank
+  one rather than guessing. The two coincide on a single-host deployment with
+  nothing in between, which is exactly why `window.location.origin` survived to
+  production: on a tunnelled staging instance it provisioned all 22 resources with
+  an address meaningless inside the container, and the operator reported itself
+  deployed and gate-verified while every tool call failed on connect. Do not
+  reintroduce a fallback that cannot be seen.
+- **Reconfigure REPLACES the agent.** `setup-api` only creates, so a reconfigure
+  gets a new agent id and the predecessor must be retired — with
+  `endAllActiveConversations`, because the admin's own operator chat is almost
+  always open and the backend answers 409 otherwise. A failed retirement is
+  reported through `ActivationOutcome.supersededWarning`, never swallowed: two
+  `READY` operators with nothing on screen saying which one the UI addresses once
+  sent an engineer to repair the abandoned one.
 - **`authMode: "caller-identity"`** makes tool calls run as the signed-in user
   via the backend's `${caller:token}` resolver (EDDI 6.2.0+). `"none"` is
   blocked at activation when OIDC is on, because every tool call would 401.

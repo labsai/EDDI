@@ -221,9 +221,9 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
     }
 
     @Override
-    public List<DocumentState> tombstoneMissing(String sourceId, String runId, int missedRunsThreshold) {
+    public List<DocumentState> bumpAndFindMissing(String sourceId, String runId, int missedRunsThreshold) {
         int threshold = Math.max(1, missedRunsThreshold);
-        return translating("tombstone missing documents", () -> {
+        return translating("reconcile missing documents", () -> {
 
             // Both filters are fenced on the run: a superseded run raises nobody's
             // miss counter and tombstones nobody, so it hands its caller an empty
@@ -236,31 +236,22 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
 
             documents.updateMany(missed, Updates.inc(FIELD_MISSED_RUNS, 1));
 
-            Bson dueForTombstone = Filters.and(
-                    Filters.eq(FIELD_SOURCE_ID, sourceId),
-                    Filters.eq(FIELD_FENCING_RUN_ID, runId),
-                    Filters.ne(FIELD_TOMBSTONED, true),
-                    Filters.gte(FIELD_MISSED_RUNS, threshold));
-
-            // One document at a time, each claimed by the same statement that marks
-            // it. Reading the candidates and then marking them in a second call let
-            // two callers finishing together both report the same document as newly
-            // tombstoned — and each would go on to delete its vectors — while the
-            // states they handed back still said tombstoned=false, because they were
-            // read before the write. PostgreSQL gets both properties from
-            // `UPDATE ... RETURNING`; this is the MongoDB equivalent.
-            //
-            // The loop terminates because every claim removes a document from the
-            // filter's own match set.
-            var claimOne = new FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER);
-            List<DocumentState> tombstoned = new ArrayList<>();
-            Document claimed;
-            while ((claimed = documents.findOneAndUpdate(dueForTombstone,
-                    Updates.set(FIELD_TOMBSTONED, true), claimOne)) != null) {
-                tombstoned.add(toDocumentState(claimed));
+            List<DocumentState> gone = new ArrayList<>();
+            for (Document document : documents.find(Filters.and(missed, Filters.gte(FIELD_MISSED_RUNS, threshold)))) {
+                gone.add(toDocumentState(document));
             }
-            return tombstoned;
+            return gone;
         });
+    }
+
+    @Override
+    public void markTombstoned(String sourceId, List<String> documentIds) {
+        if (documentIds == null || documentIds.isEmpty()) {
+            return;
+        }
+        translating("tombstone documents", () -> documents.updateMany(
+                Filters.and(Filters.eq(FIELD_SOURCE_ID, sourceId), Filters.in(FIELD_DOCUMENT_ID, documentIds)),
+                Updates.set(FIELD_TOMBSTONED, true)));
     }
 
     @Override

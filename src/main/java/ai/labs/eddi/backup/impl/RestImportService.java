@@ -25,6 +25,7 @@ import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
 import ai.labs.eddi.configs.output.IOutputStore;
 import ai.labs.eddi.configs.propertysetter.IPropertySetterStore;
 import ai.labs.eddi.configs.rag.IRagStore;
+import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import ai.labs.eddi.configs.rules.IRuleSetStore;
 import ai.labs.eddi.configs.rules.IRestRuleSetStore;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
@@ -101,6 +102,8 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  */
 @ApplicationScoped
 public class RestImportService extends AbstractBackupService implements IRestImportService {
+    private final RagSourceIngestionService ragSourceIngestionService;
+
     private static final Pattern EDDI_URI_PATTERN = Pattern.compile("\"eddi://ai.labs..*?\"");
     private static final String AGENT_FILE_ENDING = ".agent.json";
     /** EDDI 5.x named the agent file {@code <id>.bot.json}. */
@@ -145,7 +148,9 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             IMigrationManager migrationManager,
             IDocumentDescriptorStore documentDescriptorStore, TemplateSyntaxMigrator templateSyntaxMigrator,
             StructuralMatcher structuralMatcher, UpgradeExecutor upgradeExecutor, IScheduleStore scheduleStore,
-            BackupMetrics metrics, ResourceAccessGuard resourceAccessGuard, SpaceContext spaceContext) {
+            BackupMetrics metrics, ResourceAccessGuard resourceAccessGuard, SpaceContext spaceContext,
+            RagSourceIngestionService ragSourceIngestionService) {
+        this.ragSourceIngestionService = ragSourceIngestionService;
         this.metrics = metrics;
         this.resourceAccessGuard = resourceAccessGuard;
         this.spaceContext = spaceContext;
@@ -1172,7 +1177,49 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     }
 
     private List<URI> createNewRags(List<RagConfiguration> configs, ImportTransaction transaction) {
-        return configs.stream().map(c -> createResourceDirect(IRagStore.class, c, IRestRagStore.resourceURI, transaction)).toList();
+        return configs.stream().map(config -> {
+            // An archive's knowledge base carries ingestion sources, and this path
+            // writes straight to the store — so none of what the REST layer does on
+            // the way in happened: ids were never assigned (state and schedules then
+            // key on the source NAME, and the first save in the Manager re-keys them,
+            // orphaning the history), nothing was validated, and no schedule was
+            // created, so a source with a cron looked scheduled and never ran.
+            prepareImportedRag(config);
+            URI created = createResourceDirect(IRagStore.class, config, IRestRagStore.resourceURI, transaction);
+            syncImportedRagSchedules(created, config);
+            return created;
+        }).toList();
+    }
+
+    /** Assigns source ids and validates, exactly as the REST create does. */
+    private void prepareImportedRag(RagConfiguration config) {
+        if (config == null || config.getSources() == null) {
+            return;
+        }
+        for (var source : config.getSources()) {
+            if (source != null && (source.getId() == null || source.getId().isBlank())) {
+                source.setId(UUID.randomUUID().toString());
+            }
+        }
+        // Throws on a source the engine cannot honour. Importing it instead would
+        // produce a knowledge base whose runs fail for ever, and the failure would
+        // only be visible in a run history nobody is watching yet.
+        config.validate();
+    }
+
+    private void syncImportedRagSchedules(URI created, RagConfiguration config) {
+        if (config.getSources() == null || config.getSources().isEmpty()) {
+            return;
+        }
+        try {
+            IResourceId resourceId = RestUtilities.extractResourceId(created);
+            ragSourceIngestionService.syncSchedules(resourceId.getId(), resourceId.getVersion(), config, Set.of());
+        } catch (RuntimeException e) {
+            // Surfaced, never swallowed: a source with a cron that has no schedule
+            // looks scheduled on every screen and never runs.
+            LOGGER.errorf(e, "Imported knowledge base %s: its ingestion schedules were NOT created. Its sources "
+                    + "will not run until it is saved again.", created);
+        }
     }
 
     private URI updateRag(RagConfiguration config, String localId, Integer localVersion, ImportTransaction transaction) {

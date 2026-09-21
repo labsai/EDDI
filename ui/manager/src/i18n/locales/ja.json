@@ -2018,7 +2018,55 @@
     "ingestText": "テキストを取り込む",
     "ingestionHistory": "取り込みステータス",
     "saveFirstIngestion": "ドキュメントの取り込みを有効にするには、先にこのナレッジベースを保存してください。",
-    "addParam": "パラメーターの追加"
+    "addParam": "パラメーターの追加",
+    "sources": {
+      "title": "取り込みソース",
+      "add": "ソースを追加",
+      "remove": "ソースを削除",
+      "unnamed": "名称未設定のソース",
+      "disabled": "無効",
+      "enabled": "有効",
+      "running": "実行中",
+      "emptyTitle": "取り込みソースがありません",
+      "emptyDescription": "ソースを追加すると、このナレッジベースがサイトをクロールして最新の状態を保ちます。",
+      "name": "名前",
+      "namePlaceholder": "public-docs",
+      "startUrl": "開始 URL",
+      "pathPrefix": "パスのプレフィックス",
+      "pathPrefixHint": "このパス配下のみをクロールします",
+      "cron": "スケジュール (cron)",
+      "cronHint": "空欄にすると手動実行のみになります",
+      "maxDepth": "最大深度",
+      "maxPages": "最大ページ数",
+      "respectRobots": "robots.txt に従う",
+      "respectRobotsHint": "自分が所有するサイトの場合のみ無効にしてください",
+      "includeSubdomains": "サブドメインを含める",
+      "excludePatterns": "除外パターン",
+      "excludePatternsHint": "URL パスに対するグロブをカンマ区切りで指定 — * は 1 つのセグメント内、** はセグメントをまたぎます",
+      "saveFirst": "このソースの実行・プレビュー・履歴表示には、ナレッジベースの保存が必要です。",
+      "run": "今すぐ実行",
+      "runFailed": "実行を開始できませんでした。すでに実行中の可能性があります。",
+      "preview": "プレビュー",
+      "previewResult": "プレビュー — 埋め込みは行われていません",
+      "purge": "状態を消去",
+      "purgeTitle": "取り込み状態を消去しますか？",
+      "purgeDescription": "次回の実行では、このソースが取り込んだすべてを再クロールして再埋め込みします。保存済みのドキュメントはこの操作では削除されません。",
+      "purgeConfirm": "消去",
+      "history": "最近の実行",
+      "noRuns": "このソースはまだ実行されていません。",
+      "runSummary": "{{ingested}} 件取り込み · {{unchanged}} 件変更なし",
+      "statSeen": "検出",
+      "statChanged": "取り込み予定",
+      "statUnchanged": "変更なし",
+      "statFailed": "失敗",
+      "partialCrawl": "クロールが上限で停止したため、削除として扱われるものはありません。",
+      "saveBeforeRun": "先にナレッジベースを保存してください。実行は画面上の編集ではなく、保存済みの設定をクロールします。",
+      "purgeFailed": "取り込み状態を消去できませんでした。",
+      "previewFailed": "このソースをプレビューできませんでした。",
+      "previewNotCompleted": "プレビューは完了しませんでした。",
+      "disabledNoRun": "このソースは無効です。実行またはスケジュールするには有効にして保存してください。",
+      "purgeBlockedWhileRunning": "実行中です。今消去すると、並行して 2 つ目の実行が始まる可能性があります。"
+    }
   },
   "onboarding": {
     "welcome": {
@@ -4097,8 +4145,17 @@
       "tools": "付与されるツール（{{toolCount}} 件）",
       "activate": "有効にしてデプロイ",
       "callerIdentityNote": "EDDI は呼び出し時にトークンを差し込みます。会話には保存されず、この環境にのみ送られます。",
-      "rebuildWarning": "保存すると新しいオペレーターエージェントが作成され、現在のものは削除されます。既存のオペレーターとの会話は引き継がれません。",
-      "environmentHint": "オペレーターエージェント自体が動作する場所です。どの環境でも読み取りは可能です。"
+      "rebuildWarning": "保存するとオペレーターは置き換えられます。新しいエージェントが作成され、現在のエージェント ({{agentId}}) はアンデプロイされ削除されます。既存のオペレーター会話は引き継がれず、以降この画面は新しいエージェントを対象にします。",
+      "environmentHint": "オペレーターエージェント自体が動作する場所です。どの環境でも読み取りは可能です。",
+      "platformBaseUrl": "プラットフォームのベース URL",
+      "platformBaseUrlHint": "EDDI が自分自身に到達できるアドレスです。オペレーターのツールはサーバー内部から呼び出すため、ブラウザーが使うアドレスとは異なります。事情が分かっている場合を除き、初期値のままにしてください。",
+      "platformBaseUrlInvalid": "http:// または https:// で始まる絶対 URL を指定してください（例: http://127.0.0.1:7070）。",
+      "platformBaseUrlUnknown": "この EDDI デプロイは自身のアドレスを返せないため、ブラウザーのオリジンにフォールバックします。これはブラウザーと EDDI の間にトンネル・ポートマッピング・リバースプロキシが一切ない場合にのみ正しい値です。そうでなければ、ここにアドレスを入力してください。",
+      "platformBaseUrlLoopback": "このデプロイの HTTP ポートから導出しました。EDDI をサービス名やプロセス内 TLS で指定する必要がある場合は上書きしてください。",
+      "platformBaseUrlAuto": "サーバーから取得",
+      "platformBaseUrlDiffers": "このデプロイは現在、自身のアドレスを {{serverUrl}} と報告しています。上の値はこれと異なります。意図して設定した場合のみそのままにしてください。",
+      "platformBaseUrlQueryFailed": "サーバーに自身のアドレスを問い合わせられませんでした。ここに入力しない限り有効化は失敗します。再試行するにはページを再読み込みしてください。",
+      "platformBaseUrlUnresolved": "このデプロイはランダムな HTTP ポートで動作しており eddi.self.base-url も未設定のため、自分自身に到達できるアドレスを示せません。ここにアドレスを入力してください。"
     },
     "authMode": {
       "none": {
@@ -4146,7 +4203,10 @@
       "gateUnknown": "ゲート未チェック",
       "gateVerified": "ゲート確認済み",
       "gateNotVerified": "ゲート未確認",
-      "gateUnverifiedHelp": "このエージェントのドキュメントで承認ゲートを確認できませんでした。"
+      "gateUnverifiedHelp": "このエージェントのドキュメントで承認ゲートを確認できませんでした。",
+      "agentId": "エージェント",
+      "platformBaseUrl": "プラットフォームの呼び出し先",
+      "platformBaseUrlUnknown": "記録なし"
     },
     "chat": {
       "empty": "ご自身の環境について質問してください。オペレーターが調べ、行ったすべての呼び出しを表示します。",
@@ -4258,6 +4318,9 @@
       "noOpeningMessage": "(メッセージはまだありません)",
       "stepCount_one": "{{count}} ステップ",
       "stepCount_other": "{{count}} ステップ"
+    },
+    "superseded": {
+      "title": "以前のオペレーターエージェントがまだデプロイされています。"
     }
   },
   "groupWorkspace": {

@@ -122,14 +122,14 @@ class ConnectionResolverTest {
     @DisplayName("CALLER_SUPPLIED")
     class CallerSupplied {
 
-        private static final URI GNOWBE_TARGET = URI.create("https://api.gnowbe.com/api/v2/courses");
+        private static final URI ACME_TARGET = URI.create("https://api.example.com/api/v2/items");
 
-        private ConnectionConfiguration gnowbeConnection() {
+        private ConnectionConfiguration acmeConnection() {
             var connection = new ConnectionConfiguration();
-            connection.setName("gnowbe");
+            connection.setName("acme");
             connection.setAuthType(AuthType.STATIC);
             connection.setBinding(Binding.CALLER_SUPPLIED);
-            connection.setBaseUrlAllowlist(List.of("https://api.gnowbe.com"));
+            connection.setBaseUrlAllowlist(List.of("https://api.example.com"));
             var auth = new StaticAuth();
             auth.setHeaderName("x-api-key");
             connection.setStaticAuth(auth);
@@ -137,16 +137,16 @@ class ConnectionResolverTest {
         }
 
         private void callerSupplies(Map<String, String> credentials) {
-            when(callerIdentityContext.current()).thenReturn(new CallerIdentity(null, "gnowbe-backend", "https://eddi.example.com", credentials));
+            when(callerIdentityContext.current()).thenReturn(new CallerIdentity(null, "acme-backend", "https://eddi.example.com", credentials));
         }
 
         @Test
         @DisplayName("the caller's value is sent under the connection's header name")
         void sendsTheCallersCredential() {
-            register(gnowbeConnection());
-            callerSupplies(Map.of("gnowbe", "key-id:secret"));
+            register(acmeConnection());
+            callerSupplies(Map.of("acme", "key-id:secret"));
 
-            var credential = resolver(true).resolve("${connection:gnowbe}", GNOWBE_TARGET, null);
+            var credential = resolver(true).resolve("${connection:acme}", ACME_TARGET, null);
 
             assertEquals("x-api-key", credential.headerName());
             assertEquals("key-id:secret", credential.headerValue());
@@ -155,13 +155,13 @@ class ConnectionResolverTest {
         @Test
         @DisplayName("no credential on the request fails closed rather than calling out unauthenticated")
         void failsClosedWithoutCredential() {
-            register(gnowbeConnection());
+            register(acmeConnection());
             callerSupplies(Map.of());
 
-            var error = assertThrows(ConnectionException.class, () -> resolver(true).resolve("${connection:gnowbe}", GNOWBE_TARGET, null));
+            var error = assertThrows(ConnectionException.class, () -> resolver(true).resolve("${connection:acme}", ACME_TARGET, null));
 
             assertEquals(ConnectionException.Reason.NO_CALLER_CREDENTIAL, error.getReason());
-            assertTrue(error.getMessage().contains("gnowbe"), error.getMessage());
+            assertTrue(error.getMessage().contains("acme"), error.getMessage());
             assertTrue(error.getMessage().contains("resume"),
                     "the message must name the resume case, which is the non-obvious half: " + error.getMessage());
         }
@@ -173,10 +173,10 @@ class ConnectionResolverTest {
             // anonymous request, and with authorization.enabled=false every request is
             // anonymous. The operator can see the header going out; a message saying
             // the request carried none sends them to debug the wrong system.
-            register(gnowbeConnection());
+            register(acmeConnection());
             when(callerIdentityContext.current()).thenReturn(null);
 
-            var error = assertThrows(ConnectionException.class, () -> resolver(false).resolve("${connection:gnowbe}", GNOWBE_TARGET, null));
+            var error = assertThrows(ConnectionException.class, () -> resolver(false).resolve("${connection:acme}", ACME_TARGET, null));
 
             assertEquals(ConnectionException.Reason.NO_CALLER_CREDENTIAL, error.getReason());
             assertTrue(error.getMessage().contains("authorization.enabled=false"),
@@ -189,10 +189,10 @@ class ConnectionResolverTest {
         @Test
         @DisplayName("a credential for a different connection is not borrowed")
         void doesNotBorrowAnotherConnectionsCredential() {
-            register(gnowbeConnection());
-            callerSupplies(Map.of("some-other-system", "not-for-gnowbe"));
+            register(acmeConnection());
+            callerSupplies(Map.of("some-other-system", "not-for-acme"));
 
-            var error = assertThrows(ConnectionException.class, () -> resolver(true).resolve("${connection:gnowbe}", GNOWBE_TARGET, null));
+            var error = assertThrows(ConnectionException.class, () -> resolver(true).resolve("${connection:acme}", ACME_TARGET, null));
 
             assertEquals(ConnectionException.Reason.NO_CALLER_CREDENTIAL, error.getReason());
         }
@@ -200,10 +200,10 @@ class ConnectionResolverTest {
         @Test
         @DisplayName("no caller identity at all — a scheduled turn — fails closed too")
         void failsClosedWithoutCallerIdentity() {
-            register(gnowbeConnection());
+            register(acmeConnection());
             when(callerIdentityContext.current()).thenReturn(null);
 
-            var error = assertThrows(ConnectionException.class, () -> resolver(true).resolve("${connection:gnowbe}", GNOWBE_TARGET, null));
+            var error = assertThrows(ConnectionException.class, () -> resolver(true).resolve("${connection:acme}", ACME_TARGET, null));
 
             assertEquals(ConnectionException.Reason.NO_CALLER_CREDENTIAL, error.getReason());
         }
@@ -226,13 +226,13 @@ class ConnectionResolverTest {
             cases.put("null headerName", headerNamed(null));
 
             for (var entry : cases.entrySet()) {
-                var connection = gnowbeConnection();
+                var connection = acmeConnection();
                 connection.setStaticAuth(entry.getValue());
                 register(connection);
-                callerSupplies(Map.of("gnowbe", "key-id:secret"));
+                callerSupplies(Map.of("acme", "key-id:secret"));
 
                 var error = assertThrows(ConnectionException.class,
-                        () -> resolver(true).resolve("${connection:gnowbe}", GNOWBE_TARGET, null), entry.getKey());
+                        () -> resolver(true).resolve("${connection:acme}", ACME_TARGET, null), entry.getKey());
 
                 assertEquals(ConnectionException.Reason.INVALID_CONFIGURATION, error.getReason(), entry.getKey());
                 assertTrue(error.getMessage().contains("headerName"), entry.getKey() + ": " + error.getMessage());
@@ -248,11 +248,11 @@ class ConnectionResolverTest {
         @Test
         @DisplayName("the allowlist still bounds where the user's own credential may go")
         void refusesTargetOffTheAllowlist() {
-            register(gnowbeConnection());
-            callerSupplies(Map.of("gnowbe", "key-id:secret"));
+            register(acmeConnection());
+            callerSupplies(Map.of("acme", "key-id:secret"));
 
             var error = assertThrows(ConnectionException.class,
-                    () -> resolver(true).resolve("${connection:gnowbe}", URI.create("https://evil.example.com/collect"), null));
+                    () -> resolver(true).resolve("${connection:acme}", URI.create("https://evil.example.com/collect"), null));
 
             assertEquals(ConnectionException.Reason.TARGET_NOT_ALLOWED, error.getReason());
         }
@@ -260,10 +260,10 @@ class ConnectionResolverTest {
         @Test
         @DisplayName("withheld from discovery — a cached handshake would pin one caller's credential onto everybody")
         void withheldFromDiscovery() {
-            register(gnowbeConnection());
-            callerSupplies(Map.of("gnowbe", "key-id:secret"));
+            register(acmeConnection());
+            callerSupplies(Map.of("acme", "key-id:secret"));
 
-            assertTrue(resolver(true).resolveForDiscovery("${connection:gnowbe}", GNOWBE_TARGET).isEmpty());
+            assertTrue(resolver(true).resolveForDiscovery("${connection:acme}", ACME_TARGET).isEmpty());
         }
 
         @Test
@@ -274,11 +274,11 @@ class ConnectionResolverTest {
             // verified one here would make the binding unusable in exactly the topology
             // it was built for — and it is not needed, because nothing is looked up by
             // principal: the caller hands over the credential itself.
-            register(gnowbeConnection());
+            register(acmeConnection());
             boundPrincipal("end-user-42", ResolutionPrincipal.Provenance.SELF_ASSERTED);
-            callerSupplies(Map.of("gnowbe", "key-id:secret"));
+            callerSupplies(Map.of("acme", "key-id:secret"));
 
-            var credential = resolver(true).resolve("${connection:gnowbe}", GNOWBE_TARGET, null);
+            var credential = resolver(true).resolve("${connection:acme}", ACME_TARGET, null);
 
             assertEquals("key-id:secret", credential.headerValue());
         }
