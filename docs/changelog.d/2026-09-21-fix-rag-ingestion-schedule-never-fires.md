@@ -48,11 +48,28 @@ the knowledge base, which nothing would tell them to do. A startup sweep
 (`RagSourceIngestionService.repairUnarmedSchedules`, `@Observes StartupEvent`, new
 `eddi.rag.ingestion.schedule-repair.enabled`, default on) gives a fire time to any
 *ingestion* schedule that is enabled, carries a cron and has no `nextFire` at all. It is
-safe to run repeatedly by construction: after the first pass nothing matches, and two
-nodes repairing the same row compute the same next occurrence. It arms through the
-existing store-agnostic `setScheduleEnabled`, so it needs no new store method, and it
-touches nothing outside this feature's metadata — a schedule left unarmed on purpose is
-not a thing this repair can invent a cadence for.
+safe to run repeatedly by construction: after the first pass nothing matches. It arms
+through the existing store-agnostic `setScheduleEnabled`, so it needs no new store
+method, and it touches nothing outside this feature's metadata — a schedule left unarmed
+on purpose is not a thing this repair can invent a cadence for.
+
+**Two corrections from review (Copilot, #818).** The first version of this paragraph
+claimed two nodes "compute the same next occurrence", which is only true if both compute
+inside the same cron period. They need not: the listing is a snapshot and
+`setScheduleEnabled` overwrites `nextFire` unconditionally, so a slower node crossing a
+cron boundary could replace the first node's occurrence with the following one and skip a
+fire. The sweep now **re-reads the row immediately before writing it** and stands down if
+somebody has already armed it. That narrows the window to a single store round-trip
+rather than closing it — neither store offers a conditional write, and adding one means
+writing it twice, once per backend — and the residual cost is at most one occurrence of a
+cron that, without this sweep, would fire never rather than late.
+
+The second: the 40-page bound used to end the walk **silently**, so past 20,000 schedules
+an operator read "armed 12 schedules" with no way to tell a finished repair from one that
+stopped a page short of the row they were waiting on. `repairUnarmedSchedules` now returns
+`RepairResult(armed, complete)` and logs a warning naming the bound when it is the reason
+the walk stopped. The bound itself stays: an unbounded scan at startup is the thing it
+exists to prevent.
 
 Also refused now: a cron that parses but can never match a date (`0 0 30 2 *`).
 `CronParser.validate` accepts it; `computeNextFire` gives up after two years with an
@@ -119,6 +136,8 @@ explain the result.
 | `repairUnarmedSchedules` returns early | "an ingestion schedule with no fire time is given one" |
 | `prepareImportedRag` drops `requireValidCrons` | `RestImportServiceRagCronTest` → both refusal cases |
 | Run button drops `source.enabled === false` | "does not offer Run for a source that is saved as disabled" |
+| The re-read guard before arming is removed | "a row another node armed while the sweep was listing is left alone" |
+| The walk always reports itself complete | "stopping at the page bound is reported, not swallowed" |
 
 ### Files
 
@@ -137,6 +156,10 @@ Tests: `RagSourceIngestionServiceTest` (two new nested groups),
 
 ```decision-log
 | 2026-09-21 | Repair already-stored unarmed ingestion schedules with an idempotent startup sweep, rather than a migration script or leaving it to the next save | Rows written before the fix are dead for ever and nothing tells the operator to re-save the knowledge base | A one-off migration (needs running, and is skipped on upgrades); re-syncing every knowledge base at startup (delete-then-create races between nodes); a generic sweep over all schedules (wider blast radius than the defect) |
+```
+
+```decision-log
+| 2026-09-21 | Narrow the two-node repair race with a re-read rather than a conditional store write, and say so in the javadoc | The realistic cost is one skipped occurrence on a schedule that would otherwise never fire; a compare-and-set arm would need implementing twice, once per backend, which is the same "fix it in the store" the first decision above rejected | A conditional arm-only-when-null store operation on both backends (Copilot's suggestion), a distributed lock for a startup sweep, leaving the inaccurate idempotency claim in place |
 ```
 
 ```regression-note

@@ -21,6 +21,7 @@ import org.mockito.ArgumentCaptor;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -372,6 +373,18 @@ class RagSourceIngestionServiceTest {
                     .thenAnswer(invocation -> (int) invocation.getArgument(1) == 0
                             ? List.of(schedules)
                             : List.of());
+            // The sweep re-reads a row before writing it, so a second node that
+            // arrives after the first has armed it sees the armed value. By default
+            // the re-read agrees with the listing; the test that cares overrides it.
+            when(scheduleStore.readSchedule(anyString())).thenAnswer(invocation -> {
+                String id = invocation.getArgument(0);
+                for (ScheduleConfiguration schedule : schedules) {
+                    if (id.equals(schedule.getId())) {
+                        return schedule;
+                    }
+                }
+                return null;
+            });
         }
 
         @Test
@@ -438,6 +451,67 @@ class RagSourceIngestionServiceTest {
 
             verify(scheduleStore, never()).readAllSchedules(anyInt(), anyInt(), anyBoolean());
             assertFalse(service.scheduleRepairEnabled);
+        }
+
+        /**
+         * Review finding (Copilot, #818): the listing this sweep walks is a snapshot,
+         * and {@code setScheduleEnabled} overwrites {@code nextFire} unconditionally.
+         * Two nodes booting together would both see the row as unarmed, and the slower
+         * one's later {@code Instant.now()} could replace the first node's occurrence
+         * with the following one — a skipped fire. The re-read is what makes the second
+         * node stand down.
+         */
+        @Test
+        @DisplayName("a row another node armed while the sweep was listing is left alone")
+        void doesNotOverwriteARowAnotherNodeAlreadyArmed() throws Exception {
+            var asListed = unarmedIngestionSchedule();
+            storeHolds(asListed);
+
+            var asStoredNow = unarmedIngestionSchedule();
+            asStoredNow.setNextFire(Instant.now().plusSeconds(60));
+            when(scheduleStore.readSchedule("sched-1")).thenReturn(asStoredNow);
+
+            var result = service.repairUnarmedSchedules();
+
+            verify(scheduleStore, never()).setScheduleEnabled(anyString(), anyBoolean(), any());
+            assertEquals(0, result.armed(),
+                    "a row somebody else armed is not one this sweep repaired, and counting it would "
+                            + "report work that did not happen");
+        }
+
+        /**
+         * Review finding (Copilot, #818): the page bound is a deliberate safety limit,
+         * but it used to stop the walk without saying so — an operator read "armed 12
+         * schedules" and could not tell a finished repair from one that stopped a page
+         * short of the row they were waiting on.
+         */
+        @Test
+        @DisplayName("stopping at the page bound is reported, not swallowed")
+        void aTruncatedSweepSaysSo() throws Exception {
+            var armed = unarmedIngestionSchedule();
+            armed.setNextFire(Instant.now().plusSeconds(3600));
+            // Every page full, for ever: the walk can only end at its own bound.
+            when(scheduleStore.readAllSchedules(anyInt(), anyInt(), anyBoolean()))
+                    .thenReturn(Collections.nCopies(RagSourceIngestionService.REPAIR_PAGE_SIZE, armed));
+
+            var result = service.repairUnarmedSchedules();
+
+            assertFalse(result.complete(),
+                    "the sweep stopped at its own bound rather than at the end of the data, and the "
+                            + "difference is the whole point: rows beyond it were never examined");
+            verify(scheduleStore, times(RagSourceIngestionService.REPAIR_MAX_PAGES))
+                    .readAllSchedules(anyInt(), anyInt(), anyBoolean());
+        }
+
+        @Test
+        @DisplayName("reaching the end of the data is reported as a complete sweep")
+        void aFullSweepSaysSo() throws Exception {
+            storeHolds(unarmedIngestionSchedule());
+
+            var result = service.repairUnarmedSchedules();
+
+            assertTrue(result.complete(), "a short page is the end of the data, and that is a finished sweep");
+            assertEquals(1, result.armed());
         }
     }
 

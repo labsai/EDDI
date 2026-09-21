@@ -53,9 +53,9 @@ public class RagSourceIngestionService {
      * is willing to walk. Both stores page this listing deterministically (sorted
      * by {@code createdAt} then id), so the walk cannot skip or repeat a row.
      */
-    private static final int REPAIR_PAGE_SIZE = 500;
+    static final int REPAIR_PAGE_SIZE = 500;
 
-    private static final int REPAIR_MAX_PAGES = 40;
+    static final int REPAIR_MAX_PAGES = 40;
 
     private final IngestionPipeline pipeline;
     private final IIngestionStateStore stateStore;
@@ -300,24 +300,41 @@ public class RagSourceIngestionService {
      * <p>
      * Safe to run on every boot and on every node of a cluster: it only touches
      * rows that are enabled, marked as ingestion schedules, carry a cron and have
-     * no {@code nextFire} at all, so after the first pass nothing matches. Two
-     * nodes repairing the same row compute the same next occurrence and write the
-     * same value. Arming is done through {@code setScheduleEnabled}, the existing
-     * store-agnostic re-arm, rather than a new store method.
+     * no {@code nextFire} at all, so after the first pass nothing matches. The row
+     * is re-read immediately before it is written, so a second node arriving after
+     * the first has armed a row sees the armed value and leaves it alone. Arming
+     * goes through {@code setScheduleEnabled}, the existing store-agnostic re-arm,
+     * rather than a new store method.
+     *
+     * <p>
+     * That re-read narrows the window between two nodes to a single store
+     * round-trip; it does not close it, because neither store offers a conditional
+     * write and adding one means writing it twice, once per backend. The residual
+     * race costs at most <em>one</em> occurrence of a cron that has never fired at
+     * all — two nodes landing inside the same round-trip on opposite sides of a
+     * cron boundary would store the later of two occurrences — on a schedule that
+     * without this sweep would fire never rather than late. That is the trade this
+     * sweep is deliberately making.
      *
      * <p>
      * Failures are logged, never thrown: a repair that cannot read the store must
      * not stop the application from starting.
+     *
+     * @return what the sweep did, and whether it reached the end of the data —
+     *         returned rather than only logged so a test can tell a finished sweep
+     *         from a truncated one without reading log output
      */
-    void repairUnarmedSchedules() {
+    RepairResult repairUnarmedSchedules() {
         if (!scheduleRepairEnabled) {
-            return;
+            return new RepairResult(0, true);
         }
         int repaired = 0;
+        boolean walkedEverything = false;
         try {
             for (int page = 0; page < REPAIR_MAX_PAGES; page++) {
                 List<ScheduleConfiguration> batch = scheduleStore.readAllSchedules(REPAIR_PAGE_SIZE, page * REPAIR_PAGE_SIZE, true);
                 if (batch == null || batch.isEmpty()) {
+                    walkedEverything = true;
                     break;
                 }
                 for (ScheduleConfiguration schedule : batch) {
@@ -326,18 +343,46 @@ public class RagSourceIngestionService {
                     }
                 }
                 if (batch.size() < REPAIR_PAGE_SIZE) {
+                    walkedEverything = true;
                     break;
                 }
             }
         } catch (Exception e) {
             LOGGER.errorf(e, "Could not check stored ingestion schedules for a missing next fire time — "
                     + "any that were stored unarmed will not run until their knowledge base is saved again");
-            return;
+            return new RepairResult(repaired, false);
         }
         if (repaired > 0) {
             LOGGER.warnf("Armed %d ingestion schedule(s) that had been stored without a next fire time and "
                     + "could never have run", repaired);
         }
+        if (!walkedEverything) {
+            // Say so. A cap that truncates silently is worse than no cap: the
+            // operator reads "armed 12 schedules" and has no way to tell a finished
+            // repair from one that stopped a page short of the row they are waiting
+            // on.
+            LOGGER.warnf("Stopped checking stored schedules for a missing next fire time after %d rows (the "
+                    + "startup sweep's own bound, not the end of the data). Any ingestion schedule beyond "
+                    + "that point that was stored unarmed is still unarmed and will not run until its "
+                    + "knowledge base is saved again. Re-run with a larger bound, or re-save the affected "
+                    + "knowledge bases.", REPAIR_MAX_PAGES * REPAIR_PAGE_SIZE);
+        }
+        return new RepairResult(repaired, walkedEverything);
+    }
+
+    /**
+     * What one startup sweep did.
+     *
+     * @param armed
+     *            how many unarmed ingestion schedules were given a fire time
+     * @param complete
+     *            whether the walk reached the end of the data. {@code false} means
+     *            it stopped at its own page bound (or on a store failure) and rows
+     *            beyond that point were never examined — the difference between
+     *            "there was nothing left to repair" and "we stopped looking", which
+     *            a count alone cannot express
+     */
+    record RepairResult(int armed, boolean complete) {
     }
 
     /** @return whether this schedule was one of the broken ones, and was armed */
@@ -355,6 +400,17 @@ public class RagSourceIngestionService {
             return false;
         }
         try {
+            // Re-read before writing. The listing above is a snapshot, and on a
+            // cluster another node may have armed this row between the two: without
+            // this check that node's occurrence would be overwritten with a later
+            // one computed from a newer Instant.now(), skipping a fire. It is a
+            // narrowing, not a lock — neither store offers a conditional write, and
+            // adding one means writing it twice, once per backend, for a row that
+            // would otherwise fire never rather than late.
+            ScheduleConfiguration current = scheduleStore.readSchedule(schedule.getId());
+            if (current == null || current.getNextFire() != null || !current.isEnabled()) {
+                return false;
+            }
             Instant nextFire = RagIngestionSchedules.firstFire(cron);
             scheduleStore.setScheduleEnabled(schedule.getId(), true, nextFire);
             return true;
