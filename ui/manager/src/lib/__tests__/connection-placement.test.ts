@@ -51,17 +51,17 @@ describe("headerNameMismatch", () => {
 
 describe("expectedHeaderFor", () => {
   const lookup = (name: string) =>
-    ({ gnowbe: STATIC_X_API_KEY, jira: OAUTH })[name];
+    ({ acme: STATIC_X_API_KEY, jira: OAUTH })[name];
 
   it("names the header the connection requires when the header disagrees", () => {
-    expect(expectedHeaderFor("Authorization", "${connection:gnowbe}", lookup)).toBe(
+    expect(expectedHeaderFor("Authorization", "${connection:acme}", lookup)).toBe(
       "x-api-key",
     );
     expect(expectedHeaderFor("X-Auth", "${connection:jira}", lookup)).toBe("Authorization");
   });
 
   it("stays silent when the names agree, in any case", () => {
-    expect(expectedHeaderFor("X-Api-Key", "${connection:gnowbe}", lookup)).toBeNull();
+    expect(expectedHeaderFor("X-Api-Key", "${connection:acme}", lookup)).toBeNull();
     expect(expectedHeaderFor("authorization", "${connection:jira}", lookup)).toBeNull();
   });
 

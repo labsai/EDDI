@@ -1932,7 +1932,7 @@ every fix carries a regression test that fails without it.
 
 - **R1 — connection-owned headers persisted in plaintext.** `RequestRedactor` recognised a
   credential only by conventional header name, a `${vault:` marker, or value shape. A `STATIC`
-  connection on `X-Amp-Id` or a `CALLER_SUPPLIED` one on `X-Gnowbe-Key` matched none, so the live
+  connection on `X-Amp-Id` or a `CALLER_SUPPLIED` one on `X-Acme-Key` matched none, so the live
   value was written to MongoDB and shown to a HITL approver. `buildRequest` now returns the header
   names a connection filled, and both the persisted request map and the approval preview redact them
   unconditionally, case-insensitively. MCP and A2A persist no request headers.

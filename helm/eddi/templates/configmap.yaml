@@ -261,4 +261,32 @@ data:
   */}}
   QUARKUS_OIDC_TOKEN_ISSUER: "{{ $publicUrl }}/realms/eddi"
   {{- end }}
+  {{- /*
+    EDDI advertises /mcp as an OAuth protected resource. Two things about that
+    document are deployment-specific, and both are chart values rather than
+    inferences, because the signals that look convenient are about a DIFFERENT
+    service:
+
+    forceHttpsScheme — the scheme in the advertised identifier. It defaults to
+    EDDI's own ingress TLS (`ingress.tls` non-empty), NOT to the scheme of
+    eddi.oidc.publicUrl: that is the URL the browser reaches KEYCLOAK on, so an
+    https external IdP fronting a plain-http port-forward would keep forced https
+    on and advertise a resource nothing serves, and an http Keycloak behind a TLS
+    EDDI ingress would switch it off.
+
+    authorizationServer — where the client is told to authenticate. Unset, EDDI
+    falls back to quarkus.oidc.token.issuer and then to authServerUrl, and for a
+    bring-your-own IdP the latter is the address EDDI reaches IN-CLUSTER, which
+    an MCP client cannot resolve. Set this when your issuer is not what the chart
+    already pins for its own Keycloak.
+  */}}
+  {{- $metadata := .Values.eddi.oidc.resourceMetadata | default dict }}
+  {{- with $metadata.authorizationServer }}
+  QUARKUS_OIDC_RESOURCE_METADATA_AUTHORIZATION_SERVER: {{ . | quote }}
+  {{- end }}
+  {{- $forceHttps := $metadata.forceHttpsScheme }}
+  {{- if kindIs "invalid" $forceHttps }}
+  {{- $forceHttps = not (empty .Values.ingress.tls) }}
+  {{- end }}
+  QUARKUS_OIDC_RESOURCE_METADATA_FORCE_HTTPS_SCHEME: {{ $forceHttps | quote }}
   {{- end }}

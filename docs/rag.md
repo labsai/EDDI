@@ -181,6 +181,172 @@ Response:
 
 Status values: `pending` → `processing` → `completed` | `failed: <error message>`
 
+## Ingestion Sources
+
+A knowledge base can pull its own documents instead of being fed one at a time. Sources live on the
+knowledge base (`sources[]` on the RAG configuration), because the vector store is keyed by the
+knowledge base — a source that named its target by string could, and in an earlier draft did, write to
+one table while retrieval read another.
+
+```json
+{
+  "name": "product-docs",
+  "sources": [{
+    "name": "public-docs",
+    "type": "web",
+    "cron": "0 2 * * *",
+    "web": {
+      "startUrl": "https://example.com/docs/",
+      "pathPrefix": "/docs/",
+      "maxDepth": 3,
+      "maxPages": 200,
+      "excludePatterns": ["*.pdf", "**/changelog/**"],
+      "requestDelayMs": 500,
+      "respectRobots": true
+    },
+    "settings": {
+      "tombstoneAfterMissedRuns": 2,
+      "maxSegmentsPerRun": 20000,
+      "timeBudgetMinutes": 10
+    }
+  }]
+}
+```
+
+Every field has a default; omitting `settings` entirely means "all defaults". `excludePatterns` are
+globs matched against the URL **path** (`*` stays inside one segment, `**` crosses them).
+
+**`cron` is a standard five-field expression** — `min hour dom month dow` — the same form the schedule
+API takes. Six- and seven-field Quartz expressions with a seconds column are **refused when the
+knowledge base is saved**, with a 400 naming the source: stored, they would have become a schedule
+that never fires while every screen showed the source as scheduled. Omit `cron` for a source that only
+runs when someone asks.
+
+#### Every field
+
+`web` — what to crawl:
+
+| Field | Default | What it does |
+| --- | --- | --- |
+| `startUrl` | required | Where the crawl begins |
+| `sameSiteOnly` | `true` | Stay on the seed's site. Turning it off lets links take the crawl anywhere the other limits allow |
+| `includeSubdomains` | `false` | Treat `docs.example.com` as the same site as `example.com` |
+| `pathPrefix` | `/` | Only paths under this prefix are ingested |
+| `maxDepth` | `3` | How many links from the seed |
+| `maxPages` | `200` | Pages ingested per run |
+| `excludePatterns` | none | Globs matched against the path |
+| `requestDelayMs` | `500` | Politeness delay between requests to one host. A `Crawl-delay` in robots.txt wins when it is slower |
+| `timeoutSeconds` | `15` | Per-request timeout. The body gets a multiple of it before it is cut off |
+| `userAgent` | EDDI's default | Sent on every request, and matched against robots.txt groups |
+| `respectRobots` | `true` | Honour robots.txt, its `Crawl-delay` and its `Sitemap` entries |
+
+`settings` — what to do with what was crawled:
+
+| Field | Default | What it does |
+| --- | --- | --- |
+| `maxContentLength` | `100000` | Characters kept per document after conversion to Markdown. A longer page is truncated, never split across documents |
+| `maxBytesPerPage` | `5242880` | Cap on one response body. Must be positive — a non-positive value would read as "no cap" |
+| `maxSegmentsPerRun` | `20000` | Hard ceiling on embedded chunks per run: the cost control |
+| `costPerThousandSegments` | unset | Optional rate used to report a run's cost in the run history |
+| `tombstoneAfterMissedRuns` | `2` | Consecutive complete runs a document may be missing before its vectors go |
+| `timeBudgetMinutes` | `10` | Wall-clock ceiling for one run, 1–1440 |
+
+`enabled` (default `true`) is on the source itself: a disabled source keeps its configuration and its
+history, loses its schedule, and is **refused** by a manual run with a 409 — rather than accepted and
+then recorded as a failure.
+
+**What a run does.** Crawls within the scope, converts each page to Markdown, compares a content hash
+against the last successful ingest, and re-embeds only what changed — replacing that document's chunks
+rather than adding to them. Pages that disappear from the source lose their vectors after
+`tombstoneAfterMissedRuns` consecutive *complete* runs miss them; a run that stopped at a limit
+concludes nothing. ETag and Last-Modified from the previous run are sent back, so an unchanged page
+costs one 304.
+
+`robots.txt` is honoured by default, including `Crawl-delay` and `Sitemap` discovery. Turn
+`respectRobots` off only for a site you own.
+
+**When absence counts as deletion.** Removing a document is the one irreversible thing a run does, so
+it happens only when the crawl actually saw the source. A run that stopped at a limit, was cancelled,
+or reached nothing at all concludes nothing. "Reached nothing" is deliberate: an unreachable seed, a
+connection failure, a 5xx, a 429, and a 401 or 403 are the server saying nothing about its content, and
+a robots.txt that disallows everything is the same. A **404 or 410 is the opposite** — the server
+saying the page is gone — so a start page that 404s does reconcile, and one dead link on a site that
+otherwise answered never blocks reconciliation.
+
+**A page that could not be read is not a page that is gone.** A document behind a 5xx, a 429, a 401 or
+a 403, or one whose response could not be parsed, does not count as missing: the run records that it
+looked and learned nothing. Without that, the tail of a rate-limited site is deleted after
+`tombstoneAfterMissedRuns` runs while every run reports success.
+
+**A crawl that learns nothing definitive concludes nothing.** If a run produces no usable document and
+every failure was of the kind above — a site behind a JavaScript challenge or a maintenance page, which
+answers 200 for everything — the run reports `tombstoningSkipped` and removes nothing.
+
+**Vectors are replaced by adding first and removing afterwards.** A provider failure or a crash leaves
+the previous version of the document retrievable rather than leaving it with no vectors at all, and
+chunks record which source ingested them, so two sources of one knowledge base that overlap on a URL
+keep their own copies instead of deleting each other's.
+
+**A document is tombstoned only after its vectors are actually gone.** On a store that refuses the
+delete, the document stays live and the next run tries again, rather than being marked gone with its
+chunks still retrievable.
+
+**One run at a time per source.** A run is claimed before the request is answered, so a second "run
+now" while one is in flight gets a 409 rather than a second crawl into the same store. Purging is
+refused while a run is in flight, because it would delete the very row that guarantees this. A run
+whose process died is reaped — for that source only, so a short-budget source cannot reap the live run
+of one configured for hours.
+
+**Renaming the knowledge base clears what its sources have ingested.** The vector store is addressed by
+the knowledge base's name while ingestion state is keyed by its id, so a rename moves retrieval to a
+new, empty store. Clearing the state makes the next run repopulate it. The chunks under the old name
+are left where they are.
+
+**Ingestion schedules are minted by EDDI, not by clients.** A schedule whose metadata declares
+`ragIngestion` is refused by the schedule API on create and update, firing one by hand requires EDIT on
+the knowledge base it names, and a fire refuses a schedule whose name does not match that metadata.
+Without those, anyone who could create a schedule could have the server crawl, re-embed and delete from
+a knowledge base they have no access to.
+
+### Ingestion source endpoints
+
+| Method | Path | Access | Purpose |
+| ------ | ---- | ------ | ------- |
+| `POST` | `/ragstore/rags/{id}/sources/{sourceId}/run?version=N` | EDIT | Start a run (202, or 409 if one is in flight) |
+| `POST` | `/ragstore/rags/{id}/sources/{sourceId}/preview?version=N` | EDIT | Crawl and report what would change, embedding nothing. Capped at 2 minutes and a small page count, and at three previews per instance — the rest get 429 with `Retry-After` |
+| `GET` | `/ragstore/rags/{id}/sources/{sourceId}/runs?version=N&limit=20` | VIEW | Run history with counters, cost and errors |
+| `DELETE` | `/ragstore/rags/{id}/sources/{sourceId}/documents?version=N` | EDIT | Forget what the source has ingested |
+
+Running needs EDIT rather than VIEW because a published knowledge base grants VIEW to everyone by
+design, and a run rewrites what every agent using it retrieves.
+
+A source with a `cron` gets a schedule named `rag-ingestion:{ragConfigId}:{sourceId}`, kept in step with
+the configuration whenever the knowledge base is saved and removed when it is deleted. `{sourceId}` is
+the source's id, or its name when it has none. A ZIP import writes through the store rather than the
+REST layer, so it assigns the ids, validates the sources and creates their schedules itself — without
+that, an imported source was addressed by name, and the first save in the Manager re-keyed it, orphaned
+its history and re-embedded everything.
+
+### In the Manager
+
+The knowledge-base editor has an **Ingestion Sources** section: add and remove sources, edit the scope
+and the limits, and for a source that has been saved once, **Run now**, **Preview**, **Purge state**
+and the run history with its counters and errors.
+
+Run and Preview address the source by id and version, so they crawl the **saved** configuration. While
+the editor has unsaved changes both are disabled, with a line saying why — otherwise editing a start
+URL and pressing Run would silently crawl the old one. A source that has never been saved shows the
+same explanation instead of the buttons, because it has no id for the endpoints to address.
+
+### Store support for replacement
+
+Replacing a document's chunks needs `removeAll(Filter)` on the vector store, with a compound filter
+(document id and owning source). Verified for `in-memory` and `pgvector`. The other supported stores —
+`mongodb-atlas`, `elasticsearch`, `qdrant`, `chroma` — are expected to support it through their
+langchain4j drivers but are not covered by these tests. Where a store does not, the run still succeeds
+and reports `replaceUnsupported`, meaning re-ingested documents accumulate stale chunks on that
+backend.
+
 ## Observability
 
 RAG operations write audit traces to conversation memory:
@@ -271,6 +437,7 @@ parameter rather than ignoring it.
 - ✅ **Phase 8c-γ**: RAG provider expansion (8 embedding models + 6 vector stores)
 - ✅ **Phase 8c-M**: Manager UI — RAG editor with full provider parity + document ingestion
 - ✅ **REST ingestion endpoint**: `POST /ragstore/rags/{id}/ingest`
+- ✅ **Workflow step registration**: `eddi://ai.labs.rag` is a registered lifecycle extension, so a workflow can declare a knowledge-base step and the Manager offers it (before this, Options 1 and 2 below could be saved but not deployed)
 
 ## Future Enhancements
 

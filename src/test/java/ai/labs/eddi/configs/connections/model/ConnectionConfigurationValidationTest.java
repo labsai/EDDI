@@ -486,15 +486,16 @@ class ConnectionConfigurationValidationTest {
     class CallerSuppliedRules {
 
         /**
-         * The shape the Gnowbe connector uses: the platform authenticates the user and
-         * passes their own key inward on every request, so EDDI stores nothing and the
-         * connection carries only the header name and where that key may be sent.
+         * The shape a caller-supplied connector uses: the platform authenticates the
+         * user and passes their own key inward on every request, so EDDI stores nothing
+         * and the connection carries only the header name and where that key may be
+         * sent.
          */
         private ConnectionConfiguration callerSuppliedConnection() {
             var connection = staticConnection();
-            connection.setName("gnowbe");
+            connection.setName("acme");
             connection.setBinding(Binding.CALLER_SUPPLIED);
-            connection.setBaseUrlAllowlist(List.of("https://api.gnowbe.com"));
+            connection.setBaseUrlAllowlist(List.of("https://api.example.com"));
             var auth = new StaticAuth();
             auth.setHeaderName("x-api-key");
             connection.setStaticAuth(auth);
@@ -522,7 +523,7 @@ class ConnectionConfigurationValidationTest {
         @DisplayName("a stored valueTemplate is refused — it would race the caller's value silently")
         void refusesValueTemplate() {
             var connection = callerSuppliedConnection();
-            connection.getStaticAuth().setValueTemplate("Bearer ${vault:gnowbe-key}");
+            connection.getStaticAuth().setValueTemplate("Bearer ${vault:acme-key}");
 
             var error = assertThrows(IllegalArgumentException.class, connection::validate);
 
