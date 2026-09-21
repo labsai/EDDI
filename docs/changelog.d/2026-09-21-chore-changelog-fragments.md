@@ -28,8 +28,8 @@ branch to conflict with. The changelog gains a third depth:
 docs/changelog.d/<date>-<slug>.md   pending, written by a PR
         |  collate-changelog.py  (nightly)
         v
-docs/changelog.md                   the live file, newest first, capped at 250 KB
-        |  rotate-changelog.py   (nightly, when over the cap)
+docs/changelog.md                   the live file, newest first
+        |  rotate-changelog.py   (nightly, when over the 200 KB target)
         v
 docs/changelog/<YYYY-MM>.md         monthly archive
 ```
@@ -136,9 +136,13 @@ move the last entry. `register_separator()` now emits one only when the body doe
 
 - The **Regression Notes** table had a header row and no `|---|` separator, so it had never rendered
   as a table. The collator writes into it, so it needed one.
-- The three `2026-03-05` rows at the top of the **Decision Log** were moved to the bottom. The table
-  is otherwise newest-first and the collator inserts at the top, so leaving them would have produced
-  a table reading 09-22, 03-05, 03-05, 03-05, 09-17.
+- Register rows are sorted newest-first before insertion. They arrive in fragment-filename order —
+  oldest first — and were inserted as one block at the top, so a night that collated several days'
+  fragments would have put 09-20 above 09-21 inside a table whose whole ordering is newest-first.
+- A row bound for a register must lead with a real date, because that date is what places it. The
+  three legacy `2026-03-05` rows at the top of the **Decision Log** were left where they are: moving
+  rows reads as adding them, and the `Changelog Discipline` job below would have rejected this PR
+  over a purely cosmetic reorder.
 - `update_summary()` regenerates the month list in `SUMMARY.md` between the anchor and the first line
   that is not an archive row. Putting the *Pending entries* link directly under the anchor — the
   natural place for it — would have had the regenerated months inserted above it and the old rows

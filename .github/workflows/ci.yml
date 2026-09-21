@@ -259,7 +259,13 @@ jobs:
         run: |
           set -euo pipefail
           git fetch --no-tags origin "$BASE"
-          DIFF=$(git diff "origin/${BASE}...HEAD" -- docs/changelog.md 'docs/changelog/**')
+          # docs/changelog.md ONLY. Archives were in scope here at first, which
+          # contradicted the allowance above: a rotation moves dated entries
+          # INTO docs/changelog/<YYYY-MM>.md, so every legitimate rotation — and
+          # every PR that had already rotated — was rejected as an entry added
+          # in place. Archives still belong in the operator_docs trigger, which
+          # decides what runs, not what is allowed.
+          DIFF=$(git diff "origin/${BASE}...HEAD" -- docs/changelog.md)
 
           # '^+## ...(YYYY-MM-DD)' is an entry; '^+| YYYY-MM-DD |' is a row
           # appended to the Decision Log or Regression Notes table. Both are

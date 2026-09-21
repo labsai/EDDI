@@ -49,13 +49,33 @@ TARGET_BYTES = 200 * 1024
 REGISTER_HEADINGS = ("## Decision Log", "## Regression Notes")
 REGISTER = re.compile(r"^## (Decision Log|Regression Notes)\s*$")
 
+# A real calendar month and day, stated declaratively rather than parsed and
+# range-checked afterwards — the same shape ChangelogRotationTest.ARCHIVE_NAME
+# uses. `\d{2}` accepted "2026-99-99", which passed every check here, sorted
+# lexically into the live file, and then crashed rotation weeks later inside
+# pretty_month() — in the nightly job, on somebody else's entry.
+MONTH = r"(0[1-9]|1[0-2])"
+DAY = r"(0[1-9]|[12]\d|3[01])"
+
 # The date an entry carries, in its own heading: "... (2026-09-21)".
-DATE = re.compile(r"\((\d{4})-(\d{2})-\d{2}")
+#
+# The closing parenthesis is deliberately NOT required: entries already in the
+# live file and its archives are headed "(2026-07-02, after the revert)" and
+# "(2026-04-08 — part two)", and demanding ')' would stop split_sections
+# recognising them as entries at all.
+DATE = re.compile(r"\((\d{4})-" + MONTH + "-" + DAY)
+
+# Date-shaped but not a date. Matched only to tell an author that their heading
+# says 2026-13-40, rather than reporting it as having no date at all.
+DATE_SHAPED = re.compile(r"\(\d{4}-\d{2}-\d{2}")
+
+# The leading Date cell of a row bound for one of the running registers.
+ROW_DATE = re.compile(r"^\|\s*(\d{4}-" + MONTH + "-" + DAY + r")\s*\|")
 
 # A fragment filename. The date prefix is a sort hint and a hint only — the
 # heading inside is authoritative, and ChangelogFragmentTest requires the two
 # to agree.
-FRAGMENT_NAME = re.compile(r"^(\d{4}-\d{2}-\d{2})-([a-z0-9][a-z0-9._-]*)\.md$")
+FRAGMENT_NAME = re.compile(r"^(\d{4}-" + MONTH + "-" + DAY + r")-([a-z0-9][a-z0-9._-]*)\.md$")
 
 LINK = re.compile(r"\]\((?!https?://|#|mailto:|<http)([^)]+)\)")
 # A reference-style link definition: "[label]: ../../src/Foo.java".

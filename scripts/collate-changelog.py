@@ -51,10 +51,12 @@ import sys
 
 from changelog_common import (
     DATE,
+    DATE_SHAPED,
     FENCE_MARK,
     FRAGMENT_DIR,
     FRAGMENT_NAME,
     LIVE,
+    ROW_DATE,
     date_of,
     fence_mask,
     heading_indices,
@@ -138,6 +140,14 @@ def take_register_rows(text, path):
                 if not TABLE_ROW.match(line):
                     sys.exit("%s has a line in its ```%s block that is not a table row: %s"
                              % (path, kind, line[:80]))
+                # Both registers lead with a Date column, and that date is what
+                # orders the rows once several fragments' worth arrive at once.
+                # A row without one cannot be placed, so it is refused here
+                # rather than silently landing wherever it happened to be read.
+                if not ROW_DATE.match(line):
+                    sys.exit("%s has a ```%s row whose first cell is not a date: %s\n"
+                             "Start the row with the day it applies to, e.g. "
+                             "'| 2026-09-21 | …'." % (path, kind, line[:80]))
                 rows.setdefault(REGISTER_OF[kind], []).append(line)
         elif REGISTER_TYPO.match(info):
             sys.exit("%s opens a ```%s block. The collator files rows from ```decision-log and "
@@ -173,6 +183,11 @@ def entries_of(path):
     for n, start in enumerate(starts):
         heading = lines[start]
         if not DATE.search(heading):
+            if DATE_SHAPED.search(heading):
+                sys.exit("%s has a heading dated with something that is not a calendar date: %s\n"
+                         "The month must be 01-12 and the day 01-31 — an out-of-range month "
+                         "passes every check here and then crashes rotation, weeks later, in "
+                         "the nightly job." % (path, heading[:80]))
             sys.exit("%s has an entry with no date in its heading: %s\n"
                      "Every entry ends with its date in brackets, e.g. '(2026-09-21)'."
                      % (path, heading[:80]))
@@ -271,6 +286,14 @@ def main():
     if unplaced:
         sys.exit("docs/changelog.md has no %s section to append to."
                  % " or ".join(sorted(unplaced)))
+    # Newest first, matching both tables and the entry list. The rows arrive in
+    # fragment-filename order — oldest first — and were inserted as one block at
+    # the top, so a night that collated several days' fragments put 09-20 above
+    # 09-21 inside a table whose whole ordering is newest-first. Stable, so rows
+    # sharing a date keep the order their fragment wrote them in.
+    for rows in register_rows.values():
+        rows.sort(key=lambda row: ROW_DATE.match(row).group(1), reverse=True)
+
     registers = [(h, merge_register(b, h, register_rows[h]) if h in register_rows else b)
                  for h, b in registers]
 

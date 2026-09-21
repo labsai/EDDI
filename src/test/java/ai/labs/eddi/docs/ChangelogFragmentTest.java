@@ -54,11 +54,48 @@ class ChangelogFragmentTest {
     private static final Path COLLATE_WORKFLOW = Path.of(".github", "workflows", "changelog-collate.yml");
     private static final Path AGENTS = Path.of("AGENTS.md");
 
-    /** Mirrors {@code changelog_common.FRAGMENT_NAME}. */
-    private static final Pattern FRAGMENT_NAME = Pattern.compile("^(\\d{4}-\\d{2}-\\d{2})-([a-z0-9][a-z0-9._-]*)\\.md$");
+    /**
+     * A real calendar month and day, stated declaratively — mirrors
+     * {@code changelog_common.MONTH} and {@code DAY}, and the same shape
+     * {@link ChangelogRotationTest} uses for an archive name.
+     * <p>
+     * {@code \d{2}} accepted {@code 2026-99-99}, which passed every check here,
+     * sorted lexically into the live file, and then crashed rotation weeks later
+     * inside the script's {@code pretty_month()} — in the nightly job, on somebody
+     * else's entry.
+     */
+    private static final String MONTH = "(?:0[1-9]|1[0-2])";
+    private static final String DAY = "(?:0[1-9]|[12]\\d|3[01])";
 
-    /** The date an entry carries in its own heading. */
-    private static final Pattern HEADING_DATE = Pattern.compile("\\((\\d{4}-\\d{2}-\\d{2})\\)");
+    /** Mirrors {@code changelog_common.FRAGMENT_NAME}. */
+    private static final Pattern FRAGMENT_NAME = Pattern.compile("^(\\d{4}-" + MONTH + "-" + DAY + ")-([a-z0-9][a-z0-9._-]*)\\.md$");
+
+    /**
+     * The date an entry carries in its own heading.
+     * <p>
+     * The closing parenthesis is deliberately not required, matching
+     * {@code changelog_common.DATE}: entries already in the live file and its
+     * archives are headed {@code (2026-07-02, after the revert)}, and demanding
+     * {@code ')'} would report as undated a heading the collator accepts.
+     */
+    private static final Pattern HEADING_DATE = Pattern.compile("\\((\\d{4}-" + MONTH + "-" + DAY + ")");
+
+    /**
+     * Date-shaped but not a date. Matched only so an author is told their heading
+     * says {@code 2026-13-40}, rather than that it carries no date at all.
+     */
+    private static final Pattern DATE_SHAPED = Pattern.compile("\\(\\d{4}-\\d{2}-\\d{2}");
+
+    /** The leading Date cell of a row bound for one of the running registers. */
+    private static final Pattern ROW_DATE = Pattern.compile("^\\|\\s*(\\d{4}-" + MONTH + "-" + DAY + ")\\s*\\|");
+
+    /**
+     * A fenced block carrying register rows — mirrors the collator's REGISTER_INFO.
+     */
+    private static final Pattern REGISTER_FENCE = Pattern.compile("^(`{3,})(decision-log|regression-note)[ \t]*$");
+
+    /** A markdown table's separator row, which is not data. */
+    private static final Pattern SEPARATOR_ROW = Pattern.compile("^\\|[\\s\\-:|]+\\|\\s*$");
 
     /**
      * A relative link, matching {@code changelog_common.LINK} — absolute URLs,
@@ -140,8 +177,15 @@ class ChangelogFragmentTest {
 
             for (String heading : headings) {
                 if (!HEADING_DATE.matcher(heading).find()) {
-                    problems.add(name + " — undated heading: " + heading
-                            + ". The date in brackets is what orders the collated entries");
+                    // Reported apart, because "undated" sends the author looking
+                    // for a missing bracket when the real problem is a month of
+                    // 13 — which passes a \d{2} check, sorts lexically into the
+                    // live file, and crashes rotation weeks later.
+                    problems.add(DATE_SHAPED.matcher(heading).find()
+                            ? name + " — heading dated with something that is not a calendar date: "
+                                    + heading + ". The month must be 01-12 and the day 01-31"
+                            : name + " — undated heading: " + heading
+                                    + ". The date in brackets is what orders the collated entries");
                 }
             }
 
@@ -196,6 +240,49 @@ class ChangelogFragmentTest {
                         + "docs/changelog.md. Write '../../src/...' for a source file, "
                         + "'../architecture.md' for a neighbouring doc, and spell links inline rather "
                         + "than by reference:\n  "
+                        + String.join("\n  ", problems));
+    }
+
+    @Test
+    @DisplayName("every register row leads with the date that places it")
+    void registerRowsCarryADate() {
+        var problems = new TreeSet<String>();
+
+        for (Path fragment : fragments()) {
+            String name = fragment.getFileName().toString();
+            String[] lines = read(fragment).split("\n", -1);
+            int openRun = 0;
+            String kind = null;
+            for (String line : lines) {
+                String stripped = line.strip();
+                Matcher fence = REGISTER_FENCE.matcher(stripped);
+                if (openRun == 0) {
+                    if (fence.matches()) {
+                        openRun = fence.group(1).length();
+                        kind = fence.group(2);
+                    }
+                    continue;
+                }
+                Matcher mark = FENCE_MARK.matcher(stripped);
+                if (mark.matches() && mark.group(1).length() >= openRun && mark.group(2).isBlank()) {
+                    openRun = 0;
+                    continue;
+                }
+                if (stripped.isEmpty() || SEPARATOR_ROW.matcher(stripped).matches()) {
+                    continue; // a copied header separator, not a row
+                }
+                if (!ROW_DATE.matcher(stripped).find()) {
+                    problems.add(name + " — ```" + kind + " row: " + stripped);
+                }
+            }
+        }
+
+        // Both registers lead with a Date column, and once several fragments'
+        // worth of rows arrive in one collation that date is the only thing that
+        // orders them. A row without one cannot be placed.
+        assertTrue(problems.isEmpty(),
+                "these register rows do not start with a calendar date, so the collator cannot "
+                        + "order them — write '| 2026-09-21 | …':\n  "
                         + String.join("\n  ", problems));
     }
 
