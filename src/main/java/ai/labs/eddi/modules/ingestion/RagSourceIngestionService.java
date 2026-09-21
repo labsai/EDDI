@@ -53,9 +53,9 @@ public class RagSourceIngestionService {
      * is willing to walk. Both stores page this listing deterministically (sorted
      * by {@code createdAt} then id), so the walk cannot skip or repeat a row.
      */
-    private static final int REPAIR_PAGE_SIZE = 500;
+    static final int REPAIR_PAGE_SIZE = 500;
 
-    private static final int REPAIR_MAX_PAGES = 40;
+    static final int REPAIR_MAX_PAGES = 40;
 
     private final IngestionPipeline pipeline;
     private final IIngestionStateStore stateStore;
@@ -303,29 +303,35 @@ public class RagSourceIngestionService {
      * no {@code nextFire} at all, so after the first pass nothing matches.
      *
      * <p>
-     * Two nodes do <em>not</em> compute the same occurrence, which an earlier
-     * version of this comment claimed: each uses its own {@code Instant.now()}, so
-     * across a cron boundary one computes 10:01 and the other 10:02, and an
-     * unconditional write let the slower node replace the earlier fire with the
-     * later one. The write therefore goes through
-     * {@link IScheduleStore#armIfUnarmed}, whose predicate carries the "still
-     * unarmed" condition, so the first writer wins and the rest are no-ops.
+     * Two nodes do <em>not</em> compute the same occurrence: each uses its own
+     * {@code Instant.now()}, so across a cron boundary one computes 10:01 and the
+     * other 10:02, and an unconditional write let the slower node replace the
+     * earlier fire with the later one — the schedule skips an occurrence. Arming
+     * therefore goes through {@link IScheduleStore#armIfUnarmed}, which carries the
+     * "still unarmed" condition in the write predicate itself. That is the only
+     * place the nodes meet, so the first writer wins and every other one is a
+     * no-op; a re-read before writing would only have narrowed the window, not
+     * closed it.
      *
      * <p>
      * Failures are logged, never thrown: a repair that cannot read the store must
      * not stop the application from starting.
+     *
+     * @return what the sweep did, and whether it reached the end of the data —
+     *         returned rather than only logged so a test can tell a finished sweep
+     *         from a truncated one without reading log output
      */
-    void repairUnarmedSchedules() {
+    RepairResult repairUnarmedSchedules() {
         if (!scheduleRepairEnabled) {
-            return;
+            return new RepairResult(0, true);
         }
         int repaired = 0;
-        boolean truncated = true;
+        boolean walkedEverything = false;
         try {
             for (int page = 0; page < REPAIR_MAX_PAGES; page++) {
                 List<ScheduleConfiguration> batch = scheduleStore.readAllSchedules(REPAIR_PAGE_SIZE, page * REPAIR_PAGE_SIZE, true);
                 if (batch == null || batch.isEmpty()) {
-                    truncated = false;
+                    walkedEverything = true;
                     break;
                 }
                 for (ScheduleConfiguration schedule : batch) {
@@ -334,27 +340,46 @@ public class RagSourceIngestionService {
                     }
                 }
                 if (batch.size() < REPAIR_PAGE_SIZE) {
-                    truncated = false;
+                    walkedEverything = true;
                     break;
                 }
             }
         } catch (Exception e) {
             LOGGER.errorf(e, "Could not check stored ingestion schedules for a missing next fire time — "
                     + "any that were stored unarmed will not run until their knowledge base is saved again");
-            return;
+            return new RepairResult(repaired, false);
         }
         if (repaired > 0) {
             LOGGER.warnf("Armed %d ingestion schedule(s) that had been stored without a next fire time and "
                     + "could never have run", repaired);
         }
-        if (truncated) {
-            // Silence here read as "nothing left to repair" on exactly the deployments
-            // where that was least likely to be true. The cap stays — an unbounded scan
-            // of every schedule delays every boot — but it now says when it ran out.
-            LOGGER.warnf("Stopped checking for unarmed ingestion schedules after %d rows, the scan limit. Any "
-                    + "beyond that are still enabled with no next fire time and will not run; raise "
-                    + "the limit or re-save the knowledge bases concerned.", REPAIR_MAX_PAGES * REPAIR_PAGE_SIZE);
+        if (!walkedEverything) {
+            // Say so. A cap that truncates silently is worse than no cap: the
+            // operator reads "armed 12 schedules" and has no way to tell a finished
+            // repair from one that stopped a page short of the row they are waiting
+            // on.
+            LOGGER.warnf("Stopped checking stored schedules for a missing next fire time after %d rows (the "
+                    + "startup sweep's own bound, not the end of the data). Any ingestion schedule beyond "
+                    + "that point that was stored unarmed is still unarmed and will not run until its "
+                    + "knowledge base is saved again. Re-run with a larger bound, or re-save the affected "
+                    + "knowledge bases.", REPAIR_MAX_PAGES * REPAIR_PAGE_SIZE);
         }
+        return new RepairResult(repaired, walkedEverything);
+    }
+
+    /**
+     * What one startup sweep did.
+     *
+     * @param armed
+     *            how many unarmed ingestion schedules were given a fire time
+     * @param complete
+     *            whether the walk reached the end of the data. {@code false} means
+     *            it stopped at its own page bound (or on a store failure) and rows
+     *            beyond that point were never examined — the difference between
+     *            "there was nothing left to repair" and "we stopped looking", which
+     *            a count alone cannot express
+     */
+    record RepairResult(int armed, boolean complete) {
     }
 
     /** @return whether this schedule was one of the broken ones, and was armed */
@@ -373,6 +398,10 @@ public class RagSourceIngestionService {
         }
         try {
             Instant nextFire = RagIngestionSchedules.firstFire(cron);
+            // No re-read first: the store's own predicate carries the "still unarmed"
+            // condition, so a second round-trip would only narrow a window this write
+            // already closes — and would still be reading a snapshot.
+            //
             // A lost race is a success: another node armed the row a moment ago, so it
             // is armed. Only the count of rows THIS node repaired is affected, and that
             // number is a log line, not a decision.

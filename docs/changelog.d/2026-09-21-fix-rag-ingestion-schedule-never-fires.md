@@ -48,11 +48,31 @@ the knowledge base, which nothing would tell them to do. A startup sweep
 (`RagSourceIngestionService.repairUnarmedSchedules`, `@Observes StartupEvent`, new
 `eddi.rag.ingestion.schedule-repair.enabled`, default on) gives a fire time to any
 *ingestion* schedule that is enabled, carries a cron and has no `nextFire` at all. It is
-safe to run repeatedly by construction: after the first pass nothing matches, and two
-nodes repairing the same row compute the same next occurrence. It arms through the
-existing store-agnostic `setScheduleEnabled`, so it needs no new store method, and it
-touches nothing outside this feature's metadata — a schedule left unarmed on purpose is
-not a thing this repair can invent a cadence for.
+safe to run repeatedly by construction: after the first pass nothing matches. It arms
+through the existing store-agnostic `setScheduleEnabled`, so it needs no new store
+method, and it touches nothing outside this feature's metadata — a schedule left unarmed
+on purpose is not a thing this repair can invent a cadence for.
+
+**Two corrections from review (Copilot, #818).** The first version of this paragraph
+claimed two nodes "compute the same next occurrence", which is only true if both compute
+inside the same cron period. They need not: the listing is a snapshot and
+`setScheduleEnabled` overwrites `nextFire` unconditionally, so a slower node crossing a
+cron boundary could replace the first node's occurrence with the following one and skip a
+fire. Arming now goes through **`IScheduleStore.armIfUnarmed`**, which carries the "still
+unarmed" condition in the write predicate itself — `AND next_fire IS NULL AND
+enabled=true` on the Postgres `UPDATE`, `eq(NEXT_FIRE, null)` in the Mongo filter, which
+matches a stored null and a missing field alike. That is the only place the two nodes
+meet, so the first writer wins and every other one is a no-op that reports `false`; a
+lost race is treated as success, because the row is armed either way. An earlier draft
+re-read the row before writing instead, which narrowed the window to one store
+round-trip without closing it.
+
+The second: the 40-page bound used to end the walk **silently**, so past 20,000 schedules
+an operator read "armed 12 schedules" with no way to tell a finished repair from one that
+stopped a page short of the row they were waiting on. `repairUnarmedSchedules` now returns
+`RepairResult(armed, complete)` and logs a warning naming the bound when it is the reason
+the walk stopped. The bound itself stays: an unbounded scan at startup is the thing it
+exists to prevent.
 
 Also refused now: a cron that parses but can never match a date (`0 0 30 2 *`).
 `CronParser.validate` accepts it; `computeNextFire` gives up after two years with an
@@ -119,6 +139,8 @@ explain the result.
 | `repairUnarmedSchedules` returns early | "an ingestion schedule with no fire time is given one" |
 | `prepareImportedRag` drops `requireValidCrons` | `RestImportServiceRagCronTest` → both refusal cases |
 | Run button drops `source.enabled === false` | "does not offer Run for a source that is saved as disabled" |
+| `armIfUnarmed` is replaced by the unconditional `setScheduleEnabled` | "a row another node armed while the sweep was listing is left alone" |
+| The walk always reports itself complete | "stopping at the page bound is reported, not swallowed" |
 
 ### Files
 
@@ -137,6 +159,10 @@ Tests: `RagSourceIngestionServiceTest` (two new nested groups),
 
 ```decision-log
 | 2026-09-21 | Repair already-stored unarmed ingestion schedules with an idempotent startup sweep, rather than a migration script or leaving it to the next save | Rows written before the fix are dead for ever and nothing tells the operator to re-save the knowledge base | A one-off migration (needs running, and is skipped on upgrades); re-syncing every knowledge base at startup (delete-then-create races between nodes); a generic sweep over all schedules (wider blast radius than the defect) |
+```
+
+```decision-log
+| 2026-09-21 | Close the two-node repair race with a conditional `armIfUnarmed` on both stores rather than a re-read | A re-read narrows the window to one store round-trip and still reads a snapshot; the predicate is the only place two nodes meet, and ~20 lines per backend is a small price for a write that cannot skip a fire | A re-read before writing (narrows, does not close), a distributed lock for a startup sweep, leaving the inaccurate idempotency claim in place |
 ```
 
 ```regression-note

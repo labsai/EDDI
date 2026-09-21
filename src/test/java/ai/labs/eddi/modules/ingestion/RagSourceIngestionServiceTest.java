@@ -21,6 +21,7 @@ import org.mockito.ArgumentCaptor;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -373,6 +374,11 @@ class RagSourceIngestionServiceTest {
                     .thenAnswer(invocation -> (int) invocation.getArgument(1) == 0
                             ? List.of(schedules)
                             : List.of());
+            // The conditional write succeeds by default — Mockito's own default for a
+            // boolean is false, which would model a store where every node always
+            // loses the race and nothing is ever armed. The test that cares about
+            // losing it overrides this.
+            when(scheduleStore.armIfUnarmed(anyString(), any())).thenReturn(true);
         }
 
         @Test
@@ -402,19 +408,6 @@ class RagSourceIngestionServiceTest {
 
             verify(scheduleStore).armIfUnarmed(eq("sched-1"), any());
             verify(scheduleStore, never()).setScheduleEnabled(anyString(), anyBoolean(), any());
-        }
-
-        @Test
-        @DisplayName("losing the race to another node is success, not a failure to report")
-        void aLostRaceIsNotAnError() throws Exception {
-            // false means somebody else armed it first. The row is armed either way,
-            // which is all the sweep exists to guarantee.
-            storeHolds(unarmedIngestionSchedule());
-            when(scheduleStore.armIfUnarmed(anyString(), any())).thenReturn(false);
-
-            assertDoesNotThrow(() -> service.repairUnarmedSchedules());
-
-            verify(scheduleStore).armIfUnarmed(eq("sched-1"), any());
         }
 
         @Test
@@ -468,6 +461,66 @@ class RagSourceIngestionServiceTest {
 
             verify(scheduleStore, never()).readAllSchedules(anyInt(), anyInt(), anyBoolean());
             assertFalse(service.scheduleRepairEnabled);
+        }
+
+        /**
+         * Review finding (Copilot, #818): the listing this sweep walks is a snapshot,
+         * and {@code setScheduleEnabled} overwrote {@code nextFire} unconditionally.
+         * Two nodes booting together both see the row as unarmed, and the slower one's
+         * later {@code Instant.now()} replaced the first node's occurrence with the
+         * following one — a skipped fire. The condition now lives in the store's write
+         * predicate, so the second node's write matches nothing and it is told so.
+         */
+        @Test
+        @DisplayName("a row another node armed while the sweep was listing is left alone")
+        void doesNotOverwriteARowAnotherNodeAlreadyArmed() throws Exception {
+            storeHolds(unarmedIngestionSchedule());
+            // What the store reports when its "still unarmed" predicate matched nothing
+            // — the row acquired a fire time between the listing and this write.
+            when(scheduleStore.armIfUnarmed(anyString(), any())).thenReturn(false);
+
+            var result = assertDoesNotThrow(() -> service.repairUnarmedSchedules());
+
+            verify(scheduleStore, never()).setScheduleEnabled(anyString(), anyBoolean(), any());
+            assertEquals(0, result.armed(),
+                    "a row somebody else armed is not one this sweep repaired, and counting it would "
+                            + "report work that did not happen");
+            assertTrue(result.complete(), "losing the race is not a reason to call the sweep unfinished");
+        }
+
+        /**
+         * Review finding (Copilot, #818): the page bound is a deliberate safety limit,
+         * but it used to stop the walk without saying so — an operator read "armed 12
+         * schedules" and could not tell a finished repair from one that stopped a page
+         * short of the row they were waiting on.
+         */
+        @Test
+        @DisplayName("stopping at the page bound is reported, not swallowed")
+        void aTruncatedSweepSaysSo() throws Exception {
+            var armed = unarmedIngestionSchedule();
+            armed.setNextFire(Instant.now().plusSeconds(3600));
+            // Every page full, for ever: the walk can only end at its own bound.
+            when(scheduleStore.readAllSchedules(anyInt(), anyInt(), anyBoolean()))
+                    .thenReturn(Collections.nCopies(RagSourceIngestionService.REPAIR_PAGE_SIZE, armed));
+
+            var result = service.repairUnarmedSchedules();
+
+            assertFalse(result.complete(),
+                    "the sweep stopped at its own bound rather than at the end of the data, and the "
+                            + "difference is the whole point: rows beyond it were never examined");
+            verify(scheduleStore, times(RagSourceIngestionService.REPAIR_MAX_PAGES))
+                    .readAllSchedules(anyInt(), anyInt(), anyBoolean());
+        }
+
+        @Test
+        @DisplayName("reaching the end of the data is reported as a complete sweep")
+        void aFullSweepSaysSo() throws Exception {
+            storeHolds(unarmedIngestionSchedule());
+
+            var result = service.repairUnarmedSchedules();
+
+            assertTrue(result.complete(), "a short page is the end of the data, and that is a finished sweep");
+            assertEquals(1, result.armed());
         }
     }
 
