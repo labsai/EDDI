@@ -310,10 +310,11 @@ a reviewer reads.
 > and the unresolved count goes to zero while three findings sit there unanswered. This
 > happened on gnowbe-frontend#373 and is why this paragraph exists.
 >
-> The audit prints `comments=1` for a thread nobody answered and flags
-> `resolved, no reply` in its summary. **Treat a non-zero count there as outstanding work**,
-> exactly like an unresolved thread. Reply naming the commit that fixed it — "fixed in
-> `<sha>`, recording it here because the push auto-resolved this thread" — and move on.
+> The audit tags every such line **`[NO-REPLY]`** and totals them as
+> `N with no reply from you`, judged by comment *authorship* rather than count — the bot
+> replying to itself is not an answer. **Treat a non-zero total as outstanding work**, exactly
+> like an unresolved thread. Reply naming the commit that fixed it — "fixed in `<sha>`,
+> recording it here because the push auto-resolved this thread" — and move on.
 >
 > The one case you may skip: a thread the bot opened *and* closed with no finding in it
 > (duplicate notices, "review skipped" chatter). Read it before deciding it is that.
@@ -346,9 +347,19 @@ between you; a finding you can refute with a concrete citation does not need a h
 adjudicate it, and routing every one upward is its own kind of noise.
 
 Escalate instead of resolving when the call is genuinely not yours: a security or data-loss
-question, a product or API-contract decision, or a case where the bot answers your push-back
-and still disagrees. Then leave it open and say so in the report. A *human's* thread is always
-theirs to close, whichever way it went.
+question, or a product or API-contract decision. Then leave it open and say so in the report.
+A *human's* thread is always theirs to close, whichever way it went.
+
+> **A push-back you resolved can still be answered.** The bot often replies after the fact,
+> sometimes disagreeing — and since you resolved it, the default listing no longer shows it.
+> So the re-audit runs with `--all`, and any thread whose last comment came after your reply
+> gets read. If the bot accepts it, you are done. If it pushes back with something new,
+> **reopen the thread** rather than arguing in a closed one, and escalate it:
+> ```bash
+> gh api graphql -F t=<threadId> -f query='mutation($t:ID!){unresolveReviewThread(input:{threadId:$t}){thread{isResolved}}}'
+> ```
+> This is the step that makes "the bot still disagrees" a reachable outcome rather than a
+> sentence with no procedure behind it.
 
 **Defer it.** Reply saying so and what happens instead. Same resolve rule.
 
