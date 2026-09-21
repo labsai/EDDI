@@ -159,7 +159,7 @@ public class GroupHitlCoordinator {
                 // reclaimed the agents.)
                 gc.setState(persistedState);
                 LOGGER.infof("Group discussion %s was moved to %s elsewhere — stopping this leg at the phase boundary",
-                        gc.getId(), persistedState);
+                        LogSanitizer.sanitize(gc.getId()), persistedState);
                 if (persistedState == GroupConversationState.CANCELLED) {
                     notifyCancelled(gc, listener);
                 }
@@ -167,7 +167,7 @@ public class GroupHitlCoordinator {
             }
         } catch (Exception e) {
             LOGGER.debugf("Phase-boundary persisted-state re-check failed for %s: %s (continuing)",
-                    gc.getId(), e.getMessage());
+                    LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(e.getMessage()));
         }
         return false;
     }
@@ -248,7 +248,7 @@ public class GroupHitlCoordinator {
                 + "(exhausted turn budget or tasks assigned to an agent that can no longer be resolved). "
                 + "Increase protocol.maxTurns, fix the task assignments, or cancel the discussion.";
         LOGGER.warnf("No-progress TASK pause detected for GC %s at phase %d — failing to guarantee termination",
-                gc.getId(), phaseIdx);
+                LogSanitizer.sanitize(gc.getId()), phaseIdx);
         gc.getTranscript().add(new TranscriptEntry(
                 "system", "System", null, phaseIdx, phase.name(),
                 TranscriptEntryType.ERROR, Instant.now(), msg, null));
@@ -327,17 +327,17 @@ public class GroupHitlCoordinator {
             // release paused-state resources for a conversation still paused in DB.
             gc.setState(pausedState);
             gc.setPendingHumanInput(savedPending);
-            LOGGER.infof("Pause→cancel conversion for GC %s lost a state race — leaving persisted state", gc.getId());
+            LOGGER.infof("Pause→cancel conversion for GC %s lost a state race — leaving persisted state", LogSanitizer.sanitize(gc.getId()));
             return;
         } catch (IGroupConversationStore.GroupConversationGoneException e) {
             // deleted concurrently — nothing left to cancel
-            LOGGER.infof("Pause→cancel conversion for GC %s skipped — conversation was deleted", gc.getId());
+            LOGGER.infof("Pause→cancel conversion for GC %s skipped — conversation was deleted", LogSanitizer.sanitize(gc.getId()));
             return;
         } catch (Exception e) {
             gc.setState(pausedState);
             gc.setPendingHumanInput(savedPending);
             LOGGER.warnf("Failed to convert just-committed pause of GC %s to CANCELLED: %s",
-                    gc.getId(), e.getMessage());
+                    LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(e.getMessage()));
             return;
         }
 
@@ -346,12 +346,12 @@ public class GroupHitlCoordinator {
         // own exceptions already; the listener is wrapped here for the same reason.
         deleteGroupHitlTimeoutSchedule(gc.getId());
         auditHitlCancellation(gc, token.getSignal());
-        LOGGER.infof("Cancel signal landed while pausing GC %s — converted pause to CANCELLED", gc.getId());
+        LOGGER.infof("Cancel signal landed while pausing GC %s — converted pause to CANCELLED", LogSanitizer.sanitize(gc.getId()));
         try {
             notifyCancelled(gc, listener);
         } catch (Exception e) {
             LOGGER.warnf("Cancel listener threw for GC %s after CANCELLED was committed — ignoring: %s",
-                    gc.getId(), e.getMessage());
+                    LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(e.getMessage()));
         }
     }
 
@@ -404,10 +404,10 @@ public class GroupHitlCoordinator {
                     HitlSchedules.METADATA_CONVERSATION_ID_KEY, gc.getId()));
             scheduleStore.createSchedule(schedule);
             LOGGER.infof("Scheduled group HITL timeout for %s at %s (policy: %s)",
-                    gc.getId(), fireAt, policy);
+                    LogSanitizer.sanitize(gc.getId()), fireAt, policy);
         } catch (Exception e) {
             LOGGER.warnf("Failed to schedule group HITL timeout for %s: %s",
-                    gc.getId(), e.getMessage());
+                    LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(e.getMessage()));
         }
     }
 
@@ -561,7 +561,7 @@ public class GroupHitlCoordinator {
                     // RETRY policy: reset to ASSIGNED with the reviewer's feedback so
                     // the re-executing agent knows what to fix (C-D)
                     gc.getTaskList().resetFromAnyToAssigned(entry.getKey(), reviewerNote);
-                    LOGGER.infof("Task '%s' rejected with RETRY policy — reset to ASSIGNED", entry.getKey());
+                    LOGGER.infof("Task '%s' rejected with RETRY policy — reset to ASSIGNED", LogSanitizer.sanitize(entry.getKey()));
                 } else {
                     // FAIL policy (default): permanently reject the task
                     gc.getTaskList().rejectTask(entry.getKey(), reviewerNote);
@@ -1383,7 +1383,7 @@ public class GroupHitlCoordinator {
                     Instant.now(), null, null));
         } catch (Exception e) {
             LOGGER.warnf("Failed to submit HITL cancellation audit entry for group conversation %s: %s",
-                    gc.getId(), e.getMessage());
+                    LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(e.getMessage()));
         }
     }
 
@@ -1401,13 +1401,14 @@ public class GroupHitlCoordinator {
             IResourceStore.IResourceId resId = groupStore.getCurrentResourceId(gc.getGroupId());
             if (resId == null) {
                 LOGGER.warnf("Terminal cleanup: group config %s not found — ephemeral agents of GC %s not cleaned",
-                        gc.getGroupId(), gc.getId());
+                        LogSanitizer.sanitize(gc.getGroupId()), LogSanitizer.sanitize(gc.getId()));
                 return;
             }
             var config = groupStore.read(gc.getGroupId(), resId.getVersion());
             groupConversationService.cleanupEphemeralAgents(gc, config);
         } catch (Exception e) {
-            LOGGER.warnf("Terminal cleanup failed for group conversation %s: %s", gc.getId(), e.getMessage());
+            LOGGER.warnf("Terminal cleanup failed for group conversation %s: %s", LogSanitizer.sanitize(gc.getId()),
+                    LogSanitizer.sanitize(e.getMessage()));
         }
     }
 
@@ -1420,11 +1421,11 @@ public class GroupHitlCoordinator {
             int deleted = scheduleStore.deleteSchedulesByName(
                     HitlSchedules.groupTimeoutScheduleName(groupConversationId));
             if (deleted > 0) {
-                LOGGER.infof("Cleaned up %d group HITL timeout schedule(s) for %s", deleted, groupConversationId);
+                LOGGER.infof("Cleaned up %d group HITL timeout schedule(s) for %s", deleted, LogSanitizer.sanitize(groupConversationId));
             }
         } catch (Exception e) {
             LOGGER.warnf("Failed to delete group HITL timeout schedule for %s: %s",
-                    groupConversationId, e.getMessage());
+                    LogSanitizer.sanitize(groupConversationId), LogSanitizer.sanitize(e.getMessage()));
         }
     }
 }

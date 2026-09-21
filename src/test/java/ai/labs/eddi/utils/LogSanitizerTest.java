@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import static ai.labs.eddi.utils.LogSanitizer.escapeRecordBoundaries;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -216,6 +217,82 @@ class LogSanitizerTest {
             String result = sanitize("col1\tcol2");
             assertEquals("col1_col2", result);
             assertTrue(result.contains("_"), "tab should become underscore, not be removed");
+        }
+    }
+
+    @Nested
+    @DisplayName("escapeRecordBoundaries — the record-level rule")
+    class EscapeRecordBoundaries {
+
+        /**
+         * Built at runtime rather than written as a unicode escape: the project
+         * formatter turns such an escape back into the raw character, and a raw U+2028
+         * sitting in a .java file is a thing editors and reviewers mangle.
+         */
+        private final String lineSeparator = Character.toString(0x2028);
+
+        private final String paragraphSeparator = Character.toString(0x2029);
+
+        @Test
+        @DisplayName("null stays null, because a throwable's message is legitimately null")
+        void nullStaysNull() {
+            // sanitize() renders null as the string "null"; doing that here would turn
+            // a printed "java.io.IOException" into "java.io.IOException: null".
+            assertNull(escapeRecordBoundaries(null));
+        }
+
+        @Test
+        @DisplayName("LF and CR become escapes rather than underscores — the text has to survive")
+        void escapesRatherThanDestroys() {
+            assertEquals("a\\nb", escapeRecordBoundaries("a\nb"));
+            assertEquals("a\\rb", escapeRecordBoundaries("a\rb"));
+            assertEquals("a\\r\\nb", escapeRecordBoundaries("a\r\nb"));
+        }
+
+        @Test
+        @DisplayName("a forged record is neutralized but still legible")
+        void neutralizesAForgedRecord() {
+            String escaped = escapeRecordBoundaries("boom" + LogCaptureSupport.FORGED_RECORD);
+
+            assertFalse(escaped.contains("\n"), "no LF may survive: " + escaped);
+            assertFalse(escaped.contains("\r"), "no CR may survive: " + escaped);
+            assertTrue(escaped.contains("Forged admin login succeeded"),
+                    "and the payload stays readable, so the line keeps the diagnostic it was emitted for: " + escaped);
+        }
+
+        @Test
+        @DisplayName("TAB survives, because it cannot end a record and it indents stack frames")
+        void keepsTab() {
+            assertEquals("col1\tcol2", escapeRecordBoundaries("col1\tcol2"));
+        }
+
+        @Test
+        @DisplayName("other control characters become \\uXXXX escapes")
+        void escapesOtherControlCharacters() {
+            assertEquals("a\\u001bb", escapeRecordBoundaries("a\u001Bb"));
+            assertEquals("a\\u0000b", escapeRecordBoundaries("a\u0000b"));
+        }
+
+        @Test
+        @DisplayName("the Unicode line and paragraph separators are escaped too")
+        void escapesUnicodeSeparators() {
+            assertEquals("a\\u2028b", escapeRecordBoundaries("a" + lineSeparator + "b"));
+            assertEquals("a\\u2029b", escapeRecordBoundaries("a" + paragraphSeparator + "b"));
+        }
+
+        @Test
+        @DisplayName("text with nothing to escape comes back as the very same instance")
+        void returnsTheSameInstanceWhenNothingToDo() {
+            // The overwhelming majority of log records take this path, and the caller
+            // decides whether a record needs rewriting by comparing what came back.
+            String clean = "started listening on port 7070";
+            assertSame(clean, escapeRecordBoundaries(clean));
+        }
+
+        @Test
+        @DisplayName("a backslash is left alone, so Windows paths in exception messages stay readable")
+        void doesNotDoubleBackslashes() {
+            assertEquals("C:\\dev\\git", escapeRecordBoundaries("C:\\dev\\git"));
         }
     }
 }
