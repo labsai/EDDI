@@ -115,7 +115,7 @@ public class IngestedFileService {
             boolean isReplacement = replacedBytes != null;
             long otherBytes = usedBytes - (isReplacement ? replacedBytes : 0L);
 
-            String refusal = refuse(fileName, content, limits, usedFiles, isReplacement, otherBytes);
+            String refusal = refuse(content, limits, usedFiles, isReplacement, otherBytes);
             if (refusal != null) {
                 rejected.add(new RejectedFile(fileName, refusal));
                 continue;
@@ -159,7 +159,7 @@ public class IngestedFileService {
     }
 
     /** The refusal for this file, or null when it may be stored. */
-    private static String refuse(String fileName, byte[] content, IngestionSource.UploadSource limits,
+    private static String refuse(byte[] content, IngestionSource.UploadSource limits,
                                  int usedFiles, boolean isReplacement, long otherBytes) {
 
         if (content == null || content.length == 0) {
