@@ -7,6 +7,7 @@ package ai.labs.eddi.datastore.postgres;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
+import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
 import ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.*;
@@ -32,7 +33,8 @@ class PostgresAgentTriggerStoreTest extends PostgresTestBase {
     static void init() {
         var dsInstance = createDataSourceInstance();
         ds = dsInstance.get();
-        IJsonSerialization json = new JsonSerialization(new ObjectMapper());
+        IJsonSerialization json = new JsonSerialization(
+                SerializationCustomizer.configureObjectMapper(new ObjectMapper(), false));
         store = new PostgresAgentTriggerStore(dsInstance, json);
     }
 

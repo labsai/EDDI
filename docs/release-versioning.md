@@ -6,7 +6,7 @@
 
 EDDI follows [Semantic Versioning](https://semver.org/):
 
-```
+```text
 MAJOR.MINOR.PATCH[-PRERELEASE]
 ```
 
@@ -17,18 +17,30 @@ MAJOR.MINOR.PATCH[-PRERELEASE]
 | `PATCH` | Bug fixes only | `6.0.0` → `6.0.1` |
 | `PRERELEASE` | Release candidate or beta | `6.0.0-RC1`, `6.0.0-RC2` |
 
-The canonical version lives in `pom.xml` (`<version>6.0.0</version>`) and is used for Maven artifacts and CI build tags.
+The canonical version lives in `pom.xml` — the top-level `<version>` element, which CI reads with
+`grep -m1 '<version>' pom.xml` — and is used for Maven artifacts and CI build tags. (Deliberately
+not quoted with a concrete number here: this page is not a place that should need editing on every
+release.)
+
+> ### ⚠️ Release tags are **not** `v`-prefixed
+>
+> `ci.yml` triggers on `tags: ["[0-9]*"]`, so a release tag must **start with a digit**: `6.3.0`,
+> never `v6.3.0`. This is not a style preference — a `v`-prefixed tag matches nothing, so pushing
+> one runs **no workflow at all**: no build, no image, no `latest`, no cosign signature, no SLSA
+> attestation and no GitHub release. Nothing fails, because nothing starts. The tag name is also
+> used *verbatim* as the Docker tag (`PRIMARY_TAG="${GITHUB_REF#refs/tags/}"`), so the `v` would
+> not be stripped even if it did fire.
 
 ---
 
 ## Branching Model
 
-```
+```text
 main ─────────────────────────────────────── production
   ↑
   │  merge when ready
   │
-feature/version-6.0.0 ───────────────────── active development
+feature/version-6.3.0 ───────────────────── active development
 ```
 
 | Branch | Purpose | Docker push? |
@@ -45,18 +57,24 @@ All images are pushed to [Docker Hub: `labsai/eddi`](https://hub.docker.com/r/la
 
 | Trigger | Docker Tags | Purpose |
 |---|---|---|
-| Push to `main` | `labsai/eddi:6.0.0-b<N>` | Continuous integration build. `<N>` is the GitHub Actions run number. |
-| Git tag `v6.0.0-RC1` | `labsai/eddi:6.0.0-RC1` + `labsai/eddi:latest` | Release candidate |
-| Git tag `v6.0.0` | `labsai/eddi:6.0.0` + `labsai/eddi:latest` | General availability release |
+| Push to `main` | `labsai/eddi:6.3.0-b<N>` | Continuous integration build. `<N>` is the GitHub Actions run number. |
+| Git tag `6.3.0-RC1` | `labsai/eddi:6.3.0-RC1` + `labsai/eddi:latest` | Release candidate |
+| Git tag `6.3.0` | `labsai/eddi:6.3.0` + `labsai/eddi:6.3` + `labsai/eddi:6` + `labsai/eddi:latest` | General availability release |
 
 > **Key rule:** `latest` is **only** pushed on tag-based releases (RC or GA), never on regular main builds. This ensures `docker pull labsai/eddi` always gives users a deliberately released version.
+>
+> **The `6.3` and `6` aliases are moving tags**, and only a *stable* release publishes them — CI
+> gates them on `^([0-9]+)\.([0-9]+)\.([0-9]+)$`, so an RC never claims them. They are a
+> convenience for "track the latest 6.x", not something to deploy from: pin the immutable
+> `6.3.0` (better, `6.3.0@sha256:<digest>`) in manifests, which is why `helm/eddi/values.yaml`
+> and the k8s manifests use the full patch version.
 
 ### Build Tags
 
 Every push to `main` produces a unique, immutable build tag:
 
-```
-labsai/eddi:6.0.0-b42
+```text
+labsai/eddi:6.3.0-b42
                   │  │
                   │  └── GitHub Actions run number (auto-incrementing)
                   └───── Version from pom.xml
@@ -78,16 +96,18 @@ These are useful for:
 git checkout main
 git pull origin main
 
-# 2. Tag the release candidate
-git tag v6.0.0-RC1
+# 2. Tag the release candidate — no "v" prefix, or nothing triggers
+git tag 6.3.0-RC1
 
 # 3. Push the tag — CI pipeline triggers automatically
-git push origin v6.0.0-RC1
+git push origin 6.3.0-RC1
 ```
 
 This produces:
-- `labsai/eddi:6.0.0-RC1` — the version-pinned tag
+- `labsai/eddi:6.3.0-RC1` — the version-pinned tag
 - `labsai/eddi:latest` — updated to point to this RC
+
+An RC does **not** move the `6.3` or `6` aliases; only a stable release does.
 
 ### Subsequent Release Candidates
 
@@ -98,22 +118,30 @@ If RC1 needs fixes:
 # 2. Tag the new main HEAD
 git checkout main
 git pull origin main
-git tag v6.0.0-RC2
-git push origin v6.0.0-RC2
+git tag 6.3.0-RC2
+git push origin 6.3.0-RC2
 ```
 
 ### General Availability Release
 
 ```bash
-git tag v6.0.0
-git push origin v6.0.0
+git tag 6.3.0
+git push origin 6.3.0
 ```
+
+This is the only trigger that publishes the moving `6.3` and `6` aliases alongside `6.3.0` and
+`latest`.
+
+> **If nothing happens after pushing a tag, check the prefix first.** A `v`-prefixed tag does not
+> match the `[0-9]*` trigger, and GitHub reports no error for a tag that matches no workflow — the
+> push simply succeeds and nothing runs. Delete it (`git push origin :refs/tags/v6.3.0`) and re-tag
+> without the `v`.
 
 ### Red Hat Certification Release
 
 For Red Hat-certified images, use the separate workflow:
 
-```
+```text
 GitHub → Actions → "Red Hat Certification Release" → Run workflow
 ```
 
@@ -129,13 +157,13 @@ For documentation, config, or non-code commits, add `[skip docker]` to the commi
 git commit -m "docs: update README [skip docker]"
 ```
 
-This skips the Docker build and smoke test jobs, but **tests still run**.
+This skips the Docker build and smoke test jobs, but **tests still run** — unless the commit touches no path in the `code` filter, in which case `build-and-test` is skipped as well.
 
 | Commit message | Tests | Docker build | Smoke test |
 |---|---|---|---|
 | `feat: add new API endpoint` | ✅ | ✅ | ✅ |
-| `docs: update changelog [skip docker]` | ✅ | ❌ | ❌ |
-| Any tag push (`v6.0.0-RC1`) | ✅ | ✅ (always) | ✅ |
+| `docs: update changelog [skip docker]` | ❌ (docs-only paths skip `build-and-test` too) | ❌ | ❌ |
+| Any tag push (`6.3.0-RC1`) | ✅ | ✅ (always) | ✅ |
 
 > `[skip docker]` is ignored on tag pushes — releases always build Docker images.
 
@@ -145,33 +173,53 @@ This skips the Docker build and smoke test jobs, but **tests still run**.
 
 The entire pipeline lives in a single file: [`.github/workflows/ci.yml`](../.github/workflows/ci.yml).
 
-```
+```text
 ┌──────────────────┐
 │  build-and-test  │  ← Always runs (push, PR, tag)
-│  mvnw verify     │     Tests + JaCoCo coverage
+│  mvnw clean test │     Unit tests only
 └────────┬─────────┘
          │
-    ┌────┴────┐
-    │         │
-    ▼         ▼
-┌────────┐  ┌──────────────────┐
-│ docker │  │ preflight-check  │  ← PRs only
-│ build  │  │ Red Hat dry-run  │
-│ + push │  └──────────────────┘
-└────┬───┘
-     │
-     ▼
-┌────────────┐
-│ smoke-test │  ← Starts image + MongoDB, checks /q/health/ready
-└────────────┘
+         ├──────────────┬─────────────┬────────────┐
+         ▼              ▼             ▼            ▼
+┌──────────────────┐ ┌────────────┐ ┌────────┐ ┌──────────┐
+│ integration-test │ │ trivy-scan │ │ codeql │ │ gitleaks │
+│ mvnw verify      │ └─────┬──────┘ └───┬────┘ └────┬─────┘
+│ -DskipITs=false  │       │            │           │
+│ ITs + the JaCoCo │       │            │           │
+│ 90/80 gate       │       │            │           │
+└────────┬─────────┘       │            │           │
+         └─────────────────┴────────────┴───────────┘
+                           │
+              ┌────────────┴────────────┐
+              ▼                         ▼
+         ┌────────┐          ┌──────────────────┐
+         │ docker │          │ preflight-check  │  ← PRs only
+         │ build  │          │ Red Hat dry-run  │
+         │ + push │          └──────────────────┘
+         └───┬────┘
+             ▼
+       ┌────────────┐
+       │ smoke-test │  ← Starts image + MongoDB, checks /q/health/ready
+       └────────────┘
 ```
+
+Nothing is published until every gate above `docker` has passed. Its `needs` list is
+`[detect-changes, build-and-test, integration-test, trivy-scan, codeql, gitleaks]`, so a failing
+CVE scan, a secret leak, a CodeQL finding or a coverage shortfall each block the push on their
+own. **`build-and-test` runs `mvnw clean test`, not `verify`** — `integration-test` is the only
+job that runs the JaCoCo 90/80 coverage gate.
 
 ### Job Details
 
 | Job | Runs on | Condition | Duration |
 |---|---|---|---|
-| **build-and-test** | Every push/PR/tag | Always | ~3-5 min |
-| **docker** | Push to `main` or tag `v*` | `[skip docker]` to skip | ~3-4 min |
+| **build-and-test** | Every push/PR/tag | When changed paths match the `code` filter (`src/**`, `pom.xml`, `.github/workflows/**`, `Dockerfile*`, `docker-compose*.yml`, `.dockerignore`, `k8s/**`, `helm/**`, `mvnw*`, `.mvn/**`); always on tags | ~3-5 min |
+| **integration-test** | Same as build-and-test | Runs `mvnw verify -DskipITs=false`; the only job that enforces the JaCoCo 90/80 gate | ~10-15 min |
+| **codeql** | Every push/PR/tag on the `code` filter | SAST build + analysis; blocks `docker` | ~8-12 min |
+| **trivy-scan** | Same | Filesystem CVE scan, `exit-code 1`; blocks `docker` | ~2-3 min |
+| **gitleaks** | Same | Secret scanning; blocks `docker` | ~1 min |
+| **sbom** | Same | CycloneDX SBOM; does not block `docker` | ~2 min |
+| **docker** | Push to `main` or a tag matching `[0-9]*` | `[skip docker]` to skip (ignored on tags). Needs detect-changes, build-and-test, integration-test, trivy-scan, codeql and gitleaks | ~3-4 min |
 | **smoke-test** | After `docker` succeeds | Same as docker | ~1-2 min |
 | **preflight-check** | Pull requests only | Always on PRs | ~5-7 min |
 
@@ -209,29 +257,35 @@ Requires Docker Desktop for Windows. The `preflight` tool runs inside a Docker c
 
 ## Version Lifecycle
 
-```
-Development             Release Candidates          General Availability
-─────────────────       ──────────────────          ────────────────────
-feature/version-6.0.0   v6.0.0-RC1                  v6.0.0
+```text
+Development                 Release Candidates          General Availability
+─────────────────           ──────────────────          ────────────────────
+feature/version-6.3.0       tag 6.3.0-RC1               tag 6.3.0
     │                       │                           │
     ├── merge to main       ├── tag → Docker push       ├── tag → Docker push
-    │   → 6.0.0-b1          │   → 6.0.0-RC1 + latest    │   → 6.0.0 + latest
-    ├── merge to main       │                           │
-    │   → 6.0.0-b2         v6.0.0-RC2                  │
-    ├── merge to main       │                           └── start v6.1.0 cycle
-    │   → 6.0.0-b3          └── 6.0.0-RC2 + latest
+    │   → 6.3.0-b1          │   → 6.3.0-RC1 + latest    │   → 6.3.0 + latest
+    ├── merge to main       │                           │      + 6.3 + 6
+    │   → 6.3.0-b2          tag 6.3.0-RC2               │
+    ├── merge to main       │                           └── start 6.4.0 cycle
+    │   → 6.3.0-b3          └── 6.3.0-RC2 + latest
     └── ...
 ```
 
+Every tag in this diagram is written exactly as it must be pushed — bare, with no `v`.
+
 ### After a GA Release
 
-After tagging `v6.0.0`, update `pom.xml` on the feature branch to the next version:
+After tagging `6.3.0`, update `pom.xml` on the feature branch to the next version:
 
 ```bash
-# On feature/version-6.1.0 (or rename the branch)
-# Update pom.xml: <version>6.1.0</version>
-# CI builds will now produce 6.1.0-b1, 6.1.0-b2, etc.
+# On feature/version-6.4.0 (or rename the branch)
+# Update pom.xml: <version>6.4.0</version>
+# CI builds will now produce 6.4.0-b1, 6.4.0-b2, etc.
 ```
+
+`pom.xml` is not the only artefact carrying the release number — the Helm chart, the k8s manifests,
+the Dockerfile label, `application.properties` and the bundled agent filename all do too. See the
+version-bump entries in [`changelog.md`](changelog.md) for the full file set.
 
 ---
 
@@ -246,8 +300,10 @@ For full details on how signing works and how to verify images, see [Release Sig
 When creating release tags, use signed tags:
 
 ```bash
-# Instead of: git tag v6.0.0
+# Instead of: git tag 6.3.0
 # Use:
-git tag -s v6.0.0 -m "Release 6.0.0"
-git push origin v6.0.0
+git tag -s 6.3.0 -m "Release 6.3.0"
+git push origin 6.3.0
 ```
+
+Signing changes how the tag is created, not what it is called — it is still bare, with no `v`.

@@ -4,11 +4,17 @@
  */
 package ai.labs.eddi.integrations.slack;
 
+import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionRecord;
+import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionType;
+import ai.labs.eddi.configs.groups.model.GroupConversation.Dissent;
+import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
+import java.util.ArrayList;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -285,7 +291,7 @@ class SlackGroupDiscussionListenerTest {
     void awaitCompletion_returnsTrueAfterGroupComplete() {
         initExpanded();
         listener.onGroupComplete(new GroupConversationEventSink.GroupCompleteEvent(
-                ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState.COMPLETED, null));
+                GroupConversation.GroupConversationState.COMPLETED, null));
 
         assertTrue(listener.awaitCompletion(1, TimeUnit.SECONDS));
     }
@@ -313,7 +319,7 @@ class SlackGroupDiscussionListenerTest {
                 .thenReturn("ts-synth");
 
         listener.onGroupComplete(new GroupConversationEventSink.GroupCompleteEvent(
-                ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState.COMPLETED,
+                GroupConversation.GroupConversationState.COMPLETED,
                 "Final synthesis answer"));
 
         verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("Synthesis"));
@@ -330,7 +336,7 @@ class SlackGroupDiscussionListenerTest {
 
         // Now onGroupComplete also has a synthesis — should NOT post again
         listener.onGroupComplete(new GroupConversationEventSink.GroupCompleteEvent(
-                ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState.COMPLETED,
+                GroupConversation.GroupConversationState.COMPLETED,
                 "Duplicate synthesis"));
 
         // Only one synthesis header posted
@@ -345,7 +351,7 @@ class SlackGroupDiscussionListenerTest {
     }
 
     private GroupConversationEventSink.GroupStartEvent groupStart(String style, int memberCount) {
-        List<String> ids = new java.util.ArrayList<>();
+        List<String> ids = new ArrayList<>();
         for (int i = 0; i < memberCount; i++)
             ids.add("a" + i);
         return new GroupConversationEventSink.GroupStartEvent(
@@ -358,5 +364,200 @@ class SlackGroupDiscussionListenerTest {
         return new GroupConversationEventSink.SpeakerCompleteEvent(
                 agentId, displayName, response, 0, "Opinion",
                 targetAgentId, targetDisplayName);
+    }
+
+    // ─── HITL ───
+
+    @Test
+    void onHitlPause_postsThreadNotice() {
+        listener.onGroupStart(groupStart("ROUND_TABLE", 2));
+        listener.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(0, "Phase 1", "needs sign-off", "phase"));
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), eq(USER_THREAD), contains("awaiting approval"));
+    }
+
+    @Test
+    void onHitlPause_withApprovalChannelAndApprovers_postsButtons() {
+        var withHitl = new SlackGroupDiscussionListener(slackApi, AUTH_TOKEN, CHANNEL, USER_THREAD,
+                "C_APPROVAL", "U1,U2");
+        withHitl.onGroupStart(groupStart("ROUND_TABLE", 2));
+
+        withHitl.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(0, "Phase 1", "sign-off", "phase"));
+
+        // Interactive block message posted to the approval channel with group value
+        verify(slackApi).postBlocksMessage(eq(AUTH_TOKEN), eq("C_APPROVAL"), isNull(), anyList(), anyString());
+    }
+
+    @Test
+    void onHitlPause_withIntegrationName_buttonValueBindsIntegration() {
+        // H2/H1: the group approval button value carries
+        // "<integrationName>|group:<gcId>"
+        // so the decision binds to that integration at the interactivity endpoint.
+        var withHitl = new SlackGroupDiscussionListener(slackApi, AUTH_TOKEN, CHANNEL, USER_THREAD,
+                "C_APPROVAL", "U1,U2", "acme-int");
+        withHitl.onGroupStart(groupStart("ROUND_TABLE", 2));
+
+        withHitl.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(0, "Phase 1", "sign-off", "phase"));
+
+        var blocksCaptor = org.mockito.ArgumentCaptor.forClass(List.class);
+        verify(slackApi).postBlocksMessage(eq(AUTH_TOKEN), eq("C_APPROVAL"), isNull(), blocksCaptor.capture(), anyString());
+        @SuppressWarnings("unchecked")
+        var blocks = (List<Map<String, Object>>) blocksCaptor.getValue();
+        var actions = blocks.stream().filter(b -> "actions".equals(b.get("type"))).findFirst().orElseThrow();
+        @SuppressWarnings("unchecked")
+        var elements = (List<Map<String, Object>>) actions.get("elements");
+        String value = (String) elements.get(0).get("value");
+        var parsed = SlackHitlSupport.parseActionValue(value);
+        assertEquals("acme-int", parsed.integrationName());
+        assertTrue(parsed.isGroup());
+    }
+
+    @Test
+    void onHitlPause_noApprovalChannel_noBlockMessage() {
+        listener.onGroupStart(groupStart("ROUND_TABLE", 2));
+        listener.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(0, "Phase 1", "sign-off", "phase"));
+        verify(slackApi, never()).postBlocksMessage(any(), any(), any(), anyList(), anyString());
+    }
+
+    @Test
+    void onHitlPause_countsDownCompletionLatch() {
+        // A HITL pause is terminal for this listener: resume runs through a different
+        // listener instance, so onGroupComplete/onCancelled never arrive here. The
+        // latch MUST be released or registerAgentThreadMappings() parks for the full
+        // awaitCompletion timeout and leaks a virtual thread on every paused
+        // expanded-mode discussion.
+        listener.onGroupStart(groupStart("ROUND_TABLE", 2));
+        listener.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(0, "Phase 1", "sign-off", "phase"));
+
+        assertTrue(listener.awaitCompletion(1, TimeUnit.SECONDS),
+                "onHitlPause must release the completion latch so follow-up registration does not block");
+    }
+
+    @Test
+    void onHitlResume_postsVerdict() {
+        listener.onGroupStart(groupStart("ROUND_TABLE", 2));
+        listener.onHitlResume(new GroupConversationEventSink.HitlResumeEvent("APPROVED", "looks good", "slack:U1"));
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), eq(USER_THREAD), contains("approved"));
+    }
+
+    @Test
+    void onMemberPauseSkipped_postsWarning() {
+        listener.onGroupStart(groupStart("ROUND_TABLE", 2));
+        listener.onMemberPauseSkipped(new GroupConversationEventSink.MemberPauseSkippedEvent(
+                "a1", "Alice", 0, "Phase 1", "gated action"));
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), eq(USER_THREAD), contains("skipped"));
+    }
+
+    // ─── Decision reached (Wave 0, F3) ───
+
+    @Test
+    void onDecisionReached_verdict_postsTypeOutcomeAndWinner() {
+        listener.onGroupStart(groupStart("ROUND_TABLE", 2));
+        var decision = new DecisionRecord(DecisionType.VERDICT, "PRO wins on argument quality", "PRO",
+                Map.of("PRO", 8, "CON", 5), List.of(), "debate-judgment", "Judgment", "raw text");
+
+        listener.onDecisionReached(new GroupConversationEventSink.DecisionReachedEvent(decision));
+
+        // ROUND_TABLE is an EXPANDED style, so this posts channel-level (null
+        // thread) — verified three times against the same single invocation.
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("VERDICT"));
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("PRO wins on argument quality"));
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("Winner: *PRO*"));
+    }
+
+    @Test
+    void onDecisionReached_withDissents_includesDissentCount() {
+        listener.onGroupStart(groupStart("ROUND_TABLE", 2));
+        var dissents = List.of(new Dissent("a1", "Alice", "I still disagree"));
+        var decision = new DecisionRecord(DecisionType.AGREEMENT, "Compromise reached", null, null, dissents, "negotiation", "Bargain", null);
+
+        listener.onDecisionReached(new GroupConversationEventSink.DecisionReachedEvent(decision));
+
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("Dissents: 1"));
+    }
+
+    @Test
+    void onDecisionReached_noneType_doesNotPost() {
+        listener.onGroupStart(groupStart("ROUND_TABLE", 2));
+        var decision = new DecisionRecord(DecisionType.NONE, null, null, null, List.of(), "debate-judgment", "Judgment", "unparseable text");
+
+        listener.onDecisionReached(new GroupConversationEventSink.DecisionReachedEvent(decision));
+
+        // Only the onGroupStart post — a NONE decision (parse-failure fallback) is
+        // the producing feature's own concern, not something to surface in Slack.
+        verify(slackApi, times(1)).postMessage(any(), any(), any(), any());
+    }
+
+    @Test
+    void onDecisionReached_nullDecision_doesNotThrowOrPost() {
+        listener.onGroupStart(groupStart("ROUND_TABLE", 2));
+
+        assertDoesNotThrow(() -> listener.onDecisionReached(new GroupConversationEventSink.DecisionReachedEvent(null)));
+
+        verify(slackApi, times(1)).postMessage(any(), any(), any(), any());
+    }
+
+    // ─── Vote tally block (I14) ───
+
+    @Test
+    void onDecisionReached_voteWithTally_postsTheTallyBlock() {
+        listener.onGroupStart(groupStart("ROUND_TABLE", 2));
+        var tally = Map.<String, Object>of(
+                "totals", Map.of("Ship it", 2.0, "Hold it", 1.0),
+                "validBallots", 3, "participants", 3);
+        var decision = new DecisionRecord(DecisionType.VOTE, "\"Ship it\" wins.", "Ship it", tally, List.of(),
+                "vote", "Ballot", null);
+
+        listener.onDecisionReached(new GroupConversationEventSink.DecisionReachedEvent(decision));
+
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("Tally:"));
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("Ship it — 2.0"));
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("Ballots: 3 of 3"));
+    }
+
+    @Test
+    void onDecisionReached_voteWithMalformedTally_stillPostsWithoutThrowing() {
+        listener.onGroupStart(groupStart("ROUND_TABLE", 2));
+        var decision = new DecisionRecord(DecisionType.VOTE, "outcome", "X",
+                Map.of("totals", "not-a-map"), List.of(), "vote", "Ballot", null);
+
+        assertDoesNotThrow(() -> listener.onDecisionReached(new GroupConversationEventSink.DecisionReachedEvent(decision)));
+
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("Winner: *X*"));
+    }
+
+    // ─── Artifact updated (I17) ───
+
+    @Test
+    void onArtifactUpdated_created_postsNameVersionAndEditor() {
+        listener.onGroupStart(groupStart("ROUND_TABLE", 2));
+
+        listener.onArtifactUpdated(new GroupConversationEventSink.ArtifactUpdatedEvent(
+                "art-1", "design-doc", "MARKDOWN", 1, "agent-a", "DRAFT", true));
+
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("design-doc"));
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("created"));
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("v1"));
+    }
+
+    @Test
+    void onArtifactUpdated_finalUpdate_marksFinal_inCompactThread() {
+        listener.onGroupStart(groupStart("SINGLE", 1));
+
+        listener.onArtifactUpdated(new GroupConversationEventSink.ArtifactUpdatedEvent(
+                "art-1", "design-doc", "MARKDOWN", 4, "agent-b", "FINAL", false));
+
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), eq(USER_THREAD), contains("FINAL"));
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), eq(USER_THREAD), contains("updated"));
+    }
+
+    @Test
+    void onArtifactUpdated_degeneratePayload_doesNotThrowOrPost() {
+        listener.onGroupStart(groupStart("ROUND_TABLE", 2));
+
+        assertDoesNotThrow(() -> listener.onArtifactUpdated(null));
+        assertDoesNotThrow(() -> listener.onArtifactUpdated(new GroupConversationEventSink.ArtifactUpdatedEvent(
+                null, null, null, 0, null, null, false)));
+
+        verify(slackApi, times(1)).postMessage(any(), any(), any(), any());
     }
 }

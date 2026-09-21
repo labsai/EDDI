@@ -20,11 +20,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
+import java.io.IOException;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -32,6 +35,13 @@ import static org.mockito.Mockito.*;
 
 @SuppressWarnings("unchecked")
 class PrePostUtilsTest {
+
+    /** Mirrors the template data keys used by {@link PrePostUtils}. */
+    private static final String KEY_FIELD_DELIMITER = "eddiFieldDelimiter";
+    private static final String KEY_ROW_DELIMITER = "eddiRowDelimiter";
+
+    /** A nonce baked into the template text — exactly what must not happen. */
+    private static final Pattern NONCE_IN_TEMPLATE = Pattern.compile("eddi(Field|Row)[0-9a-f]{32}");
 
     private PrePostUtils prePostUtils;
     private IJsonSerialization jsonSerialization;
@@ -264,13 +274,13 @@ class PrePostUtilsTest {
     class PropertyTypeTests {
 
         private IConversationMemory memory;
-        private ai.labs.eddi.engine.memory.model.ConversationProperties conversationProperties;
+        private ConversationProperties conversationProperties;
         private Map<String, Object> templateData;
 
         @BeforeEach
         void setupMemory() throws Exception {
             memory = mock(IConversationMemory.class);
-            conversationProperties = mock(ai.labs.eddi.engine.memory.model.ConversationProperties.class);
+            conversationProperties = mock(ConversationProperties.class);
             when(memory.getConversationProperties()).thenReturn(conversationProperties);
             when(conversationProperties.toMap()).thenReturn(new HashMap<>());
             templateData = new HashMap<>();
@@ -342,7 +352,7 @@ class PrePostUtilsTest {
             instruction.setScope(Property.Scope.conversation);
             instruction.setConvertToObject(true);
 
-            when(jsonSerialization.deserialize("{invalid}")).thenThrow(new java.io.IOException("parse error"));
+            when(jsonSerialization.deserialize("{invalid}")).thenThrow(new IOException("parse error"));
 
             prePostUtils.executePropertyInstructions(List.of(instruction), 0, false, memory, templateData);
 
@@ -378,66 +388,106 @@ class PrePostUtilsTest {
         }
     }
 
-    // ==================== buildListFromJson ====================
+    // ==================== buildIterationValues ====================
 
     @Nested
-    @DisplayName("buildListFromJson Tests")
-    class BuildListFromJsonTests {
+    @DisplayName("buildIterationValues Tests")
+    class BuildIterationValuesTests {
 
         @Test
         @DisplayName("builds list with filter expression")
         void withFilter() throws Exception {
-            when(templatingEngine.processTemplate(anyString(), anyMap()))
-                    .thenReturn("[\"item1\",\"item2\"]");
-            when(jsonSerialization.deserialize(anyString(), eq(List.class)))
-                    .thenReturn(List.of("item1", "item2"));
+            stubIterationRender(List.of(List.of("item1"), List.of("item2")));
 
-            List<Object> result = prePostUtils.buildListFromJson(
-                    "item", "items", "item.active", null, new HashMap<>());
+            List<Object> result = prePostUtils.buildIterationValues("item", "items", "item.active", new HashMap<>());
 
-            assertEquals(2, result.size());
+            assertEquals(List.of("item1", "item2"), result);
         }
 
         @Test
         @DisplayName("builds list without filter expression")
         void withoutFilter() throws Exception {
-            when(templatingEngine.processTemplate(anyString(), anyMap()))
-                    .thenReturn("[\"val\"]");
-            when(jsonSerialization.deserialize(anyString(), eq(List.class)))
-                    .thenReturn(List.of("val"));
+            stubIterationRender(List.of(List.of("val")));
 
-            List<Object> result = prePostUtils.buildListFromJson(
-                    "item", "items", null, null, new HashMap<>());
+            List<Object> result = prePostUtils.buildIterationValues("item", "items", null, new HashMap<>());
 
-            assertEquals(1, result.size());
+            assertEquals(List.of("val"), result);
         }
 
         @Test
-        @DisplayName("builds list with custom iteration value")
-        void withIterationValue() throws Exception {
-            when(templatingEngine.processTemplate(anyString(), anyMap()))
-                    .thenReturn("[{\"name\":\"test\"}]");
-            when(jsonSerialization.deserialize(anyString(), eq(List.class)))
-                    .thenReturn(List.of(Map.of("name", "test")));
+        @DisplayName("nothing rendered — empty list")
+        void nothingRendered() throws Exception {
+            stubIterationRender(List.of());
 
-            List<Object> result = prePostUtils.buildListFromJson(
-                    "item", "items", null, "{\"name\":\"{item.name}\"}", new HashMap<>());
+            List<Object> result = prePostUtils.buildIterationValues("item", "items", null, new HashMap<>());
 
-            assertEquals(1, result.size());
+            assertTrue(result.isEmpty());
         }
 
         @Test
-        @DisplayName("builds list with null iteration value uses default template")
-        void withNullIterationValue() throws Exception {
-            when(templatingEngine.processTemplate(anyString(), anyMap()))
-                    .thenReturn("[\"defaultVal\"]");
-            when(jsonSerialization.deserialize(anyString(), eq(List.class)))
-                    .thenReturn(List.of("defaultVal"));
+        @DisplayName("values containing quotes and newlines survive verbatim")
+        void unsafeValuesSurviveVerbatim() throws Exception {
+            var unsafe = "he said \"hi\"\nback\\slash";
+            stubIterationRender(List.of(List.of(unsafe)));
 
-            List<Object> result = prePostUtils.buildListFromJson(
-                    "obj", "objects", null, "", new HashMap<>());
+            List<Object> result = prePostUtils.buildIterationValues("item", "items", null, new HashMap<>());
 
-            assertEquals(1, result.size());
+            assertEquals(List.of(unsafe), result);
         }
+
+        @Test
+        @DisplayName("the row delimiter is re-randomised for every invocation")
+        void rowDelimiterIsRandomisedPerInvocation() throws Exception {
+            stubIterationRender(List.of(List.of("value")));
+
+            prePostUtils.buildIterationValues("item", "items", null, new HashMap<>());
+            prePostUtils.buildIterationValues("item", "items", null, new HashMap<>());
+
+            @SuppressWarnings("rawtypes")
+            ArgumentCaptor<Map> captor = ArgumentCaptor.forClass(Map.class);
+            verify(templatingEngine, times(2)).processTemplate(anyString(), captor.capture());
+
+            var first = String.valueOf(captor.getAllValues().get(0).get(KEY_ROW_DELIMITER));
+            var second = String.valueOf(captor.getAllValues().get(1).get(KEY_ROW_DELIMITER));
+
+            assertTrue(first.matches("eddiRow[0-9a-f]{32}"), "delimiter must carry a 128-bit random nonce, was: " + first);
+            assertNotEquals(first, second, "a constant nonce makes the delimiter forgeable by upstream content");
+        }
+
+        @Test
+        @DisplayName("the template text is nonce-free, so it stays a stable compiled-template cache key")
+        void templateTextStaysStableAcrossInvocations() throws Exception {
+            stubIterationRender(List.of(List.of("value")));
+
+            prePostUtils.buildIterationValues("item", "items", null, new HashMap<>());
+            prePostUtils.buildIterationValues("item", "items", null, new HashMap<>());
+
+            ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
+            verify(templatingEngine, times(2)).processTemplate(captor.capture(), any());
+
+            assertEquals(captor.getAllValues().get(0), captor.getAllValues().get(1),
+                    "a nonce inside the template text makes every execution a compiled-template cache miss");
+            assertFalse(NONCE_IN_TEMPLATE.matcher(captor.getAllValues().getFirst()).find(),
+                    "no nonce may leak into the template text: " + captor.getAllValues().getFirst());
+        }
+    }
+
+    /**
+     * Stand in for the templating engine: read the per-invocation delimiters back
+     * out of the template DATA (the template text is deliberately nonce-free) and
+     * emit the given rows with them.
+     */
+    private void stubIterationRender(List<List<String>> renderedRows) throws Exception {
+        when(templatingEngine.processTemplate(anyString(), any())).thenAnswer(invocation -> {
+            Map<String, Object> renderData = invocation.getArgument(1);
+            String rowDelimiter = String.valueOf(renderData.get(KEY_ROW_DELIMITER));
+            String fieldDelimiter = String.valueOf(renderData.get(KEY_FIELD_DELIMITER));
+
+            var rendered = new StringBuilder();
+            for (var row : renderedRows) {
+                rendered.append(String.join(fieldDelimiter, row)).append(rowDelimiter);
+            }
+            return rendered.toString();
+        });
     }
 }

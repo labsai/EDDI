@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.datastore.bootstrap;
 
+import ai.labs.eddi.datastore.mongo.MongoDriverInfoFactory;
 import ai.labs.eddi.datastore.mongo.codec.JacksonProvider;
 import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -11,6 +12,7 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.mongodb.ConnectionString;
 import com.mongodb.MongoClientSettings;
+import com.mongodb.MongoDriverInformation;
 import com.mongodb.ReadPreference;
 import com.mongodb.WriteConcern;
 import com.mongodb.client.MongoClient;
@@ -45,6 +47,9 @@ import static org.bson.codecs.configuration.CodecRegistries.*;
 @ApplicationScoped
 @DefaultBean
 public class PersistenceModule {
+
+    private static final MongoDriverInformation DRIVER_INFO = MongoDriverInfoFactory.build();
+
     @Produces
     @ApplicationScoped
     @DefaultBean
@@ -53,7 +58,7 @@ public class PersistenceModule {
         BsonFactory bsonFactory = new BsonFactory();
         bsonFactory.enable(BsonParser.Feature.HONOR_DOCUMENT_LENGTH);
 
-        MongoClient client = MongoClients.create(buildMongoClientOptions(ReadPreference.nearest(), connectionString, bsonFactory));
+        MongoClient client = MongoClients.create(buildMongoClientOptions(ReadPreference.nearest(), connectionString, bsonFactory), DRIVER_INFO);
         registerMongoClientShutdownHook(client);
 
         return client.getDatabase(database);

@@ -13,6 +13,7 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.snippets.IRestPromptSnippetStore;
+import ai.labs.eddi.configs.snippets.model.PromptSnippet;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -346,7 +347,7 @@ class StructuralMatcherTest {
             when(snippetStore.readSnippetDescriptors(anyString(), anyInt(), anyInt()))
                     .thenReturn(List.of(descriptor));
 
-            var mockSnippet = mock(ai.labs.eddi.configs.snippets.model.PromptSnippet.class);
+            var mockSnippet = mock(PromptSnippet.class);
             when(mockSnippet.getName()).thenReturn("fallback_name");
             when(snippetStore.readSnippet("snip1", 1)).thenReturn(mockSnippet);
 

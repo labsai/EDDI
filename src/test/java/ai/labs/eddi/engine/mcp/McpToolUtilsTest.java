@@ -10,6 +10,8 @@ import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -41,10 +43,41 @@ class McpToolUtilsTest {
         assertEquals(Environment.production, McpToolUtils.parseEnvironment("   "));
     }
 
+    /**
+     * B11 — an unrecognised environment must never silently resolve to production:
+     * a typo in deploy_agent / undeploy_agent / chat_managed would otherwise hit
+     * the live environment. The parse fails, so the deploy call is never reached.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"staging", "stage", "prod", "PRODUCTIN", "dev", "invalid"})
+    void parseEnvironment_unknown_throwsInsteadOfDeployingToProduction(String environment) {
+        assertThrows(McpToolUtils.UnknownEnvironmentException.class,
+                () -> McpToolUtils.parseEnvironment(environment));
+    }
+
+    /**
+     * The message is what actually reaches the MCP caller (every tool that catches
+     * the failure echoes {@code e.getMessage()}), so it must name both the rejected
+     * value and the valid ones — otherwise the model driving the session cannot
+     * self-correct and retries the same call.
+     */
     @Test
-    void parseEnvironment_invalid_defaultsToProduction() {
-        assertEquals(Environment.production, McpToolUtils.parseEnvironment("invalid"));
-        assertEquals(Environment.production, McpToolUtils.parseEnvironment("production"));
+    void parseEnvironment_unknown_messageNamesRejectedAndValidValues() {
+        var exception = assertThrows(McpToolUtils.UnknownEnvironmentException.class,
+                () -> McpToolUtils.parseEnvironment("staging"));
+
+        assertEquals("Unknown environment 'staging'. Valid values: production, test", exception.getMessage());
+    }
+
+    /**
+     * Delegation check: McpToolUtils must not carry its own copy of the mapping —
+     * the strict parser on the enum is the single source of truth, and the MCP
+     * layer only adapts its exception type.
+     */
+    @Test
+    void parseEnvironment_delegatesToStrictEnumParser() {
+        assertEquals(Environment.parseStrict("test"), McpToolUtils.parseEnvironment("test"));
+        assertThrows(IllegalArgumentException.class, () -> Environment.parseStrict("staging"));
     }
 
     // --- parseIntOrDefault ---

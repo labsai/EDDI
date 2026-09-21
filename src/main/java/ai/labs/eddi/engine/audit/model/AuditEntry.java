@@ -68,13 +68,43 @@ import java.util.Map;
  * @param agentSignature
  *            Optional cryptographic agent signature for tamper-evident identity
  *            proof (null when signing not configured)
+ * @param sequence
+ *            0-based, gap-free position of this entry within its conversation,
+ *            or {@link #UNSEQUENCED} when the backing store cannot persist it.
+ *            The value is part of the signed payload, so an entry cannot be
+ *            renumbered to close the gap left by a deleted predecessor — which
+ *            is what makes DELETION and REORDERING detectable at all (a
+ *            per-entry HMAC alone only catches in-place field edits).
  * @author ginccc
  * @since 6.0.0
  */
 public record AuditEntry(String id, String conversationId, String agentId, Integer agentVersion, String userId, String environment, int stepIndex,
         String taskId, String taskType, int taskIndex, long durationMs, Map<String, Object> input, Map<String, Object> output,
         Map<String, Object> llmDetail, Map<String, Object> toolCalls, List<String> actions, double cost, Instant timestamp, String hmac,
-        String agentSignature) {
+        String agentSignature, long sequence) {
+
+    /**
+     * Sentinel for {@link #sequence}: this entry does not participate in a
+     * conversation chain. Used for entries with no conversation (compliance events)
+     * and by stores that do not persist the sequence — a store that dropped a real
+     * sequence on write would make every one of its rows read as tampered, so the
+     * ledger only assigns one when the store advertises support for it.
+     */
+    public static final long UNSEQUENCED = -1L;
+
+    /**
+     * Compatibility constructor for the pre-sequence 20-component shape. Produces
+     * an {@link #UNSEQUENCED} entry — every existing call site (pipeline
+     * collection, store deserialization, tests) keeps compiling and keeps its
+     * previous behaviour.
+     */
+    public AuditEntry(String id, String conversationId, String agentId, Integer agentVersion, String userId, String environment, int stepIndex,
+            String taskId, String taskType, int taskIndex, long durationMs, Map<String, Object> input, Map<String, Object> output,
+            Map<String, Object> llmDetail, Map<String, Object> toolCalls, List<String> actions, double cost, Instant timestamp, String hmac,
+            String agentSignature) {
+        this(id, conversationId, agentId, agentVersion, userId, environment, stepIndex, taskId, taskType, taskIndex, durationMs, input, output,
+                llmDetail, toolCalls, actions, cost, timestamp, hmac, agentSignature, UNSEQUENCED);
+    }
 
     /**
      * Return a copy of this entry with the environment field set. Used by
@@ -82,7 +112,18 @@ public record AuditEntry(String id, String conversationId, String agentId, Integ
      */
     public AuditEntry withEnvironment(String env) {
         return new AuditEntry(id, conversationId, agentId, agentVersion, userId, env, stepIndex, taskId, taskType, taskIndex, durationMs, input,
-                output, llmDetail, toolCalls, actions, cost, timestamp, hmac, agentSignature);
+                output, llmDetail, toolCalls, actions, cost, timestamp, hmac, agentSignature, sequence);
+    }
+
+    /**
+     * Return a copy of this entry with its recorded payload replaced. Used by
+     * {@code TurnAuditBuffer} to redact a secret user input BEFORE the entry is
+     * submitted — never after: once signed, an entry's payload is immutable.
+     */
+    public AuditEntry withPayload(Map<String, Object> newInput, Map<String, Object> newOutput, Map<String, Object> newLlmDetail,
+                                  Map<String, Object> newToolCalls) {
+        return new AuditEntry(id, conversationId, agentId, agentVersion, userId, environment, stepIndex, taskId, taskType, taskIndex, durationMs,
+                newInput, newOutput, newLlmDetail, newToolCalls, actions, cost, timestamp, hmac, agentSignature, sequence);
     }
 
     /**
@@ -91,7 +132,26 @@ public record AuditEntry(String id, String conversationId, String agentId, Integ
      */
     public AuditEntry withHmac(String hmacValue) {
         return new AuditEntry(id, conversationId, agentId, agentVersion, userId, environment, stepIndex, taskId, taskType, taskIndex, durationMs,
-                input, output, llmDetail, toolCalls, actions, cost, timestamp, hmacValue, agentSignature);
+                input, output, llmDetail, toolCalls, actions, cost, timestamp, hmacValue, agentSignature, sequence);
+    }
+
+    /**
+     * Return a copy of this entry with a different timestamp.
+     * <p>
+     * Two callers, both in {@code AuditHmac}. On the write path,
+     * {@code withStorablePrecision} floors the timestamp to the precision the
+     * signature covers and the backends can store, so the row that is signed is the
+     * row that is stored. On the read path, the v3 legacy-recovery search
+     * reconstructs the sub-precision digits a backend truncated away, so an old row
+     * can still prove it is the one that was written.
+     * <p>
+     * Not a general-purpose setter: an entry's timestamp records when the event
+     * happened, and moving it after the fact is exactly what the signature exists
+     * to detect.
+     */
+    public AuditEntry withTimestamp(Instant newTimestamp) {
+        return new AuditEntry(id, conversationId, agentId, agentVersion, userId, environment, stepIndex, taskId, taskType, taskIndex, durationMs,
+                input, output, llmDetail, toolCalls, actions, cost, newTimestamp, hmac, agentSignature, sequence);
     }
 
     /**
@@ -100,6 +160,33 @@ public record AuditEntry(String id, String conversationId, String agentId, Integ
      */
     public AuditEntry withAgentSignature(String signature) {
         return new AuditEntry(id, conversationId, agentId, agentVersion, userId, environment, stepIndex, taskId, taskType, taskIndex, durationMs,
-                input, output, llmDetail, toolCalls, actions, cost, timestamp, hmac, signature);
+                input, output, llmDetail, toolCalls, actions, cost, timestamp, hmac, signature, sequence);
+    }
+
+    /**
+     * Return a copy of this entry with its position in the conversation chain set.
+     * Applied by AuditLedgerService <em>before</em> the HMAC is computed, so the
+     * sequence is covered by the signature.
+     */
+    public AuditEntry withSequence(long sequenceValue) {
+        return new AuditEntry(id, conversationId, agentId, agentVersion, userId, environment, stepIndex, taskId, taskType, taskIndex, durationMs,
+                input, output, llmDetail, toolCalls, actions, cost, timestamp, hmac, agentSignature, sequenceValue);
+    }
+
+    /**
+     * Return a copy of this entry with the user identifier replaced — the in-memory
+     * mirror of the single mutation GDPR Art. 17(3)(e) permits on the ledger.
+     * <p>
+     * <strong>Not the production erasure path.</strong> Real pseudonymisation is a
+     * server-side bulk update ({@code IAuditStore.pseudonymizeByUserId}); nothing
+     * in {@code src/main} calls this. It exists so tests can reproduce a
+     * pseudonymised row and assert that it still verifies — which is the property
+     * that stops every routine erasure from manufacturing rows indistinguishable
+     * from tampered ones. Keep it aligned with what the store's {@code updateMany}
+     * does, or those tests stop proving anything about production.
+     */
+    public AuditEntry withUserId(String newUserId) {
+        return new AuditEntry(id, conversationId, agentId, agentVersion, newUserId, environment, stepIndex, taskId, taskType, taskIndex, durationMs,
+                input, output, llmDetail, toolCalls, actions, cost, timestamp, hmac, agentSignature, sequence);
     }
 }

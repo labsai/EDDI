@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.properties.model;
 
 import ai.labs.eddi.configs.apicalls.model.HttpCodeValidator;
+import java.util.Objects;
 
 public class PropertyInstruction extends Property {
     private String fromObjectPath = "";
@@ -84,15 +85,15 @@ public class PropertyInstruction extends Property {
         if (!super.equals(o))
             return false;
         PropertyInstruction that = (PropertyInstruction) o;
-        return java.util.Objects.equals(fromObjectPath, that.fromObjectPath) && java.util.Objects.equals(toObjectPath, that.toObjectPath)
-                && java.util.Objects.equals(convertToObject, that.convertToObject) && java.util.Objects.equals(override, that.override)
-                && java.util.Objects.equals(runOnValidationError, that.runOnValidationError)
-                && java.util.Objects.equals(httpCodeValidator, that.httpCodeValidator);
+        return Objects.equals(fromObjectPath, that.fromObjectPath) && Objects.equals(toObjectPath, that.toObjectPath)
+                && Objects.equals(convertToObject, that.convertToObject) && Objects.equals(override, that.override)
+                && Objects.equals(runOnValidationError, that.runOnValidationError)
+                && Objects.equals(httpCodeValidator, that.httpCodeValidator);
     }
 
     @Override
     public int hashCode() {
-        return java.util.Objects.hash(super.hashCode(), fromObjectPath, toObjectPath, convertToObject, override, runOnValidationError,
+        return Objects.hash(super.hashCode(), fromObjectPath, toObjectPath, convertToObject, override, runOnValidationError,
                 httpCodeValidator);
     }
 }

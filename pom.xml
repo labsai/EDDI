@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>ai.labs</groupId>
     <artifactId>eddi</artifactId>
-    <version>6.1.0</version>
+    <version>6.4.0</version>
     <properties>
         <compiler-plugin.version>3.15.0</compiler-plugin.version>
         <maven.compiler.source>25</maven.compiler.source>
@@ -13,22 +13,50 @@
         <maven.compiler.release>25</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
-        <quarkus.microprofile.version>3.0.0.Final</quarkus.microprofile.version>
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
-        <quarkus.platform.version>3.36.3</quarkus.platform.version>
-        <langchain4j-beta.version>1.16.3-beta26</langchain4j-beta.version>
-        <langchain4j.version>1.16.3</langchain4j.version>
-        <langchain4j-libs.version>1.16.3</langchain4j-libs.version>
-        <jandex-maven-plugin.version>3.5.3</jandex-maven-plugin.version>
+        <quarkus.platform.version>3.39.3</quarkus.platform.version>
+        <!-- langchain4j ships two release lines from the same reactor. Every
+             dev.langchain4j artifact below is pinned to ONE of these two, and
+             they must be bumped together: a split leaves modules resolving
+             different langchain4j-core versions, which surfaces as a runtime
+             NoSuchMethodError rather than a build failure. There used to be four
+             properties for these two values (langchain4j-libs.version and
+             langchain4j-community.version were byte-identical duplicates of
+             langchain4j.version and langchain4j-beta.version), which made a
+             half-finished bump the likely outcome of any upgrade. -->
+        <langchain4j.version>1.20.0</langchain4j.version>
+        <langchain4j-beta.version>1.20.0-beta30</langchain4j-beta.version>
+        <jandex-maven-plugin.version>3.6.0</jandex-maven-plugin.version>
         <maven.compiler.parameters>true</maven.compiler.parameters>
-        <surefire-plugin.version>3.5.5</surefire-plugin.version>
-        <failsafe-plugin.version>3.5.5</failsafe-plugin.version>
+        <surefire-plugin.version>3.5.6</surefire-plugin.version>
+        <failsafe-plugin.version>3.5.6</failsafe-plugin.version>
         <failsafe.useModulePath>false</failsafe.useModulePath>
-        <war-plugin.version>3.4.0</war-plugin.version>
-        <quarkus-mcp-server.version>1.12.1</quarkus-mcp-server.version>
-        <langchain4j-community.version>1.16.0-beta26</langchain4j-community.version>
+        <quarkus-mcp-server.version>1.13.2</quarkus-mcp-server.version>
         <skipITs>true</skipITs>
+        <!-- skipUTs skips surefire alone, so CI's Integration Tests job can reuse the
+             unit-test coverage data Build & Test already produced (target/jacoco.exec)
+             instead of running ~20k unit tests a second time before the merged
+             coverage gate. It follows skipTests, so -DskipTests still skips both. -->
+        <skipTests>false</skipTests>
+        <skipUTs>${skipTests}</skipUTs>
+        <!-- The Manager and Chat UIs (ui/manager, ui/chat) are built by Maven in
+             prepare-package and copied into target/classes just before the jar is
+             assembled. compile, test and quarkus:dev therefore never run npm, while
+             package, verify and install always build both UIs unless -DskipUi=true.
+             CI's Build Image job is the build that ships them. -->
+        <skipUi>false</skipUi>
+        <frontend-maven-plugin.version>1.15.1</frontend-maven-plugin.version>
+        <!-- Node 22 matches CI (ci.yml, the ui-* jobs) and mise.toml. The floor is
+             22.18: Vitest 5 needs 22.12, and Stryker 10's Babel 8 declares
+             `^22.18.0 || >=24.11.0`. Node 22 is Maintenance LTS until 2027-04-30;
+             20 reached end of life on 2026-04-30. -->
+        <node.version>v22.23.2</node.version>
+        <!-- Pinned: Maven only warns when a declared plugin carries no version, then
+             takes whatever its default lifecycle binding says, which moves with the
+             Maven wrapper. -->
+        <maven-resources-plugin.version>3.3.1</maven-resources-plugin.version>
+        <maven-clean-plugin.version>3.2.0</maven-clean-plugin.version>
     </properties>
     <dependencyManagement>
         <dependencies>
@@ -42,13 +70,47 @@
             <dependency>
                 <groupId>io.github.classgraph</groupId>
                 <artifactId>classgraph</artifactId>
-                <version>4.8.184</version>
+                <version>4.8.194</version>
             </dependency>
             <!-- Override jinjava to fix CVE-2026-25526 (pulled by jlama-core via jlama) -->
             <dependency>
                 <groupId>com.hubspot.jinjava</groupId>
                 <artifactId>jinjava</artifactId>
-                <version>2.8.3</version>
+                <version>2.8.4</version>
+            </dependency>
+            <!-- Override jackson-core to fix GHSA-r7wm-3cxj-wff9 (async parser DoS, <2.22.1).
+                 Managed transitively by the Quarkus BOM at 2.22.0. Trivy blocks the image
+                 push on this, so it must be overridden here rather than waiting for the BOM. -->
+            <dependency>
+                <groupId>com.fasterxml.jackson.core</groupId>
+                <artifactId>jackson-core</artifactId>
+                <version>2.22.2</version>
+            </dependency>
+            <!-- Override jackson-databind to fix GHSA-5gvw-p9qm-jgwh (@JsonView bypassed for
+                 @JsonUnwrapped containers) and GHSA-5jmj-h7xm-6q6v (case-insensitive
+                 deserialization bypasses per-property @JsonIgnoreProperties), both <2.22.1.
+                 Managed by the Quarkus BOM at 2.22.0, same as jackson-core above. Neither is
+                 reachable from our code — @JsonView is unused and every @JsonIgnoreProperties
+                 is class-level ignoreUnknown — but OpenSSF Scorecard counts advisories
+                 regardless of reachability. -->
+            <dependency>
+                <groupId>com.fasterxml.jackson.core</groupId>
+                <artifactId>jackson-databind</artifactId>
+                <version>2.22.2</version>
+            </dependency>
+            <!-- Keep the two jackson-dataformat modules we declare on the same patch
+                 as jackson-core/databind above. The Quarkus BOM manages the whole
+                 Jackson family at 2.22.0; overriding only core and databind for the
+                 advisories leaves csv and xml a patch behind their own core. -->
+            <dependency>
+                <groupId>com.fasterxml.jackson.dataformat</groupId>
+                <artifactId>jackson-dataformat-csv</artifactId>
+                <version>2.22.2</version>
+            </dependency>
+            <dependency>
+                <groupId>com.fasterxml.jackson.dataformat</groupId>
+                <artifactId>jackson-dataformat-xml</artifactId>
+                <version>2.22.2</version>
             </dependency>
             <!-- Override reactor-netty-http to fix CVE-2025-22227 (pulled by langchain4j-azure-open-ai) -->
             <dependency>
@@ -56,12 +118,40 @@
                 <artifactId>reactor-netty-http</artifactId>
                 <version>1.2.8</version>
             </dependency>
-            <!-- Override postgresql to fix CVE-2026-42198 (client-side DoS via SCRAM iteration count).
-                 Vulnerable: 42.2.0–42.7.10. Pulled by langchain4j-pgvector (42.7.7) and Quarkus BOM. -->
+            <!-- Override postgresql to fix CVE-2026-42198 (SCRAM iteration count DoS, ≤42.7.10)
+                 and CVE-2026-54291 (auth downgrade, ≤42.7.11).
+                 Pulled by langchain4j-pgvector (42.7.7) and Quarkus BOM. -->
             <dependency>
                 <groupId>org.postgresql</groupId>
                 <artifactId>postgresql</artifactId>
-                <version>42.7.11</version>
+                <version>42.7.13</version>
+            </dependency>
+            <!-- Override bcprov-lts8on to fix GHSA-mx76-r943-rf8g (native GCM chunking can throw
+                 a bad-tag exception on decryption, 2.73.0–2.73.10). Pulled by io.nats:jnats at
+                 2.73.10; jnats 2.26.1 still declares 2.73.10, so a bump of the parent does not
+                 clear it and the version has to be pinned here. -->
+            <dependency>
+                <groupId>org.bouncycastle</groupId>
+                <artifactId>bcprov-lts8on</artifactId>
+                <version>2.73.12.1</version>
+            </dependency>
+            <!-- swagger-annotations is a VERSION PIN, not a usage. No source imports
+                 io.swagger.v3.oas.annotations, so the direct <dependency> was removed
+                 from <dependencies> below — but the jar still ships, because
+                 swagger-parser (which McpApiToolBuilder does use, via
+                 io.swagger.v3.oas.models) drags it in transitively at 2.2.52. Dropping
+                 the declaration outright would therefore not have removed the artifact
+                 from target/quarkus-app/lib, the container image, the CycloneDX SBOM or
+                 the Trivy scan; it would only have DOWNGRADED it two patch versions,
+                 silently reversing the deliberate bump in aa6c48bf ("every safe
+                 patch/minor before release"). Managing it here keeps the shipped version
+                 exactly where that bump put it while removing the compile-scope
+                 dependency nothing compiles against.
+                 Pinned by BuildQualityGatesTest#swaggerAnnotationsKeepsItsShippedVersion. -->
+            <dependency>
+                <groupId>io.swagger.core.v3</groupId>
+                <artifactId>swagger-annotations</artifactId>
+                <version>2.2.54</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
@@ -128,11 +218,27 @@
         </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
-            <artifactId>quarkus-keycloak-authorization</artifactId>
+            <artifactId>quarkus-cache</artifactId>
         </dependency>
+        <!-- Caffeine is used DIRECTLY (Caffeine.newBuilder()) by ten classes — the
+             cache factory, the prompt-snippet and global-variable caches, the model
+             registries, and the tool-assembly warning cache. It arrives transitively
+             via quarkus-cache -> quarkus-caffeine, so the build works today by
+             accident: a Quarkus upgrade that reshapes that extension's own
+             dependencies would break compilation in classes that never mention
+             Quarkus. Declared explicitly, version left to the Quarkus BOM so it
+             cannot drift from the one the extension expects. -->
+        <dependency>
+            <groupId>com.github.ben-manes.caffeine</groupId>
+            <artifactId>caffeine</artifactId>
+        </dependency>
+        <!-- Bean Validation (Jakarta Validation / Hibernate Validator). Enables
+             declarative constraints on JAX-RS request bodies so an invalid body is
+             rejected at the boundary with a field-level 400 instead of being carried
+             into the engine. Version is managed by the Quarkus BOM — do not pin. -->
         <dependency>
             <groupId>io.quarkus</groupId>
-            <artifactId>quarkus-cache</artifactId>
+            <artifactId>quarkus-hibernate-validator</artifactId>
         </dependency>
         <dependency>
             <groupId>dev.langchain4j</groupId>
@@ -142,17 +248,17 @@
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-open-ai</artifactId>
-            <version>${langchain4j-libs.version}</version>
+            <version>${langchain4j.version}</version>
         </dependency>
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-anthropic</artifactId>
-            <version>${langchain4j-libs.version}</version>
+            <version>${langchain4j.version}</version>
         </dependency>
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-ollama</artifactId>
-            <version>${langchain4j-libs.version}</version>
+            <version>${langchain4j.version}</version>
         </dependency>
         <dependency>
             <groupId>dev.langchain4j</groupId>
@@ -167,12 +273,12 @@
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-google-ai-gemini</artifactId>
-            <version>${langchain4j-libs.version}</version>
+            <version>${langchain4j.version}</version>
         </dependency>
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-http-client-jdk</artifactId>
-            <version>${langchain4j-libs.version}</version>
+            <version>${langchain4j.version}</version>
         </dependency>
         <dependency>
             <groupId>dev.langchain4j</groupId>
@@ -198,22 +304,22 @@
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-mistral-ai</artifactId>
-            <version>${langchain4j-libs.version}</version>
+            <version>${langchain4j.version}</version>
         </dependency>
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-azure-open-ai</artifactId>
-            <version>${langchain4j-libs.version}</version>
+            <version>${langchain4j.version}</version>
         </dependency>
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-bedrock</artifactId>
-            <version>${langchain4j-libs.version}</version>
+            <version>${langchain4j.version}</version>
         </dependency>
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-community-oci-genai</artifactId>
-            <version>${langchain4j-community.version}</version>
+            <version>${langchain4j-beta.version}</version>
         </dependency>
         <!-- RAG Provider Expansion: additional embedding stores + models -->
         <dependency>
@@ -266,12 +372,12 @@
         <dependency>
             <groupId>org.apache.pdfbox</groupId>
             <artifactId>pdfbox</artifactId>
-            <version>3.0.7</version>
+            <version>3.0.8</version>
         </dependency>
         <dependency>
             <groupId>org.jsoup</groupId>
             <artifactId>jsoup</artifactId>
-            <version>1.22.2</version>
+            <version>1.23.2</version>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.dataformat</groupId>
@@ -281,16 +387,21 @@
             <groupId>com.fasterxml.jackson.dataformat</groupId>
             <artifactId>jackson-dataformat-xml</artifactId>
         </dependency>
-
+        <!-- YAML: ComposeStackTest and InfrastructureIT parse docker-compose*.yml
+             with YAMLMapper. quarkus-jackson does NOT ship the YAML module, so
+             without this the classpath entry arrives only through
+             json-schema-validator's transitive tree and an unrelated bump there
+             breaks the test compile. Version comes from the Quarkus BOM, like the
+             two modules above. -->
         <dependency>
-            <groupId>io.swagger.core.v3</groupId>
-            <artifactId>swagger-annotations</artifactId>
-            <version>2.2.50</version>
+            <groupId>com.fasterxml.jackson.dataformat</groupId>
+            <artifactId>jackson-dataformat-yaml</artifactId>
         </dependency>
+
         <dependency>
             <groupId>de.undercouch</groupId>
             <artifactId>bson4jackson</artifactId>
-            <version>2.15.1</version>
+            <version>2.18.0</version>
             <exclusions>
                 <exclusion>
                     <groupId>com.fasterxml.jackson.core</groupId>
@@ -315,6 +426,13 @@
             <groupId>com.github.victools</groupId>
             <artifactId>jsonschema-module-jackson</artifactId>
             <version>4.38.0</version>
+        </dependency>
+        <!-- JSON Schema VALIDATION (victools above only GENERATES schemas) — used
+             by the declarative shared-artifact validators (I17). -->
+        <dependency>
+            <groupId>com.networknt</groupId>
+            <artifactId>json-schema-validator</artifactId>
+            <version>1.5.9</version>
         </dependency>
         <dependency>
             <groupId>jakarta.annotation</groupId>
@@ -348,10 +466,6 @@
             <artifactId>vertx-web-client</artifactId>
         </dependency>
         <dependency>
-            <groupId>jakarta.transaction</groupId>
-            <artifactId>jakarta.transaction-api</artifactId>
-        </dependency>
-        <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-junit</artifactId>
             <scope>test</scope>
@@ -372,14 +486,6 @@
         <dependency>
             <groupId>org.mockito</groupId>
             <artifactId>mockito-core</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <!-- Mozilla Rhino: JavaScript engine for CalculatorTool tests -->
-        <!-- Pure Java implementation, works in all environments, auto-registers with ScriptEngineManager -->
-        <dependency>
-            <groupId>org.mozilla</groupId>
-            <artifactId>rhino-engine</artifactId>
-            <version>1.9.1</version>
             <scope>test</scope>
         </dependency>
         <!-- WireMock: embedded HTTP mock server for LlmTask and ApiCallsTask integration tests -->
@@ -425,7 +531,7 @@
         <dependency>
             <groupId>io.nats</groupId>
             <artifactId>jnats</artifactId>
-            <version>2.25.3</version>
+            <version>2.26.2</version>
         </dependency>
         <!-- PostgreSQL JDBC driver + Agroal connection pool (Phase 6.31) -->
         <dependency>
@@ -446,11 +552,38 @@
         <dependency>
             <groupId>io.swagger.parser.v3</groupId>
             <artifactId>swagger-parser</artifactId>
-            <version>2.1.42</version>
+            <version>2.1.47</version>
         </dependency>
 
     </dependencies>
     <build>
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+                <excludes>
+                    <!-- Generated by the UI build and copied from ui/*/dist by
+                         copy-ui-bundles. A stale local copy of the old
+                         deploy-to-local-eddi-repo script re-creates them here,
+                         gitignored and so invisible in git status; without these
+                         excludes the default resource copy would stage that STALE
+                         bundle into target/classes. Keep this list identical to the
+                         .gitignore block and the maven-clean-plugin fileset below. -->
+                    <exclude>META-INF/resources/assets/**</exclude>
+                    <exclude>META-INF/resources/manage.html</exclude>
+                    <exclude>META-INF/resources/welcome.html</exclude>
+                    <exclude>META-INF/resources/workforce.html</exclude>
+                    <exclude>META-INF/resources/chat.html</exclude>
+                    <exclude>META-INF/resources/scripts/js/chat-ui*.js</exclude>
+                    <exclude>META-INF/resources/scripts/css/chat-ui*.css</exclude>
+                    <exclude>META-INF/resources/mockServiceWorker.js</exclude>
+                    <exclude>META-INF/resources/eddi-icon.ico</exclude>
+                    <exclude>META-INF/resources/eddi-icon.svg</exclude>
+                    <exclude>META-INF/resources/logo_eddi.png</exclude>
+                    <exclude>META-INF/resources/fonts/**</exclude>
+                    <exclude>META-INF/resources/img/**</exclude>
+                </excludes>
+            </resource>
+        </resources>
         <plugins>
             <plugin>
                 <groupId>io.smallrye</groupId>
@@ -520,6 +653,7 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>${surefire-plugin.version}</version>
                 <configuration>
+                    <skipTests>${skipUTs}</skipTests>
                     <!-- @{argLine} preserves JaCoCo's injected agent arg -->
                     <argLine>@{argLine} -ea -XX:+EnableDynamicAgentLoading -Xshare:off --enable-native-access=ALL-UNNAMED</argLine>
                     <excludes>
@@ -536,7 +670,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-failsafe-plugin</artifactId>
-                <version>${surefire-plugin.version}</version>
+                <version>${failsafe-plugin.version}</version>
                 <executions>
                     <execution>
                         <goals>
@@ -570,7 +704,15 @@
                     </systemPropertyVariables>
                 </configuration>
             </plugin>
-            <!-- Checkstyle: code style enforcement (warnings only) -->
+            <!-- Checkstyle: code style enforcement.
+                 failOnViolation was false, which made the whole ruleset decorative:
+                 `mvn validate` reported violations and exited 0, so the import rules
+                 AGENTS.md calls mandatory could never block anything, and dead imports
+                 reached main. It fails now, but only on the rules the project actually
+                 wants enforced: violationSeverity=error means only the checkstyle.xml
+                 modules marked severity="error" (UnusedImports, RedundantImport) break
+                 the build, while the aspirational ones (FileLength, LineLength) stay at
+                 the Checker's default "warning" and remain advisory. -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-checkstyle-plugin</artifactId>
@@ -578,9 +720,33 @@
                 <configuration>
                     <configLocation>checkstyle.xml</configLocation>
                     <consoleOutput>true</consoleOutput>
-                    <failsOnError>false</failsOnError>
-                    <failOnViolation>false</failOnViolation>
-                    <violationSeverity>warning</violationSeverity>
+                    <!-- failOnViolation + violationSeverity IS the gate. `failsOnError`
+                         is deliberately absent (its default is false): the plugin's own
+                         descriptor for this goal reads "If this is true, and Checkstyle
+                         reported any violations or errors, the build fails immediately
+                         after running Checkstyle, before checking the log for
+                         logViolationsToConsole. If you want to use logViolationsToConsole,
+                         use failOnViolation instead of this." It is a second gate over the
+                         SAME error-severity set, not a processing-error guard — it just
+                         reaches the failure earlier and reports it worse ("Failed during
+                         checkstyle execution: There are N checkstyle errors" instead of
+                         "You have N Checkstyle violations"), and this build does want the
+                         console log. Real processing errors are already fatal: Checkstyle's
+                         Checker.haltOnException defaults to true, so an unparseable source
+                         aborts the run whatever this flag says.
+                         Pinned by BuildQualityGatesTest#checkstyleBlocksThroughFailOnViolation. -->
+                    <failOnViolation>true</failOnViolation>
+                    <violationSeverity>error</violationSeverity>
+                    <!-- Scope, stated rather than defaulted: the blocking import rules
+                         grade src/main/java ONLY. Turning this on today would fail the
+                         build on 163 pre-existing unused imports in src/test/java, which
+                         is a cleanup of its own and not something to smuggle into a
+                         gate-wiring change; formatter:validate already covers both source
+                         roots, so test sources are not unguarded, only un-Checkstyled.
+                         AGENTS.md §4.7 says so in as many words, and
+                         BuildQualityGatesTest#checkstyleImportGateScopeMatchesTheDocs
+                         fails if this flag and that sentence ever disagree. -->
+                    <includeTestSourceDirectory>false</includeTestSourceDirectory>
                     <linkXRef>false</linkXRef>
                 </configuration>
                 <executions>
@@ -594,7 +760,17 @@
                     </execution>
                 </executions>
             </plugin>
-            <!-- Code Formatter -->
+            <!-- Code Formatter.
+                 Bound to `validate`, NOT `format`. The format goal defaults to the
+                 process-sources phase, so it used to rewrite tracked source files on
+                 every `mvn compile`/`test`/`package` — including files the developer
+                 never touched, which then appear in `git status` next to the real work
+                 (AGENTS.md rule 5 forbids `git add .` for exactly this reason). It also
+                 meant formatting was "enforced" by mutating the working tree: CI
+                 reformatted its own checkout and reported nothing, so unformatted code
+                 could merge. `validate` checks and fails instead, and
+                 `./mvnw formatter:format` — the command AGENTS.md documents — is still
+                 how you fix a violation. -->
             <plugin>
                 <groupId>net.revelc.code.formatter</groupId>
                 <artifactId>formatter-maven-plugin</artifactId>
@@ -605,8 +781,9 @@
                 </configuration>
                 <executions>
                     <execution>
+                        <id>validate</id>
                         <goals>
-                            <goal>format</goal>
+                            <goal>validate</goal>
                         </goals>
                     </execution>
                 </executions>
@@ -615,7 +792,7 @@
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
-                <version>0.8.14</version>
+                <version>0.8.15</version>
                 <!-- Plugin-level excludes: applied to report AND check goals.
                      Excludes CDI bootstrap wiring, external integration adapters,
                      REST client libraries, and import/export services that require
@@ -667,6 +844,7 @@
                             <goal>merge</goal>
                         </goals>
                         <configuration>
+                            <skip>${skipITs}</skip>
                             <fileSets>
                                 <fileSet>
                                     <directory>${project.build.directory}</directory>
@@ -686,6 +864,7 @@
                             <goal>report</goal>
                         </goals>
                         <configuration>
+                            <skip>${skipITs}</skip>
                             <dataFile>${project.build.directory}/jacoco-it-all.exec</dataFile>
                             <outputDirectory>${project.reporting.outputDirectory}/jacoco-it</outputDirectory>
                         </configuration>
@@ -698,6 +877,7 @@
                             <goal>merge</goal>
                         </goals>
                         <configuration>
+                            <skip>${skipITs}</skip>
                             <fileSets>
                                 <fileSet>
                                     <directory>${project.build.directory}</directory>
@@ -718,13 +898,22 @@
                             <goal>report</goal>
                         </goals>
                         <configuration>
+                            <skip>${skipITs}</skip>
                             <dataFile>${project.build.directory}/jacoco-merged.exec</dataFile>
                             <outputDirectory>${project.reporting.outputDirectory}/jacoco-merged</outputDirectory>
                         </configuration>
                     </execution>
                     <!-- Coverage gate (merged UT+IT): the single authoritative threshold.
-                         Enforced during `mvn verify` against combined unit + integration test data.
-                         Target: 90/80 for OpenSSF Gold. -->
+                         Target: 90/80 for OpenSSF Gold.
+
+                         Skipped together with the ITs, because jacoco-merged.exec is only
+                         a merged file when the ITs ran. `mvn verify` defaults to
+                         skipITs=true (see the property at the top of this file), which
+                         left jacoco.exec as the sole input and graded unit-test-only
+                         coverage against a threshold that assumes both suites — so a
+                         clean tree with every test green failed the build at 89%. The
+                         gate now runs exactly where the data it grades is produced: the
+                         CI integration job, which passes -DskipITs=false. -->
                     <execution>
                         <id>merged-check</id>
                         <phase>verify</phase>
@@ -732,6 +921,7 @@
                             <goal>check</goal>
                         </goals>
                         <configuration>
+                            <skip>${skipITs}</skip>
                             <dataFile>${project.build.directory}/jacoco-merged.exec</dataFile>
                             <rules>
                                 <rule>
@@ -750,6 +940,224 @@
                                     </limits>
                                 </rule>
                             </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>com.github.eirslett</groupId>
+                <artifactId>frontend-maven-plugin</artifactId>
+                <version>${frontend-maven-plugin.version}</version>
+                <configuration>
+                    <skip>${skipUi}</skip>
+                    <nodeVersion>${node.version}</nodeVersion>
+                    <!-- Node lands in ui/node (gitignored), shared by both UIs. -->
+                    <installDirectory>${project.basedir}/ui</installDirectory>
+                </configuration>
+                <!-- prepare-package, not generate-resources: `./mvnw compile`, `test` and
+                     `quarkus:dev` never need the UI, and binding it earlier made every one of
+                     them reinstall node_modules and rebuild both UIs (and delete node_modules
+                     under a running `npm run dev`). copy-ui-bundles below shares the phase;
+                     executions of one phase run in POM order, so this plugin must stay
+                     declared before maven-clean-plugin (which drops the previous run's
+                     bundles) and maven-resources-plugin (which copies the new ones). -->
+                <executions>
+                    <execution>
+                        <id>install-node</id>
+                        <goals>
+                            <goal>install-node-and-npm</goal>
+                        </goals>
+                        <phase>prepare-package</phase>
+                    </execution>
+                    <execution>
+                        <id>manager-install</id>
+                        <goals>
+                            <goal>npm</goal>
+                        </goals>
+                        <phase>prepare-package</phase>
+                        <configuration>
+                            <arguments>ci</arguments>
+                            <workingDirectory>${project.basedir}/ui/manager</workingDirectory>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>manager-build</id>
+                        <goals>
+                            <goal>npm</goal>
+                        </goals>
+                        <phase>prepare-package</phase>
+                        <configuration>
+                            <arguments>run build</arguments>
+                            <workingDirectory>${project.basedir}/ui/manager</workingDirectory>
+                            <environmentVariables>
+                                <!-- keeps the sidebar version in lockstep with this pom -->
+                                <EDDI_VERSION>${project.version}</EDDI_VERSION>
+                            </environmentVariables>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>chat-install</id>
+                        <goals>
+                            <goal>npm</goal>
+                        </goals>
+                        <phase>prepare-package</phase>
+                        <configuration>
+                            <arguments>ci</arguments>
+                            <workingDirectory>${project.basedir}/ui/chat</workingDirectory>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>chat-build</id>
+                        <goals>
+                            <goal>npm</goal>
+                        </goals>
+                        <phase>prepare-package</phase>
+                        <configuration>
+                            <arguments>run build</arguments>
+                            <workingDirectory>${project.basedir}/ui/chat</workingDirectory>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-clean-plugin</artifactId>
+                <version>${maven-clean-plugin.version}</version>
+                <!-- Both filesets are configured per execution rather than on the plugin.
+                     A plugin-level <configuration> is merged into every execution, and how
+                     Maven merges repeated <fileset> elements is not something to rely on
+                     here: were the `clean`-phase list to reach drop-stale-ui-bundles, that
+                     execution would delete ui/manager/dist in prepare-package — moments
+                     before copy-ui-bundles reads it. -->
+                <executions>
+                    <execution>
+                        <!-- The built-in `clean` lifecycle execution. -->
+                        <id>default-clean</id>
+                        <configuration>
+                            <filesets>
+                                <fileset>
+                                    <!-- Same list as the .gitignore block and the resource excludes
+                                         above. quarkus:dev watches src/main/resources directly, so
+                                         excluding stale generated files from the copy is not enough;
+                                         ./mvnw clean removes them from the source tree as well. -->
+                                    <directory>src/main/resources/META-INF/resources</directory>
+                                    <includes>
+                                        <include>assets/**</include>
+                                        <include>manage.html</include>
+                                        <include>welcome.html</include>
+                                        <include>workforce.html</include>
+                                        <include>chat.html</include>
+                                        <include>scripts/js/chat-ui*.js</include>
+                                        <include>scripts/css/chat-ui*.css</include>
+                                        <include>mockServiceWorker.js</include>
+                                        <include>eddi-icon.ico</include>
+                                        <include>eddi-icon.svg</include>
+                                        <include>logo_eddi.png</include>
+                                        <include>fonts/**</include>
+                                        <include>img/**</include>
+                                    </includes>
+                                </fileset>
+                                <fileset>
+                                    <directory>ui/manager/dist</directory>
+                                </fileset>
+                                <fileset>
+                                    <directory>ui/chat/dist</directory>
+                                </fileset>
+                            </filesets>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <!-- `-DskipUi=true` skips the UI build and the copy below, but it cannot
+                             un-copy: a plain `./mvnw package` followed by
+                             `./mvnw package -DskipTests -DskipUi=true` in the same target/ left
+                             the first run's bundles in target/classes, and they were packaged
+                             into the jar — the documented "the jar then serves no UI" was not
+                             what you got. Dropping the generated paths here makes the option
+                             mean what it says without requiring a `clean` first.
+
+                             It runs unconditionally, not only under skipUi, because a UI rebuild
+                             has the same problem in miniature: Vite content-hashes its
+                             filenames, so every repackage without a `clean` added a fresh
+                             assets/index-<hash>.js beside the previous one and shipped both. -->
+                        <id>drop-stale-ui-bundles</id>
+                        <goals>
+                            <goal>clean</goal>
+                        </goals>
+                        <phase>prepare-package</phase>
+                        <configuration>
+                            <!-- Without this the `clean` goal deletes target/ itself, mid-build. -->
+                            <excludeDefaultDirectories>true</excludeDefaultDirectories>
+                            <filesets>
+                                <fileset>
+                                    <!-- Generated paths only: index.html, robots.txt and
+                                         scripts/js/landing-redirect.js are backend-owned, and are
+                                         the same three copy-ui-bundles excludes. -->
+                                    <directory>${project.build.outputDirectory}/META-INF/resources</directory>
+                                    <includes>
+                                        <include>assets/**</include>
+                                        <include>manage.html</include>
+                                        <include>welcome.html</include>
+                                        <include>workforce.html</include>
+                                        <include>chat.html</include>
+                                        <include>scripts/js/chat-ui*.js</include>
+                                        <include>scripts/css/chat-ui*.css</include>
+                                        <include>mockServiceWorker.js</include>
+                                        <include>eddi-icon.ico</include>
+                                        <include>eddi-icon.svg</include>
+                                        <include>logo_eddi.png</include>
+                                        <include>fonts/**</include>
+                                        <include>img/**</include>
+                                    </includes>
+                                </fileset>
+                            </filesets>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-resources-plugin</artifactId>
+                <version>${maven-resources-plugin.version}</version>
+                <executions>
+                    <execution>
+                        <id>copy-ui-bundles</id>
+                        <goals>
+                            <goal>copy-resources</goal>
+                        </goals>
+                        <phase>prepare-package</phase>
+                        <configuration>
+                            <skip>${skipUi}</skip>
+                            <outputDirectory>${project.build.outputDirectory}/META-INF/resources</outputDirectory>
+                            <resources>
+                                <resource>
+                                    <directory>${project.basedir}/ui/manager/dist</directory>
+                                    <excludes>
+                                        <!-- Backend-owned files the default resource copy already
+                                             put here. copy-resources settles a name clash by file
+                                             timestamp, not by order, so a UI build that ever emitted
+                                             one of these would silently replace it. -->
+                                        <exclude>index.html</exclude>
+                                        <exclude>robots.txt</exclude>
+                                        <exclude>scripts/js/landing-redirect.js</exclude>
+                                        <!-- The MSW dev worker is needed in public/ for the dev
+                                             server and the Playwright MSW tier, and must never
+                                             ship in the production jar. -->
+                                        <exclude>mockServiceWorker.js</exclude>
+                                    </excludes>
+                                </resource>
+                                <resource>
+                                    <directory>${project.basedir}/ui/chat/dist</directory>
+                                    <excludes>
+                                        <!-- Backend-owned files the default resource copy already
+                                             put here. copy-resources settles a name clash by file
+                                             timestamp, not by order, so a UI build that ever emitted
+                                             one of these would silently replace it. -->
+                                        <exclude>index.html</exclude>
+                                        <exclude>robots.txt</exclude>
+                                        <exclude>scripts/js/landing-redirect.js</exclude>
+                                    </excludes>
+                                </resource>
+                            </resources>
                         </configuration>
                     </execution>
                 </executions>

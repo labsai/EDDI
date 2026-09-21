@@ -5,16 +5,13 @@
 package ai.labs.eddi.modules.llm.tools.impl;
 
 import ai.labs.eddi.engine.httpclient.SafeHttpClient;
+import ai.labs.eddi.modules.llm.tools.impl.AttachmentTextExtractor.PdfInfo;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.apache.pdfbox.Loader;
-import org.apache.pdfbox.pdmodel.PDDocument;
-import org.apache.pdfbox.text.PDFTextStripper;
 import org.jboss.logging.Logger;
 
-import java.io.File;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpRequest;
@@ -26,17 +23,23 @@ import java.time.Duration;
 import static ai.labs.eddi.modules.llm.tools.UrlValidationUtils.validateUrl;
 
 /**
- * PDF reader tool for extracting text from PDF documents. Supports both local
- * files and URLs.
+ * PDF reader tool for extracting text from PDF documents fetched by URL.
+ * <p>
+ * Handles the download, SSRF validation and user-facing formatting; the actual
+ * PDFBox extraction is delegated to the shared {@link AttachmentTextExtractor}
+ * so the multimodal forwarder and {@code readAttachment} recall tool share one
+ * implementation.
  */
 @ApplicationScoped
 public class PdfReaderTool {
     private static final Logger LOGGER = Logger.getLogger(PdfReaderTool.class);
     private final SafeHttpClient httpClient;
+    private final AttachmentTextExtractor textExtractor;
 
     @Inject
-    public PdfReaderTool(SafeHttpClient httpClient) {
+    public PdfReaderTool(SafeHttpClient httpClient, AttachmentTextExtractor textExtractor) {
         this.httpClient = httpClient;
+        this.textExtractor = textExtractor;
     }
 
     @Tool("Extracts all text content from a PDF file. Provide the URL to the PDF document.")
@@ -46,19 +49,8 @@ public class PdfReaderTool {
             LOGGER.info("Extracting text from PDF: " + pdfLocation);
             validateUrl(pdfLocation);
 
-            Path tempFile = null;
-            try {
-                tempFile = downloadPdf(pdfLocation);
-                return extractTextFromFile(tempFile.toFile());
-            } finally {
-                if (tempFile != null) {
-                    try {
-                        Files.deleteIfExists(tempFile);
-                    } catch (IOException e) {
-                        LOGGER.warn("Could not delete temp file: " + tempFile);
-                    }
-                }
-            }
+            byte[] pdfBytes = downloadPdfBytes(pdfLocation);
+            return textExtractor.extractPdfText(pdfBytes);
 
         } catch (Exception e) {
             LOGGER.error("PDF extraction error for " + pdfLocation + ": " + e.getMessage());
@@ -73,19 +65,8 @@ public class PdfReaderTool {
             LOGGER.info("Extracting text from PDF pages " + startPage + "-" + endPage + ": " + pdfLocation);
             validateUrl(pdfLocation);
 
-            Path tempFile = null;
-            try {
-                tempFile = downloadPdf(pdfLocation);
-                return extractTextFromFilePages(tempFile.toFile(), startPage, endPage);
-            } finally {
-                if (tempFile != null) {
-                    try {
-                        Files.deleteIfExists(tempFile);
-                    } catch (IOException e) {
-                        LOGGER.warn("Could not delete temp file: " + tempFile);
-                    }
-                }
-            }
+            byte[] pdfBytes = downloadPdfBytes(pdfLocation);
+            return textExtractor.extractPdfText(pdfBytes, startPage, endPage, textExtractor.getDefaultMaxChars());
 
         } catch (Exception e) {
             LOGGER.error("PDF page extraction error: " + e.getMessage());
@@ -96,119 +77,53 @@ public class PdfReaderTool {
     @Tool("Gets metadata and information about a PDF file (number of pages, title, author, etc.)")
     public String getPdfInfo(@P("pdfLocation") String pdfLocation) {
 
-        PDDocument document = null;
-        Path tempFile = null;
-
         try {
             LOGGER.info("Getting PDF info for: " + pdfLocation);
             validateUrl(pdfLocation);
 
-            tempFile = downloadPdf(pdfLocation);
-            File pdfFile = tempFile.toFile();
+            byte[] pdfBytes = downloadPdfBytes(pdfLocation);
+            PdfInfo info = textExtractor.extractPdfInfo(pdfBytes);
 
-            document = Loader.loadPDF(pdfFile);
-
-            StringBuilder info = new StringBuilder();
-            info.append("PDF Information:\n\n");
-            info.append("Number of pages: ").append(document.getNumberOfPages()).append("\n");
-
-            var metadata = document.getDocumentInformation();
-            if (metadata != null) {
-                if (metadata.getTitle() != null) {
-                    info.append("Title: ").append(metadata.getTitle()).append("\n");
-                }
-                if (metadata.getAuthor() != null) {
-                    info.append("Author: ").append(metadata.getAuthor()).append("\n");
-                }
-                if (metadata.getSubject() != null) {
-                    info.append("Subject: ").append(metadata.getSubject()).append("\n");
-                }
-                if (metadata.getCreator() != null) {
-                    info.append("Creator: ").append(metadata.getCreator()).append("\n");
-                }
-                if (metadata.getCreationDate() != null) {
-                    info.append("Creation date: ").append(metadata.getCreationDate().getTime()).append("\n");
-                }
+            StringBuilder sb = new StringBuilder();
+            sb.append("PDF Information:\n\n");
+            sb.append("Number of pages: ").append(info.numberOfPages()).append("\n");
+            if (info.title() != null) {
+                sb.append("Title: ").append(info.title()).append("\n");
+            }
+            if (info.author() != null) {
+                sb.append("Author: ").append(info.author()).append("\n");
+            }
+            if (info.subject() != null) {
+                sb.append("Subject: ").append(info.subject()).append("\n");
+            }
+            if (info.creator() != null) {
+                sb.append("Creator: ").append(info.creator()).append("\n");
+            }
+            if (info.creationDate() != null) {
+                sb.append("Creation date: ").append(info.creationDate().getTime()).append("\n");
             }
 
             LOGGER.debug("PDF info extracted for " + pdfLocation);
-            return info.toString();
+            return sb.toString();
 
         } catch (Exception e) {
             LOGGER.error("PDF info extraction error: " + e.getMessage());
             return "Error: Could not get PDF information - " + e.getMessage();
+        }
+    }
+
+    private byte[] downloadPdfBytes(String url) throws IOException, InterruptedException {
+        Path tempFile = null;
+        try {
+            tempFile = downloadPdf(url);
+            return Files.readAllBytes(tempFile);
         } finally {
-            if (document != null) {
-                try {
-                    document.close();
-                } catch (IOException e) {
-                    LOGGER.warn("Error closing PDF document", e);
-                }
-            }
             if (tempFile != null) {
                 try {
                     Files.deleteIfExists(tempFile);
                 } catch (IOException e) {
                     LOGGER.warn("Could not delete temp file: " + tempFile);
                 }
-            }
-        }
-    }
-
-    private String extractTextFromFile(File pdfFile) throws IOException {
-        PDDocument document = null;
-        try {
-            document = Loader.loadPDF(pdfFile);
-            PDFTextStripper stripper = new PDFTextStripper();
-            String text = stripper.getText(document);
-
-            LOGGER.info("Extracted " + text.length() + " characters from PDF with " + document.getNumberOfPages() + " pages");
-
-            // Limit output size
-            if (text.length() > 10000) {
-                text = text.substring(0, 10000) + "\n\n[Content truncated - showing first 10000 characters]";
-            }
-
-            return text.trim();
-
-        } finally {
-            if (document != null) {
-                document.close();
-            }
-        }
-    }
-
-    private String extractTextFromFilePages(File pdfFile, int startPage, int endPage) throws IOException {
-        PDDocument document = null;
-        try {
-            document = Loader.loadPDF(pdfFile);
-
-            int totalPages = document.getNumberOfPages();
-            if (startPage < 1 || startPage > totalPages) {
-                return "Error: Start page " + startPage + " is out of range (1-" + totalPages + ")";
-            }
-            if (endPage < startPage || endPage > totalPages) {
-                endPage = totalPages;
-            }
-
-            PDFTextStripper stripper = new PDFTextStripper();
-            stripper.setStartPage(startPage);
-            stripper.setEndPage(endPage);
-
-            String text = stripper.getText(document);
-
-            LOGGER.info("Extracted text from pages " + startPage + "-" + endPage + " (" + text.length() + " characters)");
-
-            // Limit output size
-            if (text.length() > 10000) {
-                text = text.substring(0, 10000) + "\n\n[Content truncated - showing first 10000 characters]";
-            }
-
-            return text.trim();
-
-        } finally {
-            if (document != null) {
-                document.close();
             }
         }
     }

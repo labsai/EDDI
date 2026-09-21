@@ -6,7 +6,12 @@ package ai.labs.eddi.modules.llm.model;
 
 import ai.labs.eddi.configs.apicalls.model.PostResponse;
 import ai.labs.eddi.configs.apicalls.model.PreRequest;
+import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
+import ai.labs.eddi.configs.shared.RetryConfiguration;
+import ai.labs.eddi.modules.llm.guardrails.ToolResultGuardrailConfig;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import java.util.ArrayList;
 
 import java.util.List;
 import java.util.Map;
@@ -60,6 +65,22 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
     /**
      * Task configuration supporting both simple chat and advanced agent features.
      * The task automatically switches to agent mode when tools are configured.
+     *
+     * <p>
+     * Historical note: this class used to declare {@code enableParallelExecution}
+     * and {@code parallelExecutionTimeoutMs}. Neither was ever read — the tool loop
+     * in {@code AgentOrchestrator} dispatches through
+     * {@code ToolExecutor.execute(ToolExecutionRequest, memoryId)} one call at a
+     * time, and the reflection-based parallel machinery they were meant to switch
+     * on took an {@code (instance, Method, Object[])} triple that no live dispatch
+     * path can produce (MCP and A2A tools have no Java {@code Method} at all). Both
+     * were removed along with that machinery rather than wired. Stored
+     * configurations that still carry either key remain valid: every mapper that
+     * deserializes an LLM configuration is built from
+     * {@code SerializationCustomizer.configureObjectMapper}, which sets
+     * {@code FAIL_ON_UNKNOWN_PROPERTIES=false}, so the leftover keys are ignored on
+     * read and dropped on the next write.
+     * </p>
      */
     public static class Task {
         // === Core Configuration (Required) ===
@@ -225,14 +246,91 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         private String httpCallRag;
 
         /**
-         * Retry configuration for API calls
+         * Maximum number of characters of retrieved RAG context that may be appended to
+         * the system prompt, per retrieval block (vector-store RAG and httpCall RAG are
+         * capped independently).
+         * <p>
+         * {@code maxContextTokens} deliberately excludes the system prompt, so nothing
+         * used to bound this: {@code enableWorkflowRag} across N knowledge bases
+         * concatenated every chunk from every matched KB, and the serialized httpCall
+         * RAG response was appended whole ({@code toolResponseLimits} does not apply to
+         * it). The prompt then grew until the provider rejected the request.
+         * <p>
+         * {@code -1} (or {@code 0}) disables the cap and restores the previous
+         * unbounded behavior. Default: 20000.
+         */
+        private Integer maxRagContextChars = 20000;
+
+        /**
+         * Hard ceiling on the assembled system prompt, in characters, applied after all
+         * RAG context, counterweight, identity-masking and response-format blocks have
+         * been appended. This is the last line of defence for a prompt that grows from
+         * sources the agent designer does not directly author.
+         * <p>
+         * {@code -1} (default) leaves the assembled prompt untouched — the
+         * designer-authored prompt is under their own control, so only opt in when the
+         * deployment needs a hard bound.
+         */
+        private Integer maxSystemPromptChars = -1;
+
+        /**
+         * Retry configuration for LLM calls.
+         *
+         * @see ai.labs.eddi.configs.shared.RetryConfiguration
          */
         private RetryConfiguration retry;
 
         // === Budget & Cost Control ===
 
-        /** Maximum budget per conversation (in dollars) */
+        /**
+         * Maximum TOOL budget per conversation, in dollars. Covers per-call tool prices
+         * only — LLM token spend is governed separately and per run by the model
+         * cascade's {@code maxCostPerRun}. Enforced unless {@link #enforceBudget} (or
+         * the deployment-wide fallback) turns enforcement off.
+         */
         private Double maxBudgetPerConversation;
+
+        /**
+         * Enforce {@link #maxBudgetPerConversation}. Defaults to the deployment-wide
+         * {@code eddi.tools.budget.enforce-by-default} property, itself {@code false}.
+         * <p>
+         * This is an opt-<em>in</em>: without it a ceiling records cost but refuses
+         * nothing. Built-in tools priced at $0.00 until the canonical-slug fix in this
+         * release, so enforcing by default would make those ceilings bind for the first
+         * time and start aborting tool calls mid-conversation on upgrade.
+         * <p>
+         * The cost of that choice is real and is why the engine warns: http, MCP, A2A
+         * and dynamic tools dispatch under their configured name, so a tool named
+         * {@code websearch}/{@code webscraper}/{@code pdfreader} <em>was</em> priced
+         * and refused before this field existed. Every task carrying a ceiling without
+         * this flag is named once in a WARN rather than passing silently. Cost tracking
+         * runs regardless of the flag.
+         */
+        private Boolean enforceBudget;
+
+        /**
+         * Per-call tool prices in USD, overriding
+         * {@code ToolCostTracker.DEFAULT_TOOL_PRICES}. Keyed on the canonical built-in
+         * slug (the same tokens as {@code builtInToolsWhitelist}), or on an individual
+         * dispatch name for finer control — a dispatch-name entry wins over a slug
+         * entry for the same call. Negative values are clamped to 0.0.
+         */
+        private Map<String, Double> toolPricing;
+
+        /**
+         * Input price per 1M tokens in USD for this task's model calls. Null =
+         * unpriced, contributing $0 to the tracked conversation cost. Applies to
+         * non-cascade calls; a cascade run prices its steps via {@code modelCascade}'s
+         * own {@code inputPricePer1M}/{@code outputPricePer1M} (steps may target
+         * different models, so task-level prices are not inherited).
+         */
+        private Double inputPricePer1M;
+
+        /**
+         * Output price per 1M tokens in USD. Same semantics as
+         * {@link #inputPricePer1M}.
+         */
+        private Double outputPricePer1M;
 
         /** Enable cost tracking */
         private Boolean enableCostTracking = true;
@@ -251,17 +349,84 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         /** Per-tool rate limits */
         private Map<String, Integer> toolRateLimits;
 
-        /** Enable parallel tool execution */
-        private Boolean enableParallelExecution = false;
+        /**
+         * Per-tool cache partitioning, keyed by tool name. Recognized values are
+         * {@code "user"} (default), {@code "conversation"} and {@code "global"} — see
+         * the {@code ToolCacheScope} enum for the authoritative list.
+         * <p>
+         * A cached tool result is only ever served back inside its own partition, so
+         * the default keeps one authenticated user's result away from every other user.
+         * Set a tool to {@code "global"} ONLY when its result depends purely on its
+         * arguments and never on who is asking — that is the explicit, per-tool opt-in
+         * to cross-user reuse.
+         *
+         * @since 6.1.0
+         */
+        private Map<String, String> toolCacheScopes;
 
-        /** Timeout for parallel execution (ms) */
-        private Long parallelExecutionTimeoutMs = 30000L;
+        /**
+         * Default cache partition for tools without a {@link #toolCacheScopes} entry.
+         * Unset, blank or unrecognized values mean {@code "user"}.
+         *
+         * @since 6.1.0
+         */
+        private String defaultToolCacheScope;
 
         /**
          * Maximum number of tool-calling loop iterations before forcing a final answer
          * (default 10).
          */
         private Integer maxToolIterations;
+
+        /**
+         * Aggregate token ceiling for the <em>in-turn tool-call context</em>: every
+         * {@code AiMessage} that carries tool-execution requests together with its
+         * {@code ToolExecutionResultMessage}s, accumulated across all iterations of the
+         * tool-calling loop (and across a HITL pause, which replays the same
+         * transcript).
+         * <p>
+         * Conversation history is deliberately NOT counted here — it is already
+         * governed by {@link #maxContextTokens} / {@link #conversationHistoryLimit},
+         * and nothing in this guard may ever drop a system, user or assistant-prose
+         * message.
+         * <p>
+         * When the accumulated tool traffic exceeds this ceiling, the OLDEST complete
+         * tool exchange — the requesting {@code AiMessage} <em>together with all of its
+         * results</em> — is dropped before the next model call, repeatedly, until the
+         * traffic fits or only the most recent exchange remains. The most recent
+         * exchange is never dropped, so a single oversized tool result still reaches
+         * the model exactly as it does today; use {@link #toolResponseLimits} for that
+         * case.
+         * <p>
+         * Default: 60000 — high enough that no ordinary tool-using turn is touched, low
+         * enough to keep a runaway loop inside a 128k context window once the system
+         * prompt, the conversation history and the model's own completion are added.
+         * Set {@code -1} (or {@code 0}) to disable the guard entirely and restore the
+         * pre-6.1 unbounded behaviour.
+         *
+         * @since 6.1.0
+         */
+        private Integer maxToolContextTokens = 60_000;
+
+        /**
+         * Whether an outgoing chat request may carry an API-level JSON response format
+         * when {@code convertToObject=true}. One of {@code "auto"} (default),
+         * {@code "on"} or {@code "off"}.
+         * <p>
+         * {@code auto} defers to the built-in provider matrix in
+         * {@link ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy}, which
+         * also knows which providers reject JSON mode when the same request carries
+         * tool specifications. {@code on} forces the format onto every request of this
+         * task — the escape hatch for a provider or OpenAI-compatible gateway the
+         * built-in table does not know yet, and it bypasses the with-tools guard.
+         * {@code off} keeps enforcement prompt-only.
+         * <p>
+         * This never changes the model instance, only the request, so two tasks that
+         * differ only here still share one cached model.
+         *
+         * @since 6.1.0
+         */
+        private String jsonResponseFormat;
 
         // === Multi-Model Cascade ===
 
@@ -277,6 +442,16 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          * window. Reduces context bloat from verbose tool outputs.
          */
         private ToolResponseLimits toolResponseLimits;
+
+        /**
+         * What happens to a tool result on its way back to the model: whether it is
+         * wrapped in a provenance delimiter, and what to do when it carries
+         * directive-shaped content. Null means the defaults — provenance marking on,
+         * directives redacted — which is what an existing config gets.
+         *
+         * @since 6.3.0
+         */
+        private ToolResultGuardrailConfig toolResultGuardrails;
 
         // === Behavioral Counterweight & Identity Masking (Wave 1) ===
 
@@ -298,6 +473,50 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          */
         private IdentityMaskingConfig identityMasking;
 
+        // === Response Validation ===
+
+        /**
+         * Response validation configuration. When enabled, validates LLM responses
+         * against configurable policies (empty, truncation, content filter, refusal,
+         * streaming timeout) and applies the configured remediation action.
+         *
+         * @since 6.0.0
+         */
+        private ResponseValidation responseValidation;
+
+        /**
+         * Overall wall-clock backstop, in seconds, for a streaming chat completion.
+         * Only applies when streaming is active.
+         * <p>
+         * This is <em>not</em> a duplicate of the {@code timeout} model parameter, and
+         * the two are deliberately kept separate. {@code timeout} (milliseconds) is
+         * handed to the provider's HTTP client and bounds the time to the provider's
+         * first response; this field bounds the entire stream, covering providers whose
+         * native timeout does not fire.
+         * <p>
+         * When unset, the backstop is 120s, raised to cover a longer explicitly
+         * configured {@code timeout} so the backstop never truncates a stream before
+         * the timeout the operator asked for.
+         */
+        private Integer streamingTimeoutSeconds;
+
+        /**
+         * Per-task multimodal capability overrides. Each of {@code vision},
+         * {@code documents}, {@code audio} may be {@code "auto"} (defer to
+         * deployment/built-in defaults), {@code "on"} (force enabled) or {@code "off"}
+         * (force disabled). {@code null} means all defer.
+         *
+         * @since 6.1.0
+         */
+        private MultimodalOverride multimodal;
+
+        /**
+         * Per-task tool-approval gating override (tool-level HITL). When present, it
+         * FULLY REPLACES the agent-level {@code hitlConfig.toolApprovals} for this task
+         * (no list merging). Absent = inherit the agent-level default.
+         */
+        private ToolApprovalsConfig toolApprovals;
+
         // === Helper Methods ===
 
         /**
@@ -305,15 +524,33 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          * enableHttpCallTools is NOT a standalone trigger — it only enhances agent mode
          * when already triggered by tools, builtInTools, or a2aAgents. Httpcall and
          * mcpcall auto-discovery is checked at execution time.
+         * <p>
+         * {@code @JsonIgnore} because this is derived state, not stored state: it is a
+         * pure function of {@code tools}, {@code enableBuiltInTools} and
+         * {@code a2aAgents}. Without it Jackson wrote an {@code agentMode} key that no
+         * setter or field could read back, so every LLM configuration document EDDI
+         * serializes became unreadable by EDDI once
+         * {@code StrictConfigurationBodyInterceptor} began rejecting unknown keys —
+         * breaking the agent setup wizard on its own generated config, any EDDI-Manager
+         * GET → edit → PUT, and export → ZIP import. Ignoring it also stops persisting
+         * a value that is recomputed on every read anyway, and lets documents already
+         * carrying {@code agentMode} load without complaint.
          */
+        @JsonIgnore
         public boolean isAgentMode() {
             return (tools != null && !tools.isEmpty()) || (enableBuiltInTools != null && enableBuiltInTools)
                     || (a2aAgents != null && !a2aAgents.isEmpty());
         }
 
         /**
-         * Gets the system message from parameters (legacy support)
+         * Gets the system message from parameters (legacy support).
+         * <p>
+         * {@code @JsonIgnore} for the same reason as {@link #isAgentMode()}: this is a
+         * read-through of {@code parameters.systemMessage}, not a field. Serializing it
+         * duplicated the prompt at the top level of every stored task and, once unknown
+         * keys became a 400, made EDDI's own serialized LLM configs unreadable by EDDI.
          */
+        @JsonIgnore
         public String getSystemMessage() {
             return parameters != null ? parameters.get("systemMessage") : null;
         }
@@ -332,6 +569,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setId(String id) {
             this.id = id;
+        }
+
+        public ToolApprovalsConfig getToolApprovals() {
+            return toolApprovals;
+        }
+
+        public void setToolApprovals(ToolApprovalsConfig toolApprovals) {
+            this.toolApprovals = toolApprovals;
         }
 
         public String getType() {
@@ -510,6 +755,22 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
             this.httpCallRag = httpCallRag;
         }
 
+        public Integer getMaxRagContextChars() {
+            return maxRagContextChars;
+        }
+
+        public void setMaxRagContextChars(Integer maxRagContextChars) {
+            this.maxRagContextChars = maxRagContextChars;
+        }
+
+        public Integer getMaxSystemPromptChars() {
+            return maxSystemPromptChars;
+        }
+
+        public void setMaxSystemPromptChars(Integer maxSystemPromptChars) {
+            this.maxSystemPromptChars = maxSystemPromptChars;
+        }
+
         public RetryConfiguration getRetry() {
             return retry;
         }
@@ -524,6 +785,38 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setMaxBudgetPerConversation(Double maxBudgetPerConversation) {
             this.maxBudgetPerConversation = maxBudgetPerConversation;
+        }
+
+        public Boolean getEnforceBudget() {
+            return enforceBudget;
+        }
+
+        public void setEnforceBudget(Boolean enforceBudget) {
+            this.enforceBudget = enforceBudget;
+        }
+
+        public Map<String, Double> getToolPricing() {
+            return toolPricing;
+        }
+
+        public void setToolPricing(Map<String, Double> toolPricing) {
+            this.toolPricing = toolPricing;
+        }
+
+        public Double getInputPricePer1M() {
+            return inputPricePer1M;
+        }
+
+        public void setInputPricePer1M(Double inputPricePer1M) {
+            this.inputPricePer1M = inputPricePer1M;
+        }
+
+        public Double getOutputPricePer1M() {
+            return outputPricePer1M;
+        }
+
+        public void setOutputPricePer1M(Double outputPricePer1M) {
+            this.outputPricePer1M = outputPricePer1M;
         }
 
         public Boolean getEnableCostTracking() {
@@ -566,20 +859,20 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
             this.toolRateLimits = toolRateLimits;
         }
 
-        public Boolean getEnableParallelExecution() {
-            return enableParallelExecution;
+        public Map<String, String> getToolCacheScopes() {
+            return toolCacheScopes;
         }
 
-        public void setEnableParallelExecution(Boolean enableParallelExecution) {
-            this.enableParallelExecution = enableParallelExecution;
+        public void setToolCacheScopes(Map<String, String> toolCacheScopes) {
+            this.toolCacheScopes = toolCacheScopes;
         }
 
-        public Long getParallelExecutionTimeoutMs() {
-            return parallelExecutionTimeoutMs;
+        public String getDefaultToolCacheScope() {
+            return defaultToolCacheScope;
         }
 
-        public void setParallelExecutionTimeoutMs(Long parallelExecutionTimeoutMs) {
-            this.parallelExecutionTimeoutMs = parallelExecutionTimeoutMs;
+        public void setDefaultToolCacheScope(String defaultToolCacheScope) {
+            this.defaultToolCacheScope = defaultToolCacheScope;
         }
 
         public Integer getMaxToolIterations() {
@@ -588,6 +881,22 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setMaxToolIterations(Integer maxToolIterations) {
             this.maxToolIterations = maxToolIterations;
+        }
+
+        public Integer getMaxToolContextTokens() {
+            return maxToolContextTokens;
+        }
+
+        public void setMaxToolContextTokens(Integer maxToolContextTokens) {
+            this.maxToolContextTokens = maxToolContextTokens;
+        }
+
+        public String getJsonResponseFormat() {
+            return jsonResponseFormat;
+        }
+
+        public void setJsonResponseFormat(String jsonResponseFormat) {
+            this.jsonResponseFormat = jsonResponseFormat;
         }
 
         public ModelCascadeConfig getModelCascade() {
@@ -600,6 +909,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public ToolResponseLimits getToolResponseLimits() {
             return toolResponseLimits;
+        }
+
+        public ToolResultGuardrailConfig getToolResultGuardrails() {
+            return toolResultGuardrails;
+        }
+
+        public void setToolResultGuardrails(ToolResultGuardrailConfig toolResultGuardrails) {
+            this.toolResultGuardrails = toolResultGuardrails;
         }
 
         public void setToolResponseLimits(ToolResponseLimits toolResponseLimits) {
@@ -630,6 +947,194 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
             this.identityMasking = identityMasking;
         }
 
+        public ResponseValidation getResponseValidation() {
+            return responseValidation;
+        }
+
+        public void setResponseValidation(ResponseValidation responseValidation) {
+            this.responseValidation = responseValidation;
+        }
+
+        public Integer getStreamingTimeoutSeconds() {
+            return streamingTimeoutSeconds;
+        }
+
+        public void setStreamingTimeoutSeconds(Integer streamingTimeoutSeconds) {
+            this.streamingTimeoutSeconds = streamingTimeoutSeconds;
+        }
+
+        public MultimodalOverride getMultimodal() {
+            return multimodal;
+        }
+
+        public void setMultimodal(MultimodalOverride multimodal) {
+            this.multimodal = multimodal;
+        }
+
+    }
+
+    /**
+     * Response validation policies for LLM outputs. Each policy field controls how
+     * the engine reacts to a specific anomaly in the LLM response.
+     * <p>
+     * Supported actions per policy:
+     * <ul>
+     * <li>{@code "ignore"} — do nothing (default for most signals)</li>
+     * <li>{@code "warn"} — log a warning, store metadata, continue</li>
+     * <li>{@code "fallback"} — substitute a static fallback message</li>
+     * <li>{@code "error"} — throw a LifecycleException (triggers strict-write +
+     * error digest)</li>
+     * </ul>
+     *
+     * @since 6.0.0
+     */
+    public static class ResponseValidation {
+
+        /**
+         * The prefixes refusal detection used before it was configurable. Kept as the
+         * default so behaviour is unchanged for a config that does not set
+         * {@link #refusalPatterns}.
+         */
+        public static final List<String> DEFAULT_REFUSAL_PATTERNS = List.of("i'm sorry, i can't", "i cannot", "i'm not able to", "as an ai");
+
+        /** Master switch — validation is only applied when enabled. */
+        private boolean enabled = false;
+
+        /** Action when the LLM returns an empty or null response. Default: "warn". */
+        private String onEmpty = "warn";
+
+        /**
+         * Action when the response was truncated (finishReason=LENGTH). Default:
+         * "warn".
+         */
+        private String onTruncation = "warn";
+
+        /** Action when the response was blocked by content filter. Default: "warn". */
+        private String onContentFilter = "warn";
+
+        /**
+         * Action when the LLM refused to respond (detected by heuristic). Default:
+         * "ignore".
+         */
+        private String onRefusal = "ignore";
+
+        /** Action when a streaming response timed out. Default: "warn". */
+        private String onStreamingTimeout = "warn";
+
+        /**
+         * Case-insensitive prefixes that mark a completion as a refusal, matched
+         * against the trimmed response.
+         * <p>
+         * The other four triggers are provider-signalled or structural — empty text,
+         * {@code finishReason=LENGTH}, a content-filter flag, a streaming timeout — so
+         * they work for any language and any provider. This one is a language guess,
+         * and it used to be a guess in English only, hard-coded. A German- or
+         * Japanese-language agent that set {@code onRefusal} got a guardrail that could
+         * never fire: no retry, no warning, no metric. In the other direction the
+         * prefixes over-match, so a legitimate answer opening "I cannot confirm that
+         * from the data provided" was classified as a refusal and, under
+         * {@code onRefusal: "error"}, failed the turn.
+         * <p>
+         * Defaults to the four prefixes that were hard-coded, so existing configs are
+         * unaffected. Set it to an empty list to disable refusal detection outright.
+         */
+        private List<String> refusalPatterns = new ArrayList<>(DEFAULT_REFUSAL_PATTERNS);
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getOnEmpty() {
+            return onEmpty;
+        }
+
+        public void setOnEmpty(String onEmpty) {
+            this.onEmpty = onEmpty;
+        }
+
+        public String getOnTruncation() {
+            return onTruncation;
+        }
+
+        public void setOnTruncation(String onTruncation) {
+            this.onTruncation = onTruncation;
+        }
+
+        public String getOnContentFilter() {
+            return onContentFilter;
+        }
+
+        public void setOnContentFilter(String onContentFilter) {
+            this.onContentFilter = onContentFilter;
+        }
+
+        public String getOnRefusal() {
+            return onRefusal;
+        }
+
+        public void setOnRefusal(String onRefusal) {
+            this.onRefusal = onRefusal;
+        }
+
+        public String getOnStreamingTimeout() {
+            return onStreamingTimeout;
+        }
+
+        public void setOnStreamingTimeout(String onStreamingTimeout) {
+            this.onStreamingTimeout = onStreamingTimeout;
+        }
+
+        public List<String> getRefusalPatterns() {
+            return refusalPatterns;
+        }
+
+        public void setRefusalPatterns(List<String> refusalPatterns) {
+            // An explicit empty list means "do not detect refusals" and must survive;
+            // only null falls back to the defaults.
+            this.refusalPatterns = refusalPatterns != null ? new ArrayList<>(refusalPatterns) : new ArrayList<>(DEFAULT_REFUSAL_PATTERNS);
+        }
+    }
+
+    /**
+     * Per-task multimodal capability overrides. Each field is a tri-state token
+     * {@code "auto"|"on"|"off"} parsed by
+     * {@link ai.labs.eddi.modules.llm.capability.ModelCapabilityService.Support#parse}.
+     * Unset fields default to {@code "auto"}.
+     *
+     * @since 6.1.0
+     */
+    public static class MultimodalOverride {
+        private String vision = "auto";
+        private String documents = "auto";
+        private String audio = "auto";
+
+        public String getVision() {
+            return vision;
+        }
+
+        public void setVision(String vision) {
+            this.vision = vision;
+        }
+
+        public String getDocuments() {
+            return documents;
+        }
+
+        public void setDocuments(String documents) {
+            this.documents = documents;
+        }
+
+        public String getAudio() {
+            return audio;
+        }
+
+        public void setAudio(String audio) {
+            this.audio = audio;
+        }
     }
 
     /**
@@ -707,7 +1212,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         /** Optional display name for this MCP server */
         private String name;
 
-        /** Transport type: "http" (default) or "sse" */
+        /**
+         * Transport type. Only StreamableHTTP is implemented, so the accepted values
+         * are {@code "http"} (default), {@code "https"}, {@code "streamable-http"} and
+         * {@code "streamablehttp"}. {@code "sse"} was previously documented here but
+         * was never implemented — it is still accepted as a deprecated alias for
+         * StreamableHTTP so existing configs keep working, with a warning. Anything
+         * else is rejected by {@code McpToolProviderManager.validateTransport}.
+         */
         private String transport = "http";
 
         /** Optional API key or vault reference (e.g., "${vault:my-api-key}") */
@@ -826,50 +1338,22 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
     }
 
     /**
-     * Configuration for API call retries
-     */
-    public static class RetryConfiguration {
-        private Integer maxAttempts = 3;
-        private Long backoffDelayMs = 1000L;
-        private Double backoffMultiplier = 2.0;
-        private Long maxBackoffDelayMs = 10000L;
-
-        public Integer getMaxAttempts() {
-            return maxAttempts;
-        }
-
-        public void setMaxAttempts(Integer maxAttempts) {
-            this.maxAttempts = maxAttempts;
-        }
-
-        public Long getBackoffDelayMs() {
-            return backoffDelayMs;
-        }
-
-        public void setBackoffDelayMs(Long backoffDelayMs) {
-            this.backoffDelayMs = backoffDelayMs;
-        }
-
-        public Double getBackoffMultiplier() {
-            return backoffMultiplier;
-        }
-
-        public void setBackoffMultiplier(Double backoffMultiplier) {
-            this.backoffMultiplier = backoffMultiplier;
-        }
-
-        public Long getMaxBackoffDelayMs() {
-            return maxBackoffDelayMs;
-        }
-
-        public void setMaxBackoffDelayMs(Long maxBackoffDelayMs) {
-            this.maxBackoffDelayMs = maxBackoffDelayMs;
-        }
-    }
-
-    /**
      * Reference from an LLM task to a specific knowledge base in the workflow. The
      * name must match a RagConfiguration.name in the workflow.
+     *
+     * <p>
+     * Historical note: this class used to declare {@code injectionStrategy} and
+     * {@code contextTemplate}. Neither was ever read by
+     * {@code RagContextProvider.retrieveContext} or {@code LlmTask} — retrieved RAG
+     * context has always been appended to the system message unconditionally — so
+     * both were removed rather than wired (removing a knob nothing honoured is
+     * cheaper than inventing the semantics it implied). Stored configurations that
+     * still carry either key remain valid: every mapper that deserializes an LLM
+     * configuration is built from
+     * {@code SerializationCustomizer.configureObjectMapper}, which sets
+     * {@code FAIL_ON_UNKNOWN_PROPERTIES=false}, so the leftover keys are ignored on
+     * read and dropped on the next write.
+     * </p>
      */
     public static class KnowledgeBaseReference {
         /** Name of the RagConfiguration resource in the workflow */
@@ -880,12 +1364,6 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         /** Override: min similarity score (null = use KB default) */
         private Double minScore;
-
-        /** Override: injection strategy — "system_message" (default), "user_message" */
-        private String injectionStrategy;
-
-        /** Override: custom context template (null = use default formatting) */
-        private String contextTemplate;
 
         public String getName() {
             return name;
@@ -910,31 +1388,20 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         public void setMinScore(Double minScore) {
             this.minScore = minScore;
         }
-
-        public String getInjectionStrategy() {
-            return injectionStrategy;
-        }
-
-        public void setInjectionStrategy(String injectionStrategy) {
-            this.injectionStrategy = injectionStrategy;
-        }
-
-        public String getContextTemplate() {
-            return contextTemplate;
-        }
-
-        public void setContextTemplate(String contextTemplate) {
-            this.contextTemplate = contextTemplate;
-        }
     }
 
     /**
      * Default retrieval parameters for enableWorkflowRag=true mode.
+     *
+     * <p>
+     * Historical note: this class used to declare {@code injectionStrategy}. It was
+     * never read — see the note on {@link KnowledgeBaseReference} — and stored
+     * configurations that still carry the key deserialize unchanged.
+     * </p>
      */
     public static class RagDefaults {
         private Integer maxResults = 5;
         private Double minScore = 0.6;
-        private String injectionStrategy = "system_message";
 
         public Integer getMaxResults() {
             return maxResults;
@@ -950,14 +1417,6 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setMinScore(Double minScore) {
             this.minScore = minScore;
-        }
-
-        public String getInjectionStrategy() {
-            return injectionStrategy;
-        }
-
-        public void setInjectionStrategy(String injectionStrategy) {
-            this.injectionStrategy = injectionStrategy;
         }
     }
 
@@ -989,6 +1448,48 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         /** Ordered list of cascade steps (cheap → expensive) */
         private List<CascadeStep> steps;
+
+        /**
+         * Optional judge model for the {@code judge_model} evaluation strategy. Built
+         * lazily via {@code ChatModelRegistry} (with vault + global-variable
+         * resolution). Required when {@code evaluationStrategy = "judge_model"}.
+         */
+        private JudgeModelConfig judgeModel;
+
+        /**
+         * Optional overrides for the {@code heuristic} evaluation strategy. When null,
+         * the built-in English defaults are used. Enables per-deployment localization
+         * of hedging/refusal phrases and thresholds.
+         */
+        private HeuristicConfig heuristic;
+
+        /**
+         * Optional wall-clock ceiling (milliseconds) across the whole cascade. When the
+         * accumulated duration reaches this ceiling, the cascade stops escalating and
+         * returns the best response seen so far. Null = unlimited.
+         */
+        private Long maxTotalDurationMs;
+
+        /**
+         * Optional dollar ceiling for a single cascade run. Computed from captured
+         * token usage and per-step pricing. When the accumulated cost reaches this
+         * ceiling, the cascade stops escalating and returns the best response so far.
+         * Null = unlimited. Steps without configured pricing contribute $0.
+         */
+        private Double maxCostPerRun;
+
+        /** Cascade-level default input price per 1M tokens (steps may override). */
+        private Double inputPricePer1M;
+
+        /** Cascade-level default output price per 1M tokens (steps may override). */
+        private Double outputPricePer1M;
+
+        /**
+         * When true, if an earlier (escalated) step scored strictly higher than the
+         * finally-accepted step, the earlier step's response is returned instead.
+         * Default false preserves the last-step-wins behavior.
+         */
+        private boolean returnBestAcrossSteps = false;
 
         public boolean isEnabled() {
             return enabled;
@@ -1029,6 +1530,62 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         public void setSteps(List<CascadeStep> steps) {
             this.steps = steps;
         }
+
+        public JudgeModelConfig getJudgeModel() {
+            return judgeModel;
+        }
+
+        public void setJudgeModel(JudgeModelConfig judgeModel) {
+            this.judgeModel = judgeModel;
+        }
+
+        public HeuristicConfig getHeuristic() {
+            return heuristic;
+        }
+
+        public void setHeuristic(HeuristicConfig heuristic) {
+            this.heuristic = heuristic;
+        }
+
+        public Long getMaxTotalDurationMs() {
+            return maxTotalDurationMs;
+        }
+
+        public void setMaxTotalDurationMs(Long maxTotalDurationMs) {
+            this.maxTotalDurationMs = maxTotalDurationMs;
+        }
+
+        public Double getMaxCostPerRun() {
+            return maxCostPerRun;
+        }
+
+        public void setMaxCostPerRun(Double maxCostPerRun) {
+            this.maxCostPerRun = maxCostPerRun;
+        }
+
+        public Double getInputPricePer1M() {
+            return inputPricePer1M;
+        }
+
+        public void setInputPricePer1M(Double inputPricePer1M) {
+            this.inputPricePer1M = inputPricePer1M;
+        }
+
+        public Double getOutputPricePer1M() {
+            return outputPricePer1M;
+        }
+
+        public void setOutputPricePer1M(Double outputPricePer1M) {
+            this.outputPricePer1M = outputPricePer1M;
+        }
+
+        public boolean isReturnBestAcrossSteps() {
+            return returnBestAcrossSteps;
+        }
+
+        public void setReturnBestAcrossSteps(boolean returnBestAcrossSteps) {
+            this.returnBestAcrossSteps = returnBestAcrossSteps;
+        }
     }
 
     /**
@@ -1056,6 +1613,19 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         /** Per-step timeout in milliseconds. Default: 30000 */
         private Long timeoutMs = 30000L;
+
+        /**
+         * Input price per 1M tokens for this step's model. Overrides the cascade-level
+         * default. Used only for the cost ceiling / cost reporting. Null = no price
+         * (contributes $0 to the run cost).
+         */
+        private Double inputPricePer1M;
+
+        /**
+         * Output price per 1M tokens for this step's model. Overrides the cascade-level
+         * default. Null = no price (contributes $0 to the run cost).
+         */
+        private Double outputPricePer1M;
 
         public String getType() {
             return type;
@@ -1088,6 +1658,137 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         public void setTimeoutMs(Long timeoutMs) {
             this.timeoutMs = timeoutMs;
         }
+
+        public Double getInputPricePer1M() {
+            return inputPricePer1M;
+        }
+
+        public void setInputPricePer1M(Double inputPricePer1M) {
+            this.inputPricePer1M = inputPricePer1M;
+        }
+
+        public Double getOutputPricePer1M() {
+            return outputPricePer1M;
+        }
+
+        public void setOutputPricePer1M(Double outputPricePer1M) {
+            this.outputPricePer1M = outputPricePer1M;
+        }
+    }
+
+    /**
+     * Judge model for the {@code judge_model} confidence evaluation strategy. A
+     * separate (typically cheap) model rates the confidence of a step's response.
+     */
+    public static class JudgeModelConfig {
+        /** Provider type (e.g. "openai", "anthropic"). */
+        private String type;
+
+        /** Model-specific parameters (model name, apiKey, etc.). */
+        private Map<String, String> parameters;
+
+        public String getType() {
+            return type;
+        }
+
+        public void setType(String type) {
+            this.type = type;
+        }
+
+        public Map<String, String> getParameters() {
+            return parameters;
+        }
+
+        public void setParameters(Map<String, String> parameters) {
+            this.parameters = parameters;
+        }
+    }
+
+    /**
+     * Optional overrides for the {@code heuristic} confidence evaluation strategy.
+     * Any null field falls back to the built-in English default. Phrase matching is
+     * case-insensitive. When no configured phrase matches a response, the evaluator
+     * falls back to language-agnostic scoring (length + JSON-structure signals).
+     */
+    public static class HeuristicConfig {
+        /** Phrases indicating hedging/uncertainty (scored {@code hedgingScore}). */
+        private List<String> lowConfidencePhrases;
+
+        /** Phrases indicating refusal (scored {@code refusalScore}). */
+        private List<String> refusalPhrases;
+
+        /** Responses shorter than this many characters score {@code shortScore}. */
+        private Integer shortLengthThreshold;
+
+        /** Score assigned to very short responses. Default 0.3. */
+        private Double shortScore;
+
+        /** Score assigned when a refusal phrase matches. Default 0.2. */
+        private Double refusalScore;
+
+        /** Score assigned when a hedging phrase matches. Default 0.4. */
+        private Double hedgingScore;
+
+        /**
+         * Score assigned to a decent-length response with no red flags. Default 0.8.
+         */
+        private Double defaultScore;
+
+        public List<String> getLowConfidencePhrases() {
+            return lowConfidencePhrases;
+        }
+
+        public void setLowConfidencePhrases(List<String> lowConfidencePhrases) {
+            this.lowConfidencePhrases = lowConfidencePhrases;
+        }
+
+        public List<String> getRefusalPhrases() {
+            return refusalPhrases;
+        }
+
+        public void setRefusalPhrases(List<String> refusalPhrases) {
+            this.refusalPhrases = refusalPhrases;
+        }
+
+        public Integer getShortLengthThreshold() {
+            return shortLengthThreshold;
+        }
+
+        public void setShortLengthThreshold(Integer shortLengthThreshold) {
+            this.shortLengthThreshold = shortLengthThreshold;
+        }
+
+        public Double getShortScore() {
+            return shortScore;
+        }
+
+        public void setShortScore(Double shortScore) {
+            this.shortScore = shortScore;
+        }
+
+        public Double getRefusalScore() {
+            return refusalScore;
+        }
+
+        public void setRefusalScore(Double refusalScore) {
+            this.refusalScore = refusalScore;
+        }
+
+        public Double getHedgingScore() {
+            return hedgingScore;
+        }
+
+        public void setHedgingScore(Double hedgingScore) {
+            this.hedgingScore = hedgingScore;
+        }
+
+        public Double getDefaultScore() {
+            return defaultScore;
+        }
+
+        public void setDefaultScore(Double defaultScore) {
+            this.defaultScore = defaultScore;
+        }
     }
 
     /**
@@ -1103,11 +1804,23 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         /** Master switch — summary is only generated when enabled. */
         private boolean enabled = false;
 
-        /** LLM provider for summarization (should be cheap/fast). */
-        private String llmProvider = "anthropic";
+        /**
+         * LLM provider for summarization (should be cheap/fast). When unset, the parent
+         * LLM task's provider is inherited.
+         * <p>
+         * Finding F13: this used to default to a hardcoded {@code "anthropic"}, so
+         * enabling {@code conversationSummary} on, say, an OpenAI agent silently tried
+         * to call a vendor the deployment may hold no credentials for — and the failure
+         * was swallowed as a WARN, leaving the rolling summary permanently empty.
+         */
+        private String llmProvider;
 
-        /** Model for summarization. Default: claude-sonnet-4-6. */
-        private String llmModel = "claude-sonnet-4-6";
+        /**
+         * Model for summarization. When unset, the parent LLM task's model is inherited
+         * (previously hardcoded to a specific Anthropic model — see
+         * {@link #llmProvider}).
+         */
+        private String llmModel;
 
         /** Maximum tokens for the generated summary. */
         private int maxSummaryTokens = 800;
@@ -1153,12 +1866,10 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
             if (maxSummaryTokens < 100) {
                 maxSummaryTokens = 800;
             }
-            if (llmProvider == null || llmProvider.isBlank()) {
-                llmProvider = "anthropic";
-            }
-            if (llmModel == null || llmModel.isBlank()) {
-                llmModel = "claude-sonnet-4-6";
-            }
+            // llmProvider/llmModel are deliberately NOT defaulted here any more: a blank
+            // value means "inherit the parent LLM task", which only the caller can
+            // resolve (see LlmTask.resolveEffectiveSummaryConfig). Defaulting them to a
+            // vendor here is what made the summary unauthenticatable (finding F13).
         }
 
         public boolean isEnabled() {
@@ -1288,7 +1999,7 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
      */
     public static class IdentityMaskingConfig {
         private boolean enabled = false;
-        private List<String> rules = new java.util.ArrayList<>();
+        private List<String> rules = new ArrayList<>();
 
         public boolean isEnabled() {
             return enabled;

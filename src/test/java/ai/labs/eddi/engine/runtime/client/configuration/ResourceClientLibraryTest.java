@@ -4,6 +4,15 @@
  */
 package ai.labs.eddi.engine.runtime.client.configuration;
 
+import ai.labs.eddi.configs.apicalls.IApiCallsStore;
+import ai.labs.eddi.configs.dictionary.IDictionaryStore;
+import ai.labs.eddi.configs.llm.ILlmStore;
+import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
+import ai.labs.eddi.configs.output.IOutputStore;
+import ai.labs.eddi.configs.parser.IParserStore;
+import ai.labs.eddi.configs.propertysetter.IPropertySetterStore;
+import ai.labs.eddi.configs.rag.IRagStore;
+import ai.labs.eddi.configs.rules.IRuleSetStore;
 import ai.labs.eddi.configs.rules.IRestRuleSetStore;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
@@ -13,6 +22,7 @@ import ai.labs.eddi.configs.parser.IRestParserStore;
 import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
 import ai.labs.eddi.configs.rag.IRestRagStore;
 import ai.labs.eddi.configs.dictionary.IRestDictionaryStore;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
@@ -32,15 +42,30 @@ import static org.mockito.Mockito.*;
  */
 class ResourceClientLibraryTest {
 
-    private IRestParserStore parserStore;
-    private IRestDictionaryStore dictionaryStore;
-    private IRestRuleSetStore ruleSetStore;
-    private IRestApiCallsStore apiCallsStore;
-    private IRestLlmStore llmStore;
-    private IRestOutputStore outputStore;
-    private IRestPropertySetterStore propertySetterStore;
-    private IRestMcpCallsStore mcpCallsStore;
-    private IRestRagStore ragStore;
+    // Reads resolve against the stores (the engine's path, below ownership
+    // enforcement); duplicate/delete resolve against the REST facades (the
+    // authoring
+    // path, which ResourceAccessGuard sees). The split is the point of these tests.
+    private IParserStore parserStore;
+    private IDictionaryStore dictionaryStore;
+    private IRuleSetStore ruleSetStore;
+    private IApiCallsStore apiCallsStore;
+    private ILlmStore llmStore;
+    private IOutputStore outputStore;
+    private IPropertySetterStore propertySetterStore;
+    private IMcpCallsStore mcpCallsStore;
+    private IRagStore ragStore;
+
+    private IRestParserStore restParserStore;
+    private IRestDictionaryStore restDictionaryStore;
+    private IRestRuleSetStore restRuleSetStore;
+    private IRestApiCallsStore restApiCallsStore;
+    private IRestLlmStore restLlmStore;
+    private IRestOutputStore restOutputStore;
+    private IRestPropertySetterStore restPropertySetterStore;
+    private IRestMcpCallsStore restMcpCallsStore;
+    private IRestRagStore restRagStore;
+
     private ResourceClientLibrary library;
 
     // Valid hex ID (>= 18 hex chars for RestUtilities.isValidId)
@@ -48,17 +73,30 @@ class ResourceClientLibraryTest {
 
     @BeforeEach
     void setUp() {
-        parserStore = mock(IRestParserStore.class);
-        dictionaryStore = mock(IRestDictionaryStore.class);
-        ruleSetStore = mock(IRestRuleSetStore.class);
-        apiCallsStore = mock(IRestApiCallsStore.class);
-        llmStore = mock(IRestLlmStore.class);
-        outputStore = mock(IRestOutputStore.class);
-        propertySetterStore = mock(IRestPropertySetterStore.class);
-        mcpCallsStore = mock(IRestMcpCallsStore.class);
-        ragStore = mock(IRestRagStore.class);
+        parserStore = mock(IParserStore.class);
+        dictionaryStore = mock(IDictionaryStore.class);
+        ruleSetStore = mock(IRuleSetStore.class);
+        apiCallsStore = mock(IApiCallsStore.class);
+        llmStore = mock(ILlmStore.class);
+        outputStore = mock(IOutputStore.class);
+        propertySetterStore = mock(IPropertySetterStore.class);
+        mcpCallsStore = mock(IMcpCallsStore.class);
+        ragStore = mock(IRagStore.class);
+
+        restParserStore = mock(IRestParserStore.class);
+        restDictionaryStore = mock(IRestDictionaryStore.class);
+        restRuleSetStore = mock(IRestRuleSetStore.class);
+        restApiCallsStore = mock(IRestApiCallsStore.class);
+        restLlmStore = mock(IRestLlmStore.class);
+        restOutputStore = mock(IRestOutputStore.class);
+        restPropertySetterStore = mock(IRestPropertySetterStore.class);
+        restMcpCallsStore = mock(IRestMcpCallsStore.class);
+        restRagStore = mock(IRestRagStore.class);
+
         library = new ResourceClientLibrary(parserStore, dictionaryStore, ruleSetStore,
-                apiCallsStore, llmStore, outputStore, propertySetterStore, mcpCallsStore, ragStore);
+                apiCallsStore, llmStore, outputStore, propertySetterStore, mcpCallsStore, ragStore,
+                restParserStore, restDictionaryStore, restRuleSetStore, restApiCallsStore, restLlmStore,
+                restOutputStore, restPropertySetterStore, restMcpCallsStore, restRagStore);
     }
 
     @Nested
@@ -72,7 +110,7 @@ class ResourceClientLibraryTest {
                     URI.create("eddi://ai.labs.parser/parserstore/parsers/" + VALID_ID + "?version=1"),
                     Object.class);
 
-            verify(parserStore).readParser(eq(VALID_ID), eq(1));
+            verify(parserStore).read(eq(VALID_ID), eq(1));
         }
 
         @Test
@@ -82,7 +120,7 @@ class ResourceClientLibraryTest {
                     URI.create("eddi://ai.labs.llm/llmstore/llms/" + VALID_ID + "?version=1"),
                     Object.class);
 
-            verify(llmStore).readLlm(eq(VALID_ID), eq(1));
+            verify(llmStore).read(eq(VALID_ID), eq(1));
         }
 
         @Test
@@ -92,7 +130,7 @@ class ResourceClientLibraryTest {
                     URI.create("eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/" + VALID_ID + "?version=1"),
                     Object.class);
 
-            verify(apiCallsStore).readApiCalls(eq(VALID_ID), eq(1));
+            verify(apiCallsStore).read(eq(VALID_ID), eq(1));
         }
 
         @Test
@@ -102,7 +140,7 @@ class ResourceClientLibraryTest {
                     URI.create("eddi://ai.labs.behavior/behaviorstore/behaviors/" + VALID_ID + "?version=1"),
                     Object.class);
 
-            verify(ruleSetStore).readRuleSet(eq(VALID_ID), eq(1));
+            verify(ruleSetStore).read(eq(VALID_ID), eq(1));
         }
 
         @Test
@@ -112,7 +150,7 @@ class ResourceClientLibraryTest {
                     URI.create("eddi://ai.labs.mcpcalls/mcpcallsstore/mcpcalls/" + VALID_ID + "?version=1"),
                     Object.class);
 
-            verify(mcpCallsStore).readMcpCalls(eq(VALID_ID), eq(1));
+            verify(mcpCallsStore).read(eq(VALID_ID), eq(1));
         }
 
         @Test
@@ -122,7 +160,7 @@ class ResourceClientLibraryTest {
                     URI.create("eddi://ai.labs.rag/ragstore/rags/" + VALID_ID + "?version=1"),
                     Object.class);
 
-            verify(ragStore).readRag(eq(VALID_ID), eq(1));
+            verify(ragStore).read(eq(VALID_ID), eq(1));
         }
 
         @Test
@@ -132,7 +170,7 @@ class ResourceClientLibraryTest {
                     URI.create("eddi://ai.labs.property/propertystore/properties/" + VALID_ID + "?version=1"),
                     Object.class);
 
-            verify(propertySetterStore).readPropertySetter(eq(VALID_ID), eq(1));
+            verify(propertySetterStore).read(eq(VALID_ID), eq(1));
         }
 
         @Test
@@ -142,7 +180,7 @@ class ResourceClientLibraryTest {
                     URI.create("eddi://ai.labs.output/outputstore/outputsets/" + VALID_ID + "?version=1"),
                     Object.class);
 
-            verify(outputStore).readOutputSet(eq(VALID_ID), eq(1), eq(""), eq(""), eq(0), eq(0));
+            verify(outputStore).read(eq(VALID_ID), eq(1), eq(""), eq(""), eq(0), eq(0));
         }
 
         @Test
@@ -162,7 +200,7 @@ class ResourceClientLibraryTest {
                     URI.create("eddi://ai.labs.rules/rulestore/rules/" + VALID_ID + "?version=1"),
                     Object.class);
 
-            verify(ruleSetStore).readRuleSet(eq(VALID_ID), eq(1));
+            verify(ruleSetStore).read(eq(VALID_ID), eq(1));
         }
 
         @Test
@@ -172,7 +210,7 @@ class ResourceClientLibraryTest {
                     URI.create("eddi://ai.labs.dictionary/dictionarystore/dictionaries/" + VALID_ID + "?version=1"),
                     Object.class);
 
-            verify(dictionaryStore).readRegularDictionary(eq(VALID_ID), eq(1), eq(""), eq(""), eq(0), eq(0));
+            verify(dictionaryStore).read(eq(VALID_ID), eq(1));
         }
     }
 
@@ -183,7 +221,7 @@ class ResourceClientLibraryTest {
         @Test
         @DisplayName("should delegate to correct store")
         void delegatesToStore() throws Exception {
-            when(parserStore.duplicateParser(anyString(), any())).thenReturn(Response.ok().build());
+            when(restParserStore.duplicateParser(anyString(), any())).thenReturn(Response.ok().build());
 
             Response result = library.duplicateResource(
                     URI.create("eddi://ai.labs.parser/parserstore/parsers/" + VALID_ID + "?version=1"));
@@ -207,7 +245,7 @@ class ResourceClientLibraryTest {
         @Test
         @DisplayName("should delegate to correct store")
         void delegatesToStore() throws Exception {
-            when(llmStore.deleteLlm(anyString(), any(), anyBoolean())).thenReturn(Response.ok().build());
+            when(restLlmStore.deleteLlm(anyString(), any(), anyBoolean())).thenReturn(Response.ok().build());
 
             Response result = library.deleteResource(
                     URI.create("eddi://ai.labs.llm/llmstore/llms/" + VALID_ID + "?version=1"), false);
@@ -215,24 +253,113 @@ class ResourceClientLibraryTest {
             assertEquals(200, result.getStatus());
         }
 
+        /**
+         * This assertion used to read {@code assertEquals(200, …)} and so pinned the
+         * defect. Answering 200 for a type with no registered proxy made
+         * {@code RestOrphanAdmin.purgeOrphans} count every such orphan as purged and
+         * log it as purged while nothing was deleted — the whole
+         * {@code ai.labs.workflow} category, which is the biggest one. A caller must
+         * either delete or be told it did not; {@code duplicateResource} already throws
+         * for an unknown type.
+         */
         @Test
-        @DisplayName("should return OK for unknown type (graceful skip)")
-        void gracefulSkipForUnknown() throws Exception {
-            Response result = library.deleteResource(
-                    URI.create("eddi://ai.labs.unknown/store/items/" + VALID_ID + "?version=1"), false);
+        @DisplayName("an unregistered type is an error, not a silent skip")
+        void unknownTypeThrows() {
+            ServiceException thrown = assertThrows(ServiceException.class, () -> library.deleteResource(
+                    URI.create("eddi://ai.labs.unknown/store/items/" + VALID_ID + "?version=1"), false));
 
-            assertEquals(200, result.getStatus());
+            assertTrue(thrown.getMessage().contains("ai.labs.unknown"), "the message must name the type: " + thrown.getMessage());
         }
 
         @Test
         @DisplayName("should pass permanent flag")
         void passesPermanentFlag() throws Exception {
-            when(ragStore.deleteRag(anyString(), any(), anyBoolean())).thenReturn(Response.ok().build());
+            when(restRagStore.deleteRag(anyString(), any(), anyBoolean())).thenReturn(Response.ok().build());
 
             library.deleteResource(
                     URI.create("eddi://ai.labs.rag/ragstore/rags/" + VALID_ID + "?version=1"), true);
 
-            verify(ragStore).deleteRag(eq(VALID_ID), eq(1), eq(true));
+            verify(restRagStore).deleteRag(eq(VALID_ID), eq(1), eq(true));
+        }
+    }
+
+    /**
+     * Version resolution is what the agent and workflow cascades ask before they
+     * decide anything: a step reference keeps pinning {@code ?version=1} long after
+     * the resource it names has moved to v2, and asking the reference guard about
+     * one version while deleting another is how a cascade destroys something still
+     * in use. It resolves against the STORE, not the REST facade — a cascade must
+     * not need to own a configuration in order to ask which version of it exists —
+     * and reports "cannot resolve" as null rather than by throwing.
+     */
+    @Nested
+    @DisplayName("getCurrentResourceId")
+    class GetCurrentResourceId {
+
+        private IResourceStore.IResourceId resourceId(String id, Integer version) {
+            return new IResourceStore.IResourceId() {
+                @Override
+                public String getId() {
+                    return id;
+                }
+
+                @Override
+                public Integer getVersion() {
+                    return version;
+                }
+            };
+        }
+
+        @Test
+        @DisplayName("answers the live version, not the one the reference pins")
+        void resolvesAgainstTheStoreNotThePinnedVersion() throws Exception {
+            when(ruleSetStore.getCurrentResourceId(VALID_ID)).thenReturn(resourceId(VALID_ID, 7));
+
+            var current = library.getCurrentResourceId(
+                    URI.create("eddi://ai.labs.rules/rulestore/rulesets/" + VALID_ID + "?version=1"));
+
+            assertNotNull(current);
+            assertEquals(VALID_ID, current.getId());
+            assertEquals(7, current.getVersion(), "the pinned ?version=1 must not be echoed back");
+            verify(ruleSetStore).getCurrentResourceId(VALID_ID);
+        }
+
+        @Test
+        @DisplayName("resolves the legacy authority through the same store as the canonical one")
+        void resolvesLegacyHostAlias() throws Exception {
+            when(apiCallsStore.getCurrentResourceId(VALID_ID)).thenReturn(resourceId(VALID_ID, 3));
+
+            var legacy = library.getCurrentResourceId(
+                    URI.create("eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/" + VALID_ID + "?version=1"));
+            var canonical = library.getCurrentResourceId(
+                    URI.create("eddi://ai.labs.apicalls/apicallstore/apicalls/" + VALID_ID + "?version=1"));
+
+            assertEquals(3, legacy.getVersion(), "a reference written with the legacy authority must still resolve");
+            assertEquals(3, canonical.getVersion());
+        }
+
+        @Test
+        @DisplayName("a resource with no live version answers null rather than throwing")
+        void softDeletedResourceAnswersNull() throws Exception {
+            when(outputStore.getCurrentResourceId(VALID_ID))
+                    .thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+
+            assertNull(library.getCurrentResourceId(
+                    URI.create("eddi://ai.labs.output/outputstore/outputsets/" + VALID_ID + "?version=1")));
+        }
+
+        @Test
+        @DisplayName("an unregistered type answers null, and never reaches a store")
+        void unregisteredTypeAnswersNull() {
+            assertNull(library.getCurrentResourceId(
+                    URI.create("eddi://ai.labs.unknown/store/items/" + VALID_ID + "?version=1")));
+        }
+
+        @Test
+        @DisplayName("a null uri, or one carrying no resource id, answers null")
+        void unusableUriAnswersNull() {
+            assertNull(library.getCurrentResourceId(null));
+            assertNull(library.getCurrentResourceId(URI.create("eddi://ai.labs.llm/llmstore/llms/not-hex?version=1")));
         }
     }
 }

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -18,12 +19,10 @@ import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.impl.builder.ILanguageModelBuilder;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
-import ai.labs.eddi.configs.agents.IRestAgentStore;
-import ai.labs.eddi.configs.properties.IUserMemoryStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.properties.model.Property;
-import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
-import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.impl.*;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
@@ -31,6 +30,7 @@ import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import jakarta.inject.Provider;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -92,38 +92,30 @@ class LlmTaskExtendedTest {
         when(globalVariableResolver.getTemplateData()).thenReturn(Map.of());
 
         var chatModelRegistry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver);
-        var toolResponseTruncator = new ToolResponseTruncator(
-                new io.micrometer.core.instrument.simple.SimpleMeterRegistry(), chatModelRegistry);
 
         promptSnippetService = mock(PromptSnippetService.class);
         when(promptSnippetService.getAll()).thenReturn(Collections.emptyMap());
 
         var counterweightService = new CounterweightService(
-                promptSnippetService, new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+                promptSnippetService, new SimpleMeterRegistry());
         counterweightService.initMetrics();
 
         var identityMaskingService = new IdentityMaskingService(
-                new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+                new SimpleMeterRegistry());
         identityMaskingService.initMetrics();
 
         llmTask = new LlmTask(
                 resourceClientLibrary, dataFactory, memoryItemConverter,
                 templatingEngine, jsonSerialization, prePostUtils,
                 chatModelRegistry,
-                mock(CalculatorTool.class), mock(DateTimeTool.class),
-                mock(WebSearchTool.class), mock(DataFormatterTool.class),
-                mock(WebScraperTool.class), mock(TextSummarizerTool.class),
-                mock(PdfReaderTool.class), mock(WeatherTool.class),
-                mock(FetchToolResponsePageTool.class),
-                mock(IApiCallExecutor.class), mock(ToolExecutionService.class),
-                mock(McpToolProviderManager.class), mock(A2AToolProviderManager.class),
-                mock(IRestAgentStore.class), mock(IRestWorkflowStore.class),
-                mock(RagContextProvider.class), mock(IUserMemoryStore.class),
+                mock(IApiCallExecutor.class),
+                mock(IAgentStore.class), mock(IWorkflowStore.class),
+                mock(RagContextProvider.class),
                 new TokenCounterFactory(), conversationSummarizer,
                 promptSnippetService, globalVariableResolver,
                 counterweightService, identityMaskingService,
-                toolResponseTruncator, mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class),
-                null, null);
+                mock(AgentOrchestrator.class), new ConversationHistoryBuilder(),
+                new SimpleMeterRegistry(), new CallerIdentityContext(null, null));
     }
 
     private IConversationMemory createMemoryWithAction(String... actions) throws Exception {

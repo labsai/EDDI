@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.output.model;
 
 import ai.labs.eddi.modules.output.model.types.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.ArrayList;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
@@ -209,7 +210,7 @@ class OutputModelsTest {
         var e2 = new OutputEntry("b", 5, List.of(), List.of());
         var e3 = new OutputEntry("c", 3, List.of(), List.of());
 
-        var sorted = new java.util.ArrayList<>(List.of(e2, e3, e1));
+        var sorted = new ArrayList<>(List.of(e2, e3, e1));
         Collections.sort(sorted);
         assertEquals("a", sorted.get(0).getAction());
         assertEquals("c", sorted.get(1).getAction());

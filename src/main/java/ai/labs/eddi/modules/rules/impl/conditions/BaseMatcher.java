@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.rules.impl.conditions;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -41,23 +42,29 @@ public abstract class BaseMatcher implements IRuleCondition {
         return configs;
     }
 
+    /**
+     * Resolves the configured {@code occurrence}. A value that is not one of
+     * {@link ConversationStepOccurrence} is rejected rather than silently falling
+     * back to {@code currentStep} — that fallback turned a {@code lastStep} guard
+     * (a typo such as {@code "lastSteps"}) into a globally firing rule.
+     *
+     * @throws IllegalArgumentException
+     *             if the configured occurrence is unknown
+     */
     void setConversationOccurrenceQualifier(Map<String, String> configs) {
         if (configs.containsKey(conversationOccurrenceQualifier)) {
             String conversationOccurrence = configs.get(conversationOccurrenceQualifier);
-            switch (conversationOccurrence) {
-                case "lastStep" :
-                    occurrence = ConversationStepOccurrence.lastStep;
-                    break;
-                case "anyStep" :
-                    occurrence = ConversationStepOccurrence.anyStep;
-                    break;
-                case "never" :
-                    occurrence = ConversationStepOccurrence.never;
-                    break;
-                case "currentStep" :
-                default :
-                    occurrence = ConversationStepOccurrence.currentStep;
+            if (conversationOccurrence != null) {
+                try {
+                    occurrence = ConversationStepOccurrence.valueOf(conversationOccurrence.trim());
+                    return;
+                } catch (IllegalArgumentException e) {
+                    // fall through to the shared error message below
+                }
             }
+
+            throw new IllegalArgumentException(String.format("Unknown '%s' value '%s' — legal values are %s.", conversationOccurrenceQualifier,
+                    conversationOccurrence, Arrays.toString(ConversationStepOccurrence.values())));
         }
     }
 

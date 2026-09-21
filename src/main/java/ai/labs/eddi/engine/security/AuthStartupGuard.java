@@ -10,6 +10,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
+import io.quarkus.scheduler.Scheduled;
 
 /**
  * Startup guard that prevents accidental unauthenticated production
@@ -76,7 +77,7 @@ public class AuthStartupGuard {
      * level every hour (not every 60 seconds) to avoid polluting alerting/SIEM with
      * 525k identical ERROR lines per year.
      */
-    @io.quarkus.scheduler.Scheduled(every = "3600s")
+    @Scheduled(every = "3600s")
     void periodicAuthWarning() {
         if (warnMode) {
             LOGGER.warn("[SECURITY] ⚠️  REMINDER: OIDC is DISABLED in production. "

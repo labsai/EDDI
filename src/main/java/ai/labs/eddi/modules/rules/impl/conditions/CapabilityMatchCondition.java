@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.agents.CapabilityRegistryService.CapabilityMatch;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
+import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.modules.rules.impl.Rule;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import org.jboss.logging.Logger;
@@ -151,7 +152,7 @@ public class CapabilityMatchCondition implements IRuleCondition {
                     .map(CapabilityMatch::agentId)
                     .toList();
 
-            var data = new ai.labs.eddi.engine.memory.model.Data<>(MEMORY_KEY, matchedAgentIds);
+            var data = new Data<>(MEMORY_KEY, matchedAgentIds);
             memory.getCurrentStep().storeData(data);
 
             // Audit: log capability selection decision for compliance traceability

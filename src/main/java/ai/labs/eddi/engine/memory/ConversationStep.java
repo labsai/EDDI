@@ -74,6 +74,19 @@ public class ConversationStep implements IConversationMemory.IWritableConversati
     }
 
     @Override
+    public void removeConversationOutputListItem(String key, Object value) {
+        var current = conversationOutput.get(key);
+        if (current instanceof List<?> list) {
+            list.remove(value);
+        }
+    }
+
+    @Override
+    public void removeConversationOutput(String key) {
+        conversationOutput.remove(key);
+    }
+
+    @Override
     public void addConversationOutputObject(String key, Object value) {
         conversationOutput.put(key, value);
     }

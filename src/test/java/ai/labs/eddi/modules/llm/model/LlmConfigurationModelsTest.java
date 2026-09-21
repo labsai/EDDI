@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.modules.llm.model;
 
+import ai.labs.eddi.configs.shared.RetryConfiguration;
+
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
@@ -27,7 +29,6 @@ class LlmConfigurationModelsTest {
             var rd = new LlmConfiguration.RagDefaults();
             assertEquals(5, rd.getMaxResults());
             assertEquals(0.6, rd.getMinScore());
-            assertEquals("system_message", rd.getInjectionStrategy());
         }
 
         @Test
@@ -35,10 +36,8 @@ class LlmConfigurationModelsTest {
             var rd = new LlmConfiguration.RagDefaults();
             rd.setMaxResults(10);
             rd.setMinScore(0.8);
-            rd.setInjectionStrategy("user_message");
             assertEquals(10, rd.getMaxResults());
             assertEquals(0.8, rd.getMinScore());
-            assertEquals("user_message", rd.getInjectionStrategy());
         }
     }
 
@@ -183,7 +182,7 @@ class LlmConfigurationModelsTest {
 
         @Test
         void defaults() {
-            var rc = new LlmConfiguration.RetryConfiguration();
+            var rc = new RetryConfiguration();
             assertEquals(3, rc.getMaxAttempts());
             assertEquals(1000L, rc.getBackoffDelayMs());
             assertEquals(2.0, rc.getBackoffMultiplier());
@@ -192,7 +191,7 @@ class LlmConfigurationModelsTest {
 
         @Test
         void setters() {
-            var rc = new LlmConfiguration.RetryConfiguration();
+            var rc = new RetryConfiguration();
             rc.setMaxAttempts(5);
             rc.setBackoffDelayMs(500L);
             rc.setBackoffMultiplier(1.5);
@@ -213,8 +212,6 @@ class LlmConfigurationModelsTest {
             assertNull(kbr.getName());
             assertNull(kbr.getMaxResults());
             assertNull(kbr.getMinScore());
-            assertNull(kbr.getInjectionStrategy());
-            assertNull(kbr.getContextTemplate());
         }
 
         @Test
@@ -223,8 +220,6 @@ class LlmConfigurationModelsTest {
             kbr.setName("product-docs");
             kbr.setMaxResults(10);
             kbr.setMinScore(0.7);
-            kbr.setInjectionStrategy("system_message");
-            kbr.setContextTemplate("Context: {{context}}");
             assertEquals("product-docs", kbr.getName());
             assertEquals(10, kbr.getMaxResults());
         }
@@ -239,8 +234,10 @@ class LlmConfigurationModelsTest {
         void defaults() {
             var csc = new LlmConfiguration.ConversationSummaryConfig();
             assertFalse(csc.isEnabled());
-            assertEquals("anthropic", csc.getLlmProvider());
-            assertEquals("claude-sonnet-4-6", csc.getLlmModel());
+            // Finding F13: no hardcoded vendor default — blank means "inherit the
+            // parent LLM task", which only LlmTask can resolve.
+            assertNull(csc.getLlmProvider());
+            assertNull(csc.getLlmModel());
             assertEquals(800, csc.getMaxSummaryTokens());
             assertTrue(csc.isExcludePropertiesFromSummary());
             assertEquals(5, csc.getRecentWindowSteps());
@@ -278,8 +275,10 @@ class LlmConfigurationModelsTest {
             assertEquals(5, csc.getRecentWindowSteps());
             assertEquals(20, csc.getMaxRecallTurns());
             assertEquals(800, csc.getMaxSummaryTokens());
-            assertEquals("anthropic", csc.getLlmProvider());
-            assertEquals("claude-sonnet-4-6", csc.getLlmModel());
+            // Finding F13: validate() must NOT invent a vendor — an unset provider
+            // stays unset so the parent task's provider is inherited.
+            assertEquals("", csc.getLlmProvider());
+            assertNull(csc.getLlmModel());
         }
 
         @Test

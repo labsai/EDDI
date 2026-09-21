@@ -79,7 +79,7 @@ public class McpMemoryTools {
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
             LOGGER.error("MCP list_user_memories failed for user: " + userId, e);
-            return errorJson("Failed to list memories: " + e.getMessage());
+            return errorJson("Failed to list memories", e);
         }
     }
 
@@ -112,7 +112,7 @@ public class McpMemoryTools {
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
             LOGGER.error("MCP get_visible_memories failed", e);
-            return errorJson("Failed to get visible memories: " + e.getMessage());
+            return errorJson("Failed to get visible memories", e);
         }
     }
 
@@ -136,7 +136,7 @@ public class McpMemoryTools {
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
             LOGGER.error("MCP search_user_memories failed", e);
-            return errorJson("Failed to search memories: " + e.getMessage());
+            return errorJson("Failed to search memories", e);
         }
     }
 
@@ -158,7 +158,7 @@ public class McpMemoryTools {
             }
         } catch (Exception e) {
             LOGGER.error("MCP get_memory_by_key failed", e);
-            return errorJson("Failed to get memory: " + e.getMessage());
+            return errorJson("Failed to get memory", e);
         }
     }
 
@@ -191,7 +191,7 @@ public class McpMemoryTools {
             return errorJson("Invalid visibility value. Use: self, group, or global");
         } catch (Exception e) {
             LOGGER.error("MCP upsert_user_memory failed", e);
-            return errorJson("Failed to upsert memory: " + e.getMessage());
+            return errorJson("Failed to upsert memory", e);
         }
     }
 
@@ -205,7 +205,7 @@ public class McpMemoryTools {
             return jsonSerialization.serialize(Map.of("entryId", entryId, "status", "deleted"));
         } catch (Exception e) {
             LOGGER.error("MCP delete_user_memory failed", e);
-            return errorJson("Failed to delete memory: " + e.getMessage());
+            return errorJson("Failed to delete memory", e);
         }
     }
 
@@ -225,7 +225,7 @@ public class McpMemoryTools {
             return jsonSerialization.serialize(Map.of("userId", userId, "entriesDeleted", count, "status", "deleted"));
         } catch (Exception e) {
             LOGGER.error("MCP delete_all_user_memories failed", e);
-            return errorJson("Failed to delete memories: " + e.getMessage());
+            return errorJson("Failed to delete memories", e);
         }
     }
 
@@ -240,7 +240,7 @@ public class McpMemoryTools {
             return jsonSerialization.serialize(Map.of("userId", userId, "count", count));
         } catch (Exception e) {
             LOGGER.error("MCP count_user_memories failed", e);
-            return errorJson("Failed to count memories: " + e.getMessage());
+            return errorJson("Failed to count memories", e);
         }
     }
 }

@@ -33,7 +33,10 @@ public class Occurrence implements IRuleCondition {
         int occurrences = 0;
         for (List<String> history : allRulesHistorical) {
             for (String behaviorRuleName : history) {
-                if (this.behaviorRuleName.equals(behaviorRuleName)) {
+                // validateConfiguration() rejects a missing name at deserialization time,
+                // but rulesets stored before that check exist — compare from the argument
+                // side so an unnamed occurrence counts nothing instead of throwing.
+                if (behaviorRuleName != null && behaviorRuleName.equals(this.behaviorRuleName)) {
                     occurrences++;
                 }
             }
@@ -84,6 +87,26 @@ public class Occurrence implements IRuleCondition {
                 setMinTimesOccurred(timesOccurred);
             }
 
+        }
+    }
+
+    /**
+     * Without a {@code behaviorRuleName} there is nothing to count (and counting
+     * would dereference a {@code null}); without at least one of
+     * {@code minTimesOccurred} / {@code maxTimesOccurred} every count is
+     * acceptable, so the condition degrades into "matches as soon as any rule ever
+     * succeeded". Both are configuration mistakes and are refused when the ruleset
+     * is read.
+     */
+    @Override
+    public void validateConfiguration() {
+        if (behaviorRuleName == null || behaviorRuleName.isBlank()) {
+            throw new IllegalArgumentException(String.format("'%s' requires a '%s' config value.", ID, behaviorRuleNameQualifier));
+        }
+
+        if (minTimesOccurred == -1 && maxTimesOccurred == -1) {
+            throw new IllegalArgumentException(String.format("'%s' requires at least one of '%s' or '%s' — without a bound it matches"
+                    + " as soon as any behavior rule has ever succeeded.", ID, minTimesOccurredQualifier, maxTimesOccurredQualifier));
         }
     }
 

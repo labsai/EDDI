@@ -5,11 +5,14 @@
 package ai.labs.eddi.configs.properties.mongo;
 
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
+import ai.labs.eddi.configs.properties.MemorySearchTerms;
 import ai.labs.eddi.configs.properties.model.Properties;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
+import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.utils.RuntimeUtilities;
+import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.*;
@@ -17,6 +20,7 @@ import com.mongodb.client.result.DeleteResult;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import java.time.Duration;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.bson.types.ObjectId;
@@ -25,6 +29,7 @@ import org.jboss.logging.Logger;
 import java.time.Instant;
 import java.util.*;
 import java.util.regex.Pattern;
+import ai.labs.eddi.engine.audit.AuditHmac;
 
 import static com.mongodb.client.model.Filters.*;
 import static com.mongodb.client.model.Sorts.descending;
@@ -46,6 +51,7 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
     private static final Logger LOGGER = Logger.getLogger(MongoUserMemoryStore.class);
 
     private static final String COLLECTION_MEMORIES = "usermemories";
+    private static final String FIELD_ID = "_id";
     private static final String FIELD_USER_ID = "userId";
     private static final String FIELD_KEY = "key";
     private static final String FIELD_VALUE = "value";
@@ -83,6 +89,11 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
         // Category filtering
         memoriesCollection.createIndex(Indexes.compoundIndex(Indexes.ascending(FIELD_USER_ID), Indexes.ascending(FIELD_CATEGORY)),
                 new IndexOptions().name("idx_user_category").background(true));
+
+        // Ordering index for "most_accessed" recall — without it the top-k is an
+        // in-memory sort over every entry of the user on every conversation init.
+        memoriesCollection.createIndex(Indexes.compoundIndex(Indexes.ascending(FIELD_USER_ID), Indexes.descending(FIELD_ACCESS_COUNT)),
+                new IndexOptions().name("idx_user_access_count").background(true));
     }
 
     // === Flat property view (reads/writes global entries in usermemories) ===
@@ -149,8 +160,17 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
         Bson filter = buildUpsertFilter(entry);
         Instant now = Instant.now();
 
+        // A global entry is keyed on (userId, key, visibility) ONLY — it is shared
+        // across agents, so any agent that merely RECALLS it would otherwise rewrite
+        // sourceAgentId to itself and silently steal ownership. setOnInsert pins the
+        // owner to the agent that created the entry; self/group entries are keyed per
+        // agent, so there sourceAgentId is part of the identity and $set is correct.
+        Bson sourceAgentUpdate = entry.visibility() == Visibility.global
+                ? Updates.setOnInsert(FIELD_SOURCE_AGENT_ID, entry.sourceAgentId())
+                : Updates.set(FIELD_SOURCE_AGENT_ID, entry.sourceAgentId());
+
         Bson update = Updates.combine(Updates.set(FIELD_VALUE, entry.value()), Updates.set(FIELD_CATEGORY, entry.category()),
-                Updates.set(FIELD_VISIBILITY, entry.visibility().name()), Updates.set(FIELD_SOURCE_AGENT_ID, entry.sourceAgentId()),
+                Updates.set(FIELD_VISIBILITY, entry.visibility().name()), sourceAgentUpdate,
                 Updates.set(FIELD_GROUP_IDS, entry.groupIds()), Updates.set(FIELD_SOURCE_CONVERSATION_ID, entry.sourceConversationId()),
                 Updates.set(FIELD_CONFLICTED, entry.conflicted()), Updates.set(FIELD_UPDATED_AT, now.toString()),
                 Updates.setOnInsert(FIELD_USER_ID, entry.userId()), Updates.setOnInsert(FIELD_KEY, entry.key()),
@@ -158,14 +178,15 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
 
         var options = new UpdateOptions().upsert(true);
 
-        // Check for cross-agent global overwrite
+        // Check for cross-agent global write (value changes, ownership does not)
         if (entry.visibility() == Visibility.global) {
             Document existing = memoriesCollection.find(filter).first();
             if (existing != null) {
                 String existingAgent = existing.getString(FIELD_SOURCE_AGENT_ID);
                 if (existingAgent != null && !existingAgent.equals(entry.sourceAgentId())) {
-                    LOGGER.infof("[MEMORY] Cross-agent global overwrite: key='%s', user='%s', " + "previous agent='%s', new agent='%s'", entry.key(),
-                            entry.userId(), existingAgent, entry.sourceAgentId());
+                    LOGGER.infof("[MEMORY] Cross-agent global write: key='%s', user='%s', " + "owning agent='%s' (preserved), writing agent='%s'",
+                            LogSanitizer.sanitize(entry.key()), LogSanitizer.sanitize(entry.userId()), LogSanitizer.sanitize(existingAgent),
+                            LogSanitizer.sanitize(entry.sourceAgentId()));
                 }
             }
         }
@@ -200,7 +221,30 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
             throws IResourceStore.ResourceStoreException {
         RuntimeUtilities.checkNotNull(userId, FIELD_USER_ID);
 
-        // Build visibility filter: self(agentId) OR group(groupIds) OR global
+        Bson filter = buildVisibilityFilter(userId, agentId, groupIds);
+
+        if (!RECALL_ORDER_MOST_ACCESSED.equals(recallOrder)) {
+            List<UserMemoryEntry> entries = new ArrayList<>();
+            collectInto(new LinkedHashMap<>(), entries, filter, descending(FIELD_UPDATED_AT), maxEntries > 0 ? maxEntries : -1);
+            return entries;
+        }
+
+        return mostAccessedWithRecencyReservation(filter, maxEntries);
+    }
+
+    /**
+     * Visibility filter for a recall: the user's own scope — self(agentId) OR
+     * group(groupIds) OR global, always constrained to the user's own entries —
+     * plus, additively, the TEAM-OWNED scope (I8): entries whose owner is the
+     * synthetic {@code "group:"+groupId} user with {@code group} visibility.
+     * Package-private static so the filter's shape is directly assertable.
+     * <p>
+     * The team branch is deliberately narrow: it matches ONLY synthetic team owners
+     * derived from the supplied group ids, with group visibility, with a group-id
+     * overlap — never another human user's entries. The user's own branch is
+     * untouched, so personal recall behaves exactly as before.
+     */
+    static Bson buildVisibilityFilter(String userId, String agentId, List<String> groupIds) {
         List<Bson> visibilityFilters = new ArrayList<>();
 
         // Self: entries created by this agent for this user
@@ -214,19 +258,66 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
         // Global: all global entries for this user
         visibilityFilters.add(eq(FIELD_VISIBILITY, Visibility.global.name()));
 
-        Bson filter = and(eq(FIELD_USER_ID, userId), or(visibilityFilters));
-        Bson sort = "most_accessed".equals(recallOrder) ? descending(FIELD_ACCESS_COUNT) : descending(FIELD_UPDATED_AT);
+        Bson userScope = and(eq(FIELD_USER_ID, userId), or(visibilityFilters));
+        if (groupIds == null || groupIds.isEmpty()) {
+            return userScope;
+        }
 
-        List<UserMemoryEntry> entries = new ArrayList<>();
-        for (Document doc : memoriesCollection.find(filter).sort(sort).limit(maxEntries)) {
-            entries.add(documentToEntry(doc));
+        // I8: team-owned lessons. Owner ids are DERIVED from the supplied group
+        // ids, never caller-supplied strings — a caller cannot name an arbitrary
+        // owner this way.
+        List<String> teamOwners = groupIds.stream().map(gid -> IUserMemoryStore.TEAM_OWNER_PREFIX + gid).toList();
+        Bson teamScope = and(in(FIELD_USER_ID, teamOwners), eq(FIELD_VISIBILITY, Visibility.group.name()),
+                in(FIELD_GROUP_IDS, groupIds));
+        return or(userScope, teamScope);
+    }
 
-            // Increment access count when using most_accessed ordering
-            if ("most_accessed".equals(recallOrder)) {
-                memoriesCollection.updateOne(eq("_id", doc.getObjectId("_id")), Updates.inc(FIELD_ACCESS_COUNT, 1));
+    /**
+     * {@code most_accessed} recall: the bulk of the window is filled by access
+     * count, a reserved slice by recency (the split comes from
+     * {@link RecallWindow}, shared with the PostgreSQL store so both backends
+     * answer this recall order identically), and the {@code accessCount} increments
+     * are applied in ONE batched write AFTER both cursors are drained — never
+     * per-document inside an open cursor.
+     */
+    private List<UserMemoryEntry> mostAccessedWithRecencyReservation(Bson filter, int maxEntries) {
+        var window = RecallWindow.forMaxEntries(maxEntries);
+
+        Map<ObjectId, UserMemoryEntry> recalled = new LinkedHashMap<>();
+        List<UserMemoryEntry> ordered = new ArrayList<>();
+        collectInto(recalled, ordered, filter, descending(FIELD_ACCESS_COUNT), window.accessSlots());
+        collectInto(recalled, ordered, filter, descending(FIELD_UPDATED_AT), window.recencySlots());
+
+        if (!recalled.isEmpty()) {
+            memoriesCollection.updateMany(in(FIELD_ID, recalled.keySet()), Updates.inc(FIELD_ACCESS_COUNT, 1));
+        }
+
+        return ordered;
+    }
+
+    /**
+     * Drains one sorted query into {@code ordered}, de-duplicating against
+     * {@code seen} (keyed by document id). {@code limit < 0} means "no limit";
+     * {@code limit == 0} skips the query entirely (a Mongo {@code limit(0)} would
+     * mean unlimited, which is never what a zero-slot budget wants).
+     */
+    private void collectInto(Map<ObjectId, UserMemoryEntry> seen, List<UserMemoryEntry> ordered, Bson filter, Bson sort, int limit) {
+        if (limit == 0) {
+            return;
+        }
+        FindIterable<Document> found = memoriesCollection.find(filter).sort(sort);
+        if (limit > 0) {
+            found = found.limit(limit);
+        }
+        for (Document doc : found) {
+            var entry = documentToEntry(doc);
+            ObjectId id = doc.getObjectId(FIELD_ID);
+            if (id == null) {
+                ordered.add(entry);
+            } else if (seen.putIfAbsent(id, entry) == null) {
+                ordered.add(entry);
             }
         }
-        return entries;
     }
 
     @Override
@@ -236,8 +327,16 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
             return getAllEntries(userId);
         }
 
-        Pattern pattern = Pattern.compile(Pattern.quote(query), Pattern.CASE_INSENSITIVE);
-        Bson filter = and(eq(FIELD_USER_ID, userId), or(Filters.regex(FIELD_KEY, pattern), Filters.regex(FIELD_VALUE, pattern)));
+        // Every term must appear in the key or the value — see MemorySearchTerms.
+        List<String> terms = MemorySearchTerms.tokenize(query);
+        if (terms.isEmpty()) {
+            return new ArrayList<>();
+        }
+        List<Bson> termFilters = terms.stream().map(term -> {
+            Pattern pattern = Pattern.compile(Pattern.quote(term), Pattern.CASE_INSENSITIVE);
+            return or(Filters.regex(FIELD_KEY, pattern), Filters.regex(FIELD_VALUE, pattern));
+        }).toList();
+        Bson filter = and(eq(FIELD_USER_ID, userId), and(termFilters));
 
         List<UserMemoryEntry> entries = new ArrayList<>();
         for (Document doc : memoriesCollection.find(filter).sort(descending(FIELD_UPDATED_AT))) {
@@ -282,7 +381,11 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
     public void deleteAllForUser(String userId) throws IResourceStore.ResourceStoreException {
         RuntimeUtilities.checkNotNull(userId, FIELD_USER_ID);
         DeleteResult result = memoriesCollection.deleteMany(eq(FIELD_USER_ID, userId));
-        LOGGER.infof("[MEMORY] GDPR delete-all for user '%s': %d entries removed", userId, result.getDeletedCount());
+        // The pseudonym, not the identifier - see PostgresUserMemoryStore for the
+        // reasoning. Both stores must agree, or an operator reading one log and not
+        // the other draws a different conclusion about what was erased.
+        LOGGER.infof("[MEMORY] GDPR delete-all for user '%s': %d entries removed",
+                AuditHmac.pseudonymFor(userId), result.getDeletedCount());
     }
 
     @Override
@@ -293,7 +396,7 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
 
     @Override
     public long deleteOlderThan(int olderThanDays) throws IResourceStore.ResourceStoreException {
-        Instant cutoff = Instant.now().minus(java.time.Duration.ofDays(olderThanDays));
+        Instant cutoff = Instant.now().minus(Duration.ofDays(olderThanDays));
         // Exclude GDPR system keys (e.g. _gdpr_processing_restricted) from retention
         // cleanup
         Bson filter = and(

@@ -3,9 +3,11 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
+import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService.*;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
@@ -29,6 +31,9 @@ import ai.labs.eddi.engine.runtime.IConversationSetup;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
+import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -76,7 +81,13 @@ class ConversationServiceCoverageTest {
     @Mock
     private TenantQuotaService tenantQuotaService;
     @Mock
+    private IScheduleStore scheduleStore;
+    @Mock
+    private IAgentStore agentStore;
+    @Mock
     private IUserMemoryStore userMemoryStore;
+    @Mock
+    private IJsonSerialization jsonSerialization;
 
     private static final Environment ENV = Environment.production;
     private static final String AGENT_ID = "aabbccdd11223344eeff5566";
@@ -101,8 +112,9 @@ class ConversationServiceCoverageTest {
                 conversationMemoryStore, conversationDescriptorStore,
                 userMemoryStore, conversationCoordinator, conversationSetup,
                 cacheFactory, runtime, contextLogger, auditLedgerService,
-                gdprComplianceService, tenantQuotaService,
-                new SimpleMeterRegistry(), AGENT_TIMEOUT);
+                gdprComplianceService, tenantQuotaService, scheduleStore, agentStore,
+                jsonSerialization,
+                new SimpleMeterRegistry(), ConversationServiceTestFixtures.hitlResumeEvent(), new CallerIdentityContext(null, null), AGENT_TIMEOUT);
     }
 
     private ConversationMemorySnapshot createSnapshot() {
@@ -118,7 +130,7 @@ class ConversationServiceCoverageTest {
     private ConversationMemorySnapshot createSnapshotWithSteps(int stepCount) {
         var snapshot = createSnapshot();
         var steps = new ArrayList<ConversationStepSnapshot>();
-        var outputs = new ArrayList<ai.labs.eddi.engine.memory.model.ConversationOutput>();
+        var outputs = new ArrayList<ConversationOutput>();
         for (int i = 0; i < stepCount; i++) {
             var step = new ConversationStepSnapshot();
             var workflowRun = new WorkflowRunSnapshot();
@@ -126,7 +138,7 @@ class ConversationServiceCoverageTest {
             workflowRun.setLifecycleTasks(List.of(result));
             step.setWorkflows(List.of(workflowRun));
             steps.add(step);
-            outputs.add(new ai.labs.eddi.engine.memory.model.ConversationOutput());
+            outputs.add(new ConversationOutput());
         }
         snapshot.setConversationSteps(steps);
         snapshot.setConversationOutputs(outputs);
@@ -194,13 +206,16 @@ class ConversationServiceCoverageTest {
             var snapshot = createSnapshotWithSteps(2);
             when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID))
                     .thenReturn(snapshot);
-            when(conversationMemoryStore.storeConversationMemorySnapshot(any()))
-                    .thenReturn(CONVERSATION_ID);
+            // undo now uses a conditional store (CAS from the loaded READY state) instead
+            // of an unconditional replace, so a concurrent say-turn pause commit is not
+            // clobbered; a successful CAS returns true.
+            when(conversationMemoryStore.storeConversationMemorySnapshotIfState(any(), any()))
+                    .thenReturn(true);
 
             boolean result = conversationService.undo(ENV, AGENT_ID, CONVERSATION_ID);
 
             assertTrue(result);
-            verify(conversationMemoryStore).storeConversationMemorySnapshot(any());
+            verify(conversationMemoryStore).storeConversationMemorySnapshotIfState(any(), any());
         }
 
         @Test

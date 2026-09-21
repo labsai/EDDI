@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -40,40 +41,59 @@ class AgentSetupServiceBranchCoverageTest {
         service = new AgentSetupService(restInterfaceFactory, agentAdmin, secretProvider, "http://localhost:11434");
     }
 
-    // ─── parseEnvironment ────────────────────────────────────────────────
+    // ─── environment resolution ──────────────────────────────────────────
 
     @Nested
-    @DisplayName("parseEnvironment")
+    @DisplayName("environment resolution")
     class ParseEnvironment {
 
         @Test
         @DisplayName("null returns production")
         void nullEnv() {
-            assertEquals(Deployment.Environment.production, AgentSetupService.parseEnvironment(null));
+            assertEquals(Deployment.Environment.production, service.resolveParams(null, null, null, null).env());
         }
 
         @Test
         @DisplayName("blank returns production")
         void blankEnv() {
-            assertEquals(Deployment.Environment.production, AgentSetupService.parseEnvironment("  "));
+            assertEquals(Deployment.Environment.production, service.resolveParams(null, null, null, "  ").env());
         }
 
         @Test
         @DisplayName("'test' returns test")
         void testEnv() {
-            assertEquals(Deployment.Environment.test, AgentSetupService.parseEnvironment("test"));
+            assertEquals(Deployment.Environment.test, service.resolveParams(null, null, null, "test").env());
         }
 
         @Test
         @DisplayName("'PRODUCTION' returns production")
         void productionUpperCase() {
-            assertEquals(Deployment.Environment.production, AgentSetupService.parseEnvironment("PRODUCTION"));
+            assertEquals(Deployment.Environment.production, service.resolveParams(null, null, null, "PRODUCTION").env());
         }
 
         @Test
-        @DisplayName("invalid value returns production")
+        @DisplayName("invalid value is rejected instead of resolving to production")
         void invalidEnv() {
-            assertEquals(Deployment.Environment.production, AgentSetupService.parseEnvironment("staging"));
+            var exception = assertThrows(IllegalArgumentException.class, () -> service.resolveParams(null, null, null, "staging"));
+            assertEquals("Unknown environment 'staging'. Valid values: production, test", exception.getMessage());
+        }
+
+        /**
+         * The whole point: with the old lenient parse, setupAgent("staging") built and
+         * deployed the agent to production. Now it fails validation before a single
+         * resource is created — so the REST proxy factory is never touched.
+         */
+        @Test
+        @DisplayName("setupAgent with an unknown environment creates nothing")
+        void setupAgentRejectsUnknownEnvironment() {
+            var request = new SetupAgentRequest("MyAgent", "You are helpful.", "anthropic", "claude-sonnet-4-6", "sk-test", null, null, false, null,
+                    false, false, null, true, "staging", null, null);
+
+            var exception = assertThrows(AgentSetupService.AgentSetupException.class, () -> service.setupAgent(request));
+
+            assertEquals("Unknown environment 'staging'. Valid values: production, test", exception.getMessage());
+            verifyNoInteractions(restInterfaceFactory);
+            verifyNoInteractions(agentAdmin);
         }
     }
 
@@ -212,49 +232,6 @@ class AgentSetupServiceBranchCoverageTest {
         }
     }
 
-    // ─── supportsResponseFormat ──────────────────────────────────────────
-
-    @Nested
-    @DisplayName("supportsResponseFormat")
-    class SupportsResponseFormat {
-
-        @Test
-        @DisplayName("openai supports response format")
-        void openai() {
-            assertTrue(AgentSetupService.supportsResponseFormat("openai"));
-        }
-
-        @Test
-        @DisplayName("mistral supports response format")
-        void mistral() {
-            assertTrue(AgentSetupService.supportsResponseFormat("mistral"));
-        }
-
-        @Test
-        @DisplayName("azure-openai supports response format")
-        void azureOpenai() {
-            assertTrue(AgentSetupService.supportsResponseFormat("azure-openai"));
-        }
-
-        @Test
-        @DisplayName("anthropic does not support response format")
-        void anthropic() {
-            assertFalse(AgentSetupService.supportsResponseFormat("anthropic"));
-        }
-
-        @Test
-        @DisplayName("gemini does not support response format")
-        void gemini() {
-            assertFalse(AgentSetupService.supportsResponseFormat("gemini"));
-        }
-
-        @Test
-        @DisplayName("ollama does not support response format")
-        void ollama() {
-            assertFalse(AgentSetupService.supportsResponseFormat("ollama"));
-        }
-    }
-
     // ─── buildPromptResponseJson ─────────────────────────────────────────
 
     @Nested
@@ -350,7 +327,7 @@ class AgentSetupServiceBranchCoverageTest {
         @DisplayName("null agent name throws")
         void nullAgentName() {
             var req = new SetupAgentRequest(null, "prompt", "anthropic", "model",
-                    "key", null, null, null, null, null, null, null, null, null);
+                    "key", null, null, null, null, null, null, null, null, null, null, null);
             assertThrows(AgentSetupService.AgentSetupException.class, () -> service.setupAgent(req));
         }
 
@@ -358,7 +335,7 @@ class AgentSetupServiceBranchCoverageTest {
         @DisplayName("blank agent name throws")
         void blankAgentName() {
             var req = new SetupAgentRequest("  ", "prompt", "anthropic", "model",
-                    "key", null, null, null, null, null, null, null, null, null);
+                    "key", null, null, null, null, null, null, null, null, null, null, null);
             assertThrows(AgentSetupService.AgentSetupException.class, () -> service.setupAgent(req));
         }
 
@@ -366,7 +343,7 @@ class AgentSetupServiceBranchCoverageTest {
         @DisplayName("null system prompt throws")
         void nullSystemPrompt() {
             var req = new SetupAgentRequest("Agent", null, "anthropic", "model",
-                    "key", null, null, null, null, null, null, null, null, null);
+                    "key", null, null, null, null, null, null, null, null, null, null, null);
             assertThrows(AgentSetupService.AgentSetupException.class, () -> service.setupAgent(req));
         }
 
@@ -374,7 +351,7 @@ class AgentSetupServiceBranchCoverageTest {
         @DisplayName("blank system prompt throws")
         void blankSystemPrompt() {
             var req = new SetupAgentRequest("Agent", "  ", "anthropic", "model",
-                    "key", null, null, null, null, null, null, null, null, null);
+                    "key", null, null, null, null, null, null, null, null, null, null, null);
             assertThrows(AgentSetupService.AgentSetupException.class, () -> service.setupAgent(req));
         }
 
@@ -382,7 +359,7 @@ class AgentSetupServiceBranchCoverageTest {
         @DisplayName("cloud provider without API key throws")
         void cloudProviderNoApiKey() {
             var req = new SetupAgentRequest("Agent", "prompt", "openai", "gpt-4",
-                    null, null, null, null, null, null, null, null, null, null);
+                    null, null, null, null, null, null, null, null, null, null, null, null);
             assertThrows(AgentSetupService.AgentSetupException.class, () -> service.setupAgent(req));
         }
 
@@ -390,7 +367,7 @@ class AgentSetupServiceBranchCoverageTest {
         @DisplayName("cloud provider with blank API key throws")
         void cloudProviderBlankApiKey() {
             var req = new SetupAgentRequest("Agent", "prompt", "anthropic", "model",
-                    "  ", null, null, null, null, null, null, null, null, null);
+                    "  ", null, null, null, null, null, null, null, null, null, null, null);
             assertThrows(AgentSetupService.AgentSetupException.class, () -> service.setupAgent(req));
         }
 
@@ -398,7 +375,7 @@ class AgentSetupServiceBranchCoverageTest {
         @DisplayName("local provider (ollama) without API key does NOT throw for validation")
         void localProviderNoApiKeyOk() throws Exception {
             var req = new SetupAgentRequest("Agent", "prompt", "ollama", "llama3",
-                    null, null, null, null, null, null, null, null, false, null);
+                    null, null, null, null, null, null, null, null, false, null, null, null);
             // Will fail at REST call, but validation should pass
             when(restInterfaceFactory.get(any())).thenThrow(new RestInterfaceFactory.RestInterfaceFactoryException("mock", new RuntimeException()));
             assertThrows(AgentSetupService.AgentSetupException.class, () -> service.setupAgent(req));
@@ -537,6 +514,25 @@ class AgentSetupServiceBranchCoverageTest {
             assertNull(params.get("authToken"));
         }
 
+        /**
+         * The wizard used to pin {@code temperature=0.3} into every config it wrote,
+         * for every provider and every model. Anthropic's current models reject the
+         * parameter outright ("`temperature` is deprecated for this model"), so the
+         * hard-coded value turned into a 400 on every turn of every agent created this
+         * way — including the Platform Operator, on the default model. Omitting it
+         * leaves the provider's own default in force; an agent designer who wants a
+         * specific temperature sets it explicitly on the generated config.
+         */
+        @Test
+        @DisplayName("no provider gets a hard-coded temperature")
+        void noHardCodedTemperature() {
+            for (String provider : List.of("anthropic", "openai", "ollama", "jlama", "bedrock", "azure-openai", "oracle-genai")) {
+                var config = service.createLlmConfig(provider, "some-model", "key", "prompt",
+                        false, null, null, null, false, false, null);
+                assertNull(config.tasks().get(0).getParameters().get("temperature"), provider + " must not pin a sampling temperature");
+            }
+        }
+
         @Test
         @DisplayName("bedrock provider sets modelId")
         void bedrockProvider() {
@@ -547,7 +543,7 @@ class AgentSetupServiceBranchCoverageTest {
         }
 
         @Test
-        @DisplayName("azure-openai sets deploymentName, apiKey, endpoint, responseFormat")
+        @DisplayName("azure-openai sets deploymentName, apiKey, endpoint and no builder responseFormat")
         void azureOpenai() {
             String promptJson = "some json format";
             var config = service.createLlmConfig("azure-openai", "gpt-4", "mykey", "prompt",
@@ -556,7 +552,9 @@ class AgentSetupServiceBranchCoverageTest {
             assertEquals("gpt-4", params.get("deploymentName"));
             assertEquals("mykey", params.get("apiKey"));
             assertEquals("https://myaoi.openai.azure.com", params.get("endpoint"));
-            assertEquals("json", params.get("responseFormat"));
+            assertNull(params.get("responseFormat"),
+                    "AzureOpenAiLanguageModelBuilder never read this key — JSON is applied per request instead");
+            assertEquals("true", params.get("convertToObject"));
         }
 
         @Test
@@ -569,17 +567,19 @@ class AgentSetupServiceBranchCoverageTest {
         }
 
         @Test
-        @DisplayName("default provider (anthropic) sets modelName, apiKey, responseFormat if json")
+        @DisplayName("default provider branch sets modelName, apiKey, baseUrl and no builder responseFormat")
         void defaultProviderWithJson() {
-            // openai is in 'supportsResponseFormat' so it takes the default branch but with
-            // responseFormat
+            // openai takes the default branch. A builder-level responseFormat would be
+            // baked into the CACHED model and travel into tool-calling and streaming
+            // requests; JSON is applied per request instead.
             var config = service.createLlmConfig("openai", "gpt-4", "sk-key", "prompt",
                     false, null, "https://custom.api.com", "json schema", false, false, null);
             var params = config.tasks().get(0).getParameters();
             assertEquals("gpt-4", params.get("modelName"));
             assertEquals("sk-key", params.get("apiKey"));
             assertEquals("https://custom.api.com", params.get("baseUrl"));
-            assertEquals("json", params.get("responseFormat"));
+            assertNull(params.get("responseFormat"));
+            assertEquals("true", params.get("convertToObject"));
         }
 
         @Test
@@ -614,7 +614,7 @@ class AgentSetupServiceBranchCoverageTest {
         @Test
         @DisplayName("tool URIs set tools list")
         void toolUris() {
-            var uris = java.util.List.of("/httpcalls/loc1", "/httpcalls/loc2");
+            var uris = List.of("/httpcalls/loc1", "/httpcalls/loc2");
             var config = service.createLlmConfig("anthropic", "claude-3", "key", "prompt",
                     false, null, null, null, false, false, uris);
             var task = config.tasks().get(0);
@@ -667,8 +667,8 @@ class AgentSetupServiceBranchCoverageTest {
         void fullPipeline() {
             var config = service.createWorkflowConfig(
                     "/parser/loc", "/behavior/loc",
-                    java.util.List.of("/http1", "/http2"),
-                    java.util.List.of("/mcp1"),
+                    List.of("/http1", "/http2"),
+                    List.of("/mcp1"),
                     "/langchain/loc", "/output/loc");
             // parser + behavior + 2 httpcalls + 1 mcpcalls + langchain + output = 7
             assertEquals(7, config.getWorkflowSteps().size());
@@ -702,9 +702,9 @@ class AgentSetupServiceBranchCoverageTest {
     class VaultApiKey {
 
         private String invokeVaultApiKey(String apiKey, String agentName) throws Exception {
-            var method = AgentSetupService.class.getDeclaredMethod("vaultApiKey", String.class, String.class);
+            var method = AgentSetupService.class.getDeclaredMethod("vaultApiKey", String.class, String.class, String.class, Map.class);
             method.setAccessible(true);
-            return (String) method.invoke(service, apiKey, agentName);
+            return (String) method.invoke(service, apiKey, agentName, null, null);
         }
 
         @Test
@@ -715,8 +715,8 @@ class AgentSetupServiceBranchCoverageTest {
             String result = invokeVaultApiKey(vaultRef, "MyAgent");
 
             assertEquals(vaultRef, result, "Already-vaulted reference should be returned unchanged");
-            // Should NOT attempt to store anything
-            verifyNoInteractions(secretProvider);
+            // Looked up (so a dangling reference is logged) but never re-vaulted
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), anyList());
         }
 
         @Test
@@ -745,7 +745,8 @@ class AgentSetupServiceBranchCoverageTest {
             String result = invokeVaultApiKey(legacyRef, "LegacyAgent");
 
             assertEquals(legacyRef, result, "Legacy eddivault reference should be returned unchanged");
-            verifyNoInteractions(secretProvider);
+            // Looked up (so a dangling reference is logged) but never re-vaulted
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), anyList());
         }
 
         @Test
@@ -756,7 +757,8 @@ class AgentSetupServiceBranchCoverageTest {
             String result = invokeVaultApiKey(fullRef, "MultiTenantAgent");
 
             assertEquals(fullRef, result, "Full-form vault reference should be returned unchanged");
-            verifyNoInteractions(secretProvider);
+            // Looked up (so a dangling reference is logged) but never re-vaulted
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), anyList());
         }
     }
 }

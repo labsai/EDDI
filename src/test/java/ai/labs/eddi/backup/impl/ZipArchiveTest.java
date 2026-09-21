@@ -73,6 +73,32 @@ class ZipArchiveTest {
     }
 
     @Test
+    void roundTrip_keepsTheConnectionsDirectoryOfAnAgentArchive(@TempDir Path tempDir) throws IOException {
+        // The export writes connections/<id>.connection.json beside the agent file;
+        // the import reads it back from the unzipped tree. The round trip has to
+        // preserve the nested directory and the file's content byte for byte, or the
+        // reference the agent carries dangles on the other side.
+        Path sourceDir = tempDir.resolve("source");
+        Path connectionsDir = sourceDir.resolve("connections");
+        Files.createDirectories(connectionsDir);
+        Files.writeString(sourceDir.resolve("aabb11112222333344445555.agent.json"), "{\"workflows\":[]}");
+        String connectionJson = "{\"name\":\"jira\",\"staticAuth\":{\"valueTemplate\":\"Bearer ${vault:jira-token}\"}}";
+        Files.writeString(connectionsDir.resolve("68a1b2c3d4e5f60718293a4b.connection.json"), connectionJson);
+        Path targetZip = tempDir.resolve("agent.zip");
+
+        zipArchive.createZip(sourceDir.toString(), targetZip.toString(), tempDir);
+        File extracted = tempDir.resolve("extracted").toFile();
+        try (InputStream is = new FileInputStream(targetZip.toFile())) {
+            zipArchive.unzip(is, extracted);
+        }
+
+        File restored = new File(new File(extracted, "connections"), "68a1b2c3d4e5f60718293a4b.connection.json");
+        assertTrue(restored.exists(), "the connections/ directory must survive the round trip");
+        assertEquals(connectionJson, Files.readString(restored.toPath()));
+        assertTrue(new File(extracted, "aabb11112222333344445555.agent.json").exists());
+    }
+
+    @Test
     void createZip_targetEscapesBaseDir_throwsIOException(@TempDir Path tempDir) throws IOException {
         Path sourceDir = tempDir.resolve("source");
         Files.createDirectories(sourceDir);
