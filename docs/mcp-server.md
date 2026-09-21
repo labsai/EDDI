@@ -636,7 +636,7 @@ The [Quick Start](#quick-start) configurations above assume an instance with aut
 
 #### The client signs itself in (preferred)
 
-EDDI advertises `/mcp` as an **OAuth 2.0 protected resource** ([RFC 9728](https://datatracker.ietf.org/doc/html/rfc9728)), which is what lets an MCP client obtain its own token and refresh it indefinitely — no shared credential, nothing for an operator to rotate.
+EDDI advertises `/mcp` as an **OAuth 2.0 protected resource** ([RFC 9728](https://datatracker.ietf.org/doc/html/rfc9728)), which is what lets an MCP client obtain its own token and keep refreshing it — no shared credential, nothing for an operator to rotate. What ends that chain is not the 5-minute access token but the realm's **SSO session idle timeout** (Keycloak's default is 30 minutes): a client idle longer than that runs the browser flow again. Raise `ssoSessionIdleTimeout` on the realm, or grant `eddi-mcp` the `offline_access` scope, if you want it to survive longer.
 
 A client that supports the MCP authorization flow needs only the URL:
 
@@ -655,7 +655,10 @@ Two deployment notes:
 
 Its redirect URIs are `http://localhost:*` and `http://127.0.0.1:*`. Verified against Keycloak 26.7 (the version the auth E2E tier runs; the compose and k8s stacks ship 26.0): both wildcard forms match a loopback callback on any port, PKCE is genuinely required (a request without `code_challenge_method` is refused with `Missing parameter: code_challenge_method`), the password grant is refused, and a non-loopback redirect is refused with `Invalid parameter: redirect_uri`. **Which callback URL your particular client uses is its own business and not something this repo can verify** — if yours is not a loopback URL, add it to `eddi-mcp` in the admin console.
 
-- **Point your client at the client id.** `mcp-remote` takes `--static-oauth-client-info '{"client_id":"eddi-mcp"}'`; other clients have their own setting, and some support only dynamic registration. A client that insists on registering itself (RFC 7591) cannot work against this realm as shipped, because dynamic registration carries no protocol mappers and would hit exactly the role-less-token failure above.
+- **Point your client at the client id.** Discovery names the authorization server, not which client to be, so each client has to be told:
+  - **Claude Code** — `claude mcp add --transport http --client-id eddi-mcp --callback-port 8080 eddi https://eddi.example.com/mcp`. The callback port is worth fixing: without it Claude Code picks a random one, and while `eddi-mcp`'s redirect URIs are wildcards that accept any port, a realm hardened to a single redirect URI would not. **[ext]** Some Claude Code versions attempt dynamic registration even with a client id configured, and fail with "Incompatible auth server: does not support dynamic client registration" — if you hit that, the hand-pasted token below is the fallback.
+  - **`mcp-remote`** — `--static-oauth-client-info '{"client_id":"eddi-mcp"}'`.
+  - Other clients have their own setting, and some support only dynamic registration. A client that insists on registering itself (RFC 7591) cannot work against this realm as shipped, because dynamic registration carries no protocol mappers and would hit exactly the role-less-token failure above.
 - **Claude Desktop connectors redirect to `https://claude.ai/api/mcp/auth_callback`**, not to loopback. That is deliberately *not* in the shipped list: it means the authorization response for your EDDI passes through a third party's endpoint, which is an operator's decision to make rather than a default to inherit. Add it to `eddi-mcp` in the Keycloak admin console if you want it.
 
 > **Upgrading an existing realm: you have to add this client yourself.** Keycloak's
