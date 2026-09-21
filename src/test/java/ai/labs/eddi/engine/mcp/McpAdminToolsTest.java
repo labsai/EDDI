@@ -116,7 +116,7 @@ class McpAdminToolsTest {
             "eddi://ai.labs.langchain, langchain", "eddi://ai.labs.apicalls, httpcalls", "eddi://ai.labs.httpcalls, httpcalls",
             "eddi://ai.labs.mcpcalls, mcpcalls", "eddi://ai.labs.output, output", "eddi://ai.labs.property, propertysetter",
             "eddi://ai.labs.parser, dictionaries", "eddi://ai.labs.dictionary, dictionaries", "eddi://ai.labs.templating, unknown",
-            "eddi://ai.labs.rag, unknown", "eddi://ai.labs.outputsomething, unknown"})
+            "eddi://ai.labs.rag, rag", "eddi://ai.labs.outputsomething, unknown"})
     void uriToResourceType_mapsEveryStepTypeExactly(String stepType, String expected) {
         assertEquals(expected, McpAdminTools.uriToResourceType(stepType));
     }
