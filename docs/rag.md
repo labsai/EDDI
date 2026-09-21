@@ -8,6 +8,8 @@ EDDI's RAG system is a first-class workflow extension that adds contextual knowl
 
 At execution time, the `LlmTask` discovers RAG configurations from the agent's workflow, performs vector similarity search against the user's query, and injects the retrieved context into the LLM system message — all automatically and transparently.
 
+> **Start here:** a knowledge base reaches an agent through **three** configurations, not two. Naming a KB on the LLM task is not enough to bind it — the agent's workflow must also carry an `eddi://ai.labs.rag` step. See [Configuration](#configuration) for all three, and [Troubleshooting](#troubleshooting) if retrieval is silently doing nothing.
+
 ## Architecture
 
 ```
@@ -32,7 +34,23 @@ User Query
 
 ## Configuration
 
-### RagConfiguration (Knowledge Base)
+A knowledge base reaches an agent through **three** configurations. All three are required for
+vector RAG (Options 1 and 2 below); only `httpCallRag` (Option 3) works without them.
+
+| # | What | Where | Purpose |
+|---|---|---|---|
+| 1 | `RagConfiguration` | `/ragstore/rags/{id}` | Defines the KB — embedding provider, vector store, chunking |
+| 2 | **Workflow step** `eddi://ai.labs.rag` | the agent's workflow | **Binds** the KB to the agent. This is what retrieval actually discovers |
+| 3 | `knowledgeBases` / `enableWorkflowRag` | the LLM task (`langchain.json`) | Selects which bound KBs *this task* retrieves from |
+
+> **The most common failure is configuring 1 and 3 but not 2.** `RagContextProvider` matches
+> `knowledgeBases[].name` against RAG configs discovered **from the workflow document**, so with no
+> `eddi://ai.labs.rag` step there is nothing to match against. Retrieval then returns nothing at
+> all — no context, no `rag:trace:*` entry, no error, and no log line above `DEBUG`. The KB config
+> and the task reference can both be perfectly correct and the agent will still answer "I don't
+> know". See [Troubleshooting](#troubleshooting).
+
+### 1. RagConfiguration (Knowledge Base)
 
 A `RagConfiguration` is a versioned resource at `/ragstore/rags/`. It defines:
 
@@ -67,10 +85,61 @@ A `RagConfiguration` is a versioned resource at `/ragstore/rags/`. It defines:
 | `maxResults` | `5` | Default top-K results |
 | `minScore` | `0.6` | Default minimum similarity score (0.0–1.0) |
 
-### LLM Task RAG Configuration
+### 2. Workflow Step (binds the KB to the agent)
+
+The agent's workflow must declare the knowledge base as a step. This is the binding that retrieval
+discovers — without it, Options 1 and 2 below retrieve nothing.
+
+```json
+{
+  "workflowSteps" : [ {
+    "type" : "eddi://ai.labs.parser",
+    "extensions" : { },
+    "config" : { }
+  }, {
+    "type" : "eddi://ai.labs.behavior",
+    "extensions" : { },
+    "config" : {
+      "uri" : "eddi://ai.labs.rules/rulestore/rulesets/{rulesId}?version=1"
+    }
+  }, {
+    "type" : "eddi://ai.labs.rag",
+    "extensions" : { },
+    "config" : {
+      "uri" : "eddi://ai.labs.rag/ragstore/rags/{ragId}?version=1"
+    }
+  }, {
+    "type" : "eddi://ai.labs.llm",
+    "extensions" : { },
+    "config" : {
+      "uri" : "eddi://ai.labs.llm/llmstore/llms/{llmId}?version=1"
+    }
+  } ]
+}
+```
+
+Order does not matter for the RAG step — retrieval reads the workflow document rather than running
+in pipeline order — but keeping it before the LLM step matches how the rest of the pipeline reads.
+
+Add one step per knowledge base the agent should be able to retrieve from. In a ZIP export the
+configuration file is `{ragId}.rag.json`.
+
+The step does no work at conversation time: `RagTask.execute()` is deliberately a no-op, because
+retrieval happens inside the LLM task where the user's query is known. The step exists to *declare*
+the binding, and `RagTask.configure()` resolves the referenced KB so a broken URI fails when the
+workflow is deployed rather than silently returning no context on the first conversation.
+
+> **Requires EDDI with `ai.labs.rag` registered.** `WorkflowStoreClientLibrary` rejects any workflow
+> step whose type is not a registered lifecycle extension, so on a build without it a workflow
+> containing a RAG step cannot be deployed at all, and the Manager's step chooser never offers one.
+> Confirm with `GET /extensionstore/extensions` — if `eddi://ai.labs.rag` is absent, vector RAG
+> cannot be wired up on that deployment at all and only `httpCallRag` works end to end.
+
+### 3. LLM Task RAG Configuration
 
 RAG is wired into LLM tasks via four fields on `LlmConfiguration.Task`. Three of them choose what
-is retrieved:
+is retrieved, one per option below — `knowledgeBases` (Option 1), `enableWorkflowRag` with
+`ragDefaults` (Option 2), and `httpCallRag` (Option 3).
 
 The fourth bounds the result. `maxRagContextChars` (default `20000`) caps the assembled
 RAG context in characters, across every matched knowledge base and any `httpCallRag` response.
@@ -95,7 +164,8 @@ or `0` to disable the cap.
 }
 ```
 
-Each reference names a KB from the workflow and optionally overrides retrieval parameters.
+Each reference names a KB **that the workflow binds via an `eddi://ai.labs.rag` step** (see [step 2](#2-workflow-step-binds-the-kb-to-the-agent)) and optionally overrides retrieval
+parameters. The `name` must match the `name` field of the `RagConfiguration`, not its id. A name that matches no bound KB is skipped silently.
 
 #### Option 2: Auto-Discovery
 
@@ -108,7 +178,7 @@ Each reference names a KB from the workflow and optionally overrides retrieval p
 }
 ```
 
-When `enableWorkflowRag` is `true`, the system discovers all RAG steps from the workflow automatically.
+When `enableWorkflowRag` is `true`, the system retrieves from every KB the workflow binds, with no per-KB list to maintain. It still discovers those KBs from the workflow's `eddi://ai.labs.rag` steps — an agent with no such step has nothing to auto-discover.
 
 #### Option 3: httpCall RAG (Phase 8c-0)
 
@@ -120,7 +190,9 @@ When `enableWorkflowRag` is `true`, the system discovers all RAG steps from the 
 }
 ```
 
-Zero-infrastructure RAG: execute a named httpCall and inject its response as `## Search Results:` context. The user's input is available as `{userInput}` in httpCall templates. No vector store needed. Both httpCall RAG and vector RAG can be active simultaneously.
+Zero-infrastructure RAG: execute a named httpCall and inject its response as `## Search Results:` context. The user's input is available as `{userInput}` in httpCall templates. No vector store and no workflow RAG step needed. Both httpCall RAG and vector RAG can be active simultaneously.
+
+> This calls an **external** search API. It cannot be pointed at an EDDI knowledge base: `/ragstore/rags/` exposes configuration and ingestion only, with no retrieval endpoint — see [REST API](#rest-api).
 
 #### Context Injection
 
@@ -141,6 +213,11 @@ Retrieved vector-RAG context (Options 1 and 2) is **always** appended to the LLM
 | `PUT` | `/ragstore/rags/{id}?version=N` | Update a KB |
 | `POST` | `/ragstore/rags/{id}?version=N` | Duplicate a KB |
 | `DELETE` | `/ragstore/rags/{id}?version=N` | Delete a KB |
+
+> **There is no retrieval endpoint.** `/ragstore/rags/` covers configuration and ingestion only —
+> there is no `/query`, `/search` or `/retrieve`, and requests to those return `404`. Retrieval is
+> reachable only from inside a conversation, through the LLM task. That also means `httpCallRag`
+> cannot be used as a workaround to search an EDDI knowledge base; it needs an external search API.
 
 ### Document Ingestion
 
@@ -359,6 +436,41 @@ RAG operations write audit traces to conversation memory:
 
 These are visible in the conversation memory snapshot and the audit ledger.
 
+## Troubleshooting
+
+### No context is injected, and there is no error
+
+Symptoms: the model answers as though it had never seen the corpus, the compiled prompt carries no
+`## Relevant Context:` block, conversation memory holds no `rag:trace:*` or `rag:context:*` entry,
+and the logs show nothing from `RagContextProvider` or `EmbeddingStoreFactory` while other providers
+log on every turn.
+
+That combination is one specific thing: **retrieval found no knowledge base bound to the agent** and
+returned before doing any work. Everything after that point — the trace entry, the store build, the
+INFO log — is downstream of a match, and the only log on the early-return path is at `DEBUG`
+(`No RAG steps found in workflow`). Work through it in this order:
+
+| # | Check | How |
+|---|---|---|
+| 1 | Is `ai.labs.rag` a registered extension? | `GET /extensionstore/extensions`. If absent, this build cannot deploy a RAG step at all — upgrade; only `httpCallRag` works until then |
+| 2 | Does the agent's workflow carry an `eddi://ai.labs.rag` step? | Read the workflow config. **This is the usual cause** — see [step 2](#2-workflow-step-binds-the-kb-to-the-agent) |
+| 3 | Does `knowledgeBases[].name` match the KB's `name`? | Compare against the `RagConfiguration`. It matches on `name`, not id, and a miss is skipped silently |
+| 4 | Is the deployed agent version the one you edited? | Retrieval reads the workflow of the agent version in the conversation, and configs are versioned |
+| 5 | Was anything actually ingested — and is it still there? | Poll the ingestion status. On an `in-memory` store, confirm nothing has evicted it since (see [Vector Stores](#vector-stores)) |
+
+Raise `RagContextProvider` to `DEBUG` to see the early return directly:
+
+```properties
+quarkus.log.category."ai.labs.eddi.modules.llm.impl.RagContextProvider".level=DEBUG
+```
+
+### Context is retrieved but the answer ignores it
+
+Check `rag:context:{taskId}` in conversation memory for what was actually injected. If it ends in a
+`[... N further retrieved passage(s) omitted ...]` marker, the block hit `maxRagContextChars` — raise
+it, or lower `maxResults` or the number of knowledge bases. If the passages are present but
+irrelevant, lower `minScore` to widen the search or raise it to tighten it.
+
 ## Embedding Providers
 
 | Provider | Default Model | Required Parameters | Notes |
@@ -376,12 +488,20 @@ These are visible in the conversation memory snapshot and the audit ledger.
 
 | Store Type | Required Parameters | Notes |
 |---|---|---|
-| `in-memory` | — | Ephemeral, for dev/test only |
+| `in-memory` | — | Ephemeral, for dev/test only — **loses every ingested document** on restart, after 30 minutes without a query, or on any secret rotation (see below) |
 | `pgvector` | `password` | PostgreSQL + pgvector; `host`, `port`, `database`, `user`, `table`, `dimension` |
 | `mongodb-atlas` | `connectionString` | MongoDB Atlas Vector Search; `databaseName`, `collectionName`, `indexName` |
 | `elasticsearch` | — | `serverUrl` (default: `localhost:9200`); optional `apiKey` or `userName`+`password`; `indexName` |
 | `qdrant` | — | `host` (default: `localhost`), `port` (default: `6334`); optional `apiKey`, `useTls`; `collectionName` |
 | `chroma` | — | `baseUrl` (default: `http://localhost:8000`); `collectionName` |
+
+> **`in-memory` is not a small-corpus option, it is a dev/test option.** For this store the cached
+> object *is* the data, and `EmbeddingStoreFactory` holds it in a bounded Caffeine cache — max 50
+> stores, `expireAfterAccess` of 30 minutes, and a full invalidation whenever a vault secret or a
+> global variable changes. So an in-memory KB silently empties itself after 30 minutes with no
+> retrieval, on every restart, and on any credential rotation, and the next query returns no context
+> rather than an error. Re-ingesting refills it until the next eviction. Any agent expected to answer
+> from a knowledge base tomorrow needs a persistent store — `pgvector` is the tested default.
 
 ## Status
 
@@ -391,7 +511,7 @@ These are visible in the conversation memory snapshot and the audit ledger.
 - ✅ **Phase 8c-γ**: RAG provider expansion (8 embedding models + 6 vector stores)
 - ✅ **Phase 8c-M**: Manager UI — RAG editor with full provider parity + document ingestion
 - ✅ **REST ingestion endpoint**: `POST /ragstore/rags/{id}/ingest`
-- ✅ **Workflow step registration**: `eddi://ai.labs.rag` is a registered lifecycle extension, so a workflow can declare a knowledge-base step and the Manager offers it (before this, Options 1 and 2 below could be saved but not deployed)
+- ✅ **Workflow step registration**: `eddi://ai.labs.rag` is a registered lifecycle extension, so a workflow can declare a knowledge-base step and the Manager offers it. On a build without it, [Options 1 and 2](#3-llm-task-rag-configuration) can be saved but not deployed, and only `httpCallRag` works end to end — check with `GET /extensionstore/extensions`
 
 ## Future Enhancements
 

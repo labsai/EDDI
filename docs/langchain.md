@@ -633,6 +633,11 @@ Both are exposed as parameters:
 | `maxToolsInContext`        | int      | Maximum tool specifications returned per discovery call under `LAZY`. Ignored under `EAGER` | 20 |
 | `retry`                    | object   | Retry policy for LLM calls — see [Retry configuration](#retry-configuration) | (none) |
 | `responseValidation`       | object   | Validates the model's response and applies a remediation action. Policies: `onEmpty`, `onTruncation`, `onContentFilter`, `onRefusal`, `onStreamingTimeout` | (none) |
+| **Retrieval (RAG)**        |          | Requires the agent's workflow to bind the knowledge base with an `eddi://ai.labs.rag` step — see [RAG](rag.md#configuration) | |
+| `knowledgeBases`           | object[] | Knowledge bases this task retrieves from, by `name`, each optionally overriding `maxResults` / `minScore`. The name must match a KB the workflow binds; an unmatched name is skipped silently | (none) |
+| `enableWorkflowRag`        | boolean  | Retrieve from **every** knowledge base the workflow binds, instead of listing them. Ignored when `knowledgeBases` is set | false |
+| `ragDefaults`              | object   | `maxResults` / `minScore` applied under `enableWorkflowRag`; falls back to each KB's own defaults | (KB defaults) |
+| `httpCallRag`              | string   | Name of an httpCall to execute as a search, injecting its response as `## Search Results:`. Needs no vector store and no workflow step, but calls an **external** search API — it cannot query an EDDI knowledge base | (none) |
 | `maxRagContextChars`       | int      | Ceiling on the assembled RAG context, in characters. `-1` or `0` disables it and restores the older unbounded behaviour | 20000 |
 | `maxSystemPromptChars`     | int      | Hard ceiling on the whole assembled system prompt, applied after RAG context, counterweight, identity masking and response-format blocks are appended. `-1` leaves it untouched | -1 |
 | `conversationSummary`      | object   | Rolling conversation summary — see [Rolling Conversation Summary](#rolling-conversation-summary) | (none) |
