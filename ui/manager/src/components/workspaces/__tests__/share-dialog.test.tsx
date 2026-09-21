@@ -74,7 +74,7 @@ describe("ShareDialog", () => {
     await userEvent.selectOptions(screen.getByTestId("share-level-select"), "OWN");
     await userEvent.click(screen.getByTestId("share-submit"));
 
-    expect(screen.getByTestId("share-owner-warning")).toBeInTheDocument();
+    expect(await screen.findByTestId("share-owner-warning")).toBeInTheDocument();
     expect(shared).not.toHaveBeenCalled();
 
     await userEvent.click(screen.getByTestId("share-submit"));
@@ -90,10 +90,10 @@ describe("ShareDialog", () => {
     await userEvent.type(screen.getByTestId("share-subject-input"), "bob");
     await userEvent.selectOptions(screen.getByTestId("share-level-select"), "OWN");
     await userEvent.click(screen.getByTestId("share-submit"));
-    expect(screen.getByTestId("share-owner-warning")).toBeInTheDocument();
+    expect(await screen.findByTestId("share-owner-warning")).toBeInTheDocument();
 
     await userEvent.selectOptions(screen.getByTestId("share-level-select"), "VIEW");
-    expect(screen.queryByTestId("share-owner-warning")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByTestId("share-owner-warning")).not.toBeInTheDocument());
   });
 
   it("shares at the chosen level without a second click for every other level", async () => {
@@ -228,15 +228,15 @@ describe("ShareDialog", () => {
     await userEvent.type(input, "bob");
     await userEvent.selectOptions(screen.getByTestId("share-level-select"), "OWN");
     await userEvent.click(screen.getByTestId("share-submit"));
-    expect(screen.getByTestId("share-owner-warning")).toBeInTheDocument();
+    expect(await screen.findByTestId("share-owner-warning")).toBeInTheDocument();
 
     await userEvent.clear(input);
     await userEvent.type(input, "carol");
 
     // The warning is gone, and the next click re-arms rather than transferring.
-    expect(screen.queryByTestId("share-owner-warning")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByTestId("share-owner-warning")).not.toBeInTheDocument());
     await userEvent.click(screen.getByTestId("share-submit"));
-    expect(screen.getByTestId("share-owner-warning")).toBeInTheDocument();
+    expect(await screen.findByTestId("share-owner-warning")).toBeInTheDocument();
     expect(sentSubject).toBeNull();
   });
 
@@ -260,7 +260,7 @@ describe("ShareDialog", () => {
     await userEvent.selectOptions(screen.getByTestId("share-level-select"), "OWN");
     await userEvent.type(screen.getByTestId("share-subject-input"), "{Enter}{Enter}");
 
-    expect(screen.getByTestId("share-owner-warning")).toBeInTheDocument();
+    expect(await screen.findByTestId("share-owner-warning")).toBeInTheDocument();
     expect(shared).not.toHaveBeenCalled();
   });
 
