@@ -5,7 +5,6 @@
 package ai.labs.eddi.engine.runtime;
 
 import ai.labs.eddi.engine.model.LogEntry;
-import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -164,8 +163,11 @@ public class BoundedLogStore {
             if (message == null || message.isEmpty())
                 return;
 
-            // Redact potential secrets from log messages (defense-in-depth)
-            message = SecretRedactionFilter.redact(message);
+            // Redact potential secrets from log messages, and escape anything that
+            // could end a record, exactly as LogRecordRedactor would have. The ring
+            // buffer is read back through the admin log API and the SSE live tail,
+            // so a forged boundary kept here forges an entry there too.
+            message = LogRecordRedactor.rewrite(message);
         }
         if (message.isEmpty())
             return;
