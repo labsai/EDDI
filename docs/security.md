@@ -75,6 +75,28 @@ docker run -e QUARKUS_OIDC_TENANT_ENABLED=true \
            labsai/eddi:latest
 ```
 
+### The Token Must Name the User
+
+EDDI files conversations, memories and approvals under the principal name.
+Quarkus reads it from `quarkus.oidc.token.principal-claim` or, when that is unset,
+from the first of `upn`, `preferred_username` and `sub` the token carries. A
+token that carries none of them still validates, but its principal has no name,
+and nothing can be owned by nobody.
+
+EDDI therefore **rejects such a token with `401`** (`NamelessPrincipalAugmentor`)
+and logs a `[SECURITY]` WARN, at most once every five minutes, naming the claims
+it looked for and the token's issuer and client (`azp`). The ownership checks deny
+a nameless caller with `403` as a second line of defence. Background work
+(schedule fires, group members, sub-agents) never authenticates a request and is
+unaffected.
+
+If you see that WARN, either add one of those claims to the access token — for the
+shipped realm, [Identity claims, and realms imported from EDDI
+6.1.0–6.4.0](#identity-claims-and-realms-imported-from-eddi-610640) below is the
+repair — or set `QUARKUS_OIDC_TOKEN_PRINCIPAL_CLAIM` to a claim your provider does
+emit. Pick a claim that is stable and unique per user: ownership is keyed on its
+value, so a changed name orphans everything filed under the old one.
+
 > **Roles are deployment-wide.** `eddi-editor` grants authoring rights over
 > *every* configuration in the deployment. To scope agents, workflows and the
 > rest to the user or team that created them — and to share them deliberately —
@@ -148,7 +170,13 @@ defined a single client scope, and a realm file that defines any client scopes
 gets only those: Keycloak creates its built-in ones only for realms that define
 none. The import logs `Referenced client scope 'profile' doesn't exist. Ignoring`
 and carries on. Tokens still authenticated and still carried their roles, so
-logins worked and role checks passed, but every caller's principal had no name:
+logins worked and role checks passed, but every caller's principal had no name.
+
+**From this release on, such a token is refused outright:** every request answers
+`401` (see [The Token Must Name the User](#the-token-must-name-the-user) above),
+so an install carrying an unrepaired realm cannot be used until the repair below
+has been run. Up to and including 6.4.0 the same token was let through, and the
+damage was quieter:
 
 - Every conversation was stamped with a random `anonymous-<hex>` owner instead of
   the user, and long-term user memories were filed under that same per-conversation
@@ -158,6 +186,10 @@ logins worked and role checks passed, but every caller's principal had no name:
 - `GET /workspaces` reported no principal, so workspaces had nothing to scope to.
 - The Manager showed "?" in place of the user's initials and no name in the user
   menu.
+
+Conversations and memories written while the realm was broken keep their
+`anonymous-<hex>` owner, as described at the end of this section — the `401` stops
+new ones from being created that way.
 
 Realm import only runs on first boot, so a fixed realm file does not reach a
 Keycloak that already has the `eddi` realm:
