@@ -110,7 +110,7 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
      */
     private final int maxDeadLetters;
 
-    private static final Logger log = Logger.getLogger(InMemoryConversationCoordinator.class);
+    private static final Logger LOGGER = Logger.getLogger(InMemoryConversationCoordinator.class);
 
     @Inject
     public InMemoryConversationCoordinator(IRuntime runtime, MeterRegistry meterRegistry,
@@ -147,7 +147,7 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
         // could both pass the check and briefly exceed maxActiveConversations.
         // This is acceptable for a soft backpressure limit.
         if (!conversationQueues.containsKey(conversationId) && conversationQueues.size() >= maxActiveConversations) {
-            log.warnf("Coordinator capacity exceeded (%d active conversations). Rejecting new conversationId=%s", maxActiveConversations,
+            LOGGER.warnf("Coordinator capacity exceeded (%d active conversations). Rejecting new conversationId=%s", maxActiveConversations,
                     safeConversationId);
             throw new RejectedExecutionException(
                     "Coordinator capacity exceeded: " + maxActiveConversations + " active conversations. Try again later.");
@@ -170,7 +170,7 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
                 // If not, another thread cleaned it up — retry.
                 if (conversationQueues.get(conversationId) != queue) {
                     if (attempt >= 3) {
-                        log.debugf("CAS loop retried %d times for conversationId=%s (expected 0-1)", attempt, safeConversationId);
+                        LOGGER.debugf("CAS loop retried %d times for conversationId=%s (expected 0-1)", attempt, safeConversationId);
                     }
                     continue; // retry with fresh computeIfAbsent
                 }
@@ -178,7 +178,7 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
                 boolean wasEmpty = queue.isEmpty();
                 boolean enqueued = queue.offer(callable);
                 if (!enqueued) {
-                    log.warnf("Failed to enqueue task for conversationId=%s", safeConversationId);
+                    LOGGER.warnf("Failed to enqueue task for conversationId=%s", safeConversationId);
                     throw new RejectedExecutionException("Failed to enqueue task for conversationId=" + safeConversationId);
                 }
 
@@ -200,7 +200,7 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
                         if (queue.isEmpty()) {
                             conversationQueues.remove(conversationId, queue);
                         }
-                        log.warnf("Submission failed for conversationId=%s — rolled the task back off the queue "
+                        LOGGER.warnf("Submission failed for conversationId=%s — rolled the task back off the queue "
                                 + "so the conversation stays usable", safeConversationId);
                         throw e;
                     }
@@ -231,7 +231,7 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
 
             @Override
             public void onFailure(Throwable t) {
-                log.errorf(t, "In-memory task failed after it had already started (conversationId=%s) — dead-lettering "
+                LOGGER.errorf(t, "In-memory task failed after it had already started (conversationId=%s) — dead-lettering "
                         + "without retry; re-running it would repeat any side effects it already performed",
                         sanitize(conversationId));
                 routeToDeadLetter(conversationId, t);
@@ -290,7 +290,7 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
                         // the queue non-empty with nothing scheduled to drain it, wedging
                         // the conversation forever. Dead-letter the task we could not
                         // schedule and try the next one.
-                        log.errorf(e, "Failed to schedule the next queued task (conversationId=%s) — dead-lettering it "
+                        LOGGER.errorf(e, "Failed to schedule the next queued task (conversationId=%s) — dead-lettering it "
                                 + "so the conversation queue keeps draining", sanitize(conversationId));
                         routeToDeadLetter(conversationId, e);
                         totalProcessed.incrementAndGet();
@@ -332,7 +332,7 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
         } catch (RuntimeException | Error hookFailure) {
             // The hook is best effort — a failing one must never break the drain
             // of the remaining queue.
-            log.errorf(hookFailure, "Discard hook failed for conversationId=%s", sanitize(conversationId));
+            LOGGER.errorf(hookFailure, "Discard hook failed for conversationId=%s", sanitize(conversationId));
         }
     }
 
@@ -394,7 +394,7 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
             DeadLetterEntry entry = it.next();
             if (entry.id().equals(entryId)) {
                 it.remove();
-                log.infof("Replayed dead-letter %s for conversation %s (in-memory — task reference lost, removed from DL queue)",
+                LOGGER.infof("Replayed dead-letter %s for conversation %s (in-memory — task reference lost, removed from DL queue)",
                         sanitize(entryId), sanitize(entry.conversationId()));
                 return true;
             }
@@ -409,7 +409,7 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
             DeadLetterEntry entry = it.next();
             if (entry.id().equals(entryId)) {
                 it.remove();
-                log.infof("Discarded dead-letter %s for conversation %s", sanitize(entryId), sanitize(entry.conversationId()));
+                LOGGER.infof("Discarded dead-letter %s for conversation %s", sanitize(entryId), sanitize(entry.conversationId()));
                 return true;
             }
         }
@@ -420,7 +420,7 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
     public int purgeDeadLetters() {
         int count = deadLetters.size();
         deadLetters.clear();
-        log.infof("Purged %d dead-letter entries (in-memory)", count);
+        LOGGER.infof("Purged %d dead-letter entries (in-memory)", count);
         return count;
     }
 }

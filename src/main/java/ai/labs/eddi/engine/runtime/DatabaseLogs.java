@@ -41,7 +41,7 @@ public class DatabaseLogs implements IDatabaseLogs {
     public static final String TIMESTAMP = "timestamp";
     private final MongoCollection<Document> logsCollection;
 
-    private static final Logger log = Logger.getLogger(DatabaseLogs.class);
+    private static final Logger LOGGER = Logger.getLogger(DatabaseLogs.class);
 
     @Inject
     public DatabaseLogs(MongoDatabase database) {
@@ -85,7 +85,7 @@ public class DatabaseLogs implements IDatabaseLogs {
         try {
             logsCollection.insertMany(documents);
         } catch (Exception e) {
-            log.errorv("Failed to batch-insert {0} log entries: {1}", entries.size(), e.getMessage());
+            LOGGER.errorv("Failed to batch-insert {0} log entries: {1}", entries.size(), e.getMessage());
         }
     }
 

@@ -50,7 +50,7 @@ public abstract class ThreadContext {
 
     private static final ThreadLocal<Map<Object, Object>> resources = new InheritableThreadLocalMap<>();
 
-    private static final Logger log = Logger.getLogger(ThreadContext.class);
+    private static final Logger LOGGER = Logger.getLogger(ThreadContext.class);
 
     /**
      * Default no-argument constructor.
@@ -112,16 +112,16 @@ public abstract class ThreadContext {
      *         exists for the specified <code>key</code>
      */
     public static Object get(Object key) {
-        if (log.isTraceEnabled()) {
+        if (LOGGER.isTraceEnabled()) {
             String msg = "get() - in thread [" + Thread.currentThread().getName() + "]";
-            log.trace(msg);
+            LOGGER.trace(msg);
         }
 
         Object value = getValue(key);
-        if ((value != null) && log.isTraceEnabled()) {
+        if ((value != null) && LOGGER.isTraceEnabled()) {
             String msg = "Retrieved value of type [" + value.getClass().getName() + "] for key [" + key + "] " + "bound to thread ["
                     + Thread.currentThread().getName() + "]";
-            log.trace(msg);
+            LOGGER.trace(msg);
         }
         return value;
     }
@@ -159,10 +159,10 @@ public abstract class ThreadContext {
 
         resources.get().put(key, value);
 
-        if (log.isTraceEnabled()) {
+        if (LOGGER.isTraceEnabled()) {
             String msg = "Bound value of type [" + value.getClass().getName() + "] for key [" + key + "] to thread " + "["
                     + Thread.currentThread().getName() + "]";
-            log.trace(msg);
+            LOGGER.trace(msg);
         }
     }
 
@@ -177,10 +177,10 @@ public abstract class ThreadContext {
     public static Object remove(Object key) {
         Object value = resources.get().remove(key);
 
-        if ((value != null) && log.isTraceEnabled()) {
+        if ((value != null) && LOGGER.isTraceEnabled()) {
             String msg = "Removed value of type [" + value.getClass().getName() + "] for key [" + key + "]" + "from thread ["
                     + Thread.currentThread().getName() + "]";
-            log.trace(msg);
+            LOGGER.trace(msg);
         }
 
         return value;

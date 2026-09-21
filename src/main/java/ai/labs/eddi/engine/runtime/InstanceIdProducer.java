@@ -22,7 +22,7 @@ import java.util.UUID;
 @ApplicationScoped
 public class InstanceIdProducer {
 
-    private static final Logger log = Logger.getLogger(InstanceIdProducer.class);
+    private static final Logger LOGGER = Logger.getLogger(InstanceIdProducer.class);
 
     private String instanceId;
 
@@ -33,7 +33,7 @@ public class InstanceIdProducer {
             hostname = InetAddress.getLocalHost().getHostName();
         } catch (Exception e) {
             hostname = "unknown";
-            log.debugv("Could not resolve hostname, using 'unknown': {0}", e.getMessage());
+            LOGGER.debugv("Could not resolve hostname, using 'unknown': {0}", e.getMessage());
         }
 
         String shortUuid = UUID.randomUUID().toString().substring(0, 4);

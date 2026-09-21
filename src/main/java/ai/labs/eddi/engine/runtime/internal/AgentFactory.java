@@ -53,7 +53,7 @@ public class AgentFactory implements IAgentFactory {
     @Inject
     VaultGrantGate vaultGrantGate;
 
-    private static final Logger log = Logger.getLogger(AgentFactory.class);
+    private static final Logger LOGGER = Logger.getLogger(AgentFactory.class);
 
     @Inject
     public AgentFactory(IAgentStoreClientLibrary agentStoreClientLibrary, IDeploymentListener deploymentListener, MeterRegistry meterRegistry) {
@@ -184,7 +184,7 @@ public class AgentFactory implements IAgentFactory {
             // Re-fetch the agent after deployment is complete
             IAgent agent = getAgentEnvironment(environment).get(agentIdObj);
             if (agent == null) {
-                log.error("Agent deployment did not complete successfully for agentId: " + agentIdObj);
+                LOGGER.error("Agent deployment did not complete successfully for agentId: " + agentIdObj);
                 return null;
             }
             if (agent.getDeploymentStatus() == Deployment.Status.IN_PROGRESS) {
@@ -193,9 +193,9 @@ public class AgentFactory implements IAgentFactory {
                 // and "not ready yet" is an ordinary answer, not a failure worth an
                 // ERROR on every poll.
                 if (deploymentFuture == null) {
-                    log.debugf("Agent %s is still deploying and no deployment future was registered — reporting not ready", agentIdObj);
+                    LOGGER.debugf("Agent %s is still deploying and no deployment future was registered — reporting not ready", agentIdObj);
                 } else {
-                    log.error("Agent deployment did not complete successfully for agentId: " + agentIdObj);
+                    LOGGER.error("Agent deployment did not complete successfully for agentId: " + agentIdObj);
                 }
                 return null;
             }
@@ -204,16 +204,16 @@ public class AgentFactory implements IAgentFactory {
         } catch (TimeoutException e) {
             // This caller's own patience ran out — the deployment itself may still
             // finish, and the shared future stays pending for everyone else.
-            log.warnf("Agent %s was still deploying after %ds — reporting not ready to this caller", agentIdObj, DEPLOYMENT_WAIT_SECONDS);
+            LOGGER.warnf("Agent %s was still deploying after %ds — reporting not ready to this caller", agentIdObj, DEPLOYMENT_WAIT_SECONDS);
             return null;
         } catch (InterruptedException e) {
             // Newly reachable through the timed get() (join() threw unchecked).
             // Restore the flag so the interrupt is not silently swallowed.
             Thread.currentThread().interrupt();
-            log.warnf("Interrupted while waiting for agent %s to deploy — reporting not ready", agentIdObj);
+            LOGGER.warnf("Interrupted while waiting for agent %s to deploy — reporting not ready", agentIdObj);
             return null;
         } catch (Exception e) {
-            log.error("Error while waiting for agent deployment: " + e.getMessage(), e);
+            LOGGER.error("Error while waiting for agent deployment: " + e.getMessage(), e);
             return null;
         }
     }
@@ -244,17 +244,17 @@ public class AgentFactory implements IAgentFactory {
         IAgent existingAgent = agentEnvironment.putIfAbsent(id, placeholder);
         if (existingAgent != null) {
             if (existingAgent.getDeploymentStatus() == Deployment.Status.READY) {
-                log.debugf("Agent is already deployed: %s (environment=%s, version=%s)", sanitize(agentId), environment, version);
+                LOGGER.debugf("Agent is already deployed: %s (environment=%s, version=%s)", sanitize(agentId), environment, version);
                 finalDeploymentProcess.completed(Deployment.Status.READY);
                 return;
             }
             if (existingAgent.getDeploymentStatus() == Deployment.Status.IN_PROGRESS) {
-                log.debugf("Agent deployment is already in progress: %s (environment=%s, version=%s)", sanitize(agentId), environment, version);
+                LOGGER.debugf("Agent deployment is already in progress: %s (environment=%s, version=%s)", sanitize(agentId), environment, version);
                 return;
             }
             // ERROR — retry, but only if nobody else claimed the retry first.
             if (!agentEnvironment.replace(id, existingAgent, placeholder)) {
-                log.debugf("Agent redeploy already claimed by another caller: %s (environment=%s, version=%s)", sanitize(agentId), environment,
+                LOGGER.debugf("Agent redeploy already claimed by another caller: %s (environment=%s, version=%s)", sanitize(agentId), environment,
                         version);
                 return;
             }
@@ -288,7 +288,7 @@ public class AgentFactory implements IAgentFactory {
             // still the mapped value, so an interleaved undeploy (or a competing
             // redeploy) keeps its outcome.
             if (!agentEnvironment.replace(id, placeholder, agent)) {
-                log.infof("Agent %s v%s was undeployed or re-claimed while it was loading - not publishing this deployment",
+                LOGGER.infof("Agent %s v%s was undeployed or re-claimed while it was loading - not publishing this deployment",
                         sanitize(agentId), version);
                 // The load itself succeeded, and the undeploy is a later, deliberate
                 // action that legitimately wins; report success to the caller that
@@ -300,7 +300,7 @@ public class AgentFactory implements IAgentFactory {
             finalDeploymentProcess.completed(Deployment.Status.READY);
             logAgentDeployment(environment.toString(), agentId, version, Deployment.Status.READY);
         } catch (ServiceException e) {
-            log.error("Agent deployment failed for " + sanitize(agentId) + " v" + version + ": " + e.getMessage(), e);
+            LOGGER.error("Agent deployment failed for " + sanitize(agentId) + " v" + version + ": " + e.getMessage(), e);
             placeholder.setDeploymentStatus(Deployment.Status.ERROR);
             finalDeploymentProcess.completed(Deployment.Status.ERROR);
             logAgentDeployment(environment.toString(), agentId, version, Deployment.Status.ERROR);
@@ -383,9 +383,9 @@ public class AgentFactory implements IAgentFactory {
 
     private void logAgentDeployment(String environment, String agentId, Integer agentVersion, Deployment.Status status) {
         if (status == Deployment.Status.IN_PROGRESS) {
-            log.info(String.format("Deploying agent... (environment=%s, agentId=%s, version=%s)", environment, agentId, agentVersion));
+            LOGGER.info(String.format("Deploying agent... (environment=%s, agentId=%s, version=%s)", environment, agentId, agentVersion));
         } else {
-            log.info(String.format("Agent deployed with status: %s (environment=%s, agentId=%s, version=%s)", status, environment, agentId,
+            LOGGER.info(String.format("Agent deployed with status: %s (environment=%s, agentId=%s, version=%s)", status, environment, agentId,
                     agentVersion));
         }
     }
