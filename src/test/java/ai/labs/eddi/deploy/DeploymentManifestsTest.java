@@ -1989,10 +1989,14 @@ class DeploymentManifestsTest {
 
             for (Path realm : List.of(COMPOSE_REALM, KUSTOMIZE_REALM, HELM_REALM)) {
                 for (JsonNode candidate : JSON.readTree(realm.toFile()).path("clients")) {
-                    // Any client that can obtain a token, by any flow — a service
-                    // account mints one without a human and is refused just as hard.
+                    // Any client that can obtain a token, by any flow: a service
+                    // account mints one without a human, and Keycloak's implicit
+                    // flow returns an access token straight from the authorization
+                    // endpoint. An implicit-only client left out of this check could
+                    // ship without the audience mapper and be refused at runtime.
                     boolean mintsTokens = candidate.path("standardFlowEnabled").asBoolean()
                             || candidate.path("directAccessGrantsEnabled").asBoolean()
+                            || candidate.path("implicitFlowEnabled").asBoolean()
                             || candidate.path("serviceAccountsEnabled").asBoolean();
                     if (!mintsTokens) {
                         continue; // eddi-backend is bearer-only: it validates tokens, it does not mint them

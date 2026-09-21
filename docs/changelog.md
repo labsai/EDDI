@@ -74,8 +74,8 @@ intended this check and never switched it on. It matters more now that a second 
   consulted at all. What it defers is the userinfo call, which doubles as a session-revocation
   check (Keycloak refuses userinfo for a logged-out session) — so a killed session keeps working
   for up to the TTL. That, not token expiry, is why the TTL is short.
-- **`DeploymentManifestsTest`** — every client that can mint a token (any flow, service accounts
-  included) must mint the audience the property requires, in all three realm copies, compared
+- **`DeploymentManifestsTest`** — every client that can mint a token (standard, direct-grant,
+  implicit or service-account flow) must mint the audience the property requires, in all three realm copies, compared
   against the property rather than a spelling repeated in the test.
 - **`docs/security.md`**, **`docs/open-webui-integration.md`** — both properties in the table, what
   a hand-built realm has to do, and the `/v1` adapter's 401-under-OIDC entry, which now also means
