@@ -57,7 +57,7 @@ class RestA2AEndpointTest {
     @Test
     void getDefaultAgentCard_noAgents_returns404() {
         endpoint = createEndpoint(true, false);
-        when(agentCardService.listA2AAgents()).thenReturn(List.of());
+        when(agentCardService.getDefaultAgentCard()).thenReturn(null);
 
         Response response = endpoint.getDefaultAgentCard();
 
@@ -71,14 +71,29 @@ class RestA2AEndpointTest {
         endpoint = createEndpoint(true, false);
         var card1 = new AgentCard("Agent1", "First agent", "http://localhost/a2a/agents/1",
                 "EDDI", "1.0", null, null, null);
-        var card2 = new AgentCard("Agent2", "Second agent", "http://localhost/a2a/agents/2",
-                "EDDI", "1.0", null, null, null);
-        when(agentCardService.listA2AAgents()).thenReturn(List.of(card1, card2));
+        when(agentCardService.getDefaultAgentCard()).thenReturn(card1);
 
         Response response = endpoint.getDefaultAgentCard();
 
         assertEquals(200, response.getStatus());
         assertEquals(card1, response.getEntity());
+    }
+
+    /**
+     * The endpoint is anonymous, so what it costs per request is part of its
+     * contract. It used to ask for the whole roster and return element zero;
+     * AgentCardService.getDefaultAgentCard stops at the first match instead.
+     */
+    @Test
+    void getDefaultAgentCard_doesNotEnumerateTheRoster() {
+        endpoint = createEndpoint(true, false);
+        when(agentCardService.getDefaultAgentCard()).thenReturn(
+                new AgentCard("Agent1", "First agent", "http://localhost/a2a/agents/1",
+                        "EDDI", "1.0", null, null, null));
+
+        endpoint.getDefaultAgentCard();
+
+        verify(agentCardService, never()).listA2AAgents();
     }
 
     // ==================== getAgentCard ====================
