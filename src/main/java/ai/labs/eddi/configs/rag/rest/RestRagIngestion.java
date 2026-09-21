@@ -8,7 +8,10 @@ import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.rag.IRestRagIngestion;
 import ai.labs.eddi.configs.rag.IRestRagStore;
+import ai.labs.eddi.configs.rag.model.IngestionSource;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.modules.ingestion.PreviewBusyException;
+import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import ai.labs.eddi.modules.rag.RagIngestionService;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -30,14 +33,17 @@ public class RestRagIngestion implements IRestRagIngestion {
 
     private final IRestRagStore restRagStore;
     private final RagIngestionService ragIngestionService;
+    private final RagSourceIngestionService sourceIngestionService;
 
     private final ResourceAccessGuard resourceAccessGuard;
 
     @Inject
-    public RestRagIngestion(IRestRagStore restRagStore, RagIngestionService ragIngestionService, ResourceAccessGuard resourceAccessGuard) {
+    public RestRagIngestion(IRestRagStore restRagStore, RagIngestionService ragIngestionService,
+            RagSourceIngestionService sourceIngestionService, ResourceAccessGuard resourceAccessGuard) {
         this.resourceAccessGuard = resourceAccessGuard;
         this.restRagStore = restRagStore;
         this.ragIngestionService = ragIngestionService;
+        this.sourceIngestionService = sourceIngestionService;
     }
 
     @Override
@@ -90,5 +96,138 @@ public class RestRagIngestion implements IRestRagIngestion {
                     .build();
         }
         return Response.ok(Map.of("ingestionId", ingestionId, "status", status)).build();
+    }
+
+    // --- Ingestion sources ---
+
+    @Override
+    public Response runSource(String ragConfigId, String sourceId, Integer version) {
+        // EDIT for the same reason ingestDocument needs it: a run rewrites the
+        // knowledge base every agent using this config retrieves from, and a
+        // published config grants VIEW to everyone by design.
+        resourceAccessGuard.requireAccess(ragConfigId, AccessLevel.EDIT, "RAG configuration");
+
+        var resolved = resolveSource(ragConfigId, sourceId, version);
+        if (resolved.error() != null) {
+            return resolved.error();
+        }
+
+        if (!resolved.source().isEnabled()) {
+            // Answering 202 and then writing a FAILED row into the history for a
+            // source the operator deliberately turned off reads as a bug in the run
+            // rather than as an answer to the request.
+            return Response.status(Response.Status.CONFLICT)
+                    .entity(Map.of("error", "This source is disabled. Enable it to run it.", "sourceId", sourceId))
+                    .build();
+        }
+
+        return sourceIngestionService.runAsync(ragConfigId, resolved.knowledgeBase(), resolved.source())
+                .map(runKey -> Response.accepted(Map.of("status", "started", "sourceId", sourceId)).build())
+                .orElseGet(() -> Response.status(Response.Status.CONFLICT)
+                        .entity(Map.of("error", "A run is already in flight for this source", "sourceId", sourceId))
+                        .build());
+    }
+
+    @Override
+    public Response previewSource(String ragConfigId, String sourceId, Integer version) {
+        // A preview crawls the source, which is a visible amount of traffic to a
+        // third party even though it writes nothing — so it is gated like a run.
+        resourceAccessGuard.requireAccess(ragConfigId, AccessLevel.EDIT, "RAG configuration");
+
+        var resolved = resolveSource(ragConfigId, sourceId, version);
+        if (resolved.error() != null) {
+            return resolved.error();
+        }
+        try {
+            return Response
+                    .ok(sourceIngestionService.preview(ragConfigId, resolved.knowledgeBase(), resolved.source()))
+                    .build();
+        } catch (PreviewBusyException e) {
+            // 429 rather than 500: nothing is wrong with the source or the request,
+            // there is simply no preview slot free right now.
+            return Response.status(429)
+                    .header("Retry-After", "30")
+                    .entity(Map.of("error", e.getMessage(), "sourceId", sourceId))
+                    .build();
+        }
+    }
+
+    @Override
+    public Response readSourceRuns(String ragConfigId, String sourceId, Integer version, Integer limit) {
+        resourceAccessGuard.requireAccess(ragConfigId, AccessLevel.VIEW, "RAG configuration");
+
+        var resolved = resolveSource(ragConfigId, sourceId, version);
+        if (resolved.error() != null) {
+            return resolved.error();
+        }
+        int effectiveLimit = limit == null || limit <= 0 ? 20 : Math.min(limit, 200);
+        return Response.ok(sourceIngestionService.listRuns(ragConfigId, resolved.source(), effectiveLimit)).build();
+    }
+
+    @Override
+    public Response purgeSource(String ragConfigId, String sourceId, Integer version) {
+        resourceAccessGuard.requireAccess(ragConfigId, AccessLevel.EDIT, "RAG configuration");
+
+        var resolved = resolveSource(ragConfigId, sourceId, version);
+        if (resolved.error() != null) {
+            return resolved.error();
+        }
+        if (sourceIngestionService.activeRun(ragConfigId, resolved.source()).isPresent()) {
+            // The purge deletes the run history, including the RUNNING row that is the
+            // only thing stopping a second crawl into the same knowledge base — and
+            // the worker still going would write its state rows back afterwards.
+            return Response.status(Response.Status.CONFLICT)
+                    .entity(Map.of("error", "A run is in flight for this source. Purge once it has finished.",
+                            "sourceId", sourceId))
+                    .build();
+        }
+        sourceIngestionService.purge(ragConfigId, resolved.source());
+        LOGGER.infof("Purged ingestion state for source %s of RAG config %s", sanitize(sourceId), sanitize(ragConfigId));
+        return Response.ok(Map.of("status", "purged", "sourceId", sourceId)).build();
+    }
+
+    /**
+     * Loads the knowledge base and the named source, or the response that says why
+     * it could not. Access is checked by the caller BEFORE this runs, so a refusal
+     * is a 403 rather than being masked as the 404 this produces.
+     */
+    private ResolvedSource resolveSource(String ragConfigId, String sourceId, Integer version) {
+        if (version == null) {
+            // An omitted ?version binds as null, which RestVersionInfo.read rejects
+            // with an IllegalArgumentException — caught below and answered as a 404,
+            // telling the caller the knowledge base does not exist when the request
+            // was simply incomplete.
+            return new ResolvedSource(null, null, Response.status(Response.Status.BAD_REQUEST)
+                    .entity(Map.of("error", "Query parameter 'version' is required")).build());
+        }
+        RagConfiguration ragConfig;
+        try {
+            ragConfig = restRagStore.readRag(ragConfigId, version);
+        } catch (IllegalArgumentException e) {
+            // A version that cannot be used at all — negative, say — is a bad request.
+            // Answering "not found" sends the caller looking for a knowledge base
+            // that is sitting there.
+            return new ResolvedSource(null, null, Response.status(Response.Status.BAD_REQUEST)
+                    .entity(Map.of("error", "Invalid request: " + e.getMessage())).build());
+        } catch (RuntimeException e) {
+            // A store that is down is not a missing knowledge base. Reporting 404 for
+            // an outage hides it behind a client error that nobody investigates.
+            LOGGER.errorf(e, "Failed to load RAG config %s v%d", sanitize(ragConfigId), version);
+            throw e;
+        } catch (Exception e) {
+            LOGGER.warnf("Failed to load RAG config %s v%d: %s", sanitize(ragConfigId), version, e.getMessage());
+            return new ResolvedSource(null, null, Response.status(Response.Status.NOT_FOUND)
+                    .entity(Map.of("error", "RAG configuration not found: " + ragConfigId + " v" + version)).build());
+        }
+
+        IngestionSource source = ragConfig.findSource(sourceId);
+        if (source == null) {
+            return new ResolvedSource(null, null, Response.status(Response.Status.NOT_FOUND)
+                    .entity(Map.of("error", "No ingestion source '" + sourceId + "' on this knowledge base")).build());
+        }
+        return new ResolvedSource(ragConfig, source, null);
+    }
+
+    private record ResolvedSource(RagConfiguration knowledgeBase, IngestionSource source, Response error) {
     }
 }
