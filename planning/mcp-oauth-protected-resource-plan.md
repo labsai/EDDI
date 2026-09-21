@@ -108,7 +108,7 @@ Steps 1 and 2 are EDDI's. Step 3 is Keycloak's, already working. Steps 4–6 are
 # into quarkus-oidc; tracking tenant-enabled means an auth-less instance
 # advertises nothing.
 quarkus.oidc.resource-metadata.enabled=${quarkus.oidc.tenant-enabled}
-quarkus.oidc.resource-metadata.resource=/mcp
+quarkus.oidc.resource-metadata.resource=${quarkus.mcp.server.http.root-path}
 # MUST be the PUBLIC Keycloak URL. The default reports auth-server-url, which in
 # every shipped deployment is the cluster-internal address (F14) — a laptop
 # client would be told to authorize at a host it cannot resolve. token.issuer is
@@ -123,7 +123,7 @@ quarkus.oidc.resource-metadata.scopes=openid
 # priority 50, i.e. AFTER authorization at 100 (F19), so the catch-all would 401
 # it and the discovery loop could never start. Exact paths, GET/HEAD only: a
 # wildcard such as /.well-known/* would also pre-permit whatever lands there next.
-quarkus.http.auth.permission.oauth-resource-metadata.paths=/.well-known/oauth-protected-resource,/.well-known/oauth-protected-resource/*
+quarkus.http.auth.permission.oauth-resource-metadata.paths=/.well-known/oauth-protected-resource,/.well-known/oauth-protected-resource${quarkus.mcp.server.http.root-path}
 quarkus.http.auth.permission.oauth-resource-metadata.policy=permit
 quarkus.http.auth.permission.oauth-resource-metadata.methods=GET,HEAD
 ```
