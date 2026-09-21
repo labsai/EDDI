@@ -169,7 +169,7 @@ public class WebCrawler {
                 continue;
             }
             if (request.politeness().respectRobots()
-                    && !candidateRobots.isAllowed(CrawlUrls.path(candidate.fetchUrl()))) {
+                    && !candidateRobots.isAllowed(CrawlUrls.pathAndQuery(candidate.fetchUrl()))) {
                 counters.skipped++;
                 continue;
             }
