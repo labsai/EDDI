@@ -19,6 +19,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Modifier;
 import java.time.Instant;
 import java.util.Date;
 import java.util.List;
@@ -415,14 +416,18 @@ class ConversationMemoryUtilitiesHitlTest {
         }
 
         @Test
-        @DisplayName("the fingerprint strip alone — the MCP approval-status path — drops the gating message")
-        void fingerprintStripDropsTheGatingMessage() {
-            // McpHitlTools serves detail=full through stripRequestFingerprintsForRead and
-            // nothing else, so the new field has to be dropped there, not only in the
-            // approver sanitizer the REST surface uses.
-            var snapshot = ConversationMemoryUtilities.stripRequestFingerprintsForRead(pausedSnapshot());
+        @DisplayName("the partial fingerprint strip is not a projection of its own")
+        void fingerprintStripIsPrivate() throws Exception {
+            // It used to be public, and McpHitlTools served detail=full through it and
+            // nothing else — which is how the MCP door came to serve argumentsRaw and the
+            // transcript the REST door strips. Both surfaces now call the sanitizer above,
+            // so a field added there (as gatingAssistantMessageJson was) is dropped on
+            // every full-detail read at once. Private is what keeps that true.
+            var method = ConversationMemoryUtilities.class.getDeclaredMethod(
+                    "stripRequestFingerprintsForRead", ConversationMemorySnapshot.class);
 
-            assertNull(snapshot.getHitlPendingToolCalls().getGatingAssistantMessageJson());
+            assertTrue(Modifier.isPrivate(method.getModifiers()),
+                    "an approver-facing surface must not be able to pick the partial projection");
         }
 
         @Test
