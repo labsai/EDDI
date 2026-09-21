@@ -636,7 +636,7 @@ The [Quick Start](#quick-start) configurations above assume an instance with aut
 
 #### The client signs itself in (preferred)
 
-EDDI advertises `/mcp` as an **OAuth 2.0 protected resource** ([RFC 9728](https://datatracker.ietf.org/doc/html/rfc9728)), which is what lets an MCP client obtain its own token and refresh it indefinitely — no shared credential, nothing for an operator to rotate.
+EDDI advertises `/mcp` as an **OAuth 2.0 protected resource** ([RFC 9728](https://datatracker.ietf.org/doc/html/rfc9728)), which is what lets an MCP client obtain its own token and keep refreshing it — no shared credential, nothing for an operator to rotate. What ends that chain is not the 5-minute access token but the realm's **SSO session idle timeout** (Keycloak's default is 30 minutes): a client idle longer than that runs the browser flow again. Raise `ssoSessionIdleTimeout` on the realm, or grant `eddi-mcp` the `offline_access` scope, if you want it to survive longer.
 
 A client that supports the MCP authorization flow needs only the URL:
 
