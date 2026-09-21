@@ -1,6 +1,30 @@
-# docker-compose.ollama-nvidia.yml
+# ─────────────────────────────────────────────────────────────────────────────
+# NVIDIA GPU overlay — hands the Ollama container the host's NVIDIA GPUs.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.ollama.yml \
+#     -f docker-compose.ollama-nvidia.yml up -d
+#
+# It is layered ON TOP OF docker-compose.ollama.yml, not instead of it: all this
+# file adds is `gpus: all`. Used on its own it declares an Ollama with no port,
+# no volume and no model pull, and EDDI would not wait for it.
+#
+# Two host prerequisites, neither of which Compose checks for you:
+#
+#   * Docker Compose 2.30.0 or newer. The `gpus` service attribute was added in
+#     that release (before it, the equivalent was the far wordier
+#     `deploy.resources.reservations.devices` block). Older Compose versions do
+#     not know the attribute and fail the command — check yours with
+#     `docker compose version`.
+#   * The NVIDIA Container Toolkit, configured as a Docker runtime. Without it
+#     the container starts and Ollama falls back to the CPU.
+#
+# The image is repeated from docker-compose.ollama.yml because an overlay whose
+# service the BASE file does not declare needs an image of its own to be a valid
+# compose file at all (ComposeStackTest enforces that). Keep the two tags equal:
+# layering a lower tag here would silently downgrade Ollama.
+# ─────────────────────────────────────────────────────────────────────────────
+
 services:
   ollama:
     image: ollama/ollama:0.34.0
     gpus: all
-

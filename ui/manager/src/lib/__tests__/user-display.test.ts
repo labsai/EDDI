@@ -63,6 +63,14 @@ describe("userInitials", () => {
     expect(userInitials(user({ username: "𝒜lice" }))).toBe("𝒜");
   });
 
+  it("stays one character per initial when upper-casing lengthens the letter", () => {
+    // "ß".toUpperCase() is "SS" and the ligature "ﬁ".toUpperCase() is "FI" —
+    // three or four characters in an avatar sized for two.
+    expect(userInitials(user({ firstName: "ßeta", lastName: "Müller" }))).toBe("SM");
+    expect(userInitials(user({ fullName: "ﬁona ßauer" }))).toBe("FS");
+    expect(userInitials(user({ username: "ßvc" }))).toBe("S");
+  });
+
   it("returns an empty string, never a placeholder, when nothing usable is present", () => {
     expect(userInitials(EMPTY)).toBe("");
     expect(userInitials(user({ username: "___", email: "@example.com", fullName: "— 🙂" }))).toBe("");

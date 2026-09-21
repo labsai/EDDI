@@ -132,14 +132,21 @@ docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up
 # http://ollama:11434 (no host.docker.internal needed)
 docker compose -f docker-compose.yml -f docker-compose.ollama.yml up -d
 
+# The same local LLM, on the host's NVIDIA GPUs — layered on the Ollama overlay
+# above, never instead of it (all it adds is `gpus: all`)
+docker compose -f docker-compose.yml -f docker-compose.ollama.yml \
+  -f docker-compose.ollama-nvidia.yml up -d
+
 # Auth + monitoring + NATS together (overlays stack in any combination)
 docker compose -f docker-compose.yml -f docker-compose.auth.yml \
   -f docker-compose.monitoring.yml -f docker-compose.nats.yml up
 ```
 
-Available compose overlays: `docker-compose.auth.yml` (Keycloak), `docker-compose.monitoring.yml` (Prometheus+Grafana), `docker-compose.nats.yml` (NATS JetStream), `docker-compose.ollama.yml` (local LLM), `docker-compose.chroma.yml` (vector store), `docker-compose.local.yml` (build from source). `docker-compose.postgres-only.yml` is a complete standalone stack rather than an overlay — use it on its own, not with `-f docker-compose.yml`.
+Available compose overlays: `docker-compose.auth.yml` (Keycloak), `docker-compose.monitoring.yml` (Prometheus+Grafana), `docker-compose.nats.yml` (NATS JetStream), `docker-compose.ollama.yml` (local LLM), `docker-compose.ollama-nvidia.yml` (NVIDIA GPUs for that LLM), `docker-compose.chroma.yml` (vector store), `docker-compose.local.yml` (build from source). `docker-compose.postgres-only.yml` is a complete standalone stack rather than an overlay — use it on its own, not with `-f docker-compose.yml`.
 
 The Ollama overlay pulls `llama3.2:3b` on first start and keeps models in a named volume; override with `OLLAMA_PULL_MODEL=qwen3:4b`, or set it empty to skip the pull. It also sets `EDDI_OLLAMA_DEFAULT_BASE_URL`, so the agent wizard and the setup API pre-fill a base URL that resolves from inside the container — the one thing that trips up every first local-LLM agent, because `localhost` there is the container, not the host.
+
+`docker-compose.ollama-nvidia.yml` adds GPU access to that Ollama and needs two things of the host: **Docker Compose 2.30.0 or newer**, which is where the `gpus` service attribute was introduced — older versions fail on it, so check `docker compose version` — and the NVIDIA Container Toolkit configured as a Docker runtime, without which the container still starts and Ollama simply runs on the CPU.
 
 ```bash
 docker pull labsai/eddi    # Pull latest from Docker Hub

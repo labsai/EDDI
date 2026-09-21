@@ -262,6 +262,49 @@ class ComposeStackTest {
     }
 
     /**
+     * The other direction: a compose file nobody documents is one nobody can run.
+     * {@code docker-compose.ollama-nvidia.yml} shipped naming itself in its own
+     * first line and appearing nowhere else in the repository — not the README, not
+     * a page under {@code docs/} — so the only way to discover the GPU overlay was
+     * to list the project root.
+     * <p>
+     * The README is not required to carry all of them: {@code docs/} counts too,
+     * which is where the Open WebUI stack and the MCP sidecar are explained. The
+     * changelog does not count — it records what changed on a day, and an entry
+     * scrolls out of the live file into an archive nothing reads for current
+     * context.
+     */
+    @Test
+    @DisplayName("every compose file the repository ships is documented somewhere")
+    void everyComposeFileIsDocumented() {
+        List<Path> pages = new ArrayList<>(List.of(README));
+        try (Stream<Path> docs = Files.list(Path.of("docs"))) {
+            docs.filter(path -> path.getFileName().toString().endsWith(".md")).sorted().forEach(pages::add);
+        } catch (IOException e) {
+            throw new UncheckedIOException("could not list docs/", e);
+        }
+
+        String documentation = pages.stream()
+                .filter(page -> !page.getFileName().toString().equals("changelog.md"))
+                .map(ComposeStackTest::read)
+                .collect(Collectors.joining("\n"));
+
+        TreeSet<String> undocumented = new TreeSet<>();
+        for (Path file : composeFiles()) {
+            // The compose files themselves are not in the sweep: a header naming
+            // its own file is not documentation of it.
+            if (!documentation.contains(name(file))) {
+                undocumented.add(name(file));
+            }
+        }
+
+        assertEquals(Set.of(), undocumented,
+                "these compose files are named nowhere in README.md or docs/: " + undocumented
+                        + ". A stack a user cannot find is a stack they do not run — say what it layers on,"
+                        + " and what it needs of the host.");
+    }
+
+    /**
      * One MongoDB version across everything a user runs and everything that gates a
      * release. The release smoke test used to start {@code mongo:6.0} (EOL July
      * 2025) while the documented stack pins 7.0.14, which left a 7.x-specific
