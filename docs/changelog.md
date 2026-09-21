@@ -14,21 +14,39 @@ Each entry records:
 
 ## Where to Add an Entry
 
-**Add new entries directly below the `---` that closes this section**, above the
-most recent existing entry. Never append to an archive file.
+**Not here.** Write your entry as a new file in
+[`changelog.d/`](changelog.d/README.md) — `YYYY-MM-DD-<slug>.md`, with the slug
+unique to your branch — and leave this file alone. The same goes for the two
+running registers at the bottom: their rows ride along in the fragment, in a
+fenced `decision-log` or `regression-note` block.
 
-This file holds only recent work and is capped at **250 KB** —
-`ChangelogRotationTest` fails the build if it grows past that. When it does, run:
+Entries used to be inserted at the top of this file, and the registers appended
+to at the bottom. Both are a fixed point in a shared file, which git cannot
+merge: with several PRs open, every one of them conflicted with every other over
+a document that had nothing to do with the code under review. A fragment is a new
+file under a name no other branch picks, so the same two PRs merge without
+touching each other.
+
+`.github/workflows/changelog-collate.yml` runs nightly, merges the fragments in
+here **by date** — a PR that stayed open for weeks lands among its
+contemporaries rather than on top — trims this file back under its rotation
+target, and opens a PR. Until that PR merges, `changelog.d/` holds the newest
+history, so read it alongside the top of this file. To do it by hand:
 
 ```bash
-python scripts/rotate-changelog.py
+python scripts/collate-changelog.py   # fragments -> this file
+python scripts/rotate-changelog.py    # this file -> docs/changelog/<YYYY-MM>.md
 ```
 
-It moves the oldest entries into `docs/changelog/<YYYY-MM>.md` by the date each
-entry carries, adds one `../` to the relative links it moves (an archive sits a
-directory deeper than this file) without touching the ones inside code spans, and
-regenerates the Archive table below from what is on disk. Add any newly created
-archive file to [`SUMMARY.md`](SUMMARY.md). Do not raise the cap.
+This file holds only recent work and is capped at **250 KB** —
+`ChangelogRotationTest` fails the build if it grows past that. Rotation runs at a
+lower threshold than the cap, trimming back to **200 KB** whenever the file is
+over that, so the session whose entry tips it over is not the one made to rotate
+it. Rotation moves the oldest entries into `docs/changelog/<YYYY-MM>.md` by date,
+adds one `../` to the relative links it moves (an archive sits a directory deeper
+than this file) without touching the ones inside code spans, and regenerates both
+the Archive table below and the changelog list in [`SUMMARY.md`](SUMMARY.md) from
+what is on disk. Do not raise the cap.
 
 The single file this replaced had reached 1.9 MB — roughly half a million tokens —
 which neither a reader nor an agent's context window could usefully hold.
@@ -49,326 +67,6 @@ The two running registers — **Decision Log** and **Regression Notes** — live
 bottom of this file and are never archived.
 
 ---
-
-## 🔑 feat(keycloak): ship an `eddi-mcp` client for MCP clients to log in through (2026-09-20)
-
-**Repo:** EDDI (`feat/keycloak-mcp-client`, stacked on `feat/mcp-oauth-discovery`)
-
-Increment 1 of [`planning/mcp-oauth-protected-resource-plan.md`](../planning/mcp-oauth-protected-resource-plan.md),
-second half. The previous entry made EDDI tell a client *where* to authenticate; this gives
-it something to authenticate as.
-
-### What changed
-
-- **All three realm copies** (`keycloak/`, `helm/eddi/files/`, `k8s/overlays/auth/`) gain
-  `eddi-mcp`: public, authorization code + PKCE `S256` required, direct access grant / implicit
-  / service accounts all off, redirect URIs `http://localhost:*` and `http://127.0.0.1:*`, no
-  web origins, and the `realm-roles`, `eddi-backend-audience` and `groups` protocol mappers
-  copied from `eddi-frontend`.
-- **`DeploymentManifestsTest`** — a case per realm copy asserting the flow settings, the PKCE
-  requirement, the mappers (by claim name and by *access* token, not just id token), that no
-  redirect is `*` or a remote http URL, that `webOrigins` is empty, and that neither `name` nor
-  `description` exceeds 255 characters: Keycloak stores them in `VARCHAR(255)` and an over-long
-  value does not truncate — **the realm import fails and Keycloak exits 1**, which is how the
-  first draft of this client took down every stack that imports the realm. Found by running the
-  import, not by reading the file.
-- **`helm/eddi/templates/NOTES.txt`**, **`k8s/overlays/auth/kustomization.yaml`**,
-  **`docs/security.md`** — every place that told an operator to grant an account "those two
-  roles" now names all three. Following the old instruction built an administrator that logs in
-  and is refused every MCP read tool, which is the trap the realm change exists to close.
-- **`.github/workflows/ci.yml`** — `keycloak/**` added to the `code` and `backend` path
-  filters. `k8s/` and `helm/` were already there, so the compose realm was the one copy whose
-  change ran no CI — including the audience mapper every accepted token depends on.
-- **`docs/mcp-server.md`**, **`docs/security.md`** — the client, how to point a client at it,
-  why dynamic registration is not an option here, and what to do on an **existing** realm:
-  `--import-realm` never re-imports into a realm that already exists and both auth stacks keep
-  Keycloak's database in a named volume, so an upgrade leaves the client absent and the flow
-  ends in `invalid_client`. The manual steps are listed, `realm-roles` first.
-
-- **All three realm copies** — the seeded `eddi` administrator gains `eddi-viewer` alongside
-  `eddi-admin`/`eddi-editor`. There is no role hierarchy, so without it the account an operator
-  points their first MCP client at completes the login and is then refused all 27 viewer-gated tools.
-  A test pins it. `scripts/make-test-realm.mjs` guards that fixture set against the realm and
-  fails the auth E2E run when the two drift, so `ROLE_FIXTURES` and `e2e/auth/auth-helpers.ts`
-  move with it — which is how CI caught this change the first time it ran.
-
-### Decisions
-
-- **Pre-registered client, not dynamic registration.** Not a preference: this realm supplies its
-  own `clientScopes` and defines no `roles` scope, so `realm_access.roles` comes only from a
-  client's own protocol mapper. RFC 7591 registration carries no mappers, so a self-registered
-  client would mint tokens that authenticate and then fail every tool with "requires role" —
-  login succeeded, everything forbidden. Keycloak's default registration policies would also
-  have to be loosened in at least three places to get there.
-- **Loopback redirects only; `https://claude.ai/api/mcp/auth_callback` is not shipped.** Claude
-  Desktop connectors redirect to that remote callback, so the authorization response for a
-  self-hosted EDDI would pass through a third party. That is an operator's decision, documented
-  in `docs/mcp-server.md`, rather than a default inherited from us.
-- **No `webOrigins`, not even `+`.** These clients are native processes; `eddi-frontend` needs
-  browser origins and this one never makes a browser request.
-- **The redirect list is the one `[ext]` assumption in the plan.** Which loopback path each
-  client uses is documented client behaviour rather than something verified here, so the entries
-  are the broad `localhost` / `127.0.0.1` wildcards the realm already uses for the SPA, and the
-  docs say to add anything else in the admin console.
-
-### Files
-
-- `keycloak/eddi-realm.json`, `helm/eddi/files/eddi-realm.json`, `k8s/overlays/auth/eddi-realm.json`
-- `src/test/java/ai/labs/eddi/deploy/DeploymentManifestsTest.java`
-- `docs/mcp-server.md`, `docs/security.md`
-
----
-
-## 🔐 feat(mcp): advertise `/mcp` as an OAuth protected resource, so clients sign themselves in (2026-09-20)
-
-**Repo:** EDDI (`feat/mcp-oauth-discovery`, stacked on `docs/mcp-oauth-plan`)
-
-Increment 1 of [`planning/mcp-oauth-protected-resource-plan.md`](../planning/mcp-oauth-protected-resource-plan.md).
-An MCP client now discovers where to authenticate and holds its own token, instead of an
-operator pasting a bearer that expires in five minutes.
-
-Quarkus OIDC 3.39.3 already serves the RFC 9728 document and appends `resource_metadata="…"`
-to the 401 challenge, so there is no new EDDI code — five properties and one permit rule.
-
-### What changed
-
-- **`application.properties`** — `quarkus.oidc.resource-metadata.*`: `enabled` tracks
-  `tenant-enabled` (an instance with auth off has no authorization server to name, and the
-  handler is not installed for a disabled tenant), `resource=/mcp`, `force-https-scheme=true`,
-  `scopes=openid`, and `authorization-server` preferring `token.issuer` over `auth-server-url`.
-- **`application.properties`** — a `permit` rule for the two exact metadata paths (the bare
-  form and the path-inserted document), `GET,HEAD` only. Exact rather than a `/*` under the
-  prefix, which would anonymously expose any future handler beneath it.
-- **`helm/eddi`** — `eddi.oidc.resourceMetadata.{forceHttpsScheme,authorizationServer}`, because
-  neither is safely inferable: `publicUrl` describes Keycloak, not EDDI, so an https IdP in
-  front of a plain-http port-forward would advertise a resource nothing serves. The scheme now
-  follows EDDI's own `ingress.tls` unless set. Chart version bumped per Chart.yaml's rule.
-- **`application.properties`** — the MCP security banner said 33 tools (there are 84) and
-  described a two-role model (there are four, with no hierarchy).
-- **`McpOAuthDiscoveryConfigTest`** (new, 8 cases) — the config *is* the feature, so it is what
-  gets asserted: the enabled expression, the resource matching the MCP root path, the issuer
-  preference, `openid` while `user-info-required` is on, the permit rule's policy/methods/paths,
-  what those paths match and do not match, and `/mcp` still being `authenticated`.
-- **`ui/manager/e2e/auth/auth.spec.ts`** — two cases in the Keycloak tier: the document is
-  readable with no token and names the issuer a real token carries; an unauthenticated `/mcp`
-  POST answers 401 with a challenge pointing at it.
-- **Every shipped stack that serves plain http with authentication on** overrides
-  `force-https-scheme`, because that is the one shape a forced https identifier is wrong for:
-  `docker-compose.auth.yml`, the auth E2E tier, `k8s/overlays/auth` (its documented flow is
-  `kubectl port-forward`), and the helm chart whenever the Keycloak URL it is given is itself
-  plain http. Without it those deployments advertise `https://…/mcp` with nothing serving TLS,
-  and discovery dies before it starts.
-- **`ui/manager/docker-compose.integration-keycloak.yml`** — the tier now pins the
-  browser-reachable issuer the way `docker-compose.auth.yml` does, so the discovery document it
-  publishes is the one a real deployment publishes. The E2E case can therefore assert the
-  advertised authorization server is reachable **from outside the compose network** — with the
-  old in-cluster hostname that assertion could not have failed.
-- **`docs/mcp-server.md`**, **`docs/security.md`** — the discovery path as the preferred way in,
-  with the hand-pasted token demoted to a fallback; the new permit row, and why `@PermitAll`
-  alone does not make a path public.
-
-### Decisions
-
-- **The permit rule is mandatory, not defence in depth.** quarkus-oidc registers its handler as
-  `FilterBuildItem(handler, 50)` and `SecurityHandlerPriorities.AUTHORIZATION` is 100 — higher
-  runs first, so authorization would answer 401 before the document could be read, and
-  discovery could never start. Verified by `javap` on `OidcBuildStep`, and asserted over HTTP
-  in the auth E2E tier because no properties file can prove an ordering.
-- **Exact paths, never `/.well-known/*`.** A wildcard there would pre-permit whatever lands
-  under that prefix later. A test asserts what the patterns match *and* what they must not.
-- **`authorization-server` defaults to `token.issuer`.** `auth-server-url` is the
-  cluster-internal Keycloak address in both shipped deployments, so the default would have
-  advertised a host no client outside the cluster can resolve. RFC 8414 wants the advertised
-  server to equal the issuer regardless, and the E2E assertion compares it against the `iss`
-  claim of an accepted token rather than a hardcoded URL.
-- **`openid` is advertised deliberately.** `user-info-required=true` makes EDDI call userinfo
-  on every request, and Keycloak refuses userinfo for a token minted without that scope;
-  clients copy `scopes_supported` into the authorize request. A test pins the pair together so
-  removing one surfaces the other.
-- **https is forced by default.** `quarkus.http.proxy.*` is unset, so behind a TLS-terminating
-  ingress the identifier would be advertised as `http://`.
-- **The permit path interpolates the MCP root path (review round 4).** It read
-  `/.well-known/oauth-protected-resource/mcp`, a literal, while the advertised resource was
-  already derived from `${quarkus.mcp.server.http.root-path}`. An operator who moved the MCP
-  root would have moved the document with it and left the permit rule behind: the metadata
-  request then meets the catch-all `authenticated` policy and answers 401, and the 401
-  challenge that is supposed to bootstrap discovery points at a path that also answers 401.
-  Both halves now interpolate the same property. `McpOAuthDiscoveryConfigTest` asserts the
-  raw expression — asserting the resolved form would pass either way — and resolves it
-  against the root path for its match checks; reverting the property to the literal fails
-  that test. `A2aEndpointPermissionsTest` builds its matcher from this file, so it grew a
-  small expander for `${…}` inside a permission path and now probes the path-inserted
-  document through it; unexpanded, that path entered the matcher as a literal and the model
-  reported `authenticated` for a document Quarkus permits.
-
-### Files
-
-- `src/main/resources/application.properties`
-- `src/test/java/ai/labs/eddi/configs/McpOAuthDiscoveryConfigTest.java` (new)
-- `ui/manager/e2e/auth/auth.spec.ts`, `ui/manager/docker-compose.integration-keycloak.yml`
-- `docs/mcp-server.md`, `docs/security.md`
-- `src/test/java/ai/labs/eddi/engine/a2a/A2aEndpointPermissionsTest.java`
-
----
-
-## 📝 docs(mcp): how to reach an authenticated `/mcp`, and the plan to stop needing this (2026-09-20)
-
-**Repo:** EDDI (`docs/mcp-oauth-plan`)
-
-A local MCP client — Claude Desktop, Claude Code, Cursor, LM Studio — cannot practically
-manage an EDDI instance that has OIDC enabled. `/mcp` carries an `authenticated` policy
-(its own `quarkus.http.auth.permission.mcp` rule), EDDI is bearer-only (`application-type=service`), and it
-advertises no OAuth metadata, so a client that would log in by itself gets a bare 401 with
-nothing to discover. The only way in is a hand-pasted token that the shipped realm lets
-expire after Keycloak's default five minutes, and there is no long-lived key for `/mcp`
-(the only api-key surface is the `/v1` adapter).
-
-The Quick Start in `docs/mcp-server.md` only ever showed the unauthenticated
-`localhost:7070` case, so nothing said any of that.
-
-### What changed
-
-- **`docs/mcp-server.md`** — new *Connecting to an authenticated instance* section under
-  Authentication & Authorization: get a token from the public `eddi-frontend` client, pass
-  it either as a header on a Streamable-HTTP client or through `mcp-remote` (whose argument
-  splitting means the value belongs in an env var), and four caveats in the order they
-  bite — expiry, no api key, roles decide which tools work, and `/mcp` cannot be opened
-  selectively. The Quick Start now points at it.
-- **`docs/mcp-server.md`** — the Configuration block documented `quarkus.mcp-server.http.root-path`.
-  That hyphenated form is not a key the extension knows; `application.properties`
-  already says so. Corrected to `quarkus.mcp.server.http.root-path` with the warning kept.
-- **`planning/mcp-oauth-protected-resource-plan.md`** (new) — the fix: advertise `/mcp` as an
-  RFC 9728 protected resource so the client runs the OAuth flow and refreshes its own token,
-  removing the shared long-lived credential rather than automating its rotation.
-
-### Decisions
-
-- **Rotation is the wrong problem to solve.** The instinct is to reuse **Connections**, which
-  already does lazy OAuth refresh with a single-flight claim. It cannot apply: a connection
-  resolves to a header on a request *EDDI originates*, and here EDDI is the callee. Connections
-  exists because EDDI holds a credential it must refresh; inbound, the client holds it.
-- **Serving the metadata is configuration, not code.** Quarkus OIDC 3.39.3 already ships
-  `ResourceMetadataHandler` and appends `resource_metadata="…"` to the 401 challenge. The
-  plan's Increment 1 is four properties, a permit rule and a Keycloak client.
-- **A permit rule is mandatory, not a precaution.** That handler registers as
-  `FilterBuildItem(handler, 50)`, and `SecurityHandlerPriorities.AUTHORIZATION` is 100 — it
-  runs *after* authorization, so the catch-all at `/*` would 401 the discovery document and
-  the flow could never start.
-- **Pre-registered client over dynamic registration.** The realm defines no `roles` client
-  scope; `eddi-frontend` gets `realm_access.roles` only from its own protocol mapper. A
-  dynamically registered client cannot carry mappers, so its tokens authenticate and then
-  fail every tool with "requires role" — the worst failure shape available.
-- **Review follow-up (2026-09-21).** The §3.2 configuration block quoted a hardcoded `/mcp`
-  in both `resource-metadata.resource` and the permit rule's second path. What ships derives
-  both from `${quarkus.mcp.server.http.root-path}`, so an operator who moves the MCP root
-  moves the metadata document and its permit rule with it; a hardcoded permit path would
-  leave the relocated document behind the `authenticated` policy and 401 the discovery
-  request before it starts. The snippet now matches `application.properties`.
-
-- **The EDDI → client direction is deliberately out of scope** and recorded as such in the
-  plan, so it is not re-derived: it needs Claude Code channels rather than MCP, and two
-  design answers first — attribution (nothing reads the token's `azp`, so a model answering
-  a HUMAN member's turn is recorded as the person) and keeping HITL decisions out of an
-  AI client's reach.
-
-### Files
-
-- `docs/mcp-server.md`
-- `planning/mcp-oauth-protected-resource-plan.md` (new)
-
----
-
-## ⏱️ fix(schedule): close the review round and pin the guards by mutation (2026-09-04)
-
-**Repo:** EDDI (`fix/review-schedules`)
-
-Follow-up on the same branch, from three independent review rounds plus a diff-coverage pass.
-
-**Two CI failures this branch caused are fixed.** `ImportStyleTest` was red because the branch
-introduced two inline fully-qualified names — the exact convention that test enforces — in
-`RestScheduleStoreTest` and `MongoScheduleStoreTest`. And the vendored fuzz sources drifted
-because a Javadoc reformat of `PathNavigator` diverged from the copy `.clusterfuzzlite`
-vendors; the cosmetic edit is reverted rather than re-syncing the vendored file, keeping the
-diff to what the findings required.
-
-**Tests that could not fail were replaced.** Five were proven vacuous by mutation, not by
-inspection. Two `WordSplitter` cases never reached the bounds guard they claimed to pin — one
-used an input whose index made the new `i > 0 &&` term unreachable. A `MongoScheduleStore` test
-asserted `!rendered.contains("triggerType=CRON")` on a `Bson.toString()` where that string can
-never appear, so it was unconditionally true; it now encodes through the real codec registry
-and asserts BSON null for an absent trigger type and the value for a present one, catching both
-an invented default and a hardcoded null.
-
-Two further claims were **disputed with evidence and left alone**: their "changed" line was a
-rename from an inline FQN to an import, mandated by AGENTS.md 4.7. No test can fail on the
-revert of a rename, so the correct remedy is to drop the line from the coverage claim, not the
-test from the suite — and both were shown to kill real mutants first.
-
-**Diff coverage** of changed lines: 94.4% to 99.2% line, 89.3% to 98.2% branch.
-
----
-
-## ⏰ fix(schedule): correct fire bookkeeping, persistence and manual-fire claiming (2026-09-04)
-
-**Repo:** EDDI (`fix/review-schedules`)
-
-From the whole-repository code review. Scheduled fires were reporting success they had
-not earned, and losing state they had been given.
-
-**PostgreSQL lost the payload entirely.** `eddi_schedules` had no column for `message` —
-the text a CRON schedule sends to the agent, which `RestScheduleStore` makes mandatory on
-save — nor for `time_zone`, `one_time_at`, `environment`, `agent_version`, `created_by` or
-`persistent_conversation_id`. The value was written, silently dropped, read back null, and
-the scheduled turn ran with **null input**. Scheduling is enabled by default and PostgreSQL
-is a documented, supported backend. The columns are added with
-`ADD COLUMN IF NOT EXISTS` statements so existing databases upgrade in place, and the
-dropped `persistent_conversation_id` was separately re-opening the CAS claim on every
-heartbeat fire, breaking the single-owner CAS claim that keeps a fire from running twice.
-(The delivery contract is at-least-once, not exactly-once — `IScheduleStore`,
-`docs/scheduling.md` and `docs/hitl.md` all say so. An earlier draft of this entry claimed
-otherwise.)
-
-**Failures were recorded as successes.** The executor read its outcome from a latch that
-counts down on the failure branch too, so an error inside the pipeline looked like a green
-fire: retry, backoff and dead-lettering never engaged, and `docs/scheduling.md` documents a
-state machine that could not be reached.
-
-**Persistent fires un-claimed themselves mid-flight.** The strategy wrote the pre-claim
-schedule back with `replaceOne`, so the poller re-claimed and re-fired a schedule that was
-still running, routing both turns into the *same* persistent conversation — two interleaved
-turns, two cost charges, one memory.
-
-**Heartbeats drifted.** The next fire re-anchored on the moment a turn *finished* rather
-than when it was *due*, so a 40-second turn on a 60-second cadence actually fired every 100
-seconds.
-
-**A manual "fire now" took no cluster claim at all**, so it could run concurrently with the
-poller's own fire of the same schedule.
-
-Also: `PUT /schedulestore/schedules/{id}` silently erased `createdAt`, `createdBy`,
-`lastFired` and the claim state on MongoDB (PostgreSQL preserved them — a parity gap in the
-same feature), and `CronDescriber` rejected day-of-week `7`, which `CronParser.validate`
-accepts, so a valid stored schedule 400'd on read.
-
-### Regression coverage
-
-Every behavioural change is pinned by a test proven to fail with its fix reverted. Four
-tests that the auditor found could pass with the fix removed were rewritten to assert the
-corrected value precisely rather than a property the buggy code also satisfied — one had
-asserted only that the next fire time lies in the future, which the drifting formula did too.
-
-Three of this repository's own guard tests were failing and are now satisfied properly
-rather than relaxed: the three new `eddi.schedule.*` properties are documented in
-`docs/configuration-reference.md`, and the new `eddi.schedule.firelog.pruned` counter is
-both documented in `docs/metrics.md` and charted in the Grafana dashboard, because
-`MetricsDashboardCoverageTest` requires both.
-
-Recorded honestly as unverifiable locally: the `SafeHttpClient` redirect tests need a
-loopback socket, and the new DDL and Mongo codec paths are only exercised against real
-backends in CI.
-
----
-
 
 ## 🔒 fix(security): close the CWE-117 gap in the half of a log line no call site can reach (2026-09-20)
 
@@ -505,6 +203,10 @@ than the fix.
   `RestScheduleStore`, `RestUserMemoryStore`, `VaultSecretProvider`, the REST stores and others.
   `RestAgentAdministration` and `AgentFactory` among them are PR #799's scope and were left to it.
   None of them can forge a record at runtime now, so they are alert hygiene rather than exposure.
+
+---
+
+---
 
 ---
 
@@ -1168,6 +870,8 @@ so concurrent users overwrite each other's value. `secretInput` only hides the t
 
 ---
 
+---
+
 ## 🔒 fix(ui): clear the 30 npm advisories Scorecard reports (2026-09-17)
 
 **Repo:** EDDI (`fix/ui-npm-vulnerabilities`)
@@ -1378,6 +1082,8 @@ The shipped realm (6.1.0 through 6.4.0) defines only the `openid` client scope, 
 That is fixed at the source, with the backend consequences it had, on `fix/keycloak-realm-client-scopes`.
 This change stays useful after it: realms provisioned by hand, other identity providers, and users
 without a name or email still reach the fallback.
+
+---
 
 ---
 
@@ -3255,6 +2961,8 @@ line has been corrected in place.
 
 ---
 
+---
+
 ## Decision Log
 
 _For recording decisions that come up during implementation that aren't in the plan._
@@ -3281,3 +2989,4 @@ _For recording decisions that come up during implementation that aren't in the p
 _Track any regressions introduced during implementation for quick debugging._
 
 | Date | Regression | Cause | Fix | Commit |
+| ---- | ---------- | ----- | --- | ------ |
