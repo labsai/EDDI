@@ -839,6 +839,58 @@ describe("AgentWizardPage", () => {
     }
   });
 
+  /**
+   * The Base URL field is not rendered for Jlama, so a URL typed for a previous
+   * provider would be submitted with no way to see it or clear it. What the user
+   * cannot see, the wizard must not send.
+   */
+  it("Jlama drops a base URL carried over from another provider", async () => {
+    let sentBaseUrl: string | undefined = "untouched";
+    server.use(
+      http.post("*/administration/agents/setup", async ({ request }) => {
+        const body = (await request.json()) as { baseUrl?: string };
+        sentBaseUrl = body.baseUrl;
+        return HttpResponse.json({
+          agentId: "jlama-agent-1",
+          agentName: "Local Agent",
+          provider: "jlama",
+          model: "tjake/Llama-3.2-1B-Instruct-JQ4",
+          deployed: false,
+          deploymentStatus: null,
+        });
+      }),
+    );
+
+    const user = userEvent.setup();
+    renderWithProviders(<AgentWizardPage />, {
+      initialRoute: "/manage/agents/wizard",
+    });
+
+    await user.click(screen.getByTestId("type-standard"));
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.type(screen.getByTestId("wizard-agent-name"), "Local Agent");
+    await user.type(screen.getByTestId("wizard-system-prompt"), "Local help");
+    await user.click(screen.getByTestId("wizard-next"));
+
+    // A URL for a provider that does have an endpoint…
+    await user.selectOptions(screen.getByTestId("wizard-provider"), "ollama");
+    await user.type(screen.getByTestId("wizard-baseurl"), "http://localhost:11434");
+
+    // …must not survive the switch to one that does not.
+    await user.selectOptions(screen.getByTestId("wizard-provider"), "jlama");
+    await user.type(
+      screen.getByTestId("wizard-model"),
+      "tjake/Llama-3.2-1B-Instruct-JQ4",
+    );
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.click(screen.getByTestId("wizard-create-only"));
+
+    await waitFor(() => {
+      expect(sentBaseUrl).toBeUndefined();
+    });
+  });
+
   // ── LLM step: base URL input ──────────────────────────────────────
 
   it("shows base URL input on LLM step", async () => {

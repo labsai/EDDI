@@ -75,6 +75,11 @@ the backend cannot use, and reporting success anyway.
    `jlama`, which in `operator-activation.tsx` is a hard gate (`modelStepValid`): an
    admin activating the Platform Operator on Jlama could not proceed without filling in
    a field whose value was then thrown away.
+4. **A hidden field still submitted its stale value.** A consequence of fixing (2):
+   with the field no longer rendered, a base URL typed for a previous provider stayed
+   in wizard state and was still sent, with no way for the user to see or clear it.
+   `handleProviderChange` now clears it — in the wizard and in operator activation —
+   when the incoming provider has no endpoint.
 
 Worth noting that the *rule-based* reference config in `docs/agent-configs/` already had
 this right — its Jlama chooser offers `tjake/TinyLlama-1.1B-Chat-v1.0-Jlama-Q4`. The
@@ -139,6 +144,7 @@ serves.
 - `ui/manager/src/lib/model-suggestions.ts`
 - `ui/manager/src/lib/api/agent-setup.ts`
 - `ui/manager/src/lib/api/operator.ts` — stale "(Ollama, Jlama)" doc comment
+- `ui/manager/src/components/operator/operator-activation.tsx`
 - `ui/manager/src/pages/agent-wizard.tsx`
 - `ui/manager/src/lib/__tests__/model-suggestions.test.ts` (new)
 - `ui/manager/src/pages/__tests__/agent-wizard.test.tsx`
@@ -153,8 +159,8 @@ serves.
   `StrictBoundaryShippedConfigsTest`, `RuleSetStoreShippedRulesetsTest`,
   `ChangelogRotationTest`, `BuildQualityGatesTest`.
 - Manager: `npm run typecheck`, `npm run lint`, `npm run i18n:check`, `npm run build`
-  and the full suite (413 files, 6555 tests) all pass.
-- **The five new UI tests were mutation-checked**: reverting the suggestions, the
+  and the full suite (413 files, 6556 tests) all pass.
+- **The six new UI tests were mutation-checked**: reverting the suggestions, the
   default model and `IN_PROCESS_PROVIDERS` makes all five fail. They would have caught
   this.
 

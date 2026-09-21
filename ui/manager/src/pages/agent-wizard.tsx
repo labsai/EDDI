@@ -148,6 +148,13 @@ export function AgentWizardPage() {
       provider: providerId,
       model: "",
       apiKey: config?.needsKey === false ? "" : state.apiKey,
+      // A provider with no endpoint hides the field, so a URL left over from
+      // the previous provider would be submitted with no way to see or clear
+      // it. What the user cannot see, the wizard does not send.
+      baseUrl: supportsBaseUrl(providerId) ? state.baseUrl : "",
+      // A provider with no endpoint hides the field, so a URL left over from
+      // the previous provider would be submitted with no way to see or clear
+      // it. What the user cannot see, the wizard does not send.
     });
   }
 
@@ -744,7 +751,7 @@ function LlmStep({
   const datalistId = `model-suggestions-${provider}`;
   const baseUrlRequired = isBaseUrlRequired(provider);
   const baseUrlSupported = supportsBaseUrl(provider);
-  const inProcess = provider === "jlama";
+  const inProcess = !baseUrlSupported;
 
   return (
     <div>
