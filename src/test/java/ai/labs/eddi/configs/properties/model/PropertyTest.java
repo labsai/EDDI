@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.configs.properties.model;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -142,6 +144,69 @@ class PropertyTest {
                     Property.Scope.longTerm, Property.Visibility.self);
             var p2 = new Property("n", "v", null, null, null, null, null,
                     Property.Scope.longTerm, Property.Visibility.global);
+            assertNotEquals(p1, p2);
+        }
+    }
+
+    @Nested
+    @DisplayName("autoVaulted provenance marker")
+    class AutoVaulted {
+
+        /**
+         * EDDI's global serialization inclusion ({@code SerializationCustomizer}),
+         * which is what decides whether an unset marker reaches the conversation
+         * document.
+         */
+        private ObjectMapper mapper() {
+            return new ObjectMapper().setDefaultPropertyInclusion(JsonInclude.Include.NON_NULL);
+        }
+
+        @Test
+        @DisplayName("unset by default — nothing but autoVaultSecret marks a property")
+        void unsetByDefault() {
+            assertNull(new Property("n", "v", Property.Scope.conversation).getAutoVaulted());
+        }
+
+        @Test
+        @DisplayName("a marked property round-trips through JSON")
+        void roundTrips() throws Exception {
+            var prop = new Property("apiKey", "${vault:agent1.apiKey}", Property.Scope.conversation);
+            prop.setAutoVaulted(Boolean.TRUE);
+
+            var json = mapper().writeValueAsString(prop);
+            assertTrue(json.contains("\"autoVaulted\":true"), json);
+            assertEquals(Boolean.TRUE, mapper().readValue(json, Property.class).getAutoVaulted());
+        }
+
+        @Test
+        @DisplayName("an unmarked property does not carry the field at all")
+        void unmarkedIsNotWritten() throws Exception {
+            var json = mapper().writeValueAsString(new Property("n", "v", Property.Scope.conversation));
+            assertFalse(json.contains("autoVaulted"), json);
+        }
+
+        @Test
+        @DisplayName("a conversation document written before the field existed still reads, unmarked")
+        void legacyDocumentDeserializes() throws Exception {
+            // The backward-compatibility case: every conversation and user-memory
+            // document already in MongoDB. The read must not fail, and the property must
+            // come back unmarked — which ConfigReferenceGuard refuses rather than
+            // trusts, because an unmarked property and one written from conversation
+            // data are the same thing here.
+            var legacy = "{\"name\":\"apiKey\",\"valueString\":\"${vault:agent1.apiKey}\",\"scope\":\"conversation\"}";
+
+            var prop = mapper().readValue(legacy, Property.class);
+
+            assertEquals("${vault:agent1.apiKey}", prop.getValueString());
+            assertNull(prop.getAutoVaulted());
+        }
+
+        @Test
+        @DisplayName("a different marker should not be equal")
+        void differentMarker() {
+            var p1 = new Property("n", "v", Property.Scope.conversation);
+            var p2 = new Property("n", "v", Property.Scope.conversation);
+            p2.setAutoVaulted(Boolean.TRUE);
             assertNotEquals(p1, p2);
         }
     }

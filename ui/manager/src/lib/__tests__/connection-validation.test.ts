@@ -586,10 +586,10 @@ describe("validateConnection", () => {
 // ─── CALLER_SUPPLIED — EDDI stores nothing ──────────────────────
 
 const CALLER_SUPPLIED_OK = {
-  name: "gnowbe",
+  name: "acme",
   authType: "STATIC",
   binding: "CALLER_SUPPLIED",
-  baseUrlAllowlist: ["https://api.gnowbe.com"],
+  baseUrlAllowlist: ["https://api.example.com"],
   staticAuth: { headerName: "x-api-key" },
 };
 

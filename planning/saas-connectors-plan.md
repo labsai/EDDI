@@ -499,9 +499,9 @@ if telemetry shows cold-start latency matters.
 
 ### 5.5 The `CALLER_SUPPLIED` binding
 
-> **Added 2026-08-25**, after Phases 2/4/5 merged (#711). Driven by the Gnowbe
-> connector: Gnowbe hands EDDI the end user's own API key on every request, and the
-> agent should be able to do exactly what that user can do — no more.
+> **Added 2026-08-25**, after Phases 2/4/5 merged (#711). Driven by an integration
+> that hands EDDI the end user's own API key on every request, where the agent should
+> be able to do exactly what that user can do — no more.
 
 #### The problem this solves
 
@@ -513,7 +513,7 @@ request. Today that shape has no legal expression:
 | Route | Why it fails |
 |---|---|
 | `PER_USER` binding | Rejected at save time unless `authType` is `OAUTH2_AUTHORIZATION_CODE` (§5.1). A caller-supplied key has no grant to file and no consent screen to run. |
-| `${caller:token}` | Same-origin only, enforced in `CallerIdentityResolver`. It forwards the caller's **EDDI** token back to EDDI. Gnowbe is a different origin *and* a different credential. |
+| `${caller:token}` | Same-origin only, enforced in `CallerIdentityResolver`. It forwards the caller's **EDDI** token back to EDDI. The integrating service is a different origin *and* a different credential. |
 | `{context.apiKey}` in a header | Works mechanically — headers are Qute-templated in `ApiCallExecutor#buildRequest` — but context is stored as `IData<Context>` on the conversation step and persisted. That is the plaintext-token-in-conversation-memory case §12 forbids outright, and `Context` has no transient flag to opt out of it. |
 
 The permission argument is the reason to want this rather than a service key: an agent
@@ -521,7 +521,7 @@ holding one org-wide key can reach every workspace that key can, and the only th
 standing between a user and someone else's data is the correctness of the agent's own
 reasoning. A caller-supplied credential makes the platform's own authorization the
 boundary — the agent cannot do what the user cannot do, and that property holds
-without EDDI understanding Gnowbe's permission model at all.
+without EDDI understanding the target platform's permission model at all.
 
 #### What it is not
 
@@ -574,7 +574,7 @@ public enum Binding { SERVICE, PER_USER, CALLER_SUPPLIED }
 On the inbound HTTP request, as a repeated header:
 
 ```
-X-EDDI-Connection-Credential: gnowbe key-id:secret
+X-EDDI-Connection-Credential: acme key-id:secret
 ```
 
 First token is the connection name; the remainder, after one space, is the whole
@@ -628,7 +628,7 @@ by principal, which is exactly why `ResolutionPrincipal` exists separately from
 `CallerIdentity`. `CALLER_SUPPLIED` has no store, so on resume the credential is simply
 gone.
 
-That collides directly with the Gnowbe agent's requirement: writes are the calls worth
+That collides directly with the driving integration's requirement: writes are the calls worth
 gating, and writes are the calls that would break.
 
 Three ways out:
@@ -640,7 +640,7 @@ Three ways out:
 | **C. Re-supply on resume.** The resume request carries the credential again. | Correct and stateless. The constraint is not that one human does both — the approver never touches a credential — but that the same **integrating backend** both holds the user's key and makes the resume call. Unavailable where something else drives the resume. |
 
 **Decided 2026-08-25: C, with A as the failure mode.** The driving deployment settles
-it — Gnowbe's backend calls EDDI as one service principal with the end user's key
+it — the integrating backend calls EDDI as one service principal with the end user's key
 attached, so the turn's `ResolutionPrincipal` is `SELF_ASSERTED`, never `VERIFIED`. That
 rules B out on its own: the parked row is keyed by principal, and filing a credential
 under an unverified id would put one user's key where another user's turn could read it

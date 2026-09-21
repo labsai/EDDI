@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.hitl.tools;
 
+import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.ChatMessageDeserializer;
 import dev.langchain4j.data.message.ChatMessageSerializer;
@@ -51,6 +52,76 @@ public class ChatTranscriptCodec {
         } catch (Exception e) {
             LOGGER.errorf(e, "HITL tool-pause transcript serialization failed — omitting; resume will use fallback reconstruction");
             return new CodecResult(null, true);
+        }
+    }
+
+    /**
+     * Serializes a single message within {@code maxBytes}, or returns null.
+     * <p>
+     * Truncated JSON would not parse, so an over-cap {@link AiMessage} is retried
+     * with its bulk removed — first {@code text}, then {@code thinking} — keeping
+     * the tool calls and provider attributes, which are what a resume needs. Null
+     * rather than throwing: callers treat it as "nothing persisted".
+     *
+     * See {@code PendingToolCallBatch#gatingAssistantMessageJson} for why it
+     * exists.
+     */
+    public String serializeMessage(ChatMessage message, int maxBytes) {
+        if (message == null) {
+            return null;
+        }
+        try {
+            String json = withinCap(message, maxBytes);
+            if (json != null) {
+                return json;
+            }
+            if (message instanceof AiMessage ai) {
+                json = withinCap(ai.toBuilder().text(null).build(), maxBytes);
+                if (json != null) {
+                    LOGGER.warnf("HITL tool-pause gating message exceeds cap (%d bytes) — persisting it without its "
+                            + "text so the resume keeps the provider fields; the narration is still in interimText",
+                            maxBytes);
+                    return json;
+                }
+                json = withinCap(ai.toBuilder().text(null).thinking(null).build(), maxBytes);
+                if (json != null) {
+                    LOGGER.warnf("HITL tool-pause gating message exceeds cap (%d bytes) — persisting its tool calls and "
+                            + "provider attributes only", maxBytes);
+                    return json;
+                }
+            }
+            LOGGER.warnf("HITL tool-pause gating message exceeds cap (%d bytes) even reduced — omitting; a fallback "
+                    + "resume will reconstruct it from the call list", maxBytes);
+            return null;
+        } catch (Exception e) {
+            LOGGER.errorf(e, "HITL tool-pause gating message serialization failed — omitting");
+            return null;
+        }
+    }
+
+    /** The serialized message when it fits {@code maxBytes}, else null. */
+    private String withinCap(ChatMessage message, int maxBytes) {
+        String json = ChatMessageSerializer.messageToJson(message);
+        if (json == null || json.getBytes(StandardCharsets.UTF_8).length > maxBytes) {
+            return null;
+        }
+        return json;
+    }
+
+    /**
+     * Restores a message written by {@link #serializeMessage}, or null when there
+     * is nothing to restore or it does not parse.
+     */
+    public ChatMessage deserializeMessage(String json) {
+        if (json == null || json.isBlank()) {
+            return null;
+        }
+        try {
+            return ChatMessageDeserializer.messageFromJson(json);
+        } catch (Exception e) {
+            LOGGER.warnf("HITL tool-pause gating message could not be restored (%s) — reconstructing from the call list",
+                    e.getMessage());
+            return null;
         }
     }
 

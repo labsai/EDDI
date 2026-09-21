@@ -837,7 +837,7 @@ describe("ApiCallsEditor", () => {
   });
 
   it("warns when the header is not named what the connection names", async () => {
-    // amplitude sends `Authorization`; gnowbe sends `x-api-key`. The first
+    // amplitude sends `Authorization`; acme sends `x-api-key`. The first
     // header disagrees and the second agrees (case-insensitively), so one
     // warning and not two — and the second proves the lookup ran, since the
     // absence of a warning before the descriptors arrive would look the same.
@@ -846,7 +846,7 @@ describe("ApiCallsEditor", () => {
         data={withRequest({
           headers: {
             "X-Auth": "${connection:amplitude}",
-            "X-API-KEY": "${connection:gnowbe}",
+            "X-API-KEY": "${connection:acme}",
           },
         })}
         onChange={onChange}
