@@ -55,7 +55,7 @@ RUN --mount=type=cache,target=/root/.m2 \
     mvn -B package -DskipTests
 
 # ── Runtime ──
-FROM eclipse-temurin:25-jre@sha256:a214efa3200af4b657e41935799aa12d7aee3336fdb42eb505a0948f6ecdd983
+FROM eclipse-temurin:25-jre@sha256:bb036ed6cfdc57e3da7c22634d15f1b840d2caf76183861c80e81ca4b5104abb
 
 ENV LANG='C.utf8' LANGUAGE='C.utf8'
 
