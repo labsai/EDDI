@@ -126,8 +126,9 @@ public class ConversationAccessGuard {
      * Non-throwing counterpart of {@link #requireConversationOwner} for filtering
      * listings, where a denied entry must be omitted rather than raise. It admits
      * exactly what {@code requireConversationOwner} admits — admin, owner, or an
-     * unowned (legacy) conversation — so a caller never lists a conversation they
-     * could not read, nor reads one they could not list.
+     * unowned (legacy) conversation to a caller with a principal name — so a caller
+     * never lists a conversation they could not read, nor reads one they could not
+     * list.
      *
      * @param conversationOwnerId
      *            the owner recorded on the conversation descriptor (may be null)
@@ -138,7 +139,9 @@ public class ConversationAccessGuard {
             return true;
         }
         if (conversationOwnerId == null || conversationOwnerId.isBlank()) {
-            return true; // legacy data without ownership — same as requireOwnerOrAdmin
+            // Legacy data without ownership — same as requireOwnerOrAdmin, which
+            // admits it to everyone except an authenticated caller with no name.
+            return !OwnershipValidator.isNamelessCaller(identity);
         }
         return ownershipValidator.isOwner(identity, conversationOwnerId);
     }

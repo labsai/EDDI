@@ -11,6 +11,9 @@ import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
 import jakarta.ws.rs.BadRequestException;
+
+import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -167,6 +170,60 @@ class RestRagStoreWriteValidationTest {
         config.setChunkStrategy("semantic");
 
         assertThrows(BadRequestException.class, () -> restRagStore.createRag(config));
+    }
+
+    @Test
+    @DisplayName("flags a plaintext credential in either parameter map, and never the value")
+    void flagsPlaintextSecrets() {
+        // Zero-entropy values on purpose: the classification here is by parameter
+        // NAME, and a random-looking value would let an entropy-based check pass
+        // this test even if the name matching were broken.
+        var config = new RagConfiguration();
+        config.setName("product-docs");
+        config.setEmbeddingParameters(Map.of("model", "text-embedding-3-small", "apiKey", "aaaaaaaaaaaa"));
+        config.setStoreParameters(Map.of("host", "db", "password", "aaaaaaaaaaaa"));
+
+        var flagged = RestRagStore.plaintextSecretParameters(config);
+
+        assertEquals(List.of("embeddingParameters.apiKey", "storeParameters.password"),
+                flagged.stream().sorted().toList());
+    }
+
+    @Test
+    @DisplayName("a vault or connection reference is not plaintext")
+    void referencesAreNotFlagged() {
+        var config = new RagConfiguration();
+        config.setName("product-docs");
+        config.setEmbeddingParameters(Map.of("apiKey", "${vault:tenant/agent/openai-key}"));
+        config.setStoreParameters(Map.of("password", "${connection:pgvector}", "connectionString", "{properties.dsn}"));
+
+        assertEquals(List.of(), RestRagStore.plaintextSecretParameters(config));
+    }
+
+    @Test
+    @DisplayName("a plaintext credential warns but still stores — rejecting would break vault-less instances")
+    void plaintextSecretStillStores() throws Exception {
+        // The deliberate trade-off RestLlmStore and RestChannelIntegrationStore
+        // already made. A 400 here would make every existing knowledge base on a
+        // vault-less instance un-updatable.
+        var config = new RagConfiguration();
+        config.setName("product-docs");
+        config.setStoreParameters(Map.of("password", "aaaaaaaaaaaa"));
+
+        var response = restRagStore.createRag(config);
+
+        assertEquals(201, response.getStatus());
+        verify(ragStore).create(any());
+    }
+
+    @Test
+    @DisplayName("a non-credential parameter is never flagged, whatever its value looks like")
+    void nonSecretParametersAreNotFlagged() {
+        var config = new RagConfiguration();
+        config.setName("product-docs");
+        config.setEmbeddingParameters(Map.of("model", "aaaaaaaaaaaa", "baseUrl", "http://localhost:11434"));
+
+        assertEquals(List.of(), RestRagStore.plaintextSecretParameters(config));
     }
 
     private static IResourceStore.IResourceId resourceId(String id, Integer version) {
