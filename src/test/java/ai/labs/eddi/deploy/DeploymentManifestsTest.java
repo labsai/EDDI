@@ -26,6 +26,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Properties;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.TimeUnit;
@@ -1963,6 +1964,60 @@ class DeploymentManifestsTest {
         }
 
         /**
+         * {@code quarkus.oidc.token.audience} and the realm's audience mappers are one
+         * mechanism written in two files, and the failure mode is total: every token
+         * the realm issues is refused, every caller gets 401, and nothing in either
+         * file looks wrong on its own.
+         * <p>
+         * Quarkus verifies {@code aud} on an access token only when that property is
+         * set, so before it was, EDDI accepted any token from the realm — for any
+         * client in it — and roles come from {@code realm_access/roles}, which is
+         * client-independent. Setting it closes that, but only for clients whose tokens
+         * actually carry the audience, and a Keycloak client emits it only through an
+         * explicit {@code oidc-audience-mapper}.
+         * <p>
+         * So: every client a human can log in through must mint the audience EDDI
+         * requires, checked against the property rather than a spelling repeated here.
+         */
+        @Test
+        @DisplayName("every login client mints the audience EDDI requires")
+        void everyLoginClientMintsTheRequiredAudience() throws IOException {
+            String audience = applicationProperty("quarkus.oidc.token.audience");
+            assertFalse(audience.isBlank(),
+                    "quarkus.oidc.token.audience is unset, so EDDI accepts any token the realm issued for any "
+                            + "client in it. If that is deliberate, this test is what has to change with it");
+
+            for (Path realm : List.of(COMPOSE_REALM, KUSTOMIZE_REALM, HELM_REALM)) {
+                for (JsonNode candidate : JSON.readTree(realm.toFile()).path("clients")) {
+                    // Any client that can obtain a token, by any flow: a service
+                    // account mints one without a human, and Keycloak's implicit
+                    // flow returns an access token straight from the authorization
+                    // endpoint. An implicit-only client left out of this check could
+                    // ship without the audience mapper and be refused at runtime.
+                    boolean mintsTokens = candidate.path("standardFlowEnabled").asBoolean()
+                            || candidate.path("directAccessGrantsEnabled").asBoolean()
+                            || candidate.path("implicitFlowEnabled").asBoolean()
+                            || candidate.path("serviceAccountsEnabled").asBoolean();
+                    if (!mintsTokens) {
+                        continue; // eddi-backend is bearer-only: it validates tokens, it does not mint them
+                    }
+                    String clientId = candidate.path("clientId").asText();
+                    List<String> audiences = new ArrayList<>();
+                    for (JsonNode mapper : candidate.path("protocolMappers")) {
+                        if ("oidc-audience-mapper".equals(mapper.path("protocolMapper").asText())
+                                && "true".equals(mapper.path("config").path("access.token.claim").asText())) {
+                            audiences.add(mapper.path("config").path("included.client.audience").asText());
+                        }
+                    }
+                    assertTrue(audiences.contains(audience),
+                            realm + ": client `" + clientId + "` can log a user in, but its access tokens carry "
+                                    + audiences + " as audience while EDDI requires `" + audience + "`. Every "
+                                    + "token it issues would be refused with 401");
+                }
+            }
+        }
+
+        /**
          * Three copies of one realm can drift. The parts that MAY differ are the
          * hostname-shaped ones — redirectUris, webOrigins, loginTheme. Everything the
          * Java code depends on must not: RestManagerResource hardcodes the SPA client
@@ -3356,6 +3411,20 @@ class DeploymentManifestsTest {
 
     private static String read(Path path) throws IOException {
         return Files.readString(path, StandardCharsets.UTF_8);
+    }
+
+    /**
+     * One value out of {@code src/main/resources/application.properties}, so an
+     * assertion can be written against what EDDI is configured to do rather than
+     * against a spelling repeated in a test. Read from the source tree: the test
+     * classpath's own application.properties shadows it.
+     */
+    private static String applicationProperty(String key) throws IOException {
+        Properties properties = new Properties();
+        try (var in = Files.newBufferedReader(Path.of("src", "main", "resources", "application.properties"))) {
+            properties.load(in);
+        }
+        return properties.getProperty(key, "").trim();
     }
 
     // ── Reading structure out of a Go template ───────────────────
