@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.tools.impl;
 
 import ai.labs.eddi.engine.httpclient.SafeHttpClient;
+import ai.labs.eddi.modules.ingestion.HtmlToMarkdownConverter;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -30,49 +31,32 @@ import static ai.labs.eddi.modules.llm.tools.UrlValidationUtils.validateUrl;
 public class WebScraperTool {
     private static final Logger LOGGER = Logger.getLogger(WebScraperTool.class);
 
+    /** Cap on what a single extraction hands back to the model. */
+    private static final int MAX_EXTRACTED_CHARACTERS = 5000;
+
     private final SafeHttpClient httpClient;
+    private final HtmlToMarkdownConverter htmlToMarkdownConverter;
 
     @Inject
-    public WebScraperTool(SafeHttpClient httpClient) {
+    public WebScraperTool(SafeHttpClient httpClient, HtmlToMarkdownConverter htmlToMarkdownConverter) {
         this.httpClient = httpClient;
+        this.htmlToMarkdownConverter = htmlToMarkdownConverter;
     }
 
-    @Tool("Extracts text content from a web page URL. Returns the main text content without HTML tags.")
+    @Tool("Extracts the readable content of a web page URL as Markdown, with navigation, scripts and other page chrome removed.")
     public String extractWebPageText(@P("url") String url) {
 
         try {
             LOGGER.info("Extracting text from URL: " + url);
 
-            // Fetch the web page
             String html = fetchUrl(url);
 
-            // Parse HTML and extract text
-            Document doc = Jsoup.parse(html);
-
-            // Remove script and style elements
-            doc.select("script, style, nav, footer, header, aside").remove();
-
-            // Extract title
-            String title = doc.title();
-
-            // Extract main content
-            String mainContent = extractMainContent(doc);
-
-            StringBuilder result = new StringBuilder();
-            if (!title.isEmpty()) {
-                result.append("Title: ").append(title).append("\n\n");
-            }
-            result.append(mainContent);
-
-            String resultStr = result.toString().trim();
-            LOGGER.debug("Extracted " + resultStr.length() + " characters from " + url);
-
-            // Limit result size
-            if (resultStr.length() > 5000) {
-                resultStr = resultStr.substring(0, 5000) + "\n\n[Content truncated - showing first 5000 characters]";
-            }
-
-            return resultStr;
+            // Delegated rather than re-implemented: this tool used to run its own
+            // "script, style, nav, footer, header, aside" strip plus a flat text()
+            // dump, which dropped page titles living in <article><header><h1> and
+            // merged adjacent blocks into single words. The converter keeps the
+            // structure an LLM can actually use — headings, lists, tables, code.
+            return htmlToMarkdownConverter.convert(html, url, MAX_EXTRACTED_CHARACTERS);
 
         } catch (Exception e) {
             LOGGER.error("Web page extraction error for " + url + ": " + e.getMessage());
@@ -247,20 +231,4 @@ public class WebScraperTool {
         return response.body();
     }
 
-    private String extractMainContent(Document doc) {
-        // Try to find main content area
-        Element main = doc.selectFirst("main, article, .content, .main-content, #content, #main");
-
-        if (main != null) {
-            return main.text();
-        }
-
-        // Fallback to body
-        Element body = doc.body();
-        if (body != null) {
-            return body.text();
-        }
-
-        return doc.text();
-    }
 }

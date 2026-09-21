@@ -36,6 +36,15 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <li>{@code GET /.well-known/capabilities/skills} — list all registered
  * skills</li>
  * </ul>
+ * <p>
+ * <b>Anonymous access.</b> {@code @PermitAll} alone does not make an endpoint
+ * reachable without a token: Quarkus evaluates the path policies under
+ * {@code quarkus.http.auth.permission.*} <em>before</em> declarative RBAC, and
+ * this deployment's catch-all covers {@code /*} with {@code authenticated}. The
+ * four {@code @PermitAll} endpoints below are therefore also named in an
+ * explicit {@code permit} entry in {@code application.properties}, and the
+ * annotation here is only half of that decision.
+ * {@code A2aEndpointPermissionsTest} fails if the two halves ever disagree.
  *
  * @author ginccc
  */
@@ -75,6 +84,10 @@ public class RestA2AEndpoint {
 
     /**
      * Default Agent Card — returns the first A2A-enabled agent's card.
+     * <p>
+     * Anonymous by design: a peer discovers an A2A deployment through the
+     * well-known URI before it holds any credential for it. Paired with the
+     * {@code a2a-agent-card} permission entry.
      */
     @PermitAll
     @GET
@@ -84,16 +97,22 @@ public class RestA2AEndpoint {
             return Response.status(Response.Status.NOT_FOUND).build();
         }
 
-        List<AgentCard> cards = agentCardService.listA2AAgents();
-        if (cards.isEmpty()) {
+        AgentCard card = agentCardService.getDefaultAgentCard();
+        if (card == null) {
             return Response.status(Response.Status.NOT_FOUND).entity(Map.of("error", "No A2A-enabled agents found")).build();
         }
 
-        return Response.ok(cards.get(0)).build();
+        return Response.ok(card).build();
     }
 
     /**
      * Per-agent Agent Card.
+     * <p>
+     * Anonymous by design, for the same reason as the default card, and the apiKey
+     * an A2A client may send with it is optional — see
+     * {@code A2AToolProviderManager.fetchAgentCard}. Reading a card requires
+     * knowing the agent id, so it discloses one agent rather than the roster.
+     * Paired with the {@code a2a-agent-card} permission entry.
      */
     @PermitAll
     @GET
@@ -113,8 +132,17 @@ public class RestA2AEndpoint {
 
     /**
      * List all A2A-enabled agents.
+     * <p>
+     * <b>Authenticated</b>, unlike the two card endpoints above. This is the
+     * deployment's whole A2A roster — every agent's name, description, skills and
+     * URL — which is strictly more than the skill-name list that sits behind
+     * {@code eddi.a2a.capabilities.public}, and no part of the A2A protocol needs
+     * it: a peer is given a card URL, it does not enumerate. It carried
+     * {@code @PermitAll} until 6.4.0, which never took effect because no permission
+     * entry matched the path; the annotation was removed rather than a permit entry
+     * added.
      */
-    @PermitAll
+    @Authenticated
     @GET
     @Path("a2a/agents")
     public Response listA2AAgents() {
@@ -130,8 +158,13 @@ public class RestA2AEndpoint {
      * sanitized (no tenant IDs or private metadata). Gated behind
      * {@code eddi.a2a.capabilities.public} (default {@code false}).
      * <p>
-     * Path follows the well-known URI convention, same auth model as
-     * {@code /.well-known/agent.json}.
+     * Path follows the well-known URI convention. {@code capabilitiesPublic} is the
+     * only <em>authorization</em> gate — {@code a2aEnabled} gates it too, but
+     * neither of them inspects the caller. While either is {@code false} this
+     * answers 404 to authenticated and anonymous callers alike, so the
+     * {@code a2a-capabilities} permission entry can permit the path unconditionally
+     * without widening anything. While both are {@code true}, anonymous is what
+     * "public" means.
      */
     @PermitAll
     @GET
@@ -160,7 +193,8 @@ public class RestA2AEndpoint {
 
     /**
      * Public endpoint listing all registered skill names. Gated behind
-     * {@code eddi.a2a.capabilities.public} (default {@code false}).
+     * {@code eddi.a2a.capabilities.public} (default {@code false}) on exactly the
+     * same terms as {@link #searchCapabilities(String, String)}.
      */
     @PermitAll
     @GET
@@ -179,8 +213,9 @@ public class RestA2AEndpoint {
 
     /**
      * JSON-RPC 2.0 endpoint for A2A task operations. Protected by OIDC when
-     * authentication is enabled (quarkus.oidc.tenant-enabled=true). GET endpoints
-     * (Agent Card discovery) remain public per A2A protocol spec.
+     * authentication is enabled (quarkus.oidc.tenant-enabled=true). Agent Card
+     * discovery stays public per the A2A protocol spec; the agent listing does not,
+     * and neither does this.
      */
     @POST
     @Path("a2a/agents/{agentId}")

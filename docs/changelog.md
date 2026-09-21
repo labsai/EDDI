@@ -37,7 +37,7 @@ which neither a reader nor an agent's context window could usefully hold.
 
 | Period | Entries | Size |
 |---|---|---|
-| [September 2026](changelog/2026-09.md) | 3 | 7 KB |
+| [September 2026](changelog/2026-09.md) | 14 | 55 KB |
 | [August 2026](changelog/2026-08.md) | 211 | 832 KB |
 | [July 2026](changelog/2026-07.md) | 147 | 648 KB |
 | [June 2026](changelog/2026-06.md) | 26 | 67 KB |
@@ -299,6 +299,68 @@ The Quick Start in `docs/mcp-server.md` only ever showed the unauthenticated
 
 ---
 
+---
+
+## 📄 refactor(ingestion): HTML→Markdown converter, and WebScraperTool stops duplicating it (2026-09-17)
+
+**Repo:** EDDI (`feat/html-to-markdown-converter`)
+
+### Why
+
+Ingesting a web page for retrieval needs more than `Jsoup.text()`. Flat text loses the structure a
+chunker needs (heading boundaries, which section a passage came from) and merges neighbouring blocks
+into single tokens. `WebScraperTool` was doing exactly that, with its own inline
+`"script, style, nav, footer, header, aside"` strip — a second, weaker copy of the same rules.
+
+This lands the converter salvaged from the stale PR #529, with its defects fixed, and makes the
+existing tool use it instead of its own extraction.
+
+### Why not a library
+
+Checked the classpath first: jsoup and pdfbox are present; flexmark-html2md, commonmark and the
+langchain4j document parsers are not. A general HTML→Markdown library optimises for fidelity to the
+source document, while ingestion wants the opposite — aggressive removal of everything a reader skips.
+~450 lines with a 60-case suite is cheaper than a new supply-chain dependency for that job.
+
+### Defects fixed from the salvaged draft
+
+Each of these silently degraded what reached the vector store; all 46 of the draft's own tests passed
+with them present, which is the point — bad ingestion has no stack trace.
+
+- **Adjacent blocks merged.** `div`/`section`/`article` appended children with no separator, so
+  `<div>Hello</div><div>World</div>` embedded as `HelloWorld`.
+- **`<header>` stripped globally**, deleting the page title in the `<article><header><h1>` layout most
+  documentation themes use. Now only `body > header` (the site banner) is removed.
+- **Unescaped `|` in table cells**, which ends the column early and shifts every later value under the
+  wrong header — corruption that surfaces only as a wrongly cited number.
+- **Code blocks flattened**: `text()` collapses whitespace, so every multi-line sample became one line.
+  Uses `wholeText()`.
+- **Headings resolved links against `null`**, leaving them relative and useless as citations.
+- **`<dl>`, `<details>`, `<figure>` fell through to the default branch** and ran together — collapsed
+  `<details>` content is still content and is now ingested with its summary as the label.
+- Alt-less images emitted `![](url)`: tokens spent on nothing. Dropped.
+- Boilerplate selectors extended with `role=navigation|banner|contentinfo|complementary`, cookie
+  banners, buttons, `svg`, `template`, `aria-hidden`.
+- `maxLength <= 0` truncated everything; now falls back to the default.
+- Dead `inPreBlock` plumbing removed (never set true by any caller).
+
+### WebScraperTool
+
+`extractWebPageText` now returns Markdown from the converter rather than a `text()` dump prefixed with
+`Title: `. Same 5000-character cap. This is a visible change to an LLM tool's output, and a deliberate
+one: the model gets headings, lists and tables instead of one run-on paragraph. Its `extractMainContent`
+helper is gone — it was the duplicate.
+
+### Tests
+
+60 converter tests: all 46 inherited from the draft pass unchanged against the rewrite (useful evidence
+the behaviour was preserved where it was right), plus 14 in `HtmlToMarkdownConverterSalvageTest`, one per
+defect above. `WebScraperToolExtendedTest` gains a case asserting structure survives.
+
+Note: `WebScraperToolTest` cannot run in this environment — its `setUp` constructs a real
+`SafeHttpClient`, and creating an `HttpClient` here fails with "Unable to establish loopback
+connection". Pre-existing and environmental; CI covers it.
+
 ## ♿ fix(ui): closing a dialog hands focus back to what opened it (2026-09-19)
 
 **Repo:** EDDI (`fix/dialog-return-focus`)
@@ -386,6 +448,190 @@ coverage green locally.
 `previousFocusRef` is captured in the same effect, after an `autoFocus` child has already taken focus,
 so on close focus "returns" to that (now unmounted) field instead of the trigger. Pre-existing and
 separate; left alone here.
+
+---
+
+## 🔐 fix(a2a): make the A2A endpoints' anonymity real, and decide which of them deserve it (2026-09-17)
+
+**Repo:** EDDI (`fix/a2a-anonymous-discovery-permissions`)
+
+`RestA2AEndpoint` annotated five endpoints `@PermitAll`, intending them to be reachable by peer
+agents that hold no EDDI credential. None of them were named in a
+`quarkus.http.auth.permission.*` entry. **Quarkus evaluates those path policies before declarative
+RBAC**, so the `/*` catch-all (`policy=authenticated`) claimed all five: on any instance with
+`quarkus.oidc.tenant-enabled=true`, Agent Card discovery answered **401** to exactly the callers it
+exists for — a bare 401, since `quarkus.oidc.application-type=service` sends no login redirect. The
+annotation and the deployment had disagreed for as long as the endpoints existed.
+
+Nothing caught it because `A2aEndpointIT` runs against a `BaseStandaloneIT` instance with
+authorization off, where `DisabledAuthController` switches the path policies off wholesale and a
+permitted path and a protected one answer identically.
+
+### The decision, endpoint by endpoint
+
+Not all five were meant to be anonymous, so this is not "add a permit entry for the five".
+
+| Endpoint | Posture | Why |
+|---|---|---|
+| `GET /.well-known/agent.json` | **permit** | The A2A discovery convention. A peer reads the card *before* it holds any credential |
+| `GET /a2a/agents/{agentId}/agent.json` | **permit** | The card EDDI's own client fetches — `A2AToolProviderManager.fetchAgentCard` sends `apiKey` only if one is configured. Needs the agent id, so it discloses one agent, not the roster |
+| `GET /a2a/agents` | **authenticated** — `@PermitAll` removed | The whole roster: every A2A agent's name, description, skills and URL. Strictly more than the skill-name list that sits behind `eddi.a2a.capabilities.public`, and nothing in the protocol or in this repo fetches it |
+| `GET /.well-known/capabilities` | **permit** at the HTTP layer | `eddi.a2a.capabilities.public` (default `false`) is the only *authorization* gate — `eddi.a2a.enabled` gates it as well, but neither looks at the caller. While either is off the handler answers 404 to authenticated and anonymous callers alike, so permitting the path widens nothing — and while both are on, "public" has to mean *without a token* |
+| `GET /.well-known/capabilities/skills` | **permit** at the HTTP layer | Same flag, same reasoning |
+
+Where code and config disagreed, the **code** was changed: `listA2AAgents` lost `@PermitAll` and
+gained `@Authenticated`, rather than gaining a permit entry.
+
+### Design decisions
+
+- **`/a2a/agents/*/agent.json`, not `/a2a/agents/*`.** Quarkus 3.39's `ImmutablePathMatcher`
+  supports an inner wildcard matching exactly one path segment, and the distinction is load-bearing
+  twice over. A `/a2a/agents/*` prefix would (a) permit the roster, because the prefix registers
+  under `/a2a/agents` and wins over the catch-all, and (b) **break A2A outright**: the JSON-RPC
+  `POST /a2a/agents/{agentId}` would match a `methods=GET` entry, and Quarkus *denies* on a method
+  mismatch rather than falling through. Both are asserted.
+- **No `/.well-known/*` wildcard.** RFC 9728 protected-resource metadata is planned under that
+  prefix (`planning/saas-connectors-plan.md` §6.3); a wildcard would pre-permit it, and anything
+  else later dropped there, with nobody deciding to. The paths are enumerated and a test asserts a
+  sibling still requires authentication.
+- **One knob for capability discovery.** The permission entry does not re-express
+  `eddi.a2a.capabilities.public`; duplicating the gate into a second property is how the two drift.
+
+### Tests
+
+- **`A2aEndpointPermissionsTest`** (new, unit — runs in `./mvnw test`, no container). Feeds the
+  shipped `application.properties` through Quarkus's own `ImmutablePathMatcher` and resolves the
+  effective policy per path and method, replicating `findHttpMatchers`' method-filtering rule. Its
+  last test reflects over `RestA2AEndpoint` and asserts every `@PermitAll` / `@Authenticated` method
+  resolves to the policy it claims — so the *next* endpoint added with a forgotten permit entry
+  fails here. Mutation-checked three ways: removing the card entry reproduces the original
+  `[authenticated]`; widening to `/a2a/agents/*` catches both failure modes above; a
+  `/.well-known/*` wildcard trips the sibling assertion.
+- **`ui/manager/e2e/auth/a2a-discovery.spec.ts`** (new). The auth E2E tier is the only one that
+  enforces authentication, so it is where the real status codes belong: it creates an A2A-enabled
+  agent (a card is built from stored config, no deployment needed), then asserts 200 anonymous for
+  both cards and both capability endpoints and 401 anonymous for the roster, the JSON-RPC surface
+  and an unlisted `/.well-known` sibling. It opens with its own "this backend really is enforcing
+  auth" guard so it cannot pass vacuously, and re-checks the roster with an admin token so the 401
+  is provably about anonymity.
+- `docker-compose.integration-keycloak.yml` sets `EDDI_A2A_CAPABILITIES_PUBLIC=true`, because with
+  the flag off the spec could not tell "permitted, flag says no" (404) from "the permission entry is
+  missing again". The flag-off 404 stays covered by `RestA2AEndpointTest`.
+
+### Files
+
+- `src/main/resources/application.properties` — new `a2a-agent-card` and `a2a-capabilities` permit
+  entries, GET-only, before the catch-all
+- `src/main/java/ai/labs/eddi/engine/a2a/RestA2AEndpoint.java` — `listA2AAgents` is
+  `@Authenticated`; Javadoc on every endpoint records the posture and why
+- `src/test/java/ai/labs/eddi/engine/a2a/A2aEndpointPermissionsTest.java` — new
+- `ui/manager/e2e/auth/a2a-discovery.spec.ts` — new
+- `ui/manager/docker-compose.integration-keycloak.yml` — capability flag on
+- `docs/a2a-protocol.md` — an "Anonymous?" column and a "Who can call them" section
+- `docs/configuration-reference.md` — `eddi.a2a.capabilities.public` says what it actually gates
+
+### Review follow-up (PR #782)
+
+Three findings, all valid, all fixed on the branch:
+
+- The generic guard resolved the HTTP verb as `isAnnotationPresent(GET) ? "GET" : "POST"`, so a
+  future `@PermitAll @PUT` would have been graded against a method it does not serve — and since
+  the permit entries are GET-only, that is precisely the drift the guard exists to catch. The verb
+  now comes from whichever annotation is meta-annotated `jakarta.ws.rs.HttpMethod`, and the guard
+  fails on anything other than exactly one. Confirmed by planting a `@PermitAll @PUT` endpoint plus
+  a permit entry naming POST: the old code passed it, the new code names the entry and the verb.
+- `docs/a2a-protocol.md` said everything is reachable without a token when OIDC is off. True of
+  authentication, misleading about the result — `eddi.a2a.capabilities.public` is an independent
+  switch and its endpoints 404 either way while it is off.
+- `docs/configuration-reference.md` said the capability endpoints expose agent *names*.
+  `CapabilityMatch` is `(agentId, skill, confidence, attributes)` — ids. The surface is smaller
+  than the doc claimed, which if anything strengthens the case for leaving `/a2a/agents` (names,
+  descriptions, URLs) authenticated.
+
+**Second pass** (CodeRabbit's first review was rate-limited before it saw the fix commits, so both bots
+were asked for a fresh look):
+
+- `eddi.a2a.capabilities.public` was described as "the only gate". `eddi.a2a.enabled` gates the
+  capability endpoints too (`if (!a2aEnabled || !capabilitiesPublic) → 404`). Reworded in all five
+  places that said it to "the only *authorization* gate — neither flag inspects the caller", which
+  is the claim the permit entry actually rests on.
+- The Agent Card's `authentication.credentials` is built from `quarkus.oidc.auth-server-url`, i.e.
+  the URL **EDDI** uses to reach the IdP. The shapes that bundle Keycloak set that to an in-cluster
+  or compose hostname, so the token endpoint advertised to an outside peer does not resolve — which
+  this PR makes consequential, because the card is now anonymously readable under auth. Initially
+  deferred as a config-design decision; **fixed here** once CodeRabbit raised it independently at
+  Major severity — see the fourth pass below.
+
+**Third pass — two findings Copilot *suppressed* into its review body**, where they have no thread and
+a `reviewThreads` query cannot see them. Both were real, and both are properly this PR's:
+
+- **`/.well-known/agent.json` fanned out over the whole roster.** `getDefaultAgentCard()` called
+  `listA2AAgents()` and returned `cards.get(0)` — building a card for every A2A-enabled agent
+  (`getCurrentResourceId` + `read` + `readDescriptor` apiece, up to 100 candidates) and discarding
+  all but one. Merely wasteful while the endpoint required a token; an amplification vector now that
+  this PR makes it anonymous. `AgentCardService.getDefaultAgentCard()` now stops at the first match
+  (`collectA2AAgents(stopAtFirst)`), and `AgentCardServiceTest` asserts **one** store read across 25
+  candidates rather than asserting the card — the card was always right, the cost was not.
+- **The E2E cleanup scored a failed request as success.** `await call().catch(() => undefined)`
+  followed by `res === undefined || res.status() < 400` passed when the request never completed,
+  leaking the A2A-enabled fixture agent. That one contaminates specifically: the default Agent Card
+  is whichever A2A agent comes first, so a leftover is exactly what a later run reads. The soft
+  assertion now requires a real 2xx/3xx and reports the status or the error.
+
+**Fourth pass — the advertised token endpoint, raised independently by both reviewers.** Deferred
+twice on scope, then implemented: two reviewers agreeing, both framing it as "the permission change
+makes this pre-existing URL consequential", outweighed the argument for keeping it separate.
+
+`AgentCardService.advertisedTokenEndpoint()` resolves what the card advertises:
+
+- **`eddi.a2a.public-token-endpoint`** (new, optional) — advertised verbatim. The *endpoint*, not
+  the issuer, because the path is the provider-specific part.
+- Otherwise `<issuer>/protocol/openid-connect/token`, where `<issuer>` is **`eddi.keycloak.public.url`**
+  grafted onto the realm path from `quarkus.oidc.auth-server-url`, falling back to
+  `quarkus.oidc.auth-server-url` itself. Both shipped authenticated deployments already set the
+  public URL — Helm *requires* it, since the Manager SPA cannot start a login without it — so they
+  become correct with no new configuration. Only the origin is taken from it; the realm path stays
+  what EDDI is configured against, so the two cannot drift. **Nothing moves for a deployment that
+  does not opt in**, which is what made this safe to do inside a permissions PR.
+
+The derivation **assumes Keycloak**, which the docs now say rather than gloss. OIDC discovery would
+remove the assumption instead of documenting it and is the right follow-up; it is not done here
+because it turns rendering an anonymous card into an outbound HTTP call, needing `SafeHttpClient`,
+a cache and a failure policy.
+
+Verified end to end rather than by unit test alone — built the image, ran the Keycloak tier, and read
+the anonymous card: `credentials` is now
+`http://localhost:8180/realms/eddi/protocol/openid-connect/token`, the published port an outside peer
+sees, where it was `http://keycloak:8080/...`. That URL is provably reachable — it is the one the
+test fixtures fetch their tokens from. `a2a-discovery.spec.ts` now asserts it exactly, as the
+reviewer asked.
+
+**Fifth pass — a bug in the fourth pass.** CodeRabbit (Major) caught that the property introduced
+above was the *issuer*, while the Keycloak path `/protocol/openid-connect/token` was appended to
+whatever it named. So the one knob documented as "the escape hatch for a non-Keycloak IdP" handed an
+Okta or Auth0 operator their issuer with a Keycloak path stapled on — it did not do the job it was
+documented as doing, and the docs, the commit message and the reply to the reviewer all repeated the
+claim.
+
+Replaced `eddi.a2a.public-auth-server-url` with `eddi.a2a.public-token-endpoint`, advertised
+verbatim: **one** property instead of two, and it actually covers the case the other one claimed to.
+The property was one commit old and unreleased, so nothing depended on it. Two tests pin the
+distinction, including one asserting the Keycloak path is never appended to an endpoint given in
+full.
+
+Also seen this pass and **not** fixed here: `UI Manager Checks` went red on
+`share-dialog.test.tsx › does not let two quick Enters skip the ownership confirmation`, a file this
+branch does not touch. It passes 15/15 locally three runs in a row, and the cause is visible in the
+test — a synchronous `expect(screen.getByTestId("share-owner-warning"))` immediately after an async
+`userEvent.type`, with no `waitFor`, so a slow runner loses the race. A real flake with a one-line
+fix, but in unrelated code; filed separately rather than smuggled into a permissions PR.
+
+### What's next
+
+Nothing outstanding for A2A. The generic lesson — `@PermitAll` is not a permit entry — applies to
+any future endpoint meant to be anonymous; `A2aEndpointPermissionsTest` only guards
+`RestA2AEndpoint`, and widening it to every `@PermitAll` in the codebase would be a reasonable
+follow-up.
 
 ---
 
@@ -2831,777 +3077,6 @@ both documented in `docs/metrics.md` and charted in the Grafana dashboard, becau
 Recorded honestly as unverifiable locally: the `SafeHttpClient` redirect tests need a
 loopback socket, and the new DDL and Mongo codec paths are only exercised against real
 backends in CI.
-
-## 🔁 test(backup): reach the rollback path without a multi-agent archive (2026-09-07)
-
-**Repo:** EDDI (`fix/review-backup-sync`)
-
-Merging main brought in two import-rollback tests from #733 that build an archive with **two** agent
-files, land the first and fail the second. This branch independently forbids that: `singleAgentFileIn`
-rejects a multi-agent archive, because an operator who approved importing one agent was getting
-several, with the `Location` header pointing at whichever file happened to be enumerated last.
-
-Both are right, and as written they cannot both hold. The guard stays; the tests were reshaped to
-reach the same rollback through a single-agent archive whose **schedule write** fails. That is the
-first step after the Agent is created and registered, which the production comment at the call site
-already says is deliberate: schedules carry the id of the agent they fire, so they are written after
-the Agent but before descriptor bookkeeping, "so a failure there still rolls them back".
-
-Every assertion survives in substance — the Agent is registered, its row is deleted, and it is taken
-back out of the capability index; and for the second test, a registry that throws on `unregister`
-still must not abandon the workflow delete that follows it. Proven by deleting `unregisterCapabilities`
-from the rollback: `Wanted but not invoked: capabilityRegistryService.unregister(...)`.
-
----
-
-## 🔑 fix(backup): a reordered config list could hand one endpoint another's credential (2026-09-07)
-
-**Repo:** EDDI (`fix/review-backup-sync`)
-
-Three review comments and a round of CodeQL alerts. The first is the serious one.
-
-**Secrets were restored into the wrong entry.** `ScrubbedSecrets.merge` paired source and target
-list elements by index. An httpCalls config whose entries had been reordered between export and
-sync therefore kept each source entry's own `uri` while taking the target's value at that position:
-the billing call kept `https://billing.example.com` and received the *analytics* token. An
-inserted entry was worse — a newly added call to an attacker-chosen host inherited the credential
-that had been at its index. That is a credential disclosure to whatever endpoint sits at the other
-position, not merely a lost secret.
-
-Elements are now bound by stable identity (`name`, `id`, `key`) wherever they carry one, requiring
-a unique target match. Elements with none — a bare string in an array — fall back to position only
-when the lists are the same length and the two elements are identical in everything the scrubber
-did not replace. Anything else refuses and keeps its placeholder, which the caller already logs for
-the operator. Refusing beats guessing here: a lost secret costs an operator one re-entered key, a
-misplaced one goes to somebody else's server.
-
-**A workflow-only change was dropped and reported as skipped.** When a workflow diff was `UPDATE`
-with no extension changes, nothing wrote the source config, so reordered steps or an added
-condition silently did not arrive — and the run said "skipped", so the operator was told nothing
-had gone wrong. The executor now adopts the source workflow, but only when every extension
-reference it carries also exists in the target at the same canonical key; otherwise it refuses and
-names the step, the same refusal the branch already makes for a new extension. Adopted references
-are repointed onto the target's own resource URIs, because a cross-instance source names the
-*other* instance's ids. A source workflow with no steps is refused outright rather than emptying a
-live pipeline, and an adoption that comes out identical to the target is suppressed so a
-cross-instance no-op does not burn a version.
-
-**A dispatch test asserted something that could not fail.** It checked `agentUri()` was non-null,
-which is returned whether or not anything was written, so a miswired store row passed. It now
-asserts the result carries no failures and that the store was actually invoked; two sibling tests
-that provoked a failure and asserted nothing about it were strengthened the same way.
-
-**Log injection.** Snippet names, extension types and names, workflow and agent ids all come from
-the archive and reached the log unsanitized. Every log argument in `UpgradeExecutor` and
-`SourceUrlValidator` now goes through `LogSanitizer.sanitize`. Most of those values happen to be
-URI-derived and so cannot carry a control character, but a snippet name is free-form text and
-genuinely could — that is the one the new test drives.
-
----
-
-## 🧪 test(backup): replace the tests that could not fail, close the CodeQL round (2026-09-06)
-
-**Repo:** EDDI (`fix/review-backup-sync`)
-
-Two passes on the same branch: 22 review comments (mostly CodeQL log-injection alerts) and a
-mutation audit of the tests this branch had added.
-
-**Every alert was already closed in the source, but two had no test that could fail if the fix
-were removed.** Those guards were added. The rest were verified line by line against the working
-tree rather than against the previous pass's notes.
-
-**The mutation audit is the more useful half.** Fable re-ran each new test with the production
-change surgically reverted and found several that passed anyway — coverage without a contract.
-They are now rewritten to assert what the changed line actually implements:
-
-- The snippet-rollback test asserted a call count; it now proves that a snippet created during a
-  failed import is recorded on the `ImportTransaction` and deleted again by `rollbackCreatedResources`,
-  and that a snippet *merged* into an existing one is never deleted.
-- `BackupMetrics.upgradeCompleted` was checked by reading counters back, which cannot distinguish
-  `increment(0)` from no call at all — both leave a `SimpleMeterRegistry` counter at zero. It now
-  asserts the calls themselves against a recording registry.
-- The workflow pass-through tests asserted a rendered string that a re-serialised model also
-  produces. They now assert the archive's own text survives byte for byte, which catches the real
-  loss: re-rendering adds an `extensions` field the archive never carried.
-- The extension-failure test now asserts the exact key set the matcher builds from the target,
-  including the occurrence ordinal, rather than a substring a wrongly-keyed map would also satisfy.
-
-**Recorded gaps, stated rather than papered over.** Two defensive lines cannot be pinned by a unit
-test and their tests were deleted rather than left as decoration: `recordCreatedSnippet`'s
-null-URI guard and `resolveSnippetIdsByName`'s null-listing guard both sit inside a broader
-`catch (Exception)`, so removing either still leaves the class green. A test that cannot fail is
-worse than no test, because it hides the hole.
-
-Diff coverage of the branch's changed lines: 94.1% line, 84.2% branch.
-
----
-
-## 🔁 fix(backup): repair agent export, import and sync (2026-09-04)
-
-**Repo:** EDDI (`fix/review-agent-sync`)
-
-From the whole-repository code review. **Granular sync/upgrade did nothing at all**, and
-its preview said otherwise — the single most serious finding of the review, and it was
-broken three independent ways at once.
-
-1. `UpgradeExecutor` asked `StructuralMatcher.buildPreview` for a *content-less* preview
-   (`includeContent=false`), so `sourceJson` and `targetJson` were both null for every
-   matched resource. The action then reduced to `Objects.equals(null, null)` → `SKIP`, and
-   the executor skips every SKIP. Every resource that already existed in the target was
-   silently left untouched.
-2. Extension URIs were read from `step.getExtensions()`, but the engine stores them in
-   `step.getConfig().get("uri")`, so the target extension map came back empty.
-3. The ZIP and remote sources keyed their extension maps by resource-store authority
-   (`ai.labs.rules`) while the target keyed by workflow step type
-   (`eddi://ai.labs.behavior`), so the two sides could never join even with (1) and (2)
-   fixed.
-
-The REST preview endpoints pass `includeContent=true` and therefore showed real
-differences. An operator saw a diff, applied it, received success, and nothing changed.
-
-**Fixed** by a new `WorkflowExtensions` — one scan that is the single source of truth for
-how a workflow points at its extension configs. Both producers and the matcher derive
-keys from it, so source and target are guaranteed to join. The canonical key is
-`<stepType>#<occurrence>/<path>`, which also fixes a workflow with two steps of the same
-type collapsing onto one key and repointing both at the second resource. The diff action
-is now decided from content that is always loaded; `includeContent` governs only what is
-returned to the caller.
-
-### Also in this branch
-
-- **Exported ZIPs were never deleted** and accumulated in the working directory. They now
-  land in `tmp/archives/` and are swept by age (`eddi.backup.export.retention-minutes`,
-  default 60); the 404 message states the real retention instead of a fictional one.
-- **A non-ASCII agent name produced an undownloadable archive.** `URLEncoder` output like
-  `M%C3%BCller+Bot` was written literally to disk, and the download endpoint's character
-  class then rejected the decoded form. Names are slugified instead, and a
-  `Content-Disposition` header carries the readable filename.
-- **Schedules were exported but never imported** — silently dropped on every round trip
-  while the ZIP visibly contained them. Import now reads them, repoints them at the new
-  agent with fire bookkeeping reset, and rolls them back with the rest of the transaction.
-- **A v5 export ZIP imported nothing and reported 200.** The importer only looked for
-  `.agent.json`, never the v5 `.bot.json` it deliberately still accepts elsewhere.
-- **`strategy=upgrade` without `targetAgentId`** silently fell through to create, producing
-  a duplicate agent; it is now a 400 naming the parameter.
-- **A selectively-exported ZIP could not be re-imported**: a deselected extension file is
-  absent from the archive while the workflow still references it, and `readResources`
-  handed the resulting null straight to `store.create()`.
-
-### Regression coverage
-
-Every behavioural change is pinned by a test **proven to fail with its fix reverted**.
-`ExtensionSourceKeyContractTest` writes a real archive to disk and stubs a real remote,
-then asserts both producers emit identical canonical keys *and* that every extension joins
-the target as UPDATE rather than CREATE; its fixture deliberately carries two `httpcalls`
-steps so the collapse-by-type defect is caught too.
-
-Two tests are recorded honestly as characterization rather than guards: the snippet
-name-fallback row is what `main` always emitted, and `RestUtilities.createConflictException`
-was a behaviourally identical refactor. Neither can fail without its change, and both say
-so.
-
-## 🧼 fix(configs): sanitize every cascade-delete log argument, not most of them (2026-09-06)
-
-**Repo:** EDDI (`fix/review-config-delete`)
-
-CodeQL raised eight log-injection alerts on this branch: a REST path parameter reached a log call
-unsanitized, so a caller could put CR/LF in an Agent or workflow id and forge log records
-(CWE-117). Every flagged argument now goes through `LogSanitizer.sanitize`.
-
-The more useful part was what the alerts did *not* cover. `RestAgentStore` was left with the same
-tainted `id` sanitized on one line and raw sixteen lines above it, on the schedule-cascade pair
-that CodeQL could not reach because it needs the schedule store to throw. Uneven coverage in one
-file is worse than none, because the next reader assumes the file is done. Every log argument in
-that class is now sanitized: caller ids, store-sourced ids, and exception messages.
-
-`URI`-typed arguments are deliberately left alone — `URI.create` rejects control characters, so a
-URI object cannot carry a record boundary in the first place.
-
-Ten regression tests drive a CR/LF payload through the real code paths and assert no newline
-reaches the log. They guard against vacuity twice: the capture must be non-empty, and it must
-contain a marker from the specific line under test — otherwise a closed logger or an unreached
-branch would pass. `captureLogsOf` moved to a shared `LogCaptureSupport` rather than being copied.
-
-One argument is honestly not pinned: `pinned.getId()` on the plan-cascade failure path. It comes
-from `RestUtilities.extractResourceId`, whose validity gate returns null for anything containing
-CR/LF, so the value cannot be driven. It is defensive, not reachable.
-
----
-
-## 🧹 fix(configs): stop cascading deletes removing resources someone else still uses (2026-09-06)
-
-**Repo:** EDDI (`fix/review-config-delete`)
-
-Review round on this branch: 20 comments, 6 fixed, 13 confirmed already correct, 1 disputed with
-code evidence. The six fixes share one shape — a delete that asked the right question at the wrong
-moment.
-
-**Cascade deletes checked references before the parent was gone.** `planCascade` has to ask
-"is this referenced by more than one thing" while the Agent still counts itself, but by the time
-each child delete actually runs the Agent is deleted and the count has moved. A workflow that a
-second Agent adopted in between was deleted anyway. Both `RestAgentStore` and `RestWorkflowStore`
-now re-ask immediately before each child delete, and a candidate that is still referenced
-increments the `X-Cascade-Skipped` counter instead of being removed.
-
-**The orphan purge trusted a reverse lookup that ignores old versions.** Both lookups in
-`isReferencedNow` skip referrers that are not a resource's current version, while the mark scan
-deliberately counts every version a deployment record pins. The purge loop now also re-runs the
-deployed-agent scan per candidate and fails closed when the scan is incomplete or throws.
-
-**Vault key rotation could sweep the key it had just written.** `versionsToSweep` treated an empty
-list of valid versions as "nothing to keep" rather than as an unknown bound, so a rotation whose
-identity update had not yet landed swept the new key. Empty is now handled exactly like null: the
-full scan range is preserved and nothing is deleted on an unknown bound.
-
-**Soft-deleting a descriptor marked the wrong version.** Descriptor versions advance independently
-of the resource's, so the soft path now resolves the descriptor's own current version the way the
-permanent path already did.
-
-**Files:** `RestAgentStore`, `RestWorkflowStore`, `RestOrphanAdmin`, `AgentSigningService`,
-`RestVersionInfo`, and their tests.
-
----
-
-## 🛡️ fix(configs): close the CodeQL alerts and the review round (2026-09-04)
-
-**Repo:** EDDI (`fix/review-config-delete`)
-
-Follow-up on the same branch, from two independent review rounds, a diff-coverage pass, and
-four CodeQL alerts this branch introduced.
-
-**CodeQL, all four fixed in code rather than dismissed.** Two high-severity integer overflows
-in the new `ResourceUtilities` paging helper, where a caller-supplied index and limit were
-combined without bounds so a large value wrapped and produced a nonsensical window; the inputs
-are now clamped before the arithmetic. Two log-injection sites where a user-provided value
-reached a log statement unsanitised, now routed through the sanitiser the codebase already
-uses elsewhere rather than a second one.
-
-**A functional regression the branch's own suite could not see.** `RetryConfiguration` gained a
-total-backoff budget, and every test in that class stayed green while the behaviour changed.
-Found by the reviewer, fixed, and pinned by a test that fails without it.
-
-**Four tests were proven vacuous by mutation.** One claimed to pin a new
-`!config.getCapabilities().isEmpty()` guard; removing that guard left it green. Another
-asserted the consequence of a stub the real collaborator refuses to produce. Each was rewritten
-to fail on the regression it names, or deleted with an honest gap recorded — a test that cannot
-fail is worse than none, because it hides the hole.
-
-**Diff coverage** of changed lines: 89.9% to 99.5% line, 80.1% to 92.7% branch, with 38 tests
-added and each proven against a mutation of the line it protects.
-
----
-
-## 🗑️ fix(configs): make destructive configuration deletes safe, atomic and honest (2026-09-04)
-
-**Repo:** EDDI (`fix/review-config-delete`)
-
-From the whole-repository code review. The destructive configuration paths destroyed data
-that was still in use, and reported success while doing it.
-
-**Orphan purge deleted live configuration.** References are version-pinned by design, and
-`DocumentDescriptorFilter` rewrites a descriptor's `resource` to the new version on every
-PUT. So a single edit of a rule set leaves the descriptor saying `?version=2` while every
-workflow that was not re-pointed still says `?version=1`. The scan compared those full
-versioned URI strings, found no match, classified the config an orphan, and
-`DELETE /administration/orphans` removed **all** of its versions — destroying a config a
-live workflow was still resolving. The comparison is now on version-independent identity,
-so any referenced version protects the resource. The remaining deliberate gap (only the
-current version of each agent is scanned) is documented rather than silently present.
-
-**Cascade delete tore down workflows before the guard that could still reject it.** A
-version-mismatched cascade deleted the workflows and schedules of the version it read, then
-answered 409. And the reference check asked whether *one pinned version* was still
-referenced before deleting *every* version, so a workflow another agent still used was
-destroyed.
-
-**Reverse lookups crashed on soft-deleted rows.** `AgentStore` and `WorkflowStore` threw
-`ResourceNotFoundException` as soon as one referencing document had been soft-deleted,
-which disabled the "is this still referenced?" check entirely — the check is caught and
-logged, so cascade delete simply stopped protecting shared resources.
-
-**Version-0 history rows escaped permanent deletion** on MongoDB, so `deletePermanently`
-and GDPR erasure both reported success while leaving an undeletable descriptor tombstone
-behind forever.
-
-### Regression coverage
-
-Every behavioural change is pinned by a test proven to fail with its fix reverted.
-
-Three pre-existing tests were **failing on the first attempt at this branch** while the
-work reported itself green — caught by an independent reviewer running them. They are now
-genuinely closed, and closed the right way: the fixtures were corrected to stub what
-production actually calls. Five more tests in the same classes had begun passing
-*vacuously*, because the change bypassed the dead-letter branch they were written to cover;
-their stubs are restored so they exercise it again.
-
-`maxMonthlyCostUsd` is stored and displayed but never enforced, because
-`TenantQuotaService.recordCost` has no production caller. That is left as a product gap and
-now surfaces as an explicit warning rather than a silent no-op.
-Two things the auditor caught and this branch corrects rather than ships: the signing
-keypair was being destroyed from the vault on a **soft** delete, on the path that exists
-precisely to be recoverable; and a unique compound index was created unconditionally at
-startup, which fails with a duplicate-key error on exactly the deployments the finding says
-already hold duplicates. Both are now conditional and safe.
-
-Six pre-existing cascade assertions were flipped from `permanent=true` to `permanent=false`.
-That inversion is deliberate and correct: permanently removing a shared resource stays an
-explicit, non-cascading request. A functional regression in `RetryConfiguration`'s new
-backoff budget was found by the auditor while the class's own suite stayed green, and is
-fixed with a test that fails without it.
-
----
-
-## 🐳 fix(docker): move the base image digest and stop the weekly check suppressing itself (2026-09-06)
-
-**Repo:** EDDI (`fix/base-image-digest-and-check`)
-
-`main` has not published an image since 2026-08-30. Every CI run fails at **Scan Docker image
-for vulnerabilities**, and every job after it — push, cosign signing, SLSA provenance, smoke
-test, GitHub release, Red Hat catalog publish — is skipped. Reproduced locally with the gate's
-own flags (`--severity CRITICAL,HIGH --ignore-unfixed`), which exits 1 on six findings, all
-from the base image:
-
-| Package | CVE | Installed | Fixed in |
-|---|---|---|---|
-| `curl-minimal`, `libcurl-minimal` | CVE-2026-8286 (TLS config mismatch) | 7.76.1-40.el9 | 7.76.1-40.el9_8.5 |
-| `curl-minimal`, `libcurl-minimal` | CVE-2026-9547 (SSH host key bypass) | 7.76.1-40.el9 | 7.76.1-40.el9_8.5 |
-| `sqlite-libs` | CVE-2026-11822, CVE-2026-11824 (FTS5 RCE, heap overflow) | 3.34.1-10.el9_8 | 3.34.1-11.el9_8 |
-
-**Digest update, not a stopgap.** The pin was build `1.24-3.1786536503` (2026-08-12). Red Hat
-republished the tag on 2026-08-24 as `1.24-3.1787587037`; the `1.24` tag now resolves to
-`sha256:d5f7e0c5…`, which carries all four fixes. Per the remediation procedure in
-[`AGENTS.md`](../AGENTS.md) this is the clean path — the pin moves, it is never dropped, and no
-`microdnf update` line is needed. Rebuilt from the amended Dockerfile and re-ran the gate: zero
-findings, exit 0. Also booted the image against MongoDB and drove a two-turn rule-based
-conversation end to end (create ruleset → output set → workflow → agent → deploy → start →
-say), plus the smoke-test assertions CI makes: health `UP` on all four checks, `/openapi` 200,
-all three security headers present.
-
-### Why nobody was told
-
-`base-image-check.yml` **saw** the new digest on 2026-08-31 and declined to open the PR. Its
-Dependabot guard matched any open PR whose branch starts `dependabot/docker/`, and #716 —
-which bumps the *demo* image's `eclipse-temurin` base in `Dockerfile.demo` — satisfies that.
-This repo has more than one Dockerfile, so the branch prefix was never a sufficient test. The
-guard now requires the candidate PR to actually touch `$DOCKERFILE`, checked with
-`gh pr view --json files` and an exact whole-line `grep -qxF`. Verified against the live repo:
-both open Dependabot Docker PRs (#716, #631) touch only `Dockerfile.demo`, so the guard now
-falls through and the digest PR would be created.
-
-### Review round — which way the guard should fail
-
-Both CodeRabbit and Copilot flagged the same thing: the guard suppressed `gh` stderr with
-`2>/dev/null`, so an API error was indistinguishable from "no match". Right, and fixed —
-stderr is no longer discarded, both `gh` calls have their exit status checked, and each failure
-emits a `::warning::` annotation naming what could not be read.
-
-Where the two bots disagreed was the *direction* of the failure. CodeRabbit asked to exit the
-workflow on any API error ("fail closed"); Copilot asked to warn and continue with an empty
-list. Took Copilot's direction, deliberately: fail-closed here means no PR that week, which is
-the same outcome as the bug being fixed, whereas degrading toward *opening* the PR risks at
-worst a duplicate that is visible and closed in one click. Nor is a red job a reliable alarm in
-this repo — this very workflow failed on 2026-07-13, 07-20, 07-27 and 08-03, four consecutive
-weeks, with nobody acting on it. When the guard cannot complete it now also writes a
-"Dependabot guard degraded" block into the step summary, so a duplicate is explained rather
-than merely appearing.
-
-A second review round caught that the degraded summary was itself conditional: it was gated on
-`[ -z "$DEPENDABOT_PR" ]`, so if one candidate's file list was unreadable and a *later* candidate
-matched, the block was suppressed. The skip decision is sound in that case, but a candidate went
-unchecked and the summary said nothing. The gate is now on the degraded flag alone, with wording
-that distinguishes the two outcomes. (The `::warning::` annotation always fired either way; only
-the summary was being hidden.)
-
-A third round caught that the degraded reason was a scalar, so a run where two lookups failed
-reported only the last one. It is a list now, and the summary prints every failed lookup as its
-own bullet.
-
-Exercised the rewritten guard against a stubbed `gh` on all five paths: Dependabot PRs touching
-only `Dockerfile.demo` (no match, PR created — the original bug's correct behaviour), one
-touching the production Dockerfile (match, skipped), `gh pr list` failing, `gh pr view` failing
-per-PR, and the mixed case above where the first lookup fails and the second matches. The block
-is clean under `shellcheck --severity=style`.
-
-Worth recording that the first run of that fifth case printed nothing at all, which looked like
-the new conditional was broken. It was the *harness*: it locates the end of the guard fragment by
-matching `if [ -n "$DEPENDABOT_PR" ]; then`, and the fix introduces a nested `if` on the same
-condition, so the extractor cut the fragment in half and produced an unterminated block. It now
-matches only at the run-block's own indentation. The same shape of mistake as the `PATH` one in
-the UBI 10 entry: twice now the test rig has been the thing that broke, and both times it first
-presented as a bug in the code under test.
-
-The failure mode is worth naming because it is the quiet kind: the weekly job reported
-**success**, its own summary said the digest had changed, and the outcome line read
-`Dependabot PR #716 already covers this Dockerfile`. Nothing was red except the thing the
-automation existed to prevent.
-
-### UBI 10 — evaluated, not adopted
-
-Checked whether the app runs on `ubi10/openjdk-25-runtime`, since Red Hat's own Quarkus
-material still shows UBI 9. It does. Same UID 185, same `run-java.sh` entrypoint, same
-`JBOSS_CONTAINER_*` module layout, `curl` and `microdnf` both present, and the *identical* JDK
-build on both (`25.0.4.1+1-LTS`, Red_Hat-25.0.4.1.1-1) — so no JVM-level difference at all.
-The unmodified Dockerfile builds on it with only the `FROM` line changed; the image boots,
-passes the container `HEALTHCHECK`, serves `/openapi` and `/manage/`, emits an identical set of
-startup warnings, and runs the same two-turn conversation. Trivy reports **zero** findings at
-every severity, against 10 HIGH and 223 MEDIUM/LOW on UBI 9. It is also ~19 MB smaller.
-
-One real behavioural difference, and it is in the OS crypto policy rather than the JVM: RHEL 10
-additionally disables the static-RSA TLS 1.2 suites (`TLS_RSA_WITH_AES_*_CBC_*`,
-`TLS_RSA_WITH_AES_*_GCM_*`). Red Hat's OpenJDK honours `/etc/crypto-policies/back-ends/java.config`,
-and `java -XshowSettings:security:properties` confirms the suites land in the JVM's
-`jdk.tls.disabledAlgorithms` on UBI 10 and not on UBI 9. Every current LLM provider negotiates
-ECDHE and is unaffected — TLS to the OpenAI, Anthropic and Google endpoints succeeds from
-inside the UBI 10 image — but an on-prem endpoint offering only non-forward-secret suites would
-connect on UBI 9 and fail on UBI 10.
-
-Not switched in this change. The base OS is what `redhat-certify.yml` submits to the Red Hat
-container catalog, and a major-version move is a certification decision rather than a CVE fix.
-Kept separate so the digest bump can land immediately and unblock releases.
-
-### Follow-up not taken here
-
-`base-image-check.yml`'s "newer tag" probe only scans `1.25`…`1.29` **within the same
-repository**, so it cannot surface a UBI 10 image no matter how long one exists. Left as-is;
-widening it belongs with the decision above.
-
-### Merge with #736 — two guards for the same bug, combined
-
-#736 landed on `main` first and had independently fixed the same Dependabot false match, so the
-merge was a conflict between two working implementations rather than a text collision. Neither
-was strictly better, and each carried something the other lacked.
-
-`main` asked `gh pr list --app dependabot`; this branch asked `--author 'app/dependabot'`.
-`--app` is right: `--author` is the *user* filter and does not reliably match an App-authored
-PR, so the candidate list can come back empty, the skip never fires, and the job opens a
-duplicate — the mirror image of the bug being fixed. `main`'s reasoning about
-`dependabot.yml` watching three directories (`/src/main/docker`, `/mcp-sidecar`,
-`/.clusterfuzzlite`) is also the more complete statement of why the branch prefix was never
-sufficient; the demo image was only the instance that happened to bite.
-
-This branch, in turn, surfaces `gh` failures instead of swallowing them. `main` wrapped both
-lookups in `2>/dev/null || echo ""`, which restores the original failure mode in a new place:
-an unreadable candidate silently becomes "not a match", and nothing says so. The three
-follow-up commits here exist for exactly that.
-
-Resolved by taking `--app dependabot` and `main`'s reasoning into this branch's structure, so
-the guard both queries correctly and reports when it could not. Verified the merged workflow
-parses as YAML and that all six `run` blocks pass `bash -n`.
-
-**The digest now applies to two `FROM` lines.** #736 split the image into a throwaway `docs`
-stage plus the runtime stage, both carrying the pin. Its own comment requires the two to move
-together — `base-image-check.yml` parses the last `FROM` and its `sed` rewrites every line
-carrying the pin — so bumping one would leave the vulnerable base in the published image and
-silently desynchronise the automation. Both moved. `EddiImageDockerfileTest` (also new in
-#736) pins the integration image to the production file and uses synthetic digests rather
-than the real one, so it required no change.
-
-**Files:** [`src/main/docker/Dockerfile`](../src/main/docker/Dockerfile),
-[`.github/workflows/base-image-check.yml`](../.github/workflows/base-image-check.yml)
-
----
-
-## 🐧 chore(docker): move the production base image to UBI 10 (2026-09-06)
-
-**Repo:** EDDI (`chore/ubi10-base-image`)
-
-Companion to the UBI 9 digest bump on `fix/base-image-digest-and-check`, which is the immediate
-release unblock. This is the durable fix: `ubi9/openjdk-25-runtime` carries a standing CVE
-backlog that a digest bump only ever partially drains, and `ubi10/openjdk-25-runtime` is
-currently **clean at every severity**.
-
-| Base | CRITICAL/HIGH | MEDIUM/LOW | Layer size |
-|---|---|---|---|
-| `ubi9/openjdk-25-runtime:1.24` (newest digest) | 10 | 223 | 145.7 MB |
-| `ubi10/openjdk-25-runtime:1.24` | **0** | **0** | 127.0 MB |
-
-**The JDK does not change.** Both images ship Red Hat OpenJDK `25.0.4.1+1-LTS`
-(`Red_Hat-25.0.4.1.1-1`), so this is strictly an OS-layer move — no bytecode, JIT or GC
-behaviour differs. UID 185, the `run-java.sh` entrypoint, the `JBOSS_CONTAINER_*` module layout,
-`curl` (needed by `HEALTHCHECK`) and `microdnf` (needed by the stopgap escape hatch in
-`AGENTS.md`) are all present and identical. Only `JAVA_HOME` moves, from `/usr/lib/jvm/jre` to
-`/usr/lib/jvm/java-25-openjdk`, and nothing in this repo reads it.
-
-### Verified, not assumed
-
-Built the image, ran the CI image gate with its own flags (`--severity CRITICAL,HIGH
---ignore-unfixed`) → zero findings, exit 0. Booted it against MongoDB: container `HEALTHCHECK`
-healthy, health `UP` on all four checks, `/openapi` 200, `/manage/` 200, all three security
-headers present, Red Hat certification labels and `/licenses` intact. Drove a two-turn
-rule-based conversation end to end — create ruleset → output set → workflow → agent → deploy →
-start → say — against a UBI 9 control on the same build; identical output and an identical set
-of startup warnings.
-
-### Two RHEL 10 constraints, both documented in the `FROM` block
-
-**1. Host CPU floor rises to x86-64-v3.** Verified by reading
-`GNU_PROPERTY_X86_ISA_1_NEEDED` out of each image's `libc.so.6`: UBI 9 declares
-`x86-64-v2`, UBI 10 declares `x86-64-v3`. So the host needs AVX2, BMI2 and FMA — Intel Haswell
-(2013) or AMD Excavator (2015) onward. Every current cloud instance type clears it; a pre-2013
-bare-metal host does not, and glibc refuses to start rather than failing later. `libjvm.so`
-carries no ISA note (HotSpot probes the CPU at run time), so glibc is the binding constraint.
-
-**2. Static-RSA TLS 1.2 suites are disabled.** RHEL 10's crypto policy adds
-`TLS_RSA_WITH_AES_{128,256}_{CBC,GCM}_*` to the disabled set, and Red Hat's OpenJDK inherits
-`/etc/crypto-policies/back-ends/java.config` — confirmed with
-`java -XshowSettings:security:properties`, where those suites appear in the JVM's
-`jdk.tls.disabledAlgorithms` on UBI 10 and not on UBI 9. Every current LLM provider negotiates
-ECDHE and is unaffected; TLS to the OpenAI, Anthropic and Google endpoints succeeds from inside
-the image. An on-prem endpoint offering only non-forward-secret suites would connect on UBI 9
-and fail on UBI 10.
-
-Both are stated in full in the `FROM` block of [`Dockerfile`](../src/main/docker/Dockerfile), so
-the next person to touch that line sees them without leaving the file, and summarized in
-[`docs/redhat-openshift.md`](redhat-openshift.md) for operators.
-
-### Red Hat support boundary
-
-A container supplies its own userspace, so the host only has to be new enough. Red Hat's
-[container compatibility matrix](https://access.redhat.com/support/policy/rhel-container-compatibility)
-lists a UBI 10 image on a RHEL 9 host as **Supported**, subject to the conditions that apply to
-any mismatched major pair: the workload runs unprivileged, does not interact directly with
-kernel-version-specific interfaces (`ioctl`, `/proc`, `/sys`, routing, iptables, nftables, eBPF),
-and the image's RHEL version stays within its supported lifecycle. EDDI meets these — UID 185,
-nothing below the JVM. The condition an operator has to plan for is the last one Red Hat states
-and the one a support ticket runs into: a reported issue may have to be reproduced in a fully
-compatible configuration — that is, on a RHEL 10 host — before it is investigated. RHEL 8 is the
-one host Red Hat marks unsupported for a UBI 10 image. `redhat-openshift.md` states all of this.
-
-*(An earlier draft of this entry claimed the RHEL 9 host combination was categorically outside
-Red Hat's policy. It is not; the matrix was checked and the claim corrected before merge.)*
-
-### `ContainerBaseIT` no longer restates the base image
-
-> **Superseded on merge by #736.** `main` reached the same conclusion first and went further:
-> `EddiImageDockerfile.forTestContext()` transforms the *whole* production Dockerfile for the
-> test build context, rather than parsing the `FROM` line and re-stating the remaining twenty
-> lines inline. That is strictly stronger — the inline copy this branch kept could still drift
-> in every respect except the base image — so the parser described below was dropped in the
-> merge rather than reconciled. `EddiImageDockerfileTest` now pins the relationship, and it uses
-> synthetic digests, so moving the production pin to UBI 10 required no change to it.
->
-> The account below is kept because two of its findings outlived the code: static initialisers
-> run in textual order (a constant used by a container field must be declared above it, and only
-> a real container IT catches the violation), and container ITs *do* run on this machine. Both
-> are recorded in the Regression Notes.
-
-`ContainerBaseIT` builds its own inline Dockerfile that mirrored the production `FROM` — on
-UBI 9, and unpinned, so it was already a major version and a digest behind what shipped.
-Hard-coding UBI 10 there would only have reset the clock: the copy goes stale on the next digest
-bump without anything failing, and the container ITs quietly certify an OS layer nothing ships.
-It now parses the `FROM` line out of `src/main/docker/Dockerfile` at test time, which carries the
-digest pin along for free and makes drift impossible rather than merely discouraged.
-
-A later review round hardened that parser. The first version took the first whitespace-separated
-token after `FROM`, which is the image reference today but would be the **flag** the moment the
-file gains `FROM --platform=$BUILDPLATFORM …` for a multi-arch build. The ITs would then have
-built against a Dockerfile reading `FROM --platform=$BUILDPLATFORM` and failed confusingly rather
-than clearly. It now skips `--flag` tokens, and matches the instruction with a case-insensitive
-`^\s*FROM\s+` rather than `startsWith("FROM ")`, since Dockerfile keywords are case-insensitive
-and may be followed by a tab. Checked against thirteen shapes: both real Dockerfiles in the repo,
-`--platform` with and without a trailing `AS`, a lowercase keyword, a tab separator, a leading
-indent, a `# FROM` decoy comment, multi-stage last-wins, and the two malformed inputs that must
-throw.
-
-**The hardening broke the build first.** `FROM_INSTRUCTION` was declared below the `EDDI`
-container field, and static initialisers run in textual order — so that field's initialiser
-called into the parser while the pattern was still `null`, and all three container ITs died with
-`ExceptionInInitializerError` caused by a `NullPointerException`. Neither `test-compile` nor the
-standalone parsing harness could see it: one does not run static initialisers, the other does not
-reproduce this class's field order. Only the Integration Tests job did. The constant moved above
-the container fields, with a Javadoc saying why it must stay there. Verified by reproducing the
-mechanism in a two-class scratch file (declared-after throws, declared-before does not) and then
-by running `AgentUseCaseIT` locally end to end: 2 tests, 44 s, image built from the parsed
-`FROM` line, container healthy.
-
-That local run is itself worth noting, because a standing assumption said container ITs cannot
-run on this machine. They can. Had that been checked earlier, the null pattern would have been
-caught before the push rather than by CI.
-
-Worth recording how nearly that verification went wrong. The first harness reported the
-tab-separator case failing, which looked like a bug in the new regex. It was not: the harness had
-been written through a shell heredoc, which ate one backslash from `"\\s"`, and **Java 15 accepts
-`\s` in a string literal as an escape for a plain space** — so the corrupted harness compiled
-cleanly and silently tested `^ *FROM +` instead of `^\s*FROM\s+`. A compile error would have been
-kinder. The harness was rewritten to a file directly and its regex diffed against the real one
-before being trusted.
-
-### The check that could not have told us
-
-`base-image-check.yml`'s tag probe only walks `MAJOR.MINOR+1…+5` **within the pinned
-repository**, so `ubi10` was invisible to it no matter how long it existed — the job would have
-reported `1.24 is the latest tag` forever. Added a `Check for newer UBI major` step that derives
-the `ubiN` segment from the image path and probes `ubiN+1` and `ubiN+2` (trying the pinned tag,
-then `latest`, so a renamed tag scheme still registers), plus a matching issue notification whose
-body lists what to confirm before a major move: CPU baseline, crypto policy, JDK build, and
-`ContainerBaseIT`. Verified against the live registry — `ubi11` and `ubi12` are 404 today, and
-running the same logic against the old `ubi9` pin resolves to `ubi10`, which is exactly the miss
-it closes.
-
-### Review round
-
-Four findings from CodeRabbit and Copilot, all taken.
-
-**The RHEL 9 host claim was wrong** — the strongest reason to run a review. CodeRabbit disputed
-the "categorically outside Red Hat's policy" wording and it was right; the matrix says
-**Supported**. Corrected in both the doc and this entry rather than quietly reworded.
-
-*A second round then caught that the correction had left the page arguing with itself.* The
-opening bullet still said the image is "supported by Red Hat when run on RHEL or OpenShift" and
-the note below the platform table still said "any RHEL-based platform", while the new paragraph
-three lines further down said RHEL 8 is unsupported. An operator reading top-down would have
-been sent to RHEL 8 before ever reaching the caveat. Both broad claims are now bounded, the
-"runs anywhere with a container runtime" statement is explicitly separated from the *supported*
-configuration, and the platform table gained explicit RHEL 9 and RHEL 8 rows so the boundary is
-visible where support levels are actually looked up.
-
-**`ContainerBaseIT` should carry the digest, not just the tag** — raised by both bots. Taken
-further than asked: rather than restating the digest in a second place, the test now parses the
-production `FROM` line, so the class of drift the bots were pointing at cannot recur.
-
-**A hard-coded version series in operator guidance** (Copilot) — "6.3.x and earlier" would have
-gone stale immediately. The corrected paragraph names no version at all.
-
-**`actionlint` SC2001/SC2086/SC2129 on the new step** (CodeRabbit). Fixed: bash regex and
-parameter expansion instead of `echo | sed`, quoted `"$GITHUB_OUTPUT"`/`"$GITHUB_STEP_SUMMARY"`,
-grouped consecutive appends. Both new steps are now clean under
-`shellcheck --severity=style`, which the seven pre-existing steps in the file are not — those
-are left alone here rather than folded into a base-image change.
-
-Extracting the new step and running it against a stubbed `skopeo` was worth doing: the first
-harness reported "no newer major" for all three cases, which looked like a real bug in the
-rewritten parameter expansion. It was the harness — a Windows-style directory on `PATH` that
-Git Bash cannot resolve, so the stub was never found and every probe failed identically. The
-step itself is correct on all three paths (pinned on ubi9 finds ubi10, pinned on ubi10 finds
-nothing, a non-`ubiN` image exits early).
-
-### Merge with #736 and #737
-
-#736 landed on `main` while this branch was in review and changed three of the things it touches.
-
-**The move now applies to two `FROM` lines.** #736 split the image into a throwaway `docs` stage
-and the runtime stage, both carrying the pin, with a comment requiring them to move together —
-`base-image-check.yml` reads the last `FROM`, but its `sed` rewrites every line carrying the pin.
-Both stages are on UBI 10. Moving one would have published a UBI 9 layer and desynchronised the
-automation at the same time. The UBI 10 rationale block now sits above the stage comments rather
-than immediately above a single `FROM`, since it governs both.
-
-**The `ContainerBaseIT` parser was dropped**, superseded by #736's `EddiImageDockerfile` — see
-the note in that section above.
-
-**The Dependabot guard was reconciled in #737, not here.** That branch merged first and combined
-`main`'s `--app dependabot` filter with its own failure reporting; this merge inherits the
-combined version and adds only the newer-UBI-major probe, which is orthogonal — the tag scan
-walks `MAJOR.MINOR+1…+5` inside the pinned repository and so cannot see a new major at all.
-The one textual collision was the summary step, where `main` had quoted `"$GITHUB_STEP_SUMMARY"`
-for shellcheck and this branch had added an unquoted UBI-major line; the added line is now
-quoted. Verified the merged workflow parses as YAML and that all eight `run` blocks pass
-`bash -n`.
-
-**A whole-file `--ours` silently dropped an unrelated fix, and CI caught it.** Resolving the
-`FROM` collision with `git checkout --ours src/main/docker/Dockerfile` took *this branch's entire
-file*, not just its side of the conflicting hunk — discarding every non-conflicting change the
-other side carried. What went with it was #734's audit provisioning:
-
-```dockerfile
-RUN mkdir -p /opt/eddi/data &&       chown -R 185:0 /opt/eddi &&       chmod -R 775 /opt/eddi
-```
-
-That directory is the default `eddi.audit.dead-letter-path` parent. UID 185 cannot create a
-directory under `/opt` at run time, so without it every dead-letter write on the documented
-`docker run` quick start throws into a swallowed catch and the abandoned audit entries are gone
-outright rather than recoverable — the exact defect #734 had just fixed.
-
-`AuditDeadLetterImageProvisioningTest` failed on it in CI. It did not fail locally because the
-pre-push run was a hand-picked `-Dtest` list built around the files the change was *believed* to
-touch, and the whole point of this failure mode is that it touches files you did not intend.
-
-Fixed by rebuilding the file from `#737`'s and re-applying only the three intended edits, so the
-result is provably that branch's Dockerfile plus the UBI 10 move, rather than a patched-up copy
-whose provenance nobody can check. Then audited every file this branch differs from `#737` in,
-reading the **deleted** lines specifically: all remaining deletions are UBI 9 text replaced by
-UBI 10, plus one renumbered header comment. `ContainerBaseIT.java` is byte-identical to `main`'s.
-
-The general rule, worth stating because the conflict markers actively invite the mistake:
-`--ours` and `--theirs` operate on **files, not hunks**. They are only correct when one side's
-entire file is wanted, as it was for `ContainerBaseIT.java` here. Where a file has both a
-conflicting hunk and non-conflicting changes from the other side — which is the normal case —
-edit the markers, or rebuild from the other side and re-apply the intended delta.
-
-**`AGENTS.md`'s base-image bullet was corrected rather than merged.** It described
-`ContainerBaseIT` as parsing the `FROM` line, which stopped being true in this merge. It now
-names `EddiImageDockerfile.forTestContext()` and states the two-stage rule.
-
-**Files:** [`src/main/docker/Dockerfile`](../src/main/docker/Dockerfile),
-[`ContainerBaseIT.java`](../src/test/java/ai/labs/eddi/integration/ContainerBaseIT.java),
-[`.github/workflows/base-image-check.yml`](../.github/workflows/base-image-check.yml),
-[`AGENTS.md`](../AGENTS.md), [`docs/redhat-openshift.md`](redhat-openshift.md)
-
----
-
-## 🎲 test(caching): de-flake the cache-wide TTL expiry test (2026-09-06)
-
-**Repo:** EDDI (`fix/flaky-cache-ttl-test`)
-
-`CacheFactoryTest.cacheWideTtlStillExpires` reddened CI on an unrelated branch
-(run `34047771699`, `expected: <value1> but was: <null>`, 1 failure in 20,556 tests). A rerun of
-the same commit passed, so this was a race, not a regression.
-
-The test built a cache with a **1 ms** cache-wide TTL, wrote an entry, and read it straight back:
-
-```java
-ICache<String, String> cache = factory.getCache("cacheWideTtl", Duration.ofMillis(1));
-cache.put("key1", "value1");
-assertEquals("value1", cache.get("key1"));   // loses if the thread stalls for 1 ms
-```
-
-One millisecond of scheduling stall between two adjacent statements is unremarkable on a shared
-runner, and that is all it takes. The behaviour under test — that the entry eventually expires —
-was never in question.
-
-### Why the fix is a wider margin and not a fake clock
-
-`CacheFactory` builds Caffeine inline and exposes no `Ticker` seam, so a deterministic clock
-would mean adding a test-only seam to production code. That is not worth it here, because the
-deterministic coverage **already exists**: `CacheImplTest.DefaultTtlTests` drives a `FakeTicker`
-over a directly constructed `CacheImpl` carrying `WriteExpiry.of(Duration.ofSeconds(60))` and
-pins the semantics exactly — expiry on an untimed put, reads not extending it, re-writes
-restarting it.
-
-What that deterministic test cannot see is the factory itself: it constructs `CacheImpl` by hand,
-so `CacheFactory.getCache(name, ttl)` could stop installing the policy entirely and every
-assertion there would stay green. That wiring check is this test's actual job, and it is worth
-keeping. So the TTL moves to **500 ms** with a 1.5 s sleep past it. The test costs ~1.5 s, which
-against a 20,556-test suite is nothing.
-
-### The read that looks redundant is the one holding the test up
-
-The obvious "fix" is deleting the pre-expiry read, since the test is named for expiry. That would
-make it pass vacuously: with nothing asserting the entry was ever stored, a `put` that silently
-dropped the write would satisfy `assertNull` just as well as a working TTL. Its neighbours avoid
-the race by writing a *second, untimed* key as their non-vacuity guard and only reading after the
-sleep — but a cache-wide TTL expires everything, so no such key exists here and the guard has to
-be a read before expiry. That is why this one test needs a TTL its siblings do not, and the
-constant's Javadoc says so, with the failing run id.
-
-### Both assertions mutation-checked
-
-Per the house rule that a behavioural test is not trusted until it has been seen to fail:
-
-| Mutation | Expected | Result |
-|---|---|---|
-| `getCache(name, ttl)` installs `WriteExpiry.never()` instead of `of(ttl)` | the entry survives | fails at `assertNull` — *the cache-wide TTL must still remove the entry, expected `<null>` but was `<value1>`* |
-| `CacheImpl.put(K,V)` stores nothing | the entry is never there | fails at the pre-read in 0.002 s — *the entry must be readable before its TTL elapses* |
-
-Both production files were restored afterwards; this change touches **test code only**.
-
-`perEntryLifespanOverridesCacheTtl` was checked as well, as suspected: it writes a 1 ms entry and
-an untimed one into a **1 hour** cache and reads neither before sleeping, so it has no race. Same
-for `perEntryTtlIsHonoured` and `negativeLifespanIsUnlimited`.
-
-**Files:** [`CacheFactoryTest.java`](../src/test/java/ai/labs/eddi/engine/caching/CacheFactoryTest.java)
-
----
 
 ---
 

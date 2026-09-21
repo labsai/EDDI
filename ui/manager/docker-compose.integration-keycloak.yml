@@ -89,6 +89,14 @@ services:
       # No EDDI_SECURITY_ALLOW_UNAUTHENTICATED here, deliberately: OIDC is
       # configured, so AuthStartupGuard is satisfied and the opt-out would only
       # switch off the thing this tier exists to test.
+      #
+      # Off by default, and turned on here because it is the switch that decides
+      # whether /.well-known/capabilities is reachable at all. With it off the
+      # endpoint answers 404 to everyone and e2e/auth/a2a-discovery.spec.ts could
+      # not tell "permitted, and the flag says no" from "the permission entry is
+      # missing again" — which is the regression that spec exists to catch. The
+      # flag-off 404 is covered by RestA2AEndpointTest.
+      EDDI_A2A_CAPABILITIES_PUBLIC: "true"
 
   mongodb:
     image: mongo:6.0
