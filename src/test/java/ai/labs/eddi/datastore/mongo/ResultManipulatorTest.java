@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.datastore.mongo;
 
+import ai.labs.eddi.datastore.IResourceStorage;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -397,6 +398,33 @@ class ResultManipulatorTest {
 
             assertThrows(IllegalArgumentException.class,
                     () -> manipulator.limitEntities(0, -1));
+        }
+
+        @Test
+        @DisplayName("deep page — index * limit must not overflow into a negative offset")
+        void deepPageDoesNotOverflow() {
+            var list = new ArrayList<>(List.of(
+                    new Item("a", "1", 1),
+                    new Item("b", "2", 2)));
+            var manipulator = new ResultManipulator<>(list, Item.class);
+
+            // 300_000 * 10_000 overflows int to a NEGATIVE offset, and the loop then
+            // indexed the list from a negative position. The page is far past the
+            // end of the list, so the only correct answer is "empty".
+            manipulator.limitEntities(300_000, IResourceStorage.MAX_RESULT_LIMIT);
+
+            assertTrue(manipulator.getManipulatedList().isEmpty());
+        }
+
+        @Test
+        @DisplayName("deep page — the extreme index is still just an empty page, not a crash")
+        void extremeIndexYieldsEmptyPage() {
+            var list = new ArrayList<>(List.of(new Item("a", "1", 1)));
+            var manipulator = new ResultManipulator<>(list, Item.class);
+
+            manipulator.limitEntities(Integer.MAX_VALUE, Integer.MAX_VALUE);
+
+            assertTrue(manipulator.getManipulatedList().isEmpty());
         }
     }
 }

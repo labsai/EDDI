@@ -1,0 +1,261 @@
+/*
+ * Copyright EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+package ai.labs.eddi.modules.apicalls.impl;
+
+import ai.labs.eddi.engine.httpclient.IRequest;
+import ai.labs.eddi.engine.security.CallerIdentityResolver;
+import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
+import ai.labs.eddi.secrets.sanitize.UriRedactor;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
+
+/**
+ * Removes credential material from a resolved request — headers, query
+ * parameters and body alike.
+ * <p>
+ * One definition, two consumers: the debug record written to conversation
+ * memory and the approval preview shown to a human. They must not drift — a
+ * part redacted in one and not the other is a credential leak through whichever
+ * path was forgotten. Each of the three has been that leak at some point, which
+ * is why they are all defined here rather than at the call sites.
+ */
+@ApplicationScoped
+public class RequestRedactor {
+
+    /**
+     * What a redacted value is replaced with. Re-exported from {@link UriRedactor}
+     * so the two never disagree about the marker text —
+     * {@code SecretRedactionFilter} keys its "already redacted" guard on it.
+     */
+    public static final String REDACTED = UriRedactor.REDACTED;
+
+    private final CallerIdentityResolver callerIdentityResolver;
+
+    @Inject
+    public RequestRedactor(CallerIdentityResolver callerIdentityResolver) {
+        this.callerIdentityResolver = callerIdentityResolver;
+    }
+
+    /**
+     * Whether a header carries credential material, judged by its name.
+     * <p>
+     * Delegates to {@link UriRedactor}, which owns the rule now that the export
+     * scrubber needs it too. Kept here because this is the name every call site
+     * already uses, and because a request redactor without it reads as if headers
+     * were no longer checked.
+     */
+    public static boolean isSensitiveHeaderName(String headerName) {
+        return UriRedactor.isSensitiveHeaderName(headerName);
+    }
+
+    /**
+     * Redact a query parameter's value.
+     * <p>
+     * Judged by name like a header, and for the same reason: {@code ?api_key=…} or
+     * {@code ?access_token=…} is a conventional way to pass a credential, and this
+     * value is shown to an approver who is routinely not the person whose turn
+     * raised the pause. Value-shape matching backs the name check up so a
+     * credential under an unconventional name is still caught.
+     */
+    public static String redactQueryParamValue(String name, String value) {
+        return UriRedactor.redactQueryParamValue(name, value);
+    }
+
+    /**
+     * Redact a request URI — both its query string and everything before it.
+     * <p>
+     * The URI was the one field of a resolved request that carried no redaction of
+     * any kind, which made it the leak the rest of this class exists to prevent: a
+     * credential templated into the path —
+     * {@code "/v1/invoices?api_key=${vault:k}"} — is resolved to its live value by
+     * {@code ApiCallExecutor#buildRequest} before the URI is ever built, and the
+     * same value then appeared REDACTED in {@code queryParams} and PLAINTEXT in
+     * {@code uri}, adjacent fields of one JSON object shown to an approver who is
+     * routinely not the person whose turn raised the pause.
+     * <p>
+     * Static and null-tolerant for the same reason as {@link #redactBody}:
+     * {@link ResolvedRequest#of} applies it without an executor, keeping
+     * "fingerprint the raw, store the redacted" resolved in exactly one place.
+     */
+    public static String redactUri(String uri) {
+        return UriRedactor.redactUri(uri);
+    }
+
+    /**
+     * Redact one header value.
+     * <p>
+     * Name matching only catches conventional names, so an unresolved vault
+     * reference and a resolved caller token are additionally matched by value —
+     * otherwise placing either in an arbitrarily named header would defeat the
+     * redaction entirely.
+     * <p>
+     * The value-shape scan is the last step, and it is the one that closes the
+     * asymmetry this class kept for a while: a query parameter and a body both ran
+     * through {@link SecretRedactionFilter}, and a header did not. So
+     * {@code X-Client-Auth: Bearer eyJhbGciOi…} — a name matching none of the
+     * conventional patterns, a value that is not a vault reference and not the
+     * current caller's token — was stored and shown to an approver in full, while
+     * the identical string one field away in the body was caught. The shape is
+     * recognisable and the filter already existed; only the wiring was missing.
+     * <p>
+     * Note this makes header redaction slightly more aggressive, and headers are
+     * deliberately fingerprinted in their REDACTED form (see
+     * {@link ResolvedRequest}). Two different secret-shaped values under the same
+     * header therefore hash alike — but that is the pre-existing, documented
+     * trade-off for headers, not a new one: a caller token legitimately differs
+     * between requester and approver, so header values were already excluded from
+     * change detection. Gate time and resume time run this same code, so they
+     * continue to agree.
+     */
+    public String redactHeaderValue(String headerName, Object headerValue) {
+        if (isSensitiveHeaderName(headerName)) {
+            return REDACTED;
+        }
+        if (headerValue instanceof String value) {
+            if (value.contains("${vault:") || value.contains("${eddivault:")) {
+                return REDACTED;
+            }
+            return redactBody(callerIdentityResolver.redactCallerToken(value, REDACTED));
+        }
+        return headerValue == null ? null : headerValue.toString();
+    }
+
+    /** Redact every header in a name-to-value map. */
+    public Map<String, String> redactHeaders(Map<String, ?> headers) {
+        return redactHeaders(headers, Set.of());
+    }
+
+    /**
+     * Redact every header in a name-to-value map, treating the named headers as
+     * credentials whatever their name or value look like.
+     * <p>
+     * A header whose value came from a {@code ${connection:name}} is a credential
+     * by construction — that is the only thing a connection resolves to — but
+     * nothing about it need <em>look</em> like one. The connection owns the header
+     * name, and {@code X-Amp-Id} or {@code X-Gnowbe-Key} matches no conventional
+     * credential pattern; the value is whatever the provider issued, and an opaque
+     * key matches no value shape either. Relying on the heuristics here wrote such
+     * a credential to MongoDB and showed it to a HITL approver in full. So the
+     * executor, which knows which headers it filled from a connection, says so, and
+     * every one of them is redacted unconditionally. Names are compared
+     * case-insensitively, as HTTP does.
+     *
+     * @param connectionOwnedHeaders
+     *            the names of headers whose value a connection supplied; may be
+     *            {@code null} or empty
+     */
+    public Map<String, String> redactHeaders(Map<String, ?> headers, Set<String> connectionOwnedHeaders) {
+        var redacted = new HashMap<String, String>();
+        if (headers == null) {
+            return redacted;
+        }
+        Set<String> owned = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+        if (connectionOwnedHeaders != null) {
+            owned.addAll(connectionOwnedHeaders);
+        }
+        for (var entry : headers.entrySet()) {
+            String name = entry.getKey();
+            if (name != null && owned.contains(name)) {
+                redacted.put(name, REDACTED);
+                continue;
+            }
+            redacted.put(name, redactHeaderValue(name, entry.getValue()));
+        }
+        return redacted;
+    }
+
+    /**
+     * Redact secret-shaped values out of a request body.
+     * <p>
+     * A body has no fixed key vocabulary to check by name the way headers do — it
+     * is caller-defined JSON, or another format entirely — so this scans by VALUE
+     * SHAPE via {@link SecretRedactionFilter} instead: an OpenAI/Anthropic style
+     * key, a bearer token, or a vault reference is redacted wherever it appears,
+     * independent of which field it sits under. A hand-rolled secret in a
+     * generically named field with none of those shapes is not caught — the same
+     * limitation this filter already accepts for LLM tool-call arguments
+     * ({@code PendingToolCallBatch.PendingToolCall#argumentsRedacted}); reusing it
+     * here keeps the two consistent rather than inventing a second, differently
+     * effective scheme for the same class of data.
+     * <p>
+     * Static, unlike the header methods, because it needs no injected state — and
+     * so that {@link ResolvedRequest#of} can reach it without an executor. That
+     * matters for the class invariant above: this stays the <em>one</em> definition
+     * of "redacted body" across both consumers.
+     */
+    public static String redactBody(String body) {
+        return SecretRedactionFilter.redact(body);
+    }
+
+    /**
+     * Redact the {@link IRequest#KEY_URI}, {@link IRequest#KEY_HEADERS},
+     * {@link IRequest#KEY_QUERY_PARAMS} and {@link IRequest#KEY_BODY} entries of a
+     * request map, as produced by {@link IRequest#toMap()}.
+     * <p>
+     * Each entry is REPLACED with a redacted copy rather than rewritten in place.
+     * That distinction is load-bearing for the query parameters:
+     * {@code HttpClientWrapper.RequestWrapper#toMap} hands back its live
+     * {@code queryParamsMap} rather than a copy, so mutating the nested map would
+     * corrupt the request that is about to be sent — while swapping the entry in
+     * this (freshly built) outer map cannot.
+     */
+    public void redactRequestMap(Map<String, Object> requestMap) {
+        redactRequestMap(requestMap, Set.of());
+    }
+
+    /**
+     * {@link #redactRequestMap(Map)}, additionally redacting the headers a
+     * connection supplied — see {@link #redactHeaders(Map, Set)}.
+     */
+    @SuppressWarnings("unchecked")
+    public void redactRequestMap(Map<String, Object> requestMap, Set<String> connectionOwnedHeaders) {
+        if (requestMap == null) {
+            return;
+        }
+        // The KEY_* constants, not string literals: this map's shape is
+        // IRequest#toMap's contract, and a redactor that spells the keys itself is
+        // one rename away from silently redacting nothing.
+        if (requestMap.get(IRequest.KEY_URI) instanceof String uri) {
+            requestMap.put(IRequest.KEY_URI, redactUri(uri));
+        }
+        if (requestMap.get(IRequest.KEY_HEADERS) instanceof Map<?, ?> headers) {
+            requestMap.put(IRequest.KEY_HEADERS, redactHeaders((Map<String, ?>) headers, connectionOwnedHeaders));
+        }
+        if (requestMap.get(IRequest.KEY_QUERY_PARAMS) instanceof Map<?, ?> queryParams) {
+            requestMap.put(IRequest.KEY_QUERY_PARAMS, redactQueryParams((Map<String, ?>) queryParams));
+        }
+        if (requestMap.get(IRequest.KEY_BODY) instanceof String body) {
+            requestMap.put(IRequest.KEY_BODY, redactBody(body));
+        }
+    }
+
+    /**
+     * Redact a query-parameter map, preserving its multi-valued shape.
+     * <p>
+     * Values arrive as {@code List<String>} from the default implementation but a
+     * bare value is tolerated, for the same reason
+     * {@code ApiCallExecutor#normalizeQueryParams} tolerates both.
+     */
+    public static Map<String, Object> redactQueryParams(Map<String, ?> queryParams) {
+        var redacted = new HashMap<String, Object>();
+        if (queryParams == null) {
+            return redacted;
+        }
+        queryParams.forEach((name, value) -> {
+            if (value instanceof List<?> values) {
+                redacted.put(name, values.stream().map(v -> redactQueryParamValue(name, v == null ? null : v.toString())).toList());
+            } else {
+                redacted.put(name, redactQueryParamValue(name, value == null ? null : value.toString()));
+            }
+        });
+        return redacted;
+    }
+}

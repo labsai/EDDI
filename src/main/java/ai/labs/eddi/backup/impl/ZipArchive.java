@@ -24,11 +24,6 @@ public class ZipArchive implements IZipArchive {
     private static final int BUFFER_SIZE = 4096;
 
     @Override
-    public void createZip(String sourceDirPath, String targetZipPath) throws IOException {
-        createZip(sourceDirPath, targetZipPath, Path.of(System.getProperty("user.dir")));
-    }
-
-    @Override
     public void createZip(String sourceDirPath, String targetZipPath, Path allowedBaseDir) throws IOException {
         File directoryToZip = new File(sourceDirPath);
 

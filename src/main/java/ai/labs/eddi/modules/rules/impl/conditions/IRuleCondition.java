@@ -40,6 +40,19 @@ public interface IRuleCondition extends Cloneable {
         // not implemented
     }
 
+    /**
+     * Validates this condition once {@code setConfigs} and {@code setConditions}
+     * have been applied. Implementations throw {@link IllegalArgumentException}
+     * when the JSON config is unusable, so the ruleset is refused at configure()
+     * time instead of silently degrading into an always-matching condition.
+     *
+     * @throws IllegalArgumentException
+     *             if the configuration of this condition is invalid
+     */
+    default void validateConfiguration() {
+        // no constraints by default
+    }
+
     enum ExecutionState {
         SUCCESS, FAIL, NOT_EXECUTED, ERROR
     }

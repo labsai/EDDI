@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.setup.SetupResult;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
+import java.util.Map;
 import org.jboss.logging.Logger;
 
 /**
@@ -40,10 +41,10 @@ public class RestAgentSetup implements IRestAgentSetup {
             return Response.status(Response.Status.CREATED).entity(result).build();
         } catch (AgentSetupException e) {
             LOGGER.warnf("Agent setup validation failed: %s", e.getMessage());
-            return Response.status(Response.Status.BAD_REQUEST).entity(java.util.Map.of("error", e.getMessage())).build();
+            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
         } catch (Exception e) {
             LOGGER.error("Agent setup failed", e);
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(java.util.Map.of("error", "Agent setup failed: " + e.getMessage()))
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", "Agent setup failed: " + e.getMessage()))
                     .build();
         }
     }
@@ -55,11 +56,11 @@ public class RestAgentSetup implements IRestAgentSetup {
             return Response.status(Response.Status.CREATED).entity(result).build();
         } catch (AgentSetupException e) {
             LOGGER.warnf("API agent setup validation failed: %s", e.getMessage());
-            return Response.status(Response.Status.BAD_REQUEST).entity(java.util.Map.of("error", e.getMessage())).build();
+            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
         } catch (Exception e) {
             LOGGER.error("API agent setup failed", e);
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
-                    .entity(java.util.Map.of("error", "API agent setup failed: " + e.getMessage())).build();
+                    .entity(Map.of("error", "API agent setup failed: " + e.getMessage())).build();
         }
     }
 }

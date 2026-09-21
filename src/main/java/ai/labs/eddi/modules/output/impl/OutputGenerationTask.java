@@ -36,6 +36,7 @@ import jakarta.inject.Inject;
 
 import java.net.URI;
 import java.util.*;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -250,7 +251,10 @@ public class OutputGenerationTask implements ILifecycleTask {
     }
 
     private OutputItem chooseRandomly(List<OutputItem> possibleValues) {
-        return possibleValues.get(new Random().nextInt(possibleValues.size()));
+        // ThreadLocalRandom, not `new Random()`: this task is an application-scoped
+        // singleton on the request path, so a fresh Random per call both allocates
+        // and contends on its seed across concurrent conversations.
+        return possibleValues.get(ThreadLocalRandom.current().nextInt(possibleValues.size()));
     }
 
     private int countActionOccurrences(IConversationStepStack conversationStepStack, String action) {

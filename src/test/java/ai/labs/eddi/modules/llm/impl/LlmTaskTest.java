@@ -4,13 +4,12 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
-import ai.labs.eddi.configs.agents.IRestAgentStore;
-import ai.labs.eddi.configs.properties.IUserMemoryStore;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
-import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
-import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException;
@@ -18,14 +17,14 @@ import ai.labs.eddi.engine.memory.*;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
-import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.Task;
-import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.impl.*;
+import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
@@ -62,39 +61,13 @@ class LlmTaskTest {
     @Mock
     private ChatModelRegistry chatModelRegistry;
     @Mock
-    private CalculatorTool calculatorTool;
-    @Mock
-    private DateTimeTool dateTimeTool;
-    @Mock
-    private WebSearchTool webSearchTool;
-    @Mock
-    private DataFormatterTool dataFormatterTool;
-    @Mock
-    private WebScraperTool webScraperTool;
-    @Mock
-    private TextSummarizerTool textSummarizerTool;
-    @Mock
-    private PdfReaderTool pdfReaderTool;
-    @Mock
-    private WeatherTool weatherTool;
-    @Mock
-    private FetchToolResponsePageTool fetchToolResponsePageTool;
-    @Mock
     private IApiCallExecutor apiCallExecutor;
     @Mock
-    private ToolExecutionService toolExecutionService;
+    private IAgentStore restAgentStore;
     @Mock
-    private McpToolProviderManager mcpToolProviderManager;
-    @Mock
-    private A2AToolProviderManager a2aToolProviderManager;
-    @Mock
-    private IRestAgentStore restAgentStore;
-    @Mock
-    private IRestWorkflowStore restWorkflowStore;
+    private IWorkflowStore restWorkflowStore;
     @Mock
     private RagContextProvider ragContextProvider;
-    @Mock
-    private IUserMemoryStore userMemoryStore;
     @Mock
     private TokenCounterFactory tokenCounterFactory;
     @Mock
@@ -107,14 +80,6 @@ class LlmTaskTest {
     private CounterweightService counterweightService;
     @Mock
     private IdentityMaskingService identityMaskingService;
-    @Mock
-    private ToolResponseTruncator toolResponseTruncator;
-    @Mock
-    private TenantQuotaService tenantQuotaService;
-    @Mock
-    private MemorySnapshotService memorySnapshotService;
-    @Mock
-    private IAttachmentStore attachmentStore;
 
     // === Memory mocks ===
     @Mock
@@ -130,19 +95,15 @@ class LlmTaskTest {
         llmTask = new LlmTask(
                 resourceClientLibrary, dataFactory, memoryItemConverter,
                 templatingEngine, jsonSerialization, prePostUtils, chatModelRegistry,
-                calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool,
-                webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
-                fetchToolResponsePageTool,
-                apiCallExecutor, toolExecutionService, mcpToolProviderManager,
-                a2aToolProviderManager, restAgentStore, restWorkflowStore,
-                ragContextProvider, userMemoryStore, tokenCounterFactory,
+                apiCallExecutor, restAgentStore, restWorkflowStore,
+                ragContextProvider, tokenCounterFactory,
                 conversationSummarizer,
                 promptSnippetService,
                 globalVariableResolver,
                 counterweightService,
                 identityMaskingService,
-                toolResponseTruncator, tenantQuotaService,
-                memorySnapshotService, attachmentStore);
+                mock(AgentOrchestrator.class), new ConversationHistoryBuilder(),
+                new SimpleMeterRegistry(), new CallerIdentityContext(null, null));
     }
 
     // ====================================================================
@@ -503,4 +464,57 @@ class LlmTaskTest {
         String result = (String) method.invoke(llmTask, memory);
         assertNull(result);
     }
+
+    @org.junit.jupiter.api.Nested
+    @org.junit.jupiter.api.DisplayName("Blank Output Guard")
+    class BlankOutputGuard {
+
+        /**
+         * Exercises {@link LlmTask#producesRenderableOutput(String)} — the guard that
+         * decides whether an LLM response becomes a message bubble. Previously these
+         * tests re-typed the guard expression inline, so they asserted
+         * {@code String.isBlank()} and would have passed even with the production guard
+         * deleted.
+         */
+
+        @Test
+        @org.junit.jupiter.api.DisplayName("Non-blank text passes the guard")
+        void nonBlankText_passesGuard() {
+            assertTrue(LlmTask.producesRenderableOutput("Valid output"),
+                    "Non-blank text should pass the output guard");
+
+            // Verify TextOutputItem can be created with valid text
+            var outputItem = new TextOutputItem("Valid output", 0);
+            assertEquals("Valid output", outputItem.getText());
+        }
+
+        @Test
+        @org.junit.jupiter.api.DisplayName("Null text is blocked by the guard")
+        void nullText_blockedByGuard() {
+            assertFalse(LlmTask.producesRenderableOutput(null),
+                    "Null text should be blocked by the output guard");
+        }
+
+        @Test
+        @org.junit.jupiter.api.DisplayName("Blank text is blocked by the guard")
+        void blankText_blockedByGuard() {
+            assertFalse(LlmTask.producesRenderableOutput("   \n  \t  "),
+                    "Blank/whitespace text should be blocked by the output guard");
+        }
+
+        @Test
+        @org.junit.jupiter.api.DisplayName("Empty string is blocked by the guard")
+        void emptyString_blockedByGuard() {
+            assertFalse(LlmTask.producesRenderableOutput(""),
+                    "Empty string should be blocked by the output guard");
+        }
+
+        @Test
+        @org.junit.jupiter.api.DisplayName("Text with content and whitespace passes the guard")
+        void textWithWhitespace_passesGuard() {
+            assertTrue(LlmTask.producesRenderableOutput("  Hello world  \n"),
+                    "Text with content (even with surrounding whitespace) should pass");
+        }
+    }
+
 }

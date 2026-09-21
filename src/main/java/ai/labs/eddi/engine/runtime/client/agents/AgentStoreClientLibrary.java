@@ -51,14 +51,27 @@ public class AgentStoreClientLibrary implements IAgentStoreClientLibrary {
             }
         }
 
-        // Persistent User Memory (Phase 11a)
-        if (agentConfig.isEnableMemoryTools() && agentConfig.getUserMemoryConfig() != null) {
-            ((Agent) agent).setUserMemoryConfig(agentConfig.getUserMemoryConfig());
+        // Persistent User Memory (Phase 11a).
+        //
+        // enableMemoryTools is the opt-in; userMemoryConfig is tuning on top of it,
+        // and every one of its fields already has a working default. Requiring both
+        // made the second a hidden second switch: an agent that set enableMemoryTools
+        // and nothing else got no memory tool and no explanation, because the skip is
+        // silent. Fall back to the defaults instead.
+        if (agentConfig.isEnableMemoryTools()) {
+            var memoryConfig = agentConfig.getUserMemoryConfig();
+            ((Agent) agent).setUserMemoryConfig(memoryConfig != null ? memoryConfig : new AgentConfiguration.UserMemoryConfig());
         }
 
         // Memory Policy (Phase A: Strict Write Discipline)
         if (agentConfig.getMemoryPolicy() != null) {
             ((Agent) agent).setMemoryPolicy(agentConfig.getMemoryPolicy());
+        }
+
+        // Tool-level HITL: carry the agent-level tool-approval config so the gate is
+        // honored on the CONVERSATION_START (init) turn, not just say/resume turns.
+        if (agentConfig.getHitlConfig() != null) {
+            ((Agent) agent).setToolApprovalsConfig(agentConfig.getHitlConfig().getToolApprovals());
         }
 
         return agent;

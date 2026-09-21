@@ -89,6 +89,9 @@ docker run -d --name mongodb -p 27017:27017 mongo:7
 # Run unit tests
 ./mvnw test
 
+# compile and test never build the UIs; package and verify do (~2 min) unless told not to
+./mvnw package -DskipTests -DskipUi=true
+
 # Full build: compile + unit tests + package
 ./mvnw clean verify -DskipITs
 
@@ -98,6 +101,10 @@ docker run -d --name mongodb -p 27017:27017 mongo:7
 # Build Docker image
 ./mvnw clean package -DskipTests '-Dquarkus.container-image.build=true'
 ```
+
+The Manager (`ui/manager`) and the Chat UI (`ui/chat`) are part of this repository and have their own
+contributor notes in `ui/manager/AGENTS.md` and `ui/chat/AGENTS.md`. Frontend work runs from those
+directories with `npm ci` and `npm run dev`; Maven builds them into the jar.
 
 ## Code Style
 
@@ -192,7 +199,7 @@ chore(deps): bump Quarkus to 3.33.0
 - **One concern per PR** — don't mix refactoring with features
 - **Write a clear PR description** using the template
 - **Link the related issue** with `Closes #123`
-- **Keep commits clean** — squash fixup commits before requesting review
+- **Keep commits clean** — squash fixup commits *before pushing*. Once a branch is pushed and under review, don't rewrite history (no force-push); use GitHub's *Squash and merge* at the end instead.
 
 ## What the CI Checks
 
@@ -202,6 +209,11 @@ Every PR runs through these automated gates:
 | --------------------- | ---------------------------------------------------- | -------------- |
 | **Build + Tests**     | `mvnw clean verify` with Java 25                     | ✅ Yes         |
 | **CodeQL**            | Security scanning (injection, hardcoded creds, etc.) | ✅ Yes         |
+| **UI Manager Checks** | Manager audit, lint, i18n, typecheck, Vitest with coverage — when `ui/` changes | Blocks publishing |
+| **UI Manager E2E (MSW)** | Manager Playwright tier against mocked API — when `ui/` changes | Blocks publishing |
+| **UI Chat**           | Chat UI typecheck and tests — when `ui/` changes | Blocks publishing |
+| **Backend E2E**       | The Manager's Playwright API and full-stack tiers against the image built from the PR | Blocks publishing |
+| **Auth E2E (Keycloak)** | The same image with OIDC **enforced**, behind Keycloak: which token is accepted, and which role opens which door. The only job where `@RolesAllowed` is not a no-op | Blocks publishing |
 | **Dependency Review** | Blocks vulnerable or incompatibly-licensed deps      | ✅ Yes         |
 | **CodeRabbit**        | AI code review with line-by-line feedback            | Advisory       |
 | **Checkstyle**        | Java code style validation                           | ⚠️ Warnings    |

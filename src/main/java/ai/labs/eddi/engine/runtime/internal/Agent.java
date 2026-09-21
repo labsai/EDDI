@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.runtime.internal;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.ConversationMemory;
@@ -30,6 +31,7 @@ public class Agent implements IAgent {
     private Deployment.Status deploymentStatus;
     private AgentConfiguration.UserMemoryConfig userMemoryConfig;
     private AgentConfiguration.MemoryPolicy memoryPolicy;
+    private ToolApprovalsConfig toolApprovalsConfig;
 
     public Agent(String agentId, Integer agentVersion) {
         this.agentId = agentId;
@@ -50,6 +52,14 @@ public class Agent implements IAgent {
         if (memoryPolicy != null) {
             conversationMemory.setMemoryPolicy(memoryPolicy);
         }
+        // Carry the agent-level tool-approval config onto the memory BEFORE init()
+        // runs the CONVERSATION_START pipeline, so the tool-approval gate is honored
+        // on the init turn too (a behavior rule may fire an LLM task with a gated tool
+        // on CONVERSATION_START). The say/resume paths repopulate this transient
+        // carrier per turn via ConversationService#populateToolApprovalsConfig; the
+        // init turn never reaches that code, so without this a gated tool would
+        // execute un-approved on conversation start. Null carrier = gate inert.
+        conversationMemory.setAgentToolApprovalsConfig(toolApprovalsConfig);
         Conversation conversation = new Conversation(executableWorkflows, conversationMemory, propertiesHandler,
                 outputProvider);
         conversation.init(context);
@@ -89,6 +99,10 @@ public class Agent implements IAgent {
 
     public void setUserMemoryConfig(AgentConfiguration.UserMemoryConfig userMemoryConfig) {
         this.userMemoryConfig = userMemoryConfig;
+    }
+
+    public void setToolApprovalsConfig(ToolApprovalsConfig toolApprovalsConfig) {
+        this.toolApprovalsConfig = toolApprovalsConfig;
     }
 
     @Override

@@ -1,4 +1,22 @@
-# HorizontalPodAutoscaler for EDDI
+# HorizontalPodAutoscaler for EDDI — DISABLED TEMPLATE
+#
+# ⚠️  NOT referenced by any kustomization, and deliberately capped at 1 replica.
+#
+# EDDI serialises the turns of a single conversation with a JVM-LOCAL lock
+# (InMemoryConversationCoordinator holds one BlockingQueue per conversation,
+# guarded by synchronized(queue)). The NATS coordinator does not change this:
+# JetStream is used only as an ordering primitive and the Callable still runs in
+# the JVM that published it. With more than one replica and no sticky sessions,
+# two turns of the same conversation execute concurrently, both replaceOne() the
+# whole conversation document, and one turn is SILENTLY LOST. Replay-protection
+# nonces are in-memory as well, so a replayed signed envelope routed to another
+# pod goes undetected.
+#
+# Until a distributed conversation coordinator ships, scale VERTICALLY (see the
+# resource patch in kustomization.yaml).
+#
+# When that lands, restore the real values below (minReplicas: 2,
+# maxReplicas: 10) and add this file back to the `resources:` list.
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
@@ -11,8 +29,10 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: eddi
-  minReplicas: 2
-  maxReplicas: 10
+  # Pinned to 1/1 so that even an accidental `kubectl apply -f` of this file
+  # cannot scale EDDI out. Restore 2/10 together with the coordinator work.
+  minReplicas: 1
+  maxReplicas: 1
   metrics:
     - type: Resource
       resource:
@@ -37,5 +57,5 @@ spec:
       stabilizationWindowSeconds: 60
       policies:
         - type: Pods
-          value: 2
+          value: 1
           periodSeconds: 60

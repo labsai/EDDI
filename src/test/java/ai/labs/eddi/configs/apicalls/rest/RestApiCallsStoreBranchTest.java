@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.configs.apicalls.rest;
 
+import static org.mockito.ArgumentMatchers.any;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.configs.apicalls.model.ApiEndpointDiscoveryRequest;
 import ai.labs.eddi.configs.apicalls.IApiCallsStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
@@ -40,7 +43,7 @@ class RestApiCallsStoreBranchTest {
     @BeforeEach
     void setUp() {
         openMocks(this);
-        restApiCallsStore = new RestApiCallsStore(apiCallsStore, documentDescriptorStore, jsonSchemaCreator);
+        restApiCallsStore = new RestApiCallsStore(apiCallsStore, documentDescriptorStore, jsonSchemaCreator, mock(ResourceAccessGuard.class));
     }
 
     @Nested
@@ -74,7 +77,7 @@ class RestApiCallsStoreBranchTest {
         @DisplayName("returns descriptors list")
         void returnsDescriptors() throws Exception {
             var desc = new DocumentDescriptor();
-            when(documentDescriptorStore.readDescriptors(eq("ai.labs.httpcalls"), anyString(), anyInt(), anyInt(), eq(false)))
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.apicalls"), anyString(), anyInt(), anyInt(), eq(false), any()))
                     .thenReturn(List.of(desc));
 
             List<DocumentDescriptor> result = restApiCallsStore.readApiCallsDescriptors("", 0, 10);
@@ -185,25 +188,56 @@ class RestApiCallsStoreBranchTest {
         @Test
         @DisplayName("null specUrl returns 400")
         void nullSpecUrl() {
-            Response response = restApiCallsStore.discoverEndpoints(null, null, null);
+            Response response = restApiCallsStore.discoverEndpoints(null);
             assertEquals(400, response.getStatus());
         }
 
         @Test
         @DisplayName("blank specUrl returns 400")
         void blankSpecUrl() {
-            Response response = restApiCallsStore.discoverEndpoints("   ", null, null);
+            Response response = restApiCallsStore.discoverEndpoints(new ApiEndpointDiscoveryRequest("   ", null, null));
             assertEquals(400, response.getStatus());
         }
 
         @Test
-        @DisplayName("blank apiBaseUrl and apiAuth are treated as null")
-        void blankApiBaseUrlAndAuth() {
+        @DisplayName("blank apiBaseUrl and authHeaderRef are treated as null")
+        void blankApiBaseUrlAndAuthRef() {
             // This will fail on parseAndBuild since the URL is invalid, but tests the
             // effectiveBaseUrl/effectiveAuth branches
-            Response response = restApiCallsStore.discoverEndpoints("http://invalid-spec-url.test/nonexistent", "   ", "   ");
+            Response response = restApiCallsStore
+                    .discoverEndpoints(new ApiEndpointDiscoveryRequest("http://invalid-spec-url.test/nonexistent", "   ", "   "));
             // Will return either 400 or 500 depending on the exception type
             assertTrue(response.getStatus() >= 400);
+        }
+
+        @Test
+        @DisplayName("a credential in the spec URL does not come back in the error body")
+        void credentialInTheSpecUrlIsNotEchoed() {
+            // The parser names the location it could not read, so its message carries
+            // the caller's URL — and that URL is exactly where a credential would be.
+            // The 400 is worth returning; the credential in it is not.
+            String url = "https://user:sk-ant-aaaaaaaaaaaaaaaaaaaaaaaaaaa@invalid-spec-url.test/spec.json";
+
+            Response response = restApiCallsStore.discoverEndpoints(new ApiEndpointDiscoveryRequest(url, null, null));
+
+            assertFalse(String.valueOf(response.getEntity()).contains("sk-ant-aaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+                    "the error body reaches whoever called the endpoint: " + response.getEntity());
+        }
+
+        @Test
+        @DisplayName("an ordinary password in the spec URL is not echoed either")
+        void arbitraryPasswordInTheSpecUrlIsNotEchoed() {
+            // Shape-based redaction cannot help here: "hunter2" looks like nothing
+            // in particular, so only URI-aware handling knows it sits in the
+            // userinfo of a URL and is therefore a password.
+            String url = "https://alice:hunter2@invalid-spec-url.test/spec.json";
+
+            Response response = restApiCallsStore.discoverEndpoints(new ApiEndpointDiscoveryRequest(url, null, null));
+
+            assertFalse(String.valueOf(response.getEntity()).contains("hunter2"),
+                    "a password is a password whether or not it looks like a token: " + response.getEntity());
+            assertTrue(String.valueOf(response.getEntity()).contains("invalid-spec-url.test"),
+                    "the host still has to survive, or the caller cannot tell which URL failed: " + response.getEntity());
         }
     }
 

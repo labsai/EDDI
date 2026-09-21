@@ -94,6 +94,24 @@ public interface ConversationEventSink {
     }
 
     /**
+     * Called when a pipeline task fails during execution. Provides structured error
+     * information for admin monitoring.
+     */
+    default void onTaskFailed(TaskId taskId, String taskType, long durationMs,
+                              String errorType, String errorSummary) {
+    }
+
+    /**
+     * Called by the tool loop as it is about to execute one tool call — the live
+     * "Using {tool}…" signal for streaming clients. Only the NAME travels:
+     * arguments may hold user data and are already delivered, redacted, in the task
+     * summary's toolTrace at turn end. Default no-op so non-streaming sinks are
+     * unaffected.
+     */
+    default void onToolCall(String toolName) {
+    }
+
+    /**
      * Called when the entire conversation step has completed successfully. The SSE
      * endpoint should send the final snapshot and close the stream.
      */

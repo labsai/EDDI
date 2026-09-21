@@ -66,7 +66,16 @@ public interface IConversationCheckpointStore {
     int pruneOldest(String conversationId, int keepCount);
 
     /**
-     * Delete all checkpoints for a conversation. Used during GDPR erasure.
+     * Delete all checkpoints for a conversation.
+     * <p>
+     * Called by {@code GdprComplianceService.deleteUserData} for every conversation
+     * resolved for the erased user. This matters because a {@link MemoryCheckpoint}
+     * carries a copy of the conversation properties — i.e. the same PII as the
+     * conversation itself — so leaving checkpoints behind would leave the erasure
+     * incomplete.
+     * <p>
+     * {@code MemorySnapshotService.deleteCheckpoints} wraps this as well, but has
+     * no caller of its own; the cascade calls the store directly.
      *
      * @param conversationId
      *            the conversation ID

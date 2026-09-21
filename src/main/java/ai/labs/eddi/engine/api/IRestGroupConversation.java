@@ -5,7 +5,14 @@
 package ai.labs.eddi.engine.api;
 
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.engine.internal.GroupApprovalRequest;
+import ai.labs.eddi.engine.memory.model.validation.MaxInlineAttachmentSize;
+import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import jakarta.annotation.security.RolesAllowed;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.MediaType;
@@ -23,34 +30,87 @@ import java.util.List;
  * list). No {@code {env}} parameter — group conversations default to the
  * production environment.
  */
-@Path("/groups/{groupId}/conversations")
-@Tag(name = "Group Conversations")
+// Class-level path is the /groups root (not /groups/{groupId}/conversations) so
+// the
+// cross-group inbox GET /groups/pending-approvals (#21) can live alongside the
+// per-group routes. Every per-group method carries the /{groupId}/conversations
+// prefix, so all existing external URLs are unchanged.
+@Path("/groups")
+@Tag(name = "Conversations / Groups", description = "Multi-agent group discussion orchestration")
 @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user"})
 public interface IRestGroupConversation {
 
+    /**
+     * Hard ceiling, in characters, on the free-text {@code question} of a group
+     * discussion. Not an arbitrary number: it is the same 50 000 characters
+     * ({@code ~12k} tokens) the engine already treats as "one document's worth of
+     * text into a prompt" — {@code eddi.attachments.extraction.max-chars} and
+     * {@code LlmConfiguration.ToolResponseLimits#defaultMaxChars}. A group question
+     * is fanned out to every member agent in every phase, so it has no business
+     * being more permissive than a whole extracted attachment. This is a DoS/abuse
+     * ceiling, not a tuning knob: real questions are three orders of magnitude
+     * smaller.
+     */
+    int MAX_QUESTION_CHARS = 50_000;
+
+    /**
+     * Ceiling on caller-supplied identity/reference strings ({@code userId},
+     * {@code targetAgentId}). Both are persisted on the transcript and used in
+     * lookups; a 24-character hex id, an OIDC {@code sub} or an email all fit
+     * comfortably in 256 characters.
+     */
+    int MAX_IDENTIFIER_CHARS = 256;
+
+    /**
+     * Ceiling on the number of attachments a single discussion request may carry.
+     * Matches {@code eddi.attachments.max-per-conversation} (default 50), the
+     * storage quota a conversation's blob store enforces anyway — beyond it the
+     * attachments could not be materialized. Note only
+     * {@code eddi.attachments.max-per-turn} (default 5) of them ever reach the LLM.
+     */
+    int MAX_ATTACHMENTS_PER_REQUEST = 50;
+
+    /**
+     * Ceiling on a MIME type string: RFC 6838 caps {@code type} and {@code subtype}
+     * at 127 characters each.
+     */
+    int MAX_MIME_TYPE_CHARS = 255;
+
+    /** Ceiling on a file name — the POSIX/NTFS single-component limit. */
+    int MAX_FILE_NAME_CHARS = 255;
+
+    /** Ceiling on a hosted attachment URL — the de facto maximum URL length. */
+    int MAX_URL_CHARS = 2048;
+
     @POST
+    @Path("/{groupId}/conversations")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Start a group discussion", description = "Starts a new multi-agent group discussion with the given question.")
     @APIResponse(responseCode = "200", description = "Discussion result with transcript.")
+    @APIResponse(responseCode = "400", description = "Missing/blank or oversized 'question', or an oversized attachment.")
     @APIResponse(responseCode = "404", description = "Group not found.")
-    Response discuss(@PathParam("groupId") String groupId, DiscussRequest request);
+    Response discuss(@PathParam("groupId") String groupId, @NotNull
+    @Valid DiscussRequest request);
 
     @POST
-    @Path("/stream")
+    @Path("/{groupId}/conversations/stream")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.SERVER_SENT_EVENTS)
     @Operation(summary = "Start a group discussion with SSE streaming",
                description = "Starts a group discussion asynchronously and streams progress events "
                        + "(group_start, phase_start, speaker_start, speaker_complete, "
-                       + "phase_complete, synthesis_start, group_complete, group_error) "
-                       + "via Server-Sent Events.")
+                       + "phase_complete, synthesis_start, group_complete, group_error, "
+                       + "artifact_updated) via Server-Sent Events.")
     @APIResponse(responseCode = "200", description = "SSE event stream of discussion progress.")
+    @APIResponse(responseCode = "400", description = "Missing/blank or oversized 'question', or an oversized attachment.")
     @APIResponse(responseCode = "404", description = "Group not found.")
-    void discussStreaming(@PathParam("groupId") String groupId, DiscussRequest request, @Context SseEventSink eventSink, @Context Sse sse);
+    void discussStreaming(@PathParam("groupId") String groupId, @NotNull
+    @Valid DiscussRequest request,
+                          @Context SseEventSink eventSink, @Context Sse sse);
 
     @GET
-    @Path("/{groupConversationId}")
+    @Path("/{groupId}/conversations/{groupConversationId}")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Read a group conversation", description = "Returns the full transcript of a group conversation.")
     @APIResponse(responseCode = "200", description = "Group conversation transcript.")
@@ -58,13 +118,17 @@ public interface IRestGroupConversation {
     GroupConversation readGroupConversation(@PathParam("groupId") String groupId, @PathParam("groupConversationId") String groupConversationId);
 
     @DELETE
-    @Path("/{groupConversationId}")
-    @Operation(summary = "Delete a group conversation", description = "Deletes a group conversation and its member conversations.")
+    @Path("/{groupId}/conversations/{groupConversationId}")
+    @Operation(summary = "Delete a group conversation", description = "Deletes the group conversation, its shared "
+            + "artifacts and any ephemeral agents created for it. The members' own conversations are ENDED, not "
+            + "deleted, and stay readable afterwards.")
     @APIResponse(responseCode = "200", description = "Group conversation deleted.")
     @APIResponse(responseCode = "404", description = "Group conversation not found.")
+    @APIResponse(responseCode = "409", description = "Another operation (follow-up / continue / close) is in progress — retry.")
     Response deleteGroupConversation(@PathParam("groupId") String groupId, @PathParam("groupConversationId") String groupConversationId);
 
     @GET
+    @Path("/{groupId}/conversations")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "List group conversations", description = "Lists group conversation transcripts for a group with pagination.")
     @APIResponse(responseCode = "200", description = "Paginated list of group conversations.")
@@ -73,9 +137,262 @@ public interface IRestGroupConversation {
                                                    @QueryParam("limit")
                                                    @DefaultValue("20") Integer limit);
 
+    @POST
+    @Path("/{groupId}/conversations/{groupConversationId}/followup")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(summary = "Follow up with a group member",
+               description = "Send a follow-up question to a specific member agent in a completed "
+                       + "group conversation. The agent retains full context from the discussion. "
+                       + "Both the question and response are recorded on the group transcript. "
+                       + "The targetAgentId field accepts either an agent ID or a display name. "
+                       + "Returns the full updated GroupConversation including the new transcript entries.")
+    @APIResponse(responseCode = "200", description = "Updated group conversation with follow-up on transcript.")
+    @APIResponse(responseCode = "400", description = "Missing 'question' or 'targetAgentId'.")
+    @APIResponse(responseCode = "404", description = "Group conversation not found, or the target agent is not a member.")
+    @APIResponse(responseCode = "409", description = "Conversation not in COMPLETED state, or another operation is in progress.")
+    @APIResponse(responseCode = "502", description = "The member agent could not be reached / the agent call failed.")
+    @APIResponse(responseCode = "504", description = "The member agent did not respond within the timeout.")
+    Response followUpWithMember(@PathParam("groupId") String groupId,
+                                @PathParam("groupConversationId") String gcId,
+                                @NotNull
+                                @Valid FollowUpRequest request);
+
+    @POST
+    @Path("/{groupId}/conversations/{groupConversationId}/continue")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(summary = "Continue a group discussion",
+               description = "Re-run all discussion phases with a new question. All agents retain "
+                       + "memory of prior rounds. The round counter increments. NOTE: 'attachments' are "
+                       + "NOT supported on a continuation (they are only shared with member agents when "
+                       + "the discussion starts) and are rejected with 400 rather than silently ignored.")
+    @APIResponse(responseCode = "200", description = "Updated group conversation with new round.")
+    @APIResponse(responseCode = "400", description = "Missing 'question', or 'attachments' supplied (unsupported on continuation).")
+    @APIResponse(responseCode = "404", description = "Group conversation not found.")
+    @APIResponse(responseCode = "409", description = "Conversation not in COMPLETED state, or another operation is in progress.")
+    @APIResponse(responseCode = "502", description = "A member agent could not be reached during the round.")
+    @APIResponse(responseCode = "504", description = "A member agent did not respond within the timeout.")
+    Response continueDiscussion(@PathParam("groupId") String groupId,
+                                @PathParam("groupConversationId") String gcId,
+                                @NotNull
+                                @Valid DiscussRequest request);
+
+    @POST
+    @Path("/{groupId}/conversations/{groupConversationId}/continue/stream")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.SERVER_SENT_EVENTS)
+    @Operation(summary = "Continue a group discussion with SSE streaming",
+               description = "Re-run all discussion phases with SSE event streaming for progress. "
+                       + "Emits round_start (new round marker) followed by the same events as the "
+                       + "initial stream (phase_start, speaker_start, speaker_complete, phase_complete, "
+                       + "synthesis_start, group_complete, group_error), plus the HITL events "
+                       + "(awaiting_approval, hitl_resume, cancelled, member_pause_skipped, "
+                       + "human_input_requested). NOTE: "
+                       + "synthesis_start, group_complete, group_error, artifact_updated), plus the HITL "
+                       + "events (awaiting_approval, hitl_resume, cancelled, member_pause_skipped). NOTE: "
+                       + "'attachments' are NOT supported on a continuation and are rejected with a "
+                       + "terminal group_error event rather than silently ignored.")
+    @APIResponse(responseCode = "200", description = "SSE event stream of continuation progress.")
+    @APIResponse(responseCode = "404", description = "Group conversation not found.")
+    void continueDiscussionStreaming(@PathParam("groupId") String groupId,
+                                     @PathParam("groupConversationId") String gcId,
+                                     @NotNull
+                                     @Valid DiscussRequest request,
+                                     @Context SseEventSink eventSink, @Context Sse sse);
+
+    @POST
+    @Path("/{groupId}/conversations/{groupConversationId}/close")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(summary = "Close a group conversation",
+               description = "Permanently close a group conversation. Ends all member conversations "
+                       + "and cleans up ephemeral agents. No further follow-ups or continuations "
+                       + "are accepted after closing. "
+                       + "Lifecycle: discuss → COMPLETED → [followup|continue]* → close → CLOSED (terminal).")
+    @APIResponse(responseCode = "200", description = "Closed group conversation.")
+    @APIResponse(responseCode = "404", description = "Group conversation not found.")
+    @APIResponse(responseCode = "409", description = "Conversation not in COMPLETED, FAILED or CANCELLED state.")
+    Response closeGroupConversation(@PathParam("groupId") String groupId,
+                                    @PathParam("groupConversationId") String gcId);
+
+    @POST
+    @Path("/{groupId}/conversations/{groupConversationId}/cancel")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-approver"})
+    @Operation(summary = "Cancel a group discussion", description = "Cancels an in-progress group discussion.")
+    @APIResponse(responseCode = "200", description = "Discussion cancelled.")
+    @APIResponse(responseCode = "404", description = "Group conversation not found.")
+    Response cancelDiscussion(@PathParam("groupId") String groupId,
+                              @PathParam("groupConversationId") String gcId);
+
+    @POST
+    @Path("/{groupId}/conversations/{groupConversationId}/approve")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-approver"})
+    @Operation(summary = "Approve a paused group phase", description = "Resumes a paused group discussion after human approval.")
+    @APIResponse(responseCode = "200", description = "Discussion resumed.")
+    @APIResponse(responseCode = "400", description = "Invalid decision body or taskApprovals.")
+    @APIResponse(responseCode = "404", description = "Group conversation not found.")
+    @APIResponse(responseCode = "409", description = "Not awaiting approval / concurrent modification conflict.")
+    Response approveGroupPhase(@PathParam("groupId") String groupId,
+                               @PathParam("groupConversationId") String gcId,
+                               GroupApprovalRequest request);
+
+    @POST
+    @Path("/{groupId}/conversations/{groupConversationId}/approve/stream")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.SERVER_SENT_EVENTS)
+    @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-approver"})
+    @Operation(summary = "Approve a paused group phase with SSE streaming",
+               description = "Resumes a paused group discussion and streams progress events via Server-Sent Events.")
+    @APIResponse(responseCode = "200", description = "SSE event stream of resumed discussion progress.")
+    void approveGroupPhaseStreaming(@PathParam("groupId") String groupId,
+                                    @PathParam("groupConversationId") String gcId,
+                                    GroupApprovalRequest request,
+                                    @Context SseEventSink eventSink,
+                                    @Context Sse sse);
+
+    @POST
+    @Path("/{groupId}/conversations/{groupConversationId}/human-input")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-approver"})
+    @Operation(summary = "Submit a human group member's turn (I6)",
+               description = "Records the pending HUMAN member's response as their transcript entry and resumes an "
+                       + "AWAITING_HUMAN_INPUT discussion from the next speaker. Only the pending member's own "
+                       + "principal (or an admin) may submit — this is a member SPEAKING, not an approval; the "
+                       + "approve endpoint never accepts free text and this endpoint never decides approvals.")
+    @APIResponse(responseCode = "200", description = "Input recorded; discussion resumed.")
+    @APIResponse(responseCode = "400", description = "Blank content, unknown member, or memberId not matching the pending turn.")
+    @APIResponse(responseCode = "403", description = "Caller is neither the pending member nor an admin.")
+    @APIResponse(responseCode = "404", description = "Group conversation not found.")
+    @APIResponse(responseCode = "409", description = "Not awaiting human input / concurrent modification conflict.")
+    Response submitHumanInput(@PathParam("groupId") String groupId,
+                              @PathParam("groupConversationId") String gcId,
+                              HumanInputRequest request);
+
+    /**
+     * Request body for {@link #submitHumanInput}: which HUMAN member is speaking,
+     * and what they said.
+     */
+    record HumanInputRequest(
+            @NotBlank(message = "'memberId' must not be blank") String memberId,
+            @NotBlank(message = "'content' must not be blank") String content) {
+    }
+
+    @GET
+    @Path("/{groupId}/conversations/{groupConversationId}/approval-status")
+    @Produces(MediaType.APPLICATION_JSON)
+    @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-approver"})
+    @Operation(summary = "Get group approval status",
+               description = "Returns the current approval status of a group conversation. Default is a summary "
+                       + "(pause coordinates, no transcript); use detail=full for the complete conversation "
+                       + "(approver-only callers may use detail=full only while the conversation is awaiting approval).")
+    @APIResponse(responseCode = "200", description = "Approval status.")
+    @APIResponse(responseCode = "403", description = "Approver-only caller requested detail=full on a non-paused conversation.")
+    @APIResponse(responseCode = "404", description = "Group conversation not found.")
+    Response getGroupApprovalStatus(@PathParam("groupId") String groupId,
+                                    @PathParam("groupConversationId") String gcId,
+                                    @QueryParam("detail")
+                                    @DefaultValue("summary") String detail);
+
     /**
      * Request body for starting a group discussion.
+     * <p>
+     * Optional {@code attachments} are shared with every member agent: inline files
+     * ({@code data}) are stored server-side bound to the group conversation and
+     * each member is granted access; {@code url} references are forwarded as-is.
+     * Old two-argument clients remain compatible.
      */
-    record DiscussRequest(String question, String userId) {
+    record DiscussRequest(
+            @NotBlank(message = "'question' must not be blank")
+            @Size(max = MAX_QUESTION_CHARS,
+                  message = "'question' must be at most {max} characters") String question,
+
+            @Size(max = MAX_IDENTIFIER_CHARS,
+                  message = "'userId' must be at most {max} characters") String userId,
+
+            @Size(max = MAX_ATTACHMENTS_PER_REQUEST,
+                  message = "'attachments' must contain at most {max} entries")
+            @Valid List<AttachmentRef> attachments) {
+        public DiscussRequest(String question, String userId) {
+            this(question, userId, null);
+        }
     }
+
+    /**
+     * Request body for following up with a specific group member.
+     * {@code targetAgentId} accepts either a raw agent ID or a display name.
+     */
+    record FollowUpRequest(
+            @NotBlank(message = "'question' must not be blank")
+            @Size(max = MAX_QUESTION_CHARS,
+                  message = "'question' must be at most {max} characters") String question,
+
+            @NotBlank(message = "'targetAgentId' must not be blank")
+            @Size(max = MAX_IDENTIFIER_CHARS,
+                  message = "'targetAgentId' must be at most {max} characters") String targetAgentId,
+
+            @Size(max = MAX_IDENTIFIER_CHARS,
+                  message = "'userId' must be at most {max} characters") String userId) {
+    }
+
+    /**
+     * A single attachment reference on a group discussion request. Provide either
+     * inline base64 {@code data} (+ {@code mimeType}) or a hosted {@code url}.
+     * <p>
+     * {@code data} is bounded by {@link MaxInlineAttachmentSize}, which derives its
+     * ceiling from {@code eddi.attachments.max-size-bytes} rather than hardcoding
+     * one — an operator who raises the attachment cap raises this with it.
+     */
+    record AttachmentRef(
+            @Size(max = MAX_MIME_TYPE_CHARS,
+                  message = "'mimeType' must be at most {max} characters") String mimeType,
+
+            @MaxInlineAttachmentSize String data,
+
+            @Size(max = MAX_URL_CHARS,
+                  message = "'url' must be at most {max} characters") String url,
+
+            @Size(max = MAX_FILE_NAME_CHARS,
+                  message = "'fileName' must be at most {max} characters") String fileName) {
+    }
+
+    /**
+     * List the group conversations of THIS group that are currently awaiting human
+     * approval, as bounded summaries (no transcripts). Visibility: admins and
+     * approvers see all of the group's pending items; other callers only their own
+     * conversations.
+     */
+    @GET
+    @Path("/{groupId}/conversations/pending-approvals")
+    @Produces(MediaType.APPLICATION_JSON)
+    @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-approver"})
+    @Operation(summary = "List pending HITL approvals",
+               description = "Lists this group's conversations currently awaiting human approval (summaries).")
+    @APIResponse(responseCode = "200", description = "List of pending approval summaries.")
+    List<PendingApprovalSummary> listGroupPendingApprovals(
+                                                           @PathParam("groupId") String groupId,
+                                                           @QueryParam("limit")
+                                                           @DefaultValue("100") Integer limit);
+
+    /**
+     * Cross-group HITL inbox (#21): all group conversations currently awaiting
+     * human approval across every group, as bounded summaries (no transcripts).
+     * Lets an approvals dashboard answer "what is waiting for me?" in one request
+     * instead of enumerating every group (N+1). Visibility mirrors the per-group
+     * and regular surfaces: admins and approvers see all pending items; other
+     * callers see only their own conversations; anonymous sees nothing.
+     */
+    @GET
+    @Path("/pending-approvals")
+    @Produces(MediaType.APPLICATION_JSON)
+    @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-approver"})
+    @Operation(summary = "List all pending group HITL approvals",
+               description = "Lists group conversations awaiting human approval across all groups (summaries).")
+    @APIResponse(responseCode = "200", description = "List of pending approval summaries.")
+    List<PendingApprovalSummary> listAllGroupPendingApprovals(
+                                                              @QueryParam("limit")
+                                                              @DefaultValue("100") Integer limit);
 }

@@ -28,7 +28,7 @@ class MongoScheduleStoreTest extends MongoTestBase {
 
     @BeforeAll
     static void init() {
-        store = new MongoScheduleStore(getDatabase(), jsonSerialization, documentBuilder);
+        store = new MongoScheduleStore(getDatabase(), jsonSerialization, documentBuilder, 100);
     }
 
     @BeforeEach
@@ -144,7 +144,9 @@ class MongoScheduleStoreTest extends MongoTestBase {
             cfg.setFireStatus(FireStatus.PENDING);
             String id = store.createSchedule(cfg);
 
-            assertTrue(store.tryClaim(id, "node-1", Instant.now()));
+            // Past leaseExpiry: a fresh PENDING row is claimed via the PENDING clause,
+            // never the lease-steal clause.
+            assertTrue(store.tryClaim(id, "node-1", Instant.now(), Instant.now().minusSeconds(300)));
             assertEquals(FireStatus.CLAIMED, store.readSchedule(id).getFireStatus());
         }
 
@@ -157,8 +159,51 @@ class MongoScheduleStoreTest extends MongoTestBase {
             cfg.setFireStatus(FireStatus.PENDING);
             String id = store.createSchedule(cfg);
 
-            assertTrue(store.tryClaim(id, "node-1", Instant.now()));
-            assertFalse(store.tryClaim(id, "node-2", Instant.now()));
+            // A PAST leaseExpiry (300s ago) means the second claim cannot steal the
+            // fresh lease: node-1's claimedAt ≈ now is NOT <= leaseExpiry, so node-2's
+            // claim correctly fails.
+            assertTrue(store.tryClaim(id, "node-1", Instant.now(), Instant.now().minusSeconds(300)));
+            assertFalse(store.tryClaim(id, "node-2", Instant.now(), Instant.now().minusSeconds(300)));
+        }
+
+        @Test
+        @DisplayName("tryClaim steals a CLAIMED schedule whose lease expired")
+        void claimStealsExpiredLease() throws Exception {
+            var cfg = newSchedule("Steal", "a");
+            cfg.setEnabled(true);
+            cfg.setNextFire(Instant.now().minusSeconds(60));
+            cfg.setFireStatus(FireStatus.PENDING);
+            String id = store.createSchedule(cfg);
+
+            // node-1 claims at a fixed instant T; its lease is now anchored at T.
+            Instant t = Instant.now().minusSeconds(600);
+            assertTrue(store.tryClaim(id, "node-1", t, t.minusSeconds(300)));
+            assertEquals("node-1", store.readSchedule(id).getClaimedBy());
+
+            // node-2 polls later with a leaseExpiry AFTER node-1's claimedAt (T) — the
+            // lease is considered expired, so the CLAIMED row is stolen.
+            assertTrue(store.tryClaim(id, "node-2", Instant.now(), t.plusSeconds(1)),
+                    "an expired-lease CLAIMED schedule must be reclaimable");
+            var read = store.readSchedule(id);
+            assertEquals(FireStatus.CLAIMED, read.getFireStatus());
+            assertEquals("node-2", read.getClaimedBy(), "the stolen lease is now owned by node-2");
+        }
+
+        @Test
+        @DisplayName("tryClaim does NOT steal a CLAIMED schedule whose lease is still valid")
+        void claimDoesNotStealValidLease() throws Exception {
+            var cfg = newSchedule("NoSteal", "a");
+            cfg.setEnabled(true);
+            cfg.setNextFire(Instant.now().minusSeconds(60));
+            cfg.setFireStatus(FireStatus.PENDING);
+            String id = store.createSchedule(cfg);
+
+            assertTrue(store.tryClaim(id, "node-1", Instant.now(), Instant.now().minusSeconds(300)));
+
+            // leaseExpiry BEFORE node-1's fresh claimedAt → lease still valid → no steal.
+            assertFalse(store.tryClaim(id, "node-2", Instant.now(), Instant.now().minusSeconds(300)),
+                    "a still-valid lease must not be stolen");
+            assertEquals("node-1", store.readSchedule(id).getClaimedBy(), "node-1 keeps its valid lease");
         }
 
         @Test
@@ -278,26 +323,50 @@ class MongoScheduleStoreTest extends MongoTestBase {
         @Test
         @DisplayName("logFire + readFireLogs")
         void logAndRead() throws Exception {
-            var log = new ScheduleFireLog("fire-1", "sched-1", "fire-key-1",
+            // The log is written only while its schedule exists — see
+            // IScheduleStore#logFire — so the schedule has to be created first.
+            String scheduleId = store.createSchedule(newSchedule("Logged", "agent-1"));
+            var log = new ScheduleFireLog("fire-1", scheduleId, "fire-key-1",
                     Instant.now(), Instant.now(), Instant.now(),
                     "COMPLETED", "node-1", "conv-1", null, 1, 0.0);
             store.logFire(log);
 
-            List<ScheduleFireLog> logs = store.readFireLogs("sched-1", 10);
+            List<ScheduleFireLog> logs = store.readFireLogs(scheduleId, 10);
             assertEquals(1, logs.size());
             assertEquals("fire-1", logs.getFirst().id());
+        }
+
+        /**
+         * The other half of the same guard: a fire that commits its log after its
+         * schedule has been erased must leave nothing behind — the log carries a
+         * conversationId and is findable only by its scheduleId, so an orphan is
+         * personal data no erasure path can reach again.
+         */
+        @Test
+        @DisplayName("logFire — writes nothing once the schedule is gone")
+        void logFireAfterScheduleDeleted() throws Exception {
+            String scheduleId = store.createSchedule(newSchedule("Erased", "agent-1"));
+            store.deleteSchedule(scheduleId);
+
+            store.logFire(new ScheduleFireLog("fire-late", scheduleId, "fire-key-late",
+                    Instant.now(), Instant.now(), Instant.now(),
+                    "COMPLETED", "node-1", "conv-erased", null, 1, 0.0));
+
+            assertTrue(store.readFireLogs(scheduleId, 10).isEmpty(),
+                    "a fire log must not outlive the schedule it belongs to");
         }
 
         @Test
         @DisplayName("readFailedFireLogs — filters FAILED + DEAD_LETTERED")
         void readFailed() throws Exception {
-            store.logFire(new ScheduleFireLog("f1", "s1", "fk1",
+            String scheduleId = store.createSchedule(newSchedule("Failing", "agent-1"));
+            store.logFire(new ScheduleFireLog("f1", scheduleId, "fk1",
                     Instant.now(), Instant.now(), Instant.now(),
                     "COMPLETED", "n1", "c1", null, 1, 0.0));
-            store.logFire(new ScheduleFireLog("f2", "s1", "fk2",
+            store.logFire(new ScheduleFireLog("f2", scheduleId, "fk2",
                     Instant.now(), Instant.now(), Instant.now(),
                     "FAILED", "n1", "c2", "error msg", 1, 0.0));
-            store.logFire(new ScheduleFireLog("f3", "s1", "fk3",
+            store.logFire(new ScheduleFireLog("f3", scheduleId, "fk3",
                     Instant.now(), Instant.now(), Instant.now(),
                     "DEAD_LETTERED", "n1", "c3", "max retries", 3, 0.0));
 
@@ -322,8 +391,18 @@ class MongoScheduleStoreTest extends MongoTestBase {
             due.setFireStatus(FireStatus.PENDING);
             store.createSchedule(due);
 
-            List<ScheduleConfiguration> dueList = store.findDueSchedules(
-                    Instant.now(), Instant.now().minusSeconds(300), 3);
+            // Re-query with a short bounded poll: the query is deterministic (the
+            // schedule is enabled, PENDING, nextFire 60s in the past), but under the
+            // full suite this container-backed read has intermittently observed an
+            // empty result before the just-inserted document is visible. A genuine
+            // failure stays empty for the whole window and still fails the assert.
+            List<ScheduleConfiguration> dueList = List.of();
+            for (int attempt = 0; attempt < 25 && dueList.isEmpty(); attempt++) {
+                if (attempt > 0) {
+                    Thread.sleep(100);
+                }
+                dueList = store.findDueSchedules(Instant.now(), Instant.now().minusSeconds(300), 3);
+            }
 
             assertFalse(dueList.isEmpty(), "Expected at least one due schedule");
             assertTrue(dueList.stream().anyMatch(s -> "Due".equals(s.getName())),

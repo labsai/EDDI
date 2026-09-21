@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.output;
 
 import ai.labs.eddi.configs.output.model.OutputConfiguration;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
+import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.TestMemoryFactory;
 import ai.labs.eddi.engine.TestMemoryFactory.MemoryContext;
 import ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException;
@@ -112,8 +113,8 @@ class OutputGenerationTaskTest {
             // Actually, null language in memory means "any" — but output language
             // requires a match. Let's set the conversation property language.
             ctx.conversationProperties().put("language",
-                    new ai.labs.eddi.configs.properties.model.Property("language", "en",
-                            ai.labs.eddi.configs.properties.model.Property.Scope.longTerm));
+                    new Property("language", "en",
+                            Property.Scope.longTerm));
 
             task.execute(ctx.memory(), outputGen);
 

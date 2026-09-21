@@ -60,11 +60,29 @@ public class PostgresSecretPersistence implements ISecretPersistence {
     private static final String CREATE_DEKS_TABLE = """
             CREATE TABLE IF NOT EXISTS secret_vault_deks (
                 id VARCHAR(64) PRIMARY KEY DEFAULT gen_random_uuid()::text,
-                tenant_id VARCHAR(255) NOT NULL UNIQUE,
+                tenant_id VARCHAR(255) NOT NULL,
+                generation INTEGER NOT NULL DEFAULT 1,
                 encrypted_dek TEXT NOT NULL,
                 iv VARCHAR(255) NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
+            """;
+
+    /**
+     * Brings a table created before generations existed onto one row per (tenant,
+     * generation).
+     * <p>
+     * The dropped constraint is the column-level {@code UNIQUE} Postgres named
+     * {@code secret_vault_deks_tenant_id_key}: while it stands a tenant cannot hold
+     * a second generation, so rotation has nowhere to write. The replacement is a
+     * unique <em>index</em> rather than a constraint because only an index can be
+     * declared {@code IF NOT EXISTS}, and Postgres accepts one as an
+     * {@code ON CONFLICT} target just the same.
+     */
+    private static final String MIGRATE_DEKS_TABLE = """
+            ALTER TABLE secret_vault_deks ADD COLUMN IF NOT EXISTS generation INTEGER NOT NULL DEFAULT 1;
+            ALTER TABLE secret_vault_deks DROP CONSTRAINT IF EXISTS secret_vault_deks_tenant_id_key;
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_svd_tenant_generation ON secret_vault_deks (tenant_id, generation)
             """;
 
     private static final String CREATE_INDEXES = """
@@ -94,7 +112,7 @@ public class PostgresSecretPersistence implements ISecretPersistence {
             stmt.execute(CREATE_SECRETS_TABLE);
             stmt.execute(CREATE_DEKS_TABLE);
             stmt.execute(CREATE_META_TABLE);
-            for (String sql : CREATE_INDEXES.split(";")) {
+            for (String sql : (MIGRATE_DEKS_TABLE + ";" + CREATE_INDEXES).split(";")) {
                 sql = sql.trim();
                 if (!sql.isEmpty())
                     stmt.execute(sql);
@@ -187,22 +205,47 @@ public class PostgresSecretPersistence implements ISecretPersistence {
         return secrets;
     }
 
+    @Override
+    public boolean updateSecretSealing(EncryptedSecret secret, String expectedDekId) {
+        ensureSchema();
+        // IS NOT DISTINCT FROM, not =, so a NULL expectation guards a NULL row
+        // instead of matching nothing.
+        String sql = """
+                UPDATE secret_vault_secrets
+                   SET encrypted_value = ?, iv = ?, dek_id = ?, last_rotated_at = ?
+                 WHERE tenant_id = ? AND key_name = ? AND dek_id IS NOT DISTINCT FROM ?
+                """;
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, secret.getEncryptedValue());
+            ps.setString(2, secret.getIv());
+            ps.setString(3, secret.getDekId());
+            ps.setTimestamp(4, instantToTimestamp(secret.getLastRotatedAt()));
+            ps.setString(5, secret.getTenantId());
+            ps.setString(6, secret.getKeyName());
+            ps.setString(7, expectedDekId);
+            return ps.executeUpdate() == 1;
+        } catch (SQLException e) {
+            throw new PersistenceException("Failed to re-seal secret " + secret.getTenantId() + "/" + secret.getKeyName(), e);
+        }
+    }
+
     // ─── DEKs ───
 
     @Override
     public void upsertDek(EncryptedDek dek) {
         ensureSchema();
         String sql = """
-                INSERT INTO secret_vault_deks (tenant_id, encrypted_dek, iv, created_at)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT (tenant_id)
+                INSERT INTO secret_vault_deks (tenant_id, generation, encrypted_dek, iv, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT (tenant_id, generation)
                 DO UPDATE SET encrypted_dek = EXCLUDED.encrypted_dek, iv = EXCLUDED.iv
                 """;
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, dek.getTenantId());
-            ps.setString(2, dek.getEncryptedDek());
-            ps.setString(3, dek.getIv());
-            ps.setTimestamp(4, instantToTimestamp(dek.getCreatedAt()));
+            ps.setInt(2, dek.getGeneration());
+            ps.setString(3, dek.getEncryptedDek());
+            ps.setString(4, dek.getIv());
+            ps.setTimestamp(5, instantToTimestamp(dek.getCreatedAt()));
             ps.executeUpdate();
         } catch (Exception e) {
             throw new PersistenceException("Failed to upsert DEK for tenant " + dek.getTenantId(), e);
@@ -210,22 +253,78 @@ public class PostgresSecretPersistence implements ISecretPersistence {
     }
 
     @Override
+    public boolean insertDek(EncryptedDek dek) {
+        ensureSchema();
+        // DO NOTHING rather than a caught unique violation: the loser gets zero rows
+        // back and a live connection, not an aborted transaction to unwind.
+        String sql = """
+                INSERT INTO secret_vault_deks (tenant_id, generation, encrypted_dek, iv, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT (tenant_id, generation) DO NOTHING
+                """;
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, dek.getTenantId());
+            ps.setInt(2, dek.getGeneration());
+            ps.setString(3, dek.getEncryptedDek());
+            ps.setString(4, dek.getIv());
+            ps.setTimestamp(5, instantToTimestamp(dek.getCreatedAt()));
+            return ps.executeUpdate() == 1;
+        } catch (SQLException e) {
+            throw new PersistenceException("Failed to insert DEK generation for tenant " + dek.getTenantId(), e);
+        }
+    }
+
+    @Override
     public Optional<EncryptedDek> findDek(String tenantId) {
         ensureSchema();
-        String sql = "SELECT * FROM secret_vault_deks WHERE tenant_id = ?";
+        String sql = "SELECT * FROM secret_vault_deks WHERE tenant_id = ? ORDER BY generation DESC LIMIT 1";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, tenantId);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
-                    Timestamp createdTs = rs.getTimestamp("created_at");
-                    return Optional.of(new EncryptedDek(rs.getString("id"), rs.getString("tenant_id"), rs.getString("encrypted_dek"),
-                            rs.getString("iv"), createdTs != null ? createdTs.toInstant() : null));
+                    return Optional.of(resultSetToDek(rs));
                 }
             }
         } catch (SQLException e) {
             throw new PersistenceException("Failed to find DEK for tenant " + tenantId, e);
         }
         return Optional.empty();
+    }
+
+    @Override
+    public Optional<EncryptedDek> findDek(String tenantId, int generation) {
+        ensureSchema();
+        String sql = "SELECT * FROM secret_vault_deks WHERE tenant_id = ? AND generation = ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, tenantId);
+            ps.setInt(2, generation);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return Optional.of(resultSetToDek(rs));
+                }
+            }
+        } catch (SQLException e) {
+            throw new PersistenceException("Failed to find DEK generation " + generation + " for tenant " + tenantId, e);
+        }
+        return Optional.empty();
+    }
+
+    @Override
+    public List<EncryptedDek> listDeks(String tenantId) {
+        ensureSchema();
+        String sql = "SELECT * FROM secret_vault_deks WHERE tenant_id = ? ORDER BY generation";
+        List<EncryptedDek> deks = new ArrayList<>();
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, tenantId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    deks.add(resultSetToDek(rs));
+                }
+            }
+        } catch (SQLException e) {
+            throw new PersistenceException("Failed to list DEKs for tenant " + tenantId, e);
+        }
+        return deks;
     }
 
     @Override
@@ -243,14 +342,12 @@ public class PostgresSecretPersistence implements ISecretPersistence {
     @Override
     public List<EncryptedDek> listAllDeks() {
         ensureSchema();
-        String sql = "SELECT * FROM secret_vault_deks ORDER BY tenant_id";
+        String sql = "SELECT * FROM secret_vault_deks ORDER BY tenant_id, generation";
         List<EncryptedDek> deks = new ArrayList<>();
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
-                    Timestamp createdTs = rs.getTimestamp("created_at");
-                    deks.add(new EncryptedDek(rs.getString("id"), rs.getString("tenant_id"), rs.getString("encrypted_dek"), rs.getString("iv"),
-                            createdTs != null ? createdTs.toInstant() : null));
+                    deks.add(resultSetToDek(rs));
                 }
             }
         } catch (SQLException e) {
@@ -327,6 +424,14 @@ public class PostgresSecretPersistence implements ISecretPersistence {
         secret.setLastAccessedAt(accessedTs != null ? accessedTs.toInstant() : null);
         secret.setLastRotatedAt(rotatedTs != null ? rotatedTs.toInstant() : null);
         return secret;
+    }
+
+    private static EncryptedDek resultSetToDek(ResultSet rs) throws SQLException {
+        Timestamp createdTs = rs.getTimestamp("created_at");
+        // A row written before the column existed reads as 0 until the default takes
+        // effect; that row is generation 1, and EncryptedDek maps it there.
+        return new EncryptedDek(rs.getString("id"), rs.getString("tenant_id"), rs.getInt("generation"), rs.getString("encrypted_dek"),
+                rs.getString("iv"), createdTs != null ? createdTs.toInstant() : null);
     }
 
     private static Timestamp instantToTimestamp(Instant instant) {

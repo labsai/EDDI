@@ -5,7 +5,7 @@
 
 EDDI provides a built-in log management API for platform-wide observability. It captures all application log records into an in-memory ring buffer and optionally persists them to the database for cross-restart history.
 
-> **Note:** This API provides _system-level application logs_ (JUL/JBoss log records). For conversation message history (user/assistant messages), use the [Conversation Log endpoint](#conversation-log) instead.
+> **Note:** This API provides _system-level application logs_ (JUL/JBoss log records). For conversation message history (user/assistant messages), use the [Conversation Log endpoint](conversations.md) (`GET /agents/{conversationId}/log`) instead.
 
 ---
 
@@ -23,8 +23,14 @@ Returns recent log entries from the in-memory ring buffer. These are fast to que
 |-----------|------|---------|-------------|
 | `agentId` | string | — | Filter by agent ID |
 | `conversationId` | string | — | Filter by conversation ID |
-| `level` | string | — | Minimum log level (`TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`). Returns entries **at or above** this level |
-| `limit` | integer | `200` | Maximum number of entries to return |
+| `level` | string | `INFO` | Minimum log level (`TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`). Returns entries **at or above** this level |
+| `limit` | integer | `100` | Maximum number of entries to return |
+
+> The ring buffer only ever holds what the log manager actually emits. EDDI sets no
+> `quarkus.log.level` or `quarkus.log.min-level`, so the root logger is `INFO` and no
+> `DEBUG`/`TRACE` record reaches the buffer at all — passing `level=DEBUG` returns nothing
+> extra. To capture them, raise `quarkus.log.min-level` (and the category level) first.
+> `quarkus.log.console.level=DEBUG` is a *handler* setting and does not lower the logger.
 
 **Example:**
 
@@ -71,7 +77,7 @@ Returns historical logs from the database. These survive restarts and work acros
 | `userId` | string | — | Filter by user ID |
 | `instanceId` | string | — | Filter by EDDI instance ID (useful in multi-instance deployments) |
 | `skip` | integer | `0` | Number of entries to skip (pagination) |
-| `limit` | integer | `50` | Maximum entries to return |
+| `limit` | integer | `100` | Maximum entries to return |
 
 **Example:**
 
@@ -94,7 +100,7 @@ Opens a Server-Sent Events (SSE) connection for real-time log tailing. Supports 
 |-----------|------|---------|-------------|
 | `agentId` | string | — | Filter by agent ID |
 | `conversationId` | string | — | Filter by conversation ID |
-| `level` | string | — | Minimum log level (same semantics as recent logs) |
+| `level` | string | `INFO` | Minimum log level (same semantics as recent logs) |
 
 **Example:**
 
@@ -172,6 +178,17 @@ All logging configuration lives in `application.properties`:
 ```
 
 The `LogCaptureFilter` captures **every** log record (all levels) into the ring buffer for instant query. Only entries meeting the `db-persist-min-level` threshold are enqueued for async batch persistence to the database.
+
+### What the filter rewrites on the way out
+
+The filter is not only a tap. Before the console handler formats a record, it rewrites that record **in place**, so every destination — container stdout, the ring buffer, the database, the SSE live tail — sees the same text:
+
+1. **Secret redaction.** Credential-shaped material in the message, and in every message in the throwable's cause and suppressed graph, is replaced (`sk-ant-<REDACTED>` and similar). A failed outbound call routinely names the resolved URL in its exception message, and a templated credential in that URL *is* the credential.
+2. **Record-boundary escaping (CWE-117).** Anything that could end a log record is escaped rather than printed: CR becomes `\r`, LF becomes `\n`, and U+2028, U+2029 and other control characters become `\uXXXX`. TAB is left alone, because it cannot end a record and it is what indents stack frames.
+
+So a log line whose text contains a newline shows a literal `\n` instead of wrapping. **That is deliberate**: the console pattern ends in `%s%e`, `%e` prints a stack trace whose first line is the throwable's own `ClassName: message`, and without this an attacker who can get their text into an exception message could end the record and write a convincing follow-on line of their own. Stack traces are unaffected — the escaping is applied to each throwable's *message* before the trace is rendered, so frames, `Caused by:` and `... N more` come out exactly as the JVM produced them.
+
+> **Adding a log handler?** The filter is attached to the console handler only, via `quarkus.log.console.filter=eddi-log-capture`. A file or syslog handler needs the same filter, or records reaching it are neither redacted nor escaped.
 
 ---
 

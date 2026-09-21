@@ -1,0 +1,494 @@
+@import 'tailwindcss';
+/* Real typography for the `prose` classes every markdown surface already
+   wears. Without this plugin they were inert: preflight strips heading sizes,
+   list bullets and margins, and nothing put them back — chat replies rendered
+   as a crowded wall with unstyled tables. */
+@plugin "@tailwindcss/typography";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme {
+  /* EDDI brand colors — black & gold */
+  --color-primary: #f59e0b;
+  --color-primary-foreground: #0c0a09;
+  --color-secondary: #f5f5f4;
+  --color-secondary-foreground: #1c1917;
+  --color-accent: #fbbf24;
+  --color-accent-foreground: #0c0a09;
+  --color-destructive: #dc2626;
+  --color-destructive-foreground: #ffffff;
+  /* Warning — amber has been the app's caution colour since the start; this
+     gives it a name. Light mode uses amber-800, not the brand's amber-500: the
+     token is overwhelmingly read as text, and #f59e0b is only ~2.1:1 on white.
+     amber-800 rather than amber-700 because the token tints its own background
+     (`bg-warning/10 text-warning`), and amber-700 lands at 4.38:1 there — under
+     AA. amber-800 holds >=5.6:1 at every alpha the app ships. Same trade the
+     sidebar accent makes below, one step further. */
+  --color-warning: #92400e;
+  --color-warning-foreground: #ffffff;
+  --color-muted: #f5f5f4;
+  --color-muted-foreground: #78716c;
+
+  /* Light theme */
+  --color-background: #fafaf9;
+  --color-foreground: #1c1917;
+  --color-card: #ffffff;
+  --color-card-foreground: #1c1917;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #1c1917;
+  --color-border: #e7e5e4;
+  --color-input: #e7e5e4;
+  --color-ring: #f59e0b;
+
+  /* Sidebar — light in light mode, matches the rest of the app (dark override below) */
+  --color-sidebar: #ffffff;
+  --color-sidebar-foreground: #44403c;
+  --color-sidebar-border: #e7e5e4;
+  /* Darker amber so the active nav label (text-sidebar-accent) stays legible on
+     white (bright #f59e0b is only ~1.8:1); dark mode restores bright gold below. */
+  --color-sidebar-accent: #b45309;
+  --color-sidebar-accent-foreground: #ffffff;
+
+  --radius: 0.5rem;
+  --font-sans: 'Noto Sans Variable', 'Noto Sans Arabic Variable', 'Noto Sans Thai Variable', 'Noto Sans Devanagari Variable', 'Noto Sans JP Variable', 'Noto Sans KR Variable', 'Noto Sans SC Variable', 'Noto Sans TC Variable', ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Dark theme overrides — deep charcoal for premium enterprise feel */
+.dark {
+  --color-background: #09090b;
+  --color-foreground: #fafaf9;
+  --color-card: #18181b;
+  --color-card-foreground: #fafaf9;
+  --color-popover: #18181b;
+  --color-popover-foreground: #fafaf9;
+  --color-border: #27272a;
+  --color-input: #27272a;
+  --color-secondary: #27272a;
+  --color-secondary-foreground: #fafaf9;
+  --color-muted: #27272a;
+  --color-muted-foreground: #a1a1aa;
+  /* Bright amber-400 reads at ~11:1 on the dark surfaces; its foreground goes
+     near-black, matching the brand accent pair. */
+  --color-warning: #fbbf24;
+  --color-warning-foreground: #0c0a09;
+  --color-sidebar: #09090b;
+  --color-sidebar-foreground: #d4d4d8;
+  --color-sidebar-border: #18181b;
+  /* Bright gold reads well on the dark sidebar (restores the brand accent). */
+  --color-sidebar-accent: #f59e0b;
+  --color-sidebar-accent-foreground: #0c0a09;
+}
+
+/* Base styles */
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  /* ── Custom scrollbars ────────────────────────────────────── */
+
+  /* Standard property (Firefox, modern Chrome 121+) */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border) transparent;
+  }
+
+  .dark * {
+    scrollbar-color: #3f3f46 transparent;
+  }
+
+  /* WebKit (Chrome, Edge, Safari) */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-border);
+    border-radius: 9999px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-muted-foreground);
+  }
+
+  .dark ::-webkit-scrollbar-thumb {
+    background: #3f3f46;
+  }
+
+  .dark ::-webkit-scrollbar-thumb:hover {
+    background: #52525b;
+  }
+
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  /* Ensure all interactive elements show pointer cursor */
+  button,
+  [role="button"],
+  a,
+  select,
+  label:has(input[type="checkbox"]),
+  label:has(input[type="radio"]) {
+    cursor: pointer;
+  }
+
+  body {
+    font-family: var(--font-sans);
+  }
+
+  /* Global focus-visible ring for keyboard navigation */
+  a:focus-visible,
+  button:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible,
+  input:focus-visible,
+  [tabindex]:focus-visible,
+  [role="tab"]:focus-visible,
+  [role="radio"]:focus-visible,
+  [role="menuitem"]:focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+    border-radius: var(--radius);
+  }
+
+  /* Skip to main content link — hidden until focused.
+     Clipped in place rather than parked off-screen: `left: -9999px` does not
+     mirror under `dir="rtl"`, and in RTL the left side is scrollable overflow,
+     so the old rule inflated the document's scrollWidth by 9999px on every
+     page and pushed the whole layout sideways. */
+  .skip-to-main {
+    position: absolute;
+    inset-block-start: auto;
+    inset-inline-start: 0;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    z-index: 9999;
+  }
+
+  .skip-to-main:focus {
+    position: fixed;
+    inset-block-start: 0.5rem;
+    /* Direction-neutral centering — no `left`/`translateX` needed, and it
+       cannot overflow either edge. */
+    inset-inline: 0;
+    margin-inline: auto;
+    width: fit-content;
+    height: auto;
+    overflow: visible;
+    clip-path: none;
+    padding: 0.5rem 1.5rem;
+    background: var(--color-primary);
+    color: var(--color-primary-foreground);
+    font-weight: 600;
+    font-size: 0.875rem;
+    border-radius: var(--radius);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+}
+
+/* Chat prose overrides */
+@layer components {
+  .prose pre {
+    background-color: var(--color-muted);
+    border: 1px solid var(--color-border);
+  }
+
+  .prose code {
+    color: var(--color-primary);
+    font-weight: 500;
+  }
+
+  .prose a {
+    color: var(--color-primary);
+    text-decoration: underline;
+  }
+
+  /* ── Onboarding ─────────────────────────────── */
+
+  /* Spotlight overlay — box-shadow dims everything except the cutout rect */
+  .tour-spotlight {
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.65);
+    border-radius: 12px;
+    pointer-events: none;
+    transition: all 300ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .tour-spotlight::after {
+    content: '';
+    position: absolute;
+    inset: -4px;
+    border: 2px solid var(--color-primary);
+    border-radius: 14px;
+    animation: pulse-ring 2s ease-in-out infinite;
+    pointer-events: none;
+  }
+
+  @keyframes pulse-ring {
+    0%, 100% { opacity: 0.4; transform: scale(1); }
+    50% { opacity: 0.8; transform: scale(1.03); }
+  }
+
+  /* Tour tooltip entry animation */
+  .tour-tooltip {
+    animation: tooltip-enter 250ms ease-out;
+  }
+
+  @keyframes tooltip-enter {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Welcome modal backdrop — glassmorphism */
+  .welcome-modal-backdrop {
+    backdrop-filter: blur(8px);
+    background: rgba(0, 0, 0, 0.6);
+  }
+
+  .welcome-modal-card {
+    backdrop-filter: blur(16px);
+    background: rgba(24, 24, 27, 0.95);
+    border: 1px solid rgba(245, 158, 11, 0.15);
+    /* This hero card is ALWAYS dark, so pin the sidebar tokens its text/borders
+       read to light values — otherwise light-mode's dark --color-sidebar-*
+       tokens render dark-on-dark (unreadable). */
+    --color-sidebar-foreground: #e4e4e7;
+    --color-sidebar-border: rgba(245, 158, 11, 0.2);
+  }
+
+  /* Carousel dot transitions */
+  .carousel-dot {
+    transition: all 200ms ease;
+  }
+
+  .carousel-dot-active {
+    background: var(--color-primary);
+    transform: scale(1.2);
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ── Container-query responsive grid ─────────── */
+  /* Responds to the ACTUAL content area width, not viewport.
+     This ensures grids adapt when the chat drawer (420px) is open.
+
+     Columns are `minmax(0, 1fr)`, never bare `1fr`. `1fr` means
+     `minmax(auto, 1fr)`, and that `auto` floor resolves to the item's
+     min-content width — which for the `truncate` (`white-space: nowrap`)
+     headings and descriptions inside these cards is the *entire* untruncated
+     string. Columns then overrun the container instead of ellipsising. It
+     stayed invisible in English only because those strings happened to be
+     short; longer translations (Arabic, German) blew the grid out and made
+     the content area scroll horizontally. A 0 floor lets truncation engage. */
+  .cq-card-grid {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  @container main (min-width: 32rem) {
+    .cq-card-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @container main (min-width: 56rem) {
+    .cq-card-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+
+  @container main (min-width: 76rem) {
+    .cq-card-grid {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+  }
+
+  /* Variant for stat-style cards (2→4 columns, skipping 3) */
+  .cq-stat-grid {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  @container main (min-width: 32rem) {
+    .cq-stat-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @container main (min-width: 56rem) {
+    .cq-stat-grid {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+  }
+
+  /* ── Task Board active card pulse ─────────── */
+  @keyframes pulse-border {
+    0%, 100% { border-color: var(--color-primary); }
+    50% { border-color: color-mix(in oklch, var(--color-primary) 40%, transparent); }
+  }
+}
+
+/* ── Chat-scale markdown headings ──────────────────────────────
+   DELIBERATELY UNLAYERED. The typography plugin sizes headings for a DOCUMENT
+   (h1 ≈ 2.14em even at prose-sm), which inside a chat bubble reads as a
+   billboard — a group member whose answer opens with "# Compliance-First AI
+   Integration" filled a third of the card with its own title. A message is not
+   a page: the hierarchy only has to be visible, not architectural.
+
+   These cannot live in `@layer components`: the plugin's sizes ship as
+   utilities, and in Tailwind v4's cascade every utility beats every component
+   rule regardless of specificity. Unlayered CSS outranks all layered CSS, which
+   is the one placement that reliably wins without !important. */
+.prose :is(h1, h2, h3, h4, h5, h6) {
+  margin-top: 1em;
+  margin-bottom: 0.4em;
+  line-height: 1.3;
+}
+
+.prose :is(h1, h2, h3, h4, h5, h6):first-child {
+  margin-top: 0;
+}
+
+.prose h1 {
+  font-size: 1.35em;
+}
+
+.prose h2 {
+  font-size: 1.2em;
+}
+
+.prose h3 {
+  font-size: 1.08em;
+}
+
+.prose :is(h4, h5, h6) {
+  font-size: 1em;
+}
+
+/* ── Chat-scale markdown rhythm ────────────────────────────────
+   DELIBERATELY UNLAYERED, for the reason spelled out under the headings above.
+
+   Twelve surfaces render model-written markdown — the board transcript, the
+   advisor cards, the synthesis card, the Manager transcript, the conversation
+   viewer, 1:1 chat, the operator, the thread page, artifacts, release notes —
+   and every one of them had hand-rolled its own subset of the same repairs as
+   `[&_p]:my-1`-style utilities. The subsets disagreed: paragraph spacing was
+   4px on the board and the plugin's 16px on the Manager, so the SAME transcript
+   read with two different rhythms depending on which page you opened it from,
+   and `break-words` was present on five of the twelve.
+
+   Rhythm lives here, once. Call sites keep what is genuinely theirs — text
+   colour, padding, a surface-specific code background — and stop restating the
+   parts that are not a per-surface decision.
+
+   The values are chat values, not document values. A message is read in a
+   column a few hundred pixels wide, so paragraphs need to be distinguishable
+   without the air a page gives them: 0.75em against a 1.71 line-height keeps a
+   paragraph a unit while the plugin's 1.14em made a six-paragraph answer scroll
+   for no reason. */
+.prose {
+  overflow-wrap: break-word;
+}
+
+.prose :is(p, ul, ol, blockquote) {
+  margin-top: 0.75em;
+  margin-bottom: 0.75em;
+}
+
+/* Items belong to their list far more tightly than the list belongs to the
+   prose around it. */
+.prose :is(ul, ol) li {
+  margin-top: 0.25em;
+  margin-bottom: 0.25em;
+}
+
+/* A "loose" list — one whose items markdown wrapped in <p> — must not inherit
+   paragraph spacing inside each bullet, or every item becomes its own block. */
+.prose li > p {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+/* The card supplies the padding; the first and last blocks must not add to it.
+   Six of the twelve surfaces set this by hand and six did not, so a message
+   opened one way sat a line lower than the same message opened another. */
+.prose > :first-child {
+  margin-top: 0;
+}
+
+.prose > :last-child {
+  margin-bottom: 0;
+}
+
+/* Wide code never widens the message. Five of the twelve set this; the rest let
+   a long line push the card instead. */
+.prose pre {
+  overflow-x: auto;
+}
+
+/* One divider colour everywhere, rather than the two surfaces that remembered
+   to pass `[&_hr]:border-border` and the ten that did not. */
+.prose hr {
+  border-color: var(--color-border);
+}
+
+/* A markdown `---` is a divider, not a chapter break.
+
+   Same reasoning as the headings above, and the same placement rule. The
+   typography plugin gives `hr` a 2.857em margin on both sides — 40px at
+   prose-sm's 14px — and margin collapsing does not help, because the rule sits
+   between two blocks that both want space. A group member who separates every
+   section with `---` (models do this constantly) spent 80px of card on each
+   one: measured at 100px between the end of one paragraph and the text of the
+   next heading, in a card whose paragraphs are 4px apart.
+
+   1em keeps the separator legible while letting the heading's own margin-top
+   win the collapse, so a divider costs about as much as the heading it
+   introduces rather than three times more. */
+.prose hr {
+  margin-top: 1em;
+  margin-bottom: 1em;
+}
+
+/* Markdown tables inside chat bubbles: readable and self-contained. The
+   typography plugin provides the base table styling; these add the chat
+   specifics — hairline row borders, breathing room in cells, and horizontal
+   scrolling INSIDE the table so a wide model-written table can never force the
+   whole bubble (or page) to scroll sideways.
+
+   Unlayered for the same reason as the headings above: the plugin sets cell
+   padding as a utility, so a `@layer components` rule lost silently and every
+   cell rendered with zero horizontal padding. */
+.prose table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.prose th {
+  text-align: start;
+  font-weight: 600;
+  padding: 0.375rem 0.75rem;
+  border-bottom: 1px solid var(--color-border);
+  background-color: var(--color-muted);
+}
+
+.prose td {
+  padding: 0.375rem 0.75rem;
+  border-bottom: 1px solid color-mix(in oklab, var(--color-border) 60%, transparent);
+  vertical-align: top;
+}

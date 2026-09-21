@@ -14,8 +14,8 @@ import org.jboss.logging.Logger;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.Optional;
 
 /**
@@ -25,6 +25,23 @@ import java.util.Optional;
 public class RestManagerResource implements IRestManagerResource {
     private static final Logger LOGGER = Logger.getLogger(RestManagerResource.class);
     private static final String SPA_CLIENT_ID = "eddi-frontend";
+
+    /** Classpath prefix the Manager's static assets live under. */
+    private static final String RESOURCE_BASE = "META-INF/resources";
+
+    /**
+     * Characters a Manager asset name may never contain.
+     * <p>
+     * {@code '\'} is in the set for a security reason, not a cosmetic one. A
+     * classpath resource name is '/'-separated, so {@link #normalizeSlashPath}
+     * splits on '/' alone and a backslash therefore stays inside a single segment —
+     * {@code ..\..\..\pom.xml} pops nothing and would be handed to the classloader
+     * intact. The previous {@code Paths.get(...).normalize()} guard did catch that
+     * on Windows (where '\' is a separator) and not on Linux; rejecting the
+     * character outright is the same answer on every operating system, which is
+     * what this guard is supposed to give.
+     */
+    private static final String INVALID_PATH_CHARS = "<>|:*?\"\\\0";
 
     @ConfigProperty(name = "eddi.keycloak.public.url")
     Optional<String> keycloakPublicUrl;
@@ -51,35 +68,31 @@ public class RestManagerResource implements IRestManagerResource {
     @Override
     public Response fetchManagerResources(String path) {
         try {
-            // Strip leading "./" or "././" for clarity
-            while (path.startsWith("./")) {
-                path = path.substring(2);
-            }
-
-            // Normalize the path to resolve relative elements
-            Path resourcePath = Paths.get("META-INF/resources", path).normalize();
-
-            // Prevent directory traversal: normalized path must stay under the base
-            Path basePath = Paths.get("META-INF/resources").normalize();
-            if (!resourcePath.startsWith(basePath)) {
-                throw new SecurityException("Directory traversal attempt detected");
-            }
-
-            // Disallow characters in file names that may be used maliciously
-            // (avoids regex to prevent polynomial ReDoS — CodeQL java/polynomial-redos)
-            String invalidChars = "<>|:*?\"\0";
+            // Character check FIRST. It used to run after Paths.get, which on Windows
+            // throws InvalidPathException (an IllegalArgumentException, so neither catch
+            // below matched) for exactly the characters this loop is here to reject —
+            // "/manage/a:b" answered 500 instead of the intended 403.
+            // (No regex: CodeQL java/polynomial-redos.)
             for (char c : path.toCharArray()) {
-                if (invalidChars.indexOf(c) >= 0) {
+                if (INVALID_PATH_CHARS.indexOf(c) >= 0) {
                     throw new SecurityException("Invalid characters in file path");
                 }
             }
 
+            // A classpath resource name is '/'-separated, always — it is not a
+            // filesystem path. Paths.get(...).toString() rendered it with the platform
+            // separator, so on Windows every lookup became "META-INF\resources\..."
+            // which no classloader resolves: every existing file under /manage fell
+            // through to manage.html, and the traversal guard's behaviour differed by
+            // operating system.
+            String resourcePath = RESOURCE_BASE + "/" + normalizeSlashPath(path);
+
             // Attempt to load the file from the resources folder
-            InputStream fileStream = Thread.currentThread().getContextClassLoader().getResourceAsStream(resourcePath.toString());
+            InputStream fileStream = Thread.currentThread().getContextClassLoader().getResourceAsStream(resourcePath);
 
             // If the file doesn't exist, fallback to "manage.html"
             if (fileStream == null) {
-                fileStream = Thread.currentThread().getContextClassLoader().getResourceAsStream("META-INF/resources/manage.html");
+                fileStream = Thread.currentThread().getContextClassLoader().getResourceAsStream(RESOURCE_BASE + "/manage.html");
 
                 if (fileStream == null) {
                     throw new FileNotFoundException("manage.html not found in META-INF/resources");
@@ -96,6 +109,37 @@ public class RestManagerResource implements IRestManagerResource {
             LOGGER.error("Failed to serve resource: " + path, e);
             throw new InternalServerErrorException("An error occurred while accessing the resource");
         }
+    }
+
+    /**
+     * Collapse {@code .} and {@code ..} segments of a '/'-separated classpath
+     * suffix, refusing any path that would climb above the base.
+     * <p>
+     * Deliberately string-based rather than {@code java.nio.file.Path}: this is a
+     * classpath resource name, where the separator is always '/', and NIO also
+     * brings platform-specific parsing (and {@code InvalidPathException}) that has
+     * no business deciding whether a URL is safe.
+     * <p>
+     * Splitting on '/' alone is only safe because the caller has already rejected
+     * every character in {@link #INVALID_PATH_CHARS}, backslash included — without
+     * that, {@code ..\..\x} would survive as one segment that pops nothing.
+     */
+    private static String normalizeSlashPath(String path) {
+        Deque<String> segments = new ArrayDeque<>();
+        for (String segment : path.split("/")) {
+            if (segment.isEmpty() || ".".equals(segment)) {
+                continue;
+            }
+            if ("..".equals(segment)) {
+                if (segments.isEmpty()) {
+                    throw new SecurityException("Directory traversal attempt detected");
+                }
+                segments.removeLast();
+                continue;
+            }
+            segments.addLast(segment);
+        }
+        return String.join("/", segments);
     }
 
     private String buildAuthConfigJs() {

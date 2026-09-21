@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.dictionary.rest;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.dictionary.IDictionaryStore;
 import ai.labs.eddi.configs.dictionary.model.DictionaryConfiguration;
@@ -40,7 +41,7 @@ class RestDictionaryStoreTest {
         dictionaryStore = mock(IDictionaryStore.class);
         var documentDescriptorStore = mock(IDocumentDescriptorStore.class);
         jsonSchemaCreator = mock(IJsonSchemaCreator.class);
-        restStore = new RestDictionaryStore(dictionaryStore, documentDescriptorStore, jsonSchemaCreator);
+        restStore = new RestDictionaryStore(dictionaryStore, documentDescriptorStore, jsonSchemaCreator, mock(ResourceAccessGuard.class));
     }
 
     @Nested
@@ -170,6 +171,18 @@ class RestDictionaryStoreTest {
                 var dict = (DictionaryConfiguration) config;
                 return dict.getWords().size() == 2;
             }));
+        }
+
+        @Test
+        @DisplayName("a missing operation is a caller error (400), not a NullPointerException (500)")
+        void missingOperationIsIllegalArgument() throws Exception {
+            when(dictionaryStore.read("dict-1", 1)).thenReturn(new DictionaryConfiguration());
+
+            var instruction = new PatchInstruction<DictionaryConfiguration>();
+            instruction.setDocument(new DictionaryConfiguration());
+
+            assertThrows(IllegalArgumentException.class, () -> restStore.patchRegularDictionary("dict-1", 1, List.of(instruction)));
+            verify(dictionaryStore, never()).update(any(), any(), any());
         }
 
         @Test

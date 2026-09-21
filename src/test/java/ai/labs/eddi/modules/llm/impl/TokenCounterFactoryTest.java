@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.data.message.*;
 import dev.langchain4j.model.TokenCountEstimator;
 import dev.langchain4j.model.openai.OpenAiTokenCountEstimator;
@@ -215,6 +216,66 @@ class TokenCounterFactoryTest {
             String result = TokenCounterFactory.extractText(withImage);
             assertTrue(result.contains("Describe this"), "Should extract text content");
             // ImageContent is not TextContent, so it should be filtered out
+        }
+    }
+
+    /**
+     * Tool traffic used to weigh nothing. A {@link ToolExecutionResultMessage} fell
+     * through to the {@code default ""} arm and an {@link AiMessage} announcing
+     * tool calls has a {@code null} {@code text()}, so an entire tool-calling turn
+     * estimated at zero tokens — which is why no caller could meter it.
+     */
+    @Nested
+    @DisplayName("extractText — tool messages")
+    class ToolMessageTests {
+
+        private static final ToolExecutionRequest REQUEST = ToolExecutionRequest.builder()
+                .id("call-1").name("searchWeb").arguments("{\"query\":\"eddi\"}").build();
+
+        @Test
+        @DisplayName("a tool result contributes its tool name and its whole payload")
+        void toolResultIsCounted() {
+            var message = ToolExecutionResultMessage.from(REQUEST, "a very long result payload");
+            String text = TokenCounterFactory.extractText(message);
+
+            assertTrue(text.contains("a very long result payload"), "the payload is what fills the context window");
+            assertTrue(text.contains("searchWeb"), "the tool name travels with the result");
+        }
+
+        @Test
+        @DisplayName("an AiMessage announcing tool calls contributes names and argument JSON")
+        void toolRequestsAreCounted() {
+            String text = TokenCounterFactory.extractText(AiMessage.from(REQUEST));
+
+            assertTrue(text.contains("searchWeb"), "the requested tool name is sent back to the provider");
+            assertTrue(text.contains("{\"query\":\"eddi\"}"), "so are the serialized arguments");
+        }
+
+        @Test
+        @DisplayName("an AiMessage keeps its own prose alongside its tool calls")
+        void toolRequestsKeepAssistantProse() {
+            String text = TokenCounterFactory.extractText(AiMessage.from("Let me look that up.", List.of(REQUEST)));
+
+            assertTrue(text.contains("Let me look that up."));
+            assertTrue(text.contains("searchWeb"));
+        }
+
+        @Test
+        @DisplayName("the approximate estimator now assigns tool messages a non-zero cost")
+        void approximateEstimatorCountsToolMessages() {
+            var estimator = new TokenCounterFactory.ApproximateTokenCountEstimator();
+            var result = ToolExecutionResultMessage.from(REQUEST, "y".repeat(4000));
+
+            assertTrue(estimator.estimateTokenCountInMessage(result) >= 1000,
+                    "a 4000-character tool result that estimates at 0 tokens makes every token budget blind to it");
+            assertTrue(estimator.estimateTokenCountInMessage(AiMessage.from(REQUEST)) > 0,
+                    "an AiMessage with tool calls has null text but is far from free");
+        }
+
+        @Test
+        @DisplayName("an AiMessage without tool calls is unchanged")
+        void plainAiMessageUnchanged() {
+            assertEquals("Response", TokenCounterFactory.extractText(AiMessage.from("Response")));
         }
     }
 }

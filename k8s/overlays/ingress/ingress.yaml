@@ -25,6 +25,12 @@ spec:
     - host: eddi.example.com
       http:
         paths:
+          # The Manager UI needs no rule of its own: EDDI serves it from this
+          # same Service at /manage (IRestManagerResource). There used to be a
+          # commented-out rule here sending /manage to a separate eddi-manager
+          # Service — following it took the real Manager, and the
+          # /manage/__auth_config__.js endpoint that tells the SPA where
+          # Keycloak is, off the ingress entirely.
           - path: /
             pathType: Prefix
             backend:
@@ -32,14 +38,6 @@ spec:
                 name: eddi
                 port:
                   name: http
-          # Uncomment to expose Manager UI on the same host
-          # - path: /manage
-          #   pathType: Prefix
-          #   backend:
-          #     service:
-          #       name: eddi-manager
-          #       port:
-          #         name: http
   # Uncomment for TLS:
   # tls:
   #   - hosts:

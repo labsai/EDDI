@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.configs.mcpcalls.rest;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.configs.mcpcalls.model.McpToolDiscoveryRequest;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
@@ -16,6 +18,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -38,7 +41,8 @@ class RestMcpCallsStoreTest {
         var documentDescriptorStore = mock(IDocumentDescriptorStore.class);
         jsonSchemaCreator = mock(IJsonSchemaCreator.class);
         mcpToolProviderManager = mock(McpToolProviderManager.class);
-        restStore = new RestMcpCallsStore(mcpCallsStore, documentDescriptorStore, jsonSchemaCreator, mcpToolProviderManager);
+        restStore = new RestMcpCallsStore(mcpCallsStore, documentDescriptorStore, jsonSchemaCreator, mcpToolProviderManager,
+                mock(ResourceAccessGuard.class));
     }
 
     @Nested
@@ -71,7 +75,12 @@ class RestMcpCallsStoreTest {
             when(resourceId.getId()).thenReturn("new-id");
             when(resourceId.getVersion()).thenReturn(1);
             when(mcpCallsStore.create(any())).thenReturn(resourceId);
-            assertEquals(201, restStore.createMcpCalls(new McpCallsConfiguration()).getStatus());
+            // This test is about delegation to the store; the write boundary now
+            // refuses a config the engine could never connect to, so it needs a
+            // valid one. Rejection is covered by RestMcpCallsStoreWriteValidationTest.
+            var config = new McpCallsConfiguration();
+            config.setMcpServerUrl("https://mcp.example.com/tools");
+            assertEquals(201, restStore.createMcpCalls(config).getStatus());
         }
     }
 
@@ -107,15 +116,29 @@ class RestMcpCallsStoreTest {
         @Test
         @DisplayName("should return BAD_REQUEST for null URL")
         void nullUrl() {
-            Response response = restStore.discoverTools(null, null, null);
+            Response response = restStore.discoverTools(null, null);
             assertEquals(400, response.getStatus());
         }
 
         @Test
         @DisplayName("should return BAD_REQUEST for blank URL")
         void blankUrl() {
-            Response response = restStore.discoverTools("  ", null, null);
+            Response response = restStore.discoverTools(new McpToolDiscoveryRequest("  ", null), null);
             assertEquals(400, response.getStatus());
+        }
+
+        @Test
+        @DisplayName("a configuration the manager refused is a 400 with the reason, not 200 with zero tools")
+        void rejectedConfigurationIsBadRequest() {
+            var refused = new McpToolProviderManager.McpServerFailure("discovery-probe", "http://169.254.169.254/",
+                    McpToolProviderManager.McpFailureKind.INVALID_CONFIGURATION, "URL targets a blocked address");
+            when(mcpToolProviderManager.discoverTools(any()))
+                    .thenReturn(new McpToolProviderManager.McpToolsResult(List.of(), Map.of(), List.of(refused)));
+
+            Response response = restStore.discoverTools(new McpToolDiscoveryRequest("http://169.254.169.254/", "http"), null);
+
+            assertEquals(400, response.getStatus());
+            assertTrue(String.valueOf(response.getEntity()).contains("URL targets a blocked address"), String.valueOf(response.getEntity()));
         }
 
         @Test
@@ -123,11 +146,15 @@ class RestMcpCallsStoreTest {
         void connectionFailure() throws Exception {
             when(mcpToolProviderManager.discoverTools(any()))
                     .thenThrow(new RuntimeException("Connection refused"));
-            Response response = restStore.discoverTools("http://localhost:9999", "http", null);
+            Response response = restStore.discoverTools(new McpToolDiscoveryRequest("http://localhost:9999", "http"), null);
             assertEquals(502, response.getStatus());
             @SuppressWarnings("unchecked")
             Map<String, Object> entity = (Map<String, Object>) response.getEntity();
-            assertTrue(entity.get("error").toString().contains("Connection refused"));
+            String error = entity.get("error").toString();
+            assertTrue(error.contains("RuntimeException"), "the caller learns the failure TYPE: " + error);
+            assertTrue(!error.contains("Connection refused"),
+                    "the exception MESSAGE stays out of the response — it routinely carries the resolved URL, "
+                            + "and a URL with a templated credential in it IS the credential");
         }
     }
 

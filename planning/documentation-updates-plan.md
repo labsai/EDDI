@@ -4,8 +4,8 @@
 
 ## Prerequisite Reading
 
-1. [`docs/changelog.md`](../changelog.md) — Sprint 1 and 2 entries
-2. [`AGENTS.md`](../../AGENTS.md) — The full file, especially §3 Roadmap, §4.4 Tool Security, and the Reusable Infrastructure table
+1. [`docs/changelog.md`](../docs/changelog.md) — Sprint 1 and 2 entries
+2. [`AGENTS.md`](../AGENTS.md) — The full file, especially §3 Roadmap, §4.4 Tool Security, and the Reusable Infrastructure table
 
 ---
 
@@ -112,7 +112,7 @@ EDDI enforces security-by-default in production:
 - **Security headers** (CSP, X-Frame-Options, X-Content-Type-Options) are set on all responses.
 - **CI scanning** via CodeQL (SAST) and Trivy (vulnerability scan) on every push.
 
-See [`.env.example`](.env.example) for required environment variables.
+See [`.env.example`](../.env.example) for required environment variables.
 ```
 
 ---

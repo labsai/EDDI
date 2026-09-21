@@ -11,9 +11,11 @@ import java.util.List;
  * Database entity for an encrypted secret stored via envelope encryption. The
  * actual secret value is encrypted with the tenant's DEK (Data Encryption Key).
  * <p>
- * Secrets are scoped at the <b>tenant level</b> — identified by
- * {@code (tenantId, keyName)}. The {@code allowedAgents} field is for
- * visibility/documentation only (not enforced at resolution time).
+ * Secrets are stored at the <b>tenant level</b> — identified by
+ * {@code (tenantId, keyName)}. The {@code allowedAgents} field restricts which
+ * agents may use the secret, checked at deployment time by
+ * {@link ai.labs.eddi.secrets.VaultGrantGate}; whether a violation blocks the
+ * deployment depends on {@code eddi.vault.grant-enforcement}.
  *
  * @author ginccc
  * @since 6.0.0
@@ -35,8 +37,8 @@ public class EncryptedSecret {
     /** Human-readable description of what this secret is for */
     private String description;
     /**
-     * Agent IDs allowed to use this secret, or ["*"] for all agents. For
-     * visibility/documentation only — not enforced at resolution time.
+     * Agent IDs allowed to use this secret, or ["*"] for all agents. Null or empty
+     * means unrestricted, not "deny all". Enforced at deployment time.
      */
     private List<String> allowedAgents;
     private Instant createdAt;

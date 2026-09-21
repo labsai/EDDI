@@ -15,6 +15,20 @@ import java.net.URI;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 /**
+ * Version-resolution mixin for the configuration stores.
+ * <p>
+ * <strong>Deliberately carries no {@code @RolesAllowed}.</strong> It has no
+ * {@code @Path} of its own, so it is never an addressable resource — its two
+ * default methods only become endpoints through a {@code @Path}-bearing
+ * sub-interface, and every one of those already declares
+ * {@code @RolesAllowed({"eddi-admin", "eddi-editor"})} at class level. A role
+ * here would therefore protect nothing that is not already protected, while
+ * putting a security annotation on the declaring type of methods that
+ * {@link ai.labs.eddi.configs.rest.RestVersionInfo} — a plain, non-CDI helper
+ * shared by every store implementation — calls in-process from
+ * {@code validateParameters()} during config resolution and ZIP import. Guard
+ * new stores at the store interface, not here.
+ *
  * @author ginccc
  */
 public interface IRestVersionInfo {

@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -38,7 +39,9 @@ class GroupConversationTest {
         assertEquals(0, gc.getCurrentPhaseIndex());
         assertNull(gc.getCurrentPhaseName());
         assertNull(gc.getSynthesizedAnswer());
+        assertNull(gc.getDecision());
         assertEquals(0, gc.getDepth());
+        assertEquals(1, gc.getRound());
         assertNull(gc.getCreated());
         assertNull(gc.getLastModified());
     }
@@ -57,6 +60,7 @@ class GroupConversationTest {
         gc.setCurrentPhaseIndex(2);
         gc.setCurrentPhaseName("Peer Critique");
         gc.setSynthesizedAnswer("EDDI is a middleware.");
+        gc.setDecision(new DecisionRecord(DecisionType.VERDICT, "PRO wins", "PRO", null, List.of(), "debate-judgment", "Judgment", null));
         gc.setDepth(1);
         gc.setCreated(now);
         gc.setLastModified(now);
@@ -74,6 +78,8 @@ class GroupConversationTest {
         assertEquals(2, gc.getCurrentPhaseIndex());
         assertEquals("Peer Critique", gc.getCurrentPhaseName());
         assertEquals("EDDI is a middleware.", gc.getSynthesizedAnswer());
+        assertEquals(DecisionType.VERDICT, gc.getDecision().type());
+        assertEquals("PRO", gc.getDecision().winner());
         assertEquals(1, gc.getDepth());
         assertEquals(now, gc.getCreated());
         assertEquals(now, gc.getLastModified());
@@ -208,6 +214,51 @@ class GroupConversationTest {
         }
     }
 
+    // ==================== DecisionRecord (Wave 0, F3) ====================
+
+    @Nested
+    @DisplayName("DecisionRecord")
+    class DecisionRecordTests {
+
+        @Test
+        @DisplayName("record fields accessible via accessors")
+        void recordFields() {
+            var dissent = new Dissent("agent-2", "Agent Two", "I still disagree");
+            var decision = new DecisionRecord(DecisionType.VOTE, "Option A wins 3-1", "Option A",
+                    Map.of("Option A", 3, "Option B", 1), List.of(dissent), "majority", "Voting", "raw ballot text");
+
+            assertEquals(DecisionType.VOTE, decision.type());
+            assertEquals("Option A wins 3-1", decision.outcome());
+            assertEquals("Option A", decision.winner());
+            assertEquals(3, decision.tally().get("Option A"));
+            assertEquals(1, decision.dissents().size());
+            assertEquals("agent-2", decision.dissents().get(0).agentId());
+            assertEquals("majority", decision.method());
+            assertEquals("Voting", decision.decidedAtPhase());
+            assertEquals("raw ballot text", decision.raw());
+        }
+
+        @Test
+        @DisplayName("nullable fields (winner, tally) may be null")
+        void nullableFields() {
+            var decision = new DecisionRecord(DecisionType.NONE, null, null, null, List.of(), "debate-judgment", "Judgment", "unparseable");
+
+            assertNull(decision.winner());
+            assertNull(decision.tally());
+            assertTrue(decision.dissents().isEmpty());
+        }
+
+        @Test
+        @DisplayName("Dissent record fields accessible via accessors")
+        void dissentFields() {
+            var dissent = new Dissent("agent-3", "Agent Three", "The evidence was insufficient");
+
+            assertEquals("agent-3", dissent.agentId());
+            assertEquals("Agent Three", dissent.displayName());
+            assertEquals("The evidence was insufficient", dissent.position());
+        }
+    }
+
     // ==================== Enums ====================
 
     @Nested
@@ -218,20 +269,51 @@ class GroupConversationTest {
         @DisplayName("TranscriptEntryType — all values")
         void transcriptEntryTypes() {
             var values = TranscriptEntryType.values();
-            assertEquals(11, values.length);
+            assertEquals(25, values.length);
             assertNotNull(TranscriptEntryType.valueOf("QUESTION"));
             assertNotNull(TranscriptEntryType.valueOf("SYNTHESIS"));
             assertNotNull(TranscriptEntryType.valueOf("SKIPPED"));
+            assertNotNull(TranscriptEntryType.valueOf("PLAN"));
+            assertNotNull(TranscriptEntryType.valueOf("TASK_RESULT"));
+            assertNotNull(TranscriptEntryType.valueOf("VERIFICATION"));
+            assertNotNull(TranscriptEntryType.valueOf("FOLLOW_UP"));
+            // Wave 0, F4
+            assertNotNull(TranscriptEntryType.valueOf("ABSTAINED"));
+            assertNotNull(TranscriptEntryType.valueOf("DISSENT"));
+            assertNotNull(TranscriptEntryType.valueOf("CONVERGENCE"));
+            assertNotNull(TranscriptEntryType.valueOf("FACILITATION"));
+            assertNotNull(TranscriptEntryType.valueOf("VOTE"));
+            assertNotNull(TranscriptEntryType.valueOf("PROPOSAL"));
+            assertNotNull(TranscriptEntryType.valueOf("BARGAIN"));
+            assertNotNull(TranscriptEntryType.valueOf("HUMAN_INPUT"));
+            assertNotNull(TranscriptEntryType.valueOf("RETRO"));
+            assertNotNull(TranscriptEntryType.valueOf("BID"));
         }
 
         @Test
         @DisplayName("GroupConversationState — all values")
         void groupConversationStates() {
             var values = GroupConversationState.values();
-            assertEquals(5, values.length);
+            assertEquals(9, values.length);
             assertNotNull(GroupConversationState.valueOf("CREATED"));
             assertNotNull(GroupConversationState.valueOf("COMPLETED"));
             assertNotNull(GroupConversationState.valueOf("FAILED"));
+            assertNotNull(GroupConversationState.valueOf("AWAITING_APPROVAL"));
+            assertNotNull(GroupConversationState.valueOf("AWAITING_HUMAN_INPUT"));
+            assertNotNull(GroupConversationState.valueOf("CLOSED"));
+            assertNotNull(GroupConversationState.valueOf("CANCELLED"));
+        }
+
+        @Test
+        @DisplayName("DecisionType — all values")
+        void decisionTypes() {
+            var values = DecisionType.values();
+            assertEquals(5, values.length);
+            assertNotNull(DecisionType.valueOf("VERDICT"));
+            assertNotNull(DecisionType.valueOf("VOTE"));
+            assertNotNull(DecisionType.valueOf("AGREEMENT"));
+            assertNotNull(DecisionType.valueOf("AWARD"));
+            assertNotNull(DecisionType.valueOf("NONE"));
         }
     }
 
@@ -256,5 +338,118 @@ class GroupConversationTest {
         gc.setTranscript(List.of(entry));
 
         assertEquals(1, gc.getTranscript().size());
+    }
+
+    @Test
+    @DisplayName("round setter round-trips")
+    void round_setterRoundTrips() {
+        var gc = new GroupConversation();
+        gc.setRound(3);
+        assertEquals(3, gc.getRound());
+    }
+
+    // ==================== availableActions (computed) ====================
+
+    @Nested
+    @DisplayName("availableActions")
+    class AvailableActionsTests {
+
+        @Test
+        @DisplayName("COMPLETED offers followup, continue, close")
+        void completed() {
+            var gc = new GroupConversation();
+            gc.setState(GroupConversationState.COMPLETED);
+            assertEquals(List.of("followup", "continue", "close"), gc.getAvailableActions());
+        }
+
+        @Test
+        @DisplayName("FAILED offers close only")
+        void failed() {
+            var gc = new GroupConversation();
+            gc.setState(GroupConversationState.FAILED);
+            assertEquals(List.of("close"), gc.getAvailableActions());
+        }
+
+        @Test
+        @DisplayName("CANCELLED offers close only")
+        void cancelled() {
+            var gc = new GroupConversation();
+            gc.setState(GroupConversationState.CANCELLED);
+            assertEquals(List.of("close"), gc.getAvailableActions());
+        }
+
+        @Test
+        @DisplayName("CLOSED offers nothing")
+        void closed() {
+            var gc = new GroupConversation();
+            gc.setState(GroupConversationState.CLOSED);
+            assertTrue(gc.getAvailableActions().isEmpty());
+        }
+
+        @Test
+        @DisplayName("non-terminal states offer nothing")
+        void nonTerminal() {
+            for (var state : List.of(GroupConversationState.CREATED, GroupConversationState.IN_PROGRESS,
+                    GroupConversationState.SYNTHESIZING, GroupConversationState.AWAITING_APPROVAL)) {
+                var gc = new GroupConversation();
+                gc.setState(state);
+                assertTrue(gc.getAvailableActions().isEmpty(), "expected no actions for " + state);
+            }
+        }
+
+        @Test
+        @DisplayName("null state yields empty list, not null")
+        void nullState() {
+            var gc = new GroupConversation();
+            assertNotNull(gc.getAvailableActions());
+            assertTrue(gc.getAvailableActions().isEmpty());
+        }
+    }
+
+    // ==================== memberDisplayNames encapsulation ====================
+
+    @Nested
+    @DisplayName("memberDisplayNames")
+    class MemberDisplayNamesTests {
+
+        @Test
+        @DisplayName("getter returns an unmodifiable view")
+        void getterUnmodifiable() {
+            var gc = new GroupConversation();
+            gc.addMemberDisplayName("a", "Alice");
+            assertThrows(UnsupportedOperationException.class,
+                    () -> gc.getMemberDisplayNames().put("b", "Bob"));
+        }
+
+        @Test
+        @DisplayName("addMemberDisplayName populates the map")
+        void addPopulates() {
+            var gc = new GroupConversation();
+            gc.addMemberDisplayName("a", "Alice");
+            gc.addMemberDisplayName("b", "Bob");
+            assertEquals("Alice", gc.getMemberDisplayNames().get("a"));
+            assertEquals(2, gc.getMemberDisplayNames().size());
+        }
+
+        @Test
+        @DisplayName("setter defensively copies the input map")
+        void setterDefensiveCopy() {
+            var gc = new GroupConversation();
+            var src = new LinkedHashMap<String, String>();
+            src.put("a", "Alice");
+            gc.setMemberDisplayNames(src);
+            src.put("b", "Bob"); // mutate caller's map afterward — must not leak in
+            assertEquals(1, gc.getMemberDisplayNames().size());
+        }
+
+        @Test
+        @DisplayName("setter treats null as empty and stays mutable via add")
+        void setterNull() {
+            var gc = new GroupConversation();
+            gc.setMemberDisplayNames(null);
+            assertTrue(gc.getMemberDisplayNames().isEmpty());
+            assertDoesNotThrow(() -> gc.addMemberDisplayName("a", "Alice"));
+            assertEquals("Alice", gc.getMemberDisplayNames().get("a"));
+        }
     }
 }

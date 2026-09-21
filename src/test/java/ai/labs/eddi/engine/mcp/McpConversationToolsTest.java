@@ -4,11 +4,13 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.triggermanagement.IRestAgentTriggerStore;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
@@ -17,13 +19,19 @@ import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.api.IRestAgentEngine;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.audit.rest.IRestAuditStore;
+import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
+import ai.labs.eddi.engine.memory.model.ConversationOutput;
+import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.*;
+import ai.labs.eddi.engine.security.ConversationAccessGuard;
+import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.BoundedLogStore;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
+import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import java.util.LinkedHashMap;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -35,7 +43,9 @@ import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
+import io.quarkus.security.identity.SecurityIdentity;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -73,10 +83,15 @@ class McpConversationToolsTest {
         RestAgentEngine = mock(IRestAgentEngine.class);
         // Default: lenient serialize returns empty JSON
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
-        var mockIdentity = mock(io.quarkus.security.identity.SecurityIdentity.class);
+        var mockIdentity = mock(SecurityIdentity.class);
         lenient().when(mockIdentity.isAnonymous()).thenReturn(true);
+        // Authorization disabled: the guard admits every caller (an unstubbed
+        // descriptor store reads back no descriptor, i.e. no owner to check against).
+        var conversationAccessGuard = new ConversationAccessGuard(mockIdentity, new OwnershipValidator(false),
+                mock(IConversationDescriptorStore.class));
         tools = new McpConversationTools(conversationService, agentAdmin, AgentStore, restInterfaceFactory, jsonSerialization, boundedLogStore,
-                auditStore, AgentTriggerStore, userConversationStore, RestAgentEngine, mockIdentity, false);
+                auditStore, AgentTriggerStore, userConversationStore, RestAgentEngine, mockIdentity, conversationAccessGuard,
+                mock(ResourceAccessGuard.class), false);
     }
 
     // --- listAgents ---
@@ -120,23 +135,23 @@ class McpConversationToolsTest {
     @Test
     void listAgentConfigs_returnsDescriptors() throws IOException {
         var descriptor = new DocumentDescriptor();
-        when(AgentStore.readAgentDescriptors("", 0, 20)).thenReturn(List.of(descriptor));
+        when(AgentStore.readAgentDescriptors("", 0, 20, "")).thenReturn(List.of(descriptor));
         when(jsonSerialization.serialize(any())).thenReturn("[{\"name\":\"TestAgent\"}]");
 
         String result = tools.listAgentConfigs(null, null);
 
         assertNotNull(result);
-        verify(AgentStore).readAgentDescriptors("", 0, 20);
+        verify(AgentStore).readAgentDescriptors("", 0, 20, "");
     }
 
     @Test
     void listAgentConfigs_withFilterAndLimit() throws IOException {
-        when(AgentStore.readAgentDescriptors("search", 0, 5)).thenReturn(Collections.emptyList());
+        when(AgentStore.readAgentDescriptors("search", 0, 5, "")).thenReturn(Collections.emptyList());
         when(jsonSerialization.serialize(any())).thenReturn("[]");
 
         tools.listAgentConfigs("search", 5);
 
-        verify(AgentStore).readAgentDescriptors("search", 0, 5);
+        verify(AgentStore).readAgentDescriptors("search", 0, 5, "");
     }
 
     // --- createConversation ---
@@ -280,13 +295,39 @@ class McpConversationToolsTest {
 
     @Test
     void readConversation_withReturningFields() throws Exception {
+        var output = new ConversationOutput();
+        output.put("input", "hello");
+        output.put("output", List.of("hi"));
+        output.put("actions", List.of("greet"));
         var snapshot = new SimpleConversationMemorySnapshot();
-        when(conversationService.readConversation(eq(CONV_ID), eq(false), eq(false), eq(List.of("input", "output")))).thenReturn(snapshot);
+        snapshot.setConversationOutputs(List.of(output));
+        when(conversationService.readConversation(eq(CONV_ID), eq(false), eq(false), anyList())).thenReturn(snapshot);
         when(jsonSerialization.serialize(snapshot)).thenReturn("{}");
 
-        tools.readConversation(AGENT_ID, CONV_ID, "production", false, false, "input,output");
+        tools.readConversation(AGENT_ID, CONV_ID, "production", false, false, " input , output ");
 
-        verify(conversationService).readConversation(any(), eq(false), eq(false), eq(List.of("input", "output")));
+        // Output keys are not sections: the service is asked for conversationOutputs
+        // (it filters by section only — passing "input" dropped every section) and the
+        // keys select within it.
+        verify(conversationService).readConversation(any(), eq(false), eq(false), eq(List.of("conversationOutputs")));
+        assertEquals(1, snapshot.getConversationOutputs().size());
+        assertEquals(Set.of("input", "output"), snapshot.getConversationOutputs().getFirst().keySet());
+    }
+
+    @Test
+    void readConversation_sectionNamesPassThroughAndKeepTheWholeSection() throws Exception {
+        var output = new ConversationOutput();
+        output.put("input", "hello");
+        output.put("actions", List.of("greet"));
+        var snapshot = new SimpleConversationMemorySnapshot();
+        snapshot.setConversationOutputs(List.of(output));
+        when(conversationService.readConversation(eq(CONV_ID), eq(false), eq(true), anyList())).thenReturn(snapshot);
+        when(jsonSerialization.serialize(snapshot)).thenReturn("{}");
+
+        tools.readConversation(AGENT_ID, CONV_ID, null, null, null, "conversationOutputs,conversationProperties,input");
+
+        verify(conversationService).readConversation(any(), eq(false), eq(true), eq(List.of("conversationOutputs", "conversationProperties")));
+        assertEquals(Set.of("input", "actions"), snapshot.getConversationOutputs().getFirst().keySet());
     }
 
     @Test
@@ -528,7 +569,7 @@ class McpConversationToolsTest {
     @Test
     void chatManaged_noTriggerConfigured_returnsError() throws Exception {
         when(userConversationStore.readUserConversation("no_trigger", "user1"))
-                .thenThrow(new ai.labs.eddi.datastore.IResourceStore.ResourceStoreException("not found"));
+                .thenThrow(new IResourceStore.ResourceStoreException("not found"));
         when(AgentTriggerStore.readAgentTrigger("no_trigger")).thenReturn(null);
 
         String result = tools.chatManaged("no_trigger", "user1", "hello", "production");
@@ -540,7 +581,7 @@ class McpConversationToolsTest {
     void chatManaged_happyPath_createsConversationAndSendsMessage() throws Exception {
         // No existing UserConversation
         when(userConversationStore.readUserConversation("support", "user1"))
-                .thenThrow(new ai.labs.eddi.datastore.IResourceStore.ResourceStoreException("not found"));
+                .thenThrow(new IResourceStore.ResourceStoreException("not found"));
 
         // Trigger exists with a deployment
         var trigger = new AgentTriggerConfiguration();
@@ -578,7 +619,7 @@ class McpConversationToolsTest {
     @Test
     void chatManaged_existingConversation_reusesIt() throws Exception {
         // Existing UserConversation found
-        var existing = new ai.labs.eddi.engine.triggermanagement.model.UserConversation(
+        var existing = new UserConversation(
                 "support", "user1", Environment.production, AGENT_ID, CONV_ID);
         when(userConversationStore.readUserConversation("support", "user1")).thenReturn(existing);
 
@@ -589,7 +630,7 @@ class McpConversationToolsTest {
 
         // Conversation state is READY (not ended)
         when(RestAgentEngine.getConversationState(CONV_ID))
-                .thenReturn(ai.labs.eddi.engine.memory.model.ConversationState.READY);
+                .thenReturn(ConversationState.READY);
 
         // Mock say
         doAnswer(invocation -> {
@@ -611,7 +652,7 @@ class McpConversationToolsTest {
     @Test
     void chatManaged_staleConversation_recreatesFresh() throws Exception {
         // Existing UserConversation references a deleted conversation
-        var existing = new ai.labs.eddi.engine.triggermanagement.model.UserConversation(
+        var existing = new UserConversation(
                 "support", "user1", Environment.production, AGENT_ID, "deleted-conv-id");
         when(userConversationStore.readUserConversation("support", "user1")).thenReturn(existing);
 
@@ -654,7 +695,7 @@ class McpConversationToolsTest {
     @Test
     void chatManaged_endedConversation_recreatesFresh() throws Exception {
         // Existing UserConversation references an ended conversation
-        var existing = new ai.labs.eddi.engine.triggermanagement.model.UserConversation(
+        var existing = new UserConversation(
                 "support", "user1", Environment.production, AGENT_ID, "ended-conv-id");
         when(userConversationStore.readUserConversation("support", "user1")).thenReturn(existing);
 
@@ -670,7 +711,7 @@ class McpConversationToolsTest {
 
         // getConversationState returns ENDED
         when(RestAgentEngine.getConversationState("ended-conv-id"))
-                .thenReturn(ai.labs.eddi.engine.memory.model.ConversationState.ENDED);
+                .thenReturn(ConversationState.ENDED);
 
         // New conversation creation succeeds
         when(conversationService.startConversation(eq(Environment.production), eq(AGENT_ID), eq("user1"), anyMap()))
@@ -697,7 +738,7 @@ class McpConversationToolsTest {
     @Test
     void chatManaged_transientStateError_doesNotRecreate() throws Exception {
         // Existing UserConversation is valid
-        var existing = new ai.labs.eddi.engine.triggermanagement.model.UserConversation(
+        var existing = new UserConversation(
                 "support", "user1", Environment.production, AGENT_ID, CONV_ID);
         when(userConversationStore.readUserConversation("support", "user1")).thenReturn(existing);
 
@@ -723,7 +764,7 @@ class McpConversationToolsTest {
     @Test
     void chatManaged_triggerDeleted_returnsError() throws Exception {
         // Existing UserConversation found
-        var existing = new ai.labs.eddi.engine.triggermanagement.model.UserConversation(
+        var existing = new UserConversation(
                 "deleted_intent", "user1", Environment.production, AGENT_ID, CONV_ID);
         when(userConversationStore.readUserConversation("deleted_intent", "user1")).thenReturn(existing);
 
@@ -746,7 +787,7 @@ class McpConversationToolsTest {
     void chatManaged_conversationCreationFails_returnsError() throws Exception {
         // No existing UserConversation
         when(userConversationStore.readUserConversation("support", "user1"))
-                .thenThrow(new ai.labs.eddi.datastore.IResourceStore.ResourceStoreException("not found"));
+                .thenThrow(new IResourceStore.ResourceStoreException("not found"));
 
         // Trigger exists
         var trigger = new AgentTriggerConfiguration();

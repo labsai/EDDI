@@ -7,13 +7,15 @@ package ai.labs.eddi.engine.memory.rest;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
-import ai.labs.eddi.engine.memory.IAttachmentStorage;
+import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.runtime.IRuntime;
+import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -51,14 +53,19 @@ class RestConversationStoreFilterTest {
         documentDescriptorStore = mock(IDocumentDescriptorStore.class);
         conversationDescriptorStore = mock(IConversationDescriptorStore.class);
         conversationMemoryStore = mock(IConversationMemoryStore.class);
+        IConversationService conversationService = mock(IConversationService.class);
         IUserMemoryStore userMemoryStore = mock(IUserMemoryStore.class);
         IRuntime runtime = mock(IRuntime.class);
-        Instance<IAttachmentStorage> attachmentStorageInstance = mock(Instance.class);
+        Instance<IAttachmentStore> attachmentStorageInstance = mock(Instance.class);
         when(attachmentStorageInstance.isResolvable()).thenReturn(false);
+        ConversationAccessGuard conversationAccessGuard = mock(ConversationAccessGuard.class);
+        // Agent-filter regression tests don't exercise ownership scoping — the caller
+        // sees all conversations, so filtering behaves as before owner-scoping landed.
+        when(conversationAccessGuard.seesAllConversations()).thenReturn(true);
 
         restConversationStore = new RestConversationStore(
                 documentDescriptorStore, conversationDescriptorStore,
-                conversationMemoryStore, userMemoryStore, runtime,
+                conversationMemoryStore, conversationService, userMemoryStore, runtime, conversationAccessGuard,
                 30, 90, attachmentStorageInstance);
     }
 

@@ -6,6 +6,7 @@ package ai.labs.eddi.configs.mcpcalls.model;
 
 import ai.labs.eddi.configs.apicalls.model.PostResponse;
 import ai.labs.eddi.configs.apicalls.model.PreRequest;
+import ai.labs.eddi.configs.shared.RetryConfiguration;
 
 import java.util.List;
 import java.util.Map;
@@ -67,6 +68,22 @@ public class McpCall {
      * replies
      */
     private PostResponse postResponse;
+
+    /**
+     * When {@code true}, a failed MCP call stores the error in memory but does not
+     * abort the pipeline. Downstream tasks and post-response processing can inspect
+     * the error via the {@code <responseObjectName>Error} memory key. Defaults to
+     * {@code false} (fail-fast).
+     */
+    private Boolean continueOnError = false;
+
+    /**
+     * Optional retry configuration for this MCP call. When set, transient failures
+     * (timeouts, rate limits, connection errors) are retried with exponential
+     * backoff before the call is considered failed. Uses the shared
+     * {@link RetryConfiguration} model.
+     */
+    private RetryConfiguration retry;
 
     // --- Getters and Setters ---
 
@@ -140,5 +157,21 @@ public class McpCall {
 
     public void setPostResponse(PostResponse postResponse) {
         this.postResponse = postResponse;
+    }
+
+    public Boolean getContinueOnError() {
+        return continueOnError;
+    }
+
+    public void setContinueOnError(Boolean continueOnError) {
+        this.continueOnError = continueOnError;
+    }
+
+    public RetryConfiguration getRetry() {
+        return retry;
+    }
+
+    public void setRetry(RetryConfiguration retry) {
+        this.retry = retry;
     }
 }
