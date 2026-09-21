@@ -16,11 +16,25 @@ import java.util.logging.LogRecord;
  *
  * <p>
  * This filter always returns {@code true} (it never suppresses logs). It has
- * two side effects: it redacts the record in place via
- * {@link LogRecordRedactor}, so console output matches the ring buffer, and it
- * pushes each record — with the redacted text the redactor already produced —
- * to {@link BoundedLogStore#capture(LogRecord, String)} for ring-buffer storage
- * and SSE streaming.
+ * two side effects: it rewrites the record in place via
+ * {@link LogRecordRedactor} — stripping credential material and escaping
+ * anything that could forge a record boundary — so console output matches the
+ * ring buffer, and it pushes each record, with the text the redactor already
+ * produced, to {@link BoundedLogStore#capture(LogRecord, String)} for
+ * ring-buffer storage and SSE streaming.
+ * </p>
+ *
+ * <h3>This filter is EDDI's only CWE-117 guarantee for throwables</h3>
+ * <p>
+ * The console format ends in {@code %s%e}, and {@code %e} renders a stack trace
+ * whose first line is the throwable's own {@code toString()}. Call-site
+ * {@code LogSanitizer.sanitize(…)} covers the {@code %s} half and cannot cover
+ * the other, so the 400-odd log calls that pass a throwable rely on the rewrite
+ * this filter performs. It is wired to the console handler alone, through
+ * {@code quarkus.log.console.filter=eddi-log-capture}; enabling a file or
+ * syslog handler means wiring this filter to it as well, and
+ * {@code LogRecordBoundaryForgeryTest} fails if either that property or the
+ * format string moves out from under this claim.
  * </p>
  *
  * <h3>Bootstrap Safety</h3>
