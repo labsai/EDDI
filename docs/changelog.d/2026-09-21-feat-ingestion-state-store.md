@@ -94,3 +94,42 @@ comes from `startRun` like any other.
 - `src/test/java/ai/labs/eddi/modules/ingestion/IngestionStateStoreContract.java`
 
 ---
+
+### Review follow-ups (2026-09-21)
+
+- **The reaper released ownership for the whole source, not for the runs it reaped.**
+  `reapStaleRuns` fails the stale runs and clears `fencing_run_id` in two writes, not one. Once the
+  first commits, the partial unique index on the source is free: a replacement run can claim the
+  source and stamp every document with its own id before the second one runs, and a source-wide
+  release then wipes the live run's fence. Every `recordSeen`, `recordIngested`,
+  `recordUnreachable` and `tombstoneMissing` of that run silently matches nothing while it carries
+  on crawling and embedding, so it finishes looking healthy having recorded no document at all, and
+  the whole source is re-fetched and re-embedded on the next run. PostgreSQL now reaps with
+  `UPDATE ... RETURNING run_id` and releases `WHERE fencing_run_id = ANY (?)`; MongoDB claims each
+  stale run with `findOneAndUpdate` — the ids have to come back *with* the write, not from a read
+  after it — and releases with `in(fencingRunId, reapedIds)`.
+- **`startRun`'s insert was the one operation still outside `translating(...)`.** It handled
+  `MongoWriteException` and let everything else out, so a connection failure, a timeout or a
+  step-down during the insert escaped as a raw `MongoException` while PostgreSQL answered the same
+  outage with `IngestionStateStoreException` — the backend-dependent exception contract the helper
+  was added to remove. The duplicate-key case is now handled inside the supplier, so it still
+  returns `Optional.empty()`, and everything else falls through to the helper.
+
+The contract gained `reapingDoesNotReleaseAnotherRunsOwnership` and one hook,
+`forceDocumentOwner`, implemented per backend. The hook is needed because the interleave cannot be
+produced through the public interface: the partial unique index means a stale `RUNNING` run and its
+replacement can never both exist, so there is no sequence of `startRun` calls that leaves a document
+owned by a run other than the one about to be reaped.
+
+### Still open
+
+Review also found that `recordIngested` inserts a newly discovered document with a
+`fencing_run_id` but no `fencing_generation`, and `takeOwnership` matches
+`fencing_generation IS NULL` (the arm that exists for rows predating the fencing columns). A
+`takeOwnership` delayed past its own run's reaping can therefore land on a row the replacement run
+inserted and take that one document back. The scoped release above does not close it. Every fix
+needs the claiming run's generation at insert time, which `recordIngested` is not given: a scalar
+subquery works on PostgreSQL and has no MongoDB equivalent, a per-call lookup is symmetric but adds
+a read per ingested document, and carrying the generation through `startRun`'s return type is the
+cleanest but changes `IIngestionStateStore`, which two further open PRs are built on. Left for that
+decision rather than picked unilaterally here.

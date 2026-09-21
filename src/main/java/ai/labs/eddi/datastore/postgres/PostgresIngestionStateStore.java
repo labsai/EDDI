@@ -442,27 +442,47 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
                    SET status = 'FAILED', finished_at = ?,
                        error = 'Run abandoned — no completion recorded before the stale threshold'
                  WHERE source_id = ? AND status = 'RUNNING' AND started_at < ?
+                 RETURNING run_id
                 """;
-        // Ownership goes to nobody, so the worker just declared dead is fenced from
-        // this moment rather than only once a replacement run claims the source.
-        // NULL never equals a runId, so every later write of its own matches
-        // nothing.
-        String release = "UPDATE rag_ingestion_documents SET fencing_run_id = NULL WHERE source_id = ?";
+        // Ownership is taken from the runs this call reaped, and from nobody else,
+        // so the worker just declared dead is fenced from this moment rather than
+        // only once a replacement run claims the source. NULL never equals a runId,
+        // so every later write of its own matches nothing.
+        //
+        // Scoped to those run ids because the two statements are not one
+        // transaction. Once the UPDATE above commits, the partial unique index on
+        // (source_id) WHERE status = 'RUNNING' is free: a replacement run can claim
+        // the source and stamp every document with its own id before the release
+        // runs. A source-wide release would then wipe the live run's fence, and its
+        // recordSeen / recordIngested / recordUnreachable / tombstoneMissing would
+        // all silently match nothing while it kept crawling and embedding.
+        String release = """
+                UPDATE rag_ingestion_documents
+                   SET fencing_run_id = NULL
+                 WHERE source_id = ? AND fencing_run_id = ANY (?)
+                """;
         try (Connection connection = connection()) {
-            int reaped;
+            List<String> reaped = new ArrayList<>();
             try (PreparedStatement statement = connection.prepareStatement(sql)) {
                 statement.setTimestamp(1, Timestamp.from(Instant.now()));
                 statement.setString(2, sourceId);
                 statement.setTimestamp(3, Timestamp.from(startedBefore));
-                reaped = statement.executeUpdate();
+                // RETURNING, so the ids come back from the same statement that failed
+                // the runs rather than from a read that could see a later claim.
+                try (ResultSet resultSet = statement.executeQuery()) {
+                    while (resultSet.next()) {
+                        reaped.add(resultSet.getString(1));
+                    }
+                }
             }
-            if (reaped > 0) {
+            if (!reaped.isEmpty()) {
                 try (PreparedStatement statement = connection.prepareStatement(release)) {
                     statement.setString(1, sourceId);
+                    statement.setArray(2, connection.createArrayOf("varchar", reaped.toArray()));
                     statement.executeUpdate();
                 }
             }
-            return reaped;
+            return reaped.size();
         } catch (SQLException e) {
             throw new IngestionStateStoreException("Failed to reap stale ingestion runs", e);
         }

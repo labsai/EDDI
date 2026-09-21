@@ -292,20 +292,29 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
                 .append(FIELD_STATUS, IngestionRun.Status.RUNNING.name())
                 .append(FIELD_GENERATION, generation)
                 .append(FIELD_STARTED_AT, Date.from(Instant.now()));
-        try {
-            runs.insertOne(run);
+        // Inside translating, like every other operation on this store: only the
+        // duplicate-key case is special, and handling it here rather than around
+        // the helper means a connection failure, a timeout or a step-down during
+        // the insert leaves as IngestionStateStoreException rather than as a raw
+        // MongoException — which is the backend-dependent exception contract the
+        // helper exists to remove.
+        return translating("start an ingestion run", () -> {
+            try {
+                runs.insertOne(run);
+            } catch (MongoWriteException e) {
+                if (e.getError().getCategory() == ErrorCategory.DUPLICATE_KEY) {
+                    // The partial unique index rejected it: another run is in flight.
+                    // Losing that race is the expected outcome, not an error.
+                    return Optional.<String>empty();
+                }
+                // Anything else is a real failure, and reporting it as "already
+                // running" would show the operator a 409 for a broken database. It
+                // falls through to translating, which names it as what it is.
+                throw e;
+            }
             takeOwnership(sourceId, runId, generation);
             return Optional.of(runId);
-        } catch (MongoWriteException e) {
-            if (e.getError().getCategory() == ErrorCategory.DUPLICATE_KEY) {
-                // The partial unique index rejected it: another run is in flight.
-                // Losing that race is the expected outcome, not an error.
-                return Optional.empty();
-            }
-            // Anything else is a real failure. Reporting it as "already running"
-            // would show the operator a 409 for a broken database.
-            throw new IngestionStateStoreException("Failed to start an ingestion run", e);
-        }
+        });
     }
 
     @Override
@@ -359,31 +368,58 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
 
     @Override
     public int reapStaleRuns(String sourceId, Instant startedBefore) {
-        int reaped = doReap(sourceId, startedBefore);
-        if (reaped > 0) {
-            // Ownership goes to nobody, so the worker just declared dead is fenced
-            // from this moment rather than only once a replacement run claims the
-            // source. No runId matches a missing field.
+        List<String> reaped = doReap(sourceId, startedBefore);
+        if (!reaped.isEmpty()) {
+            // Ownership is taken from the runs this call reaped, and from nobody
+            // else, so the worker just declared dead is fenced from this moment
+            // rather than only once a replacement run claims the source. No runId
+            // matches a missing field.
+            //
+            // Scoped to those run ids because these are two writes, not one. Once
+            // the runs are failed the partial unique index on (sourceId, RUNNING) is
+            // free, so a replacement can claim the source and stamp every document
+            // with its own id before the release runs. A source-wide release would
+            // then wipe the live run's fence, and its recordSeen / recordIngested /
+            // recordUnreachable / tombstoneMissing would all silently match nothing
+            // while it kept crawling and embedding.
             translating("release ownership of a reaped source",
-                    () -> documents.updateMany(Filters.eq(FIELD_SOURCE_ID, sourceId),
+                    () -> documents.updateMany(
+                            Filters.and(Filters.eq(FIELD_SOURCE_ID, sourceId),
+                                    Filters.in(FIELD_FENCING_RUN_ID, reaped)),
                             Updates.unset(FIELD_FENCING_RUN_ID)));
         }
-        return reaped;
+        return reaped.size();
     }
 
-    private int doReap(String sourceId, Instant startedBefore) {
+    /**
+     * Fails every stale run of this source and returns their ids.
+     *
+     * <p>
+     * One at a time, each id claimed by the same statement that fails its run — the
+     * ids have to come back <em>with</em> the write, not from a read after it, or a
+     * replacement claiming the source in between would be released by the caller.
+     * The same shape {@code tombstoneMissing} uses, and it terminates for the same
+     * reason: every update removes that run from the filter's own match set.
+     * </p>
+     */
+    private List<String> doReap(String sourceId, Instant startedBefore) {
         return translating("reap stale runs", () -> {
-            var result = runs.updateMany(
-                    Filters.and(
-                            Filters.eq(FIELD_SOURCE_ID, sourceId),
-                            Filters.eq(FIELD_STATUS, IngestionRun.Status.RUNNING.name()),
-                            Filters.lt(FIELD_STARTED_AT, Date.from(startedBefore))),
-                    Updates.combine(
-                            Updates.set(FIELD_STATUS, IngestionRun.Status.FAILED.name()),
-                            Updates.set(FIELD_FINISHED_AT, Date.from(Instant.now())),
-                            Updates.set(FIELD_ERROR,
-                                    "Run abandoned — no completion recorded before the stale threshold")));
-            return (int) result.getModifiedCount();
+            var stale = Filters.and(
+                    Filters.eq(FIELD_SOURCE_ID, sourceId),
+                    Filters.eq(FIELD_STATUS, IngestionRun.Status.RUNNING.name()),
+                    Filters.lt(FIELD_STARTED_AT, Date.from(startedBefore)));
+            var fail = Updates.combine(
+                    Updates.set(FIELD_STATUS, IngestionRun.Status.FAILED.name()),
+                    Updates.set(FIELD_FINISHED_AT, Date.from(Instant.now())),
+                    Updates.set(FIELD_ERROR,
+                            "Run abandoned — no completion recorded before the stale threshold"));
+            var claimOne = new FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER);
+            List<String> reaped = new ArrayList<>();
+            Document claimed;
+            while ((claimed = runs.findOneAndUpdate(stale, fail, claimOne)) != null) {
+                reaped.add(claimed.getString(FIELD_RUN_ID));
+            }
+            return reaped;
         });
     }
 

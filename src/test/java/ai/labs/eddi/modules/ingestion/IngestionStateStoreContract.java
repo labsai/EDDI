@@ -36,6 +36,19 @@ public interface IngestionStateStoreContract {
     /** A store with no state for the ids this test uses. */
     IIngestionStateStore store();
 
+    /**
+     * Sets a document's fencing owner directly, bypassing the store.
+     *
+     * <p>
+     * Needed for exactly one property, and there is no way to reach it through the
+     * interface: the partial unique index means a stale {@code RUNNING} run and the
+     * run that replaced it can never both exist, so the state the reaper's two
+     * writes can be interleaved with cannot be produced by calling {@code startRun}
+     * twice. This puts a document in it.
+     * </p>
+     */
+    void forceDocumentOwner(String sourceId, String documentId, String runId);
+
     String SOURCE = "src-1";
     String OTHER_SOURCE = "src-2";
     String DOC = "https://example.com/docs/intro";
@@ -47,6 +60,30 @@ public interface IngestionStateStoreContract {
     private void closeRun(String runId, String sourceId, IngestionRun.Status status) {
         store().finishRun(new IngestionRun(runId, sourceId, status, null, Instant.now(),
                 0, 0, 0, 0, 0, 0, 0.0, null));
+    }
+
+    @Test
+    @DisplayName("reaping a stale run leaves the ownership a replacement run has taken alone")
+    default void reapingDoesNotReleaseAnotherRunsOwnership() {
+        // The reaper fails the run and releases its documents in two writes, not
+        // one. In between, the partial unique index is free: a replacement run can
+        // claim the source and stamp every document with its own id. Releasing
+        // ownership for the whole source then wipes the live run's fence, and its
+        // recordSeen / recordIngested / recordUnreachable / tombstoneMissing all
+        // silently match nothing while it carries on crawling and embedding — a run
+        // that finishes looking healthy having recorded not one document.
+        String stale = openRun(SOURCE);
+        store().recordIngested(SOURCE, DOC, "hash-1", null, null, stale);
+
+        String replacement = "run-that-claimed-the-source-in-between";
+        forceDocumentOwner(SOURCE, DOC, replacement);
+
+        assertEquals(1, store().reapStaleRuns(SOURCE, Instant.now().plusSeconds(60)));
+
+        // The assertion that matters: the replacement's own write still lands.
+        store().recordIngested(SOURCE, DOC, "hash-2", null, null, replacement);
+        assertEquals("hash-2", store().lookup(SOURCE, DOC).orElseThrow().contentHash(),
+                "the reaper released a fence it had not taken, so the live run is writing into nothing");
     }
 
     // === document state ===
