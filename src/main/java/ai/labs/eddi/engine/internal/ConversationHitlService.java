@@ -1132,12 +1132,12 @@ class ConversationHitlService {
                 } else {
                     LOGGER.warnf("Pause restored for %s without re-arming the timeout schedule — "
                             + "a finite policy resumes after the next restart (crash recovery) or a manual decision",
-                            conversationId);
+                            sanitize(conversationId));
                 }
-                LOGGER.warnf("Resume of conversation %s failed — pause restored (AWAITING_HUMAN)", conversationId);
+                LOGGER.warnf("Resume of conversation %s failed — pause restored (AWAITING_HUMAN)", sanitize(conversationId));
             }
         } catch (Exception e) {
-            LOGGER.errorf(e, "Failed to restore pause after failed resume: %s", conversationId);
+            LOGGER.errorf(e, "Failed to restore pause after failed resume: %s", sanitize(conversationId));
         }
     }
 

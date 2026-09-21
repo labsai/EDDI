@@ -374,7 +374,11 @@ class ConversationStepRunner {
                             String msg = "Conversation not ready! (conversationId=%s)";
                             msg = String.format(msg, conversationId);
                             conversationService.contextLogger.setLoggingContext(loggingContext);
-                            LOGGER.error(msg + "\n" + t.getLocalizedMessage(), t);
+                            // ": " rather than "\n": the throwable is passed as well, so
+                            // %e prints the whole trace anyway, and a newline in a log
+                            // MESSAGE is now escaped rather than printed (CWE-117) — it
+                            // would render as a literal "\n" in the middle of the line.
+                            LOGGER.error(msg + ": " + t.getLocalizedMessage(), t);
                         } else {
                             logConversationError(loggingContext, conversationId, t);
                         }
