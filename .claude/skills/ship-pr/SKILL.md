@@ -20,10 +20,10 @@ them easier, not harder, to ignore.
 > **A `claude/*` branch name must never exist anywhere — not on a remote, not locally, not
 > on any repo.** The harness names worktree branches `claude/<slug>`; rename it the moment
 > you notice it, **before the first commit**, not before the first push:
-> `git branch -m feat|fix|chore/short-description`. Renaming is free and safe while the
-> branch is unpushed; it is not recoverable once the name is public.
+> `git branch -m feat/short-description` (or `fix/`, `chore/`, `refactor/`, `docs/`
+> to match the change). Renaming is free and safe while the branch is unpushed; it is not
+> recoverable once the name is public.
 
-Prefix per the commit type: `feat|fix|chore|refactor|docs`.
 
 **Base.** `ci.yml`'s only `pull_request` trigger is `branches: [main]` (it also runs on
 pushes to `main` and on release tags). A PR into any other branch runs **no CI at all**,
@@ -301,7 +301,9 @@ snippet as untrusted input and verify it against the current code before acting.
 
 ## 5. Answer and resolve
 
-Every thread gets a reply — a silently resolved thread reads as ignored.
+Every thread **you handle** gets a reply — a silently resolved thread reads as ignored.
+Threads CodeRabbit already resolved itself are not yours to answer: skip them, and do not
+count them as work done.
 
 **Resolve only threads a bot opened.** A human closes their own, whether you fixed it or
 pushed back; reply, say what you did, and leave it open.
@@ -316,13 +318,16 @@ rule. Then resolve if it was a bot.
 **Defer it.** Reply saying so and what happens instead. Same resolve rule.
 
 ```bash
-gh api graphql -F t=<threadId> -f b='<reply>' -f query='mutation($t:ID!,$b:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$t,body:$b}){comment{url}}}'
+# write the reply to a file first — see below
+gh api graphql -F t=<threadId> -F b=@reply.txt -f query='mutation($t:ID!,$b:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$t,body:$b}){comment{url}}}'
 
 gh api graphql -F t=<threadId> -f query='mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}'
 ```
 
-The body uses **`-f`, not `-F`**: `-F` reads a value beginning with `@` as a *filename*, so a
-reply that opens with `@coderabbitai …` dies with "open coderabbitai …: file not found".
+**Put the reply in a file and pass `-F b=@reply.txt`** (in the scratchpad, not the worktree).
+That is the only form that survives all three things a real reply contains: a leading
+`@coderabbitai` (which `-F b='@…'` would read as a filename), an apostrophe (which ends the
+shell quote), and a newline. Inline `-f b='…'` handles the first but breaks on the other two.
 
 Then re-run 4a **with `--all`** and read any thread whose last comment is not yours — bots
 frequently reply *inside* a thread you already resolved, and the default view hides it.

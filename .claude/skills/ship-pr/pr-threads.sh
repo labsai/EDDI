@@ -125,7 +125,7 @@ fi
 
 TOTAL=$(printf '%s\n' "$ALL" | grep -c . || true)
 OPEN=$(printf '%s\n' "$ALL" | grep -c '^\[OPEN\]' || true)
-ANSWERED=$(printf '%s\n' "$ALL" | grep '^\[OPEN\]' | grep -cvE 'replies=1( |$)' || true)
+ANSWERED=$(printf '%s\n' "$ALL" | grep '^\[OPEN\]' | grep -cvE 'comments=1( |$)' || true)
 
 echo
 echo "threads: $TOTAL total, $OPEN unresolved ($ANSWERED of those have more than the opening comment)"
