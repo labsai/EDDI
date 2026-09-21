@@ -22,6 +22,11 @@ before the store build, before any INFO log. Every symptom in the report falls o
 return: no `## Relevant Context:` block, no `rag:trace:*`/`rag:context:*`, and no `RagContextProvider`
 or `EmbeddingStoreFactory` lines while other tool providers logged on every turn.
 
+A second cause presents identically and the troubleshooting section now says so: when the workflow
+*does* bind a step but no `knowledgeBases[].name` matches its KB name, every step is `continue`d past,
+`traceEntries` stays empty so no trace is stored, and `allResults.isEmpty()` returns null just the
+same. Only the `DEBUG` line distinguishes them — it is logged for the missing-step case alone.
+
 `rag.md` mentioned the requirement only in a subordinate clause ("Each reference names a KB from the
 workflow") and in a Status bullet at the bottom of the page. Its setup path showed the KB config and
 the LLM task and nothing else — so a reader who followed it end to end built exactly the broken

@@ -447,10 +447,14 @@ Symptoms: the model answers as though it had never seen the corpus, the compiled
 and the logs show nothing from `RagContextProvider` or `EmbeddingStoreFactory` while other providers
 log on every turn.
 
-That combination is one specific thing: **retrieval found no knowledge base bound to the agent** and
-returned before doing any work. Everything after that point — the trace entry, the store build, the
-INFO log — is downstream of a match, and the only log on the early-return path is at `DEBUG`
-(`No RAG steps found in workflow`). Work through it in this order:
+That combination means **no knowledge base was matched** — but two different causes produce it, and
+from the outside they look identical. Either the workflow binds no `eddi://ai.labs.rag` step at all,
+or it binds one whose name none of `knowledgeBases[].name` matches. Either way retrieval returns
+before doing any work: the trace entry, the store build and the INFO log are all downstream of a
+match, so none of them appear.
+
+At `DEBUG` the two causes do separate — `No RAG steps found in workflow` is logged only for the
+first — so raise the level before guessing if you can. Otherwise work through it in this order:
 
 | # | Check | How |
 |---|---|---|
@@ -505,7 +509,10 @@ tighten it.
 > global variable changes. So an in-memory KB silently empties itself after 30 minutes with no
 > retrieval, on every restart, and on any credential rotation, and the next query returns no context
 > rather than an error. Re-ingesting refills it until the next eviction. Any agent expected to answer
-> from a knowledge base tomorrow needs a persistent store — `pgvector` is the tested default.
+> from a knowledge base tomorrow needs a persistent store. Note that `storeType` still **defaults to**
+> `in-memory`, so persistence is opt-in: `pgvector` is the recommended choice, and — with `in-memory`
+> — one of the two stores whose document-replacement semantics are verified (see
+> [Ingestion Sources](#ingestion-sources)).
 
 ## Status
 
