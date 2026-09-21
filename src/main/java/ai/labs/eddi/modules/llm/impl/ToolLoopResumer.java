@@ -378,8 +378,83 @@ class ToolLoopResumer {
         for (PendingToolCallBatch.PendingToolCall c : batch.getCalls()) {
             requests.add(rebuiltRequest(c));
         }
-        messages.add(AiMessage.from(requests));
+        messages.addAll(gatingExchange(batch, requests));
         return messages;
+    }
+
+    /**
+     * Result handed back for a batch's ungated call on a degraded resume. The call
+     * was dealt with before the pause, inside the interrupted turn — executed,
+     * failed, or refused (a self-conversation call is refused, not run) — but its
+     * real result lived only in the transcript this path could not restore. So this
+     * says only what is known: it was handled, its outcome is lost, and it should
+     * not simply be repeated. Claiming it ran would be false for a refused call.
+     */
+    static final String HANDLED_BEFORE_PAUSE_RESULT = "{\"status\":\"HANDLED_BEFORE_PAUSE\",\"note\":"
+            + "\"This call was handled before the approval pause; its result could not be restored. "
+            + "Do not repeat it unless the user asks.\"}";
+
+    /**
+     * The model turn carrying the gated calls, as the degraded resume replays it:
+     * the assistant message the pause persisted
+     * ({@code PendingToolCallBatch#gatingAssistantMessageJson}),
+     * <em>unchanged</em>, followed by a result for each of its ungated calls.
+     * <p>
+     * <b>Why the original message is kept whole.</b> It carries the provider-opaque
+     * fields the model attached to that turn — on Gemini 3.x the
+     * {@code thoughtSignature}, which the API demands back on this request. Gemini
+     * places it on a specific {@code functionCall} part (for a parallel batch, part
+     * 0 only), so the message is replayed with its original parts in their original
+     * order, rather than rebuilt from the gated calls alone. Measured against the
+     * live Gemini API ({@code gemini-3.8-flash} and {@code gemini-3.5-flash}, two
+     * parallel calls, signature on part 0), dropping the ungated call and letting
+     * the signature ride on the remaining one was also accepted — today. That is
+     * validation leniency Google has not documented and could tighten, and it would
+     * then fail on exactly this rarely-exercised path. Replaying what the model
+     * actually emitted stays valid under stricter validation, and was equally
+     * accepted in the same measurement.
+     * <p>
+     * <b>Why the ungated calls get a result here.</b> A replayed call with no
+     * answer is a dangling tool-call id for every provider that pairs results to
+     * requests. They are answered first and the gated ones after, as the resume
+     * applies their verdicts — the same order the primary, transcript-restoring
+     * path produces, where the ungated results were appended before the pause and
+     * the gated ones after it. The answer records that the call was handled, so the
+     * model does not repeat a side effect blindly — but not whether it succeeded,
+     * which this path cannot know.
+     * <p>
+     * Falls back to a bare {@code AiMessage.from(gatedRequests)} — the previous
+     * behaviour — when nothing was persisted (a batch from before the field
+     * existed, or one whose message would not fit its cap), when it does not parse,
+     * or when it does not contain every gated call id, since a message that
+     * disagrees with the batch is not the one the pause was about.
+     */
+    List<ChatMessage> gatingExchange(PendingToolCallBatch batch, List<ToolExecutionRequest> gatedRequests) {
+        ChatMessage restored = chatTranscriptCodec.deserializeMessage(batch.getGatingAssistantMessageJson());
+        if (!(restored instanceof AiMessage ai) || !ai.hasToolExecutionRequests()) {
+            return List.of(AiMessage.from(gatedRequests));
+        }
+        Set<String> gatedIds = new HashSet<>();
+        for (ToolExecutionRequest r : gatedRequests) {
+            gatedIds.add(r.id());
+        }
+        Set<String> restoredIds = new HashSet<>();
+        for (ToolExecutionRequest r : ai.toolExecutionRequests()) {
+            restoredIds.add(r.id());
+        }
+        if (!restoredIds.containsAll(gatedIds)) {
+            LOGGER.warnf("HITL resume: persisted gating message does not contain every gated call — "
+                    + "reconstructing it from the call list instead");
+            return List.of(AiMessage.from(gatedRequests));
+        }
+        List<ChatMessage> exchange = new ArrayList<>();
+        exchange.add(ai);
+        for (ToolExecutionRequest r : ai.toolExecutionRequests()) {
+            if (!gatedIds.contains(r.id())) {
+                exchange.add(ToolExecutionResultMessage.from(r, HANDLED_BEFORE_PAUSE_RESULT));
+            }
+        }
+        return exchange;
     }
 
     static ToolExecutionRequest rebuiltRequest(PendingToolCallBatch.PendingToolCall c) {

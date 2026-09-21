@@ -206,6 +206,29 @@ final class ModelParameterValues {
     }
 
     /**
+     * A boolean read with an EDDI-chosen default, for options whose provider
+     * default is wrong for EDDI. Unlike {@link #applyBoolean}, where unset means
+     * "let the provider decide", an absent, blank or unparseable value here lands
+     * on {@code defaultValue}; an explicit {@code "true"}/{@code "false"} is
+     * honoured.
+     */
+    static boolean booleanValue(Map<String, String> parameters, String key, boolean defaultValue) {
+        String raw = rawValue(parameters, key);
+        if (raw == null) {
+            return defaultValue;
+        }
+        if ("true".equalsIgnoreCase(raw)) {
+            return true;
+        }
+        if ("false".equalsIgnoreCase(raw)) {
+            return false;
+        }
+        LOGGER.warnf("LLM parameter '%s' is not a boolean ('%s') — falling back to %b.",
+                sanitize(key), sanitize(raw), defaultValue);
+        return defaultValue;
+    }
+
+    /**
      * The trimmed value, or {@code null} when the key is absent, empty or nothing
      * but whitespace.
      * <p>

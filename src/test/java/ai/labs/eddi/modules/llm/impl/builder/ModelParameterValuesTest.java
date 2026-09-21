@@ -15,11 +15,14 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.booleanValue;
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.doubleValue;
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.intValue;
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.longValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Unit tests for {@link ModelParameterValues}.
@@ -241,6 +244,40 @@ class ModelParameterValuesTest {
             String withNul = "bad" + (char) 0 + "path";
             ModelParameterValues.applyPath(params("modelCachePath", withNul), "modelCachePath", applied::set);
             assertNull(applied.get());
+        }
+    }
+
+    @Nested
+    @DisplayName("booleanValue — an EDDI-chosen default, not the provider's")
+    class BooleanValues {
+
+        @Test
+        @DisplayName("an absent, empty or blank key lands on the default")
+        void absentIsTheDefault() {
+            assertTrue(booleanValue(Map.of(), "flag", true));
+            assertFalse(booleanValue(Map.of(), "flag", false));
+            assertTrue(booleanValue(Map.of("flag", ""), "flag", true));
+            assertTrue(booleanValue(Map.of("flag", "   "), "flag", true));
+            assertTrue(booleanValue(null, "flag", true));
+        }
+
+        @Test
+        @DisplayName("explicit values win over the default, case-insensitively and padded")
+        void explicitValuesWin() {
+            assertFalse(booleanValue(Map.of("flag", "false"), "flag", true));
+            assertFalse(booleanValue(Map.of("flag", "FALSE"), "flag", true));
+            assertFalse(booleanValue(Map.of("flag", " False "), "flag", true));
+            assertTrue(booleanValue(Map.of("flag", "TRUE"), "flag", false));
+        }
+
+        @Test
+        @DisplayName("an unparseable value falls back to the default rather than to false")
+        void unparseableFallsBackToTheDefault() {
+            // The point of the method: Boolean.parseBoolean("yes") is false, which on
+            // Gemini would silently switch off thought-signature handling on a typo.
+            assertTrue(booleanValue(Map.of("flag", "yes"), "flag", true));
+            assertTrue(booleanValue(Map.of("flag", "1"), "flag", true));
+            assertFalse(booleanValue(Map.of("flag", "nope"), "flag", false));
         }
     }
 }

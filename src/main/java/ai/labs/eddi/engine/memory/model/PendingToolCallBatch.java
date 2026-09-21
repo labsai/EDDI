@@ -35,6 +35,14 @@ public class PendingToolCallBatch {
      * fingerprint, which is computed over the full body before any capping.
      */
     public static final int PREVIEW_BODY_MAX_BYTES = 8_192;
+    /**
+     * Cap for {@link #gatingAssistantMessageJson}. The part the resume needs — the
+     * tool calls and the provider's opaque attributes — is a few hundred bytes; the
+     * cap bounds what a verbose narration can add to a document that must stay
+     * under MongoDB's 16 MB limit. Over it, the message sheds text before
+     * attributes (see {@code ChatTranscriptCodec#serializeMessage}).
+     */
+    public static final int GATING_MESSAGE_MAX_BYTES = 65_536;
 
     /** A single gated tool call awaiting a human verdict. */
     public static class PendingToolCall {
@@ -315,6 +323,30 @@ public class PendingToolCallBatch {
      * output where it belongs.
      */
     private String interimText;
+    /**
+     * The gating assistant message on its own — the single message whose tool calls
+     * this pause is about — serialized with the same {@code ChatTranscriptCodec} as
+     * {@link #chatTranscriptJson}, capped at {@link #GATING_MESSAGE_MAX_BYTES}.
+     * <p>
+     * Written <em>only</em> when {@link #transcriptOmitted}: the transcript already
+     * carries this message, and the one other reason the transcript can fail to
+     * restore — a codec change mid-pause — would break this field identically. When
+     * the transcript was over its cap,
+     * {@code ToolLoopResumer.fallbackRebuildMessages} rebuilds a degraded history
+     * and used to append a bare {@code AiMessage.from(requests)}, losing every
+     * provider-opaque field on the turn — on Gemini 3.x the
+     * {@code thoughtSignature} the API then demands back, so the resume 400'd on
+     * the path that exists to survive a failure. Replaying the real message keeps
+     * the fallback degraded only in the way it documents (prior intra-turn
+     * iterations are lost).
+     * <p>
+     * Provider-agnostic: it stores the message, not a named field. Unredacted model
+     * output, like the transcript, so it is excluded from the names-only
+     * projection. Null when the transcript was kept, on batches persisted before
+     * this field existed, and when serialization fails — readers then fall back to
+     * the bare reconstruction.
+     */
+    private String gatingAssistantMessageJson;
 
     public String getPauseEpoch() {
         return pauseEpoch;
@@ -354,6 +386,14 @@ public class PendingToolCallBatch {
 
     public void setChatTranscriptJson(String chatTranscriptJson) {
         this.chatTranscriptJson = chatTranscriptJson;
+    }
+
+    public String getGatingAssistantMessageJson() {
+        return gatingAssistantMessageJson;
+    }
+
+    public void setGatingAssistantMessageJson(String gatingAssistantMessageJson) {
+        this.gatingAssistantMessageJson = gatingAssistantMessageJson;
     }
 
     public boolean isTranscriptOmitted() {

@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.configs.rag.model;
 
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -225,9 +228,70 @@ public class RagConfiguration {
         if (unsupported != null) {
             throw new IllegalArgumentException(unsupported);
         }
+        if (sources != null) {
+            Set<String> keys = new HashSet<>();
+            for (IngestionSource source : sources) {
+                if (source == null) {
+                    // A JSON array may hold a literal null. Said here rather than as the
+                    // NullPointerException the next line would throw.
+                    throw new IllegalArgumentException("The sources list contains a null entry");
+                }
+                source.validate();
+                // Ingestion state is keyed by this. Two sources sharing it would share
+                // one document history, so each run would tombstone the other's pages.
+                if (!keys.add(source.effectiveId())) {
+                    throw new IllegalArgumentException("Two ingestion sources share the id or name '"
+                            + source.effectiveId() + "' — each source needs its own");
+                }
+            }
+        }
     }
 
+    // --- Ingestion sources ---
+
+    /**
+     * Where this knowledge base's documents come from.
+     *
+     * <p>
+     * Sources live on the knowledge base rather than as a resource of their own
+     * because the vector store is keyed by the knowledge base. A standalone source
+     * would have to name its target by string, which is how the draft this replaces
+     * came to write crawled content into a table keyed on the <em>source's</em>
+     * name while retrieval read one keyed on the knowledge base's — an ingestion
+     * that reported success and a knowledge base that stayed empty.
+     */
+    private List<IngestionSource> sources = new ArrayList<>();
+
     // --- Getters and Setters ---
+
+    public List<IngestionSource> getSources() {
+        return sources;
+    }
+
+    public void setSources(List<IngestionSource> sources) {
+        this.sources = sources == null ? new ArrayList<>() : sources;
+    }
+
+    /**
+     * The source addressed by this id, or null.
+     *
+     * <p>
+     * Matches {@link IngestionSource#effectiveId()} — the id, or the name when
+     * there is none — because that is what schedules, ingestion state and the REST
+     * paths are keyed by. Matching on the id alone meant an id-less source (a ZIP
+     * import goes straight to the store and never passes the REST layer that
+     * assigns ids) could be scheduled and have its state recorded, yet never be
+     * found again: every scheduled fire failed and every REST call answered 404.
+     */
+    public IngestionSource findSource(String sourceId) {
+        if (sourceId == null || sources == null) {
+            return null;
+        }
+        return sources.stream()
+                .filter(source -> source != null && sourceId.equals(source.effectiveId()))
+                .findFirst()
+                .orElse(null);
+    }
 
     public String getName() {
         return name;

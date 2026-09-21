@@ -1509,7 +1509,10 @@ class AgentOrchestratorCoverageTest {
         var gated = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{}").build();
         var allowed = ToolExecutionRequest.builder().id("c2").name("getCurrentDateTime").arguments("{}").build();
         var gr = new ToolApprovalGate.GateResult(List.of(gated), List.of(allowed), Map.of("c1", "calculate"));
-        List<ChatMessage> msgs = List.of(UserMessage.from("hi"), AiMessage.from(List.of(gated, allowed)));
+        // The runtime shape of a mixed batch: the ungated call has already executed
+        // and its result follows the assistant message when the pause is snapshotted.
+        List<ChatMessage> msgs = List.of(UserMessage.from("hi"), AiMessage.from(List.of(gated, allowed)),
+                ToolExecutionResultMessage.from(allowed, "2026-09-18T10:00:00Z"));
 
         var batch = orchestrator.buildPendingBatch(msgs, gr, twoToolTask(), memory, 0,
                 List.of(), new ArrayList<>(), 1, 0, Map.of("calculate", "builtin"), gateCalculate());
