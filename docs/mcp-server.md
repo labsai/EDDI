@@ -634,7 +634,30 @@ To add a new MCP tool: add its name to the `MCP_TOOLS` set in `McpToolFilter.jav
 
 The [Quick Start](#quick-start) configurations above assume an instance with authentication off. When `quarkus.oidc.tenant-enabled=true`, `/mcp` carries an explicit `authenticated` HTTP policy and every request needs a bearer token.
 
-**EDDI does not yet advertise itself as an OAuth protected resource**, so a client that expects to log in by itself — a Claude Desktop connector, or `mcp-remote`'s automatic OAuth — receives a bare 401 with nothing to discover, and stops. Until that lands ([`planning/mcp-oauth-protected-resource-plan.md`](../planning/mcp-oauth-protected-resource-plan.md)), the token has to be supplied by hand.
+#### The client signs itself in (preferred)
+
+EDDI advertises `/mcp` as an **OAuth 2.0 protected resource** ([RFC 9728](https://datatracker.ietf.org/doc/html/rfc9728)), which is what lets an MCP client obtain its own token and keep refreshing it — no shared credential, nothing for an operator to rotate. What ends that chain is not the 5-minute access token but the realm's **SSO session idle timeout** (Keycloak's default is 30 minutes): a client idle longer than that runs the browser flow again. Raise `ssoSessionIdleTimeout` on the realm, or grant `eddi-mcp` the `offline_access` scope, if you want it to survive longer.
+
+A client that supports the MCP authorization flow needs only the URL:
+
+```json
+{ "mcpServers": { "eddi": { "url": "https://eddi.example.com/mcp" } } }
+```
+
+Behind that, the client: reads `WWW-Authenticate: Bearer resource_metadata="…"` from the 401; fetches `/.well-known/oauth-protected-resource/mcp`, which names the resource and your Keycloak realm; discovers the realm's endpoints; runs authorization code + PKCE in your browser; and then keeps its own tokens.
+
+Two deployment notes:
+
+- **The advertised identifier is forced to `https`** (`quarkus.oidc.resource-metadata.force-https-scheme`, default `true` here), because the scheme is otherwise read from the request and a TLS-terminating proxy has already downgraded it. The case that needs action is the opposite one: a deployment serving **plain http with authentication on** must set it to `false`, or it advertises a URL nothing is listening on. Every shipped stack that serves plain http with authentication on does exactly that: both compose auth stacks and the k8s auth overlay set it to `false` outright. The chart does not read the Keycloak URL — it defaults `eddi.oidc.resourceMetadata.forceHttpsScheme` from whether `ingress.tls` is configured, which is right for the documented `kubectl port-forward` flow (no ingress, so no TLS, so `false`) but wrong wherever something outside the chart terminates TLS. Set the value explicitly there.
+- **The authorization server that is advertised** is `quarkus.oidc.token.issuer` when set, falling back to `quarkus.oidc.auth-server-url`. In the shipped compose and helm deployments the latter is the cluster-internal Keycloak address, so leave `QUARKUS_OIDC_TOKEN_ISSUER` pointing at the public URL.
+
+**Discovery names the authorization server, not the client — so this is not yet a URL-only setup.** Your Keycloak realm also needs a client for MCP clients to use: public, PKCE, with the redirect URIs your client uses, and carrying the same protocol mappers as `eddi-frontend`. **A client without the `realm-roles` mapper issues tokens that authenticate and then fail every tool with "requires role"**, because the realm has no `roles` client scope and EDDI reads roles from `realm_access/roles`.
+
+The shipped realms gain such a client (`eddi-mcp`) in the PR stacked on this one; until that lands, create one yourself or use the hand-pasted token below, which works today.
+
+#### Supplying a token by hand (fallback)
+
+For a client with no OAuth support, or for a quick test, the token can be pasted in.
 
 **1. Get a token.** The shipped realm's `eddi-frontend` client is public and permits the direct access grant:
 

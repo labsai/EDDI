@@ -2513,7 +2513,7 @@ class DeploymentManifestsTest {
          * The chart version this test is written against. Bump it in the same commit as
          * helm/eddi/Chart.yaml — see chartVersionRecordsTheBreakingChange.
          */
-        private static final String EXPECTED_CHART_VERSION = "2.0.0";
+        private static final String EXPECTED_CHART_VERSION = "2.1.0";
 
         /**
          * This release removes {@code manager.*}, {@code monitoring.*} and
