@@ -651,9 +651,31 @@ Two deployment notes:
 - **The advertised identifier is forced to `https`** (`quarkus.oidc.resource-metadata.force-https-scheme`, default `true` here), because the scheme is otherwise read from the request and a TLS-terminating proxy has already downgraded it. The case that needs action is the opposite one: a deployment serving **plain http with authentication on** must set it to `false`, or it advertises a URL nothing is listening on. Every shipped stack that serves plain http with authentication on does exactly that: both compose auth stacks and the k8s auth overlay set it to `false` outright. The chart does not read the Keycloak URL — it defaults `eddi.oidc.resourceMetadata.forceHttpsScheme` from whether `ingress.tls` is configured, which is right for the documented `kubectl port-forward` flow (no ingress, so no TLS, so `false`) but wrong wherever something outside the chart terminates TLS. Set the value explicitly there.
 - **The authorization server that is advertised** is `quarkus.oidc.token.issuer` when set, falling back to `quarkus.oidc.auth-server-url`. In the shipped compose and helm deployments the latter is the cluster-internal Keycloak address, so leave `QUARKUS_OIDC_TOKEN_ISSUER` pointing at the public URL.
 
-**Discovery names the authorization server, not the client — so this is not yet a URL-only setup.** Your Keycloak realm also needs a client for MCP clients to use: public, PKCE, with the redirect URIs your client uses, and carrying the same protocol mappers as `eddi-frontend`. **A client without the `realm-roles` mapper issues tokens that authenticate and then fail every tool with "requires role"**, because the realm has no `roles` client scope and EDDI reads roles from `realm_access/roles`.
+**The realm ships the client this uses: `eddi-mcp`.** Public, authorization code + PKCE (`S256` required), no direct access grant, and carrying the same protocol mappers as `eddi-frontend`. That last part is not a detail — the realm defines no `roles` client scope, so **a client without the `realm-roles` mapper issues tokens that authenticate and then fail every tool with "requires role"**, because EDDI reads roles from `realm_access/roles`. If you provision your realm by hand, copy those mappers.
 
-The shipped realms gain such a client (`eddi-mcp`) in the PR stacked on this one; until that lands, create one yourself or use the hand-pasted token below, which works today.
+Its redirect URIs are `http://localhost:*` and `http://127.0.0.1:*`. Verified against Keycloak 26.7 (the version the auth E2E tier runs; the compose and k8s stacks ship 26.0): both wildcard forms match a loopback callback on any port, PKCE is genuinely required (a request without `code_challenge_method` is refused with `Missing parameter: code_challenge_method`), the password grant is refused, and a non-loopback redirect is refused with `Invalid parameter: redirect_uri`. **Which callback URL your particular client uses is its own business and not something this repo can verify** — if yours is not a loopback URL, add it to `eddi-mcp` in the admin console.
+
+- **Point your client at the client id.** Discovery names the authorization server, not which client to be, so each client has to be told:
+  - **Claude Code** — `claude mcp add --transport http --client-id eddi-mcp --callback-port 8080 eddi https://eddi.example.com/mcp`. The callback port is worth fixing: without it Claude Code picks a random one, and while `eddi-mcp`'s redirect URIs are wildcards that accept any port, a realm hardened to a single redirect URI would not. **[ext]** Some Claude Code versions attempt dynamic registration even with a client id configured, and fail with "Incompatible auth server: does not support dynamic client registration" — if you hit that, the hand-pasted token below is the fallback.
+  - **`mcp-remote`** — `--static-oauth-client-info '{"client_id":"eddi-mcp"}'`.
+  - Other clients have their own setting, and some support only dynamic registration. A client that insists on registering itself (RFC 7591) cannot work against this realm as shipped, because dynamic registration carries no protocol mappers and would hit exactly the role-less-token failure above.
+- **Claude Desktop connectors redirect to `https://claude.ai/api/mcp/auth_callback`**, not to loopback. That is deliberately *not* in the shipped list: it means the authorization response for your EDDI passes through a third party's endpoint, which is an operator's decision to make rather than a default to inherit. Add it to `eddi-mcp` in the Keycloak admin console if you want it.
+
+> **Upgrading an existing realm: you have to add this client yourself.** Keycloak's
+> `--import-realm` does **not** re-import into a realm that already exists, and both shipped
+> auth stacks keep its database in a named volume — so a realm provisioned before this
+> release keeps its old client list. The symptom is specific: discovery works, your client
+> follows the document to Keycloak, and Keycloak answers `invalid_client`. `install.sh`
+> does not add it either; its realm repair only restores `eddi-frontend`'s client scopes.
+>
+> Either re-provision the realm (in development, `docker compose -f docker-compose.auth.yml
+> down -v` and start again — this deletes your Keycloak data), or create the client by hand
+> from `eddi-mcp` in [`keycloak/eddi-realm.json`](../keycloak/eddi-realm.json). Creating it
+> in the admin console takes four things: **public** client, **Standard flow** on with
+> **Direct access grants** off, `pkce.code.challenge.method` = `S256` under Advanced, and the
+> redirect URIs. Then copy the three protocol mappers from `eddi-frontend` — `realm-roles`
+> above all, because **without it every token authenticates and every tool answers "requires
+> role"**.
 
 #### Supplying a token by hand (fallback)
 
@@ -709,7 +731,9 @@ printf '%s' "$KC_PASSWORD" | curl -s \
 
 ### Role Mapping
 
-These are the **actual Keycloak role strings** the tools check (not aliases). Roles are additive in intent — grant an editor/admin the read scope too. For exact per-tool roles see the code (`requireRole` calls) and the per-category sections above (HITL / Memory / GDPR).
+These are the **actual Keycloak role strings** the tools check (not aliases). Roles are additive in intent — grant an editor/admin the read scope too.
+
+> **There is no role hierarchy, and this bites exactly once.** `requireRole` is a literal `hasRole`, so an account holding `eddi-admin` but not `eddi-viewer` completes the OAuth flow and is then refused *every read tool* — 27 of the 84, including `list_agents`. It looks like a broken feature and is a missing role assignment. The shipped realm's `eddi` account holds `eddi-viewer` alongside `eddi-admin` and `eddi-editor` for this reason; grant the same to your own operators. For exact per-tool roles see the code (`requireRole` calls) and the per-category sections above (HITL / Memory / GDPR).
 
 | Role           | Scope |
 | -------------- | ----- |

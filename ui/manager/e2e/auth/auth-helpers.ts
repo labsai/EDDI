@@ -31,7 +31,14 @@ export const SPA_CLIENT_ID = "eddi-frontend";
  * deliberately seeds no credential for it.
  */
 export const USERS = {
-  admin: { username: "eddi", password: "e2e-admin-password", roles: ["eddi-admin", "eddi-editor"] },
+  admin: {
+    username: "eddi",
+    password: "e2e-admin-password",
+    // eddi-viewer alongside the other two: there is no role hierarchy, so an
+    // administrator without it is refused every MCP read tool. Kept in step with
+    // ROLE_FIXTURES in scripts/make-test-realm.mjs, which fails the run otherwise.
+    roles: ["eddi-admin", "eddi-editor", "eddi-viewer"],
+  },
   user: { username: "user", password: "user", roles: ["eddi-user"] },
   viewer: { username: "viewer", password: "viewer", roles: ["eddi-viewer"] },
 } as const;

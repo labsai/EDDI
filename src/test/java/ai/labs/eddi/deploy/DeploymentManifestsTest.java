@@ -37,6 +37,7 @@ import java.util.stream.Stream;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -1831,6 +1832,133 @@ class DeploymentManifestsTest {
                                 + "tell the operator to set a password on; removing it instead of its "
                                 + "password leaves those instructions pointing at nothing — and makes the "
                                 + "assertion above pass by having nothing to check");
+            }
+        }
+
+        /**
+         * The client an MCP client logs in through, once EDDI advertises {@code /mcp}
+         * as an OAuth protected resource.
+         * <p>
+         * Its protocol mappers are the load-bearing part, and the reason this realm
+         * cannot simply let clients register themselves: the realm supplies its own
+         * {@code clientScopes} and defines no {@code roles} scope among them, so a
+         * client without an explicit {@code realm-roles} mapper issues tokens that pass
+         * authentication — valid signature, userinfo succeeds — and then fail every
+         * single MCP tool, because {@code McpToolUtils.requireRole} reads
+         * {@code realm_access/roles} and finds nothing. "Logged in, and everything is
+         * forbidden" is the worst failure shape available, and a dynamically registered
+         * client (RFC 7591 carries no mappers) can only produce that one.
+         * <p>
+         * The flow settings are the other half: a public client with the direct access
+         * grant enabled would let anyone holding a username and password mint an MCP
+         * token without a browser, which is the flow this whole feature exists to stop
+         * relying on.
+         */
+        @Test
+        @DisplayName("the MCP client issues tokens that carry roles, through code+PKCE only")
+        void mcpClientIsUsableAndCodeFlowOnly() throws IOException {
+            for (Path realm : List.of(COMPOSE_REALM, KUSTOMIZE_REALM, HELM_REALM)) {
+                JsonNode mcp = client(JSON.readTree(realm.toFile()), "eddi-mcp");
+
+                assertTrue(mcp.path("publicClient").asBoolean(),
+                        realm + ": eddi-mcp must be public — a desktop or CLI MCP client cannot keep a secret");
+                assertTrue(mcp.path("standardFlowEnabled").asBoolean(),
+                        realm + ": eddi-mcp needs the authorization code flow, which is the whole point of it");
+                assertEquals("S256", mcp.path("attributes").path("pkce.code.challenge.method").asText(),
+                        realm + ": eddi-mcp must REQUIRE PKCE S256; a public client without it can have its "
+                                + "authorization code intercepted by any local process that wins the race to "
+                                + "the loopback redirect");
+                for (String forbidden : List.of("directAccessGrantsEnabled", "implicitFlowEnabled",
+                        "serviceAccountsEnabled")) {
+                    assertFalse(mcp.path(forbidden).asBoolean(),
+                            realm + ": eddi-mcp must not enable " + forbidden + " — it exists so that clients "
+                                    + "stop handling passwords and long-lived credentials");
+                }
+
+                List<String> mapperNames = new ArrayList<>();
+                mcp.path("protocolMappers").forEach(mapper -> mapperNames.add(mapper.path("name").asText()));
+                assertTrue(mapperNames.contains("realm-roles"),
+                        realm + ": eddi-mcp has no realm-roles mapper, so its tokens authenticate and then "
+                                + "fail every MCP tool. This realm defines no `roles` client scope, so the "
+                                + "mapper is the only source of realm_access.roles. Mappers: " + mapperNames);
+                assertTrue(mapperNames.contains("eddi-backend-audience"),
+                        realm + ": eddi-mcp has no audience mapper, so its tokens carry no `aud` for the "
+                                + "backend and would be refused the moment quarkus.oidc.token.audience is set. "
+                                + "Mappers: " + mapperNames);
+
+                JsonNode rolesMapper = null;
+                for (JsonNode mapper : mcp.path("protocolMappers")) {
+                    if ("realm-roles".equals(mapper.path("name").asText())) {
+                        rolesMapper = mapper;
+                    }
+                }
+                // The assertion above already refuses a client without this mapper, so
+                // this cannot be null in practice — it is here so that a future edit
+                // which loosens that check fails with a sentence instead of an NPE.
+                assertNotNull(rolesMapper, realm + ": eddi-mcp has no realm-roles mapper to inspect");
+                assertEquals("realm_access.roles", rolesMapper.path("config").path("claim.name").asText(),
+                        realm + ": eddi-mcp's roles mapper must write the claim quarkus.oidc.roles"
+                                + ".role-claim-path names (realm_access/roles)");
+                assertEquals("true", rolesMapper.path("config").path("access.token.claim").asText(),
+                        realm + ": eddi-mcp's roles must be in the ACCESS token — the bearer EDDI validates — "
+                                + "not only in the id token");
+
+                // Keycloak's CLIENT.DESCRIPTION and CLIENT.NAME columns are
+                // VARCHAR(255), and an over-long value does not truncate: the import
+                // fails with "Value too long for column", Keycloak exits 1, and every
+                // stack that imports this realm — compose, helm, kustomize, the auth
+                // E2E tier — comes up with no identity provider at all. Found by
+                // running the import, not by reading the file.
+                for (String field : List.of("description", "name")) {
+                    int length = mcp.path(field).asText().length();
+                    assertTrue(length <= 255,
+                            realm + ": eddi-mcp's " + field + " is " + length + " characters. Keycloak stores it "
+                                    + "in a VARCHAR(255) and refuses to start the realm import above that");
+                }
+
+                List<String> redirects = stringList(mcp.get("redirectUris"));
+                assertFalse(redirects.isEmpty(), realm + ": eddi-mcp has no redirect URI, so no client can use it");
+                for (String uri : redirects) {
+                    assertNotEquals("*", uri,
+                            realm + ": eddi-mcp allows redirects to `*`, which hands an authorization code to "
+                                    + "any host that asks");
+                    assertTrue(uri.startsWith("http://localhost") || uri.startsWith("http://127.0.0.1")
+                            || uri.startsWith("https://"),
+                            realm + ": eddi-mcp redirect `" + uri + "` is neither loopback nor https. A remote "
+                                    + "http callback would carry the code in cleartext");
+                }
+                assertEquals(List.of(), stringList(mcp.get("webOrigins")),
+                        realm + ": eddi-mcp needs no browser origin — its clients are native processes, and "
+                                + "`+` here would extend CORS to a client that never makes a browser request");
+            }
+        }
+
+        /**
+         * EDDI has no role hierarchy: {@code McpToolUtils.requireRole} is a literal
+         * {@code hasRole}, so {@code eddi-admin} does not satisfy a tool that names
+         * {@code eddi-viewer} — and 27 of the MCP tools name exactly that, including
+         * every read tool in {@code McpConversationTools}.
+         * <p>
+         * The seeded administrator is the account an operator points their first MCP
+         * client at. Holding only {@code eddi-admin} and {@code eddi-editor}, it
+         * completed the OAuth flow and was then refused {@code list_agents} — "logged
+         * in, and every read tool says requires role", which reads as a broken feature
+         * rather than as a missing role assignment.
+         */
+        @Test
+        @DisplayName("the seeded administrator holds the role the MCP read tools name")
+        void seededAdministratorCanUseTheReadTools() throws IOException {
+            for (Path realm : List.of(COMPOSE_REALM, KUSTOMIZE_REALM, HELM_REALM)) {
+                for (JsonNode user : JSON.readTree(realm.toFile()).path("users")) {
+                    List<String> roles = stringList(user.get("realmRoles"));
+                    if (!roles.contains("eddi-admin")) {
+                        continue;
+                    }
+                    assertTrue(roles.contains("eddi-viewer"),
+                            realm + ": `" + user.path("username").asText() + "` holds " + roles + " but not "
+                                    + "eddi-viewer. There is no role hierarchy — requireRole is a literal "
+                                    + "hasRole — so this account is refused every MCP read tool");
+                }
             }
         }
 

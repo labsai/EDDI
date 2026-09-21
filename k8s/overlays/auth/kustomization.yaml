@@ -33,11 +33,13 @@
 #   viewer / viewer  (eddi-viewer — read-only)
 #   user   / user    (eddi-user)
 #
-# The privileged `eddi` account (eddi-admin + eddi-editor) is seeded WITHOUT a
-# password, for the same reason: it used to ship as eddi/eddi, which is full
-# EDDI administration for anything that can reach the Service. Give it one in
-# the Keycloak admin console (Users → eddi → Credentials → Set password) after
-# the first boot, or grant the two roles to an account of your own.
+# The privileged `eddi` account (eddi-admin + eddi-editor + eddi-viewer) is
+# seeded WITHOUT a password, for the same reason: it used to ship as eddi/eddi,
+# which is full EDDI administration for anything that can reach the Service.
+# Give it one in the Keycloak admin console (Users → eddi → Credentials → Set
+# password) after the first boot, or grant all three roles to an account of your
+# own — eddi-viewer included, because EDDI has no role hierarchy and an
+# administrator without it is refused every read tool over MCP.
 #
 # ⚠️  Exposing this beyond `kubectl port-forward`? Four settings have to be
 # changed, and none of them can be derived — but they carry TWO different URLs.
