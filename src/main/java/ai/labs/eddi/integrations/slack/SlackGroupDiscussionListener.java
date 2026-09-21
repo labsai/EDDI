@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionRecord;
 import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionType;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
+import ai.labs.eddi.utils.LogSanitizer;
 import org.jboss.logging.Logger;
 
 import java.util.List;
@@ -433,7 +434,7 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
                 slackApi.postBlocksMessage(authToken, hitlApprovalChannel, null, blocks, fallback);
             } catch (SlackDeliveryException e) {
                 LOGGER.warnf("Failed to post group HITL approval notification for %s: %s",
-                        groupConversationId, e.getMessage());
+                        LogSanitizer.sanitize(groupConversationId), LogSanitizer.sanitize(e.getMessage()));
             }
         } finally {
             // A HITL pause is TERMINAL for this listener's lifecycle: the discussion
