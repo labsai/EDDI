@@ -46,13 +46,19 @@ export function AccessibleDialog({
   useEffect(() => {
     if (open) {
       previousFocusRef.current = document.activeElement as HTMLElement;
-      // Focus the dialog after render
-      requestAnimationFrame(() => {
-        const firstFocusable = dialogRef.current?.querySelector<HTMLElement>(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-        );
-        firstFocusable?.focus();
+      // Focus the dialog after render — unless focus is already inside it. An
+      // `autoFocus` field has claimed it during commit, and a user can click
+      // into a field before the frame runs; moving either to the first
+      // focusable (usually the Close button) sent their typing nowhere. Under a
+      // loaded CI runner the late frame did exactly that mid-`userEvent.type`.
+      const frame = requestAnimationFrame(() => {
+        const dialog = dialogRef.current;
+        if (!dialog || dialog.contains(document.activeElement)) return;
+        dialog
+          .querySelector<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')
+          ?.focus();
       });
+      return () => cancelAnimationFrame(frame);
     } else {
       // Return focus to the trigger element
       previousFocusRef.current?.focus();
