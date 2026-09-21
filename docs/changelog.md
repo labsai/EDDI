@@ -189,8 +189,13 @@ to the 401 challenge, so there is no new EDDI code — five properties and one p
   `tenant-enabled` (an instance with auth off has no authorization server to name, and the
   handler is not installed for a disabled tenant), `resource=/mcp`, `force-https-scheme=true`,
   `scopes=openid`, and `authorization-server` preferring `token.issuer` over `auth-server-url`.
-- **`application.properties`** — a `permit` rule for `/.well-known/oauth-protected-resource`
-  and its path-inserted form, `GET,HEAD` only.
+- **`application.properties`** — a `permit` rule for the two exact metadata paths (the bare
+  form and the path-inserted document), `GET,HEAD` only. Exact rather than a `/*` under the
+  prefix, which would anonymously expose any future handler beneath it.
+- **`helm/eddi`** — `eddi.oidc.resourceMetadata.{forceHttpsScheme,authorizationServer}`, because
+  neither is safely inferable: `publicUrl` describes Keycloak, not EDDI, so an https IdP in
+  front of a plain-http port-forward would advertise a resource nothing serves. The scheme now
+  follows EDDI's own `ingress.tls` unless set. Chart version bumped per Chart.yaml's rule.
 - **`application.properties`** — the MCP security banner said 33 tools (there are 84) and
   described a two-role model (there are four, with no hierarchy).
 - **`McpOAuthDiscoveryConfigTest`** (new, 8 cases) — the config *is* the feature, so it is what
