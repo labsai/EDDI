@@ -68,6 +68,89 @@ bottom of this file and are never archived.
 
 ---
 
+## 🔎 fix(operator): let the Platform Operator inspect knowledge bases (2026-09-17)
+
+**Repo:** EDDI (`fix/operator-rag-reads`)
+
+### Why
+
+An admin asked the Operator to check a RAG knowledge base. It answered that the tool `readRag`
+"was not found". That tool never existed: `tool-scopes.ts` named no `ragstore` path, so no RAG
+tool was ever generated — the model guessed a name by analogy with `readLlm` and the tool loop
+answered `Error: Tool 'readRag' not found` (`ToolLoopRunner:654`).
+
+The guess was the symptom of an asymmetry. The Operator *can* read `docs/rag.md` (the docs
+endpoints are granted in both scopes), so it knew knowledge bases exist — while holding no tool
+for one and no sentence saying so. Knowing a feature exists with neither a tool nor a word about
+it is what produces an improvised tool call, the same failure `BODY_AUTHORING_NO_AGENT` already
+prevents for agents.
+
+### What changed
+
+- **`tool-scopes.ts`** — three reads added: `GET /ragstore/rags/descriptors`, `GET /ragstore/rags/{id}`,
+  `GET /ragstore/rags/{id}/ingestion/{ingestionId}/status`. Descriptors are included because a KB is
+  asked about by NAME; without the listing the by-id read is unreachable. New predicates
+  `grantsKnowledgeBaseReads` / `grantsKnowledgeBaseAuthoring`.
+- **`system-prompt.ts`** — a knowledge-base section, conditional on those reads, plus a derived
+  "you cannot create, edit or ingest" sentence; `rag` added to the step-type list and the docs map.
+- **`McpAdminTools`** — `read_resource` gained a `"rag"` case, so an MCP client can read a KB config too.
+
+### Decisions
+
+- **Not folded into `WORKFLOW_EXTENSION_STORES`.** That constant doubles as
+  `WRITABLE_EXTENSION_STORES`; adding `ragstore/rags` there would grant PUT/POST as a side effect
+  of wanting a read.
+- **Reads only; `ingest` stays excluded**, as `planning/operator-write-scope-plan.md` §5 requires.
+  The ingestion *status* read is what answers "did the documents land?" without a write.
+- **No new exposure class.** RAG embedding and vector-store credentials are `${vault:...}`
+  references resolved at runtime, exactly like `llmstore`, which was already granted.
+- **The boundary sentence is derived, not asserted**, so allow-listing a RAG write later cannot
+  leave the prompt claiming the opposite.
+
+### Note
+
+Existing operators keep their old tool set — tools are provisioned at activation, so an operator
+must be re-activated to gain these.
+
+
+### Review round 1 (Copilot)
+
+Four inline findings plus one *suppressed* comment (no thread — only visible in the review body), all
+acted on:
+
+- **`ai.labs.rag` → `unknown` in `STEP_TYPE_TO_RESOURCE_TYPE`** — a real dead end: an MCP client
+  following `list_agent_resources` into `read_resource` would have passed `unknown` and never
+  reached the new case. Mapping added, and the test that pinned `unknown` updated.
+- **The cheatsheet leaked RAG unconditionally** — `rag (knowledge base)` in the step-type list and
+  the `rag` docs-map entry sat in `BODY_CHEATSHEET`, which every prompt carries. A prompt without the
+  RAG endpoints therefore still said knowledge bases exist. Both moved into the conditional section,
+  which now has a *no-reads* variant that names the `rag` step and states the boundary rather than
+  going silent — silence is what produced the invented call.
+- **The ingestion claim did not track its own endpoint** — `grantsKnowledgeBaseReads` gates a section
+  that promised an ingestion check while requiring only the two config reads. Split into
+  `grantsIngestionStatusReads` rather than requiring all three: the config reads are a complete
+  capability alone, so demanding the third would drop the whole section on a deployment missing one
+  endpoint.
+- **`grantsKnowledgeBaseAuthoring` missed the duplicate verb** (a *suppressed* Copilot comment, which
+  carries no thread — found by grepping the review body). `POST /ragstore/rags/{id}` is `duplicateRag`,
+  and a copy of a knowledge base is a new knowledge base, so granting it would have left the prompt
+  telling an operator that CAN create one that it cannot. Added, with a test covering all four
+  authoring routes.
+- **Plaintext credentials in a `RagConfiguration`** — the exposure is real but not new: `GET
+  /llmstore/llms/{id}` returns a plaintext key verbatim too, and `RestLlmStore` says so in its own
+  javadoc. RAG was, however, the one credential-carrying store with **no write-time warning**, so it
+  now has the same one `RestLlmStore` and `RestChannelIntegrationStore` already had (warn, never
+  reject — a rejection breaks vault-less instances). Redacting config reads platform-wide is a
+  separate change; doing it for RAG alone would imply the other stores are safe.
+
+**Files:** `ui/manager/src/lib/operator/tool-scopes.ts`, `.../system-prompt.ts`, their tests,
+`src/main/java/ai/labs/eddi/engine/mcp/McpAdminTools.java`,
+`src/main/java/ai/labs/eddi/configs/rag/rest/RestRagStore.java`,
+`src/test/java/ai/labs/eddi/engine/mcp/{McpAdminToolsSwitchCoverageTest,McpAdminToolsTest}.java`,
+`src/test/java/ai/labs/eddi/configs/rag/rest/RestRagStoreWriteValidationTest.java`, `docs/mcp-server.md`
+
+---
+
 ## 🔒 fix(security): close the CWE-117 gap in the half of a log line no call site can reach (2026-09-20)
 
 **Repo:** EDDI (`fix/log-injection-record-boundary-handler`)
@@ -273,6 +356,7 @@ Mutation-checked: reverting the final-URL identity and re-lowercasing the path f
 
 The source configuration and the pipeline that ties crawl → convert → state store → embed, with vector
 removal driven by the tombstone list, plus the Manager UI.
+
 ## 📄 refactor(ingestion): HTML→Markdown converter, and WebScraperTool stops duplicating it (2026-09-17)
 
 **Repo:** EDDI (`feat/html-to-markdown-converter`)

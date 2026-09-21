@@ -52,7 +52,7 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 | `delete_agent`          | Delete an agent (with optional cascade)                                          |
 | `update_agent`          | Update an agent's name/description and optionally redeploy                       |
 | `read_workflow`         | Read a package's full pipeline configuration                                    |
-| `read_resource`         | Read any resource config by type (behavior, langchain, httpcalls, output, etc.) |
+| `read_resource`         | Read any resource config by type (behavior, langchain, httpcalls, output, rag, etc.) — read only; `rag` has no create/update/delete case |
 | `list_agent_triggers`   | List all agent triggers (intent→agent mappings) for managed conversations       |
 | `create_agent_trigger`  | Create an agent trigger mapping an intent to one or more agent deployments       |
 | `update_agent_trigger`  | Update an existing agent trigger                                                |
