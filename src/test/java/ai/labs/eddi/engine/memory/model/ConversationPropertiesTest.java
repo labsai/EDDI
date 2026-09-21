@@ -130,6 +130,8 @@ class ConversationPropertiesTest {
         props.put("key", prop);
 
         assertEquals(prop, props.get("key"));
-        // toMap won't have the value since memory-backed storage is skipped
+        // toMap() is derived from the map itself, so it holds even without a memory
+        // to mirror the property into.
+        assertEquals("value", props.toMap().get("key"));
     }
 }

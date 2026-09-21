@@ -4,11 +4,13 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
@@ -19,9 +21,13 @@ import ai.labs.eddi.engine.audit.rest.IRestAuditStore;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.eddi.engine.memory.rest.IRestConversationStore;
 import ai.labs.eddi.engine.model.*;
+import ai.labs.eddi.engine.security.ConversationAccessGuard;
+import ai.labs.eddi.engine.security.OwnershipValidator;
+import io.quarkus.security.identity.SecurityIdentity;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.BoundedLogStore;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
@@ -63,6 +69,8 @@ class McpConversationToolsExtendedTest {
     private IRestAgentEngine restAgentEngine;
     private IRestConversationStore convStore;
     private IRestDocumentDescriptorStore descriptorStore;
+    private SecurityIdentity mockIdentity;
+    private ConversationAccessGuard conversationAccessGuard;
     private McpConversationTools tools;
 
     @BeforeEach
@@ -84,13 +92,16 @@ class McpConversationToolsExtendedTest {
         when(restInterfaceFactory.get(IRestDocumentDescriptorStore.class)).thenReturn(descriptorStore);
 
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
-        var mockIdentity = mock(io.quarkus.security.identity.SecurityIdentity.class);
+        mockIdentity = mock(SecurityIdentity.class);
         lenient().when(mockIdentity.isAnonymous()).thenReturn(true);
+        // Authorization disabled: the guard admits every caller.
+        conversationAccessGuard = new ConversationAccessGuard(mockIdentity, new OwnershipValidator(false),
+                mock(IConversationDescriptorStore.class));
 
         tools = new McpConversationTools(conversationService, agentAdmin, agentStore,
                 restInterfaceFactory, jsonSerialization, boundedLogStore, auditStore,
                 agentTriggerStore, userConversationStore, restAgentEngine,
-                mockIdentity, false);
+                mockIdentity, conversationAccessGuard, mock(ResourceAccessGuard.class), false);
     }
 
     // ==================== listConversations ====================
@@ -173,12 +184,12 @@ class McpConversationToolsExtendedTest {
                 .thenThrow(new RestInterfaceFactory.RestInterfaceFactoryException("Factory error", new RuntimeException("cause")));
         when(failingFactory.get(IRestDocumentDescriptorStore.class)).thenReturn(descriptorStore);
 
-        var mockIdentity = mock(io.quarkus.security.identity.SecurityIdentity.class);
+        var mockIdentity = mock(SecurityIdentity.class);
         lenient().when(mockIdentity.isAnonymous()).thenReturn(true);
         var localTools = new McpConversationTools(conversationService, agentAdmin, agentStore,
                 failingFactory, jsonSerialization, boundedLogStore, auditStore,
                 agentTriggerStore, userConversationStore, restAgentEngine,
-                mockIdentity, false);
+                mockIdentity, conversationAccessGuard, mock(ResourceAccessGuard.class), false);
 
         String result = localTools.listConversations(AGENT_ID, null, null, null);
 
@@ -291,7 +302,7 @@ class McpConversationToolsExtendedTest {
 
     @Test
     void listAgentConfigs_handlesException() {
-        when(agentStore.readAgentDescriptors(any(), anyInt(), anyInt()))
+        when(agentStore.readAgentDescriptors(any(), anyInt(), anyInt(), any()))
                 .thenThrow(new RuntimeException("DB error"));
 
         String result = tools.listAgentConfigs(null, null);
@@ -329,7 +340,7 @@ class McpConversationToolsExtendedTest {
         output.put("actions", List.of("greet"));
         snapshot.setConversationOutputs(List.of(output));
         when(conversationService.readConversation(eq(CONV_ID), eq(false), eq(true),
-                eq(List.of("input", "output")))).thenReturn(snapshot);
+                eq(List.of("conversationOutputs")))).thenReturn(snapshot);
         when(jsonSerialization.serialize(snapshot)).thenReturn("{}");
 
         tools.readConversation(null, CONV_ID, null, null, null, "input,output");
@@ -629,7 +640,7 @@ class McpConversationToolsExtendedTest {
     @Test
     void chatManaged_emptyDeployments_returnsError() throws Exception {
         when(userConversationStore.readUserConversation("support", "user1"))
-                .thenThrow(new ai.labs.eddi.datastore.IResourceStore.ResourceStoreException("not found"));
+                .thenThrow(new IResourceStore.ResourceStoreException("not found"));
 
         var trigger = new AgentTriggerConfiguration();
         trigger.setIntent("support");
@@ -645,7 +656,7 @@ class McpConversationToolsExtendedTest {
     @Test
     void chatManaged_nullTrigger_returnsError() throws Exception {
         when(userConversationStore.readUserConversation("support", "user1"))
-                .thenThrow(new ai.labs.eddi.datastore.IResourceStore.ResourceStoreException("not found"));
+                .thenThrow(new IResourceStore.ResourceStoreException("not found"));
 
         when(agentTriggerStore.readAgentTrigger("support")).thenReturn(null);
 

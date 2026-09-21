@@ -1,0 +1,85 @@
+{
+  "manifest": {
+    "templateId": "decision-board",
+    "title": "Decision Board",
+    "description": "A deliberation board with a human director as a full voting member: positions are stated blind, deliberated openly, distilled into explicit options, and decided by ballot — cast in structural independence, with the losing side's statements recorded as dissents. The human's ballot pauses the discussion until they submit (or the turn times out). Ties go to the chair; HUMAN_DECIDES tie-breaking remains save-time rejected until its resume machinery ships.",
+    "requiredRoles": [
+      { "role": "advisor1", "description": "First board advisor" },
+      { "role": "advisor2", "description": "Second board advisor" },
+      { "role": "humanDirector", "description": "Human board member — their principal id; votes like any member, the discussion waits for their ballot" },
+      { "role": "chair", "description": "Chairs the board: distills options, synthesizes, breaks ties" }
+    ]
+  },
+  "config": {
+    "name": "Decision Board",
+    "description": "Hybrid human/agent deliberation ending in an auditable ballot",
+    "style": "CUSTOM",
+    "moderatorAgentId": "$chair",
+    "members": [
+      { "agentId": "$advisor1", "displayName": "Advisor 1", "speakingOrder": 1 },
+      { "agentId": "$advisor2", "displayName": "Advisor 2", "speakingOrder": 2 },
+      { "agentId": "$humanDirector", "displayName": "Human Director", "speakingOrder": 3, "memberType": "HUMAN" }
+    ],
+    "humanMemberConfig": { "turnTimeout": "PT24H", "onTimeout": "SKIP_TURN" },
+    "phases": [
+      {
+        "name": "Positions",
+        "type": "OPINION",
+        "participants": "ALL",
+        "turnOrder": "PARALLEL",
+        "contextScope": "NONE",
+        "repeats": 1
+      },
+      {
+        "name": "Deliberation",
+        "type": "OPINION",
+        "participants": "ALL",
+        "turnOrder": "SEQUENTIAL",
+        "contextScope": "FULL",
+        "repeats": 2,
+        "allowAbstention": true
+      },
+      {
+        "name": "Options",
+        "type": "SYNTHESIS",
+        "participants": "MODERATOR",
+        "turnOrder": "SEQUENTIAL",
+        "contextScope": "FULL",
+        "inputTemplate": "Distill the deliberation on:\n\"{question}\"\n\ninto 2-4 concrete, mutually exclusive options the board can vote on. Format each on its own line as:\nOption A: <text>\nOption B: <text>\n(and so on). State each option's essential trade-off in one sentence beneath it.",
+        "repeats": 1
+      },
+      {
+        "name": "Ballot",
+        "type": "VOTE",
+        "participants": "ALL",
+        "turnOrder": "PARALLEL",
+        "contextScope": "NONE",
+        "repeats": 1,
+        "voteConfig": {
+          "method": "MAJORITY",
+          "optionsSource": "LAST_SYNTHESIS",
+          "quorum": 0.5,
+          "tiePolicy": "MODERATOR_DECIDES"
+        }
+      },
+      {
+        "name": "Resolution",
+        "type": "SYNTHESIS",
+        "participants": "MODERATOR",
+        "turnOrder": "SEQUENTIAL",
+        "contextScope": "FULL",
+        "repeats": 1
+      }
+    ],
+    "recordDissents": true,
+    "protocol": {
+      "agentTimeoutSeconds": 180,
+      "onAgentFailure": "SKIP",
+      "maxRetries": 2,
+      "onMemberUnavailable": "SKIP",
+      "maxTurns": 40,
+      "maxCostPerDiscussion": 5.0,
+      "onCostExceeded": "SYNTHESIZE_NOW"
+    }
+  }
+}

@@ -112,9 +112,16 @@ class McpToolUtilsBranchCoverageTest {
         }
 
         @Test
-        @DisplayName("invalid → production")
+        @DisplayName("unknown → rejected (never silently production)")
         void invalidEnv() {
-            assertEquals(Environment.production, McpToolUtils.parseEnvironment("staging"));
+            assertThrows(McpToolUtils.UnknownEnvironmentException.class,
+                    () -> McpToolUtils.parseEnvironment("staging"));
+        }
+
+        @Test
+        @DisplayName("legacy v5 'unrestricted' → production")
+        void legacyUnrestricted() {
+            assertEquals(Environment.production, McpToolUtils.parseEnvironment("unrestricted"));
         }
 
         @Test

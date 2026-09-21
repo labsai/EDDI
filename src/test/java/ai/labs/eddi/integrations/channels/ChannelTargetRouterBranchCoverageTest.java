@@ -4,7 +4,7 @@
  */
 package ai.labs.eddi.integrations.channels;
 
-import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.channels.IChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
@@ -41,7 +41,7 @@ class ChannelTargetRouterBranchCoverageTest {
     @Mock
     private IRestAgentAdministration agentAdmin;
     @Mock
-    private IRestAgentStore agentStore;
+    private IAgentStore agentStore;
     @Mock
     private SecretResolver secretResolver;
     @Mock
@@ -242,14 +242,14 @@ class ChannelTargetRouterBranchCoverageTest {
     class GetSigningSecrets {
 
         @Test
-        @DisplayName("slack → returns slackSigningSecrets")
+        @DisplayName("slack → returns secrets from signingSecretsByType map")
         void slackSecrets() {
             var result = router.getSigningSecrets("slack");
             assertNotNull(result);
         }
 
         @Test
-        @DisplayName("other channel type → empty set")
+        @DisplayName("unregistered channel type → empty set")
         void otherType() {
             var result = router.getSigningSecrets("teams");
             assertTrue(result.isEmpty());

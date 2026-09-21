@@ -5,7 +5,12 @@
 package ai.labs.eddi.utils;
 
 import ai.labs.eddi.datastore.IResourceStore;
+import jakarta.ws.rs.WebApplicationException;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.net.URI;
 
@@ -25,6 +30,42 @@ class RestUtilitiesTest {
     void createURI_withSinglePart_returnsThatPart() {
         URI uri = RestUtilities.createURI("eddi://ai.labs.agents/abc");
         assertEquals("eddi://ai.labs.agents/abc", uri.toString());
+    }
+
+    // --- createConflictException ---
+
+    /**
+     * The 409 a client gets when it tries to create a resource that already exists,
+     * with the existing resource's URI as the body — the only thing that tells the
+     * caller where to look. Nothing exercised this path at all, which is awkward
+     * for a method just switched from instantiating RESTEasy Reactive's internal
+     * {@code ResponseBuilderImpl} to the portable {@code Response.status(...)} API:
+     * entity and media-type handling is exactly where two builder implementations
+     * would differ.
+     */
+    @Test
+    void createConflictException_carriesTheExistingResourceUriAsPlainText() {
+        WebApplicationException exception = RestUtilities.createConflictException(
+                "eddi://ai.labs.agents/agentstore/agents/",
+                new IResourceStore.IResourceId() {
+                    @Override
+                    public String getId() {
+                        return "5262b802dc6c4008b54c7c0b58100f97";
+                    }
+
+                    @Override
+                    public Integer getVersion() {
+                        return 3;
+                    }
+                });
+
+        Response response = exception.getResponse();
+        assertEquals(409, response.getStatus());
+        assertEquals("eddi://ai.labs.agents/agentstore/agents/5262b802dc6c4008b54c7c0b58100f97?version=3",
+                response.getEntity(),
+                "the body must point the caller at the resource that already exists");
+        assertEquals(MediaType.TEXT_PLAIN_TYPE, response.getMediaType(),
+                "a bare URI body must not be announced as anything but text/plain");
     }
 
     // --- extractResourceId ---
@@ -88,6 +129,47 @@ class RestUtilitiesTest {
     void extractResourceId_withInvalidVersion_throwsIllegalArgument() {
         URI uri = URI.create("eddi://ai.labs.agents/agentsstore/agents/5262b802dc6c4008b54c7c0b58100f97?version=abc");
         assertThrows(IllegalArgumentException.class, () -> RestUtilities.extractResourceId(uri));
+    }
+
+    /**
+     * B10 — a malformed URI must be reported through the return value (id == null),
+     * never by throwing. An authority-only URI such as "eddi://ai.labs.agent" has
+     * no '/' after the scheme at all.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"eddi://ai.labs.agent", "eddi://host", "eddi://ai.labs.agent?version=1", "eddi://ai.labs.agent#fragment",
+            "eddi://ai.labs.agent/", "agents", "/agents", ""})
+    void extractResourceId_withMalformedUri_returnsNullIdWithoutThrowing(String malformedUri) {
+        IResourceStore.IResourceId resourceId = RestUtilities.extractResourceId(URI.create(malformedUri));
+
+        assertNotNull(resourceId, "a non-null URI must still yield a resource id object");
+        assertNull(resourceId.getId(), "no usable id can be extracted from " + malformedUri);
+    }
+
+    /**
+     * The parameterized case above feeds this same URI but only ever asserts the
+     * id, which is why the version loss went unnoticed: an authority-only URI has
+     * no '/' after the scheme, and discarding everything from that point took the
+     * query with it. The reported version then fell back to 0 — the value callers
+     * already use to mean "unspecified", so an explicit {@code ?version=1} was
+     * indistinguishable from no version at all.
+     */
+    @Test
+    void extractResourceId_withQueryButNoPath_stillReadsTheVersion() {
+        IResourceStore.IResourceId resourceId = RestUtilities.extractResourceId(URI.create("eddi://ai.labs.agent?version=1"));
+
+        assertNotNull(resourceId);
+        assertNull(resourceId.getId(), "an authority-only URI carries no id");
+        assertEquals(Integer.valueOf(1), resourceId.getVersion(), "the version query param must survive the missing path");
+    }
+
+    @Test
+    void extractResourceId_withNoPathAndNoQuery_reportsNoVersion() {
+        IResourceStore.IResourceId resourceId = RestUtilities.extractResourceId(URI.create("eddi://ai.labs.agent"));
+
+        assertNotNull(resourceId);
+        assertNull(resourceId.getId());
+        assertEquals(Integer.valueOf(0), resourceId.getVersion(), "no query means no version, which callers read as 'current'");
     }
 
     @Test

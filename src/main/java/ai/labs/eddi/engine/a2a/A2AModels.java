@@ -91,6 +91,24 @@ public final class A2AModels {
     public record Artifact(String name, String description, List<Part> parts, int index, Map<String, Object> metadata) {
     }
 
+    // === Errors ===
+
+    /**
+     * The peer's request is malformed. Its message is authored inside the A2A layer
+     * and is therefore safe to hand back to an arbitrary remote peer verbatim —
+     * unlike the text of an arbitrary downstream exception, which may carry
+     * connection strings, internal host names or other deployment detail.
+     * <p>
+     * Extends {@link IllegalArgumentException} so callers that already handle that
+     * type keep working.
+     */
+    public static class InvalidA2ARequestException extends IllegalArgumentException {
+
+        public InvalidA2ARequestException(String message) {
+            super(message);
+        }
+    }
+
     // === JSON-RPC Error Codes ===
 
     public static final int ERROR_TASK_NOT_FOUND = -32001;

@@ -18,6 +18,21 @@ import java.util.List;
  * <p>
  * Returned by POST /backup/import/preview and POST /backup/import/sync/preview.
  *
+ * @param sourceAgentId
+ *            the agent's id in the source system
+ * @param sourceAgentName
+ *            the agent's human-readable name in the source system
+ * @param targetAgentId
+ *            the local agent being matched against, or null in create mode
+ * @param targetAgentName
+ *            the local agent's name, or null in create mode
+ * @param resources
+ *            one diff per resource
+ * @param error
+ *            why this preview could not be produced; null on success. Only a
+ *            batch preview fills it — a single preview reports failure with an
+ *            HTTP status. It exists so a failed row in a batch is a real field
+ *            rather than an {@code "Error: ..."} prefix smuggled into the name
  * @since 6.0.0
  */
 public record ImportPreview(
@@ -25,7 +40,18 @@ public record ImportPreview(
         String sourceAgentName,
         String targetAgentId,
         String targetAgentName,
-        List<ResourceDiff> resources) {
+        List<ResourceDiff> resources,
+        String error) {
+
+    /** A preview that was produced successfully — {@code error} is null. */
+    public ImportPreview(String sourceAgentId,
+            String sourceAgentName,
+            String targetAgentId,
+            String targetAgentName,
+            List<ResourceDiff> resources) {
+        this(sourceAgentId, sourceAgentName, targetAgentId, targetAgentName, resources, null);
+    }
+
     /**
      * Diff for a single resource in the import/sync preview.
      *
@@ -34,7 +60,7 @@ public record ImportPreview(
      * @param resourceType
      *            type identifier: "agent", "workflow", "langchain", "httpcalls",
      *            "behavior", "regulardictionary", "property", "output", "mcpcalls",
-     *            "rag", "snippet"
+     *            "rag", "snippet", "schedule"
      * @param name
      *            human-readable name from DocumentDescriptor or snippet.name
      * @param action

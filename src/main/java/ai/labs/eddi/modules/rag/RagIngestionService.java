@@ -39,6 +39,12 @@ public class RagIngestionService {
     private final EmbeddingStoreFactory embeddingStoreFactory;
 
     /**
+     * What {@link #getStatus} answers for an id it holds no status for — never
+     * started on this instance, or expired.
+     */
+    public static final String STATUS_UNKNOWN = "unknown";
+
+    /**
      * Bounded status tracking with 1-hour expiry to prevent memory leaks.
      */
     private final Cache<String, String> ingestionStatus = Caffeine.newBuilder().expireAfterWrite(Duration.ofHours(1)).maximumSize(10_000).build();

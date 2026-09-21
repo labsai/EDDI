@@ -1,0 +1,756 @@
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
+import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
+import {
+  ArrowLeft,
+  Workflow,
+  Plus,
+  Trash2,
+  RefreshCw,
+  AlertCircle,
+  Settings,
+  Save,
+  Undo2,
+  Rocket,
+  X,
+} from "lucide-react";
+import { cn, formatRelativeTime } from "@/lib/utils";
+import { toast } from "sonner";
+import { getErrorMessage } from "@/lib/api-client";
+import { AlertDialog } from "@/components/ui/alert-dialog";
+import {
+  useWorkflow,
+  useUpdateWorkflow,
+  useDeleteWorkflow,
+  useWorkflowVersions,
+} from "@/hooks/use-workflows";
+
+import { parseResourceUri } from "@/lib/api/agents";
+import type { WorkflowExtension } from "@/lib/api/workflows";
+import {
+  PipelineBuilder,
+  type PipelineItem,
+} from "@/components/editors/pipeline-builder";
+import {
+  AddExtensionDialog,
+  type AddExtensionResult,
+} from "@/components/editors/add-extension-dialog";
+import { useLatestVersions } from "@/hooks/use-latest-versions";
+import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
+import { useSaveAndDeploy } from "@/hooks/use-save-and-deploy";
+import { getAgent, updateAgent } from "@/lib/api/agents";
+import {
+  ParserEditor,
+} from "@/components/editors/parser-editor";
+import {
+  createDefaultParserData,
+  type ParserData,
+} from "@/components/editors/parser-editor-types";
+
+/* ─── Main page ─── */
+export function WorkflowDetailPage() {
+  const { id } = useParams<{ id: string }>();
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  // Cascade context from URL (when navigating from agent-detail)
+  const agentId = searchParams.get("agentId") ?? undefined;
+  const agentVer = searchParams.get("agentVer") ?? undefined;
+
+  const [version, setVersion] = useState<number | undefined>(undefined);
+  const [currentAgentVer, setCurrentAgentVer] = useState<number | undefined>(
+    agentVer ? parseInt(agentVer, 10) : undefined
+  );
+  const [showAddDialog, setShowAddDialog] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [localExtensions, setLocalExtensions] = useState<
+    WorkflowExtension[] | null
+  >(null);
+  const [saveMessage, setSaveMessage] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
+
+  // Parser inline editing
+  const [parserEditIndex, setParserEditIndex] = useState<number | null>(null);
+  const [parserEditData, setParserEditData] = useState<ParserData | null>(null);
+
+  const { data: versionDescriptors } = useWorkflowVersions(id!);
+
+  // Version picker data
+  const versions = useMemo(() => {
+    if (!versionDescriptors) return [];
+    return versionDescriptors
+      .map((d) => {
+        const { version: v } = parseResourceUri(d.resource);
+        return { version: v, lastModifiedOn: d.lastModifiedOn };
+      })
+      .sort((a, b) => b.version - a.version);
+  }, [versionDescriptors]);
+
+  // Default to latest version
+  const resolvedVersion = version ?? versions[0]?.version ?? 1;
+
+  const {
+    data: workflow,
+    isLoading,
+    isError,
+    refetch,
+  } = useWorkflow(id!, resolvedVersion);
+  const updateMutation = useUpdateWorkflow();
+  const deleteMutation = useDeleteWorkflow();
+
+  // Use local state if user has made edits, otherwise use server data
+  const currentExtensions = useMemo(
+    () => localExtensions ?? workflow?.workflowSteps ?? [],
+    [localExtensions, workflow?.workflowSteps]
+  );
+  const serverExtensions = workflow?.workflowSteps ?? [];
+  const isDirty =
+    localExtensions !== null &&
+    JSON.stringify(localExtensions) !== JSON.stringify(serverExtensions);
+
+  // Warn on tab close/reload when dirty
+  useUnsavedChangesGuard(isDirty);
+
+  // Save & Test support
+  const { saveAndDeploy, isRunning: isSaveAndDeploying } = useSaveAndDeploy();
+
+  // Build pipeline items from current extensions
+  const pipelineItems: PipelineItem[] = currentExtensions.map((ext, i) => ({
+    id: `ext-${i}`,
+    index: i,
+    extension: ext,
+  }));
+
+  // Collect all config URIs for version staleness detection
+  const configUris = useMemo(
+    () =>
+      currentExtensions
+        .map((ext) => (ext.config?.uri as string) ?? "")
+        .filter((uri) => uri.includes("://")),
+    [currentExtensions]
+  );
+  const { data: latestVersions } = useLatestVersions(configUris);
+
+  // Reset local state when server data changes (version switch)
+  useEffect(() => {
+    setLocalExtensions(null);
+  }, [workflow?.workflowSteps]);
+
+  // Clear save message after 3s
+  useEffect(() => {
+    if (saveMessage) {
+      const timer = setTimeout(() => setSaveMessage(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [saveMessage]);
+
+  const handleReorder = useCallback(
+    (newItems: PipelineItem[]) => {
+      setLocalExtensions(newItems.map((item) => item.extension));
+    },
+    []
+  );
+
+  const handleRemoveExtension = useCallback(
+    (index: number) => {
+      const updated = currentExtensions.filter((_, i) => i !== index);
+      setLocalExtensions(updated);
+    },
+    [currentExtensions]
+  );
+
+  const handleAddExtension = useCallback(
+    (result: AddExtensionResult) => {
+      // Parser steps get default inline config instead of an empty config
+      const isParser = result.descriptor.type === "eddi://ai.labs.parser";
+      const defaultParser = isParser ? createDefaultParserData() : undefined;
+
+      const newExt: WorkflowExtension = {
+        type: result.descriptor.type,
+        extensions: isParser && !result.configUri
+          ? ({ ...defaultParser!.extensions } as Record<string, unknown>)
+          : {},
+        config: result.configUri
+          ? { uri: result.configUri }
+          : isParser
+            ? ({ ...defaultParser!.config } as Record<string, unknown>)
+            : {},
+      };
+      setLocalExtensions([...currentExtensions, newExt]);
+      setShowAddDialog(false);
+    },
+    [currentExtensions]
+  );
+
+  const handleUpdateVersion = useCallback(
+    (index: number, newUri: string) => {
+      const updated = [...currentExtensions];
+      const ext = updated[index];
+      if (ext) {
+        updated[index] = {
+          ...ext,
+          config: { ...ext.config, uri: newUri },
+        };
+        setLocalExtensions(updated);
+      }
+    },
+    [currentExtensions]
+  );
+
+
+  const handleSave = useCallback(async () => {
+    if (!isDirty || !localExtensions) return;
+    try {
+      const result = await updateMutation.mutateAsync({
+        id: id!,
+        version: resolvedVersion,
+        config: { workflowSteps: localExtensions },
+      });
+      // Track the new version so subsequent saves target the correct version
+      const wfUrl = new URL(result.location, "http://dummy");
+      const newVersion = parseInt(wfUrl.searchParams.get("version") ?? "1", 10);
+      setVersion(newVersion);
+      setSaveMessage({
+        type: "success",
+        text: t("packageEditor.saved", "Workflow saved successfully"),
+      });
+      setLocalExtensions(null);
+    } catch {
+      setSaveMessage({
+        type: "error",
+        text: t("packageEditor.saveError", "Failed to save workflow"),
+      });
+    }
+  }, [isDirty, localExtensions, updateMutation, id, resolvedVersion, t]);
+
+  const handleSaveAndDeploy = useCallback(async () => {
+    if (!isDirty || !localExtensions || !agentId || !currentAgentVer) return;
+
+    await saveAndDeploy({
+      agentId,
+      save: async () => {
+        // 1. Save workflow
+        const wfResult = await updateMutation.mutateAsync({
+          id: id!,
+          version: resolvedVersion,
+          config: { workflowSteps: localExtensions },
+        });
+
+        // Parse new workflow version from location header
+        const wfUrl = new URL(wfResult.location, "http://dummy");
+        const newWfVersion = parseInt(wfUrl.searchParams.get("version") ?? "1", 10);
+        setVersion(newWfVersion);
+        setLocalExtensions(null);
+
+        // 2. Update parent agent's workflow reference
+        const agent = await getAgent(agentId, currentAgentVer);
+        const oldWfUri = `eddi://ai.labs.workflow/workflowstore/workflows/${id}?version=${resolvedVersion}`;
+        const newWfUri = `eddi://ai.labs.workflow/workflowstore/workflows/${id}?version=${newWfVersion}`;
+        const updatedAgent = {
+          ...agent,
+          workflows: (agent.workflows ?? []).map((u) =>
+            u === oldWfUri ? newWfUri : u
+          ),
+        };
+        const agentResult = await updateAgent(agentId, currentAgentVer, updatedAgent);
+        const agentUrl = new URL(agentResult.location, "http://dummy");
+        const newAgentVersion = parseInt(agentUrl.searchParams.get("version") ?? "1", 10);
+        setCurrentAgentVer(newAgentVersion);
+
+        return { newAgentVersion };
+      },
+    });
+  }, [isDirty, localExtensions, updateMutation, id, resolvedVersion, agentId, currentAgentVer, saveAndDeploy]);
+
+  const handleDiscard = useCallback(() => {
+    setLocalExtensions(null);
+  }, []);
+
+  // Parser inline editing handlers
+  const handleEditInline = useCallback(
+    (index: number) => {
+      const ext = currentExtensions[index];
+      if (ext) {
+        setParserEditIndex(index);
+        setParserEditData({
+          config: (ext.config ?? {}) as ParserData["config"],
+          extensions: (ext.extensions ?? {}) as ParserData["extensions"],
+        });
+      }
+    },
+    [currentExtensions]
+  );
+
+  const handleParserSave = useCallback(() => {
+    if (parserEditIndex === null || !parserEditData) return;
+    const updated = [...currentExtensions];
+    const ext = updated[parserEditIndex];
+    if (ext) {
+      updated[parserEditIndex] = {
+        ...ext,
+        config: (parserEditData.config ?? {}) as Record<string, unknown>,
+        extensions: (parserEditData.extensions ?? {}) as Record<string, unknown>,
+      };
+      setLocalExtensions(updated);
+    }
+    setParserEditIndex(null);
+    setParserEditData(null);
+  }, [parserEditIndex, parserEditData, currentExtensions]);
+
+  const handleParserCancel = useCallback(() => {
+    setParserEditIndex(null);
+    setParserEditData(null);
+  }, []);
+
+  function handleDelete() {
+    deleteMutation.mutate(
+      { id: id!, version: resolvedVersion },
+      {
+        onSuccess: () => {
+          toast.success(t("common.delete") + " \u2713");
+          setShowDeleteDialog(false);
+          navigate("/manage/workflows");
+        },
+        onError: (err) => toast.error(getErrorMessage(err)),
+      }
+    );
+  }
+
+  const handleVersionChange = useCallback((v: number) => {
+    setVersion(v);
+    setLocalExtensions(null);
+  }, []);
+
+  /* ─── Loading / Error states ─── */
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-20" data-testid="workflow-loading">
+        <RefreshCw className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (isError || !workflow) {
+    return (
+      <div className="space-y-4">
+        <BackLink />
+        <div className="flex flex-col items-center justify-center rounded-xl border border-destructive/30 bg-destructive/5 py-16">
+          <AlertCircle className="h-12 w-12 text-destructive" />
+          <p className="mt-4 text-lg font-medium text-destructive">
+            {t("common.error")}
+          </p>
+          <button
+            onClick={() => refetch()}
+            className="mt-4 rounded-lg bg-destructive/10 px-4 py-2 text-sm font-medium text-destructive hover:bg-destructive/20"
+          >
+            {t("common.retry")}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="space-y-2">
+          <BackLink />
+          <div className="flex items-center gap-3">
+            <Workflow className="h-8 w-8 text-primary" />
+            <div>
+              <h1 className="text-3xl font-bold text-foreground">
+                {(() => {
+                  const desc = versionDescriptors?.find(d => {
+                    const match = d.resource?.match(/\?version=(\d+)/);
+                    return match ? parseInt(match[1]!, 10) === resolvedVersion : false;
+                  });
+                  return desc?.name || t("packageEditor.title", "Workflow Editor");
+                })()}
+              </h1>
+              <p className="font-mono text-sm text-muted-foreground">
+                {id}
+                <span className="ms-2 inline-flex items-center rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-semibold text-primary">
+                  v{resolvedVersion}
+                </span>
+              </p>
+            </div>
+          </div>
+
+          {/* Version picker */}
+          {versions.length > 0 && (
+            <VersionSelect
+              versions={versions}
+              current={resolvedVersion}
+              onChange={handleVersionChange}
+              disabled={isDirty}
+            />
+          )}
+        </div>
+
+        {/* Actions */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Save feedback */}
+          {saveMessage && (
+            <span
+              className={cn(
+                "text-xs font-medium",
+                saveMessage.type === "success"
+                  ? "text-emerald-600 dark:text-emerald-400"
+                  : "text-destructive"
+              )}
+              data-testid="save-feedback"
+            >
+              {saveMessage.type === "success" ? "✓" : "✕"} {saveMessage.text}
+            </span>
+          )}
+
+          {/* Dirty indicator */}
+          {isDirty && (
+            <span
+              className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900/30 dark:text-amber-400"
+              data-testid="dirty-indicator"
+            >
+              <AlertCircle className="h-3 w-3" />
+              {t("editor.dirty", "Unsaved changes")}
+            </span>
+          )}
+
+          {/* Discard */}
+          <button
+            onClick={handleDiscard}
+            disabled={!isDirty || updateMutation.isPending}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-input px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-all hover:bg-secondary active:scale-[0.98] disabled:opacity-50"
+            data-testid="discard-btn"
+          >
+            <Undo2 className="h-4 w-4" />
+            {t("editor.discard", "Discard")}
+          </button>
+
+          {/* Save */}
+          <button
+            onClick={handleSave}
+            disabled={!isDirty || updateMutation.isPending || isSaveAndDeploying}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 active:scale-[0.98] disabled:opacity-50"
+            data-testid="save-btn"
+          >
+            <Save className="h-4 w-4" />
+            {updateMutation.isPending
+              ? t("editor.saving", "Saving...")
+              : t("editor.save", "Save")}
+          </button>
+
+          {/* Save & Test */}
+          {agentId && agentVer && (
+            <button
+              onClick={handleSaveAndDeploy}
+              disabled={!isDirty || updateMutation.isPending || isSaveAndDeploying}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition-all hover:bg-emerald-700 active:scale-[0.98] disabled:opacity-50 dark:bg-emerald-600 dark:hover:bg-emerald-700"
+              data-testid="save-test-btn"
+            >
+              <Rocket className="h-4 w-4" />
+              {isSaveAndDeploying
+                ? t("editor.deploying", "Deploying…")
+                : t("editor.saveAndTest", "Save & Test")}
+            </button>
+          )}
+
+          {/* Delete */}
+          <button
+            onClick={() => setShowDeleteDialog(true)}
+            className="rounded-lg bg-destructive/10 px-4 py-2 text-sm font-medium text-destructive hover:bg-destructive/20 transition-colors"
+            data-testid="delete-wf-btn"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+
+      {/* Pipeline section */}
+      <section className="rounded-xl border bg-card shadow-sm">
+        <div className="flex items-center justify-between border-b border-border p-5">
+          <div className="flex items-center gap-2">
+            <Workflow className="h-5 w-5 text-primary" />
+            <h2 className="text-lg font-semibold text-foreground">
+              {t("packageEditor.pipeline", "Pipeline")}
+            </h2>
+            <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary" data-testid="pipeline-step-count">
+              {currentExtensions.length}
+            </span>
+          </div>
+          <button
+            onClick={() => setShowAddDialog(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-primary/10 px-3 py-1.5 text-sm font-medium text-primary hover:bg-primary/20 transition-colors"
+            data-testid="add-extension-btn"
+          >
+            <Plus className="h-4 w-4" />
+            {t("packageEditor.addTask", "Add Task")}
+          </button>
+
+        </div>
+
+        <PipelineBuilder
+          items={pipelineItems}
+          onChange={handleReorder}
+          onRemove={handleRemoveExtension}
+          disabled={updateMutation.isPending}
+          workflowId={id}
+          workflowVersion={resolvedVersion}
+          agentId={agentId}
+          agentVer={agentVer}
+          latestVersions={latestVersions}
+          onUpdateVersion={handleUpdateVersion}
+          onEditInline={handleEditInline}
+        />
+      </section>
+
+      {/* Add extension dialog */}
+      <AddExtensionDialog
+        open={showAddDialog}
+        onClose={() => setShowAddDialog(false)}
+        onSelect={handleAddExtension}
+      />
+
+
+      {/* Parser inline editing dialog */}
+      {parserEditIndex !== null && parserEditData && (
+        <ParserDialog
+          data={parserEditData}
+          onChange={setParserEditData}
+          onSave={handleParserSave}
+          onCancel={handleParserCancel}
+        />
+      )}
+
+      {/* Raw config (collapsible) */}
+      <RawConfigSection config={workflow} />
+
+      {/* Delete confirmation dialog */}
+      <AlertDialog
+        open={showDeleteDialog}
+        onOpenChange={setShowDeleteDialog}
+        title={t("packages.confirmDelete", "Delete Workflow")}
+        description={t("packages.confirmDeleteDescription", "This action cannot be undone. The workflow and all its data will be permanently removed.")}
+        confirmLabel={t("common.delete")}
+        cancelLabel={t("common.cancel")}
+        onConfirm={handleDelete}
+        isPending={deleteMutation.isPending}
+      />
+    </div>
+  );
+}
+
+/* ─── Sub-components ─── */
+
+function BackLink() {
+  const { t } = useTranslation();
+  const [searchParams] = useSearchParams();
+  const parentAgentId = searchParams.get("agentId");
+
+  if (parentAgentId) {
+    return (
+      <Link
+        to={`/manage/agentview/${parentAgentId}`}
+        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
+      >
+        <ArrowLeft className="h-4 w-4" />
+        {t("packageDetail.backToAgent", "Back to Agent")}
+      </Link>
+    );
+  }
+
+  return (
+    <Link
+      to="/manage/workflows"
+      className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
+    >
+      <ArrowLeft className="h-4 w-4" />
+      {t("packageDetail.backToWorkflows", "Back to Workflows")}
+    </Link>
+  );
+}
+
+function VersionSelect({
+  versions,
+  current,
+  onChange,
+  disabled,
+}: {
+  versions: { version: number; lastModifiedOn?: number }[];
+  current: number;
+  onChange: (v: number) => void;
+  disabled?: boolean;
+}) {
+  if (versions.length <= 1) {
+    return (
+      <span
+        className="inline-flex items-center gap-1.5 rounded-md bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground"
+        data-testid="version-badge"
+      >
+        v{current}
+      </span>
+    );
+  }
+
+  return (
+    <select
+      value={current}
+      onChange={(e) => onChange(Number(e.target.value))}
+      disabled={disabled}
+      className="rounded-md border border-input bg-background px-2.5 py-1 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1 disabled:opacity-50"
+      data-testid="version-picker"
+    >
+      {versions.map((v) => (
+        <option key={v.version} value={v.version}>
+          v{v.version}
+          {v.lastModifiedOn
+            ? ` — ${formatRelativeTime(v.lastModifiedOn)}`
+            : ""}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+// formatRelativeTime imported from @/lib/utils
+
+function RawConfigSection({
+  config,
+}: {
+  config: { workflowSteps?: WorkflowExtension[] };
+}) {
+  const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <section className="rounded-xl border bg-card shadow-sm">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex w-full items-center justify-between p-5 text-start"
+      >
+        <div className="flex items-center gap-2">
+          <Settings className="h-5 w-5 text-muted-foreground" />
+          <h2 className="text-lg font-semibold text-foreground">
+            {t("packageDetail.rawConfig", "Raw Configuration")}
+          </h2>
+        </div>
+        <span className="text-sm text-muted-foreground">
+          {expanded ? "▲" : "▼"}
+        </span>
+      </button>
+      {expanded && (
+        <div className="border-t border-border p-5">
+          <pre className="overflow-x-auto rounded-lg bg-secondary p-4 text-sm text-foreground">
+            {JSON.stringify(config, null, 2)}
+          </pre>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/* ─── Parser Editing Dialog ─── */
+
+function ParserDialog({
+  data,
+  onChange,
+  onSave,
+  onCancel,
+}: {
+  data: ParserData;
+  onChange: (d: ParserData) => void;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  const { t } = useTranslation();
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  // Auto-focus the dialog panel on mount for keyboard a11y
+  useEffect(() => {
+    dialogRef.current?.focus();
+  }, []);
+
+  // Lock body scroll while dialog is open
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
+
+  // Close on Escape key
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        onCancel();
+      }
+    },
+    [onCancel],
+  );
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      data-testid="parser-edit-dialog"
+      onKeyDown={handleKeyDown}
+    >
+      {/* Backdrop */}
+      <div
+        className="absolute inset-0 bg-black/50 backdrop-blur-sm animate-in fade-in duration-150"
+        onClick={onCancel}
+        aria-hidden="true"
+      />
+
+      {/* Dialog panel */}
+      <div
+        ref={dialogRef}
+        tabIndex={-1}
+        className="relative z-10 w-full max-w-lg max-h-[85vh] overflow-y-auto rounded-xl border border-border bg-card shadow-2xl mx-4 p-5 outline-none animate-in fade-in zoom-in-95 duration-200"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="parser-dialog-title"
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between mb-4">
+          <h3 id="parser-dialog-title" className="text-lg font-semibold text-foreground">
+            {t("parserEditor.title", "Parser Configuration")}
+          </h3>
+          <button
+            onClick={onCancel}
+            className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label={t("common.close", "Close")}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Editor content */}
+        <ParserEditor data={data} onChange={onChange} />
+
+        {/* Footer */}
+        <div className="mt-4 flex items-center justify-end gap-2 border-t border-border pt-4">
+          <button
+            onClick={onCancel}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-input px-4 py-2 text-sm font-medium text-foreground shadow-sm transition-all hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            data-testid="parser-dialog-cancel"
+          >
+            {t("common.cancel", "Cancel")}
+          </button>
+          <button
+            onClick={onSave}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            data-testid="parser-dialog-save"
+          >
+            {t("common.apply", "Apply")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

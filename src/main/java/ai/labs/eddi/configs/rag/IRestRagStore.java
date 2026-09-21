@@ -22,7 +22,7 @@ import java.util.List;
  * JAX-RS interface for RAG (Knowledge Base) configuration store.
  */
 @Path("/ragstore/rags")
-@Tag(name = "RAG Knowledge Bases")
+@Tag(name = "Knowledge / RAG Stores", description = "RAG knowledge base configuration")
 @RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestRagStore extends IRestVersionInfo {
     String resourceBaseType = "eddi://ai.labs.rag";

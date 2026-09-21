@@ -9,7 +9,10 @@ import dev.langchain4j.model.jlama.JlamaChatModel;
 import jakarta.enterprise.context.ApplicationScoped;
 
 import java.util.Map;
+import java.util.Set;
 
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyDouble;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyInt;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 @ApplicationScoped
@@ -18,6 +21,11 @@ public class JlamaLanguageModelBuilder implements ILanguageModelBuilder {
     private static final String KEY_AUTH_TOKEN = "authToken";
     private static final String KEY_TEMPERATURE = "temperature";
     private static final String KEY_MAX_TOKENS = "maxTokens";
+
+    @Override
+    public Set<String> recognisedParameters() {
+        return Set.of(KEY_MODEL_NAME, KEY_AUTH_TOKEN, KEY_TEMPERATURE, KEY_MAX_TOKENS);
+    }
 
     @Override
     public ChatModel build(Map<String, String> parameters) {
@@ -31,13 +39,12 @@ public class JlamaLanguageModelBuilder implements ILanguageModelBuilder {
             builder.authToken(parameters.get(KEY_AUTH_TOKEN));
         }
 
-        if (!isNullOrEmpty(parameters.get(KEY_TEMPERATURE))) {
-            builder.temperature(Float.parseFloat(parameters.get(KEY_TEMPERATURE)));
-        }
+        // Parsed as a double and narrowed: this setter takes a float, and a separate
+        // float helper would buy nothing — every value a float accepts, a double
+        // accepts too.
+        applyDouble(parameters, KEY_TEMPERATURE, temperature -> builder.temperature((float) temperature));
 
-        if (!isNullOrEmpty(parameters.get(KEY_MAX_TOKENS))) {
-            builder.maxTokens(Integer.parseInt(parameters.get(KEY_MAX_TOKENS)));
-        }
+        applyInt(parameters, KEY_MAX_TOKENS, builder::maxTokens);
 
         return builder.build();
     }

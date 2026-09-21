@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Tracks tool calls made during agent execution for debugging, logging, and
@@ -194,15 +195,15 @@ public class ToolExecutionTrace {
             if (o == null || getClass() != o.getClass())
                 return false;
             ToolCall that = (ToolCall) o;
-            return java.util.Objects.equals(toolName, that.toolName) && java.util.Objects.equals(arguments, that.arguments)
-                    && java.util.Objects.equals(result, that.result) && executionTimeMs == that.executionTimeMs
-                    && java.util.Objects.equals(error, that.error) && success == that.success && Double.compare(that.cost, cost) == 0
+            return Objects.equals(toolName, that.toolName) && Objects.equals(arguments, that.arguments)
+                    && Objects.equals(result, that.result) && executionTimeMs == that.executionTimeMs
+                    && Objects.equals(error, that.error) && success == that.success && Double.compare(that.cost, cost) == 0
                     && fromCache == that.fromCache && timestamp == that.timestamp;
         }
 
         @Override
         public int hashCode() {
-            return java.util.Objects.hash(toolName, arguments, result, executionTimeMs, error, success, cost, fromCache, timestamp);
+            return Objects.hash(toolName, arguments, result, executionTimeMs, error, success, cost, fromCache, timestamp);
         }
 
         @Override
@@ -333,7 +334,7 @@ public class ToolExecutionTrace {
             if (o == null || getClass() != o.getClass())
                 return false;
             ToolMetrics that = (ToolMetrics) o;
-            return java.util.Objects.equals(toolName, that.toolName) && totalCalls == that.totalCalls && successfulCalls == that.successfulCalls
+            return Objects.equals(toolName, that.toolName) && totalCalls == that.totalCalls && successfulCalls == that.successfulCalls
                     && failedCalls == that.failedCalls && totalExecutionTimeMs == that.totalExecutionTimeMs
                     && minExecutionTimeMs == that.minExecutionTimeMs && maxExecutionTimeMs == that.maxExecutionTimeMs
                     && Double.compare(that.totalCost, totalCost) == 0 && cacheHits == that.cacheHits;
@@ -341,7 +342,7 @@ public class ToolExecutionTrace {
 
         @Override
         public int hashCode() {
-            return java.util.Objects.hash(toolName, totalCalls, successfulCalls, failedCalls, totalExecutionTimeMs, minExecutionTimeMs,
+            return Objects.hash(toolName, totalCalls, successfulCalls, failedCalls, totalExecutionTimeMs, minExecutionTimeMs,
                     maxExecutionTimeMs, totalCost, cacheHits);
         }
 
@@ -354,9 +355,21 @@ public class ToolExecutionTrace {
     }
 
     /**
-     * Add a successful tool call to the trace
+     * Add a successful tool call to the trace.
+     *
+     * <p>
+     * {@code synchronized} because a trace instance is a shared mutable accumulator
+     * with no ownership guarantee: it is created per agent turn and handed to
+     * whatever records into it. The class publishes no happens-before edge of its
+     * own, so without this the backing ArrayList/HashMap and the primitive
+     * accumulators would race under any concurrent writer — most visibly
+     * HashMap.computeIfAbsent in {@link #updateMetrics} throwing a
+     * ConcurrentModificationException. Today's tool loop writes from one thread at
+     * a time, so this is defensive rather than load-bearing; keep it, because the
+     * cost is nil and the failure mode is silent corruption of an audit artefact.
+     * </p>
      */
-    public void addToolCall(String toolName, String arguments, String result, long executionTimeMs, double cost, boolean fromCache) {
+    public synchronized void addToolCall(String toolName, String arguments, String result, long executionTimeMs, double cost, boolean fromCache) {
         ToolCall call = new ToolCall();
         call.setToolName(toolName);
         call.setArguments(arguments);
@@ -381,9 +394,11 @@ public class ToolExecutionTrace {
     }
 
     /**
-     * Add a failed tool call to the trace
+     * Add a failed tool call to the trace. {@code synchronized} for the same reason
+     * as {@link #addToolCall} — it is the other writer into the same shared mutable
+     * state.
      */
-    public void addFailedToolCall(String toolName, String arguments, String error, long executionTimeMs, double cost) {
+    public synchronized void addFailedToolCall(String toolName, String arguments, String error, long executionTimeMs, double cost) {
         ToolCall call = new ToolCall();
         call.setToolName(toolName);
         call.setArguments(arguments);
@@ -511,14 +526,14 @@ public class ToolExecutionTrace {
         if (o == null || getClass() != o.getClass())
             return false;
         ToolExecutionTrace that = (ToolExecutionTrace) o;
-        return java.util.Objects.equals(toolCalls, that.toolCalls) && totalExecutionTimeMs == that.totalExecutionTimeMs && hasErrors == that.hasErrors
+        return Objects.equals(toolCalls, that.toolCalls) && totalExecutionTimeMs == that.totalExecutionTimeMs && hasErrors == that.hasErrors
                 && Double.compare(that.totalCost, totalCost) == 0 && cacheHits == that.cacheHits && cacheMisses == that.cacheMisses
-                && java.util.Objects.equals(toolMetrics, that.toolMetrics);
+                && Objects.equals(toolMetrics, that.toolMetrics);
     }
 
     @Override
     public int hashCode() {
-        return java.util.Objects.hash(toolCalls, totalExecutionTimeMs, hasErrors, totalCost, cacheHits, cacheMisses, toolMetrics);
+        return Objects.hash(toolCalls, totalExecutionTimeMs, hasErrors, totalCost, cacheHits, cacheMisses, toolMetrics);
     }
 
     @Override

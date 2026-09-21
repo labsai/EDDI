@@ -5,9 +5,11 @@
 package ai.labs.eddi.modules.output;
 
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
+import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.TestMemoryFactory;
 import ai.labs.eddi.engine.TestMemoryFactory.MemoryContext;
 import ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException;
+import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IDataFactory;
 import ai.labs.eddi.engine.memory.model.Data;
@@ -150,8 +152,8 @@ class OutputGenerationTaskBranchTest {
         void matchingLanguageProcesses() {
             MemoryContext ctx = TestMemoryFactory.createWithActions(List.of("greet"));
             ctx.conversationProperties().put("lang",
-                    new ai.labs.eddi.configs.properties.model.Property("lang", "en",
-                            ai.labs.eddi.configs.properties.model.Property.Scope.longTerm));
+                    new Property("lang", "en",
+                            Property.Scope.longTerm));
 
             IOutputGeneration outputGen = mock(IOutputGeneration.class);
             when(outputGen.getLanguage()).thenReturn("en");
@@ -172,8 +174,8 @@ class OutputGenerationTaskBranchTest {
         void mismatchingLanguageSkips() {
             MemoryContext ctx = TestMemoryFactory.createWithActions(List.of("greet"));
             ctx.conversationProperties().put("lang",
-                    new ai.labs.eddi.configs.properties.model.Property("lang", "de",
-                            ai.labs.eddi.configs.properties.model.Property.Scope.longTerm));
+                    new Property("lang", "de",
+                            Property.Scope.longTerm));
 
             IOutputGeneration outputGen = mock(IOutputGeneration.class);
             when(outputGen.getLanguage()).thenReturn("en");
@@ -214,7 +216,7 @@ class OutputGenerationTaskBranchTest {
         void nullLatestDataInPreviousStep() {
             MemoryContext ctx = TestMemoryFactory.createWithActions(List.of("greet"));
             // Add previous step but with null actions data
-            var prevStep = mock(ai.labs.eddi.engine.memory.IConversationMemory.IConversationStep.class);
+            var prevStep = mock(IConversationMemory.IConversationStep.class);
             when(prevStep.getLatestData(eq("actions"))).thenReturn(null);
             when(ctx.previousSteps().size()).thenReturn(1);
             when(ctx.previousSteps().get(eq(0))).thenReturn(prevStep);

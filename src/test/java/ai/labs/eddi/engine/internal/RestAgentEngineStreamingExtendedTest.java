@@ -10,6 +10,8 @@ import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.security.ConversationAccessGuard;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.ws.rs.sse.OutboundSseEvent;
 import jakarta.ws.rs.sse.Sse;
 import jakarta.ws.rs.sse.SseEventSink;
@@ -32,7 +34,10 @@ import static org.mockito.Mockito.*;
  */
 class RestAgentEngineStreamingExtendedTest {
 
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
     private IConversationService conversationService;
+    private ConversationAccessGuard conversationAccessGuard;
     private RestAgentEngineStreaming streaming;
     private SseEventSink eventSink;
     private Sse sse;
@@ -41,7 +46,8 @@ class RestAgentEngineStreamingExtendedTest {
     @BeforeEach
     void setUp() {
         conversationService = mock(IConversationService.class);
-        streaming = new RestAgentEngineStreaming(conversationService);
+        conversationAccessGuard = mock(ConversationAccessGuard.class);
+        streaming = new RestAgentEngineStreaming(conversationService, conversationAccessGuard);
         eventSink = mock(SseEventSink.class);
         sse = mock(Sse.class);
         eventBuilder = mock(OutboundSseEvent.Builder.class);
@@ -114,18 +120,32 @@ class RestAgentEngineStreamingExtendedTest {
         }
 
         @Test
-        @DisplayName("onTaskComplete includes toolTrace in event")
+        @DisplayName("onTaskComplete emits toolTrace as a JSON array of trace entries")
         void onTaskCompleteIncludesToolTrace() throws Exception {
             invokeSayStreaming();
             var handler = captureHandler();
 
             handler.onTaskComplete(new TaskId("task-1"), "LlmTask", 200L,
-                    Map.of("toolTrace", List.of(Map.of("tool", "weather", "duration", 100))));
+                    Map.of("toolTrace", List.of(
+                            Map.of("type", "tool_call", "tool", "weather", "arguments", "{\"city\":\"Vienna\"}"),
+                            Map.of("type", "tool_result", "tool", "weather", "result", "18C, clear"))));
 
             var dataCaptor = ArgumentCaptor.forClass(String.class);
             verify(eventBuilder).data(eq(String.class), dataCaptor.capture());
-            String data = dataCaptor.getValue();
-            assertTrue(data.contains("toolTrace"));
+
+            // Parse the frame instead of substring-matching: a raw `contains("toolTrace")`
+            // also passes on malformed JSON or a stringified payload.
+            var node = MAPPER.readTree(dataCaptor.getValue());
+            assertEquals("eddi://task-1", node.get("taskId").asText());
+            var trace = node.get("toolTrace");
+            assertNotNull(trace, "task_complete frame must carry a toolTrace field");
+            assertTrue(trace.isArray(), "toolTrace must be a JSON array, not a string");
+            assertEquals(2, trace.size());
+            assertEquals("tool_call", trace.get(0).get("type").asText());
+            assertEquals("weather", trace.get(0).get("tool").asText());
+            assertEquals("{\"city\":\"Vienna\"}", trace.get(0).get("arguments").asText());
+            assertEquals("tool_result", trace.get(1).get("type").asText());
+            assertEquals("18C, clear", trace.get(1).get("result").asText());
         }
 
         @Test
@@ -153,7 +173,12 @@ class RestAgentEngineStreamingExtendedTest {
             handler.onToken("Hello");
 
             verify(eventBuilder).name("token");
-            verify(eventBuilder).data(eq(String.class), eq("Hello"));
+            // Payloads go out with one space per line prepended: RESTEasy writes
+            // "data:" with no separator, and every consumer strips one leading
+            // space, so an unpadded token beginning with a space arrived one short
+            // — which broke Markdown list markers ("-" + " alpha" -> "-alpha").
+            // See RestAgentEngineStreaming#padDataLines.
+            verify(eventBuilder).data(eq(String.class), eq(" Hello"));
         }
 
         @Test
@@ -202,18 +227,25 @@ class RestAgentEngineStreamingExtendedTest {
             verify(eventSink).close();
         }
 
+        /**
+         * A12: the error frame is a fixed message plus a correlation id — the raw
+         * exception text never reaches the client, so it cannot carry quotes, newlines
+         * or (the actual concern) deployment internals into the stream.
+         */
         @Test
-        @DisplayName("onError escapes special characters in error message")
-        void onErrorEscapesMessage() throws Exception {
+        @DisplayName("onError does not echo the exception message into the stream")
+        void onErrorDoesNotEchoTheExceptionMessage() throws Exception {
             invokeSayStreaming();
             var handler = captureHandler();
 
-            handler.onError(new RuntimeException("Error with \"quotes\" and\nnewlines"));
+            handler.onError(new RuntimeException("Error with \"quotes\" and\nnewlines on host mongo-3.internal"));
 
             var dataCaptor = ArgumentCaptor.forClass(String.class);
             verify(eventBuilder).data(eq(String.class), dataCaptor.capture());
             String data = dataCaptor.getValue();
-            assertFalse(data.contains("\n")); // newline should be escaped
+            assertFalse(data.contains("\n")); // must never break the SSE framing
+            assertFalse(data.contains("mongo-3.internal"), "the raw exception text must not reach the client");
+            assertTrue(data.contains("correlationId"));
         }
     }
 

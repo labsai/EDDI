@@ -127,6 +127,22 @@ class ConversationMemoryUtilitiesTest {
             assertEquals(5, restored.getAgentVersion());
             assertEquals("user-42", restored.getUserId());
         }
+
+        /**
+         * F6/N3: the snapshot field initialiser is the LEGACY sentinel so key-less
+         * stored documents read as legacy — a snapshot built from live memory is
+         * current-shaped by definition and must be stamped so explicitly here.
+         */
+        @Test
+        @DisplayName("a snapshot built from live memory is stamped with the current schema version")
+        void stampsCurrentSchemaVersion() {
+            var memory = new ConversationMemory("conv-id", "agent-1", 5, "user-42");
+
+            var snapshot = ConversationMemoryUtilities.convertConversationMemory(memory);
+
+            assertEquals(ConversationMemorySnapshot.CURRENT_SCHEMA_VERSION, snapshot.getSchemaVersion(),
+                    "a freshly built snapshot must claim current — the initialiser deliberately claims legacy");
+        }
     }
 
     // ─── convertSimpleConversationMemory ─────────────────────────
@@ -215,6 +231,36 @@ class ConversationMemoryUtilitiesTest {
             assertNotNull(simple.getConversationSteps());
             assertNotNull(simple.getConversationOutputs());
             assertNotNull(simple.getConversationProperties());
+        }
+
+        /**
+         * A present-but-empty query parameter ({@code ?returningFields=}) binds as
+         * {@code [""]}, and LLM-generated tools make that shape routine: every
+         * generated parameter is required, so a model with no filter to express sends
+         * the empty string. Treating {@code [""]} as a selection nulled steps, outputs
+         * AND properties — the operator's test-drive read-back returned a snapshot with
+         * nothing to quote, so a working agent looked broken. Blank entries mean NO
+         * filter.
+         */
+        @Test
+        @DisplayName("a blank entry means NO filter, not 'select nothing'")
+        void blankEntryMeansNoFilter() {
+            var snapshot = buildMultiStepSnapshot(2);
+            var simple = ConversationMemoryUtilities.convertSimpleConversationMemorySnapshot(
+                    snapshot, true, true, List.of(""));
+            assertNotNull(simple.getConversationSteps(), "[\"\"] must behave like no filter");
+            assertNotNull(simple.getConversationOutputs());
+            assertNotNull(simple.getConversationProperties());
+        }
+
+        @Test
+        @DisplayName("blank entries are dropped, real entries still filter")
+        void blankBesideRealEntryStillFilters() {
+            var snapshot = buildMultiStepSnapshot(2);
+            var simple = ConversationMemoryUtilities.convertSimpleConversationMemorySnapshot(
+                    snapshot, true, true, List.of("", "conversationOutputs", "  "));
+            assertNull(simple.getConversationSteps(), "the real entry keeps filtering");
+            assertNotNull(simple.getConversationOutputs());
         }
     }
 

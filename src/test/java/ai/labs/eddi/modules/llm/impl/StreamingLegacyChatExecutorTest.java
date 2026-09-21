@@ -76,12 +76,14 @@ class StreamingLegacyChatExecutorTest {
     }
 
     @Test
-    @DisplayName("Should propagate streaming errors as RuntimeException")
+    @DisplayName("Should propagate streaming errors as RuntimeException when nothing was streamed")
     void execute_error_throwsRuntimeException() {
+        // An error only propagates when no content arrived. If tokens were already
+        // streamed, the partial text is returned with a streaming_error_partial
+        // warning instead of throwing.
         StreamingChatModel streamingModel = new StreamingChatModel() {
             @Override
             public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
-                handler.onPartialResponse("partial");
                 handler.onError(new RuntimeException("LLM connection failed"));
             }
         };
@@ -90,6 +92,23 @@ class StreamingLegacyChatExecutorTest {
                 () -> executor.execute(streamingModel, List.of(UserMessage.from("Hi")), eventSink));
 
         assertTrue(ex.getMessage().contains("Streaming chat failed"));
+        verify(eventSink, never()).onToken(anyString());
+    }
+
+    @Test
+    @DisplayName("Should return partial content when streaming errors after tokens were emitted")
+    void execute_errorAfterPartial_returnsPartialContent() {
+        StreamingChatModel streamingModel = new StreamingChatModel() {
+            @Override
+            public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+                handler.onPartialResponse("partial");
+                handler.onError(new RuntimeException("LLM connection failed"));
+            }
+        };
+
+        String result = executor.execute(streamingModel, List.of(UserMessage.from("Hi")), eventSink);
+
+        assertEquals("partial", result);
         verify(eventSink).onToken("partial");
     }
 

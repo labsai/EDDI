@@ -7,37 +7,43 @@
   ╚══════╝╚═════╝ ╚═════╝ ╚═╝
   Multi-Agent AI Orchestration Middleware
 
-{{- if not .Values.eddi.vaultMasterKey }}
+  ✅ Vault master key is configured.
+     (The chart cannot render without it — see eddi.vaultMasterKey.)
+     ⚠️  Save it! If lost, encrypted secrets are UNRECOVERABLE.
+     It reaches the pod as a FILE at
+     /etc/eddi/secrets/application-secrets.properties, never as an env var.
 
-  ⚠️  WARNING: Vault master key is not set!
-  EDDI will start but secret encryption is DISABLED.
-  Set it with:
+  🔏 Verify the image you just deployed
 
-    helm upgrade {{ .Release.Name }} ./helm/eddi \
-      --set eddi.vaultMasterKey="$(openssl rand -base64 24)" \
-      --namespace {{ .Release.Namespace }}
+     Images are cosign-signed (keyless OIDC) and carry a SLSA provenance
+     attestation. Verify before trusting a rollout:
 
-  ⚠️  Save this key! If lost, encrypted secrets are UNRECOVERABLE.
+       cosign verify \
+         --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+         --certificate-identity-regexp '^https://github\.com/labsai/EDDI/\.github/workflows/ci\.yml@refs/(heads/main|tags/.+)$' \
+         {{ .Values.eddi.image.repository }}:{{ .Values.eddi.image.tag }}
+{{- if not .Values.eddi.image.digest }}
 
+     Then pin the digest, so the kubelet can never pull different bits under
+     the same tag:
+
+       crane digest {{ .Values.eddi.image.repository }}:{{ .Values.eddi.image.tag }}
+       helm upgrade {{ .Release.Name }} ./helm/eddi \
+         --set eddi.image.digest="sha256:..." \
+         --namespace {{ .Release.Namespace }}
 {{- else }}
 
-  ✅ Vault master key is configured.
-
+     Deployed digest: {{ .Values.eddi.image.digest }}
 {{- end }}
 
   📡 Access EDDI:
 
-    kubectl port-forward svc/{{ include "eddi.fullname" . }} 7070:7070 -n {{ .Release.Namespace }}
-    open http://localhost:7070
+    kubectl port-forward svc/{{ include "eddi.fullname" . }} {{ .Values.eddi.service.port }}:{{ .Values.eddi.service.port }} -n {{ .Release.Namespace }}
+    open http://localhost:{{ .Values.eddi.service.port }}
 
-{{- if .Values.manager.enabled }}
+  🖥️  The Manager UI is served by EDDI itself:
 
-  🖥️  Access Manager UI:
-
-    kubectl port-forward svc/{{ include "eddi.fullname" . }}-manager 7071:7071 -n {{ .Release.Namespace }}
-    open http://localhost:7071
-
-{{- end }}
+    open http://localhost:{{ .Values.eddi.service.port }}/manage
 
 {{- if .Values.keycloak.enabled }}
 
@@ -45,14 +51,31 @@
 
     kubectl port-forward svc/{{ include "eddi.fullname" . }}-keycloak 8080:8080 -n {{ .Release.Namespace }}
     open http://localhost:8080
-    Login: {{ .Values.keycloak.adminUsername }} / {{ .Values.keycloak.adminPassword }}
+    Username: {{ .Values.keycloak.adminUsername }}
+    Password: the value you passed as keycloak.adminPassword — deliberately not
+              echoed here, since install output lands in shell history, CI logs
+              and terminal scrollback.
+
+  👤 Give the EDDI administrator a password — it ships without one:
+
+    The realm seeds `eddi` with the eddi-admin and eddi-editor roles and NO
+    credential, so nobody can log in to /manage until you set one. It used to
+    ship as eddi/eddi, which the Keycloak Service made a guessable EDDI
+    administrator for every pod in the cluster.
+
+      Keycloak admin console → Users → eddi → Credentials → Set password
+
+    Or grant those two realm roles to an account of your own. The unprivileged
+    fixtures (viewer/viewer, user/user) still log straight in.
 
 {{- end }}
 
   📊 Components:
-    Database:    {{ if .Values.mongodb.enabled }}MongoDB{{ else if .Values.postgres.enabled }}PostgreSQL{{ else }}None (external){{ end }}
-    Messaging:   {{ .Values.eddi.messagingType }}
-    Auth (OIDC): {{ if .Values.eddi.oidc.enabled }}Enabled{{ else }}Disabled{{ end }}
-    Autoscaling: {{ if .Values.autoscaling.enabled }}Enabled ({{ .Values.autoscaling.minReplicas }}-{{ .Values.autoscaling.maxReplicas }} replicas){{ else }}Disabled{{ end }}
+    Database:      {{ if .Values.mongodb.enabled }}MongoDB (in-chart){{ else if .Values.postgres.enabled }}PostgreSQL (in-chart){{ else if .Values.eddi.datastore.externalConnectionString }}MongoDB (external){{ else }}PostgreSQL (external){{ end }}
+    Messaging:     {{ include "eddi.messagingType" . }}
+    Auth (OIDC):   {{ if .Values.eddi.oidc.enabled }}Enabled{{ else }}Disabled{{ end }}
+    Replicas:      {{ .Values.eddi.replicas }} (fixed — EDDI is single-writer per
+                   conversation; see eddi.replicas in values.yaml)
+    NetworkPolicy: {{ if .Values.networkPolicy.enabled }}Enabled{{ else }}Disabled{{ end }}
 
   📖 Full docs: https://github.com/labsai/EDDI/blob/main/docs/kubernetes.md

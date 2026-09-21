@@ -22,6 +22,7 @@ import ai.labs.eddi.modules.properties.impl.PropertySetterTask;
 import ai.labs.eddi.modules.properties.model.SetOnActions;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.configs.properties.model.PropertyInstruction;
+import ai.labs.eddi.secrets.ISecretProvider;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -62,7 +63,7 @@ public class PropertySetterTaskTest {
     private IExpressionProvider expressionProvider;
     private IMemoryItemConverter memoryItemConverter;
     private ITemplatingEngine templateEngine;
-    private ai.labs.eddi.secrets.ISecretProvider secretProvider;
+    private ISecretProvider secretProvider;
     private ConversationProperties conversationProperties;
     private Expressions expressions;
 
@@ -89,7 +90,7 @@ public class PropertySetterTaskTest {
         memoryItemConverter = mock(IMemoryItemConverter.class);
         templateEngine = mock(ITemplatingEngine.class);
         IResourceClientLibrary resourceClientLibrary = mock(IResourceClientLibrary.class);
-        secretProvider = mock(ai.labs.eddi.secrets.ISecretProvider.class);
+        secretProvider = mock(ISecretProvider.class);
 
         conversationProperties = new ConversationProperties(conversationMemory);
         when(conversationMemory.getConversationProperties()).thenReturn(conversationProperties);

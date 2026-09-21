@@ -54,8 +54,8 @@ import java.util.Map;
  * actions</li>
  * <li><strong>Property Extraction</strong>: Extract and store data in
  * conversation memory</li>
- * <li><strong>HTTP Calls</strong>: Call external REST APIs</li>
- * <li><strong>LangChain</strong>: Invoke LLM services (OpenAI, Claude, Gemini,
+ * <li><strong>API Calls</strong>: Call external REST APIs</li>
+ * <li><strong>LLM</strong>: Invoke LLM services (OpenAI, Claude, Gemini,
  * etc.)</li>
  * <li><strong>Output Generation</strong>: Format responses using templates</li>
  * </ul>

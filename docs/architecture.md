@@ -1,6 +1,6 @@
 # EDDI Architecture
 
-**Version: 6.0.0**
+[![Version](https://img.shields.io/github/v/release/labsai/EDDI?label=version&color=blue)](https://github.com/labsai/EDDI/releases)
 
 This document provides a comprehensive overview of EDDI's architecture, design principles, and internal workflow.
 
@@ -53,7 +53,7 @@ E.D.D.I. (Enhanced Dialog Driven Interface) is a **multi-agent orchestration mid
 EDDI's architecture is built on several key principles:
 
 1. **Modularity**: Every component is pluggable and replaceable
-2. **Composability**: Agents are assembled from reusable packages and extensions
+2. **Composability**: Agents are assembled from reusable workflows and extensions
 3. **Asynchronous Processing**: Non-blocking I/O for handling concurrent conversations
 4. **State-Driven**: All operations transform or query the conversation state
 5. **Cloud-Native**: Designed for containerized, distributed deployments
@@ -232,14 +232,14 @@ EDDI agents are **not monolithic**. They are **composite objects** assembled fro
 
 ```
 Agent (.agent.json)
-  ├─ Workflow 1 (.package.json)
+  ├─ Workflow 1 (.workflow.json)
   │   ├─ Behavior Rules Extension (.behavior.json)
   │   ├─ HTTP Calls Extension (.httpcalls.json)
   │   └─ Output Extension (.output.json)
-  ├─ Workflow 2 (.package.json)
+  ├─ Workflow 2 (.workflow.json)
   │   ├─ Dictionary Extension (.dictionary.json)
   │   └─ LangChain Extension (.langchain.json)
-  └─ Workflow 3 (.package.json)
+  └─ Workflow 3 (.workflow.json)
       └─ Property Extension (.property.json)
 ```
 
@@ -247,39 +247,37 @@ Agent (.agent.json)
 
 **File**: `{agentId}.agent.json`
 
-A agent is simply a **list of package references**:
+A agent is simply a **list of workflow references**:
 
 ```json
 {
-  "packages": [
-    "eddi://ai.labs.package/packagestore/packages/{workflowId}?version={version}",
-    "eddi://ai.labs.package/packagestore/packages/{anotherWorkflowId}?version={version}"
+  "workflows": [
+    "eddi://ai.labs.workflow/workflowstore/workflows/{workflowId}?version={version}",
+    "eddi://ai.labs.workflow/workflowstore/workflows/{anotherWorkflowId}?version={version}"
   ]
 }
 ```
 
 ### 2. Workflow Level
 
-**File**: `{workflowId}.package.json`
+**File**: `{workflowId}.workflow.json`
 
-A package is a **container of functionality** with a list of extensions:
+A workflow is a **container of functionality** with a list of steps:
 
 ```json
 {
-  "packageExtensions": [
+  "workflowSteps": [
     {
-      "type": "eddi://ai.labs.behavior",
-      "extensions": {
-        "uri": "eddi://ai.labs.behavior/behaviorstore/behaviorsets/{behaviorId}?version={version}"
-      },
+      "type": "eddi://ai.labs.rules",
       "config": {
+        "uri": "eddi://ai.labs.rules/rulestore/rulesets/{behaviorId}?version={version}",
         "appendActions": true
       }
     },
     {
-      "type": "eddi://ai.labs.httpcalls",
-      "extensions": {
-        "uri": "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/{httpCallsId}?version={version}"
+      "type": "eddi://ai.labs.apicalls",
+      "config": {
+        "uri": "eddi://ai.labs.apicalls/apicallstore/apicalls/{httpCallsId}?version={version}"
       }
     }
   ]
@@ -330,7 +328,7 @@ Extensions are the **actual agent logic**:
       "actions": ["fetch_weather"],
       "request": {
         "method": "GET",
-        "path": "/current?location=${context.userLocation}"
+        "path": "/current?location={context.userLocation}"
       },
       "postResponse": {
         "propertyInstructions": [
@@ -373,9 +371,9 @@ When adding a new feature, use this guide to decide where configuration belongs:
 
 | Question | Config Level | Example |
 |---|---|---|
-| Does it affect the entire agent across all conversations? | **Agent level** (`AgentConfiguration`) | `enableMemoryTools`, `enableStreaming` |
+| Does it affect the entire agent across all conversations? | **Agent level** (`AgentConfiguration`) | `enableMemoryTools`, `a2aEnabled` |
 | Does it control how a pipeline step behaves? | **Extension level** (e.g., `langchain.json`, `property.json`) | LLM parameters, property instructions |
-| Does it define which extensions run and in what order? | **Workflow level** (`package.json`) | Extension types and URIs |
+| Does it define which extensions run and in what order? | **Workflow level** (`workflow.json`) | Extension types and URIs |
 | Is it a user-facing runtime setting? | **Agent level** | User memory config, audit settings |
 | Is it a tool/capability the LLM can use? | **Extension level** (in `langchain.json`) | `builtInToolsWhitelist` |
 
@@ -401,7 +399,7 @@ When adding a new feature, use this guide to decide where configuration belongs:
 
 ### ConversationCoordinator
 
-**Location**: `ai.labs.eddi.engine.runtime.internal.ConversationCoordinator`
+**Location**: `ai.labs.eddi.engine.runtime.IConversationCoordinator`, implemented by `InMemoryConversationCoordinator` and `NatsConversationCoordinator` in `ai.labs.eddi.engine.runtime.internal` (which one is active depends on deployment configuration)
 
 **Purpose**: Ensures proper message ordering and concurrency control
 
@@ -461,17 +459,17 @@ void executeLifecycle(
 
 ### WorkflowConfiguration
 
-**Location**: `ai.labs.eddi.configs.packages.model.WorkflowConfiguration`
+**Location**: `ai.labs.eddi.configs.workflows.model.WorkflowConfiguration`
 
-**Purpose**: Defines the structure of an agent package
+**Purpose**: Defines the structure of an agent workflow
 
 **Model**:
 
 ```java
 public class WorkflowConfiguration {
-    private List<WorkflowExtension> packageExtensions;
+    private List<WorkflowStep> workflowSteps;
 
-    public static class WorkflowExtension {
+    public static class WorkflowStep {
         private URI type;
         private Map<String, Object> extensions;
         private Map<String, Object> config;
@@ -481,7 +479,7 @@ public class WorkflowConfiguration {
 
 ### ToolExecutionService
 
-**Location**: `ai.labs.eddi.modules.langchain.tools.ToolExecutionService`
+**Location**: `ai.labs.eddi.modules.llm.tools.ToolExecutionService`
 
 **Purpose**: Unified execution pipeline for all AI agent tool invocations
 
@@ -528,7 +526,7 @@ The attachment subsystem handles binary file storage for multimodal conversation
 |-----------|---------|
 | **`IAttachmentStore`** | Interface for storing/loading binary attachments (GridFS for MongoDB, BLOB for PostgreSQL) |
 | **`MimeValidator`** | Magic-byte detection (16+ formats) and declared-vs-detected MIME compatibility checking |
-| **`MultimodalMessageEnhancer`** | Converts stored attachments into langchain4j `Content` objects (images → `ImageContent` via base64 data URI, others → text markers) |
+| **`AttachmentForwarder`** (`modules.llm.impl`) | The single place attachments become langchain4j `Content` on the outgoing user message. Resolves bytes from any source under uniform per-file/aggregate caps, gates on `ModelCapabilityService`, and emits `ImageContent` / native `PdfFileContent` / `AudioContent` / inlined text as the model allows — see [attachments-guide.md](attachments-guide.md#llm-multimodal-support) |
 
 ---
 
@@ -622,13 +620,13 @@ The attachment subsystem handles binary file storage for multimodal conversation
 
 ### 4. Repository Pattern
 
-- **Where**: Data access (stores: agentstore, packagestore, etc.)
+- **Where**: Data access (stores: agentstore, workflowstore, etc.)
 - **Why**: Abstracts data persistence from business logic
 
 ### 5. Factory Pattern
 
 - **Where**: `IAgentFactory`
-- **Why**: Complex agent instantiation from multiple packages and configurations
+- **Why**: Complex agent instantiation from multiple workflows and configurations
 
 ### 6. Coordinator Pattern
 
@@ -658,7 +656,7 @@ The attachment subsystem handles binary file storage for multimodal conversation
 
 - **Vertical**: Handles thousands of concurrent conversations per instance
 - **Horizontal**: Stateless design allows infinite horizontal scaling
-- **Agenttleneck**: MongoDB becomes agenttleneck; use replica sets and sharding
+- **Bottleneck**: MongoDB becomes the bottleneck; use replica sets and sharding
 
 ---
 
@@ -690,63 +688,32 @@ The attachment subsystem handles binary file storage for multimodal conversation
 
 ---
 
-## Case Study: The "Agent Father"
+## Case Study: The Platform Operator
 
-The **Agent Father** is a meta-agent that demonstrates EDDI's architecture in action. It's an agent that creates other agents.
+The **Platform Operator** is a meta-agent that demonstrates EDDI's architecture in action: an agent that reads and operates the deployment it runs inside — including creating other agents.
 
-> **For a comprehensive, step-by-step walkthrough of Agent Father, see [Agent Father: A Deep Dive](agent-father-deep-dive.md)**
+It is provisioned by EDDI-Manager (at `/manage/operator`) through `POST /administration/agents/setup-api`, which is the same OpenAPI-to-agent path any user can call.
 
 ### How It Works
 
-1. **Conversation Start**: User starts chat with Agent Father
-2. **Information Gathering**: Agent Father asks questions:
-   - "What do you want to call your agent?"
-   - "What should it do?"
-   - "Which LLM API should it use?"
-3. **Memory Storage**: Property setters save answers to conversation memory:
-   - `context.agentName`
-   - `context.agentDescription`
-   - `context.llmType`
-4. **Condition Triggers**: Behavior rule monitors memory:
-   ```json
-   {
-     "conditions": [
-       {
-         "type": "contextmatcher",
-         "configs": {
-           "contextKey": "agentName",
-           "contextType": "string"
-         }
-       }
-     ],
-     "actions": ["httpcall(create-agent)"]
-   }
-   ```
-5. **API Call Execution**: HTTP Calls extension triggers:
-   ```json
-   {
-     "name": "create-agent",
-     "request": {
-       "method": "POST",
-       "path": "/agentstore/agents",
-       "body": "{\"agentName\": \"${context.agentName}\"}"
-     }
-   }
-   ```
-6. **Self-Modification**: Agent Father calls EDDI's own API to create a new agent configuration
+1. **Tool generation**: the Manager fetches EDDI's own OpenAPI spec and passes it to `setup-api` with an endpoint allow-list. `McpApiToolBuilder` turns each allow-listed operation into an `apicalls` tool, named by its `operationId` (falling back to a `method_path` slug) and grouped by its first OpenAPI tag.
+2. **Provisioning**: `AgentSetupService.createApiAgent` creates the parser, behaviour rules, one `apicalls` config per group, LLM config, workflow and agent — in that order, with compensating deletes if any step fails.
+3. **Gating**: the agent is created *with* its `hitlConfig` on v1, so the approval gate cannot be bypassed by redeploying an earlier version. The gate requires approval by HTTP *method* — `http.post:*`, `http.put:*`, `http.patch:*`, `http.delete:*` — and exempts `http.get:*`. Gating by method rather than by an enumerated list of tool names is what keeps it fail-safe: a write endpoint granted later is covered the moment it exists, with nobody having to remember to add its name.
+4. **Operation**: the model calls a tool; `ToolApprovalGate` classifies it; a write pauses the conversation (`hitlPauseType: "TOOL_CALL"`) until a human approves the *resolved request*, which is fingerprinted at gate time and re-checked before execution.
+5. **Self-modification**: on approval, the tool call reaches EDDI's REST API and the new agent configuration is written.
 
 ### Key Insight
 
-Agent Father isn't special code—it's a **regular EDDI agent** that uses:
+The operator isn't special code—it's a **regular EDDI agent** that uses:
 
-- Behavior rules to control conversation flow
-- Property extraction to gather data
+- An LLM task with tools generated from an ordinary OpenAPI spec
 - HTTP Calls to invoke EDDI's REST API
-- Output templates to guide the user
+- The HITL approval gate to keep every write under human control
+- Behavior rules and output templates like any other agent
 
-This demonstrates EDDI's power: **the same architecture that powers conversational agents can orchestrate complex, multi-step workflows**, even self-modifying the system itself.
+This demonstrates EDDI's power: **the same architecture that powers conversational agents can orchestrate complex, multi-step workflows**, even self-modifying the system itself — and the deterministic governance layer (Pillar 2) is what makes that safe rather than reckless.
 
-**See the [Agent Father Deep Dive](agent-father-deep-dive.md) for complete implementation details, code examples, and real-world applications.**
+**See [Human-in-the-Loop](hitl.md) for the approval gate, and [HTTP Calls](httpcalls.md) for how the generated tools are executed.**
 
 ---
 
@@ -801,7 +768,7 @@ Every resource references its dependencies by `eddi://` URI:
 Agent → Workflow: "eddi://ai.labs.workflow/workflowstore/workflows/{id}?version=1"
 Workflow → Rules: "eddi://ai.labs.rules/rulestore/rulesets/{id}?version=1"
 Workflow → ApiCalls: "eddi://ai.labs.apicalls/apicallstore/apicalls/{id}?version=1"
-Workflow → LLM: "eddi://ai.labs.llm/llmstore/llmconfigs/{id}?version=1"
+Workflow → LLM: "eddi://ai.labs.llm/llmstore/llms/{id}?version=1"
 ```
 
 ### Extension Types & Their Pipeline Role
@@ -810,8 +777,8 @@ Each workflow runs its extensions in order: **Parser → Behavior → Property �
 
 | Extension Type | Input | Output | Key Feature |
 |---|---|---|---|
-| **Parser** | Raw user text | Expressions (semantic representation) | `expressionsAsActions: true` — parser expressions become actions |
-| **Behavior Rules** | Actions and expressions | New actions that drive subsequent tasks | IF-THEN condition engine — the routing logic |
+| **Parser** | Raw user text | Expressions (semantic representation) | Dictionaries, normalizer and corrections; `appendExpressions`, `includeUnused`, `includeUnknown` |
+| **Behavior Rules** | Actions and expressions | New actions that drive subsequent tasks | IF-THEN condition engine — the routing logic; `expressionsAsActions: true` (in the behavior step's `config`, alongside `appendActions` and `uri`) makes parser expressions become actions |
 | **Property Setter** | Current memory data | Stored properties (conversation-scoped or long-term) | Slot-filling using `{memory.current.input}` templates |
 | **HTTP Calls** | Actions, template variables | Response data stored in memory | Pre/post request property instructions, retry support |
 | **LLM** | Conversation memory, system prompt, tools | LLM response text | Legacy chat (simple) or Agent mode (tool-calling loop) |
@@ -868,10 +835,11 @@ A `GroupConversationService` orchestrates discussions through configurable phase
 
 **Key capabilities:**
 
-- **5 built-in discussion styles**: Round Table, Peer Review, Devil's Advocate, Delphi, and Debate — each with distinct phase flows and turn-taking rules
+- **7 built-in discussion styles**: Round Table, Peer Review, Devil's Advocate, Delphi, Debate, Task Force, and Negotiation — each with distinct phase flows and turn-taking rules. Task Force uses a 4-phase pipeline (PLAN→EXECUTE→VERIFY→SYNTHESIS) for structured task decomposition and parallel execution; Negotiation trades rather than wins (positions & interests → opening proposals → bargaining with a concession ledger → arbitration → synthesis)
 - **Custom phases**: Define your own phase sequences with configurable context scopes (independent, full transcript, anonymous, own-feedback-only)
 - **Group-of-groups**: Members can themselves be groups, enabling hierarchical multi-agent composition with configurable depth limits
 - **Fault tolerance**: Per-agent timeouts, configurable failure policies (skip, retry, abort), and graceful degradation when members are unavailable
+- **Dynamic agents**: Agents can create, recruit, delegate to, and teardown new agents at runtime during discussions, with configurable guardrails (provider/model whitelists, per-discussion caps, lifecycle policies)
 
 See [Group Conversations](group-conversations.md) for full configuration reference, and [A2A Protocol](a2a-protocol.md) for peer-to-peer agent communication.
 
@@ -883,7 +851,7 @@ EDDI provides **bilateral** Model Context Protocol (MCP) integration — it is b
 
 **As MCP Server:** EDDI exposes its full API surface (conversations, administration, diagnostics, scheduling, group discussions) as MCP tools. This enables AI assistants (Claude Desktop, IDE plugins, custom MCP clients) to interact with deployed agents and manage the platform programmatically. Documentation is also exposed as MCP resources (`eddi://docs/{name}`).
 
-**As MCP Client:** Individual agents can consume external MCP servers as tool providers. MCP server connections are configured per LLM task, support vault-based API key resolution, and are subject to the same rate limiting, caching, and cost tracking as built-in tools. Failed MCP connections degrade gracefully — they never kill the pipeline.
+**As MCP Client:** Individual agents can consume external MCP servers as tool providers. MCP server connections are configured as `mcpcalls` workflow extensions (versioned configuration resources, the MCP equivalent of `httpcalls`), support vault-based API key resolution, and are subject to the same rate limiting, caching, and cost tracking as built-in tools. The LLM auto-discovers them from the workflow (`enableMcpCallTools`, default `true`); behavior rules can also trigger specific MCP tools deterministically. Failed MCP connections degrade gracefully — they never kill the pipeline.
 
 See [MCP Server](mcp-server.md) for the full tool reference and client configuration.
 
@@ -895,10 +863,33 @@ EDDI's memory model extends beyond single conversations. The `IUserMemoryStore` 
 
 **How it integrates with the pipeline:**
 
-- At **conversation init**, visible user memories are loaded as `longTerm` properties and made available in all templates via `{{properties.key}}`
+- At **conversation init**, visible user memories are loaded as `longTerm` properties and made available in all templates via `{properties.key}`
 - During the pipeline, the LLM can autonomously store and recall facts using built-in memory tools (when enabled)
 - At **conversation teardown**, `longTerm` properties are persisted back to the user memory store
-- **Background consolidation** (the "Dream" service) performs scheduled maintenance: stale pruning, contradiction detection, and optional LLM-driven summarization
+- **Background consolidation** (the "Dream" service) performs stale pruning, contradiction detection, and optional LLM-driven summarization. It runs on the same cluster-aware schedule machinery as every other background job — a `ScheduleConfiguration` whose `metadata` carries `{"dreamType": "dream_consolidation"}` is claimed by `SchedulePollerService` and dispatched by `ScheduleFireExecutor` to `DreamService`, which reads the agent's `userMemoryConfig.dream` block and runs one cycle. The target agent and user come from the schedule's **top-level** `agentId` / `agentVersion` / `userId` fields — `metadata` carries only the `dreamType` marker. Spend is bounded per cycle by `dream.maxCostPerRun` (US dollars), and because Dream has no parent LLM task to inherit credentials from, its model credentials come from `dream.parameters` (which resolves `${vault:…}` and `${vars:…}` like any LLM task's parameters). A cycle that cannot run — no `userId`, dream disabled on the agent, or a failing LLM call — is logged at ERROR and marked FAILED on the fire log, so it retries with backoff and dead-letters rather than silently doing nothing
+
+**Creating a Dream schedule** — use the raw REST body, `POST /schedulestore/schedules`, with the cron expression from `dream.schedule`:
+
+```json
+{
+  "name": "nightly dream — alice",
+  "agentId": "5a8b1c2d3e4f5a6b7c8d9e0f",
+  "agentVersion": 0,
+  "triggerType": "CRON",
+  "cronExpression": "0 3 * * *",
+  "timeZone": "UTC",
+  "userId": "alice",
+  "message": "dream",
+  "metadata": { "dreamType": "dream_consolidation" },
+  "enabled": true
+}
+```
+
+Three things this body does that are easy to get wrong:
+
+- **The `create_schedule` MCP tool cannot do this.** Its arguments (`agentId`, `triggerType`, `cron`, `heartbeatIntervalSeconds`, `message`, `name`, `timeZone`, `conversationStrategy`, `userId`, `environment`) contain no `metadata`, so a schedule created that way has `metadata == null`, `DreamService.isDreamSchedule(…)` returns `false`, and the schedule fires an ordinary chat turn against the agent on the dream cron forever — logged COMPLETED, consolidating nothing. REST is the only route that produces a working Dream schedule today.
+- **`message` is required even though Dream never reads it.** `RestScheduleStore.validateSchedule` rejects a CRON schedule without a non-blank `message`; the Dream fast-path bypasses `say()` entirely, so the value is inert — supply any placeholder.
+- **`userId` must name the real user whose memories are consolidated.** Left unset it defaults to `system:scheduler`, which `DreamService` rejects (the cycle is marked FAILED rather than consolidating an empty memory set).
 
 Memory visibility is enforced at the storage level — agents can only see memories matching their visibility scope, preventing cross-tenant memory leaks.
 
@@ -968,7 +959,7 @@ Master Key (env var EDDI_VAULT_MASTER_KEY)
                            └→ Secret plaintext
 ```
 
-- **Per-deployment salt**: `VaultSaltManager` generates and stores a unique 32-byte salt per EDDI instance
+- **Per-deployment salt**: `VaultSaltManager` generates and stores a unique 16-byte salt per EDDI instance
 - **Envelope encryption**: Rotating the master key re-wraps KEK→DEK without touching individual secrets
 - **Export scrubbing**: Agent export/sync automatically strips secrets from ZIP files
 
@@ -978,7 +969,7 @@ EDDI agents can sign their inter-agent messages using Ed25519 digital signatures
 
 **Key lifecycle:**
 
-1. **Key generation**: `POST /agentstore/{id}/signing/keys` → `AgentSigningService.generateKeyPair()` creates an Ed25519 keypair. Public key stored in `AgentConfiguration.identity.publicKey`, private key encrypted in the Secrets Vault
+1. **Key generation**: `AgentSigningService.generateKeyPair(tenantId, agentId)` creates an Ed25519 keypair. Public key stored in `AgentConfiguration.identity.publicKey`, private key encrypted in the Secrets Vault. **This is a service-level API with no REST endpoint** — keys are provisioned as part of agent creation, not by an operator call
 2. **Key rotation**: `AgentPublicKey` records support versioned keys with `validFromMs`/`validUntilMs` windows. Old and new keys overlap during rotation. Private keys use versioned vault paths (`agent-signing-key:{agentId}:v{version}`)
 3. **Signing**: When `security.signInterAgentMessages=true`, the `GroupConversationService` creates a `SignedEnvelope` for each agent response. The envelope contains the message payload, a UUID nonce, and an epoch timestamp. The canonical JSON form (RFC 8785 via `JacksonCanonicalizer`) is signed with Ed25519
 4. **Self-verification**: Immediately after signing, the service verifies its own signature against the agent's public key. If self-verification fails, the signature is discarded (fail-safe to unsigned)
@@ -993,10 +984,10 @@ EDDI agents can sign their inter-agent messages using Ed25519 digital signatures
 | **Dev mode** | No | Allowed — info log on startup |
 | **Dev mode** | Yes | Full auth with configured Keycloak |
 | **Production** | No + no opt-out | `AuthStartupGuard` **fails startup** with clear error |
-| **Production** | No + explicit opt-out | Starts, but logs ERROR every 60s as a constant reminder |
+| **Production** | No + explicit opt-out | Starts, but logs an ERROR at startup and a WARN reminder every hour |
 | **Production** | Yes | Full OIDC with Keycloak multi-tenant support |
 
-The escape hatch (`EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true`) exists for air-gapped deployments and quick demos. The periodic ERROR log ensures operators remain aware.
+The escape hatch (`EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true`) exists for air-gapped deployments and quick demos. The hourly WARN reminder ensures operators remain aware.
 
 ### CI Security Scanning
 
@@ -1012,14 +1003,18 @@ The escape hatch (`EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true`) exists for air-gap
 Production response headers (configured via `application.properties`):
 - `X-Content-Type-Options: nosniff`
 - `X-Frame-Options: DENY`
+- `Referrer-Policy: strict-origin-when-cross-origin`
+- `X-XSS-Protection: 0`
+- `Permissions-Policy: camera=(), microphone=(), geolocation=()`
 - `Content-Security-Policy: default-src 'self'; ...`
-- `Strict-Transport-Security: max-age=31536000` (when TLS is configured)
+
+`Strict-Transport-Security` is **not** set by EDDI — configure it at your TLS terminator / ingress.
 
 ## Related Documentation
 
 - [Getting Started](getting-started.md) - Setup and installation
 - [Conversation Memory & State Management](conversation-memory.md) - Deep dive into conversation state
-- [Agent Father: A Deep Dive](agent-father-deep-dive.md) - Complete walkthrough of a real-world example
+- [Human-in-the-Loop](hitl.md) - The approval gate the Platform Operator runs behind
 - [Behavior Rules](behavior-rules.md) - Configure decision logic
 - [HTTP Calls](httpcalls.md) - External API integration
 - [LLM Integration](langchain.md) - Connect to LLM APIs

@@ -8,10 +8,13 @@ import ai.labs.eddi.configs.channels.IChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.IRestChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
+import ai.labs.eddi.configs.channels.model.ObserveConfig;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import ai.labs.eddi.utils.RestUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -20,10 +23,13 @@ import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
+import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * REST implementation for channel integration configuration CRUD. Includes
@@ -48,19 +54,50 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
 
     private final IChannelIntegrationStore channelStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
+    private final ResourceAccessGuard resourceAccessGuard;
     private final RestVersionInfo<ChannelIntegrationConfiguration> restVersionInfo;
 
     @Inject
     public RestChannelIntegrationStore(IChannelIntegrationStore channelStore,
-            IDocumentDescriptorStore documentDescriptorStore) {
-        restVersionInfo = new RestVersionInfo<>(resourceURI, channelStore, documentDescriptorStore);
+            IDocumentDescriptorStore documentDescriptorStore,
+            ResourceAccessGuard resourceAccessGuard) {
+        restVersionInfo = new RestVersionInfo<>(resourceURI, channelStore, documentDescriptorStore, resourceAccessGuard);
         this.channelStore = channelStore;
         this.documentDescriptorStore = documentDescriptorStore;
+        this.resourceAccessGuard = resourceAccessGuard;
+    }
+
+    /**
+     * Asserts the author may converse with everything this channel points at.
+     * <p>
+     * <h3>Why the channel's own permissions are not enough</h3> A channel target is
+     * a standing invitation: once configured, every inbound Slack message reaches
+     * {@code targetId} as a system-initiated conversation, which is deliberately
+     * below the USE gate. Without this check an editor could aim a channel they
+     * control at a colleague's private agent and relay its replies into a room of
+     * their choosing, having never held access to it. Mirrors the checks on
+     * triggers, schedules and group membership, which are the same shape of
+     * standing reference.
+     */
+    private void requireUseOnTargets(ChannelIntegrationConfiguration configuration) {
+        if (configuration == null || configuration.getTargets() == null) {
+            return;
+        }
+        for (var target : configuration.getTargets()) {
+            if (target == null || target.getTargetId() == null || target.getTargetId().isBlank()) {
+                continue;
+            }
+            if (target.getType() == ChannelTarget.TargetType.GROUP) {
+                resourceAccessGuard.requireUseAccess(target.getTargetId(), "group");
+            } else {
+                resourceAccessGuard.requireAgentUseAccess(target.getTargetId());
+            }
+        }
     }
 
     @Override
     public List<DocumentDescriptor> readChannelDescriptors(String filter, Integer index, Integer limit) {
-        return restVersionInfo.readDescriptors("ai.labs.channel", filter, index, limit);
+        return restVersionInfo.readDescriptors(filter, index, limit);
     }
 
     @Override
@@ -72,6 +109,7 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
     public Response updateChannel(String id, Integer version,
                                   ChannelIntegrationConfiguration channelConfiguration) {
         validateConfiguration(channelConfiguration);
+        requireUseOnTargets(channelConfiguration);
         validateUniqueChannelId(channelConfiguration, id);
         Response response = restVersionInfo.update(id, version, channelConfiguration);
         syncDescriptor(id, channelConfiguration);
@@ -81,6 +119,7 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
     @Override
     public Response createChannel(ChannelIntegrationConfiguration channelConfiguration) {
         validateConfiguration(channelConfiguration);
+        requireUseOnTargets(channelConfiguration);
         validateUniqueChannelId(channelConfiguration, null);
         Response response = restVersionInfo.create(channelConfiguration);
         URI location = response.getLocation();
@@ -139,10 +178,54 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
     // ─── Validation ────────────────────────────────────────────────────────────
 
     // Visible for testing
+    /**
+     * {@code platformConfig} keys that hold credentials.
+     * <p>
+     * A channel's bot token or signing secret is stored, and returned by
+     * {@code GET /channelstore/channels/&#123;id&#125;}, exactly as it was written
+     * — so a plaintext value is readable by anyone who can read the configuration,
+     * and lands in ZIP exports and backups too. {@code ChannelTargetRouter}
+     * resolves {@code ${vault:...}} references at send time, so the vault is
+     * available here; nothing was telling operators to use it.
+     */
+    private static final Set<String> SECRET_PLATFORM_CONFIG_KEYS = Set.of(
+            "bottoken", "signingsecret", "clientsecret", "apikey", "apisecret", "token",
+            "password", "webhooksecret", "appsecret", "verificationtoken");
+
+    /**
+     * Warns — rather than rejects — when a credential is written in plaintext.
+     * <p>
+     * Rejecting would break every existing integration on its next update, and
+     * whether a value is a secret is a guess based on its key name. A log line at
+     * write time is the honest amount of certainty: it names the key, points at the
+     * vault, and leaves the operator's configuration working.
+     */
+    private void warnOnPlaintextSecrets(ChannelIntegrationConfiguration config) {
+        var platformConfig = config.getPlatformConfig();
+        if (platformConfig == null || platformConfig.isEmpty()) {
+            return;
+        }
+        for (var entry : platformConfig.entrySet()) {
+            String key = entry.getKey();
+            Object value = entry.getValue();
+            if (key == null || !(value instanceof String text) || text.isBlank()) {
+                continue;
+            }
+            if (SECRET_PLATFORM_CONFIG_KEYS.contains(key.toLowerCase(Locale.ROOT)) && !text.contains("${vault:")) {
+                LOG.warnf("Channel integration '%s' stores platformConfig.%s in plaintext — it is returned verbatim by "
+                        + "GET /channelstore/channels/{id} and included in backups. Store it in the secrets vault and "
+                        + "reference it as ${vault:<key>} instead; the router resolves that at send time.",
+                        sanitize(config.getName()), sanitize(key));
+            }
+        }
+    }
+
     void validateConfiguration(ChannelIntegrationConfiguration config) {
         if (config.getName() == null || config.getName().isBlank()) {
             throw new BadRequestException("Channel integration name is required.");
         }
+
+        warnOnPlaintextSecrets(config);
 
         // Channel type must be a registered adapter
         String channelType = config.getChannelType();
@@ -191,20 +274,46 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                 throw new BadRequestException(
                         "Target '" + target.getName() + "' must have a targetId.");
             }
-            // Observe mode is schema-ready but not yet implemented
             if (target.isObserveMode()) {
-                throw new BadRequestException(
-                        "Target '" + target.getName()
-                                + "': observeMode is not yet implemented. "
-                                + "Set observeMode to false or omit it.");
+                // An observer answers channel traffic it was never addressed in, and
+                // the guard against that becoming expensive is a per-turn cost the
+                // engine can only attribute to a 1:1 conversation. A GROUP observer
+                // would start a whole multi-agent discussion off unaddressed chatter
+                // with its dollar ceiling unenforceable — refuse it here rather than
+                // ship a control that silently does not apply.
+                if (target.getType() != ChannelTarget.TargetType.AGENT) {
+                    throw new BadRequestException(
+                            "Target '" + target.getName()
+                                    + "': observeMode is only supported for AGENT targets.");
+                }
+                // Defaulted rather than rejected: `observeMode: true` with no config
+                // would mean no cooldown and no caps, which is the one shape an
+                // observer must never be saved in. The defaults are the documented
+                // ones on ObserveConfig.
+                if (target.getObserveConfig() == null) {
+                    target.setObserveConfig(new ObserveConfig());
+                }
+                // An observer watches traffic it was not part of. Naming it the
+                // default makes it the answer to "the bot was mentioned and no
+                // trigger matched" as well, so one target would answer both
+                // addressed and unaddressed messages under different limits —
+                // and the observer's cooldown and caps would not apply to half
+                // of what it said.
+                if (target.getName().equalsIgnoreCase(config.getDefaultTargetName())) {
+                    throw new BadRequestException(
+                            "Target '" + target.getName()
+                                    + "': an observeMode target cannot also be the default target.");
+                }
             }
-            // Future-proofing: validate ObserveConfig bounds even while rejected
             if (target.getObserveConfig() != null) {
                 var oc = target.getObserveConfig();
                 if (oc.getCooldownSeconds() < 0) {
                     throw new BadRequestException(
                             "Target '" + target.getName() + "': cooldownSeconds must be >= 0.");
                 }
+                // Zero is a valid, meaningful setting on both caps — an observer
+                // that is configured but deliberately silent — so only a negative
+                // value is a mistake.
                 if (oc.getMaxDailyResponses() < 0) {
                     throw new BadRequestException(
                             "Target '" + target.getName() + "': maxDailyResponses must be >= 0.");
@@ -212,6 +321,20 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                 if (oc.getMaxCostPerDay() < 0) {
                     throw new BadRequestException(
                             "Target '" + target.getName() + "': maxCostPerDay must be >= 0.");
+                }
+                for (String keyword : oc.getTriggerKeywords() == null ? List.<String>of() : oc.getTriggerKeywords()) {
+                    if (keyword == null || keyword.isBlank()) {
+                        throw new BadRequestException(
+                                "Target '" + target.getName()
+                                        + "': observeConfig.triggerKeywords contains a null or blank keyword.");
+                    }
+                }
+                for (String mimeType : oc.getTriggerMimeTypes() == null ? List.<String>of() : oc.getTriggerMimeTypes()) {
+                    if (mimeType == null || mimeType.isBlank()) {
+                        throw new BadRequestException(
+                                "Target '" + target.getName()
+                                        + "': observeConfig.triggerMimeTypes contains a null or blank type.");
+                    }
                 }
             }
             if (target.getTriggers() != null) {
@@ -259,7 +382,7 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
 
         try {
             var descriptors = documentDescriptorStore.readDescriptors(
-                    "ai.labs.channel", "", 0, 1000, false);
+                    "ai.labs.channel", "", 0, IDescriptorStore.NO_LIMIT, false);
             for (var descriptor : descriptors) {
                 try {
                     var resId = RestUtilities.extractResourceId(descriptor.getResource());
@@ -274,10 +397,14 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                             && existing.getPlatformConfig() != null
                             && channelType.equalsIgnoreCase(existing.getChannelType())
                             && channelId.equals(existing.getPlatformConfig().get("channelId"))) {
+                        // The sweep is deliberately unscoped: a channelId collides with every
+                        // integration in the deployment, not only the caller's own, so scoping it
+                        // would let two workspaces both bind the same Slack channel and route each
+                        // other's messages. What the message must NOT do is name the conflicting
+                        // integration — that would turn a uniqueness check into an enumeration
+                        // oracle for other people's channel integrations.
                         throw new BadRequestException(
-                                "Another channel integration ('"
-                                        + (existing.getName() != null ? existing.getName() : resId.getId())
-                                        + "') already uses channelId '" + channelId
+                                "Another channel integration already uses channelId '" + channelId
                                         + "' for type '" + channelType + "'.");
                     }
                 } catch (BadRequestException e) {
@@ -303,32 +430,73 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                                 ChannelIntegrationConfiguration config) {
         try {
             var currentResourceId = channelStore.getCurrentResourceId(resourceId);
-            var descriptor = documentDescriptorStore.readDescriptor(
-                    resourceId, currentResourceId.getVersion());
-            boolean changed = false;
+            int version = currentResourceId.getVersion();
+            // Use channelType as description for quick identification in lists
+            String desc = config.getChannelType() != null
+                    ? config.getChannelType() + " integration"
+                    : null;
 
+            // Same lookup as RestAgentGroupStore.syncDescriptor. On CREATE the
+            // descriptor does not exist yet — DocumentDescriptorFilter writes it after
+            // this method runs — and on UPDATE it still lives at version-1 until the
+            // filter promotes it. Reading only the current version failed on both paths,
+            // the catch below swallowed that, and every channel descriptor kept an empty
+            // name, so list_channel_integrations' name filter could never match.
+            DocumentDescriptor descriptor = readDescriptorOrNull(resourceId, version);
+            int descriptorVersion = version;
+            if (descriptor == null && version > 1) {
+                descriptor = readDescriptorOrNull(resourceId, version - 1);
+                descriptorVersion = version - 1;
+            }
+
+            if (descriptor == null) {
+                descriptor = new DocumentDescriptor();
+                descriptor.setResource(RestUtilities.createURI(resourceURI, resourceId, versionQueryParam, version));
+                Date now = new Date(System.currentTimeMillis());
+                descriptor.setCreatedOn(now);
+                descriptor.setLastModifiedOn(now);
+                descriptor.setName(config.getName());
+                descriptor.setDescription(desc);
+                // Stamped like any newly created resource, or the channel is left unowned.
+                resourceAccessGuard.stampNewDescriptor(descriptor);
+                try {
+                    documentDescriptorStore.createDescriptor(resourceId, version, descriptor);
+                } catch (IResourceStore.ResourceStoreException raced) {
+                    // The descriptor filter created it between our lookup and this write.
+                    documentDescriptorStore.setDescriptor(resourceId, version, descriptor);
+                }
+                return;
+            }
+
+            boolean changed = false;
             if (config.getName() != null
                     && !config.getName().equals(descriptor.getName())) {
                 descriptor.setName(config.getName());
                 changed = true;
             }
-
-            // Use channelType as description for quick identification in lists
-            String desc = config.getChannelType() != null
-                    ? config.getChannelType() + " integration"
-                    : null;
             if (desc != null && !desc.equals(descriptor.getDescription())) {
                 descriptor.setDescription(desc);
                 changed = true;
             }
 
             if (changed) {
-                documentDescriptorStore.setDescriptor(
-                        resourceId, currentResourceId.getVersion(), descriptor);
+                descriptor.setLastModifiedOn(new Date(System.currentTimeMillis()));
+                documentDescriptorStore.setDescriptor(resourceId, descriptorVersion, descriptor);
             }
         } catch (Exception e) {
             LOGGER.warnf(e, "Failed to sync channel descriptor for id=%s",
                     sanitizeForLog(resourceId));
+        }
+    }
+
+    /**
+     * The descriptor at {@code version}, or {@code null} when there is none yet.
+     */
+    private DocumentDescriptor readDescriptorOrNull(String resourceId, int version) throws IResourceStore.ResourceStoreException {
+        try {
+            return documentDescriptorStore.readDescriptor(resourceId, version);
+        } catch (IResourceStore.ResourceNotFoundException notYet) {
+            return null;
         }
     }
 

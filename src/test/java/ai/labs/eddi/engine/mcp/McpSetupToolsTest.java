@@ -6,6 +6,9 @@ package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.configs.rules.IRestRuleSetStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
+import ai.labs.eddi.engine.setup.CreateApiAgentRequest;
 import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.mcpcalls.IRestMcpCallsStore;
@@ -22,6 +25,7 @@ import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.setup.AgentSetupService;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.secrets.model.SecretReference;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -30,6 +34,7 @@ import org.mockito.ArgumentCaptor;
 import java.net.URI;
 import java.util.List;
 
+import io.quarkus.security.identity.SecurityIdentity;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -86,7 +91,7 @@ class McpSetupToolsTest {
         when(secretProvider.isAvailable()).thenReturn(false);
 
         service = new AgentSetupService(restInterfaceFactory, agentAdmin, secretProvider, "http://localhost:11434");
-        var mockIdentity = mock(io.quarkus.security.identity.SecurityIdentity.class);
+        var mockIdentity = mock(SecurityIdentity.class);
         lenient().when(mockIdentity.isAnonymous()).thenReturn(true);
         tools = new McpSetupTools(service, jsonSerialization, mockIdentity, false);
     }
@@ -263,13 +268,13 @@ class McpSetupToolsTest {
         when(AgentStore.createAgent(any())).thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1")).build());
 
         var vaultTools = new McpSetupTools(vaultService, jsonSerialization,
-                mock(io.quarkus.security.identity.SecurityIdentity.class), false);
+                mock(SecurityIdentity.class), false);
 
         vaultTools.setupAgent("Vault Agent", "You are helpful", "openai", "gpt-4o", "sk-live-secret", null, null, null,
                 null, null, null, null, false, null);
 
         // Verify the API key was stored in the vault
-        var refCaptor = ArgumentCaptor.forClass(ai.labs.eddi.secrets.model.SecretReference.class);
+        var refCaptor = ArgumentCaptor.forClass(SecretReference.class);
         verify(vaultProvider).store(refCaptor.capture(), eq("sk-live-secret"), contains("Vault Agent"), any());
         assertTrue(refCaptor.getValue().keyName().startsWith("setup.vault-agent."),
                 "Vault key should start with 'setup.<sanitized-name>.'");
@@ -398,7 +403,21 @@ class McpSetupToolsTest {
 
         var task = config.tasks().get(0);
         assertTrue(task.getEnableBuiltInTools());
-        assertEquals(java.util.List.of("calculator", "websearch"), task.getBuiltInToolsWhitelist());
+        assertEquals(List.of("calculator", "websearch"), task.getBuiltInToolsWhitelist());
+    }
+
+    /**
+     * The 60s timeout bounds time-to-first-response; left without an explicit
+     * streaming backstop, every created agent's first streamed turn logged that the
+     * timeout is shorter than the backstop and does not lower it.
+     */
+    @Test
+    void createLlmConfig_statesTheStreamingBackstopExplicitly() {
+        var config = service.createLlmConfig("anthropic", "claude-sonnet-5", "key", "prompt", false, null, null, null, false, false, null);
+
+        var task = config.tasks().get(0);
+        assertEquals("60000", task.getParameters().get("timeout"));
+        assertEquals(120, task.getStreamingTimeoutSeconds());
     }
 
     @Test
@@ -467,7 +486,7 @@ class McpSetupToolsTest {
         assertTrue(params.get("systemMessage").contains("quickReplies"), "System message should contain quickReplies format");
         assertTrue(params.get("systemMessage").contains("htmlResponseText"), "System message should contain htmlResponseText");
         assertEquals("true", params.get("convertToObject"), "convertToObject should be true for JSON format");
-        assertEquals("json", params.get("responseFormat"), "OpenAI should have responseFormat=json");
+        assertNull(params.get("responseFormat"), "JSON is applied per request, never baked into the cached model");
 
         // Verify postResponse is set with QR instructions
         assertNotNull(task.getPostResponse());
@@ -494,7 +513,7 @@ class McpSetupToolsTest {
         assertTrue(params.get("systemMessage").contains("\"score\":"), "System message should contain score field");
         assertTrue(params.get("systemMessage").contains("htmlResponseText"), "System message should contain htmlResponseText");
         assertFalse(params.get("systemMessage").contains("quickReplies"), "System message should NOT contain quickReplies");
-        assertNull(params.get("responseFormat"), "Gemini should NOT have responseFormat param (conflicts with function calling)");
+        assertNull(params.get("responseFormat"), "Gemini must never carry a builder-level responseFormat (conflicts with function calling)");
 
         // PostResponse should NOT have QR instructions (only sentiment, no QR)
         assertNotNull(task.getPostResponse());
@@ -519,7 +538,7 @@ class McpSetupToolsTest {
         assertTrue(params.get("systemMessage").contains("\"sentiment\":"));
         assertTrue(params.get("systemMessage").contains("htmlResponseText"));
         assertEquals("true", params.get("convertToObject"));
-        assertEquals("json", params.get("responseFormat"));
+        assertNull(params.get("responseFormat"));
 
         // PostResponse should have both output and QR instructions
         assertNotNull(task.getPostResponse());
@@ -585,20 +604,6 @@ class McpSetupToolsTest {
     @Test
     void buildPromptResponseJson_neither_returnsNull() {
         assertNull(McpSetupTools.buildPromptResponseJson(false, false));
-    }
-
-    @Test
-    void supportsResponseFormat_openaiAndMistral() {
-        assertTrue(McpSetupTools.supportsResponseFormat("openai"));
-        assertFalse(McpSetupTools.supportsResponseFormat("gemini"), "Gemini conflicts with function calling");
-        assertFalse(McpSetupTools.supportsResponseFormat("gemini-vertex"), "Gemini-Vertex conflicts with function calling");
-        assertTrue(McpSetupTools.supportsResponseFormat("mistral"));
-        assertTrue(McpSetupTools.supportsResponseFormat("azure-openai"));
-        assertFalse(McpSetupTools.supportsResponseFormat("anthropic"));
-        assertFalse(McpSetupTools.supportsResponseFormat("ollama"));
-        assertFalse(McpSetupTools.supportsResponseFormat("jlama"));
-        assertFalse(McpSetupTools.supportsResponseFormat("bedrock"));
-        assertFalse(McpSetupTools.supportsResponseFormat("oracle-genai"));
     }
 
     @Test
@@ -797,7 +802,7 @@ class McpSetupToolsTest {
         when(agentAdmin.deployAgent(any(), any(), anyInt(), anyBoolean(), anyBoolean())).thenReturn(Response.ok().build());
 
         String result = tools.createApIAgent("API Agent", "You are an API assistant", SIMPLE_SPEC, "anthropic", "claude-sonnet-4-6", "sk-test", null,
-                "Bearer api-key", null, null, null, true, null);
+                "Bearer api-key", null, null, null, true, null, null, null);
 
         assertNotNull(result);
 
@@ -820,14 +825,14 @@ class McpSetupToolsTest {
 
     @Test
     void createApiAgent_missingSpec_returnsError() {
-        String result = tools.createApIAgent("Agent", "prompt", null, null, null, "key", null, null, null, null, null, null, null);
+        String result = tools.createApIAgent("Agent", "prompt", null, null, null, "key", null, null, null, null, null, null, null, null, null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("OpenAPI spec is required"));
     }
 
     @Test
     void createApiAgent_missingApiKey_returnsError() {
-        String result = tools.createApIAgent("Agent", "prompt", SIMPLE_SPEC, null, null, null, null, null, null, null, null, null, null);
+        String result = tools.createApIAgent("Agent", "prompt", SIMPLE_SPEC, null, null, null, null, null, null, null, null, null, null, null, null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("API key is required"));
     }
@@ -841,7 +846,7 @@ class McpSetupToolsTest {
         when(WorkflowStore.createWorkflow(any())).thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1")).build());
         when(AgentStore.createAgent(any())).thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1")).build());
 
-        tools.createApIAgent("Agent", "prompt", SIMPLE_SPEC, null, null, "key", null, null, null, null, null, false, null);
+        tools.createApIAgent("Agent", "prompt", SIMPLE_SPEC, null, null, "key", null, null, null, null, null, false, null, null, null);
 
         var packageCaptor = ArgumentCaptor.forClass(WorkflowConfiguration.class);
         verify(WorkflowStore).createWorkflow(packageCaptor.capture());
@@ -854,5 +859,106 @@ class McpSetupToolsTest {
         assertEquals(URI.create("eddi://ai.labs.httpcalls"), pkgConfig.getWorkflowSteps().get(2).getType());
         assertEquals(URI.create("eddi://ai.labs.httpcalls"), pkgConfig.getWorkflowSteps().get(3).getType());
         assertEquals(URI.create("eddi://ai.labs.llm"), pkgConfig.getWorkflowSteps().get(4).getType());
+    }
+
+    // --- setup-api can now provision the approval gate (iteration 2) ---
+
+    @Test
+    void createApiAgent_installsTheHitlGateOnV1OfTheAgentDocument() throws Exception {
+        // Before this, createApiAgent built a bare AgentConfiguration, so EVERY agent
+        // the wizard produced had hitlConfig == null and an inert gate — no caller
+        // could provision a gated agent through setup-api at all. It must land on v1:
+        // a later PUT would write version + 1 and leave the ungated v1 redeployable.
+        stubApiAgentStores();
+
+        var hitl = new AgentConfiguration.HitlConfig();
+        var toolApprovals = new ToolApprovalsConfig();
+        toolApprovals.setRequireApproval(List.of("http.post:*", "http.put:*", "http.patch:*", "http.delete:*"));
+        toolApprovals.setExempt(List.of("http.get:*"));
+        hitl.setToolApprovals(toolApprovals);
+
+        service.createApiAgent(new CreateApiAgentRequest("Agent", "prompt", SIMPLE_SPEC, null, null, "key",
+                null, null, null, null, null, false, null, null, hitl, null, null, null, null));
+
+        var agentCaptor = ArgumentCaptor.forClass(AgentConfiguration.class);
+        verify(AgentStore).createAgent(agentCaptor.capture());
+        var created = agentCaptor.getValue().getHitlConfig();
+        assertNotNull(created, "the gate must be created WITH the agent, not added afterwards");
+        assertEquals(List.of("http.post:*", "http.put:*", "http.patch:*", "http.delete:*"),
+                created.getToolApprovals().getRequireApproval());
+        assertEquals(List.of("http.get:*"), created.getToolApprovals().getExempt());
+    }
+
+    @Test
+    void createApiAgent_withoutHitlConfig_leavesTheAgentExactlyAsBefore() throws Exception {
+        stubApiAgentStores();
+
+        service.createApiAgent(new CreateApiAgentRequest("Agent", "prompt", SIMPLE_SPEC, null, null, "key",
+                null, null, null, null, null, false, null, null, null, null, null, null, null));
+
+        var agentCaptor = ArgumentCaptor.forClass(AgentConfiguration.class);
+        verify(AgentStore).createAgent(agentCaptor.capture());
+        assertNull(agentCaptor.getValue().getHitlConfig());
+    }
+
+    /**
+     * The engine default of 10 tool iterations suits a conversational agent with a
+     * handful of tools. An agent whose whole toolset is a spec's endpoints — the
+     * Platform Operator — needs longer chains for one legitimate task, and at the
+     * default it died mid-work with "max tool iterations reached" (observed live:
+     * an agent build stopped at the cap after 22 calls). This is the provisioning
+     * half of that fix.
+     */
+    @Test
+    void createApiAgent_withMaxToolIterations_setsItOnTheGeneratedLlmTask() throws Exception {
+        stubApiAgentStores();
+
+        service.createApiAgent(new CreateApiAgentRequest("Agent", "prompt", SIMPLE_SPEC, null, null, "key",
+                null, null, null, null, null, false, null, null, null, null, 30, null, null));
+
+        var llmCaptor = ArgumentCaptor.forClass(LlmConfiguration.class);
+        verify(langchainStore).createLlm(llmCaptor.capture());
+        assertEquals(30, llmCaptor.getValue().tasks().getFirst().getMaxToolIterations());
+    }
+
+    @Test
+    void createApiAgent_withoutMaxToolIterations_keepsTheEngineDefault() throws Exception {
+        stubApiAgentStores();
+
+        service.createApiAgent(new CreateApiAgentRequest("Agent", "prompt", SIMPLE_SPEC, null, null, "key",
+                null, null, null, null, null, false, null, null, null, null, null, null, null));
+
+        var llmCaptor = ArgumentCaptor.forClass(LlmConfiguration.class);
+        verify(langchainStore).createLlm(llmCaptor.capture());
+        // Null on the config means ToolLoopRunner's own default applies — the field
+        // must not be written unasked.
+        assertNull(llmCaptor.getValue().tasks().getFirst().getMaxToolIterations());
+    }
+
+    @Test
+    void createApiAgent_withMcpServerUrls_addsAnMcpStepAlongsideTheGeneratedHttpcalls() throws Exception {
+        // "REST plus MCP" was unreachable through this wizard: createApiAgent passed
+        // null for the MCP locations, so an agent needing both had to be hand-built.
+        stubApiAgentStores();
+        when(mcpCallsStore.createMcpCalls(any()))
+                .thenReturn(Response.created(URI.create("/mcpcallstore/mcpcalls/mcp-1?version=1")).build());
+
+        service.createApiAgent(new CreateApiAgentRequest("Agent", "prompt", SIMPLE_SPEC, null, null, "key",
+                null, null, null, null, null, false, null, null, null, "https://mcp.example.com/sse", null, null, null));
+
+        var packageCaptor = ArgumentCaptor.forClass(WorkflowConfiguration.class);
+        verify(WorkflowStore).createWorkflow(packageCaptor.capture());
+        var stepTypes = packageCaptor.getValue().getWorkflowSteps().stream().map(s -> s.getType().toString()).toList();
+        assertTrue(stepTypes.contains("eddi://ai.labs.mcpcalls"), "expected an MCP step, got: " + stepTypes);
+        assertTrue(stepTypes.contains("eddi://ai.labs.httpcalls"), "the generated httpcalls must survive: " + stepTypes);
+    }
+
+    private void stubApiAgentStores() {
+        when(httpCallsStore.createApiCalls(any())).thenReturn(Response.created(URI.create("/apicallstore/apicalls/hc-1?version=1")).build())
+                .thenReturn(Response.created(URI.create("/apicallstore/apicalls/hc-2?version=1")).build());
+        when(behaviorStore.createRuleSet(any())).thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1")).build());
+        when(langchainStore.createLlm(any())).thenReturn(Response.created(URI.create("/llmstore/llms/lc-1?version=1")).build());
+        when(WorkflowStore.createWorkflow(any())).thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1")).build());
+        when(AgentStore.createAgent(any())).thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1")).build());
     }
 }

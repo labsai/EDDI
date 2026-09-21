@@ -81,6 +81,26 @@ class PostgresConversationMemoryStoreUnitTest {
         verify(preparedStatement).setString(5, "conv-123");
     }
 
+    /**
+     * G12 parity with the MongoDB store: an UPDATE that matches no row means the
+     * conversation was deleted mid-turn. Before the fix the count was discarded and
+     * the conversation id was returned as if the turn had been persisted, so
+     * {@code ConversationService.onComplete} never reached
+     * {@code logConversationError}.
+     */
+    @Test
+    void storeSnapshot_conversationDeletedMidTurn_throwsResourceStoreException() throws Exception {
+        ConversationMemorySnapshot snapshot = createSnapshot("conv-123");
+        when(jsonSerialization.serialize(snapshot)).thenReturn("{\"test\":true}");
+        when(preparedStatement.executeUpdate()).thenReturn(0);
+
+        var thrown = assertThrows(IResourceStore.ResourceStoreException.class,
+                () -> store.storeConversationMemorySnapshot(snapshot));
+
+        assertTrue(thrown.getMessage().contains("conv-123"), thrown.getMessage());
+        assertTrue(thrown.getMessage().contains("NOT persisted"), thrown.getMessage());
+    }
+
     @Test
     void storeSnapshot_ioException_throwsRuntimeException() throws Exception {
         ConversationMemorySnapshot snapshot = createSnapshot(null);

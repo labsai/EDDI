@@ -4,12 +4,13 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
-import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property;
-import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.MemorySnapshotService;
@@ -25,6 +26,7 @@ import ai.labs.eddi.modules.llm.tools.UserMemoryTool;
 import ai.labs.eddi.modules.llm.tools.impl.*;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
@@ -32,6 +34,7 @@ import org.mockito.MockitoAnnotations;
 import java.lang.reflect.Method;
 import java.util.*;
 
+import dev.langchain4j.service.tool.ToolExecutor;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -71,9 +74,9 @@ class AgentOrchestratorTest {
     @Mock
     private A2AToolProviderManager a2aToolProviderManager;
     @Mock
-    private IRestAgentStore restAgentStore;
+    private IAgentStore restAgentStore;
     @Mock
-    private IRestWorkflowStore restWorkflowStore;
+    private IWorkflowStore restWorkflowStore;
     @Mock
     private IResourceClientLibrary resourceClientLibrary;
     @Mock
@@ -107,10 +110,12 @@ class AgentOrchestratorTest {
                 webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
                 fetchToolResponsePageTool,
                 toolExecutionService, mcpToolProviderManager, a2aToolProviderManager,
-                restAgentStore, restWorkflowStore, resourceClientLibrary,
+                restWorkflowStore, resourceClientLibrary,
                 apiCallExecutor, jsonSerialization, memoryItemConverter,
                 userMemoryStore, toolResponseTruncator, tenantQuotaService,
-                memorySnapshotService);
+                memorySnapshotService,
+                null, null, null, null, null,
+                mock(IHitlToolJournalStore.class), new ConversationHistoryBuilder(), new TokenCounterFactory());
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -516,10 +521,12 @@ class AgentOrchestratorTest {
                 webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
                 fetchToolResponsePageTool,
                 toolExecutionService, mcpToolProviderManager, a2aToolProviderManager,
-                restAgentStore, restWorkflowStore, resourceClientLibrary,
+                restWorkflowStore, resourceClientLibrary,
                 apiCallExecutor, jsonSerialization, memoryItemConverter,
                 null, // null userMemoryStore
-                toolResponseTruncator, tenantQuotaService, memorySnapshotService);
+                toolResponseTruncator, tenantQuotaService, memorySnapshotService,
+                null, null, null, null, null,
+                mock(IHitlToolJournalStore.class), new ConversationHistoryBuilder(), new TokenCounterFactory());
 
         var task = new LlmConfiguration.Task();
         task.setEnableBuiltInTools(true);
@@ -734,9 +741,9 @@ class AgentOrchestratorTest {
         ToolSpecification spec = ToolSpecification.builder()
                 .name("test_tool").description("desc").build();
         List<ToolSpecification> specs = List.of(spec);
-        Map<String, dev.langchain4j.service.tool.ToolExecutor> executors = Map.of();
+        Map<String, ToolExecutor> executors = Map.of();
 
-        var result = new AgentOrchestrator.HttpCallToolsResult(specs, executors);
+        var result = new AgentOrchestrator.HttpCallToolsResult(specs, executors, Map.of(), Map.of());
 
         assertNotNull(result);
         assertEquals(1, result.toolSpecs().size());
@@ -898,7 +905,7 @@ class AgentOrchestratorTest {
 
     @Test
     void httpCallToolsResult_emptySpecs() {
-        var result = new AgentOrchestrator.HttpCallToolsResult(List.of(), Map.of());
+        var result = new AgentOrchestrator.HttpCallToolsResult(List.of(), Map.of(), Map.of(), Map.of());
 
         assertTrue(result.toolSpecs().isEmpty());
         assertTrue(result.executors().isEmpty());
@@ -929,5 +936,57 @@ class AgentOrchestratorTest {
 
         assertEquals(1, result.size());
         assertTrue(result.get(0) instanceof UserMemoryTool);
+    }
+
+    // =========================================================================
+    // Endpoint provenance for approval matching
+    // =========================================================================
+
+    @Test
+    void normalizeEndpointPath_acceptsEveryConfiguredShape() {
+        // The httpcall config accepts all of these for the same endpoint. Storing
+        // them verbatim would make "http.post:/agentstore/agents" miss most — and a
+        // require-pattern that misses is an ungated write.
+        assertEquals("/agentstore/agents", AgentOrchestrator.normalizeEndpointPath("/agentstore/agents"));
+        assertEquals("/agentstore/agents", AgentOrchestrator.normalizeEndpointPath("agentstore/agents"));
+        assertEquals("/agentstore/agents", AgentOrchestrator.normalizeEndpointPath("  /agentstore/agents  "));
+        assertEquals("/agentstore/agents", AgentOrchestrator.normalizeEndpointPath("https://eddi.example:7070/agentstore/agents"));
+    }
+
+    @Test
+    @DisplayName("a value that merely begins \"http\" is not parsed as a URL")
+    void normalizeEndpointPath_doesNotMistakeANonUrlForAUrl() {
+        // The case that actually distinguishes the two implementations: a value
+        // beginning "http" that parses as an OPAQUE URI (scheme, then no slash).
+        // URI.getPath() is null for those, so the loose startsWith("http") test
+        // collapsed it to an empty string and the endpoint provenance vanished —
+        // taking the approval pattern's ability to match with it.
+        assertEquals("/httpfoo:bar", AgentOrchestrator.normalizeEndpointPath("httpfoo:bar"));
+
+        // These agree under either implementation — a relative URI keeps its path —
+        // but they are the shapes a config is actually likely to hold.
+        assertEquals("/httpcalls/agents", AgentOrchestrator.normalizeEndpointPath("httpcalls/agents"));
+        assertEquals("/httpstuff", AgentOrchestrator.normalizeEndpointPath("httpstuff"));
+
+        // A real absolute URL still contributes only its path, whatever its case.
+        assertEquals("/agentstore/agents", AgentOrchestrator.normalizeEndpointPath("HTTPS://eddi.example/agentstore/agents"));
+
+        // A URL with no path is the root, not nothing: an empty key ("post:") can be
+        // matched by no pattern expecting a slash, and an unmatched require-pattern
+        // is an ungated call.
+        assertEquals("/", AgentOrchestrator.normalizeEndpointPath("https://eddi.example"));
+        assertEquals("/", AgentOrchestrator.normalizeEndpointPath("https://eddi.example?x=1"));
+
+        // Request.path defaults to "" and means the target server's root, so it has
+        // to be gateable too — "" would make the key "post:" and match nothing.
+        assertEquals("/", AgentOrchestrator.normalizeEndpointPath(""));
+        assertEquals("/", AgentOrchestrator.normalizeEndpointPath("   "));
+    }
+
+    @Test
+    void normalizeEndpointPath_leavesAnUnparseableValueAlone() {
+        // A templated host is not a URI; matching something odd beats throwing
+        // during tool discovery.
+        assertEquals("http://{host}/x", AgentOrchestrator.normalizeEndpointPath("http://{host}/x"));
     }
 }

@@ -36,13 +36,13 @@ Add these **Bot Token Scopes**:
 Store your Slack credentials in EDDI's Secrets Vault:
 
 ```bash
-curl -X POST http://localhost:7070/secretstore/keys \
+curl -X PUT http://localhost:7070/secretstore/secrets/default/slack-bot-token \
   -H "Content-Type: application/json" \
-  -d '{"keyName":"slack-bot-token","secretValue":"xoxb-your-token-here"}'
+  -d '{"value":"xoxb-your-token-here","description":"Slack bot token"}'
 
-curl -X POST http://localhost:7070/secretstore/keys \
+curl -X PUT http://localhost:7070/secretstore/secrets/default/slack-signing-secret \
   -H "Content-Type: application/json" \
-  -d '{"keyName":"slack-signing-secret","secretValue":"your-signing-secret"}'
+  -d '{"value":"your-signing-secret","description":"Slack signing secret"}'
 ```
 
 ### 5. Configure Channel Integration
@@ -234,6 +234,105 @@ Triggers are case-insensitive. The text after the colon becomes the message sent
 
 Type `@EDDI help` to see available trigger keywords for the channel.
 
+### Observe Mode (passive watching)
+
+Everything above needs the bot to be addressed: a top-level channel message
+with no `@EDDI` is ignored. An **observer** is the one exception. Set
+`observeMode` on a target and it also sees plain channel traffic, and answers
+in a thread under the message it reacted to.
+
+```json
+{
+  "name": "incident-watch",
+  "type": "AGENT",
+  "targetId": "<agentId>",
+  "observeMode": true,
+  "observeConfig": {
+    "triggerKeywords": ["incident", "outage", "sev1"],
+    "triggerMimeTypes": ["application/pdf"],
+    "cooldownSeconds": 60,
+    "maxDailyResponses": 50,
+    "maxCostPerDay": 5.0
+  }
+}
+```
+
+Every reply passes four gates, in this order:
+
+1. **Trigger** — a keyword appears anywhere in the message (case-insensitive
+   substring), or the message carries a file of a listed MIME type. Leave both
+   lists empty and the observer watches *everything* in the channel, which is
+   what the rest of this list exists to make survivable.
+2. **Cooldown** — `cooldownSeconds` since this observer last replied in this
+   channel. Not reset at midnight: it is a spam guard, not a daily allowance.
+3. **Daily count** — `maxDailyResponses` per UTC day.
+4. **Daily cost** — `maxCostPerDay` per UTC day.
+
+The order matters when reading
+`eddi_channel_observe_decisions_total{reason=...}`: an observer that did not
+match is reported as `NO_TRIGGER`, never as throttled.
+
+Notes and current limits:
+
+- **An observer cannot also be the channel's `defaultTargetName`.** The default
+  is what an unmatched *mention* falls back to; an observer answers traffic it
+  was never addressed in. One target doing both would answer half its messages
+  outside its own cooldown and caps, so the pairing is refused at save time.
+- **`AGENT` targets only.** `maxCostPerDay` is measured against the per-turn
+  cost the engine attributes to a 1:1 conversation; there is no equivalent for
+  a group discussion, so a `GROUP` observer is rejected at save time rather
+  than run with its primary control unenforceable.
+- **Cost means tool spend.** `ToolCostTracker` is the engine's only cost
+  tracker and it accumulates `@Tool` executions, so an observer that only talks
+  to an LLM accrues `$0.00` and is bounded by `maxDailyResponses`. Same
+  quantity, and the same caveat, as the cost a scheduled fire logs.
+- **Every limit is per node.** The counters live in the engine's in-process
+  Caffeine cache, which is not shared between replicas. Three replicas behind a
+  load balancer therefore allow three times `maxDailyResponses`, three times
+  `maxCostPerDay`, and three replies inside one cooldown — one per node. Size
+  the numbers per node, or run observers on a single replica if the ceiling has
+  to be exact for the deployment.
+- **The allowance is spent on commit, not on success.** A turn that fails still
+  used a reply, so a failing observer cannot retry all day. The reply is booked
+  in the same compare-and-set that grants it, so two messages arriving together
+  on one node cannot both be told there is room for one more.
+- **System messages are not observed.** Joins, leaves, topic and name changes
+  and pins arrive as ordinary `message` events with a human author. An observer
+  acts only on a plain message or a `file_share`, so it does not answer "@someone
+  has joined the channel".
+- **A message that mentions the bot is not observed.** With both
+  `message.channels` and `app_mention` subscribed, a channel mention arrives as
+  two events, in no guaranteed order. `app_mention` is the one that routes — by
+  event type, not by which lands first — so observing the `message` copy would
+  answer the same sentence twice. The bot's own user id comes from the event
+  envelope's `authorizations`, so a mention anywhere in the text is recognised
+  and a mention of somebody else is not.
+
+  An envelope carrying no bot authorization falls back to treating *any* `<@…>`
+  anywhere in the text as possibly the bot's, because it cannot tell the bot
+  from anyone else. That errs one way only: a message mentioning any user is
+  left unobserved. It suppresses some observer replies rather than risking a
+  duplicate one.
+- **The dollar ceiling is approximate by nature.** A turn's cost exists only
+  once it has run, so spend already in flight is not yet booked against the day,
+  and the ceiling can be exceeded by the cost of the turns running when it is
+  crossed. A turn that pauses for approval is priced when it pauses, so what the
+  approved half spends is never charged. `maxDailyResponses` is the bound that is
+  exact — per node.
+- **Several observers in one channel**: the first one whose triggers match
+  answers. If that one is throttled the message is dropped rather than passed
+  to the next — otherwise a second watcher would answer precisely *because* the
+  first was rate-limited.
+- **Replying to an observer continues with that observer.** Its reply opens a
+  thread, and that thread is locked to it — otherwise answering the watcher
+  would reach the channel's default target instead. Messages in that thread are
+  addressed to it, so they route as ordinary conversation and do not spend the
+  observe allowance.
+- Bot messages are filtered before any of this, so two observers in one channel
+  cannot answer each other.
+- Omitting `observeConfig` on an observer stores the defaults above rather than
+  leaving it uncapped.
+
 ### Multi-Agent Group Discussions
 
 When a trigger keyword routes to a GROUP target, a multi-agent panel discussion starts. All configured agents in the group participate in a live discussion streamed to Slack.
@@ -271,11 +370,24 @@ Each style produces a distinct phase flow, but all use the same header+thread UX
 
 | Style | Phases | Slack Behavior |
 |-------|--------|---------------|
-| **ROUND TABLE** | Opinion → Synthesis | Each agent posts a channel header; moderator synthesizes |
+| **ROUND TABLE** | Initial Opinions → Discussion (×`maxRounds`-1, default 1) → Synthesis | Each agent posts a channel header; moderator synthesizes |
 | **PEER REVIEW** | Opinion → Critique → Revision → Synthesis | Peer feedback threads under the target agent's header |
 | **DEVIL'S ADVOCATE** | Opinion → Challenge → Defense → Synthesis | Challenger threads under the original agent's header |
 | **DEBATE** | Pro Arguments → Con Arguments → Rebuttals → Judge | PRO and CON agents post separate headers; rebuttals thread under opponents |
 | **DELPHI** | Anonymous Round 1 → Round 2 (convergence) → Synthesis | Each round's opinions post as headers; convergence visible across rounds |
+| **TASK FORCE** | Plan → Execute → Verify → Synthesis | Moderator posts plan; agents post task results; verifiers thread under targets; synthesis |
+| **NEGOTIATION** | Positions & Interests → Opening Proposals → Bargaining → Arbitration (skipped once agreement is reached) → Synthesis | Each agent posts its position and proposals as channel headers; moderator arbitrates and synthesizes |
+
+#### TASK_FORCE Events in Slack
+
+The `SlackGroupDiscussionListener` handles TASK_FORCE-specific events:
+
+| Event | Slack Rendering |
+|-------|----------------|
+| `onTaskPlanCreated` | Posts "📝 *Task plan created*" (or "pre-configured") with numbered task list and assignments |
+| `onSpeakerComplete` (EXECUTE phase) | Each agent's task result posts as a channel-level header + thread reply |
+| `onTaskVerified` | Posts ✅/❌ with task subject, pass/fail status, and moderator feedback |
+| `onGroupComplete` | Posts "📋 *Panel Synthesis*" with preview + full content in thread |
 
 #### Peer Feedback Threading
 

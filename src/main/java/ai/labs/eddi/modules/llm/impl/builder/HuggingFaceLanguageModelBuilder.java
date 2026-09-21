@@ -10,7 +10,11 @@ import jakarta.enterprise.context.ApplicationScoped;
 
 import java.time.Duration;
 import java.util.Map;
+import java.util.Set;
 
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyDouble;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyInt;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyLong;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 /**
@@ -46,6 +50,11 @@ public class HuggingFaceLanguageModelBuilder implements ILanguageModelBuilder {
     private static final String KEY_WAIT_FOR_MODEL = "waitForModel";
     private static final String BASE_URL_HUGGING_FACE = "https://api-inference.huggingface.co/models/";
 
+    @Override
+    public Set<String> recognisedParameters() {
+        return Set.of(KEY_ACCESS_TOKEN, KEY_MODEL_ID, KEY_TEMPERATURE, KEY_TIMEOUT, KEY_MAX_NEW_TOKENS, KEY_WAIT_FOR_MODEL);
+    }
+
     @SuppressWarnings("removal")
     @Override
     public ChatModel build(Map<String, String> parameters) {
@@ -64,17 +73,11 @@ public class HuggingFaceLanguageModelBuilder implements ILanguageModelBuilder {
             builder.baseUrl(huggingFaceUrl);
         }
 
-        if (!isNullOrEmpty(parameters.get(KEY_TIMEOUT))) {
-            builder.timeout(Duration.ofMillis(Long.parseLong(parameters.get(KEY_TIMEOUT))));
-        }
+        applyLong(parameters, KEY_TIMEOUT, ms -> builder.timeout(Duration.ofMillis(ms)));
 
-        if (!isNullOrEmpty(parameters.get(KEY_TEMPERATURE))) {
-            builder.temperature(Double.parseDouble(parameters.get(KEY_TEMPERATURE)));
-        }
+        applyDouble(parameters, KEY_TEMPERATURE, builder::temperature);
 
-        if (!isNullOrEmpty(parameters.get(KEY_MAX_NEW_TOKENS))) {
-            builder.maxNewTokens(Integer.parseInt(parameters.get(KEY_MAX_NEW_TOKENS)));
-        }
+        applyInt(parameters, KEY_MAX_NEW_TOKENS, builder::maxNewTokens);
 
         if (!isNullOrEmpty(parameters.get(KEY_WAIT_FOR_MODEL))) {
             builder.waitForModel(Boolean.parseBoolean(parameters.get(KEY_WAIT_FOR_MODEL)));

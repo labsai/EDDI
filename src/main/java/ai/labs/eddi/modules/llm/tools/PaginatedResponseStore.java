@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.caching.ICacheFactory;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import java.util.ArrayList;
 import org.jboss.logging.Logger;
 
 import java.util.List;
@@ -104,7 +105,7 @@ public class PaginatedResponseStore {
     private List<String> splitIntoPages(String text, int pageSize) {
         int totalLength = text.length();
         int pageCount = (totalLength + pageSize - 1) / pageSize;
-        var pages = new java.util.ArrayList<String>(pageCount);
+        var pages = new ArrayList<String>(pageCount);
 
         for (int i = 0; i < totalLength; i += pageSize) {
             pages.add(text.substring(i, Math.min(i + pageSize, totalLength)));

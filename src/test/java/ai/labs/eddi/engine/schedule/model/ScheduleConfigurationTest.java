@@ -9,6 +9,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -91,9 +92,19 @@ class ScheduleConfigurationTest {
         assertEquals("Every weekday at 9am", config.getCronDescription());
     }
 
+    /**
+     * The ORDER is asserted, not just the count. Both stores persist
+     * {@code name()}, but a reordering would still silently repoint anything that
+     * ever compared ordinals, and {@code SKIPPED} was appended last precisely so
+     * that nothing has to. A new status therefore goes on the END of this list — if
+     * this assertion fails because a value was inserted mid-list, move it rather
+     * than re-recording the new order.
+     */
     @Test
     void fireStatus_allValues() {
-        assertEquals(6, ScheduleConfiguration.FireStatus.values().length);
+        assertArrayEquals(
+                new String[]{"PENDING", "CLAIMED", "EXECUTING", "COMPLETED", "FAILED", "DEAD_LETTERED", "SKIPPED"},
+                Arrays.stream(ScheduleConfiguration.FireStatus.values()).map(Enum::name).toArray(String[]::new));
     }
 
     @Test

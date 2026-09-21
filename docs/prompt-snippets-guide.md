@@ -1,6 +1,6 @@
 # Prompt Snippets — Usage Guide
 
-> Prompt Snippets are reusable system prompt building blocks stored as versioned configuration documents. They replace the deleted `CounterweightService`, `IdentityMaskingService`, and `DeploymentContextService` with a flexible, user-extensible, config-driven approach.
+> Prompt Snippets are reusable system prompt building blocks stored as versioned configuration documents. They replace the deleted `DeploymentContextService` with a flexible, user-extensible, config-driven approach, and supply the customisable preset text for the counterweight and identity-masking features described in [langchain.md → Behavioral Safety](langchain.md#behavioral-safety-counterweight--identity-masking).
 
 ## Quick Start
 
@@ -25,11 +25,11 @@ Content-Type: application/json
 Reference the snippet in your LLM task's system prompt template:
 
 ```
-You are a helpful customer service agent for {{properties.company_name.valueString}}.
+You are a helpful customer service agent for {properties.company_name}.
 
-{{snippets.cautious_mode}}
+{snippets.cautious_mode}
 
-Always respond in {{properties.preferred_language.valueString}}.
+Always respond in {properties.preferred_language}.
 ```
 
 That's it. The snippet content is automatically injected at template resolution time.
@@ -40,7 +40,7 @@ That's it. The snippet content is automatically injected at template resolution 
 
 ### Auto-Loading
 
-All snippets are loaded from MongoDB at LLM task execution time and injected into the template data map under the `snippets` namespace. This happens **before** the Jinja2 template engine processes the system prompt, so `{{snippets.xxx}}` resolves like any other template variable.
+All snippets are loaded from MongoDB at LLM task execution time and injected into the template data map under the `snippets` namespace. This happens **before** the Qute template engine processes the system prompt, so `{snippets.xxx}` resolves like any other template variable.
 
 ```
 Template Data Map:
@@ -60,8 +60,8 @@ Template Data Map:
 Snippets are cached in a Caffeine cache with a **5-minute TTL**. This means:
 
 - Snippets load once from MongoDB, then serve from cache
-- After creating/updating/deleting a snippet, changes appear within 5 minutes
-- For immediate effect, restart the server or call `invalidateCache()` programmatically
+- `POST`/`PUT`/`DELETE` on `/snippetstore/snippets` invalidate the cache synchronously, so a snippet edited through the REST API takes effect on the next LLM turn
+- The 5-minute TTL is the fallback for changes made outside the REST API (a direct database write, or another node)
 - Cache hit/miss metrics are exposed at `/q/metrics` as `eddi.snippets.cache.hits` and `eddi.snippets.cache.misses`
 
 ### Name Validation
@@ -75,7 +75,7 @@ Snippet names **must** match the pattern `[a-z0-9_]+`:
 | `tone_formal` | `with.dot` (dot) |
 | `rule_42` | `with space` (space) |
 
-This ensures safe Jinja2 dot-notation access (`{{snippets.name}}`).
+This ensures safe Qute dot-notation access (`{snippets.name}`).
 
 ---
 
@@ -83,39 +83,21 @@ This ensures safe Jinja2 dot-notation access (`{{snippets.name}}`).
 
 ### `templateEnabled` (default: `true`)
 
-Controls whether the Jinja2 template engine resolves template markers inside the snippet content.
+Intended to control whether the Qute template engine resolves template markers inside the snippet content. **It is currently inert.**
 
-**When `true` (default):** Template variables in the snippet are resolved against the full template data map. This allows snippets to be dynamic:
-
-```json
-{
-  "name": "personalized_greeting",
-  "content": "Address the user as {{properties.preferred_name.valueString}} and respond in {{properties.preferred_language.valueString}}.",
-  "templateEnabled": true
-}
-```
-
-**When `false`:** Template markers (`{{`, `}}`) are treated as literal text. The content is wrapped in Jinja2 `{% raw %}...{% endraw %}` blocks automatically. This is useful for code examples or documentation snippets:
+Snippet content is injected verbatim and is never template-resolved, whatever `templateEnabled` says. A snippet reaches a prompt as a template *data value* — `{snippets.name}` resolves to it — and Qute does not re-parse what an expression resolved to. Any `{...}` inside the content therefore reaches the model as literal text:
 
 ```json
 {
   "name": "code_example_instructions",
-  "content": "When showing code examples, use the format: {{variable_name}} for placeholders.",
+  "content": "When showing code examples, use the format: {variable_name} for placeholders.",
   "templateEnabled": false
 }
 ```
 
-### Inline Override
+That is exactly the `templateEnabled: false` guarantee, and every snippet gets it for free — no unparsed-block wrapping is applied or needed. The corollary is that `templateEnabled: true` does **not** make `{properties.x}` inside a snippet resolve either; it too reaches the model literally. Snippets cannot be made dynamic this way — put the dynamic parts in the system prompt template itself, around the `{snippets.name}` reference.
 
-Even when `templateEnabled` is `true`, you can protect specific sections using Jinja2 raw blocks directly in the content:
-
-```json
-{
-  "name": "mixed_content",
-  "content": "Hello {{properties.name.valueString}}! {% raw %}Use {{placeholder}} in templates.{% endraw %}",
-  "templateEnabled": true
-}
-```
+The field is kept because stored configs carry it and because honouring it remains a live option; see the `PromptSnippetService` class javadoc for what enabling it would cost.
 
 ---
 
@@ -171,7 +153,7 @@ All endpoints require `eddi-admin` or `eddi-editor` role.
 }
 ```
 
-Usage: `{{snippets.cautious_mode}}`
+Usage: `{snippets.cautious_mode}`
 
 ### Persona — Formal Tone
 
@@ -193,21 +175,21 @@ Usage: `{{snippets.cautious_mode}}`
   "name": "gdpr_notice",
   "category": "compliance",
   "description": "GDPR-compliant data handling instructions",
-  "content": "DATA PRIVACY: You are operating under GDPR regulations. Never store or repeat personal data beyond the current conversation unless the user explicitly consents. If asked about data handling, refer to our privacy policy at {{properties.privacy_policy_url.valueString}}.",
+  "content": "DATA PRIVACY: You are operating under GDPR regulations. Never store or repeat personal data beyond the current conversation unless the user explicitly consents. If asked about data handling, refer the user to our published privacy policy.",
   "tags": ["compliance", "gdpr", "eu"],
   "templateEnabled": true
 }
 ```
 
-### Dynamic — Context-Aware Routing
+### Routing — Escalation Rules
 
 ```json
 {
   "name": "routing_context",
   "category": "custom",
-  "description": "Injects department-specific instructions from properties",
-  "content": "You are handling inquiries for the {{properties.department.valueString}} department. Follow these department-specific guidelines:\n{{properties.department_guidelines.valueString}}",
-  "tags": ["routing", "dynamic"],
+  "description": "Department handover and escalation rules",
+  "content": "ROUTING: Handle only inquiries that belong to your assigned department. If a request belongs elsewhere, say so and hand it over rather than guessing. Escalate to a human agent whenever the user asks for one.",
+  "tags": ["routing"],
   "templateEnabled": true
 }
 ```
@@ -219,18 +201,18 @@ Usage: `{{snippets.cautious_mode}}`
 Snippets give you full control over prompt composition order:
 
 ```
-{{snippets.tone_formal}}
+{snippets.tone_formal}
 
 You are a customer service agent for Acme Corp.
 
-{{snippets.cautious_mode}}
+{snippets.cautious_mode}
 
-{{snippets.gdpr_notice}}
+{snippets.gdpr_notice}
 
-Your specialization is {{properties.specialization.valueString}}.
+Your specialization is {properties.specialization}.
 
 Important context:
-{{snippets.routing_context}}
+{snippets.routing_context}
 ```
 
 The designer controls exactly where each snippet appears, enabling precise prompt engineering.
@@ -241,8 +223,8 @@ The designer controls exactly where each snippet appears, enabling precise promp
 
 | Legacy Service | Snippet Replacement |
 |---|---|
-| `CounterweightService` | Create a `cautious_mode` snippet with your safety instructions |
-| `IdentityMaskingService` | Create a `persona_instructions` snippet with masking rules |
 | `DeploymentContextService` | Create environment-specific snippets (`prod_rules`, `staging_rules`) |
+
+`CounterweightService` and `IdentityMaskingService` were **not** removed — they are still applied to every system prompt and are configured per LLM task via the `counterweight` and `identityMasking` blocks in [langchain.md → Behavioral Safety](langchain.md#behavioral-safety-counterweight--identity-masking). Counterweight preset text is itself customised by creating `counterweight-cautious` / `counterweight-strict` snippets.
 
 The key advantage: snippets are **user-configurable** without code changes, versionable, and composable.

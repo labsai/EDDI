@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.runtime.rest.interceptors;
 
+import ai.labs.eddi.engine.triggermanagement.IRestAgentTriggerStore;
+import jakarta.ws.rs.Path;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -60,10 +62,20 @@ class LegacyPathRewriteFilterTest {
         }
 
         @Test
-        @DisplayName("/bottriggerstore/bottriggers → /agenttriggerstore/agenttriggers")
+        @DisplayName("/bottriggerstore/bottriggers → /AgentTriggerStore/agenttriggers (case must match the @Path)")
         void botTriggerToAgentTrigger() {
-            assertEquals("/agenttriggerstore/agenttriggers/t1",
+            assertEquals("/AgentTriggerStore/agenttriggers/t1",
                     LegacyPathRewriteFilter.rewritePath("/bottriggerstore/bottriggers/t1"));
+        }
+
+        @Test
+        @DisplayName("rewritten trigger path matches the declared @Path of IRestAgentTriggerStore")
+        void botTriggerRewriteMatchesDeclaredJaxRsPath() {
+            String declaredPath = IRestAgentTriggerStore.class.getAnnotation(Path.class).value();
+
+            assertEquals(declaredPath + "/t1",
+                    LegacyPathRewriteFilter.rewritePath("/bottriggerstore/bottriggers/t1"),
+                    "JAX-RS path matching is case-sensitive — a rewrite that does not match the declared @Path yields a 404");
         }
 
         @Test
@@ -71,6 +83,53 @@ class LegacyPathRewriteFilterTest {
         void langchainToolsToLlmTools() {
             assertEquals("/llm/tools",
                     LegacyPathRewriteFilter.rewritePath("/langchain/tools"));
+        }
+    }
+
+    @Nested
+    @DisplayName("rewritePath — legacy environment segments")
+    class EnvironmentTests {
+
+        @Test
+        @DisplayName("/unrestricted/ → /production/")
+        void unrestrictedSegmentBecomesProduction() {
+            assertEquals("/agentstore/agents/abc/production/whatever",
+                    LegacyPathRewriteFilter.rewritePath("/botstore/bots/abc/unrestricted/whatever"));
+        }
+
+        @Test
+        @DisplayName("/restricted/ → /production/")
+        void restrictedSegmentBecomesProduction() {
+            assertEquals("/agents/abc/production/status",
+                    LegacyPathRewriteFilter.rewritePath("/agents/abc/restricted/status"));
+        }
+
+        @Test
+        @DisplayName("trailing /unrestricted → /production")
+        void trailingUnrestrictedBecomesProduction() {
+            assertEquals("/agents/abc/production",
+                    LegacyPathRewriteFilter.rewritePath("/agents/abc/unrestricted"));
+        }
+
+        @Test
+        @DisplayName("trailing /restricted → /production")
+        void trailingRestrictedBecomesProduction() {
+            assertEquals("/agents/abc/production",
+                    LegacyPathRewriteFilter.rewritePath("/agents/abc/restricted"));
+        }
+
+        @Test
+        @DisplayName("store rewrite and environment rewrite apply together")
+        void storeAndEnvironmentRewriteCombine() {
+            assertEquals("/agentstore/agents/abc/production",
+                    LegacyPathRewriteFilter.rewritePath("/botstore/bots/abc/unrestricted"));
+        }
+
+        @Test
+        @DisplayName("a v6 /production path is left untouched")
+        void productionPathUnchanged() {
+            String path = "/agentstore/agents/abc/production";
+            assertEquals(path, LegacyPathRewriteFilter.rewritePath(path));
         }
     }
 
