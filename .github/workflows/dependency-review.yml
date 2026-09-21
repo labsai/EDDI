@@ -23,18 +23,92 @@ jobs:
         uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
         with:
           fail-on-severity: high
-          # deny-licenses is deprecated upstream (dependency-review-action#997) in
-          # favour of allow-lists, but migrating means enumerating every licence
-          # this project accepts — a repo-wide policy decision, not a mechanical
-          # swap. Kept deliberately until the maintainers make that call; the
-          # pinned v4 keeps honouring it, and removal would arrive with a major
-          # bump that gets reviewed here anyway.
-          deny-licenses: GPL-3.0, AGPL-3.0
-          # BOM-managed dependencies carry no <version> in the pom, so the action
-          # cannot resolve their metadata and reports "unknown licence" on every
-          # PR that touches the manifest. Caffeine is Apache-2.0 — verified against
-          # its own POM on Maven Central (3.2.4, the version the Quarkus BOM
-          # resolves) — and already shipped transitively via quarkus-caffeine
-          # before it was ever declared, so nothing new is being licensed here.
-          allow-dependencies-licenses: pkg:maven/com.github.ben-manes.caffeine/caffeine
+          # LICENCE POLICY — reviewed 2026-09-17, deny-list kept on purpose.
+          #
+          # EDDI is Apache-2.0 and ships as a fat jar inside a distributed Docker
+          # image, i.e. we distribute a combined work. The line is therefore drawn
+          # at the library level: permissive and weak (file-level) copyleft are
+          # acceptable — Apache-2.0, MIT, ISC, BSD-2/3-Clause, 0BSD, MIT-0,
+          # OFL-1.1, UPL-1.0, BlueOak, MPL-2.0, EPL-1.0/2.0, CDDL — and anything
+          # whose obligations reach the whole work is not. EPL in particular has
+          # to stay acceptable: the entire Jakarta EE / JUnit / JaCoCo layer that
+          # Quarkus pulls in is EPL, usually dual-licensed with GPL-2.0 under the
+          # Classpath Exception.
+          #
+          # Why the list below is longer than "GPL-3.0, AGPL-3.0": the realistic
+          # hazard for middleware is not someone adding a GPL-3.0 jar, it is a
+          # dependency relicensing to a source-available licence. EDDI already
+          # depends on MongoDB and Elasticsearch clients (both still Apache-2.0),
+          # and that corner of the ecosystem has moved to SSPL / BUSL / Elastic-2.0
+          # more than once. LGPL is denied because an uber jar is closer to static
+          # than to dynamic linking, so the LGPL carve-out we would be relying on
+          # does not cleanly apply to what we actually ship.
+          #
+          # Why NOT allow-licenses, despite the deprecation warning the action
+          # prints on every run (upstream actions/dependency-review-action#997):
+          #   1. It would fail the build today. GitHub reports org.jsoup:jsoup and
+          #      io.github.classgraph:classgraph as "LicenseRef-bad-non-standard"
+          #      (both are really MIT). The action's src/spdx.ts satisfies() returns
+          #      false for an expression it cannot match, so under an allow-list those
+          #      land in `forbidden` -> setFailed; under a deny-list satisfiesAny()
+          #      returns false and they pass. Migrating means two permanent
+          #      per-package exclusions that exist only to work around GitHub's
+          #      own normalisation — the opposite of what an allow-list is for.
+          #   2. It buys no coverage here. The 58 Maven entries GitHub cannot resolve
+          #      (see the note below the licence list) land in the `unlicensed`
+          #      bucket, and main.ts printNullLicenses() only prints —
+          #      it never sets issueFound. They are informational in BOTH modes, so
+          #      an allow-list would not gate them either.
+          #   3. Removal is not scheduled. Issue #997 was closed by stalebot after
+          #      180 days, not by a decision, and v5.0.0 (2026-05-08) is a node20
+          #      -> node24 runtime bump that leaves deny-licenses fully documented
+          #      in action.yml. There is no newer v4 digest to move to.
+          # Revisit if upstream actually announces removal, or if GitHub starts
+          # resolving BOM-managed Maven coordinates (which would make an allow-list
+          # meaningful rather than cosmetic).
+          #
+          # Known trade-off, accepted: satisfiesAny() treats "A OR B" as denied
+          # when either side is denied, so a *directly declared* dependency offering
+          # "Apache-2.0 OR LGPL-2.1" would be flagged despite the Apache option.
+          # Nothing in the tree hits this today — the dual-licensed ones
+          # (net.java.dev.jna, org.javassist, com.github.java-json-tools:*) are all
+          # transitive, and GitHub's Maven graph only reads pom.xml. If one is ever
+          # declared directly, add it to allow-dependencies-licenses with the
+          # licence we are taking it under.
+          #
+          # Verified against every licence value in this repo's live dependency
+          # graph (gh api repos/labsai/EDDI/dependency-graph/sbom) using the exact
+          # library versions this pinned commit bundles (@onebeyond/spdx-license-
+          # satisfies 1.0.1, spdx-expression-parse 4.0.0, spdx-license-ids 3.0.20):
+          # all fifteen ids below exist in that id set — an unknown one would be
+          # silently ignored rather than error — nothing currently in the graph is
+          # newly denied, every listed hazard is caught, deprecated ids (GPL-3.0)
+          # match the -only/-or-later entries, and Classpath-Exception artefacts do
+          # not false-positive.
+          deny-licenses: >-
+            AGPL-3.0-only, AGPL-3.0-or-later,
+            GPL-2.0-only, GPL-2.0-or-later,
+            GPL-3.0-only, GPL-3.0-or-later,
+            LGPL-2.0-only, LGPL-2.0-or-later,
+            LGPL-2.1-only, LGPL-2.1-or-later,
+            LGPL-3.0-only, LGPL-3.0-or-later,
+            SSPL-1.0, BUSL-1.1, Elastic-2.0
+          # No allow-dependencies-licenses on purpose. BOM-managed dependencies
+          # carry no <version> in the pom (and the langchain4j ones use a
+          # ${property}), so GitHub cannot resolve their metadata and reports no
+          # licence — 58 Maven entries are in that state, plus all 21 pinned
+          # GitHub Actions. Caffeine used to be exempted here to keep one of them
+          # out of the informational "could not detect a license" list, which was
+          # a bad trade: that input drops a package from the licence check
+          # entirely ("we leave it off of the `licensed` and `unlicensed` lists",
+          # groupChanges in the action's src/licenses.ts), so the exemption also
+          # waived deny-licenses for any future Caffeine release whose licence
+          # GitHub *can* resolve. It bought nothing either — per point 2 above an
+          # unresolved licence cannot fail the build, and 57 other entries sit in
+          # the same bucket unexempted. Caffeine is Apache-2.0 (verified against
+          # its own POM on Maven Central at 3.2.4, the version the Quarkus BOM
+          # resolves) and shipped transitively via quarkus-caffeine before it was
+          # ever declared here, so nothing needed waiving. Reach for this input
+          # only for a package whose licence GitHub reports wrongly, and name the
+          # licence being accepted when you do.
           comment-summary-in-pr: always
