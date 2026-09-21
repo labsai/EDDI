@@ -243,6 +243,16 @@ class DocumentationLinksTest {
                 continue; // the index itself, and each folder's own landing page
             }
             String relative = docs.relativize(p).toString().replace('\\', '/');
+            // Pending changelog entries, not pages. Each one lives for about a
+            // day before the nightly job folds it into changelog.md — which IS
+            // listed — and deletes it, so listing them would mean editing
+            // SUMMARY.md twice per entry to index something already indexed.
+            // ChangelogFragmentTest keeps that narrow: nothing but a README and
+            // dated fragments may live in this directory, so the exemption
+            // cannot become a place to park a real page.
+            if (relative.startsWith("changelog.d/")) {
+                continue;
+            }
             // SUMMARY.md links either by bare name or by path, depending on depth.
             if (!summary.contains("(" + relative + ")") && !summary.contains("(" + name + ")")
                     && !summary.contains("/" + name + ")")) {

@@ -40,6 +40,7 @@ Closes #
 - [ ] I have added tests that prove my fix/feature works
 - [ ] Existing tests pass locally (`./mvnw clean verify -DskipITs`)
 - [ ] I have updated documentation if needed
+- [ ] My changelog entry is a new file under [`docs/changelog.d/`](https://github.com/labsai/EDDI/blob/main/docs/changelog.d/README.md) — not an edit to `docs/changelog.md`, which every open PR would conflict over
 - [ ] My commit messages follow [conventional commits](https://github.com/labsai/EDDI/blob/main/CONTRIBUTING.md#commit-convention)
 - [ ] I have not committed any secrets, API keys, or tokens
 - [ ] This PR has a clear, focused scope (one concern per PR)
