@@ -325,7 +325,7 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
             PublishAck ack = jetStream.publish(subject, conversationId.getBytes());
             long durationNanos = System.nanoTime() - startNanos;
 
-            log.debugf("Published to NATS subject %s (seq: %d)", subject, ack.getSeqno());
+            log.debugf("Published to NATS subject %s (seq: %d)", sanitize(subject), ack.getSeqno());
 
             // Record publish metrics
             getMetrics().ifPresent(m -> {

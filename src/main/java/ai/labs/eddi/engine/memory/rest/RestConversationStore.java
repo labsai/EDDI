@@ -240,7 +240,7 @@ public class RestConversationStore implements IRestConversationStore {
                         retConversationDescriptors.add(conversationDescriptor);
                     } catch (Exception e) {
                         // Skip individual corrupted/orphaned descriptors gracefully
-                        log.debug(format("Skipping descriptor due to error: %s", e.getMessage()));
+                        log.debug(format("Skipping descriptor due to error: %s", sanitize(e.getMessage())));
                     }
                 }
 
@@ -602,11 +602,11 @@ public class RestConversationStore implements IRestConversationStore {
             try {
                 long deleted = attachmentStorageInstance.get().deleteByConversation(conversationId);
                 if (deleted > 0) {
-                    log.debug(format("Deleted %d attachments for conversation %s", deleted, conversationId));
+                    log.debug(format("Deleted %d attachments for conversation %s", deleted, sanitize(conversationId)));
                 }
             } catch (Exception e) {
                 log.warn(format("Failed to delete attachments for conversation %s: %s",
-                        conversationId, e.getMessage()));
+                        sanitize(conversationId), sanitize(e.getMessage())));
             }
         }
     }
