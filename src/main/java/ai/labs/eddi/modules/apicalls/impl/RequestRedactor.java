@@ -12,6 +12,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
 import java.util.HashMap;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -235,6 +236,125 @@ public class RequestRedactor {
         if (requestMap.get(IRequest.KEY_BODY) instanceof String body) {
             requestMap.put(IRequest.KEY_BODY, redactBody(body));
         }
+    }
+
+    /**
+     * Replace every occurrence of a resolved secret plaintext in {@code text},
+     * longest first so one secret contained in another leaves no fragment.
+     * <p>
+     * This is the by-VALUE complement to the name and shape heuristics above: the
+     * executor knows which vault plaintexts it substituted into a request, and an
+     * opaque key — a Segment write key, a webhook path — matches no heuristic.
+     */
+    public static String redactResolvedSecrets(String text, Set<String> resolvedSecrets) {
+        if (text == null || resolvedSecrets == null || resolvedSecrets.isEmpty()) {
+            return text;
+        }
+        String redacted = text;
+        for (String secret : resolvedSecrets.stream().filter(s -> s != null && !s.isEmpty())
+                .sorted(Comparator.comparingInt(String::length).reversed()).toList()) {
+            redacted = redacted.replace(secret, REDACTED);
+        }
+        return redacted;
+    }
+
+    /**
+     * {@link #redactResolvedSecrets(String, Set)} over the URI, header values,
+     * query-parameter values and body of a request map, each entry REPLACED like
+     * {@link #redactRequestMap(Map, Set)} does.
+     */
+    @SuppressWarnings("unchecked")
+    public static void redactResolvedSecrets(Map<String, Object> requestMap, Set<String> resolvedSecrets) {
+        if (requestMap == null || resolvedSecrets == null || resolvedSecrets.isEmpty()) {
+            return;
+        }
+        if (requestMap.get(IRequest.KEY_URI) instanceof String uri) {
+            requestMap.put(IRequest.KEY_URI, redactResolvedSecrets(uri, resolvedSecrets));
+        }
+        if (requestMap.get(IRequest.KEY_HEADERS) instanceof Map<?, ?> headers) {
+            var redacted = new HashMap<String, Object>();
+            ((Map<String, ?>) headers).forEach((name, value) -> redacted.put(name,
+                    value == null ? null : redactResolvedSecrets(value.toString(), resolvedSecrets)));
+            requestMap.put(IRequest.KEY_HEADERS, redacted);
+        }
+        if (requestMap.get(IRequest.KEY_QUERY_PARAMS) instanceof Map<?, ?> queryParams) {
+            var redacted = new HashMap<String, Object>();
+            ((Map<String, ?>) queryParams).forEach((name, value) -> redacted.put(name, value instanceof List<?> values
+                    ? values.stream().map(v -> v == null ? null : redactResolvedSecrets(v.toString(), resolvedSecrets)).toList()
+                    : value == null ? null : redactResolvedSecrets(value.toString(), resolvedSecrets)));
+            requestMap.put(IRequest.KEY_QUERY_PARAMS, redacted);
+        }
+        if (requestMap.get(IRequest.KEY_BODY) instanceof String body) {
+            requestMap.put(IRequest.KEY_BODY, redactResolvedSecrets(body, resolvedSecrets));
+        }
+    }
+
+    /**
+     * How long a body may be in a log line before it is cut, matching
+     * {@code HttpClientWrapper.truncateAndClean}.
+     */
+    private static final int LOG_BODY_LIMIT = 150;
+
+    /**
+     * A request formatted for a log line, with every resolved secret plaintext
+     * removed BEFORE the line is built.
+     * <p>
+     * Order is the whole point. {@code RequestWrapper.toString()} normalises
+     * newlines to spaces and truncates the body to {@value #LOG_BODY_LIMIT}
+     * characters, so redacting its output by exact value misses a secret that
+     * contains a newline (a PEM key) or that straddles the cut — part or all of the
+     * plaintext then survives into the log. This reads the request's RAW components
+     * ({@link IRequest#toMap()}), redacts those, and normalises afterwards.
+     * <p>
+     * Headers are deliberately absent, exactly as they are from
+     * {@code RequestWrapper.toString()}: the credential a request carries is
+     * usually a header, and a log line is the one place that never needed them.
+     *
+     * @param request
+     *            the request to describe; {@code null} yields {@code "null"}
+     * @param resolvedSecrets
+     *            the plaintexts the build substituted, from
+     *            {@code ApiCallExecutor.BuiltRequest#resolvedSecrets}
+     * @return a single-line, redacted description of the request
+     */
+    public static String safeRequestLog(IRequest request, Set<String> resolvedSecrets) {
+        if (request == null) {
+            return "null";
+        }
+        Map<String, Object> raw;
+        try {
+            raw = request.toMap();
+        } catch (RuntimeException notDescribable) {
+            raw = null;
+        }
+        if (raw == null) {
+            // No raw view to work from. Redacting the formatted string is what this
+            // method exists to improve on, but it is still strictly better than not
+            // redacting at all.
+            return redactResolvedSecrets(request.toString(), resolvedSecrets);
+        }
+        String uri = redactResolvedSecrets(asString(raw.get(IRequest.KEY_URI)), resolvedSecrets);
+        String method = asString(raw.get(IRequest.KEY_METHOD));
+        String queryParams = redactResolvedSecrets(asString(raw.get(IRequest.KEY_QUERY_PARAMS)), resolvedSecrets);
+        String body = truncateAndClean(redactResolvedSecrets(asString(raw.get(IRequest.KEY_BODY)), resolvedSecrets));
+        return "Request{uri=" + uri + ", method=" + method + ", requestBody=\"" + body + "\", queryParams=" + queryParams + "}";
+    }
+
+    private static String asString(Object value) {
+        return value == null ? null : value.toString();
+    }
+
+    /**
+     * One line, bounded in length — the same shape
+     * {@code HttpClientWrapper.truncateAndClean} produces, applied only AFTER
+     * redaction.
+     */
+    private static String truncateAndClean(String text) {
+        if (text == null) {
+            return null;
+        }
+        String cleaned = text.replaceAll("\\r?\\n", " ");
+        return cleaned.length() > LOG_BODY_LIMIT ? cleaned.substring(0, LOG_BODY_LIMIT) + "..." : cleaned;
     }
 
     /**
