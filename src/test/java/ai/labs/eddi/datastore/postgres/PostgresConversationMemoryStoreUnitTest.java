@@ -8,6 +8,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.memory.ConcurrentConversationModificationException;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
@@ -19,9 +20,11 @@ import javax.sql.DataSource;
 import java.io.IOException;
 import java.sql.*;
 import java.util.Collections;
+import java.util.LinkedList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.startsWith;
@@ -97,7 +100,7 @@ class PostgresConversationMemoryStoreUnitTest {
         ConversationMemorySnapshot snapshot = createSnapshot("conv-123");
         when(jsonSerialization.serialize(snapshot)).thenReturn("{\"test\":true}");
         when(preparedStatement.executeUpdate()).thenReturn(0);
-        ResultSet probeResult = stubConversationExists(false);
+        ProbeResources probe = stubConversationExists(false);
 
         var thrown = assertThrows(IResourceStore.ResourceStoreException.class,
                 () -> store.storeConversationMemorySnapshot(snapshot));
@@ -106,7 +109,8 @@ class PostgresConversationMemoryStoreUnitTest {
         assertTrue(thrown.getMessage().contains("NOT persisted"), thrown.getMessage());
         assertFalse(thrown instanceof ConcurrentConversationModificationException,
                 "an erased conversation has nothing to retry against — it must not be reported as a revision conflict");
-        verify(probeResult).close();
+        verify(probe.probeResult()).close();
+        verify(probe.probeStatement()).close();
     }
 
     /**
@@ -120,7 +124,7 @@ class PostgresConversationMemoryStoreUnitTest {
         snapshot.setRevision(4L);
         when(jsonSerialization.serialize(snapshot)).thenReturn("{\"test\":true}");
         when(preparedStatement.executeUpdate()).thenReturn(0);
-        ResultSet probeResult = stubConversationExists(true);
+        ProbeResources probe = stubConversationExists(true);
 
         var thrown = assertThrows(ConcurrentConversationModificationException.class,
                 () -> store.storeConversationMemorySnapshot(snapshot));
@@ -131,7 +135,22 @@ class PostgresConversationMemoryStoreUnitTest {
                 "a refused write must leave the snapshot on the revision it was derived from");
         // The guard has to reach the SQL, not just the exception mapping.
         verify(preparedStatement).setLong(6, 4L);
-        verify(probeResult).close();
+        verify(probe.probeResult()).close();
+        verify(probe.probeStatement()).close();
+    }
+
+    /**
+     * The two mocks behind the existence probe, returned together so a test can
+     * assert the store closed <em>both</em>.
+     * <p>
+     * Returning only the {@code ResultSet} was the gap: the helper's comment
+     * claimed the tests verified both closes, and no test could, because the
+     * statement never left this method. Both matter — {@code ResultSet.close()} is
+     * not specified to close the statement that produced it, so a leaked
+     * {@code PreparedStatement} per refused write holds a server-side portal open
+     * until the connection is returned.
+     */
+    private record ProbeResources(PreparedStatement probeStatement, ResultSet probeResult) {
     }
 
     /**
@@ -139,17 +158,42 @@ class PostgresConversationMemoryStoreUnitTest {
      * row is gone" apart from "the row moved to another revision".
      * <p>
      * The probe gets its own statement and result set rather than reusing the
-     * shared update mocks, and the test verifies the store closes both — the probe
-     * runs in try-with-resources, and a leaked cursor per refused write would be a
-     * real leak.
+     * shared update mocks, so a test can verify the store closes both — the probe
+     * runs in try-with-resources, and a leak per refused write would be a real one.
      */
-    private ResultSet stubConversationExists(boolean exists) throws SQLException {
+    private ProbeResources stubConversationExists(boolean exists) throws SQLException {
         PreparedStatement probeStatement = mock(PreparedStatement.class);
         ResultSet probeResult = mock(ResultSet.class);
         when(connection.prepareStatement(startsWith("SELECT 1 FROM conversation_memories"))).thenReturn(probeStatement);
         when(probeStatement.executeQuery()).thenReturn(probeResult);
         when(probeResult.next()).thenReturn(exists);
-        return probeResult;
+        return new ProbeResources(probeStatement, probeResult);
+    }
+
+    /**
+     * The append path exists so a long conversation is not re-serialized and
+     * re-shipped on every turn. A full-document {@code serialize(snapshot)} at the
+     * top of {@code storeConversationMemorySnapshot} put that cost straight back:
+     * its result was dead on all three branches — the append path returns before
+     * using it, the full-replace path overwrites it after stamping the new
+     * revision, and the insert path serializes separately once the id exists.
+     * <p>
+     * One call, not none: {@code appendConversationSteps} legitimately serializes
+     * the same instance once, for the body, with the step and output arrays
+     * temporarily emptied so the stored history is neither re-serialized nor sent.
+     */
+    @Test
+    void storeSnapshot_pureAppend_serializesTheSnapshotOnceForTheBody() throws Exception {
+        ConversationMemorySnapshot snapshot = createSnapshot("conv-123");
+        snapshot.setConversationSteps(new LinkedList<>(List.of(new ConversationMemorySnapshot.ConversationStepSnapshot())));
+        snapshot.setConversationOutputs(new LinkedList<>(List.of(new ConversationOutput())));
+        snapshot.setPersistedStepCount(0);
+        when(jsonSerialization.serialize(any())).thenReturn("[]");
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        store.storeConversationMemorySnapshot(snapshot);
+
+        verify(jsonSerialization, times(1)).serialize(snapshot);
     }
 
     @Test

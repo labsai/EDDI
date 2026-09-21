@@ -94,7 +94,6 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     public String storeConversationMemorySnapshot(ConversationMemorySnapshot snapshot) throws IResourceStore.ResourceStoreException {
         ensureSchema();
         try {
-            String json = jsonSerialization.serialize(snapshot);
             String conversationId = snapshot.getConversationId();
 
             if (conversationId != null) {
@@ -111,7 +110,11 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
                 // A full-row write may rewrite the history, so it records itself as the
                 // latest rewrite; an append in flight elsewhere reads this before retrying.
                 snapshot.setHistoryRevision(expectedRevision + 1);
-                json = jsonSerialization.serialize(snapshot);
+                // Serialized HERE and nowhere earlier: the append path above returns
+                // without a full-document body, and this is the whole point of the
+                // append path. Serializing up front cost every call one full
+                // serialization of the entire conversation that nothing then used.
+                String json = jsonSerialization.serialize(snapshot);
                 // Update existing, guarded on the revision this write was derived from.
                 // COALESCE because a row written before _rev existed carries no such key
                 // and must still be writable (it upgrades in the process).

@@ -592,7 +592,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "All six `eddi_conversation_*_count_total` counters.",
+          "description": "Every `eddi_conversation_*_count_total` counter.",
           "gridPos": {
             "h": 7,
             "w": 12,
