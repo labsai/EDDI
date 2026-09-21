@@ -70,6 +70,11 @@ class RestConversationStoreLogInjectionTest {
     private IAttachmentStore attachmentStore;
     private RestConversationStore store;
 
+    /**
+     * Builds the store with attachment storage resolvable and authorization
+     * disabled, so neither the ownership gate nor the owner filter stands between
+     * the call and the log line under test.
+     */
     @SuppressWarnings("unchecked")
     @BeforeEach
     void setUp() {
@@ -102,6 +107,11 @@ class RestConversationStoreLogInjectionTest {
         return descriptor;
     }
 
+    /**
+     * The listing swallows a corrupt descriptor and logs the cause. That cause is
+     * not the developer's text: a store routinely quotes back the value it was
+     * handed, which is the caller's.
+     */
     @Test
     @DisplayName("a forged exception message cannot forge a record on the descriptor-skip line")
     void sanitizesTheExceptionMessageOnTheDescriptorSkipLine() throws Exception {
@@ -121,6 +131,10 @@ class RestConversationStoreLogInjectionTest {
                 "the cause is sanitized, not dropped — an operator still needs to know why it was skipped: " + logged);
     }
 
+    /**
+     * The success half of the attachment cleanup, reached only when the store
+     * reports a non-zero count. The id on it is the caller's path parameter.
+     */
     @Test
     @DisplayName("a forged conversationId cannot forge a record on the attachments-deleted line")
     void sanitizesTheConversationIdOnTheAttachmentsDeletedLine() throws Exception {
@@ -136,6 +150,11 @@ class RestConversationStoreLogInjectionTest {
                 "the conversation id is sanitized, not dropped: " + logged);
     }
 
+    /**
+     * The failure half, which carries two tainted values on one line — the caller's
+     * id and the store's message. Both are forged here, so the test holds whichever
+     * of the two {@code sanitize(…)} calls is removed.
+     */
     @Test
     @DisplayName("a forged conversationId and cause cannot forge a record on the attachment-failure line")
     void sanitizesTheAttachmentFailureLine() throws Exception {

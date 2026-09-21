@@ -54,6 +54,11 @@ class NatsConversationCoordinatorLogInjectionTest {
 
     private NatsConversationCoordinator coordinator;
 
+    /**
+     * Injects a mocked {@code JetStream} into the coordinator by reflection — the
+     * idiom the sibling coordinator tests already use — so a publish succeeds and
+     * reaches the line under test without a broker.
+     */
     @SuppressWarnings("unchecked")
     @BeforeEach
     void setUp() throws Exception {
@@ -79,6 +84,11 @@ class NatsConversationCoordinatorLogInjectionTest {
         when(jetStream.publish(anyString(), any(byte[].class))).thenReturn(publishAck);
     }
 
+    /**
+     * The caller's conversation id reaches the publish line through the subject it
+     * is built into, so the forgery travels one step further than on the other
+     * sinks in this change.
+     */
     @Test
     @DisplayName("a forged conversationId cannot forge a record on the publish line")
     void sanitizesTheSubjectOnThePublishLine() {
@@ -94,6 +104,10 @@ class NatsConversationCoordinatorLogInjectionTest {
                 "the subject is sanitized, not dropped — an operator still needs to know which subject: " + logged);
     }
 
+    /**
+     * Pins the premise of the test above, so the reason the fix sits at the log
+     * call cannot quietly stop being true.
+     */
     @Test
     @DisplayName("sanitizeSubject is a NATS token rule, not a log sanitizer")
     void sanitizeSubjectDoesNotRemoveRecordBoundaries() {

@@ -63,6 +63,10 @@ class RestLogAdminLogInjectionTest {
     private Sse sse;
     private RestLogAdmin restLogAdmin;
 
+    /**
+     * A sink that never reports itself closed, and a store with no backlog to
+     * replay, so nothing but the line under test can reach the capture window.
+     */
     @BeforeEach
     void setUp() {
         BoundedLogStore boundedLogStore = mock(BoundedLogStore.class);
@@ -78,13 +82,21 @@ class RestLogAdminLogInjectionTest {
                 () -> FROZEN_CLOCK);
     }
 
+    /**
+     * Closes the sink once the assertions are done. The cleanup virtual thread
+     * loops for as long as the sink is open, so without this it would outlive the
+     * test rather than finish.
+     */
     @AfterEach
     void releaseTheCleanupThread() {
-        // The virtual thread loops for as long as the sink is open; closing it lets
-        // the thread finish rather than outlive the test.
         sinkClosed.set(true);
     }
 
+    /**
+     * The {@code agentId} query parameter reaches the stream-started line. A CRLF
+     * in it would end the real record and leave the remainder to be read as a
+     * second line the server wrote itself.
+     */
     @Test
     @DisplayName("a forged agentId cannot forge a record on the stream-started line")
     void sanitizesTheAgentIdOnTheStreamStartedLine() {
@@ -98,6 +110,11 @@ class RestLogAdminLogInjectionTest {
                 "the agentId is sanitized, not dropped — an operator still needs to know which agent: " + logged);
     }
 
+    /**
+     * The same forgery through the other tainted parameter on that line,
+     * {@code level}. Kept separate from the {@code agentId} case so that reverting
+     * one of the two {@code sanitize(…)} calls fails exactly one test.
+     */
     @Test
     @DisplayName("a forged level cannot forge a record on the stream-started line")
     void sanitizesTheLevelOnTheStreamStartedLine() {
