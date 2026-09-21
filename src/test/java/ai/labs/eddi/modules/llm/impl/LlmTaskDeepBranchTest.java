@@ -4,10 +4,10 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
-import ai.labs.eddi.configs.agents.IRestAgentStore;
-import ai.labs.eddi.configs.properties.IUserMemoryStore;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
-import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.memory.*;
@@ -18,15 +18,17 @@ import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.impl.builder.ILanguageModelBuilder;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
-import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.impl.*;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
+import ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException;
+import ai.labs.eddi.engine.runtime.service.ServiceException;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import jakarta.inject.Provider;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -104,33 +106,24 @@ class LlmTaskDeepBranchTest {
         when(globalVariableResolver.getTemplateData()).thenReturn(Map.of());
 
         var chatModelRegistry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver);
-        var toolResponseTruncator = new ToolResponseTruncator(
-                new io.micrometer.core.instrument.simple.SimpleMeterRegistry(), chatModelRegistry);
 
         mockSnippetService = mock(PromptSnippetService.class);
         when(mockSnippetService.getAll()).thenReturn(Collections.emptyMap());
 
         var counterweightService = new CounterweightService(mockSnippetService,
-                new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+                new SimpleMeterRegistry());
         counterweightService.initMetrics();
         var identityMaskingService = new IdentityMaskingService(
-                new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+                new SimpleMeterRegistry());
         identityMaskingService.initMetrics();
 
         llmTask = new LlmTask(resourceClientLibrary, dataFactory, memoryItemConverter,
                 templatingEngine, jsonSerialization, prePostUtils, chatModelRegistry,
-                mock(CalculatorTool.class), mock(DateTimeTool.class), mock(WebSearchTool.class),
-                mock(DataFormatterTool.class), mock(WebScraperTool.class), mock(TextSummarizerTool.class),
-                mock(PdfReaderTool.class), mock(WeatherTool.class), mock(FetchToolResponsePageTool.class),
-                mock(IApiCallExecutor.class), mock(ToolExecutionService.class),
-                mock(McpToolProviderManager.class), mock(A2AToolProviderManager.class),
-                mock(IRestAgentStore.class), mock(IRestWorkflowStore.class),
-                mock(RagContextProvider.class), mock(IUserMemoryStore.class),
-                new TokenCounterFactory(), mock(ConversationSummarizer.class),
+                mock(IApiCallExecutor.class), mock(IAgentStore.class), mock(IWorkflowStore.class),
+                mock(RagContextProvider.class), new TokenCounterFactory(), mock(ConversationSummarizer.class),
                 mockSnippetService, globalVariableResolver, counterweightService,
-                identityMaskingService, toolResponseTruncator,
-                mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class),
-                null, null);
+                identityMaskingService, mock(AgentOrchestrator.class), new ConversationHistoryBuilder(),
+                new SimpleMeterRegistry(), new CallerIdentityContext(null, null));
     }
 
     private IConversationMemory setupMemory(List<String> actions) {
@@ -246,14 +239,14 @@ class LlmTaskDeepBranchTest {
         @Test
         @DisplayName("null URI in configuration throws WorkflowConfigurationException")
         void nullUri() {
-            assertThrows(ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException.class,
+            assertThrows(WorkflowConfigurationException.class,
                     () -> llmTask.configure(Map.of(), Map.of()));
         }
 
         @Test
         @DisplayName("empty URI in configuration throws WorkflowConfigurationException")
         void emptyUri() {
-            assertThrows(ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException.class,
+            assertThrows(WorkflowConfigurationException.class,
                     () -> llmTask.configure(Map.of("uri", ""), Map.of()));
         }
 
@@ -272,9 +265,9 @@ class LlmTaskDeepBranchTest {
         @DisplayName("ServiceException from resource library wraps in WorkflowConfigurationException")
         void serviceException() throws Exception {
             when(resourceClientLibrary.getResource(any(), eq(LlmConfiguration.class)))
-                    .thenThrow(new ai.labs.eddi.engine.runtime.service.ServiceException("fail"));
+                    .thenThrow(new ServiceException("fail"));
 
-            assertThrows(ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException.class,
+            assertThrows(WorkflowConfigurationException.class,
                     () -> llmTask.configure(Map.of("uri", "eddi://ai.labs.llm/llmstore/llmconfigs/abc123?version=1"), Map.of()));
         }
     }
@@ -326,8 +319,10 @@ class LlmTaskDeepBranchTest {
             var task = createTask(Map.of("apiKey", "key"));
             llmTask.execute(memory, new LlmConfiguration(List.of(task)));
 
-            // Should create audit:compiled_prompt, audit:model_response, audit:model_name
-            verify(dataFactory, atLeast(3)).createData(anyString(), any());
+            // atLeast(3) on anyString() passed for any three keys at all — name them.
+            verify(dataFactory).createData(eq(MemoryKeys.AUDIT_COMPILED_PROMPT), any());
+            verify(dataFactory).createData(eq(MemoryKeys.AUDIT_MODEL_RESPONSE), eq(LLM_RESPONSE));
+            verify(dataFactory).createData(eq(MemoryKeys.AUDIT_MODEL_NAME), any());
         }
 
         @Test
@@ -492,29 +487,21 @@ class LlmTaskDeepBranchTest {
             when(gvr.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
             when(gvr.getTemplateData()).thenReturn(Map.of());
             var chatModelRegistry = new ChatModelRegistry(jsonBuilders, gvr, secretResolver);
-            var trt = new ToolResponseTruncator(
-                    new io.micrometer.core.instrument.simple.SimpleMeterRegistry(), chatModelRegistry);
             var cws = new CounterweightService(mock(PromptSnippetService.class),
-                    new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+                    new SimpleMeterRegistry());
             cws.initMetrics();
             var ims = new IdentityMaskingService(
-                    new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+                    new SimpleMeterRegistry());
             ims.initMetrics();
             when(mockSnippetService.getAll()).thenReturn(Collections.emptyMap());
 
             var jsonTask = new LlmTask(resourceClientLibrary, dataFactory, memoryItemConverter,
                     templatingEngine, jsonSerialization, prePostUtils, chatModelRegistry,
-                    mock(CalculatorTool.class), mock(DateTimeTool.class), mock(WebSearchTool.class),
-                    mock(DataFormatterTool.class), mock(WebScraperTool.class), mock(TextSummarizerTool.class),
-                    mock(PdfReaderTool.class), mock(WeatherTool.class), mock(FetchToolResponsePageTool.class),
-                    mock(IApiCallExecutor.class), mock(ToolExecutionService.class),
-                    mock(McpToolProviderManager.class), mock(A2AToolProviderManager.class),
-                    mock(IRestAgentStore.class), mock(IRestWorkflowStore.class),
-                    mock(RagContextProvider.class), mock(IUserMemoryStore.class),
-                    new TokenCounterFactory(), mock(ConversationSummarizer.class),
-                    mockSnippetService, gvr, cws, ims, trt,
-                    mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class),
-                    null, null);
+                    mock(IApiCallExecutor.class), mock(IAgentStore.class), mock(IWorkflowStore.class),
+                    mock(RagContextProvider.class), new TokenCounterFactory(), mock(ConversationSummarizer.class),
+                    mockSnippetService, gvr, cws,
+                    ims, mock(AgentOrchestrator.class), new ConversationHistoryBuilder(),
+                    new SimpleMeterRegistry(), new CallerIdentityContext(null, null));
 
             var memory = setupMemory(List.of("action1"));
             when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());

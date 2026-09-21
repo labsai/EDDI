@@ -4,7 +4,7 @@
  */
 package ai.labs.eddi.integrations.channels;
 
-import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration.ChannelConnector;
 import ai.labs.eddi.configs.channels.IChannelIntegrationStore;
@@ -19,16 +19,20 @@ import ai.labs.eddi.engine.model.AgentDeploymentStatus;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter.ResolvedTarget;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.model.SecretReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -51,16 +55,19 @@ class ChannelTargetRouterRefreshTest {
     private IChannelIntegrationStore channelStore;
     private IDocumentDescriptorStore descriptorStore;
     private IRestAgentAdministration agentAdmin;
-    private IRestAgentStore agentStore;
+    private IAgentStore agentStore;
     private SecretResolver secretResolver;
     private ChannelTargetRouter router;
+
+    /** Accumulated descriptors across multiple setupNewStyleConfigForType calls. */
+    private List<DocumentDescriptor> accumulatedDescriptors;
 
     @BeforeEach
     void setUp() throws Exception {
         channelStore = mock(IChannelIntegrationStore.class);
         descriptorStore = mock(IDocumentDescriptorStore.class);
         agentAdmin = mock(IRestAgentAdministration.class);
-        agentStore = mock(IRestAgentStore.class);
+        agentStore = mock(IAgentStore.class);
         secretResolver = mock(SecretResolver.class);
 
         ICacheFactory cacheFactory = mock(ICacheFactory.class);
@@ -70,8 +77,39 @@ class ChannelTargetRouterRefreshTest {
         router = new ChannelTargetRouter(channelStore, descriptorStore, agentAdmin, agentStore,
                 secretResolver, cacheFactory);
 
+        accumulatedDescriptors = new ArrayList<>();
+
         // Default: no legacy agents
         when(agentAdmin.getDeploymentStatuses(any())).thenReturn(List.of());
+    }
+
+    @Test
+    @DisplayName("a secret rotation landing DURING a refresh is not stamped away")
+    void invalidationDuringRefreshIsNotLost() throws Exception {
+        setupNewStyleConfig(CHANNEL_ID, "xoxb-original", "signing-original");
+
+        router.registerSecretInvalidation();
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Consumer<SecretReference>> listener = ArgumentCaptor.forClass(Consumer.class);
+        verify(secretResolver).registerInvalidationListener(listener.capture());
+
+        // The rotation lands while the refresh is still reading the store, so the
+        // maps it is building already hold the revoked credential. The listener
+        // zeroes the timestamp; the refresh must not then stamp it fresh again, or
+        // the router serves the revoked token for a whole interval — the exact
+        // window the listener exists to close.
+        var rotatedMidRefresh = new AtomicBoolean();
+        doAnswer(invocation -> {
+            if (rotatedMidRefresh.compareAndSet(false, true)) {
+                listener.getValue().accept(null);
+            }
+            return accumulatedDescriptors;
+        }).when(descriptorStore).readDescriptors(eq("ai.labs.channel"), anyString(), anyInt(), anyInt(), anyBoolean());
+
+        router.resolveTarget("slack", CHANNEL_ID, "hello");
+        router.resolveTarget("slack", CHANNEL_ID, "hello");
+
+        verify(descriptorStore, times(2)).readDescriptors(eq("ai.labs.channel"), anyString(), anyInt(), anyInt(), anyBoolean());
     }
 
     // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -83,13 +121,31 @@ class ChannelTargetRouterRefreshTest {
                                                                 String botToken,
                                                                 String signingSecret)
             throws Exception {
+        return setupNewStyleConfigForType("slack", channelId, botToken, signingSecret,
+                CHANNEL_CONFIG_ID, "Test Slack Channel");
+    }
+
+    /**
+     * Set up the store mocks to return a channel integration config for any channel
+     * type. Each call uses a unique configId so multiple configs can coexist.
+     */
+    private ChannelIntegrationConfiguration setupNewStyleConfigForType(String channelType,
+                                                                       String channelId,
+                                                                       String botToken,
+                                                                       String signingSecret,
+                                                                       String configId,
+                                                                       String name)
+            throws Exception {
         var config = new ChannelIntegrationConfiguration();
-        config.setName("Test Slack Channel");
-        config.setChannelType("slack");
-        config.setPlatformConfig(new HashMap<>(Map.of(
-                "channelId", channelId,
-                "botToken", botToken,
-                "signingSecret", signingSecret)));
+        config.setName(name);
+        config.setChannelType(channelType);
+        var platformConfig = new HashMap<String, String>();
+        platformConfig.put("channelId", channelId);
+        platformConfig.put("botToken", botToken);
+        if (signingSecret != null) {
+            platformConfig.put("signingSecret", signingSecret);
+        }
+        config.setPlatformConfig(platformConfig);
         config.setDefaultTargetName("default-agent");
 
         var target = new ChannelTarget();
@@ -99,14 +155,20 @@ class ChannelTargetRouterRefreshTest {
         target.setTargetId(AGENT_ID);
         config.setTargets(List.of(target));
 
-        // Wire descriptor → config
+        // Wire descriptor → config (append to accumulated list)
         var descriptor = new DocumentDescriptor();
         URI resourceUri = URI.create("eddi://ai.labs.channel/channelstore/channels/"
-                + CHANNEL_CONFIG_ID + "?version=1");
+                + configId + "?version=1");
         descriptor.setResource(resourceUri);
+
+        // Track descriptors in a field — do NOT call the mock to read existing
+        // descriptors, as that would inflate invocation counts and break
+        // verify(times(N)) assertions in RefreshMechanism tests.
+        accumulatedDescriptors.add(descriptor);
+
         when(descriptorStore.readDescriptors(eq("ai.labs.channel"), anyString(), anyInt(), anyInt(), anyBoolean()))
-                .thenReturn(List.of(descriptor));
-        when(channelStore.read(eq(CHANNEL_CONFIG_ID), eq(1)))
+                .thenReturn(new ArrayList<>(accumulatedDescriptors));
+        when(channelStore.read(eq(configId), eq(1)))
                 .thenReturn(config);
 
         // Secret resolver: pass through (or resolve vault refs)
@@ -149,7 +211,7 @@ class ChannelTargetRouterRefreshTest {
 
         when(agentAdmin.getDeploymentStatuses(Deployment.Environment.production))
                 .thenReturn(List.of(status));
-        when(agentStore.readAgent(eq(agentId), eq(1))).thenReturn(agentConfig);
+        when(agentStore.read(eq(agentId), eq(1))).thenReturn(agentConfig);
     }
 
     // ─── Public API — resolveTarget ────────────────────────────────────────────
@@ -276,7 +338,7 @@ class ChannelTargetRouterRefreshTest {
     class SigningSecrets {
 
         @Test
-        @DisplayName("returns resolved signing secrets from new-style configs")
+        @DisplayName("returns resolved signing secrets from new-style Slack configs")
         void newStyleSigningSecrets() throws Exception {
             setupNewStyleConfig(CHANNEL_ID, "xoxb-token", "${eddivault:slack-signing}");
 
@@ -289,7 +351,7 @@ class ChannelTargetRouterRefreshTest {
         }
 
         @Test
-        @DisplayName("includes legacy signing secrets")
+        @DisplayName("includes legacy signing secrets under slack type")
         void legacySigningSecrets() throws Exception {
             when(descriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
                     .thenReturn(List.of());
@@ -303,13 +365,118 @@ class ChannelTargetRouterRefreshTest {
         }
 
         @Test
-        @DisplayName("returns empty for non-slack channel type")
-        void nonSlackReturnsEmpty() throws Exception {
+        @DisplayName("returns secrets only for the requested channel type — cross-type isolation")
+        void crossTypeIsolation() throws Exception {
+            // Set up a Slack config and a Telegram config with different secrets
+            setupNewStyleConfigForType("slack", CHANNEL_ID, "xoxb-token", "slack-secret",
+                    CHANNEL_CONFIG_ID, "Test Slack Channel");
+            setupNewStyleConfigForType("telegram", "tg-chat-123", "tg-bot-token", "telegram-secret",
+                    "aabbccddeeff001122aa", "Test Telegram Bot");
+
+            Set<String> slackSecrets = router.getSigningSecrets("slack");
+            Set<String> telegramSecrets = router.getSigningSecrets("telegram");
+
+            // Each type has exactly its own secret, not the other's
+            assertTrue(slackSecrets.contains("slack-secret"));
+            assertFalse(slackSecrets.contains("telegram-secret"),
+                    "Slack secrets must not contain Telegram's secret");
+
+            assertTrue(telegramSecrets.contains("telegram-secret"));
+            assertFalse(telegramSecrets.contains("slack-secret"),
+                    "Telegram secrets must not contain Slack's secret");
+        }
+
+        @Test
+        @DisplayName("collects secrets from multiple configs of the same channel type")
+        void multipleConfigsSameType() throws Exception {
+            setupNewStyleConfigForType("slack", CHANNEL_ID, "token-1", "secret-A",
+                    CHANNEL_CONFIG_ID, "Slack Channel 1");
+            setupNewStyleConfigForType("slack", "C99OTHERCHANNEL", "token-2", "secret-B",
+                    "ff00ff00ff00ff00ff00", "Slack Channel 2");
+
+            Set<String> secrets = router.getSigningSecrets("slack");
+
+            assertEquals(2, secrets.size());
+            assertTrue(secrets.containsAll(Set.of("secret-A", "secret-B")));
+        }
+
+        @Test
+        @DisplayName("getSigningSecrets is case-insensitive on channel type")
+        void caseInsensitiveLookup() throws Exception {
+            setupNewStyleConfigForType("discord", "guild-ch-1", "bot-token", "discord-secret",
+                    "1122334455667788aabb", "Test Discord Channel");
+
+            // All case variants should return the same secrets
+            Set<String> lower = router.getSigningSecrets("discord");
+            Set<String> upper = router.getSigningSecrets("DISCORD");
+            Set<String> mixed = router.getSigningSecrets("Discord");
+
+            assertEquals(lower, upper);
+            assertEquals(lower, mixed);
+            assertTrue(lower.contains("discord-secret"));
+        }
+
+        @Test
+        @DisplayName("returns empty set for channel type with no configs")
+        void unknownTypeReturnsEmpty() throws Exception {
             setupNewStyleConfig(CHANNEL_ID, "token", "secret");
 
             Set<String> secrets = router.getSigningSecrets("teams");
 
             assertTrue(secrets.isEmpty());
+        }
+
+        @Test
+        @DisplayName("returns empty set for null channel type")
+        void nullTypeReturnsEmpty() {
+            Set<String> secrets = router.getSigningSecrets(null);
+
+            assertTrue(secrets.isEmpty());
+        }
+
+        @Test
+        @DisplayName("config without signingSecret key does not contribute to secrets")
+        void configWithoutSigningSecretKey() throws Exception {
+            // Telegram might not use "signingSecret" as its key name
+            setupNewStyleConfigForType("telegram", "tg-chat-456", "tg-bot-token", null,
+                    "ccccddddeeeeffffaaaa", "Telegram No Secret");
+
+            Set<String> secrets = router.getSigningSecrets("telegram");
+
+            assertTrue(secrets.isEmpty(),
+                    "Config without signingSecret key should not appear in secrets map");
+        }
+
+        @Test
+        @DisplayName("config with blank signingSecret does not contribute to secrets")
+        void blankSigningSecretIgnored() throws Exception {
+            setupNewStyleConfigForType("slack", CHANNEL_ID, "token", "   ",
+                    CHANNEL_CONFIG_ID, "Slack with blank secret");
+
+            Set<String> secrets = router.getSigningSecrets("slack");
+
+            assertTrue(secrets.isEmpty(),
+                    "Blank signing secret should be excluded");
+        }
+
+        @Test
+        @DisplayName("legacy Slack secrets and new-style Slack secrets are combined")
+        void legacyAndNewStyleCombined() throws Exception {
+            // New-style config with one secret
+            setupNewStyleConfig(CHANNEL_ID, "xoxb-new", "new-style-secret");
+
+            // Legacy agent with a different secret on a different channel
+            setupLegacyAgent(AGENT_ID, "C99LEGACY", "xoxb-leg", "legacy-secret", null);
+            when(secretResolver.resolveValue("xoxb-leg")).thenReturn("xoxb-leg");
+            when(secretResolver.resolveValue("legacy-secret")).thenReturn("legacy-secret");
+
+            Set<String> secrets = router.getSigningSecrets("slack");
+
+            assertTrue(secrets.contains("new-style-secret"),
+                    "Should contain new-style secret");
+            assertTrue(secrets.contains("legacy-secret"),
+                    "Should contain legacy secret");
+            assertEquals(2, secrets.size());
         }
     }
 
@@ -720,7 +887,7 @@ class ChannelTargetRouterRefreshTest {
                     Deployment.Status.READY, desc);
             when(agentAdmin.getDeploymentStatuses(Deployment.Environment.production))
                     .thenReturn(List.of(status));
-            when(agentStore.readAgent(eq(AGENT_ID), eq(1))).thenReturn(agentConfig);
+            when(agentStore.read(eq(AGENT_ID), eq(1))).thenReturn(agentConfig);
 
             assertNull(router.resolveTarget("slack", CHANNEL_ID, "hello"));
             assertFalse(router.hasAnyChannels("slack"));
@@ -746,7 +913,7 @@ class ChannelTargetRouterRefreshTest {
                     Deployment.Status.READY, desc);
             when(agentAdmin.getDeploymentStatuses(Deployment.Environment.production))
                     .thenReturn(List.of(status));
-            when(agentStore.readAgent(eq(AGENT_ID), eq(1))).thenReturn(agentConfig);
+            when(agentStore.read(eq(AGENT_ID), eq(1))).thenReturn(agentConfig);
 
             assertNull(router.resolveTarget("slack", CHANNEL_ID, "hello"));
         }
@@ -778,7 +945,7 @@ class ChannelTargetRouterRefreshTest {
                     Deployment.Status.READY, desc);
             when(agentAdmin.getDeploymentStatuses(Deployment.Environment.production))
                     .thenReturn(List.of(status));
-            when(agentStore.readAgent(eq(AGENT_ID), eq(1))).thenReturn(agentConfig);
+            when(agentStore.read(eq(AGENT_ID), eq(1))).thenReturn(agentConfig);
             when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
 
             ResolvedTarget result = router.resolveTarget("slack", CHANNEL_ID, "hello");
@@ -838,6 +1005,49 @@ class ChannelTargetRouterRefreshTest {
         }
     }
 
+    // ─── getIntegrationByName (HITL decision binding, H1/H2) ─────────────────────
+
+    @Nested
+    @DisplayName("getIntegrationByName — deterministic integration binding")
+    class GetIntegrationByNameTests {
+
+        @Test
+        @DisplayName("returns the named integration")
+        void resolvesByName() throws Exception {
+            setupNewStyleConfig(CHANNEL_ID, "xoxb-token", "signing123"); // name "Test Slack Channel"
+
+            var result = router.getIntegrationByName("slack", "Test Slack Channel");
+
+            assertTrue(result.isPresent());
+            assertEquals("Test Slack Channel", result.get().getName());
+        }
+
+        @Test
+        @DisplayName("returns empty for an unknown name")
+        void unknownName() throws Exception {
+            setupNewStyleConfig(CHANNEL_ID, "xoxb-token", "signing123");
+
+            assertTrue(router.getIntegrationByName("slack", "does-not-exist").isEmpty());
+        }
+
+        @Test
+        @DisplayName("returns empty for null/blank name")
+        void nullOrBlankName() throws Exception {
+            setupNewStyleConfig(CHANNEL_ID, "xoxb-token", "signing123");
+
+            assertTrue(router.getIntegrationByName("slack", null).isEmpty());
+            assertTrue(router.getIntegrationByName("slack", "  ").isEmpty());
+        }
+
+        @Test
+        @DisplayName("scoped by channel type — a name in another type is not matched")
+        void scopedByType() throws Exception {
+            setupNewStyleConfig(CHANNEL_ID, "xoxb-token", "signing123");
+
+            assertTrue(router.getIntegrationByName("teams", "Test Slack Channel").isEmpty());
+        }
+    }
+
     // ─── Test helper: simple ConcurrentHashMap-based ICache ─────────────────
 
     private static class MapCache<K, V> extends ConcurrentHashMap<K, V> implements ICache<K, V> {
@@ -881,4 +1091,115 @@ class ChannelTargetRouterRefreshTest {
             return putIfAbsent(key, value);
         }
     }
+
+    // ==================== observeCandidates ====================
+
+    /**
+     * Observers are deliberately reachable only through their own accessor:
+     * {@code resolveTarget} answers "who was this addressed to", and an observer is
+     * addressed to nobody.
+     */
+    @Nested
+    @DisplayName("observeCandidates Tests")
+    class ObserveCandidatesTests {
+
+        @Test
+        @DisplayName("returns the observe-mode targets, in configuration order")
+        void returnsObserversInOrder() throws Exception {
+            var config = setupNewStyleConfig(CHANNEL_ID, "xoxb-token", "secret");
+            config.setTargets(List.of(
+                    target("plain", false),
+                    target("watch-a", true),
+                    target("watch-b", true)));
+
+            var observers = router.observeCandidates("slack", CHANNEL_ID);
+
+            assertEquals(List.of("watch-a", "watch-b"),
+                    observers.stream().map(ChannelTarget::getName).toList());
+        }
+
+        @Test
+        @DisplayName("an unknown channel yields an empty list, never null")
+        void unknownChannelIsEmpty() {
+            assertTrue(router.observeCandidates("slack", "C-nope").isEmpty());
+        }
+
+        @Test
+        @DisplayName("a channel with no observers yields an empty list")
+        void noObserversIsEmpty() throws Exception {
+            // The whole point: a channel that never configured one must behave
+            // exactly as it did before observe mode existed.
+            setupNewStyleConfig(CHANNEL_ID, "xoxb-token", "secret");
+            assertTrue(router.observeCandidates("slack", CHANNEL_ID).isEmpty());
+        }
+
+        @Test
+        @DisplayName("the channel type is matched case-insensitively, as elsewhere")
+        void channelTypeIsCaseInsensitive() throws Exception {
+            var config = setupNewStyleConfig(CHANNEL_ID, "xoxb-token", "secret");
+            config.setTargets(List.of(target("watch", true)));
+
+            assertEquals(1, router.observeCandidates("SLACK", CHANNEL_ID).size());
+        }
+
+        @Test
+        @DisplayName("an unmatched mention goes to the plain default, not to an observer")
+        void observerIsNotTheDefault() throws Exception {
+            var config = setupNewStyleConfig(CHANNEL_ID, "xoxb-token", "secret");
+            var observer = target("watch", true);
+            observer.setTriggers(List.of("watch"));
+            config.setTargets(List.of(target("plain", false), observer));
+            config.setDefaultTargetName("plain");
+
+            var resolved = router.resolveFromIntegration(config, "hello there");
+            assertEquals("plain", resolved.target().getName());
+        }
+
+        @Test
+        @DisplayName("an observer is not reachable through its own trigger keyword")
+        void observerIsNotReachableByTrigger() throws Exception {
+            // `observerIsNotTheDefault` covers the no-colon case only. Reaching an
+            // observer by trigger ran its agent on the addressed path, where none
+            // of the cooldown, the daily count or the cost ceiling applies — and
+            // it is repeatable, because nothing books anything there.
+            var config = setupNewStyleConfig(CHANNEL_ID, "xoxb-token", "secret");
+            var observer = target("watch", true);
+            observer.setTriggers(List.of("watch"));
+            var plain = target("plain", false);
+            config.setTargets(List.of(plain, observer));
+            config.setDefaultTargetName("plain");
+
+            var resolved = router.resolveFromIntegration(config, "watch: hello");
+
+            assertEquals("plain", resolved.target().getName());
+            // Not stripped: the keyword was never a trigger, so the default target
+            // gets the sentence as typed.
+            assertEquals("watch: hello", resolved.strippedMessage());
+        }
+
+        @Test
+        @DisplayName("an observer named as the default resolves to nothing, not to itself")
+        void observerNamedAsDefaultIsRefused() throws Exception {
+            // The store refuses to save this pairing, so it can only arrive from a
+            // document written straight to the datastore. Resolving it would make
+            // one target answer both addressed and unaddressed messages, with the
+            // observer's cooldown and caps applying to only half of what it said.
+            var config = setupNewStyleConfig(CHANNEL_ID, "xoxb-token", "secret");
+            var observer = target("watch", true);
+            config.setTargets(List.of(observer));
+            config.setDefaultTargetName("watch");
+
+            assertNull(router.resolveFromIntegration(config, "hello there"));
+        }
+
+        private ChannelTarget target(String name, boolean observing) {
+            var target = new ChannelTarget();
+            target.setName(name);
+            target.setType(ChannelTarget.TargetType.AGENT);
+            target.setTargetId("agent-" + name);
+            target.setObserveMode(observing);
+            return target;
+        }
+    }
+
 }

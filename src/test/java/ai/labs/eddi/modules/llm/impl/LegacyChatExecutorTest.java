@@ -5,12 +5,15 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
+import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.response.ChatResponseMetadata;
+import dev.langchain4j.model.output.TokenUsage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -80,7 +83,7 @@ class LegacyChatExecutorTest {
                 }
             };
             var task = createTask();
-            var retryConfig = new LlmConfiguration.RetryConfiguration();
+            var retryConfig = new RetryConfiguration();
             retryConfig.setMaxAttempts(1);
             task.setRetry(retryConfig);
 
@@ -101,6 +104,54 @@ class LegacyChatExecutorTest {
             var result = executor.execute(model, createMessages("Test"), task);
 
             assertEquals("", result.response());
+        }
+    }
+
+    // ==================== Token usage ====================
+
+    @Nested
+    @DisplayName("Token usage")
+    class TokenUsageTests {
+
+        private ChatModel modelReporting(TokenUsage tokenUsage) {
+            return new ChatModel() {
+                @Override
+                public ChatResponse chat(List<ChatMessage> messages) {
+                    return ChatResponse.builder().aiMessage(AiMessage.from("Response"))
+                            .metadata(ChatResponseMetadata.builder().tokenUsage(tokenUsage).build()).build();
+                }
+            };
+        }
+
+        /**
+         * The three counts are boxed Integers and providers legitimately report only
+         * some of them. Building the map with {@code Map.of} made a partial report an
+         * NPE that killed the whole turn — telemetry taking down the conversation.
+         */
+        @Test
+        @DisplayName("a partially reported token usage does not throw and defaults the missing counts to 0")
+        void nullTokenCountsDoNotThrow() throws Exception {
+            var result = assertDoesNotThrow(
+                    () -> executor.execute(modelReporting(new TokenUsage(null, null, null)), createMessages("Hi"), createTask()));
+
+            @SuppressWarnings("unchecked")
+            var tokenUsage = (Map<String, Object>) result.responseMetadata().get("tokenUsage");
+            assertNotNull(tokenUsage, "token usage must still be reported when the counts are absent");
+            assertEquals(0, tokenUsage.get("inputTokens"));
+            assertEquals(0, tokenUsage.get("outputTokens"));
+            assertEquals(0, tokenUsage.get("totalTokens"));
+        }
+
+        @Test
+        @DisplayName("fully reported token counts are surfaced verbatim")
+        void fullTokenCountsAreSurfaced() throws Exception {
+            var result = executor.execute(modelReporting(new TokenUsage(10, 20, 30)), createMessages("Hi"), createTask());
+
+            @SuppressWarnings("unchecked")
+            var tokenUsage = (Map<String, Object>) result.responseMetadata().get("tokenUsage");
+            assertEquals(10, tokenUsage.get("inputTokens"));
+            assertEquals(20, tokenUsage.get("outputTokens"));
+            assertEquals(30, tokenUsage.get("totalTokens"));
         }
     }
 
@@ -147,7 +198,7 @@ class LegacyChatExecutorTest {
         task.setType("openai");
         task.setActions(List.of("action1"));
         task.setParameters(Map.of("apiKey", "test-key"));
-        var retryConfig = new LlmConfiguration.RetryConfiguration();
+        var retryConfig = new RetryConfiguration();
         retryConfig.setMaxAttempts(2);
         retryConfig.setBackoffDelayMs(10L);
         task.setRetry(retryConfig);

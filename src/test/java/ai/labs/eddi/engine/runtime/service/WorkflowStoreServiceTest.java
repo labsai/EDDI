@@ -4,9 +4,9 @@
  */
 package ai.labs.eddi.engine.runtime.service;
 
-import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
-import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -19,13 +19,13 @@ import static org.mockito.Mockito.*;
 class WorkflowStoreServiceTest {
 
     private WorkflowStoreService service;
-    private IRestWorkflowStore workflowStore;
-    private IRestDocumentDescriptorStore descriptorStore;
+    private IWorkflowStore workflowStore;
+    private IDocumentDescriptorStore descriptorStore;
 
     @BeforeEach
     void setUp() {
-        workflowStore = mock(IRestWorkflowStore.class);
-        descriptorStore = mock(IRestDocumentDescriptorStore.class);
+        workflowStore = mock(IWorkflowStore.class);
+        descriptorStore = mock(IDocumentDescriptorStore.class);
         service = new WorkflowStoreService(workflowStore, descriptorStore);
     }
 
@@ -33,18 +33,18 @@ class WorkflowStoreServiceTest {
     @DisplayName("getKnowledgeWorkflow delegates to restWorkflowStore")
     void getKnowledgeWorkflow() throws Exception {
         var config = new WorkflowConfiguration();
-        doReturn(config).when(workflowStore).readWorkflow("wf1", 1);
+        doReturn(config).when(workflowStore).read("wf1", 1);
 
         var result = service.getKnowledgeWorkflow("wf1", 1);
 
         assertSame(config, result);
-        verify(workflowStore).readWorkflow("wf1", 1);
+        verify(workflowStore).read("wf1", 1);
     }
 
     @Test
     @DisplayName("getKnowledgeWorkflow wraps exception as ServiceException")
     void getKnowledgeWorkflowException() throws Exception {
-        doThrow(new RuntimeException("not found")).when(workflowStore).readWorkflow("wf1", 1);
+        doThrow(new RuntimeException("not found")).when(workflowStore).read("wf1", 1);
 
         var ex = assertThrows(ServiceException.class, () -> service.getKnowledgeWorkflow("wf1", 1));
         assertTrue(ex.getMessage().contains("not found"));

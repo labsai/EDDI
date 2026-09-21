@@ -3,6 +3,14 @@
 # Activated by: git config core.hooksPath .githooks
 # Bypassed by: git push --no-verify (human emergency only)
 
+# git passes the pushed-to remote as $1: a configured name (origin, upstream, a
+# second maintainer remote) or a bare URL when pushing to one. The recovery
+# fetch below has to query THAT remote. Hardcoding "origin" queries a different
+# repository in the fork layout AGENTS.md 2 rule 3 describes, so the retry
+# misses the same way and a legitimate fast-forward push is refused with a
+# "your local branch has diverged" message that is not true.
+remote="$1"
+
 # stdin receives lines: <local ref> <local sha> <remote ref> <remote sha>
 
 while read local_ref local_sha remote_ref remote_sha; do
@@ -17,7 +25,9 @@ while read local_ref local_sha remote_ref remote_sha; do
   # Try a targeted fetch before declaring a non-fast-forward.
   if ! git merge-base --is-ancestor "$remote_sha" "$local_sha" 2>/dev/null; then
     # Might be a shallow clone — fetch the remote ref and retry
-    git fetch --depth=1 origin "$remote_sha" 2>/dev/null || true
+    if [ -n "$remote" ]; then
+      git fetch --depth=1 "$remote" "$remote_sha" 2>/dev/null || true
+    fi
     if ! git merge-base --is-ancestor "$remote_sha" "$local_sha" 2>/dev/null; then
       echo ""
       echo "BLOCKED: Non-fast-forward push detected on $remote_ref"

@@ -4,10 +4,12 @@
  */
 package ai.labs.eddi.configs.agents.mongo;
 
+import ai.labs.eddi.configs.hitl.HitlConfigValidation;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.mongo.DocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.ResourceUtilities;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.datastore.AbstractResourceStore;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -44,6 +46,9 @@ public class AgentStore extends AbstractResourceStore<AgentConfiguration> implem
     @Override
     public IResourceStore.IResourceId create(AgentConfiguration agentConfiguration) throws IResourceStore.ResourceStoreException {
         RuntimeUtilities.checkCollectionNoNullElements(agentConfiguration.getWorkflows(), WORKFLOWS_FIELD);
+        validateWorkflowUris(agentConfiguration);
+        HitlConfigValidation.validate(agentConfiguration.getHitlConfig());
+        validateUserMemoryConfig(agentConfiguration);
         return super.create(agentConfiguration);
     }
 
@@ -52,7 +57,60 @@ public class AgentStore extends AbstractResourceStore<AgentConfiguration> implem
     public Integer update(String id, Integer version, AgentConfiguration agentConfiguration)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
         RuntimeUtilities.checkCollectionNoNullElements(agentConfiguration.getWorkflows(), WORKFLOWS_FIELD);
+        validateWorkflowUris(agentConfiguration);
+        HitlConfigValidation.validate(agentConfiguration.getHitlConfig());
+        validateUserMemoryConfig(agentConfiguration);
         return super.update(id, version, agentConfiguration);
+    }
+
+    /**
+     * Every entry of {@code workflows} must be a versioned workflow resource URI.
+     * <p>
+     * Anything was accepted before —
+     * {@code eddi://ai.labs.workflow/.../zzz?version=1}, a rules URI, a URI without
+     * a version — and the mistake only surfaced at deploy time as an opaque
+     * failure, far from the request that caused it. This is the shape check every
+     * write path shares (REST, ZIP import, sync, setup); whether the workflow
+     * exists is checked by {@code RestAgentStore}, because import and sync write
+     * their workflows before the agent and the mock-based store tests have none to
+     * resolve.
+     */
+    static void validateWorkflowUris(AgentConfiguration agentConfiguration) {
+        var workflows = agentConfiguration.getWorkflows();
+        if (workflows == null) {
+            return;
+        }
+        for (int i = 0; i < workflows.size(); i++) {
+            String uri = workflows.get(i).toString();
+            IResourceStore.IResourceId resourceId = uri.startsWith(WORKFLOW_RESOURCE_URI) ? ResourceUtilities.validateUri(uri) : null;
+            if (resourceId == null) {
+                throw new IllegalArgumentException("workflows[" + i + "] must be a workflow resource URI of the form "
+                        + WORKFLOW_RESOURCE_URI + "<id>" + VERSION_QUERY_PARAM + "<version>, got: " + uri);
+            }
+        }
+    }
+
+    /**
+     * Write-time bound on the Dream consolidation settings.
+     * <p>
+     * This rule used to live in
+     * {@code AgentConfiguration.DreamConfig.setSummarizeTargetEntries}, which
+     * Jackson calls on every READ — so an agent stored before the rule existed
+     * became impossible to load, deploy, export or repair. Checking here rejects
+     * the same bad input at save time with a 400 (via
+     * {@code IllegalArgumentExceptionMapper}) while leaving stored documents
+     * readable.
+     */
+    private static void validateUserMemoryConfig(AgentConfiguration agentConfiguration) {
+        var userMemoryConfig = agentConfiguration.getUserMemoryConfig();
+        if (userMemoryConfig == null || userMemoryConfig.getDream() == null) {
+            return;
+        }
+        if (userMemoryConfig.getDream().getSummarizeTargetEntries() < 1) {
+            throw new IllegalArgumentException(
+                    "userMemoryConfig.dream.summarizeTargetEntries must be >= 1, got: "
+                            + userMemoryConfig.getDream().getSummarizeTargetEntries());
+        }
     }
 
     public List<DocumentDescriptor> getAgentDescriptorsContainingWorkflow(String workflowId, Integer workflowVersion, boolean includePreviousVersions)
@@ -75,7 +133,7 @@ public class AgentStore extends AbstractResourceStore<AgentConfiguration> implem
             allIds = allIds.stream().sorted(comparator).collect(Collectors.toList());
 
             for (IResourceStore.IResourceId agentId : allIds) {
-                if (agentId.getVersion() < getCurrentResourceId(agentId.getId()).getVersion()) {
+                if (isStaleReference(agentId.getId(), agentId.getVersion())) {
                     continue;
                 }
 

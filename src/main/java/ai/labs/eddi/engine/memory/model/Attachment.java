@@ -9,6 +9,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**
@@ -35,8 +36,12 @@ public class Attachment {
     private String url;
 
     /**
-     * Inline base64-encoded data. Transient — used for context-based input only,
-     * never persisted to MongoDB. Consumers should decode this and pass to LLM.
+     * Inline base64-encoded data. Used for context-based input only; the payload
+     * lives in memory for the duration of the turn but is NEVER persisted to
+     * MongoDB — {@link #getBase64Data()} is {@link JsonIgnore}d so Jackson's
+     * getter-based serialization skips it. The {@code transient} keyword alone does
+     * not stop Jackson (no {@code PROPAGATE_TRANSIENT_MARKER} configured).
+     * Consumers should decode this and pass it to the LLM.
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private transient String base64Data;
@@ -122,6 +127,7 @@ public class Attachment {
         this.url = url;
     }
 
+    @JsonIgnore
     public String getBase64Data() {
         return base64Data;
     }

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.rag.rest;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.rag.IRestRagStore;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.modules.rag.RagIngestionService;
@@ -31,7 +32,7 @@ class RestRagIngestionTest {
     @BeforeEach
     void setUp() {
         openMocks(this);
-        restRagIngestion = new RestRagIngestion(restRagStore, ragIngestionService);
+        restRagIngestion = new RestRagIngestion(restRagStore, ragIngestionService, mock(ResourceAccessGuard.class));
     }
 
     @Test
@@ -88,6 +89,19 @@ class RestRagIngestionTest {
         Response response = restRagIngestion.ingestDocument("missing", 1, null, "test.txt", "Content");
 
         assertEquals(404, response.getStatus());
+    }
+
+    @Test
+    void getIngestionStatus_unknownIdIs404() {
+        when(ragIngestionService.getStatus("never-started")).thenReturn(RagIngestionService.STATUS_UNKNOWN);
+
+        Response response = restRagIngestion.getIngestionStatus("rag-123", "never-started");
+
+        assertEquals(404, response.getStatus());
+        @SuppressWarnings("unchecked")
+        Map<String, Object> body = (Map<String, Object>) response.getEntity();
+        assertEquals("never-started", body.get("ingestionId"));
+        assertEquals(RagIngestionService.STATUS_UNKNOWN, body.get("status"));
     }
 
     @Test

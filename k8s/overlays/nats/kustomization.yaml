@@ -1,18 +1,33 @@
-# NATS JetStream overlay — enables durable messaging for multi-replica EDDI
+# NATS JetStream component
 #
-# ⚠️  This is a COMPONENT overlay — it does NOT include the base EDDI manifests.
-# You MUST apply it together with a database overlay, for example:
+# ⚠️  This is a kustomize COMPONENT, not a standalone overlay. `kubectl apply -k`
+# on this directory does not work by design. Reference it from a kustomization
+# that already includes the base:
 #
-# Using a combined kustomization.yaml that references both:
 #   resources:
-#     - ../mongodb
-#     - ../nats
+#     - ../../overlays/postgres
+#   components:
+#     - ../../overlays/nats
 #
-# Requires: EDDI replicas > 1 to benefit from NATS ordering guarantees.
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-
-namespace: eddi
+# It used to be `kind: Kustomization`, which made the patch below a silent
+# no-op: a directory under `resources:` is built as its own root first, so the
+# patch targeted a resource set with no eddi-config in it — and kustomize exits
+# 0 on a patch that matches nothing.
+#
+# ⚠️  THE TWO VARIABLES BELOW ARE READ BY NOTHING IN THE PUBLISHED IMAGE.
+# NatsConversationCoordinator is gated on @IfBuildProfile("nats") — a BUILD-time
+# switch — and labsai/eddi is published without it. `eddi.messaging.type` exists
+# in application.properties but no Java code reads it, so setting it to "nats"
+# does not swap the coordinator. Applying this component against a stock image
+# gets you a JetStream StatefulSet with a 5Gi PVC that EDDI never connects to,
+# and in-memory queues anyway. Use it only with an image you built yourself with
+# `-Dquarkus.profile=nats`.
+#
+# NATS is a durability/ordering primitive either way: it does NOT enable more
+# than one EDDI replica — see the comment on spec.replicas in
+# k8s/base/eddi-deployment.yaml.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
 
 resources:
   - nats-statefulset.yaml

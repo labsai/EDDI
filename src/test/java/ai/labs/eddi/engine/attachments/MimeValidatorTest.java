@@ -7,6 +7,10 @@ package ai.labs.eddi.engine.attachments;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+
+import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -36,6 +40,18 @@ class MimeValidatorTest {
         void testDetectGif() {
             byte[] gif = new byte[]{0x47, 0x49, 0x46, 0x38, 0x39, 0x61};
             assertEquals("image/gif", MimeValidator.detectMime(gif));
+        }
+
+        @Test
+        @DisplayName("a PDF header after leading bytes (BOM, print-job prefix) is still a PDF, within the first 1024 bytes")
+        void testDetectPdfWithLeadingBytes() {
+            byte[] prefixed = "﻿%!PS-Adobe job prefix\n%PDF-1.7\n".getBytes(StandardCharsets.UTF_8);
+            assertEquals("application/pdf", MimeValidator.detectMime(prefixed));
+            assertEquals("application/pdf", MimeValidator.detectMime("%PDF-1.4\n".getBytes(StandardCharsets.US_ASCII)));
+
+            byte[] tooLate = new byte[1100];
+            System.arraycopy("%PDF-".getBytes(StandardCharsets.US_ASCII), 0, tooLate, 1030, 5);
+            assertEquals("application/octet-stream", MimeValidator.detectMime(tooLate));
         }
 
         @Test
@@ -186,6 +202,30 @@ class MimeValidatorTest {
         @DisplayName("Should accept when detection returns octet-stream")
         void testUnknownDetection() {
             assertTrue(MimeValidator.isCompatible("application/custom", "application/octet-stream"));
+        }
+
+        @Test
+        @DisplayName("Should accept text/plain content that has no signature")
+        void testPlainTextUndetected() {
+            assertTrue(MimeValidator.isCompatible("text/plain", MimeValidator.detectMime("hello world, plain text".getBytes())));
+        }
+
+        @ParameterizedTest(name = "rejects signature-less content declared as {0}")
+        @ValueSource(strings = {"image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf",
+                "IMAGE/PNG; charset=binary"})
+        @DisplayName("Should reject undetectable content declared as a signature-bearing type")
+        void testSignatureRequired(String declared) {
+            byte[] text = "this is not a png at all".getBytes();
+            assertEquals("application/octet-stream", MimeValidator.detectMime(text));
+            assertFalse(MimeValidator.isCompatible(declared, MimeValidator.detectMime(text)),
+                    "plain text must not pass as " + declared);
+        }
+
+        @Test
+        @DisplayName("Should still accept real content for a signature-bearing type")
+        void testSignatureRequiredAcceptsRealContent() {
+            byte[] png = new byte[]{(byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
+            assertTrue(MimeValidator.isCompatible("image/png", MimeValidator.detectMime(png)));
         }
 
         @Test

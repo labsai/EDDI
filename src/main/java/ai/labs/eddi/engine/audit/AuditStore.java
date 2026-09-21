@@ -5,9 +5,13 @@
 package ai.labs.eddi.engine.audit;
 
 import ai.labs.eddi.engine.audit.model.AuditEntry;
+import com.mongodb.MongoBulkWriteException;
+import com.mongodb.MongoWriteException;
+import com.mongodb.bulk.BulkWriteError;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Indexes;
+import com.mongodb.client.model.InsertManyOptions;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -18,9 +22,18 @@ import java.util.*;
 /**
  * MongoDB implementation of {@link IAuditStore}.
  * <p>
- * Uses a dedicated {@code audit_ledger} collection with insert-only semantics.
- * No {@code updateOne()}, {@code replaceOne()}, or {@code deleteOne()}
- * operations are ever called — this enforces the write-once contract.
+ * Uses a dedicated {@code audit_ledger} collection with insert-only semantics,
+ * with exactly one exception: {@link #pseudonymizeByUserId} issues an
+ * {@code updateMany} to overwrite {@code userId} under GDPR Art. 17(3)(e).
+ * Nothing else mutates or removes a stored entry — no {@code deleteOne()},
+ * {@code deleteMany()}, {@code replaceOne()}, and no update of any other field.
+ * <p>
+ * That mutation does <em>not</em> invalidate the entry's HMAC: since the v3
+ * canonical form the signature covers
+ * {@link ai.labs.eddi.engine.audit.AuditHmac#identityToken}, which maps a user
+ * identifier and its pseudonym to the same value. Rows written under v1/v2
+ * (which signed {@code userId} verbatim) do not verify after pseudonymisation
+ * and are reported as such by the verification endpoint.
  * <p>
  * Annotated {@code @DefaultBean} so PostgreSQL can provide an alternative.
  *
@@ -54,6 +67,10 @@ public class AuditStore implements IAuditStore {
     private static final String F_TIMESTAMP = "timestamp";
     private static final String F_HMAC = "hmac";
     private static final String F_AGENT_SIGNATURE = "agentSignature";
+    private static final String F_SEQUENCE = "sequence";
+
+    /** MongoDB's {@code E11000 duplicate key} error code. */
+    private static final int DUPLICATE_KEY_ERROR = 11000;
 
     private final MongoCollection<Document> collection;
 
@@ -65,13 +82,61 @@ public class AuditStore implements IAuditStore {
         collection.createIndex(Indexes.ascending(F_CONVERSATION_ID));
         collection.createIndex(Indexes.ascending(F_AGENT_ID, F_AGENT_VERSION));
         collection.createIndex(Indexes.descending(F_TIMESTAMP));
+        // GDPR export (getEntriesByUserId) and erasure (pseudonymizeByUserId) both
+        // select on userId. audit_ledger is the largest, append-only, never-pruned
+        // collection in the system and both operations are legally deadline-bound,
+        // so without this they are full collection scans — and updateMany holds a
+        // write lock for the duration.
+        collection.createIndex(Indexes.ascending(F_USER_ID));
+        // Per-conversation reads sort by timestamp descending; the compound index
+        // serves the filter and the sort together, so large conversations stop
+        // hitting MongoDB's in-memory sort limit. It also backs maxSequence.
+        collection.createIndex(Indexes.compoundIndex(Indexes.ascending(F_CONVERSATION_ID), Indexes.descending(F_TIMESTAMP)));
+        collection.createIndex(Indexes.compoundIndex(Indexes.ascending(F_CONVERSATION_ID), Indexes.descending(F_SEQUENCE)));
     }
 
+    /**
+     * Insert one entry, treating "already stored" as success — see
+     * {@link #appendBatch} for why the retry path needs that.
+     */
     @Override
     public void appendEntry(AuditEntry entry) {
-        collection.insertOne(toDocument(entry));
+        try {
+            collection.insertOne(toDocument(entry));
+        } catch (MongoWriteException e) {
+            if (e.getError().getCode() != DUPLICATE_KEY_ERROR) {
+                throw e;
+            }
+        }
     }
 
+    /**
+     * Insert a batch, unordered and duplicate-tolerant.
+     * <p>
+     * Unordered so one rejected document does not stop the ones behind it — an
+     * ordered {@code insertMany} persists the prefix and abandons the rest, which
+     * combined with the ledger's whole-batch retry meant a single bad entry
+     * discarded three flush windows of unrelated conversations' records.
+     * Duplicate-key errors are ignored for the same reason the PostgreSQL insert
+     * carries {@code ON CONFLICT (id) DO NOTHING}: a retry of a partially-applied
+     * batch must be able to re-offer the documents that already landed. Every other
+     * write error is still raised, so a genuinely broken store is not hidden.
+     * <p>
+     * <strong>A write-concern error is not a duplicate.</strong>
+     * {@code MongoBulkWriteException} is also how the driver reports a failure of
+     * the write concern itself — a {@code w=majority} acknowledgement timing out
+     * during a replica-set election, say — and in that shape
+     * {@link MongoBulkWriteException#getWriteErrors()} is <em>empty</em> while
+     * {@link MongoBulkWriteException#getWriteConcernError()} is set. Filtering only
+     * the per-document errors therefore returned normally for a batch whose
+     * durability was never confirmed: {@code AuditLedgerService} cleared its
+     * in-flight batch, reset its failure counter and left the chain counters past
+     * positions a rollback could still erase — no retry, no dead-letter record, no
+     * dropped-counter increment, and {@code /auditstore/verify} reporting the
+     * conversation {@code BROKEN} later on. The production connection string sets
+     * {@code w=majority}, so this is the ordinary failover shape rather than an
+     * exotic one.
+     */
     @Override
     public void appendBatch(List<AuditEntry> entries) {
         if (entries == null || entries.isEmpty())
@@ -82,7 +147,19 @@ public class AuditStore implements IAuditStore {
             documents.add(toDocument(entry));
         }
 
-        collection.insertMany(documents);
+        try {
+            collection.insertMany(documents, new InsertManyOptions().ordered(false));
+        } catch (MongoBulkWriteException e) {
+            if (e.getWriteConcernError() != null) {
+                throw e;
+            }
+            List<BulkWriteError> fatal = e.getWriteErrors().stream()
+                    .filter(error -> error.getCode() != DUPLICATE_KEY_ERROR)
+                    .toList();
+            if (!fatal.isEmpty()) {
+                throw e;
+            }
+        }
     }
 
     @Override
@@ -109,6 +186,16 @@ public class AuditStore implements IAuditStore {
     public List<AuditEntry> getEntriesByUserId(String userId, int skip, int limit) {
         Document filter = new Document(F_USER_ID, userId);
         return query(filter, skip, limit);
+    }
+
+    @Override
+    public long maxSequence(String conversationId) {
+        Document highest = collection.find(new Document(F_CONVERSATION_ID, conversationId))
+                .sort(new Document(F_SEQUENCE, -1))
+                .projection(new Document(F_SEQUENCE, 1))
+                .limit(1)
+                .first();
+        return highest == null ? AuditEntry.UNSEQUENCED : readSequence(highest);
     }
     // ==================== Private Helpers ====================
 
@@ -157,6 +244,7 @@ public class AuditStore implements IAuditStore {
             doc.put(F_HMAC, entry.hmac());
         if (entry.agentSignature() != null)
             doc.put(F_AGENT_SIGNATURE, entry.agentSignature());
+        doc.put(F_SEQUENCE, entry.sequence());
         return doc;
     }
 
@@ -170,12 +258,31 @@ public class AuditStore implements IAuditStore {
                 doc.get(F_TOOL_CALLS) instanceof Document d ? new LinkedHashMap<>(d) : null, doc.getList(F_ACTIONS, String.class),
                 doc.getDouble(F_COST) != null ? doc.getDouble(F_COST) : 0.0,
                 doc.getDate(F_TIMESTAMP) != null ? doc.getDate(F_TIMESTAMP).toInstant() : null, doc.getString(F_HMAC),
-                doc.getString(F_AGENT_SIGNATURE));
+                doc.getString(F_AGENT_SIGNATURE), readSequence(doc));
     }
+
+    /**
+     * Read the chain position, tolerating documents written before the field
+     * existed (and any numeric BSON type the driver hands back).
+     */
+    private static long readSequence(Document doc) {
+        Object raw = doc.get(F_SEQUENCE);
+        return raw instanceof Number n ? n.longValue() : AuditEntry.UNSEQUENCED;
+    }
+
+    /**
+     * Pseudonymisation is HMAC-preserving for v3 rows — see the class javadoc — so
+     * the blanket {@code updateMany} stays correct and stays cheap.
+     */
     @Override
     public long pseudonymizeByUserId(String userId, String pseudonym) {
         return collection.updateMany(
                 new Document(F_USER_ID, userId),
                 new Document("$set", new Document(F_USER_ID, pseudonym))).getModifiedCount();
+    }
+
+    @Override
+    public boolean supportsSequence() {
+        return true;
     }
 }

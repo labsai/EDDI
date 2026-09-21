@@ -8,6 +8,7 @@ import ai.labs.eddi.modules.nlp.expressions.Expressions;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * @author ginccc
@@ -45,12 +46,12 @@ public class Solution {
         if (o == null || getClass() != o.getClass())
             return false;
         Solution that = (Solution) o;
-        return java.util.Objects.equals(expressions, that.expressions);
+        return Objects.equals(expressions, that.expressions);
     }
 
     @Override
     public int hashCode() {
-        return java.util.Objects.hash(expressions);
+        return Objects.hash(expressions);
     }
 
     @Override

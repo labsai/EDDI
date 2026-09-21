@@ -1,6 +1,6 @@
 # Properties
 
-**Version: 6.0.0**
+[![Version](https://img.shields.io/github/v/release/labsai/EDDI?label=version&color=blue)](https://github.com/labsai/EDDI/releases)
 
 ## Overview
 
@@ -23,7 +23,7 @@ A property has:
 
 | Mechanism | Source | Lifetime | Access Pattern |
 |---|---|---|---|
-| **Properties** | Agent-set (via PropertySetter, LLM tools) | Configurable (step → longTerm) | `{properties.key.valueString}` |
+| **Properties** | Agent-set (via PropertySetter, LLM tools) | Configurable (step → longTerm) | `{properties.key}` |
 | **Context** | Your application (passed per request) | Per request | `{context.key}` |
 | **Memory** | Pipeline (each task writes data) | Per step (current turn's data) | `{memory.current.key}` |
 
@@ -40,7 +40,7 @@ Properties support four scopes that control their lifetime:
 | `step` | Current conversation turn only | Not persisted | Temporary data needed only for this response |
 | `conversation` | Entire conversation session | Persisted in conversation memory | User preferences within a session, extracted entities |
 | `longTerm` | Across conversations | Persisted in user property store | User profile data, preferences that should survive between sessions |
-| `secret` | Across conversations (encrypted) | Persisted via SecretsVault | API keys, tokens, sensitive credentials |
+| `secret` | Current conversation session (the property holds a `${vault:...}` reference) | Plaintext encrypted into SecretsVault under `<agentId>.<propertyName>`; the property itself is conversation-scoped and is not reloaded in a new conversation | API keys, tokens, sensitive credentials |
 
 ### Choosing the Right Scope
 
@@ -82,18 +82,22 @@ The PropertySetter task (`ai.labs.property`) sets properties based on triggered 
 
 ```json
 {
-  "setOnActions": ["greet_user"],
-  "propertyInstructions": [
+  "setOnActions": [
     {
-      "name": "greeted",
-      "valueString": "true",
-      "scope": "conversation"
-    },
-    {
-      "name": "preferred_language",
-      "valueString": "{context.language}",
-      "scope": "longTerm",
-      "visibility": "global"
+      "actions": ["greet_user"],
+      "setProperties": [
+        {
+          "name": "greeted",
+          "valueString": "true",
+          "scope": "conversation"
+        },
+        {
+          "name": "preferred_language",
+          "valueString": "{context.language}",
+          "scope": "longTerm",
+          "visibility": "global"
+        }
+      ]
     }
   ]
 }
@@ -145,40 +149,44 @@ See [Persistent User Memory](user-memory.md) for full details on the LLM memory 
 
 ## Accessing Properties in Templates
 
-Properties are available in **all** templates via the `properties` namespace:
+Properties are available in **all** templates via the `properties` namespace.
+
+> ⚠️ **`properties` exposes raw values, not `Property` objects.** `MemoryItemConverter.convert()` puts `ConversationProperties.toMap()` into the template context, and `toMap()` returns the unwrapped Java value that was stored (`String`, `Integer`, `Float`, `Boolean`, `List`, `Map`) — the `Property` wrapper never reaches the template. Use `{properties.key}` directly. A `.valueString` / `.valueInt` / … suffix resolves against the raw value (a `String` has no `valueString` property) and fails at render time. The `valueString`, `valueInt`, … names are **write-side** field names of the JSON property-setter config only. AGENTS.md §5.1 is the authoritative reference for the template data model.
 
 ### In Output Templates
 
 ```
-Hello {properties.userName.valueString}! Your preferred language is {properties.preferred_language.valueString}.
+Hello {properties.userName}! Your preferred language is {properties.preferred_language}.
 ```
 
 ### In System Prompts (LLM)
 
 ```
-You are a helpful assistant. The user's name is {properties.userName.valueString}.
-They prefer {properties.preferred_language.valueString} responses.
+You are a helpful assistant. The user's name is {properties.userName}.
+They prefer {properties.preferred_language} responses.
 ```
 
 ### In HTTP Call Bodies
 
 ```json
 {
-  "userId": "{properties.userId.valueString}",
-  "language": "{properties.preferred_language.valueString}"
+  "userId": "{properties.userId}",
+  "language": "{properties.preferred_language}"
 }
 ```
 
-### Property Value Accessors
+### Reading the Different Value Types
 
-| Accessor | Type | Example |
+The property-setter config picks the value type by which `value*` field you write (`valueString`, `valueInt`, `valueFloat`, `valueObject`, `valueList`, `valueBoolean`). In templates, all of them are read the same way — through the property name:
+
+| Written as | Read in a template | Example |
 |---|---|---|
-| `.valueString` | String value | `{properties.name.valueString}` |
-| `.valueInt` | Integer value | `{properties.age.valueInt}` |
-| `.valueFloat` | Float value | `{properties.score.valueFloat}` |
-| `.valueObject` | Object/Map | `{properties.profile.valueObject.email}` |
-| `.valueList` | List | `{#for item in properties.tags.valueList}...{/for}` |
-| `.valueBoolean` | Boolean | `{#if properties.isPremium.valueBoolean}...{/if}` |
+| `valueString` | `{properties.name}` | `Hello {properties.name}` |
+| `valueInt` | `{properties.age}` | `You are {properties.age}` |
+| `valueFloat` | `{properties.score}` | `Score: {properties.score}` |
+| `valueObject` | `{properties.profile.<field>}` | `{properties.profile.email}` |
+| `valueList` | `{properties.tags}` | `{#for item in properties.tags}...{/for}` |
+| `valueBoolean` | `{properties.isPremium}` | `{#if properties.isPremium}...{/if}` |
 
 ---
 
@@ -198,7 +206,9 @@ Conversation.init()
       └─→ Available as {properties.key} in all templates
 ```
 
-Recall order (`most_recent` or `most_accessed`) and max entries come from the agent's `UserMemoryConfig` if configured, otherwise sensible defaults (1000 entries, most recent).
+Recall order (`most_recent` or `most_accessed`) and the maximum number of recalled entries come from the agent's `userMemoryConfig`, but only when the agent sets **`enableMemoryTools: true`** — that flag is what attaches the block (and, when the block is absent, a defaults instance whose field defaults are **`most_recent` ordering and 50 entries**).
+
+> **Note:** with `enableMemoryTools: false` the config is never attached, so the defaults on `UserMemoryConfig` apply — `maxRecallEntries` is 50 either way. This used to differ: a separate hard-coded default in `Conversation` recalled 1000 entries when no config was attached, so the effective cap changed twentyfold depending on that flag and a `maxRecallEntries` declared without `enableMemoryTools` had no effect. The two are now the same constant. Set `enableMemoryTools: true` plus an explicit `maxRecallEntries` if the number matters to you.
 
 ### 2. Pipeline Execution
 
@@ -232,10 +242,12 @@ Conversation.postConversationLifecycleTasks()
 
 Properties with `scope=secret` are automatically handled by the SecretsVault:
 
-1. During pipeline execution, the secret value is available in memory normally
-2. At teardown, the value is encrypted and stored in SecretsVault
-3. The in-memory property value is scrubbed (replaced with a vault reference)
-4. On next conversation init, the value is loaded from the vault and decrypted
+1. The moment the property instruction runs, `PropertySetterTask` stores the plaintext in SecretsVault under `<agentId>.<name>`
+2. The raw input is scrubbed from the conversation step
+3. The property value becomes a `${vault:<agentId>.<name>}` reference with `conversation` scope
+4. Downstream consumers (`ChatModelRegistry`, `ApiCallExecutor`, `SecretResolver`) resolve the reference at point-of-use
+
+If the vault is unavailable or disabled, the turn fails closed with a `LifecycleException` rather than persisting the plaintext — set `EDDI_VAULT_MASTER_KEY`.
 
 ```json
 {

@@ -5,9 +5,13 @@
 package ai.labs.eddi.configs.migration;
 
 import ai.labs.eddi.configs.migration.model.MigrationLog;
+import com.mongodb.MongoCommandException;
 import com.mongodb.MongoNamespace;
+import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.RenameCollectionOptions;
 import org.bson.Document;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -16,6 +20,11 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
+
+import org.bson.types.ObjectId;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -179,7 +188,7 @@ class V6RenameMigrationTest {
         void renamesAllCollections() {
             when(migrationLogStore.readMigrationLog(anyString())).thenReturn(null);
 
-            var oldNames = java.util.Set.of("bots", "bots.history", "packages", "packages.history", "behaviorrulesets", "behaviorrulesets.history",
+            var oldNames = Set.of("bots", "bots.history", "packages", "packages.history", "behaviorrulesets", "behaviorrulesets.history",
                     "httpcalls", "httpcalls.history", "langchain", "langchain.history", "regulardictionaries", "regulardictionaries.history");
 
             // Use thenAnswer to return non-empty for old names, empty for everything else
@@ -197,7 +206,7 @@ class V6RenameMigrationTest {
             when(database.getName()).thenReturn("eddi");
 
             // Track all rename calls across all mock collections
-            java.util.List<String> renamedTo = new java.util.ArrayList<>();
+            List<String> renamedTo = new ArrayList<>();
             // Re-wire: capture renameCollection calls
             when(database.getCollection(anyString())).thenAnswer(invocation -> {
                 String name = invocation.getArgument(0);
@@ -208,7 +217,7 @@ class V6RenameMigrationTest {
                         MongoNamespace ns = renameInvocation.getArgument(0);
                         renamedTo.add(ns.getCollectionName());
                         return null;
-                    }).when(coll).renameCollection(any(MongoNamespace.class));
+                    }).when(coll).renameCollection(any(MongoNamespace.class), any(RenameCollectionOptions.class));
                 } else {
                     when(coll.estimatedDocumentCount()).thenReturn(0L);
                 }
@@ -246,60 +255,370 @@ class V6RenameMigrationTest {
             migration.runIfNeeded();
 
             // renameCollection should never be called for empty collections
-            verify(emptyCollection, never()).renameCollection(any(MongoNamespace.class));
+            verify(emptyCollection, never()).renameCollection(any(MongoNamespace.class), any(RenameCollectionOptions.class));
         }
 
+        /**
+         * A target that really does hold documents (written between the pre-flight and
+         * the rename) is genuinely ambiguous and must still stop the migration —
+         * dropping it there would destroy data. The rename therefore goes out with
+         * {@code dropTarget=false}, fails with error 48, and the run aborts cleanly
+         * without throwing.
+         * <p>
+         * The recovery half — an EMPTY leftover v6 namespace, which is the normal state
+         * of a v5 database because startup creates those namespaces itself — lives in
+         * {@link EmptyTargetNamespaceTests}.
+         */
         @Test
-        @DisplayName("should handle MongoCommandException error code 48 gracefully")
+        @DisplayName("error 48 with a POPULATED target → never drops it, aborts, stays incomplete")
         @SuppressWarnings("unchecked")
-        void handlesAlreadyRenamed() {
+        void populatedTargetCollection_abortsWithoutDropping() {
             when(migrationLogStore.readMigrationLog(anyString())).thenReturn(null);
 
-            MongoCollection<Document> col = mock(MongoCollection.class);
-            when(col.estimatedDocumentCount()).thenReturn(5L);
-            var exception = mock(com.mongodb.MongoCommandException.class);
-            when(exception.getErrorCode()).thenReturn(48);
-            doThrow(exception).when(col).renameCollection(any(MongoNamespace.class));
+            MongoCollection<Document> bots = mock(MongoCollection.class);
+            when(bots.estimatedDocumentCount()).thenReturn(5L);
+            var namespaceExists = mock(MongoCommandException.class);
+            when(namespaceExists.getErrorCode()).thenReturn(48);
+            doThrow(namespaceExists).when(bots).renameCollection(any(MongoNamespace.class), any(RenameCollectionOptions.class));
 
-            // After rename exceptions, code continues to migrateAgentFields /
-            // migrateCollection
-            // which calls find() — stub it to return an empty iterable
-            com.mongodb.client.FindIterable<Document> emptyIterable = mock(com.mongodb.client.FindIterable.class);
-            com.mongodb.client.MongoCursor<Document> emptyCursor = mock(com.mongodb.client.MongoCursor.class);
-            when(emptyCursor.hasNext()).thenReturn(false);
-            when(emptyIterable.iterator()).thenReturn(emptyCursor);
-            when(col.find()).thenReturn(emptyIterable);
+            MongoCollection<Document> agents = mock(MongoCollection.class);
+            // Stale estimate lets it past the pre-flight; the exact count is the truth.
+            when(agents.estimatedDocumentCount()).thenReturn(0L);
+            when(agents.countDocuments()).thenReturn(3L);
 
-            when(database.getCollection(anyString())).thenReturn(col);
+            when(database.getCollection(anyString())).thenAnswer(invocation -> switch (invocation.<String>getArgument(0)) {
+                case "bots" -> bots;
+                case "agents" -> agents;
+                default -> emptyCollection();
+            });
             when(database.getName()).thenReturn("eddi");
 
-            // Should not throw — error code 48 means already renamed
             assertDoesNotThrow(() -> migration.runIfNeeded());
+
+            // The exact count must actually be consulted — an estimate is not a
+            // licence to drop a collection.
+            verify(agents).countDocuments();
+            verify(agents, never()).drop();
+            var options = ArgumentCaptor.forClass(RenameCollectionOptions.class);
+            verify(bots).renameCollection(any(MongoNamespace.class), options.capture());
+            assertFalse(options.getValue().isDropTarget(), "a target holding documents must never be dropped");
+            verify(migrationLogStore, never()).createMigrationLog(any());
+        }
+
+        /**
+         * An unreadable target count is not permission to drop either: the rename must
+         * go out with {@code dropTarget=false}, fail with 48, and leave the migration
+         * incomplete so the next start retries.
+         */
+        @Test
+        @DisplayName("error 48 with an unreadable target count → aborts without dropping")
+        @SuppressWarnings("unchecked")
+        void unreadableTargetCount_abortsWithoutDropping() {
+            when(migrationLogStore.readMigrationLog(anyString())).thenReturn(null);
+
+            MongoCollection<Document> bots = mock(MongoCollection.class);
+            when(bots.estimatedDocumentCount()).thenReturn(5L);
+            var namespaceExists = mock(MongoCommandException.class);
+            when(namespaceExists.getErrorCode()).thenReturn(48);
+            doThrow(namespaceExists).when(bots).renameCollection(any(MongoNamespace.class), any(RenameCollectionOptions.class));
+
+            MongoCollection<Document> agents = mock(MongoCollection.class);
+            when(agents.estimatedDocumentCount()).thenReturn(0L);
+            when(agents.countDocuments()).thenThrow(new IllegalStateException("no primary available"));
+
+            when(database.getCollection(anyString())).thenAnswer(invocation -> switch (invocation.<String>getArgument(0)) {
+                case "bots" -> bots;
+                case "agents" -> agents;
+                default -> emptyCollection();
+            });
+            when(database.getName()).thenReturn("eddi");
+
+            assertDoesNotThrow(() -> migration.runIfNeeded());
+
+            verify(agents, never()).drop();
+            var options = ArgumentCaptor.forClass(RenameCollectionOptions.class);
+            verify(bots).renameCollection(any(MongoNamespace.class), options.capture());
+            assertFalse(options.getValue().isDropTarget(), "an unreadable count is not permission to drop the target");
+            verify(migrationLogStore, never()).createMigrationLog(any());
         }
 
         @Test
-        @DisplayName("should handle non-48 MongoCommandException by logging warning")
+        @DisplayName("a non-48 MongoCommandException aborts the run and leaves it incomplete")
         @SuppressWarnings("unchecked")
         void handlesOtherMongoCommandException() {
             when(migrationLogStore.readMigrationLog(anyString())).thenReturn(null);
 
-            MongoCollection<Document> col = mock(MongoCollection.class);
-            when(col.estimatedDocumentCount()).thenReturn(5L);
-            var exception = mock(com.mongodb.MongoCommandException.class);
-            when(exception.getErrorCode()).thenReturn(500);
-            when(exception.getMessage()).thenReturn("Internal error");
-            doThrow(exception).when(col).renameCollection(any(MongoNamespace.class));
+            MongoCollection<Document> bots = mock(MongoCollection.class);
+            when(bots.estimatedDocumentCount()).thenReturn(5L);
+            var internalError = mock(MongoCommandException.class);
+            when(internalError.getErrorCode()).thenReturn(500);
+            when(internalError.getMessage()).thenReturn("Internal error");
+            doThrow(internalError).when(bots).renameCollection(any(MongoNamespace.class), any(RenameCollectionOptions.class));
 
-            com.mongodb.client.FindIterable<Document> emptyIterable = mock(com.mongodb.client.FindIterable.class);
-            com.mongodb.client.MongoCursor<Document> emptyCursor = mock(com.mongodb.client.MongoCursor.class);
-            when(emptyCursor.hasNext()).thenReturn(false);
-            when(emptyIterable.iterator()).thenReturn(emptyCursor);
-            when(col.find()).thenReturn(emptyIterable);
+            MongoCollection<Document> agents = mock(MongoCollection.class);
+            when(agents.estimatedDocumentCount()).thenReturn(0L);
 
-            when(database.getCollection(anyString())).thenReturn(col);
+            when(database.getCollection(anyString())).thenAnswer(invocation -> switch (invocation.<String>getArgument(0)) {
+                case "bots" -> bots;
+                case "agents" -> agents;
+                default -> emptyCollection();
+            });
             when(database.getName()).thenReturn("eddi");
 
             assertDoesNotThrow(() -> migration.runIfNeeded());
+
+            // A server-side failure is not a placeholder — nothing may be dropped and
+            // the documents still sitting under "bots" must be retried next start.
+            verify(agents, never()).drop();
+            verify(migrationLogStore, never()).createMigrationLog(any());
+        }
+
+        @SuppressWarnings("unchecked")
+        private MongoCollection<Document> emptyCollection() {
+            MongoCollection<Document> collection = mock(MongoCollection.class);
+            FindIterable<Document> iterable = mock(FindIterable.class);
+            MongoCursor<Document> cursor = mock(MongoCursor.class);
+            doReturn(false).when(cursor).hasNext();
+            doReturn(cursor).when(iterable).iterator();
+            doReturn(0L).when(collection).estimatedDocumentCount();
+            doReturn(iterable).when(collection).find();
+            return collection;
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────
+    // B14 — a rename that cannot happen must not be shrugged off
+    // ───────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("v5/v6 collection conflicts")
+    class CollectionConflictTests {
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("v5 and v6 collection both populated → reports an error, renames nothing, stays incomplete")
+        void bothCollectionsPopulated_abortsInsteadOfLosingV5Documents() {
+            when(migrationLogStore.readMigrationLog(anyString())).thenReturn(null);
+
+            MongoCollection<Document> bots = mock(MongoCollection.class);
+            when(bots.estimatedDocumentCount()).thenReturn(5L);
+            MongoCollection<Document> agents = mock(MongoCollection.class);
+            when(agents.estimatedDocumentCount()).thenReturn(3L);
+            // Build the iterable BEFORE it is handed to thenReturn(): creating/stubbing
+            // another mock inside an unfinished when(...) is exactly what Mockito reports
+            // as UnfinishedStubbingException. The stub itself is only a safety net — a
+            // regression that carries on past the conflict then fails on the verifies
+            // below instead of blowing up with an NPE inside migrateAgentFields.
+            FindIterable<Document> agentDocuments = emptyIterable();
+            when(agents.find()).thenReturn(agentDocuments);
+
+            MongoCollection<Document> emptyCollection = mock(MongoCollection.class);
+            when(emptyCollection.estimatedDocumentCount()).thenReturn(0L);
+
+            when(database.getCollection(anyString())).thenAnswer(invocation -> {
+                String name = invocation.getArgument(0);
+                if ("bots".equals(name)) {
+                    return bots;
+                }
+                if ("agents".equals(name)) {
+                    return agents;
+                }
+                return emptyCollection;
+            });
+            when(database.getName()).thenReturn("eddi");
+
+            migration.runIfNeeded();
+
+            var conflicts = migration.detectCollectionRenameConflicts();
+            assertEquals(1, conflicts.size(), "the bots/agents clash must be reported");
+            assertTrue(conflicts.getFirst().contains("bots") && conflicts.getFirst().contains("agents"), conflicts.getFirst());
+
+            // The rename would have failed and the v5 documents would then have been
+            // invisible to the URI rewrite (it only scans v6 names), so the run must touch
+            // nothing at all...
+            verify(bots, never()).renameCollection(any(MongoNamespace.class), any(RenameCollectionOptions.class));
+            verify(agents, never()).renameCollection(any(MongoNamespace.class), any(RenameCollectionOptions.class));
+            verify(bots, never()).find();
+            verify(agents, never()).find();
+            // ...and above all must not claim to be done, or the v5 documents would be
+            // stranded forever behind the "already applied" short-circuit.
+            verify(migrationLogStore, never()).createMigrationLog(any());
+        }
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("only the v5 collection populated → no conflict, migration completes")
+        void onlyV5Populated_isNotAConflict() {
+            when(migrationLogStore.readMigrationLog(anyString())).thenReturn(null);
+
+            MongoCollection<Document> bots = mock(MongoCollection.class);
+            when(bots.estimatedDocumentCount()).thenReturn(5L);
+
+            MongoCollection<Document> emptyCollection = mock(MongoCollection.class);
+            when(emptyCollection.estimatedDocumentCount()).thenReturn(0L);
+
+            when(database.getCollection(anyString())).thenAnswer(invocation -> "bots".equals(invocation.getArgument(0)) ? bots : emptyCollection);
+            when(database.getName()).thenReturn("eddi");
+
+            migration.runIfNeeded();
+
+            assertTrue(migration.detectCollectionRenameConflicts().isEmpty());
+            verify(bots).renameCollection(any(MongoNamespace.class), any(RenameCollectionOptions.class));
+            verify(migrationLogStore).createMigrationLog(any());
+        }
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("a rename that fails aborts the run and leaves the migration incomplete so it runs again")
+        void failedRename_doesNotMarkMigrationComplete() {
+            when(migrationLogStore.readMigrationLog(anyString())).thenReturn(null);
+
+            MongoCollection<Document> bots = mock(MongoCollection.class);
+            when(bots.estimatedDocumentCount()).thenReturn(5L);
+            doThrow(new IllegalStateException("rename refused")).when(bots)
+                    .renameCollection(any(MongoNamespace.class), any(RenameCollectionOptions.class));
+
+            // A populated v6 collection that the URI-rewrite pass would visit if the run
+            // carried on past the failed rename — the witness that we really aborted.
+            MongoCollection<Document> workflows = mock(MongoCollection.class);
+            when(workflows.estimatedDocumentCount()).thenReturn(2L);
+            FindIterable<Document> workflowDocuments = emptyIterable();
+            when(workflows.find()).thenReturn(workflowDocuments);
+
+            MongoCollection<Document> emptyCollection = mock(MongoCollection.class);
+            when(emptyCollection.estimatedDocumentCount()).thenReturn(0L);
+
+            when(database.getCollection(anyString())).thenAnswer(invocation -> switch (invocation.<String>getArgument(0)) {
+                case "bots" -> bots;
+                case "workflows" -> workflows;
+                default -> emptyCollection;
+            });
+            when(database.getName()).thenReturn("eddi");
+
+            migration.runIfNeeded();
+
+            verify(bots).renameCollection(any(MongoNamespace.class), any(RenameCollectionOptions.class));
+            verify(workflows, never()).find(); // aborted before the URI rewrite pass
+            verify(migrationLogStore, never()).createMigrationLog(any());
+        }
+
+        /**
+         * Always call this into a local variable first — never inline it into
+         * {@code thenReturn(...)}, which stubs a mock inside an unfinished stubbing.
+         */
+        @SuppressWarnings("unchecked")
+        private FindIterable<Document> emptyIterable() {
+            FindIterable<Document> iterable = mock(FindIterable.class);
+            MongoCursor<Document> cursor = mock(MongoCursor.class);
+            doReturn(false).when(cursor).hasNext();
+            doReturn(cursor).when(iterable).iterator();
+            return iterable;
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────
+    // An EMPTY but EXISTING v6 namespace must not deadlock the migration.
+    // MongoDB refuses renameCollection with NamespaceExists (48) whenever the
+    // target namespace exists — being empty does not help — and EDDI creates
+    // those empty v6 namespaces itself on any boot (createIndex).
+    // ───────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("empty-but-existing v6 target namespace")
+    class EmptyTargetNamespaceTests {
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("an empty v6 target is dropped so the rename succeeds instead of failing forever with error 48")
+        void emptyExistingTargetIsDroppedAndMigrationCompletes() {
+            when(migrationLogStore.readMigrationLog(anyString())).thenReturn(null);
+
+            MongoCollection<Document> bots = mock(MongoCollection.class);
+            when(bots.estimatedDocumentCount()).thenReturn(5L);
+
+            var renameOptions = recordRenamesAndRejectWithoutDropTarget(bots);
+
+            // "agents" EXISTS but is empty: the estimate keeps the pre-flight quiet
+            // (it only flags pairs where BOTH sides hold documents) and the exact count
+            // proves the namespace may be dropped.
+            MongoCollection<Document> agents = mock(MongoCollection.class);
+            when(agents.estimatedDocumentCount()).thenReturn(0L);
+            when(agents.countDocuments()).thenReturn(0L);
+
+            MongoCollection<Document> emptyCollection = mock(MongoCollection.class);
+            when(emptyCollection.estimatedDocumentCount()).thenReturn(0L);
+
+            when(database.getCollection(anyString())).thenAnswer(invocation -> switch (invocation.<String>getArgument(0)) {
+                case "bots" -> bots;
+                case "agents" -> agents;
+                default -> emptyCollection;
+            });
+            when(database.getName()).thenReturn("eddi");
+
+            migration.runIfNeeded();
+
+            assertEquals(1, renameOptions.size(), "bots → agents must be attempted exactly once");
+            assertTrue(renameOptions.getFirst().isDropTarget(),
+                    "an empty leftover v6 namespace must be dropped — otherwise the rename fails with 48, the run "
+                            + "aborts, the app re-creates the namespace on the next boot and the migration can never complete");
+            // ...and because the rename went through, the run finishes and is recorded.
+            verify(migrationLogStore).createMigrationLog(any());
+        }
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("a v6 target that really holds documents is never dropped, even when the cheap estimate says it is empty")
+        void populatedTargetIsNeverDroppedOnAStaleEstimate() {
+            when(migrationLogStore.readMigrationLog(anyString())).thenReturn(null);
+
+            MongoCollection<Document> bots = mock(MongoCollection.class);
+            when(bots.estimatedDocumentCount()).thenReturn(5L);
+
+            var renameOptions = recordRenamesAndRejectWithoutDropTarget(bots);
+
+            // estimatedDocumentCount() reads collection metadata that can be stale after
+            // an unclean shutdown; countDocuments() is the truth. Deciding on the stale
+            // estimate would drop three live agent documents.
+            MongoCollection<Document> agents = mock(MongoCollection.class);
+            when(agents.estimatedDocumentCount()).thenReturn(0L);
+            when(agents.countDocuments()).thenReturn(3L);
+
+            MongoCollection<Document> emptyCollection = mock(MongoCollection.class);
+            when(emptyCollection.estimatedDocumentCount()).thenReturn(0L);
+
+            when(database.getCollection(anyString())).thenAnswer(invocation -> switch (invocation.<String>getArgument(0)) {
+                case "bots" -> bots;
+                case "agents" -> agents;
+                default -> emptyCollection;
+            });
+            when(database.getName()).thenReturn("eddi");
+
+            migration.runIfNeeded();
+
+            assertEquals(1, renameOptions.size(), "bots → agents must be attempted exactly once");
+            assertFalse(renameOptions.getFirst().isDropTarget(), "a target holding documents must never be dropped");
+            // The rename then legitimately fails with 48 and the run must stay incomplete.
+            verify(migrationLogStore, never()).createMigrationLog(any());
+        }
+
+        /**
+         * Models MongoDB: the rename throws NamespaceExists (48) unless dropTarget is
+         * set, and every attempt is recorded so the test can assert on the options.
+         */
+        private List<RenameCollectionOptions> recordRenamesAndRejectWithoutDropTarget(MongoCollection<Document> collection) {
+            var namespaceExists = mock(MongoCommandException.class);
+            when(namespaceExists.getErrorCode()).thenReturn(48);
+
+            var recorded = new ArrayList<RenameCollectionOptions>();
+            doAnswer(invocation -> {
+                RenameCollectionOptions options = invocation.getArgument(1);
+                recorded.add(options);
+                if (!options.isDropTarget()) {
+                    throw namespaceExists;
+                }
+                return null;
+            }).when(collection).renameCollection(any(MongoNamespace.class), any(RenameCollectionOptions.class));
+            return recorded;
         }
     }
 
@@ -350,13 +669,13 @@ class V6RenameMigrationTest {
             var envDoc = new Document("botId", "agent-1")
                     .append("botVersion", 2)
                     .append("environment", "unrestricted")
-                    .append("_id", new org.bson.types.ObjectId());
+                    .append("_id", new ObjectId());
 
             MongoCollection<Document> envCol = mock(MongoCollection.class);
             when(envCol.estimatedDocumentCount()).thenReturn(1L);
 
-            com.mongodb.client.FindIterable<Document> envIterable = mock(com.mongodb.client.FindIterable.class);
-            com.mongodb.client.MongoCursor<Document> envCursor = mock(com.mongodb.client.MongoCursor.class);
+            FindIterable<Document> envIterable = mock(FindIterable.class);
+            MongoCursor<Document> envCursor = mock(MongoCursor.class);
             when(envCursor.hasNext()).thenReturn(true, false);
             when(envCursor.next()).thenReturn(envDoc);
             when(envIterable.iterator()).thenReturn(envCursor);
@@ -468,14 +787,14 @@ class V6RenameMigrationTest {
             when(migrationLogStore.readMigrationLog(anyString())).thenReturn(null);
 
             // Agent document with old field name 'packages'
-            var agentDoc = new Document("packages", java.util.List.of("workflow-ref"))
-                    .append("_id", new org.bson.types.ObjectId());
+            var agentDoc = new Document("packages", List.of("workflow-ref"))
+                    .append("_id", new ObjectId());
 
             MongoCollection<Document> agentCol = mock(MongoCollection.class);
             when(agentCol.estimatedDocumentCount()).thenReturn(1L);
 
-            com.mongodb.client.FindIterable<Document> agentIterable = mock(com.mongodb.client.FindIterable.class);
-            com.mongodb.client.MongoCursor<Document> agentCursor = mock(com.mongodb.client.MongoCursor.class);
+            FindIterable<Document> agentIterable = mock(FindIterable.class);
+            MongoCursor<Document> agentCursor = mock(MongoCursor.class);
             when(agentCursor.hasNext()).thenReturn(true, false);
             when(agentCursor.next()).thenReturn(agentDoc);
             when(agentIterable.iterator()).thenReturn(agentCursor);
@@ -519,13 +838,13 @@ class V6RenameMigrationTest {
             // Workflow document with old URI
             var workflowDoc = new Document(
                     "extension", "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/h1?version=1")
-                    .append("_id", new org.bson.types.ObjectId());
+                    .append("_id", new ObjectId());
 
             MongoCollection<Document> workflowCol = mock(MongoCollection.class);
             when(workflowCol.estimatedDocumentCount()).thenReturn(1L);
 
-            com.mongodb.client.FindIterable<Document> iterable = mock(com.mongodb.client.FindIterable.class);
-            com.mongodb.client.MongoCursor<Document> cursor = mock(com.mongodb.client.MongoCursor.class);
+            FindIterable<Document> iterable = mock(FindIterable.class);
+            MongoCursor<Document> cursor = mock(MongoCursor.class);
             when(cursor.hasNext()).thenReturn(true, false);
             when(cursor.next()).thenReturn(workflowDoc);
             doReturn(cursor).when(iterable).iterator();
@@ -566,13 +885,13 @@ class V6RenameMigrationTest {
             when(migrationLogStore.readMigrationLog(anyString())).thenReturn(null);
 
             var envDoc = new Document("environment", "restricted")
-                    .append("_id", new org.bson.types.ObjectId());
+                    .append("_id", new ObjectId());
 
             MongoCollection<Document> envCol = mock(MongoCollection.class);
             when(envCol.estimatedDocumentCount()).thenReturn(1L);
 
-            com.mongodb.client.FindIterable<Document> envIterable = mock(com.mongodb.client.FindIterable.class);
-            com.mongodb.client.MongoCursor<Document> envCursor = mock(com.mongodb.client.MongoCursor.class);
+            FindIterable<Document> envIterable = mock(FindIterable.class);
+            MongoCursor<Document> envCursor = mock(MongoCursor.class);
             when(envCursor.hasNext()).thenReturn(true, false);
             when(envCursor.next()).thenReturn(envDoc);
             when(envIterable.iterator()).thenReturn(envCursor);

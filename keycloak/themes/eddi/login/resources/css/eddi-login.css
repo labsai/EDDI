@@ -1,0 +1,760 @@
+/* ============================================================================
+ * EDDI login theme
+ *
+ * Loaded after PatternFly (stylesCommon) and after keycloak.v2's css/styles.css.
+ * Layering:
+ *   1. theme.properties adds .pf-v5-theme-dark to <html>  -> PF5 dark defaults
+ *   2. this file's :root block recolours those defaults   -> EDDI palette
+ *   3. the targeted rules below cover what tokens cannot express
+ *
+ * PF5 declares its dark theme's ROOT tokens as :where(.pf-v5-theme-dark){...} —
+ * specificity 0 — so the :root overrides below beat those. They do NOT beat
+ * everything: the dark theme also sets component variables on component
+ * elements (`:where(.pf-v5-theme-dark) .pf-v5-c-login { ... }`), and a custom
+ * property resolves from the nearest declaring element regardless of
+ * specificity. That is why the token block sets both the --100 and the
+ * --300/--400 tiers; see the note above the PatternFly token block.
+ *
+ * Note on caching: url.resourcesPath embeds the Keycloak version, so editing
+ * this file does NOT change its URL — verified, the path survived a container
+ * restart. Responses carry `Cache-Control: no-cache`, so browsers revalidate
+ * rather than serve blind, but do not expect a theme edit to bust caches.
+ *
+ * See planning/keycloak-eddi-theme.md
+ * ========================================================================== */
+
+/* --- Typography ----------------------------------------------------------
+ * PatternFly ships Red Hat Text/Display. The Manager and Workforce UIs use
+ * Noto Sans, so without this the login page is the one EDDI surface in a
+ * different typeface.
+ *
+ * These are the same variable font files the Manager loads (weights 100-900 in
+ * one file each), split by script. The Latin face is below; the Latin-ext,
+ * Cyrillic and Greek faces that follow it exist because of the locales the realm
+ * offers — see the note above them for why they are bundled and what they cost.
+ * Scripts we do not ship fall through the stack to the system font.
+ * ------------------------------------------------------------------------ */
+@font-face {
+    font-family: "Noto Sans Variable";
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+    src: url(../fonts/noto-sans-latin-variable.woff2) format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+                   U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122,
+                   U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* The realm offers all 30 locales Keycloak ships translations for — deliberately
+   a superset of the Manager's 14, so a visitor whose language Keycloak covers
+   gets a localised login even where the app behind it falls back to English.
+   The Latin subset alone would leave Czech, Polish, Turkish, Hungarian and the
+   Baltic languages with fallback glyphs *inside* otherwise-branded words
+   ("Přihlásit"), which reads as broken rather than as a different font, and
+   Russian, Ukrainian and Greek in a fallback face throughout. These three
+   subsets cover them.
+
+   Cost, measured rather than assumed: `unicode-range` normally defers a subset
+   until the page uses it, but the locale switcher lists every language under its
+   native name, so Latin-ext, Cyrillic and Greek glyphs sit in the DOM on every
+   page and all four files are fetched regardless of the chosen language
+   (~245 KB total). Accepted: `font-display: swap` keeps it off the paint path,
+   it caches for the session, and the page already loads a ~1.5 MB PatternFly
+   stylesheet.
+
+   Arabic, Farsi, Thai and CJK are deliberately not bundled: those files are an
+   order of magnitude larger, they do not mix inside words with Latin, and every
+   OS ships a competent face for them. */
+@font-face {
+    font-family: "Noto Sans Variable";
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+    src: url(../fonts/noto-sans-latin-ext-variable.woff2) format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF,
+                   U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF,
+                   U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+    font-family: "Noto Sans Variable";
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+    src: url(../fonts/noto-sans-cyrillic-variable.woff2) format("woff2");
+    unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+
+@font-face {
+    font-family: "Noto Sans Variable";
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+    src: url(../fonts/noto-sans-greek-variable.woff2) format("woff2");
+    unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1,
+                   U+03A3-03FF;
+}
+
+/* --- EDDI palette (mirrors the Manager's Tailwind tokens) ----------------- */
+:root {
+    /* Mirrors the Manager's --font-sans, minus the subsets we do not ship. */
+    --eddi-font: "Noto Sans Variable", ui-sans-serif, system-ui, -apple-system,
+                 "Segoe UI", sans-serif;
+
+    /* A deliberate two-step radius scale. PatternFly's own values are 3px for
+       buttons and none for the card, which read as three unrelated corners
+       once our 4px inputs were added. */
+    --eddi-radius:    6px;  /* controls: inputs, buttons */
+    --eddi-radius-lg: 12px; /* the login card */
+
+    /* Taken from the Manager's own `.dark` token block, not eyeballed. Note
+       #0c0a09 is its --color-primary-foreground (the label on an amber fill),
+       NOT the page background — the page is #09090b. */
+    --eddi-bg:            #09090b; /* zinc-950   page background            */
+    --eddi-surface:       #18181b; /* zinc-900   login card                 */
+    --eddi-surface-alt:   #1f1f23; /*            hover / raised surfaces    */
+    --eddi-border:        #27272a; /* zinc-800   card + decorative borders  */
+    --eddi-border-strong: #3f3f46; /* zinc-700                              */
+
+    /* Interactive controls need a heavier border than decorative ones.
+       WCAG 2.2 SC 1.4.11 wants 3:1 against the adjacent colour for the visual
+       information that identifies a control, and #27272a on the #18181b card is
+       1.19:1. Zinc-500 measures 3.5:1 there. The card keeps --eddi-border,
+       because a panel edge is decoration and 1.4.11 does not apply to it. */
+    --eddi-field-border:  #71717a; /* zinc-500   inputs, 3.5:1 on the card  */
+    --eddi-primary:       #f59e0b; /* amber-500  buttons, focus, accents    */
+    --eddi-primary-hover: #d97706; /* amber-600                             */
+    --eddi-on-primary:    #0c0a09; /* label on an amber fill                */
+    --eddi-link:          #fbbf24; /* amber-400  links                      */
+    --eddi-fg:            #fafaf9; /* stone-50   primary text               */
+    --eddi-muted:         #a1a1aa; /* zinc-400   labels, secondary text     */
+    --eddi-error:         #ef4444; /* red-500 — see note below              */
+    --eddi-success:       #22c55e; /* green-500                             */
+    --eddi-focus:         #f59e0b; /* focus ring                            */
+
+    /* The Manager's --color-destructive is #dc2626 in both its themes. On our
+       dark card that is ~3.2:1, under the 4.5:1 needed for text, so the dark
+       mode uses red-500 for the accent and red-400 for the message itself.
+       Light mode below uses the Manager's value exactly, where it passes. */
+
+    /* Surface treatments that have to differ per colour scheme. Keeping them as
+       tokens is what lets the light block stay short. */
+    --eddi-recess:        rgba(0, 0, 0, .35);
+    --eddi-inset-shadow:  inset 0 1px 2px rgba(0, 0, 0, .45);
+    --eddi-card-sheen:    linear-gradient(180deg, rgba(255, 255, 255, .035), transparent 140px);
+    --eddi-card-edge:     inset 0 1px 0 0 rgba(255, 255, 255, .05);
+    --eddi-card-shadow:   0 24px 64px -16px rgba(0, 0, 0, .85);
+    --eddi-logo-filter:   none;
+    --eddi-chevron:       url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath fill='%23a1a1aa' d='M0 0h10L5 6z'/%3E%3C/svg%3E");
+    --eddi-bloom-near:    rgba(245, 158, 11, .14);
+    --eddi-bloom-mid:     rgba(245, 158, 11, .07);
+    --eddi-bloom-far:     rgba(245, 158, 11, .025);
+    --eddi-vignette:      rgba(39, 39, 42, .45);
+
+    /* Native form controls, scrollbars and autofill follow this. PF5's dark
+       theme sets it too; repeated here so the page degrades sanely if the
+       .pf-v5-theme-dark class is ever dropped. */
+    color-scheme: dark;
+}
+
+/* --- Light mode -----------------------------------------------------------
+ * The Manager ships a theme toggle whose default is `system`, so a user on a
+ * light OS already gets a light Manager. Following prefers-color-scheme here
+ * matches that default, and is what the "system" state of the toggle in the
+ * card header resolves to. The toggle cannot read the Manager's own choice —
+ * Keycloak is a different origin, so that localStorage is unreachable — which
+ * is why the OS preference, not the Manager's setting, is the default.
+ *
+ * Values come from the Manager's own light token block, not from taste.
+ *
+ * Because every PatternFly token above is declared as var(--eddi-…), the whole
+ * component set follows from reassigning the palette — that indirection is what
+ * keeps this block to a palette swap plus the handful of treatments that are
+ * inherently directional (a highlight lit from above, a recess, a shadow).
+ * ------------------------------------------------------------------------ */
+/* The light values live in one place and are applied by two selectors: the
+ * media query governs when the visitor has expressed no preference here (so the
+ * page follows the OS, like the Manager's "system" default), and the attribute
+ * wins when they have chosen explicitly with the control in the card header.
+ * `[data-eddi-theme="dark"]` needs no rules — it simply excludes itself from the
+ * media query and inherits the dark base above.
+ *
+ * KEEP THE TWO LISTS IN SYNC. */
+@media (prefers-color-scheme: light) {
+    :root:not([data-eddi-theme]) {
+        --eddi-bg:            #fafaf9; /* stone-50   page background        */
+        --eddi-surface:       #ffffff; /*            login card             */
+        --eddi-surface-alt:   #f5f5f4; /* stone-100                         */
+        --eddi-border:        #e7e5e4; /* stone-200                         */
+        --eddi-border-strong: #d6d3d1; /* stone-300                         */
+        --eddi-field-border:  #78716c; /* stone-500 — 4.8:1 on the white card */
+        --eddi-fg:            #1c1917; /* stone-900  primary text           */
+        --eddi-muted:         #78716c; /* stone-500  labels                 */
+        --eddi-error:         #dc2626; /* the Manager's destructive         */
+
+        /* Amber-400 links and an amber-500 focus ring are ~1.7:1 and ~2.1:1 on
+           white. Both step down the amber ramp until they clear their bars
+           (4.5:1 for link text, 3:1 for a focus indicator). */
+        --eddi-link:          #b45309; /* amber-700                         */
+        --eddi-focus:         #b45309; /* amber-700                         */
+
+        --eddi-recess:        #f5f5f4;
+        --eddi-inset-shadow:  inset 0 1px 2px rgba(28, 25, 23, .06);
+        --eddi-card-sheen:    none;
+        --eddi-card-edge:     inset 0 1px 0 0 rgba(255, 255, 255, .9);
+        --eddi-card-shadow:   0 10px 30px -12px rgba(28, 25, 23, .18);
+
+        /* The wordmark ships as a white monochrome PNG. Inverting it produces
+           black on the same transparency — invert() leaves the alpha channel
+           alone — which is why no second asset is needed. */
+        --eddi-logo-filter:   invert(1);
+        --eddi-chevron:       url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath fill='%2378716c' d='M0 0h10L5 6z'/%3E%3C/svg%3E");
+
+        /* PF's elevation tokens are tuned for near-black and read as smears on
+           stone-50. */
+        --pf-v5-global--BoxShadow--lg: 0 6px 18px rgba(28, 25, 23, .10);
+        --pf-v5-global--BoxShadow--xl: 0 12px 32px rgba(28, 25, 23, .14);
+
+        /* On a light page the bloom cannot read as emitted light — at any
+           visible alpha it reads as a stain. It becomes a faint warm wash, and
+           the vignette flips from near-black to a cool grey so the card still
+           separates from the page. */
+        --eddi-bloom-near:    rgba(245, 158, 11, .10);
+        --eddi-bloom-mid:     rgba(245, 158, 11, .04);
+        --eddi-bloom-far:     transparent;
+        --eddi-vignette:      rgba(120, 113, 108, .10);
+
+        color-scheme: light;
+    }
+}
+
+/* Explicit light choice — mirror of the block above. */
+:root[data-eddi-theme="light"] {
+    --eddi-bg:            #fafaf9;
+    --eddi-surface:       #ffffff;
+    --eddi-surface-alt:   #f5f5f4;
+    --eddi-border:        #e7e5e4;
+    --eddi-border-strong: #d6d3d1;
+    --eddi-field-border:  #78716c;
+    --eddi-fg:            #1c1917;
+    --eddi-muted:         #78716c;
+    --eddi-error:         #dc2626;
+    --eddi-link:          #b45309;
+    --eddi-focus:         #b45309;
+    --eddi-recess:        #f5f5f4;
+    --eddi-inset-shadow:  inset 0 1px 2px rgba(28, 25, 23, .06);
+    --eddi-card-sheen:    none;
+    --eddi-card-edge:     inset 0 1px 0 0 rgba(255, 255, 255, .9);
+    --eddi-card-shadow:   0 10px 30px -12px rgba(28, 25, 23, .18);
+    --eddi-logo-filter:   invert(1);
+    --eddi-chevron:       url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath fill='%2378716c' d='M0 0h10L5 6z'/%3E%3C/svg%3E");
+    --pf-v5-global--BoxShadow--lg: 0 6px 18px rgba(28, 25, 23, .10);
+    --pf-v5-global--BoxShadow--xl: 0 12px 32px rgba(28, 25, 23, .14);
+    --eddi-bloom-near:    rgba(245, 158, 11, .10);
+    --eddi-bloom-mid:     rgba(245, 158, 11, .04);
+    --eddi-bloom-far:     transparent;
+    --eddi-vignette:      rgba(120, 113, 108, .10);
+
+    color-scheme: light;
+}
+
+/* --- PatternFly 5 global tokens ------------------------------------------
+ * Recolouring these propagates to every PF component, because component-level
+ * variables are declared as var(--pf-v5-global--...). The `light-*` / `dark-*`
+ * variants are NOT light/dark-mode switches — they are "for use on light /
+ * dark surfaces" — and PF's dark theme remaps both, so both must be set.
+ *
+ * IMPORTANT: the dark theme does not merely recolour the globals, it also
+ * re-points components at a DIFFERENT TIER of them, via rules like
+ *   :where(.pf-v5-theme-dark) .pf-v5-c-button { ... : var(--pf-v5-global--primary-color--300) }
+ * So the `--300` / `--400` tiers below are not spares — under .pf-v5-theme-dark
+ * they are what the primary button, the login card and the form controls
+ * actually read. Verified against PatternFly 5.3.1; see
+ * planning/keycloak-eddi-theme.md §3.
+ * ------------------------------------------------------------------------ */
+:root {
+    /* Surfaces. --light-100 drives the login card in the LIGHT theme, --300 in
+       the dark theme; --100 drives inputs in light, --400 in dark. Set all four
+       so the result does not depend on which theme class is present.
+       Trade-off: collapsing 100/300/400 onto one colour removes PF's tonal
+       separation between a surface and a raised element on top of it. The only
+       login page where that shows is the WebAuthn recovery-codes panel
+       (pf-v5-c-panel pf-m-raised), which ends up flush with the card. */
+    --pf-v5-global--BackgroundColor--100:       var(--eddi-surface);
+    --pf-v5-global--BackgroundColor--light-100: var(--eddi-surface);
+    --pf-v5-global--BackgroundColor--150:       var(--eddi-surface-alt);
+    --pf-v5-global--BackgroundColor--200:       var(--eddi-bg);
+    --pf-v5-global--BackgroundColor--300:       var(--eddi-surface);
+    --pf-v5-global--BackgroundColor--400:       var(--eddi-surface);
+    --pf-v5-global--BackgroundColor--dark-100:  var(--eddi-surface);
+    --pf-v5-global--BackgroundColor--dark-200:  var(--eddi-bg);
+
+    /* Text */
+    --pf-v5-global--Color--100:       var(--eddi-fg);
+    --pf-v5-global--Color--200:       var(--eddi-muted);
+    --pf-v5-global--Color--light-100: var(--eddi-fg);
+    --pf-v5-global--Color--light-200: var(--eddi-muted);
+    --pf-v5-global--Color--dark-100:  var(--eddi-fg);
+    --pf-v5-global--Color--dark-200:  var(--eddi-muted);
+
+    /* Borders. --400 is the dark theme's form-control underline. */
+    --pf-v5-global--BorderColor--100:       var(--eddi-border);
+    --pf-v5-global--BorderColor--200:       var(--eddi-border);
+    --pf-v5-global--BorderColor--300:       var(--eddi-border-strong);
+    --pf-v5-global--BorderColor--400:       var(--eddi-border-strong);
+    --pf-v5-global--BorderColor--light-100: var(--eddi-border);
+    --pf-v5-global--BorderColor--dark-100:  var(--eddi-border);
+
+    /* Accent. --100/--200 drive the primary button in the light theme;
+       --300 (background) and --400 (label) drive it under .pf-v5-theme-dark.
+       --400 resolving to near-black is what keeps the amber button at ~10:1. */
+    --pf-v5-global--primary-color--100:       var(--eddi-primary);
+    --pf-v5-global--primary-color--200:       var(--eddi-primary-hover);
+    --pf-v5-global--primary-color--300:       var(--eddi-primary);
+    --pf-v5-global--primary-color--400:       var(--eddi-bg);
+    --pf-v5-global--primary-color--light-100: var(--eddi-primary);
+    --pf-v5-global--primary-color--dark-100:  var(--eddi-primary);
+    --pf-v5-global--active-color--100:        var(--eddi-primary);
+
+    /* Links */
+    --pf-v5-global--link--Color:               var(--eddi-link);
+    --pf-v5-global--link--Color--hover:        var(--eddi-primary);
+    --pf-v5-global--link--Color--light:        var(--eddi-link);
+    --pf-v5-global--link--Color--light--hover: var(--eddi-primary);
+    --pf-v5-global--link--Color--dark:         var(--eddi-link);
+    --pf-v5-global--link--Color--dark--hover:  var(--eddi-primary);
+    --pf-v5-global--link--Color--visited:      var(--eddi-link);
+
+    /* Status. On a dark surface the higher tiers must get LIGHTER, not darker —
+       the inverse of the light theme. Field-level error text ("Invalid username
+       or password") reads --danger-color--200; a red-700 there lands at ~2.4:1
+       on #18181b, so it is red-400. */
+    --pf-v5-global--danger-color--100:  var(--eddi-error);
+    --pf-v5-global--danger-color--200:  #f87171; /* red-400 */
+    --pf-v5-global--danger-color--300:  #fca5a5; /* red-300 */
+    --pf-v5-global--success-color--100: var(--eddi-success);
+    --pf-v5-global--success-color--200: #4ade80; /* green-400 */
+    --pf-v5-global--warning-color--100: var(--eddi-primary);
+    --pf-v5-global--warning-color--200: #fbbf24; /* amber-400 */
+
+    /* Typography. PF re-declares --FontFamily--text as var(--…--text--vf) when
+       variable fonts are in play, so the --vf pair must be set too or the Red
+       Hat variable faces win. Monospace is left alone — nothing on these pages
+       uses it. */
+    --pf-v5-global--FontFamily--text:        var(--eddi-font);
+    --pf-v5-global--FontFamily--text--vf:    var(--eddi-font);
+    --pf-v5-global--FontFamily--heading:     var(--eddi-font);
+    --pf-v5-global--FontFamily--heading--vf: var(--eddi-font);
+
+    /* Corner radius. --BorderRadius--sm drives every PF control (buttons,
+       menus, alerts), so setting it once keeps them consistent. --lg is PF's
+       pill radius (30em) and is deliberately left alone. */
+    --pf-v5-global--BorderRadius--sm: var(--eddi-radius);
+
+    /* Icons, disabled states, elevation */
+    --pf-v5-global--icon--Color--light:  var(--eddi-muted);
+    --pf-v5-global--icon--Color--dark:   var(--eddi-muted);
+    --pf-v5-global--disabled-color--100: #71717a;
+    --pf-v5-global--disabled-color--200: #52525b;
+    --pf-v5-global--disabled-color--300: var(--eddi-border);
+    --pf-v5-global--BoxShadow--lg: 0 8px 24px rgba(0, 0, 0, .55);
+    --pf-v5-global--BoxShadow--xl: 0 16px 40px rgba(0, 0, 0, .65);
+}
+
+/* --- Page background -----------------------------------------------------
+ * keycloak.v2's styles.css sets `.login-pf body { background: url(keycloak-bg.png)
+ * no-repeat center center fixed; background-size: cover; }`. Same selector, same
+ * specificity, loaded later — and the shorthand resets background-image, so the
+ * PNG is never fetched.
+ *
+ * A flat fill read as dead space. The bloom sits behind the wordmark so the
+ * logo appears to be the light source for the panel below it — the same
+ * gesture as the card's top edge line.
+ * ------------------------------------------------------------------------ */
+.login-pf body {
+    background:
+        /* Centred on the wordmark (its optical centre is ~29% down the
+           viewport), tight, and with intermediate stops — a wide gradient at
+           low alpha over near-black bands visibly, which read as a smudge
+           rather than as light. */
+        radial-gradient(34% 24% at 50% 29%,
+            var(--eddi-bloom-near),
+            var(--eddi-bloom-mid) 38%,
+            var(--eddi-bloom-far) 62%,
+            transparent 80%),
+        radial-gradient(78% 48% at 50% 108%, var(--eddi-vignette), transparent 72%),
+        var(--eddi-bg);
+    background-attachment: fixed;
+}
+
+/* --- Logo ----------------------------------------------------------------
+ * #kc-header-wrapper renders realm.displayNameHtml as 29px uppercase text.
+ * We replace it with the EDDI wordmark using the classic accessible
+ * image-replacement technique: the text stays in the accessibility tree
+ * (screen readers still announce "EDDI") but is pushed off-screen.
+ *
+ * Do NOT target div.kc-logo-text — that rule exists in the parent stylesheet
+ * but the element does not exist in keycloak.v2's template.
+ * ------------------------------------------------------------------------ */
+#kc-header-wrapper {
+    height: 56px;
+    width: 100%;
+    background-image: url(../img/logo_eddi.png); /* 500x159, white wordmark */
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: contain;
+    filter: var(--eddi-logo-filter); /* inverted to black in light mode */
+    text-indent: -9999px;
+    position: relative;
+    overflow: hidden;
+    white-space: nowrap;
+}
+
+/* --- Login card ----------------------------------------------------------
+ * PF's login card is borderless; the Manager's panels use a 1px zinc-800 hairline.
+ * ------------------------------------------------------------------------ */
+.pf-v5-c-login__main {
+    position: relative;
+    border: 1px solid var(--eddi-border);
+    border-radius: var(--eddi-radius-lg);
+
+    /* Light from above: a 1px inset highlight along the top edge and a falloff
+       into the surface, then a real shadow so the panel sits off the page. */
+    background-image: var(--eddi-card-sheen);
+    box-shadow: var(--eddi-card-edge), var(--eddi-card-shadow);
+}
+
+/* SIGNATURE — the light source. A hairline amber rule across the top edge,
+   brightest at centre, fading to nothing at both ends; it echoes the hairline
+   strokes of the wordmark above it. This is the one bold element on the page;
+   everything else is deliberately quiet. */
+.pf-v5-c-login__main::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 1px;
+    background: linear-gradient(90deg,
+        transparent, rgba(245, 158, 11, .15) 18%,
+        var(--eddi-primary) 50%,
+        rgba(245, 158, 11, .15) 82%, transparent);
+    border-top-left-radius: inherit;
+    border-top-right-radius: inherit;
+    transform: scaleX(1);
+    transform-origin: 50% 50%;
+    animation: eddi-light-on 620ms cubic-bezier(.2, .7, .3, 1) both;
+}
+
+@keyframes eddi-light-on {
+    from { transform: scaleX(.15); opacity: 0; }
+    to   { transform: scaleX(1);   opacity: 1; }
+}
+
+/* One orchestrated moment, and only for those who want it. */
+@media (prefers-reduced-motion: reduce) {
+    .pf-v5-c-login__main::before { animation: none; }
+}
+
+/* The footer band is the "New user? Register" strip emitted by login.ftl. It
+   does not render while the realm has registrationAllowed=false, so this rule
+   is styled ahead of time rather than verified live. */
+.pf-v5-c-login__main-footer-band {
+    border-top: 1px solid var(--eddi-border);
+    background-color: var(--eddi-bg);
+}
+
+/* --- Primary button ------------------------------------------------------
+ * Token overrides give the amber background, but the label colour resolves from
+ * --pf-v5-global--Color--light-100 (#fafaf9), which on #f59e0b is ~2.1:1 — a
+ * WCAG AA failure. Force near-black text: ~10:1.
+ * ------------------------------------------------------------------------ */
+.pf-v5-c-button.pf-m-primary {
+    --pf-v5-c-button--m-primary--Color:         var(--eddi-on-primary);
+    --pf-v5-c-button--m-primary--hover--Color:  var(--eddi-on-primary);
+    --pf-v5-c-button--m-primary--focus--Color:  var(--eddi-on-primary);
+    --pf-v5-c-button--m-primary--active--Color: var(--eddi-on-primary);
+
+    font-weight: 600;
+    letter-spacing: .01em;
+    padding-block: 10px;
+    transition: box-shadow 180ms ease;
+}
+
+/* Deliberately no gradient here. The button is already the heaviest element on
+   the page; the top-edge light line is the signature and this must not compete
+   with it. Hover gets warmth, nothing more. */
+.pf-v5-c-button.pf-m-primary:hover {
+    box-shadow: 0 8px 26px -8px rgba(245, 158, 11, .55);
+}
+
+/* --- Inputs --------------------------------------------------------------
+ * PF5 form controls are bottom-bordered only. Two changes here:
+ *
+ * 1. Recess the field to the page colour. Taking the card off the global
+ *    surface token left inputs at the card's own #18181b, so a field was
+ *    distinguishable from its container by a 1px hairline alone — flat. The
+ *    component variable is set directly rather than via a global because this
+ *    is a deliberate contrast decision, not a colour-tier correction: inputs
+ *    should read as cut into the card, not laid on top of it.
+ * 2. A full hairline and the shared control radius.
+ *
+ * WCAG 1.4.11 (non-text contrast) is met by the border, via --eddi-field-border.
+ * It is deliberately a different token from --eddi-border: the recess alone is
+ * only ~1.11:1 against the card and the Manager's #27272a border only 1.19:1, so
+ * a field's boundary needed its own, heavier value while the card's decorative
+ * edge kept the CI one. The visible consequence is that fields read more
+ * strongly than the Manager's do — that is the cost of the criterion, not an
+ * oversight.
+ * ------------------------------------------------------------------------ */
+.pf-v5-c-form-control,
+.pf-v5-c-input-group {
+    --pf-v5-c-form-control--BackgroundColor: transparent;
+
+    background-color: var(--eddi-recess);
+    border: 1px solid var(--eddi-field-border);
+    border-radius: var(--eddi-radius);
+    box-shadow: var(--eddi-inset-shadow);
+}
+
+.pf-v5-c-form-control:focus-within,
+.pf-v5-c-input-group:focus-within {
+    border-color: var(--eddi-focus);
+    box-shadow:
+        var(--eddi-inset-shadow),
+        0 0 0 3px color-mix(in srgb, var(--eddi-focus) 18%, transparent);
+}
+
+/* The password field is an input-group: the field and the visibility toggle are
+   siblings, each with their own box. Styled separately they meet in a hard seam
+   with mismatched corners. The group becomes the field, and its children go
+   flat so the pair reads as one control. */
+.pf-v5-c-input-group {
+    overflow: hidden;
+}
+
+/* Verified markup: .pf-v5-c-input-group > .pf-v5-c-input-group__item.pf-m-fill
+   > span.pf-v5-c-form-control > input. The direct-child variant does not occur,
+   so it is not styled here. */
+.pf-v5-c-input-group > .pf-v5-c-input-group__item > .pf-v5-c-form-control {
+    background-color: transparent;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+}
+
+.pf-v5-c-button.pf-m-control {
+    background-color: transparent;
+    border: 0;
+    color: var(--eddi-muted);
+    transition: color 150ms ease;
+}
+
+.pf-v5-c-button.pf-m-control:hover,
+.pf-v5-c-button.pf-m-control:focus {
+    background-color: transparent;
+    color: var(--eddi-fg);
+}
+
+/* The group clips to its radius, and the toggle sits flush against that edge —
+   a focus ring drawn outside the button (the default `outline-offset: 2px`)
+   would be cut off, leaving a keyboard user with a partially invisible focus
+   indicator. Draw it inside instead. */
+.pf-v5-c-input-group :focus-visible {
+    outline-offset: -2px;
+}
+
+/* Chrome/Edge force a hard-coded pale autofill background that ignores
+   background-color. The inset box-shadow trick is the only reliable override. */
+.pf-v5-c-form-control > input:-webkit-autofill,
+.pf-v5-c-form-control > input:-webkit-autofill:hover,
+.pf-v5-c-form-control > input:-webkit-autofill:focus {
+    -webkit-box-shadow: inset 0 0 0 1000px var(--eddi-bg);
+    -webkit-text-fill-color: var(--eddi-fg);
+    caret-color: var(--eddi-fg);
+    transition: background-color 5000s ease-in-out 0s;
+}
+
+/* --- Locale picker -------------------------------------------------------
+ * Keycloak renders the language selector as a native <select> wrapped in a
+ * .pf-v5-c-form-control, in the card header beside the title. The field styling
+ * above therefore hit it too, giving it the recess, border, radius and 38px
+ * height of the password input — so it read as a stray form field competing
+ * with the heading rather than as a utility.
+ *
+ * It is quiet at rest and reveals its affordance on hover or focus, which is
+ * the usual treatment for a header utility. The native <select> keeps its own
+ * keyboard and screen-reader behaviour untouched.
+ * ------------------------------------------------------------------------ */
+/* PatternFly's header is a grid whose two tracks are content-sized and packed
+   left, so the picker landed one column-gap (16px) to the right of where the
+   form fields end — close enough to look like a mistake rather than a choice.
+   Letting the title track take the free space puts the picker's right edge on
+   the same line as the fields and the Sign In button. */
+.pf-v5-c-login__main-header {
+    /* The header's grid tracks overflow its padding box by exactly the column
+       gap, which pushed the picker 16px past the right edge of the fields —
+       near enough to read as a mistake rather than a choice. Track sizing does
+       not fix it (`minmax(0, 1fr)` and a zero min-width on the title were both
+       tried against the live page and neither moved it). Zeroing the gap does,
+       so the spacing moves onto the utilities instead, which is equivalent
+       visually and actually works. */
+    column-gap: 0;
+}
+
+.pf-v5-c-login__main-header-utilities {
+    margin-left: 16px;
+}
+
+/* A realm can put arbitrary markup in displayNameHtml, and it lands inside
+   #kc-header-wrapper — where we are already painting the wordmark. Keycloak's
+   own `master` realm ships
+   `<div class="kc-logo-text"><span>Keycloak</span></div>`, and keycloak.v2's
+   stylesheet still carries the rule that gives that div the Keycloak logo, so
+   on the admin console login the two logos rendered on top of each other.
+   Suppressing any such box leaves our background image as the only mark; the
+   text inside it stays in the accessibility tree via the text-indent above. */
+#kc-header-wrapper .kc-logo-text,
+#kc-header-wrapper img {
+    display: none;
+}
+
+.pf-v5-c-login__main-header-utilities {
+    justify-self: end;
+}
+
+.pf-v5-c-login__main-header-utilities .pf-v5-c-form-control {
+    background-color: transparent;
+    border-color: transparent;
+    box-shadow: none;
+    transition: background-color 150ms ease, border-color 150ms ease;
+}
+
+.pf-v5-c-login__main-header-utilities .pf-v5-c-form-control:hover,
+.pf-v5-c-login__main-header-utilities .pf-v5-c-form-control:focus-within {
+    background-color: var(--eddi-recess);
+    border-color: var(--eddi-border);
+}
+
+/* PatternFly draws the field underline with ::after. The picker is a header
+   utility, not a field, so that line has to go with the rest of the chrome —
+   otherwise it hangs under the label with no box around it. */
+.pf-v5-c-login__main-header-utilities .pf-v5-c-form-control::after {
+    border-bottom: 0;
+}
+
+/* PatternFly's caret is not part of the select — it is a 32px sibling grid item
+   overlaying the field. The select's width is decided by the wrapper's grid and
+   does not grow for a longer label, so the text ran straight under that caret
+   ("Deutsch" overlapped it by 17px). Padding cannot fix it, because the caret is
+   not in the select's box.
+   Hiding PF's caret and drawing our own as a background inside the select's own
+   padding puts both under the same box: overflowing text now clips at the
+   content edge instead of painting over the chevron. */
+.pf-v5-c-login__main-header-utilities .pf-v5-c-form-control__utilities {
+    display: none;
+}
+
+/* Below PatternFly's header breakpoint the grid collapses to one column and the
+   utilities wrap onto their own row. The picker stretched to fill it — 268px at
+   a 560px viewport, against 82px on desktop — which is what made the stacked
+   layout look accidental. Keep both utilities content-sized so the row reads the
+   same at every width.
+
+   `field-sizing: content` is what actually sizes a <select> to its *selected*
+   option; `width: auto` does not, and `max-content` would size it to the widest
+   option in the list (which here is a 30-language menu). It is Chrome/Edge-only
+   at present, so the max-width is the fallback everywhere else — capped rather
+   than full-bleed. */
+.pf-v5-c-login__main-header-utilities {
+    flex: 0 0 auto;
+}
+
+.pf-v5-c-login__main-header-utilities .pf-v5-c-form-control {
+    width: auto;
+}
+
+.pf-v5-c-login__main-header-utilities select {
+    color: var(--eddi-muted);
+    font-size: 13px;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    width: auto;
+    max-width: 11rem;
+    field-sizing: content;
+    padding: 4px 24px 4px 8px;
+    background-image: var(--eddi-chevron);
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    background-size: 10px 6px;
+}
+
+.pf-v5-c-login__main-header-utilities .pf-v5-c-form-control:hover select,
+.pf-v5-c-login__main-header-utilities .pf-v5-c-form-control:focus-within select {
+    color: var(--eddi-fg);
+}
+
+/* Colour-scheme toggle, injected next to the locale picker. Same quiet
+   treatment, so the two read as one row of header utilities. */
+.pf-v5-c-login__main-header-utilities {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.eddi-theme-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto; /* the header row is flex; without this it squashes to 24px */
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: var(--eddi-radius);
+    background-color: transparent;
+    color: var(--eddi-muted);
+    cursor: pointer;
+    transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+
+.eddi-theme-toggle:hover,
+.eddi-theme-toggle:focus-visible {
+    background-color: var(--eddi-recess);
+    border-color: var(--eddi-border);
+    color: var(--eddi-fg);
+}
+
+/* --- Type treatment ------------------------------------------------------
+ * The wordmark is hairline and widely tracked. PatternFly's defaults — a 400
+ * title with no tracking and 700 labels — pull the opposite way and made the
+ * form read heavier than the brand above it. Lighter title, tracked; labels
+ * become small tracked caps, which suits an operator console and echoes the
+ * spacing of the logo. text-transform leaves the accessible name intact.
+ * ------------------------------------------------------------------------ */
+.pf-v5-c-title {
+    /* Set through the component token: `.pf-v5-c-title.pf-m-3xl` carries the
+       weight at two-class specificity, so a plain `font-weight` here loses. */
+    --pf-v5-c-title--m-3xl--FontWeight: 300;
+
+    letter-spacing: .012em;
+}
+
+.pf-v5-c-form__label-text {
+    color: var(--eddi-muted);
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: .085em;
+    text-transform: uppercase;
+}
+
+/* --- Focus visibility ----------------------------------------------------
+ * A 2px amber ring on the near-black background; PF's default is a thin blue
+ * outline that all but disappears here.
+ * ------------------------------------------------------------------------ */
+:focus-visible {
+    /* --eddi-focus, not --eddi-primary: the brand amber stays amber-500 in both
+       schemes, but on a white card that is 2.15:1 — under WCAG 2.4.11's 3:1 for
+       a focus indicator. The token steps down to amber-700 in light mode. */
+    outline: 2px solid var(--eddi-focus);
+    outline-offset: 2px;
+}

@@ -5,13 +5,17 @@
 package ai.labs.eddi.configs.groups.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
+import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
 import ai.labs.eddi.configs.groups.IRestAgentGroupStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
+import ai.labs.eddi.configs.groups.model.GroupWorkspace;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionStyle;
 import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
+import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
@@ -25,6 +29,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 import java.net.URI;
 import java.util.Arrays;
+import java.util.Date;
 import java.util.List;
 import java.util.Map;
 
@@ -41,15 +46,23 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
 
     private final IAgentGroupStore groupStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
+    private final ResourceAccessGuard resourceAccessGuard;
     private final IJsonSchemaCreator jsonSchemaCreator;
+    private final IGroupWorkspaceStore workspaceStore;
+    private final IScheduleStore scheduleStore;
     private final RestVersionInfo<AgentGroupConfiguration> restVersionInfo;
 
     @Inject
-    public RestAgentGroupStore(IAgentGroupStore groupStore, IDocumentDescriptorStore documentDescriptorStore, IJsonSchemaCreator jsonSchemaCreator) {
-        restVersionInfo = new RestVersionInfo<>(resourceURI, groupStore, documentDescriptorStore);
+    public RestAgentGroupStore(IAgentGroupStore groupStore, IDocumentDescriptorStore documentDescriptorStore, IJsonSchemaCreator jsonSchemaCreator,
+            IGroupWorkspaceStore workspaceStore, IScheduleStore scheduleStore,
+            ResourceAccessGuard resourceAccessGuard) {
+        this.resourceAccessGuard = resourceAccessGuard;
+        restVersionInfo = new RestVersionInfo<>(resourceURI, groupStore, documentDescriptorStore, resourceAccessGuard);
         this.groupStore = groupStore;
         this.documentDescriptorStore = documentDescriptorStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
+        this.workspaceStore = workspaceStore;
+        this.scheduleStore = scheduleStore;
     }
 
     @Override
@@ -78,13 +91,16 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
             case DEVIL_ADVOCATE -> "One designated challenger argues against the group consensus";
             case DELPHI -> "Anonymous opinion rounds to reduce groupthink and achieve convergence";
             case DEBATE -> "Structured pro/con argumentation with rebuttal and judge";
+            case TASK_FORCE -> "Collaborative task accomplishment: plan, execute in parallel, verify, synthesize";
+            case NEGOTIATION -> "Trade, not win/lose: positions, opening proposals, bargaining with a concession "
+                    + "ledger, arbitration only if no agreement, synthesis";
             case CUSTOM -> "User-defined phases for full control over the discussion flow";
         };
     }
 
     @Override
     public List<DocumentDescriptor> readGroupDescriptors(String filter, Integer index, Integer limit) {
-        return restVersionInfo.readDescriptors("ai.labs.group", filter, index, limit);
+        return restVersionInfo.readDescriptors(filter, index, limit);
     }
 
     @Override
@@ -92,8 +108,32 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
         return restVersionInfo.read(id, version);
     }
 
+    /**
+     * Every member agent must be one the caller may actually converse with.
+     * <p>
+     * A group's member turns run system-initiated, deliberately below the USE gate
+     * — no interactive caller exists then. So recruiting an agent into a group is
+     * the moment to check: without this, adding a colleague's private agent as a
+     * member is a standing bypass of the gate on {@code /agents/{id}/start}, with
+     * the group discussion as the read-out channel.
+     * <p>
+     * Nested groups are checked as agents here; an id that names a group rather
+     * than an agent resolves against its own descriptor, which is the right subject
+     * either way.
+     */
+    private void requireUseOnMembers(AgentGroupConfiguration configuration) {
+        if (configuration == null || configuration.getMembers() == null) {
+            return;
+        }
+        for (var member : configuration.getMembers()) {
+            if (member != null && member.agentId() != null && !member.agentId().isBlank()) {
+                resourceAccessGuard.requireAgentUseAccess(member.agentId());
+            }
+        }
+    }
     @Override
     public Response updateGroup(String id, Integer version, AgentGroupConfiguration groupConfiguration) {
+        requireUseOnMembers(groupConfiguration);
         Response response = restVersionInfo.update(id, version, groupConfiguration);
         syncDescriptor(id, groupConfiguration);
         return response;
@@ -101,6 +141,7 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
 
     @Override
     public Response createGroup(AgentGroupConfiguration groupConfiguration) {
+        requireUseOnMembers(groupConfiguration);
         Response response = restVersionInfo.create(groupConfiguration);
         // Sync name/description from config onto the descriptor
         URI location = response.getLocation();
@@ -135,7 +176,36 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
 
     @Override
     public Response deleteGroup(String id, Integer version, Boolean permanent) {
-        return restVersionInfo.delete(id, version, permanent);
+        Response response = restVersionInfo.delete(id, version, permanent);
+        // I13: a permanently deleted group takes its standing workspace with it —
+        // backlog, cadences and metrics are meaningless without the config they
+        // belong to, and an orphaned cadence would keep firing into errors. A
+        // soft (versioned) delete keeps the workspace: the group can come back.
+        if (Boolean.TRUE.equals(permanent) && response.getStatus() < 300) {
+            try {
+                // Review finding: cadence ScheduleConfigurations outlive the
+                // workspace — enabled and due, the fire executor keeps selecting
+                // them and every fire errors with "No workspace exists". Retire
+                // the schedules BEFORE the workspace so a crash between the two
+                // leaves the recoverable order (schedules gone, workspace still
+                // deletable), never the orphaned one.
+                GroupWorkspace workspace = workspaceStore.find(id);
+                if (workspace != null) {
+                    for (GroupWorkspace.Cadence cadence : workspace.getCadences()) {
+                        try {
+                            scheduleStore.deleteSchedule(cadence.scheduleRef());
+                        } catch (Exception e) {
+                            LOG.warnf("Could not delete schedule %s of cadence %s while deleting group %s: %s",
+                                    cadence.scheduleRef(), cadence.cadenceId(), sanitize(id), e.getMessage());
+                        }
+                    }
+                }
+                workspaceStore.deleteByGroupId(id);
+            } catch (Exception e) {
+                LOG.errorf(e, "Failed to cascade workspace deletion for group %s", sanitize(id));
+            }
+        }
+        return response;
     }
 
     @Override
@@ -184,12 +254,19 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
                 descriptor = new DocumentDescriptor();
                 descriptor.setResource(RestUtilities.createURI(resourceURI, resourceId,
                         versionQueryParam, version));
+                Date now = new Date(System.currentTimeMillis());
+                descriptor.setCreatedOn(now);
+                descriptor.setLastModifiedOn(now);
                 if (config.getName() != null) {
                     descriptor.setName(config.getName());
                 }
                 if (config.getDescription() != null) {
                     descriptor.setDescription(config.getDescription());
                 }
+                // Stamped like any other newly created resource: this path runs when the
+                // descriptor filter has not (yet) produced one, and an unstamped descriptor
+                // would leave the group unowned.
+                resourceAccessGuard.stampNewDescriptor(descriptor);
                 try {
                     documentDescriptorStore.createDescriptor(resourceId, version, descriptor);
                 } catch (IResourceStore.ResourceStoreException ignored) {
@@ -213,6 +290,7 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
             }
 
             if (changed) {
+                descriptor.setLastModifiedOn(new Date(System.currentTimeMillis()));
                 documentDescriptorStore.setDescriptor(resourceId, descriptorVersion, descriptor);
             }
         } catch (Exception e) {

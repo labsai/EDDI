@@ -108,6 +108,34 @@ class SourceUrlValidatorTest {
         }
 
         @Test
+        @DisplayName("should reject RFC 6598 CGNAT addresses (100.64.0.0/10)")
+        void rejectsCarrierGradeNat() {
+            // Not covered by InetAddress.isSiteLocalAddress(); Tailscale and some
+            // k8s pod networks allocate here, so an editor could otherwise reach
+            // internal peers through the sync endpoints.
+            assertThrows(IllegalArgumentException.class,
+                    () -> SourceUrlValidator.validate("http://100.64.0.1:8080", true));
+        }
+
+        @Test
+        @DisplayName("should reject RFC 4193 IPv6 unique local addresses (fc00::/7)")
+        void rejectsIpv6UniqueLocal() {
+            // isSiteLocalAddress() only matches the deprecated fec0::/10, so ULA
+            // addresses used to pass this validator while failing every other one.
+            assertThrows(IllegalArgumentException.class,
+                    () -> SourceUrlValidator.validate("http://[fd00::1]:8080", true));
+            assertThrows(IllegalArgumentException.class,
+                    () -> SourceUrlValidator.validate("http://[fc00::1]:8080", true));
+        }
+
+        @Test
+        @DisplayName("should reject IPv4 multicast addresses")
+        void rejectsMulticast() {
+            assertThrows(IllegalArgumentException.class,
+                    () -> SourceUrlValidator.validate("http://224.0.0.1:8080", true));
+        }
+
+        @Test
         @DisplayName("should reject unresolvable hosts (fail closed)")
         void rejectsUnresolvableHost() {
             var ex = assertThrows(IllegalArgumentException.class,

@@ -4,27 +4,101 @@
  */
 package ai.labs.eddi.engine.caching;
 
+import ai.labs.eddi.engine.gdpr.GdprComplianceService;
+import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Tests for {@link CacheFactory} — covers named cache creation, TTL caches,
  * null name handling, and same-cache reuse semantics.
+ * <p>
+ * The factory builds its caches against {@code System.nanoTime()} and exposes
+ * no seam for a {@link com.github.benmanes.caffeine.cache.Ticker}, so the
+ * expiry assertions here sleep rather than winding a fake clock. What they are
+ * for is narrow: that the factory <em>wires</em> the expiry policy it claims
+ * to. The semantics of that policy are pinned deterministically in
+ * {@code CacheImplTest}, which drives a {@code FakeTicker} over a directly
+ * constructed {@code CacheImpl} and would therefore not notice the factory
+ * dropping the policy on the floor.
+ * <p>
+ * Most of these assertions only ever wait for "at least this much time has
+ * passed", which makes them slow-machine safe. Two do depend on an upper bound
+ * and are sized accordingly: the cache-wide TTL test reads an entry back before
+ * it expires (500 ms of margin, see {@link #CACHE_WIDE_TTL_MILLIS}), and the
+ * sub-second cache-key test needs a 999 ms entry to survive a 30 ms sleep (969
+ * ms of margin). Both margins are orders of magnitude larger than the work
+ * between the statements they span.
  */
 @DisplayName("CacheFactory Tests")
 class CacheFactoryTest {
+
+    /**
+     * Long enough that a 1 ms TTL has certainly elapsed, short enough to not drag.
+     */
+    private static final long PAST_TTL_MILLIS = 150L;
+
+    /**
+     * Past a 1 ms TTL by a wide margin while leaving most of a 999 ms TTL unspent,
+     * so the sub-second cache-key assertions cannot flake in either direction.
+     */
+    private static final long SUB_SECOND_GAP_MILLIS = 30L;
+
+    /**
+     * Cache-wide TTL for the one test that has to read an entry back
+     * <em>before</em> it expires.
+     * <p>
+     * Every other expiry test here can use a 1 ms lifespan because it only reads
+     * <em>after</em> sleeping: its guard against passing vacuously is a second,
+     * untimed key that must survive. A cache-wide TTL leaves no such key — it
+     * expires everything — so the guard has to be a read taken before expiry, and
+     * that read races the TTL. At 1 ms it lost the race on CI (run 34047771699,
+     * {@code expected: <value1> but was: <null>}), because the assertion only needs
+     * the thread to be descheduled for a millisecond between two adjacent
+     * statements. Half a second is past any plausible stall there, and the test
+     * still finishes well inside two seconds.
+     * <p>
+     * <b>Keep this value under one second.</b> A sub-second TTL is what makes the
+     * pre-expiry read able to catch a truncating duration conversion — the exact
+     * bug class this codebase already hit once, when the cache <em>key</em> was
+     * rendered with {@code Duration.toSeconds()} and every sub-second TTL collapsed
+     * onto {@code ttl=0} (see the comment in
+     * {@link CacheFactory#getCache(String, java.time.Duration)}). If
+     * {@code WriteExpiry.of} ever acquired the same truncation, a sub-second TTL
+     * would become an instant expiry, and only a read taken before the sleep would
+     * notice. Raising this to a whole number of seconds would silence the flake and
+     * lose that coverage at the same time.
+     */
+    private static final long CACHE_WIDE_TTL_MILLIS = 500L;
+
+    /**
+     * Comfortably past {@link #CACHE_WIDE_TTL_MILLIS}. Caffeine evaluates expiry on
+     * read, so overshooting once is enough — no polling is needed.
+     */
+    private static final long PAST_CACHE_WIDE_TTL_MILLIS = 3 * CACHE_WIDE_TTL_MILLIS;
 
     private CacheFactory factory;
 
     @BeforeEach
     void setUp() {
         factory = new CacheFactory();
+    }
+
+    /**
+     * The maximum entry count Caffeine was actually built with — asserting the
+     * factory's arithmetic in isolation would not catch it failing to reach
+     * {@code Caffeine.maximumSize}.
+     */
+    private static long evictionMaximumOf(ICache<?, ?> cache) {
+        return ((CacheImpl<?, ?>) cache).backingCache().policy().eviction()
+                .orElseThrow(() -> new AssertionError("cache was built without a size bound")).getMaximum();
     }
 
     @Nested
@@ -66,6 +140,36 @@ class CacheFactoryTest {
             cache.put("key1", "value1");
             assertEquals("value1", cache.get("key1"));
         }
+
+        @Test
+        @DisplayName("a size-only cache must still honour a PER-ENTRY TTL")
+        void perEntryTtlIsHonoured() throws InterruptedException {
+            // This is the D5b wiring: ToolCacheService and PaginatedResponseStore both
+            // take a cache from getCache(name) and then pass their own TTL to put().
+            // Without expireAfter(...) on the builder there is no variable-expiry view
+            // for CacheImpl to write through and the TTL is silently dropped.
+            ICache<String, String> cache = factory.getCache("perEntryTtl");
+            cache.put("expiring", "value", 1, TimeUnit.MILLISECONDS);
+            cache.put("permanent", "value");
+
+            Thread.sleep(PAST_TTL_MILLIS);
+
+            assertNull(cache.get("expiring"), "an entry written with a 1ms lifespan must be gone");
+            assertEquals("value", cache.get("permanent"), "an entry written without a lifespan must survive");
+        }
+
+        @Test
+        @DisplayName("a NEGATIVE per-entry lifespan means unlimited, it does not throw")
+        void negativeLifespanIsUnlimited() throws InterruptedException {
+            ICache<String, String> cache = factory.getCache("negativeTtl");
+
+            assertDoesNotThrow(() -> cache.put("key1", "value1", -1, TimeUnit.SECONDS));
+            // Reading immediately would also pass if -1 were mapped to a short positive
+            // TTL. Wait past a plausible one, so only a genuinely unlimited entry survives.
+            Thread.sleep(PAST_TTL_MILLIS);
+            assertEquals("value1", cache.get("key1"),
+                    "a negative lifespan means unlimited — the entry must outlive any positive TTL");
+        }
     }
 
     @Nested
@@ -100,5 +204,226 @@ class CacheFactoryTest {
             cache.put("key1", "ttlValue");
             assertEquals("ttlValue", cache.get("key1"));
         }
+
+        /**
+         * The one expiry path that already worked before D5b — Slack event dedup, the
+         * HITL approval-notified cache and the channel thread locks all rely on it.
+         * Switching the builder from {@code expireAfterWrite(ttl)} to
+         * {@code expireAfter(WriteExpiry.of(ttl))} must not have quietly dropped it.
+         */
+        @Test
+        @DisplayName("the cache-wide TTL still expires entries written without their own lifespan")
+        void cacheWideTtlStillExpires() throws InterruptedException {
+            ICache<String, String> cache = factory.getCache("cacheWideTtl", Duration.ofMillis(CACHE_WIDE_TTL_MILLIS));
+            cache.put("key1", "value1");
+            // Keep this read, and keep it on THIS cache. It is the only thing standing
+            // between the assertion below and passing vacuously: a put() that stored
+            // nothing, an entry the cache declined to admit, or a TTL that truncated to
+            // zero would all satisfy assertNull just as well as a working TTL does.
+            //
+            // The tempting refactor is to split this in two — prove storage against a
+            // long-TTL cache with no race, then prove expiry against a 1 ms one. That
+            // reads better and runs faster, and it is weaker: a sub-second TTL
+            // truncating to zero would leave the long-TTL half green and make the
+            // short-TTL half pass for the wrong reason. Both halves have to be the same
+            // sub-second cache, which is why this read has to win a race at all.
+            // See CACHE_WIDE_TTL_MILLIS for how the margin is sized.
+            assertEquals("value1", cache.get("key1"), "the entry must be readable before its TTL elapses");
+
+            Thread.sleep(PAST_CACHE_WIDE_TTL_MILLIS);
+
+            assertNull(cache.get("key1"), "the cache-wide TTL must still remove the entry");
+        }
+
+        @Test
+        @DisplayName("a per-entry lifespan overrides the cache-wide TTL")
+        void perEntryLifespanOverridesCacheTtl() throws InterruptedException {
+            ICache<String, String> cache = factory.getCache("ttlOverride", Duration.ofHours(1));
+            cache.put("short", "value", 1, TimeUnit.MILLISECONDS);
+            cache.put("default", "value");
+
+            Thread.sleep(PAST_TTL_MILLIS);
+
+            assertNull(cache.get("short"), "the 1ms per-entry lifespan must win over the 1h cache TTL");
+            assertEquals("value", cache.get("default"), "the 1h cache TTL must still apply to untimed entries");
+        }
+
+        /**
+         * D2: replay protection is only as strong as the cache is deep. The nonce cache
+         * must be able to hold every nonce written during the TTL it was asked for — a
+         * fixed capacity below {@code peakRps * ttl} forgets nonces that are still
+         * replayable, and because Caffeine's admission filter is frequency-based rather
+         * than LRU it forgets the <em>newest</em> ones.
+         */
+        @Test
+        @DisplayName("the nonce cache's capacity covers the TTL it is built with")
+        void nonceCacheCapacityCoversItsTtl() {
+            // A fractional-second TTL on purpose: maximumSizeFor derives capacity from
+            // ttl.toMillis(), so a regression that truncated to whole seconds — the same
+            // truncation the instance-key test below guards — would under-size the cache
+            // and re-open replay. A whole-second TTL could not detect it. Occupancy is
+            // therefore computed at millisecond precision to match production.
+            Duration ttl = Duration.ofMillis(390_500);
+            double ttlSeconds = ttl.toMillis() / 1000.0;
+
+            long capacity = evictionMaximumOf(factory.getCache("nonce-replay-protection", ttl));
+
+            double steadyStateOccupancy = CacheFactory.NONCE_PEAK_SIGNED_RPS * ttlSeconds;
+            assertTrue(capacity >= steadyStateOccupancy,
+                    "a capacity of " + capacity + " cannot hold the " + steadyStateOccupancy
+                            + " nonces written during a " + ttlSeconds + "s replay window");
+            assertEquals((long) Math.ceil(steadyStateOccupancy * CacheFactory.RATE_SIZED_EVICTION_HEADROOM), capacity,
+                    "the capacity must carry head-room, because eviction is not LRU and drops the newest nonce");
+        }
+
+        /**
+         * The whole point of deriving the size: raising the TTL must raise the capacity
+         * by itself, so a future change to the replay window cannot silently outgrow a
+         * hard-coded number.
+         */
+        @Test
+        @DisplayName("a longer nonce TTL yields a proportionally larger cache")
+        void nonceCacheCapacityTracksTheTtl() {
+            long shortTtl = evictionMaximumOf(factory.getCache("nonce-replay-protection", Duration.ofSeconds(390)));
+            long longTtl = evictionMaximumOf(factory.getCache("nonce-replay-protection", Duration.ofSeconds(780)));
+
+            assertEquals(2 * shortTtl, longTtl, "doubling the replay window must double the capacity");
+        }
+
+        @Test
+        @DisplayName("caches that are not rate-sized keep their configured capacity")
+        void nonRateSizedCachesKeepConfiguredSize() {
+            assertEquals(10_000L, evictionMaximumOf(factory.getCache("tool-results", Duration.ofMinutes(5))));
+            assertEquals(1_000L, evictionMaximumOf(factory.getCache("slack-event-dedup", Duration.ofHours(24))),
+                    "an unlisted cache must stay on the 1_000 default however long its TTL is");
+        }
+
+        /**
+         * The instance key used to render the TTL with {@code Duration.toSeconds()},
+         * which TRUNCATES: every sub-second TTL collapsed onto {@code ":ttl=0"} and any
+         * two TTLs sharing a whole-second part collapsed together. Two callers asking
+         * the same cache name for different TTLs then shared ONE Caffeine instance,
+         * whose expiry policy was whichever of them happened to build it first — the
+         * other TTL was accepted and silently ignored. The distinctness of the
+         * instances is asserted through observable expiry, not through identity, so it
+         * cannot pass on a technicality.
+         */
+        @Test
+        @DisplayName("two sub-second TTLs get distinct caches with distinct expiry")
+        void subSecondTtlsDoNotShareOneCache() throws InterruptedException {
+            // 1ms and 999ms BOTH truncate to ttl=0 seconds, so under the old key they
+            // were one instance — carrying the 1ms policy of whichever built it first.
+            ICache<String, String> shortLived = factory.getCache("subSecondTtl", Duration.ofMillis(1));
+            ICache<String, String> longLived = factory.getCache("subSecondTtl", Duration.ofMillis(999));
+
+            shortLived.put("key", "short");
+            longLived.put("key", "long");
+
+            // Comfortably past the 1ms TTL and comfortably short of the 999ms one.
+            Thread.sleep(SUB_SECOND_GAP_MILLIS);
+
+            assertNull(shortLived.get("key"), "the 1ms TTL must expire its own entry");
+            assertEquals("long", longLived.get("key"),
+                    "the 999ms entry must survive: sharing one instance would have given it the 1ms expiry");
+        }
+
+        /**
+         * The same truncation above one second: 10.001s and 10.9s both rendered as
+         * {@code ttl=10}. This is the form a config-derived TTL actually takes — see
+         * {@code NonceCacheService}, whose TTL is {@code Duration.ofMillis(maxAgeMs +
+         * clockSkewMs + buffer)} over two operator-settable millisecond properties.
+         */
+        @Test
+        @DisplayName("two TTLs sharing a whole-second part get distinct caches")
+        void sameWholeSecondDifferentMillisDoNotShareOneCache() {
+            ICache<String, String> a = factory.getCache("wholeSecondTtl", Duration.ofMillis(10_001));
+            ICache<String, String> b = factory.getCache("wholeSecondTtl", Duration.ofMillis(10_900));
+
+            a.put("key", "a");
+            b.put("key", "b");
+
+            // Both TTLs are far longer than this test takes, so a lost value can only
+            // mean the two Durations resolved to one shared instance.
+            assertEquals("a", a.get("key"), "10001ms and 10900ms must not truncate onto one instance");
+            assertEquals("b", b.get("key"), "10001ms and 10900ms must not truncate onto one instance");
+        }
+
+        /**
+         * The flip side: TTLs that are {@code equal} must still SHARE an instance, or
+         * the fix would leak a fresh Caffeine cache per caller.
+         * {@code Duration.toString()} normalises, so {@code ofSeconds(60)} and
+         * {@code ofMinutes(1)} both render {@code PT1M}.
+         */
+        @Test
+        @DisplayName("equal TTLs expressed differently still share one cache")
+        void equalTtlsShareOneCache() {
+            ICache<String, String> bySeconds = factory.getCache("equalTtl", Duration.ofSeconds(60));
+            ICache<String, String> byMinutes = factory.getCache("equalTtl", Duration.ofMinutes(1));
+
+            bySeconds.put("key", "value");
+
+            assertEquals("value", byMinutes.get("key"), "equal durations must resolve to the same cache instance");
+        }
+
+        @Test
+        @DisplayName("building a TTL cache must not stack expireAfterWrite with expireAfter")
+        void ttlCacheBuildsWithoutPolicyConflict() {
+            // Caffeine throws IllegalStateException at build() time if both expiry
+            // policies are configured. Every @PostConstruct that asks for a TTL cache
+            // would fail on startup.
+            assertDoesNotThrow(() -> factory.getCache("slack-event-dedup", Duration.ofMinutes(10)));
+            assertDoesNotThrow(() -> factory.getCache("channel-thread-locks", Duration.ofHours(24)));
+            assertDoesNotThrow(() -> factory.getCache("nonce-replay-protection", Duration.ofMillis(390_000)));
+        }
+    }
+
+    /**
+     * Finding r9. Both caches were added without an entry in
+     * {@code CacheFactory.CACHE_SIZES}, so they fell back to the 1,000 default. The
+     * restriction cache is keyed by userId — the same shape as "userConversations",
+     * which is sized 10,000 for exactly this reason — so a deployment with a few
+     * thousand concurrently active users thrashes it precisely under load, and
+     * Caffeine's W-TinyLFU admission then rejects the newly inserted key rather
+     * than an old one. Nothing logs it, because a cache miss is not an error: the
+     * per-turn store round trip on the hottest path in the system would simply come
+     * back.
+     */
+    @Test
+    @DisplayName("the per-user restriction cache is sized for active users, not left on the 1,000 default")
+    void perUserCachesAreNotLeftOnTheDefaultSize() {
+        // Asked for by the NAME THE SERVICE ACTUALLY USES, not by a matching literal.
+        // With both sides written out by hand, renaming the constant left this test
+        // green while the cache it names silently fell back to DEFAULT_MAX_SIZE —
+        // which is the very defect the sizing entries were added for, and a cache
+        // miss logs nothing.
+        assertEquals(10_000L,
+                CacheFactory.maximumSizeFor(GdprComplianceService.RESTRICTION_CACHE_NAME, Duration.ofSeconds(30)),
+                "a userId-keyed cache on the 1,000 default reinstates the per-turn store read under load");
+        assertEquals(CacheFactory.maximumSizeFor("userConversations", null),
+                CacheFactory.maximumSizeFor(GdprComplianceService.RESTRICTION_CACHE_NAME, Duration.ofSeconds(30)),
+                "same keyspace shape as userConversations, so the same size");
+        // The tenant cache is deliberately sized AT the default, so the number alone
+        // proves nothing — delete its CACHE_SIZES entry and an assertEquals(1_000L)
+        // stays green while the sizing silently reverts to inheritance, which is the
+        // regression these entries exist to prevent. Assert the entry, then the value.
+        assertTrue(CacheFactory.hasExplicitSize(TenantQuotaService.QUOTA_CACHE_NAME),
+                "the tenant cache must carry its own entry — at the default value, its sizing is otherwise unrecorded");
+        assertEquals(1_000L, CacheFactory.maximumSizeFor(TenantQuotaService.QUOTA_CACHE_NAME, Duration.ofSeconds(5)),
+                "tenants are few, so the recorded size is deliberately the same number as the default");
+    }
+
+    /**
+     * The binding above only bites if these names are genuinely the ones the
+     * services request their caches under — assert that too, so the constants
+     * cannot drift apart from {@code CacheFactory.CACHE_SIZES} in either direction.
+     */
+    @Test
+    @DisplayName("the sized entries are keyed on the names the services actually request")
+    void sizedEntriesUseTheServicesOwnCacheNames() {
+        assertNotEquals(CacheFactory.maximumSizeFor(GdprComplianceService.RESTRICTION_CACHE_NAME, Duration.ofSeconds(30)),
+                CacheFactory.maximumSizeFor("a-name-nothing-sizes", Duration.ofSeconds(30)),
+                "the restriction cache must have its own entry, not the default");
+        assertEquals("gdprProcessingRestrictions", GdprComplianceService.RESTRICTION_CACHE_NAME);
+        assertEquals("tenantQuotas", TenantQuotaService.QUOTA_CACHE_NAME);
     }
 }

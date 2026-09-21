@@ -9,9 +9,13 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.lifecycle.TaskId;
+import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.model.PendingApprovalSummary;
 
 import java.net.URI;
 import java.util.List;
@@ -30,6 +34,18 @@ public interface IConversationService {
 
     /**
      * Start a new conversation with the latest ready Agent version.
+     * <p>
+     * {@code userId} is taken as given, but how much it is worth is decided here
+     * and recorded with the conversation for the rest of its life: it counts as
+     * verified only when an authenticated caller's own principal name is what was
+     * passed. A caller that names some other user — the {@code /v1} adapter
+     * believing {@code X-OpenWebUI-User-Id}, a webhook relaying a third-party id —
+     * has asserted that user, not proved them, and the conversation is marked
+     * accordingly. Per-user SaaS credentials are released against that mark, so a
+     * caller cannot mint a conversation as somebody else and spend their tokens. A
+     * conversation started from inside a running pipeline turn inherits the parent
+     * conversation's mark instead, since a pipeline thread has no caller to judge
+     * by.
      *
      * @throws AgentNotReadyException
      *             if no version of the Agent is deployed
@@ -42,9 +58,31 @@ public interface IConversationService {
             throws AgentNotReadyException, ResourceStoreException, ResourceNotFoundException;
 
     /**
-     * End a conversation by setting its state to ENDED.
+     * End a conversation by setting its state to ENDED. Delegates to
+     * {@link #endConversation(String, String)} with a {@code system:end} actor —
+     * use the two-arg overload from an authenticated context so a pause-terminating
+     * end is attributable in the audit trail.
      */
     void endConversation(String conversationId);
+
+    /**
+     * Reset the state of a stuck conversation (ERROR or EXECUTION_INTERRUPTED) to
+     * READY. Updates both persistent storage and the in-memory cache atomically.
+     * Admin-only operation.
+     */
+    void resetConversationState(String conversationId, ConversationState targetState);
+
+    /**
+     * End a conversation with actor attribution. When the conversation was
+     * {@code AWAITING_HUMAN}, ending it terminally resolves the pending approval:
+     * the timeout schedule is disarmed, the bookmark cleared, an
+     * {@code hitl.approval} cancellation is audited with {@code endedBy}, and a
+     * {@link ai.labs.eddi.engine.events.HitlResumeCompletedEvent} (null verdict,
+     * terminal snapshot) is fired for channel observers — so every
+     * pause-terminating path is attributed and rendered. {@code endedBy} is a
+     * principal name or a {@code system:*} identifier for automated ends.
+     */
+    void endConversation(String conversationId, String endedBy);
 
     /**
      * Get the current state of a conversation (from cache or DB).
@@ -85,11 +123,22 @@ public interface IConversationService {
     /**
      * Process a user input (say) or rerun the last step. Results are delivered via
      * the responseHandler callback.
+     * <p>
+     * <b>Handler contract:</b> exactly one handler method is invoked on every
+     * accepted call — {@code onComplete} when the turn executed (the snapshot may
+     * carry state {@code AWAITING_HUMAN} if THIS turn paused the conversation), or
+     * {@code onSkipped} when the turn was dropped without consuming the input
+     * (conversation paused or busy at execution time). Calls rejected up-front
+     * throw instead and never invoke the handler.
      *
      * @throws AgentMismatchException
      *             if agentId doesn't match the conversation's agent
      * @throws ConversationEndedException
      *             if the conversation has already ended
+     * @throws ConversationAwaitingApprovalException
+     *             if the conversation is awaiting a human decision — the input is
+     *             NOT consumed; a reviewer must resolve the pause via
+     *             {@link #resumeConversation} (or cancel) first
      * @throws ResourceNotFoundException
      *             if the conversation is not found
      */
@@ -100,6 +149,17 @@ public interface IConversationService {
     @FunctionalInterface
     interface ConversationResponseHandler {
         void onComplete(SimpleConversationMemorySnapshot snapshot);
+
+        /**
+         * The turn was dropped WITHOUT consuming the input — the conversation was
+         * paused ({@code AWAITING_HUMAN}) or busy ({@code IN_PROGRESS}) by the time the
+         * queued turn executed. The snapshot reflects the persisted state; the user's
+         * message was not processed. Defaults to {@link #onComplete} so callback
+         * consumers that only inspect the snapshot state keep working.
+         */
+        default void onSkipped(SimpleConversationMemorySnapshot snapshot) {
+            onComplete(snapshot);
+        }
     }
 
     /**
@@ -112,9 +172,40 @@ public interface IConversationService {
 
         void onToken(String token);
 
+        /**
+         * Called when a multi-model cascade step starts. Default no-op so handlers that
+         * do not care about cascade events are unaffected.
+         */
+        default void onCascadeStepStart(int stepIndex, String modelType, String modelName, int totalSteps) {
+        }
+
+        /**
+         * Called when a cascade step is evaluated and escalation is triggered. Default
+         * no-op.
+         */
+        default void onCascadeEscalation(int fromStep, int toStep, double confidence, double threshold, String reason, long durationMs) {
+        }
+
         void onComplete(SimpleConversationMemorySnapshot snapshot);
 
         void onError(Throwable error);
+
+        default void onTaskFailed(TaskId taskId, String taskType, long durationMs,
+                                  String errorType, String errorSummary) {
+        }
+
+        /** One tool call is about to execute — see ConversationEventSink#onToolCall. */
+        default void onToolCall(String toolName) {
+        }
+
+        /**
+         * The turn was dropped without consuming the input (see
+         * {@link ConversationResponseHandler#onSkipped}). Defaults to
+         * {@link #onComplete} so the stream always terminates.
+         */
+        default void onSkipped(SimpleConversationMemorySnapshot snapshot) {
+            onComplete(snapshot);
+        }
     }
 
     /**
@@ -180,6 +271,119 @@ public interface IConversationService {
 
     boolean redo(String conversationId) throws ResourceStoreException, ResourceNotFoundException;
 
+    // --- HITL lifecycle ---
+
+    /**
+     * Outcome of a cancel request — lets the REST layer report honestly instead of
+     * returning 200 unconditionally.
+     */
+    enum CancelOutcome {
+        /** A paused/running conversation was cancelled (or signalled to stop). */
+        CANCELLED,
+        /**
+         * Conversation exists but is neither paused nor executing (READY/ENDED/...).
+         */
+        NOTHING_TO_CANCEL,
+        /** No conversation with that id exists. */
+        NOT_FOUND
+    }
+
+    /**
+     * Cancel a conversation with the given control signal. Cancels a paused
+     * (AWAITING_HUMAN) conversation, or signals a turn executing on this pod to
+     * stop at the next task boundary.
+     *
+     * @param conversationId
+     *            the conversation to cancel
+     * @param mode
+     *            the cancellation mode (CANCEL_GRACEFUL or CANCEL_IMMEDIATE —
+     *            IMMEDIATE currently degrades to graceful on this surface)
+     * @return what actually happened — see {@link CancelOutcome}
+     * @throws ResourceStoreException
+     *             on persistence failures
+     */
+    default CancelOutcome cancelConversation(String conversationId,
+                                             ControlSignal mode)
+            throws ResourceStoreException {
+        return cancelConversation(conversationId, mode, null);
+    }
+
+    /**
+     * Cancel with actor attribution: {@code cancelledBy} identifies who terminated
+     * the pending approval (a principal name, or a {@code system:*} identifier for
+     * automated cancellations) and is recorded in the audit trail. {@code null} is
+     * recorded as {@code unknown}.
+     */
+    CancelOutcome cancelConversation(String conversationId,
+                                     ControlSignal mode,
+                                     String cancelledBy)
+            throws ResourceStoreException;
+
+    /**
+     * Resume a paused (HITL) conversation with the given human decision.
+     *
+     * @param conversationId
+     *            the conversation to resume
+     * @param decision
+     *            the human approval/rejection decision
+     * @param responseHandler
+     *            optional callback — may be null for fire-and-forget
+     * @throws IllegalArgumentException
+     *             {@code decision} is null, carries no top-level {@code verdict},
+     *             or its {@code toolDecisions} fail validation — maps to HTTP 400;
+     *             checked before the AWAITING_HUMAN-&gt;IN_PROGRESS CAS, so the
+     *             pause is never consumed by a malformed request. Every current
+     *             caller (REST, Slack, MCP, timeout auto-resolution) already
+     *             guarantees a non-null verdict before calling this method; this is
+     *             the one place that guarantee is enforced rather than assumed, so
+     *             a future caller that forgets fails loudly here instead of
+     *             silently reaching the tool-execution gate with nothing to check.
+     * @throws IllegalStateException
+     *             wrong-state conflict (not AWAITING_HUMAN, or agent not deployed)
+     *             — maps to HTTP 409; the pause is preserved/restored
+     * @throws ResourceStoreException
+     *             on infrastructure failures (store errors, coordinator saturation)
+     *             — maps to HTTP 500; the pause is restored
+     * @throws ResourceNotFoundException
+     *             if the conversation is not found
+     */
+    void resumeConversation(String conversationId,
+                            HitlDecision decision,
+                            ConversationResponseHandler responseHandler)
+            throws ResourceStoreException, ResourceNotFoundException;
+
+    /**
+     * Load the full conversation memory snapshot for a given conversationId.
+     *
+     * @throws ResourceStoreException
+     *             on persistence failures
+     * @throws ResourceNotFoundException
+     *             if the conversation is not found
+     */
+    ConversationMemorySnapshot getConversationMemorySnapshot(String conversationId)
+            throws ResourceStoreException, ResourceNotFoundException;
+
+    /**
+     * List conversations currently in AWAITING_HUMAN state (bounded).
+     *
+     * @param limit
+     *            maximum number of summaries to return (clamped to [1, 1000])
+     * @return list of pending approval summaries (never null)
+     * @throws ResourceStoreException
+     *             on persistence failures
+     */
+    List<PendingApprovalSummary> listPendingApprovals(int limit)
+            throws ResourceStoreException;
+
+    /**
+     * Owner-scoped variant of {@link #listPendingApprovals(int)}: only summaries
+     * owned by {@code ownerUserId} are returned, and the limit applies AFTER that
+     * restriction — a non-admin caller's approval inbox cannot be starved by other
+     * users' backlog.
+     */
+    List<PendingApprovalSummary> listPendingApprovals(String ownerUserId, int limit)
+            throws ResourceStoreException;
+
     // --- Domain exceptions (no JAX-RS dependency) ---
 
     class AgentNotReadyException extends Exception {
@@ -200,8 +404,57 @@ public interface IConversationService {
         }
     }
 
+    /**
+     * Throws {@link InputTooLargeException} when {@code inputData}'s text exceeds
+     * {@code eddi.conversations.max-input-chars}. The conversationId entry points
+     * apply it themselves; callers that drive the agent-id overloads on behalf of
+     * an external party (A2A) call it before they do.
+     */
+    void requireInputWithinLimit(InputData inputData);
+
+    /**
+     * A turn's input is longer than {@code eddi.conversations.max-input-chars}.
+     * <p>
+     * Unchecked, like {@link ConversationNotFoundException}, so it travels through
+     * every caller of {@code say} without widening their signatures; the REST
+     * surfaces answer it with 413. Without a limit a multi-megabyte message was
+     * accepted and forwarded to the model — which refused it, after the request had
+     * been paid for in time and, on providers that bill rejected prompts, in money.
+     */
+    class InputTooLargeException extends RuntimeException {
+        private final int length;
+        private final int limit;
+
+        public InputTooLargeException(int length, int limit) {
+            super("Input is " + length + " characters long; this deployment accepts at most " + limit
+                    + " per turn (eddi.conversations.max-input-chars).");
+            this.length = length;
+            this.limit = limit;
+        }
+
+        public int getLength() {
+            return length;
+        }
+
+        public int getLimit() {
+            return limit;
+        }
+    }
+
     class ConversationEndedException extends Exception {
         public ConversationEndedException(String message) {
+            super(message);
+        }
+    }
+
+    /**
+     * The conversation is paused awaiting a human decision (HITL) — user input is
+     * rejected without being consumed until a reviewer resolves the pause via
+     * {@code resumeConversation} or a cancel. Maps to HTTP 409 at the REST layer
+     * (mirrors {@link ConversationEndedException} → 410).
+     */
+    class ConversationAwaitingApprovalException extends Exception {
+        public ConversationAwaitingApprovalException(String message) {
             super(message);
         }
     }

@@ -123,6 +123,32 @@ public class PostgresDeploymentStorage implements IDeploymentStorage {
         }
     }
 
+    @Override
+    public int deleteDeploymentInfos(String agentId) throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                PreparedStatement ps = conn.prepareStatement("DELETE FROM deployments WHERE AGENT_ID = ?")) {
+            ps.setString(1, agentId);
+            return ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to delete deployment infos", e);
+        }
+    }
+
+    @Override
+    public int deleteDeploymentInfo(String environment, String agentId, Integer agentVersion) throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        String sql = "DELETE FROM deployments WHERE environment = ? AND AGENT_ID = ? AND AGENT_VERSION = ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, environment);
+            ps.setString(2, agentId);
+            ps.setInt(3, agentVersion);
+            return ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to delete deployment info", e);
+        }
+    }
+
     private DeploymentInfo toDeploymentInfo(ResultSet rs) throws SQLException {
         DeploymentInfo info = new DeploymentInfo();
         info.setEnvironment(Environment.valueOf(rs.getString("environment")));

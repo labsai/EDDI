@@ -115,10 +115,19 @@ public class ResultManipulator<T> {
             limit = listForManipulation.size();
         }
 
+        // long arithmetic: `index * limit` in int overflows to a NEGATIVE offset for
+        // large pages (e.g. index 250_000 with the 10_000-row ceiling), and the loop
+        // then indexes the list from a negative position. ResourceFilter and
+        // DescriptorStore already compute their skip this way; this was the one path
+        // left doing it in int.
+        long start = (long) index * limit;
+        int size = listForManipulation.size();
+
         List<T> limitedList = new ArrayList<>();
-        index = index * limit;
-        for (int i = index; i < (index + limit) && i < listForManipulation.size(); i++) {
-            limitedList.add(listForManipulation.get(i));
+        if (start < size) {
+            int from = (int) start;
+            int to = (int) Math.min(start + limit, size);
+            limitedList.addAll(listForManipulation.subList(from, to));
         }
 
         listForManipulation.clear();

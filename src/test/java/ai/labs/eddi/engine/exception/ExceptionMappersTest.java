@@ -26,16 +26,39 @@ class ExceptionMappersTest {
     @DisplayName("ResourceStoreExceptionMapper")
     class StoreMapper {
 
+        /**
+         * A12 — this mapper is the terminal handler for sneaky-thrown store failures,
+         * so its body reaches arbitrary callers. It must never echo the driver message
+         * (collections, hosts, replica-set members).
+         */
         @Test
-        @DisplayName("should return 500 with exception message")
-        void returns500() {
+        @DisplayName("should return 500 without the raw driver message")
+        void returns500WithoutInternalDetail() {
             var mapper = new ResourceStoreExceptionMapper();
-            var ex = new IResourceStore.ResourceStoreException("DB connection failed");
+            var ex = new IResourceStore.ResourceStoreException(
+                    "Timed out after 30000 ms while waiting to connect to replica set "
+                            + "[mongo-01.internal:27017] for db=eddi collection=conversationmemories");
 
             Response response = mapper.toResponse(ex);
 
             assertEquals(500, response.getStatus());
-            assertEquals("DB connection failed", response.getEntity());
+            String body = String.valueOf(response.getEntity());
+            assertTrue(body.startsWith(ResourceStoreExceptionMapper.GENERIC_MESSAGE), "body must be the fixed message");
+            assertFalse(body.contains("mongo-01.internal"), "hostname leaked to the client");
+            assertFalse(body.contains("conversationmemories"), "collection name leaked to the client");
+            assertFalse(body.contains("replica set"), "topology detail leaked to the client");
+        }
+
+        @Test
+        @DisplayName("should include a correlation id so the logged detail can be found")
+        void includesCorrelationId() {
+            var mapper = new ResourceStoreExceptionMapper();
+
+            String first = String.valueOf(mapper.toResponse(new IResourceStore.ResourceStoreException("boom")).getEntity());
+            String second = String.valueOf(mapper.toResponse(new IResourceStore.ResourceStoreException("boom")).getEntity());
+
+            assertTrue(first.contains("correlationId:"), "body must carry a correlation id");
+            assertNotEquals(first, second, "each failure must get its own correlation id");
         }
     }
 

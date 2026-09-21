@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.datastore;
 
+import ai.labs.eddi.configs.connections.names.IConnectionNameClaimStore;
+import ai.labs.eddi.configs.connections.names.MongoConnectionNameClaimStore;
+import ai.labs.eddi.configs.connections.names.PostgresConnectionNameClaimStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStorage;
 import ai.labs.eddi.configs.deployment.mongo.MongoDeploymentStorage;
 import ai.labs.eddi.configs.migration.IMigrationLogStore;
@@ -14,6 +17,7 @@ import ai.labs.eddi.configs.variables.IGlobalVariableStore;
 import ai.labs.eddi.configs.variables.mongo.GlobalVariableStore;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.mongo.MongoUserMemoryStore;
+import ai.labs.eddi.datastore.mongo.GridFsAttachmentStore;
 import ai.labs.eddi.datastore.mongo.MongoResourceStorageFactory;
 import ai.labs.eddi.datastore.postgres.PostgresAuditStore;
 import ai.labs.eddi.datastore.postgres.PostgresAttachmentStore;
@@ -22,6 +26,7 @@ import ai.labs.eddi.datastore.postgres.PostgresConversationMemoryStore;
 import ai.labs.eddi.datastore.postgres.PostgresDatabaseLogs;
 import ai.labs.eddi.datastore.postgres.PostgresDeploymentStorage;
 import ai.labs.eddi.datastore.postgres.PostgresGlobalVariableStore;
+import ai.labs.eddi.datastore.postgres.PostgresHitlToolJournalStore;
 import ai.labs.eddi.datastore.postgres.PostgresMigrationLogStore;
 import ai.labs.eddi.datastore.postgres.PostgresMigrationManager;
 import ai.labs.eddi.datastore.postgres.PostgresResourceStorageFactory;
@@ -31,18 +36,33 @@ import ai.labs.eddi.datastore.postgres.PostgresUserMemoryStore;
 import ai.labs.eddi.datastore.postgres.PostgresAgentTriggerStore;
 import ai.labs.eddi.engine.audit.AuditStore;
 import ai.labs.eddi.engine.audit.IAuditStore;
+import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
+import ai.labs.eddi.engine.hitl.tools.mongo.HitlToolJournalStore;
 import ai.labs.eddi.engine.memory.ConversationMemoryStore;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.memory.IConversationCheckpointStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
+import ai.labs.eddi.engine.memory.MongoConversationCheckpointStore;
 import ai.labs.eddi.engine.runtime.DatabaseLogs;
 import ai.labs.eddi.engine.runtime.IDatabaseLogs;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.mongo.MongoScheduleStore;
+import ai.labs.eddi.engine.tenancy.ITenantQuotaStore;
+import ai.labs.eddi.engine.tenancy.MongoTenantQuotaStore;
+import ai.labs.eddi.engine.tenancy.PostgresTenantQuotaStore;
 import ai.labs.eddi.engine.triggermanagement.IAgentTriggerStore;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.mongo.AgentTriggerStore;
 import ai.labs.eddi.engine.triggermanagement.mongo.UserConversationStore;
+import ai.labs.eddi.connections.grants.IConnectionGrantStore;
+import ai.labs.eddi.connections.oauth.IOAuthStateStore;
+import ai.labs.eddi.connections.oauth.MongoOAuthStateStore;
+import ai.labs.eddi.connections.oauth.PostgresOAuthStateStore;
+import ai.labs.eddi.connections.grants.MongoConnectionGrantStore;
+import ai.labs.eddi.connections.grants.PostgresConnectionGrantStore;
+import ai.labs.eddi.connections.settings.IConnectionSettingsStore;
+import ai.labs.eddi.connections.settings.MongoConnectionSettingsStore;
+import ai.labs.eddi.connections.settings.PostgresConnectionSettingsStore;
 import ai.labs.eddi.secrets.persistence.ISecretPersistence;
 import ai.labs.eddi.secrets.persistence.MongoSecretPersistence;
 import ai.labs.eddi.secrets.persistence.PostgresSecretPersistence;
@@ -80,6 +100,13 @@ public class DataStoreProducers {
     @Produces
     @ApplicationScoped
     public IScheduleStore scheduleStore(Instance<MongoScheduleStore> mongo, Instance<PostgresScheduleStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IHitlToolJournalStore hitlToolJournalStore(Instance<HitlToolJournalStore> mongo,
+                                                      Instance<PostgresHitlToolJournalStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 
@@ -123,6 +150,33 @@ public class DataStoreProducers {
 
     @Produces
     @ApplicationScoped
+    public IConnectionGrantStore connectionGrantStore(Instance<MongoConnectionGrantStore> mongo,
+                                                      Instance<PostgresConnectionGrantStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IConnectionNameClaimStore connectionNameClaimStore(Instance<MongoConnectionNameClaimStore> mongo,
+                                                              Instance<PostgresConnectionNameClaimStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IOAuthStateStore oauthStateStore(Instance<MongoOAuthStateStore> mongo, Instance<PostgresOAuthStateStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IConnectionSettingsStore connectionSettingsStore(Instance<MongoConnectionSettingsStore> mongo,
+                                                            Instance<PostgresConnectionSettingsStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
     public IUserConversationStore userConversationStore(Instance<UserConversationStore> mongo, Instance<PostgresUserConversationStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
@@ -160,7 +214,7 @@ public class DataStoreProducers {
     @Produces
     @ApplicationScoped
     public IConversationCheckpointStore conversationCheckpointStore(
-                                                                    Instance<ai.labs.eddi.engine.memory.MongoConversationCheckpointStore> mongo,
+                                                                    Instance<MongoConversationCheckpointStore> mongo,
                                                                     Instance<PostgresConversationCheckpointStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
@@ -168,16 +222,16 @@ public class DataStoreProducers {
     @Produces
     @ApplicationScoped
     public IAttachmentStore attachmentStore(
-                                            Instance<ai.labs.eddi.datastore.mongo.GridFsAttachmentStore> mongo,
+                                            Instance<GridFsAttachmentStore> mongo,
                                             Instance<PostgresAttachmentStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 
     @Produces
     @ApplicationScoped
-    public ai.labs.eddi.engine.tenancy.ITenantQuotaStore tenantQuotaStore(
-                                                                          Instance<ai.labs.eddi.engine.tenancy.MongoTenantQuotaStore> mongo,
-                                                                          Instance<ai.labs.eddi.engine.tenancy.PostgresTenantQuotaStore> postgres) {
+    public ITenantQuotaStore tenantQuotaStore(
+                                              Instance<MongoTenantQuotaStore> mongo,
+                                              Instance<PostgresTenantQuotaStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 }

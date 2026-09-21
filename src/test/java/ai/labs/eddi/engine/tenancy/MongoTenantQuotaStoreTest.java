@@ -7,24 +7,34 @@ package ai.labs.eddi.engine.tenancy;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.engine.tenancy.model.TenantQuota;
 import ai.labs.eddi.engine.tenancy.model.UsageSnapshot;
+import com.mongodb.MongoClientSettings;
+import com.mongodb.MongoException;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.FindOneAndUpdateOptions;
 import com.mongodb.client.model.IndexOptions;
+import com.mongodb.client.model.UpdateOptions;
+import org.bson.BsonDocument;
 import org.bson.Document;
 import org.bson.conversions.Bson;
+import org.mockito.ArgumentCaptor;
+import org.mockito.MockedStatic;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.time.Clock;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
 
+import com.mongodb.client.MongoCursor;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -154,7 +164,7 @@ class MongoTenantQuotaStoreTest {
         void empty() {
             FindIterable<Document> emptyIterable = mock(FindIterable.class);
             when(quotasCollection.find()).thenReturn(emptyIterable);
-            com.mongodb.client.MongoCursor<Document> emptyCursor = mock(com.mongodb.client.MongoCursor.class);
+            MongoCursor<Document> emptyCursor = mock(MongoCursor.class);
             when(emptyCursor.hasNext()).thenReturn(false);
             doReturn(emptyCursor).when(emptyIterable).iterator();
 
@@ -178,7 +188,7 @@ class MongoTenantQuotaStoreTest {
 
             FindIterable<Document> iter = mock(FindIterable.class);
             when(quotasCollection.find()).thenReturn(iter);
-            com.mongodb.client.MongoCursor<Document> cursor = mock(com.mongodb.client.MongoCursor.class);
+            MongoCursor<Document> cursor = mock(MongoCursor.class);
             Iterator<Document> docIter = List.of(doc1, doc2).iterator();
             when(cursor.hasNext()).thenAnswer(inv -> docIter.hasNext());
             when(cursor.next()).thenAnswer(inv -> docIter.next());
@@ -262,6 +272,108 @@ class MongoTenantQuotaStoreTest {
         }
     }
 
+    /**
+     * The honest-503 path was PostgreSQL-only, while {@code eddi.datastore.type}
+     * defaults to mongodb.
+     * <p>
+     * A {@link MongoException} escaping these three mutators is not a quota answer
+     * at all: it travelled through {@code TenantQuotaService} (which does not
+     * catch) into {@code ConversationService}'s generic handler and out as a 500
+     * with a stack trace, while the same outage on PostgreSQL produced 503
+     * {@code quota_accounting_unavailable}, a {@code Retry-After} and a tick on
+     * {@code eddi.tenant.quota.unavailable}. Failing closed is unchanged — the
+     * request is still refused — but it is now described correctly, and identically
+     * on both backends.
+     */
+    @Nested
+    @DisplayName("a driver failure is reported as an accounting outage, not as a denial or a 500")
+    class DriverFailures {
+
+        /**
+         * Finding f2-01. The three cases below fail the WRITE half, which a real outage
+         * never reaches: every gate in {@code TenantQuotaService} opens by reading the
+         * tenant's configuration, so {@code getQuota} is the call that throws.
+         * Unwrapped, it travelled out as an opaque 500 with no tick on
+         * {@code eddi.tenant.quota.unavailable} — and only a partial outage, reads up
+         * and writes down, ever exercised the wrapped mutators.
+         * <p>
+         * It cannot report the outage in its return value: {@code null} there already
+         * means "no quota configured", which the service treats as unlimited — i.e.
+         * exactly the silent bypass this must not become.
+         */
+        @Test
+        @DisplayName("getQuota — the call every gate makes first")
+        void quotaReadOutage() {
+            when(quotasCollection.find(any(Bson.class))).thenThrow(new MongoException("connection reset"));
+
+            var thrown = assertThrows(QuotaAccountingUnavailableException.class, () -> sut.getQuota(TENANT_ID));
+
+            assertEquals(ITenantQuotaStore.ACCOUNTING_UNAVAILABLE, thrown.getMessage(),
+                    "the same reason the mutators give, so the 503 body is identical whichever call failed");
+            assertInstanceOf(MongoException.class, thrown.getCause(),
+                    "the driver exception stays attached — a connection fault is not diagnosable without it");
+        }
+
+        @Test
+        @DisplayName("tryIncrementConversations")
+        void conversationsOutage() {
+            when(usageCollection.findOneAndUpdate(any(Bson.class), any(Bson.class), any()))
+                    .thenThrow(new MongoException("connection reset"));
+
+            QuotaCheckResult result = sut.tryIncrementConversations(TENANT_ID, 10);
+
+            assertFalse(result.allowed(), "fail closed — an unreadable counter is not permission to proceed");
+            assertTrue(result.accountingUnavailable(),
+                    "503 quota_accounting_unavailable, not 429 quota_exceeded: nothing is over a limit");
+            assertEquals(ITenantQuotaStore.ACCOUNTING_UNAVAILABLE, result.reason(),
+                    "the same reason PostgresTenantQuotaStore gives, so parity holds on the wire too");
+        }
+
+        @Test
+        @DisplayName("tryIncrementApiCalls")
+        void apiCallsOutage() {
+            when(usageCollection.findOneAndUpdate(any(Bson.class), any(Bson.class), any()))
+                    .thenThrow(new MongoException("connection reset"));
+
+            QuotaCheckResult result = sut.tryIncrementApiCalls(TENANT_ID, 60);
+
+            assertFalse(result.allowed());
+            assertTrue(result.accountingUnavailable());
+            assertEquals(ITenantQuotaStore.ACCOUNTING_UNAVAILABLE, result.reason());
+        }
+
+        @Test
+        @DisplayName("tryAddCost")
+        void costOutage() {
+            when(usageCollection.findOneAndUpdate(any(Bson.class), any(Bson.class), any()))
+                    .thenThrow(new MongoException("connection reset"));
+
+            QuotaCheckResult result = sut.tryAddCost(TENANT_ID, 10.0, 100.0);
+
+            assertFalse(result.allowed(), "a budget that cannot be read is not a budget with room left");
+            assertTrue(result.accountingUnavailable());
+            // Asserted like its two siblings above, and it was not: this gate phrased
+            // a reason of its own ("Cost accounting failed — denying request for
+            // safety") while every other outage path used the shared constant.
+            // ConversationService puts reason() verbatim into the
+            // QuotaAccountingUnavailableException the 503 body is built from, so one
+            // outage read differently depending on which gate happened to fail first.
+            assertEquals(ITenantQuotaStore.ACCOUNTING_UNAVAILABLE, result.reason(),
+                    "the same reason the other gates give, so the 503 body is identical whichever call failed");
+        }
+
+        @Test
+        @DisplayName("an unlimited quota still short-circuits before touching the store")
+        void unlimitedNeverReachesTheFailingStore() {
+            when(usageCollection.findOneAndUpdate(any(Bson.class), any(Bson.class), any()))
+                    .thenThrow(new MongoException("connection reset"));
+
+            assertEquals(QuotaCheckResult.OK, sut.tryIncrementConversations(TENANT_ID, -1));
+            assertEquals(QuotaCheckResult.OK, sut.tryIncrementApiCalls(TENANT_ID, -1));
+            verify(usageCollection, never()).findOneAndUpdate(any(Bson.class), any(Bson.class), any());
+        }
+    }
+
     // ─── tryIncrementApiCalls ──────────────────────────────────────────────────
 
     @Nested
@@ -332,6 +444,19 @@ class MongoTenantQuotaStoreTest {
         }
 
         @Test
+        @DisplayName("should return denied at exactly the limit, matching checkCostBudget")
+        void exactlyAtLimit() {
+            Document result = new Document("monthlyCostUsd", 100.0);
+            when(usageCollection.findOneAndUpdate(any(Bson.class), any(Bson.class), any())).thenReturn(result);
+
+            QuotaCheckResult qResult = sut.tryAddCost(TENANT_ID, 10.0, 100.0);
+
+            // TenantQuotaService.checkCostBudget denies on `currentCost >= limit`, so
+            // post-call accounting must use >= too or the two disagree at the boundary.
+            assertFalse(qResult.allowed(), "at exactly the limit the budget is spent");
+        }
+
+        @Test
         @DisplayName("should return denied when budget exceeded")
         void overBudget() {
             Document result = new Document("monthlyCostUsd", 150.0);
@@ -355,16 +480,89 @@ class MongoTenantQuotaStoreTest {
         }
 
         @Test
-        @DisplayName("should handle stale month (null result) by resetting")
-        void staleMonth() {
+        @DisplayName("should not deny when the usage document disappears mid-update")
+        void usageDocumentDisappears() {
+            // Both conditional updates miss: the document was removed between the
+            // materialise and the retry (resetUsage / deleteQuota race). Cost cannot
+            // be accounted, but a bookkeeping race must not cost the caller a 429.
             when(usageCollection.findOneAndUpdate(any(Bson.class), any(Bson.class), any()))
                     .thenReturn(null);
 
             QuotaCheckResult qResult = sut.tryAddCost(TENANT_ID, 10.0, 100.0);
 
             assertTrue(qResult.allowed());
-            // Two findOneAndUpdate calls: first returns null, second resets
+            // Two conditional adds: one before and one after materialise-and-roll.
             verify(usageCollection, times(2)).findOneAndUpdate(any(Bson.class), any(Bson.class), any());
+        }
+    }
+
+    // ─── Upsert filter discipline ──────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("upsert filter discipline")
+    class UpsertFilterDiscipline {
+
+        /**
+         * {@code tenant_usage} carries a {@code unique(true)} index on
+         * {@code tenantId}. An upsert whose filter also pins a rolling window misses
+         * the tenant's existing document and attempts a SECOND insert, which the server
+         * rejects with E11000 — turning a quota check into a 500 on a live request.
+         * This is the pure-unit guard for that invariant; the end-to-end proof against
+         * a real server is in {@code MongoTenantQuotaStoreContainerTest}.
+         */
+        @Test
+        @DisplayName("every write that may insert is keyed on tenantId alone")
+        void everyUpsertIsKeyedOnTenantIdOnly() {
+            // All conditional updates miss, so every write path is exercised.
+            when(usageCollection.findOneAndUpdate(any(Bson.class), any(Bson.class), any())).thenReturn(null);
+
+            sut.tryIncrementConversations(TENANT_ID, 10);
+            sut.tryIncrementApiCalls(TENANT_ID, 60);
+            sut.tryAddCost(TENANT_ID, 1.0, 100.0);
+
+            // The store reaches the server through both primitives (findOneAndUpdate
+            // for the conditional fast paths, updateOne for the materialising upsert),
+            // and forcing every conditional to miss drives all three calls onto their
+            // upsert branch — so atLeastOnce() is the honest lower bound. atLeast(0)
+            // would let this whole assertion pass even if the store stopped touching
+            // Mongo entirely.
+            ArgumentCaptor<Bson> findFilters = ArgumentCaptor.forClass(Bson.class);
+            ArgumentCaptor<FindOneAndUpdateOptions> findOptions = ArgumentCaptor.forClass(FindOneAndUpdateOptions.class);
+            verify(usageCollection, atLeastOnce())
+                    .findOneAndUpdate(findFilters.capture(), any(Bson.class), findOptions.capture());
+
+            ArgumentCaptor<Bson> updateFilters = ArgumentCaptor.forClass(Bson.class);
+            ArgumentCaptor<UpdateOptions> updateOptions = ArgumentCaptor.forClass(UpdateOptions.class);
+            verify(usageCollection, atLeastOnce())
+                    .updateOne(updateFilters.capture(), any(Bson.class), updateOptions.capture());
+
+            // Count the upsert filters actually asserted. Verifying the calls happened
+            // is not enough — an upsert-free run would leave every isUpsert() branch
+            // false and the tenantId-only invariant would go unchecked. Guard on it.
+            int upsertsChecked = 0;
+            for (int i = 0; i < findFilters.getAllValues().size(); i++) {
+                if (findOptions.getAllValues().get(i).isUpsert()) {
+                    assertKeyedOnTenantIdOnly(findFilters.getAllValues().get(i));
+                    upsertsChecked++;
+                }
+            }
+            for (int i = 0; i < updateFilters.getAllValues().size(); i++) {
+                if (updateOptions.getAllValues().get(i).isUpsert()) {
+                    assertKeyedOnTenantIdOnly(updateFilters.getAllValues().get(i));
+                    upsertsChecked++;
+                }
+            }
+            assertTrue(upsertsChecked > 0,
+                    "no upsert was exercised, so the tenantId-only invariant was never actually checked");
+        }
+
+        private void assertKeyedOnTenantIdOnly(Bson filter) {
+            BsonDocument rendered = filter.toBsonDocument(Document.class, MongoClientSettings.getDefaultCodecRegistry());
+            assertEquals(Set.of("tenantId"), rendered.keySet(),
+                    "an upsert against tenant_usage must be keyed on tenantId alone — anything narrower "
+                            + "misses the tenant's document and inserts a duplicate (E11000). Was: " + rendered.toJson());
+            assertFalse(rendered.get("tenantId").isDocument(),
+                    "tenantId must be an equality match, was: " + rendered.toJson());
         }
     }
 
@@ -413,6 +611,45 @@ class MongoTenantQuotaStoreTest {
             assertNotNull(snapshot);
             assertEquals(TENANT_ID, snapshot.tenantId());
             assertEquals(0, snapshot.conversationsToday());
+        }
+
+        /**
+         * Finding 14. {@code ITenantQuotaStore.getUsage} documents that the snapshot
+         * "reflects current-window values only", and enforcement does roll the windows
+         * — but this read did not, so
+         * {@code GET /administration/quotas/&#123;id&#125;/usage} showed yesterday's
+         * {@code conversationsToday} and the last active minute's
+         * {@code apiCallsThisMinute} until the next increment happened to roll them. An
+         * operator saw a tenant "at its daily limit" the morning after while the very
+         * next request would have been allowed.
+         */
+        @Test
+        @DisplayName("expired windows read as zero, and the stored document is left untouched")
+        void expiredWindowsAreZeroedOnRead() {
+            Instant now = Instant.parse("2026-03-04T12:00:30Z");
+            var pinned = new MongoTenantQuotaStore(database, Clock.fixed(now, ZoneOffset.UTC));
+
+            Document doc = new Document()
+                    .append("tenantId", TENANT_ID)
+                    .append("conversationsToday", 5)
+                    .append("apiCallsThisMinute", 3)
+                    .append("monthlyCostUsd", 42.0)
+                    .append("minuteStart", Instant.parse("2026-03-04T11:59:00Z").toEpochMilli())
+                    .append("dayStart", Instant.parse("2026-03-03T00:00:00Z").toEpochMilli())
+                    .append("costMonth", "2026-02");
+
+            when(usageCollection.find(any(Bson.class))).thenReturn(findIterable);
+            when(findIterable.first()).thenReturn(doc);
+
+            UsageSnapshot snapshot = pinned.getUsage(TENANT_ID);
+
+            assertEquals(0, snapshot.conversationsToday(), "yesterday's daily counter is not today's");
+            assertEquals(0, snapshot.apiCallsThisMinute(), "the previous minute's rate counter is not this minute's");
+            assertEquals(0.0, snapshot.monthlyCostUsd(), "last month's spend is not this month's");
+            // A read must not write: the window starts are reported as stored so the
+            // caller can still see when the counters were last touched.
+            assertEquals(Instant.parse("2026-03-03T00:00:00Z"), snapshot.dayStart());
+            verify(usageCollection, never()).updateOne(any(Bson.class), any(Bson.class));
         }
 
         @Test
@@ -525,6 +762,89 @@ class MongoTenantQuotaStoreTest {
             sut.resetUsage(TENANT_ID);
 
             verify(usageCollection).deleteOne(any(Bson.class));
+        }
+    }
+
+    // ─── Bootstrap ──────────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("Bootstrap (CDI constructor)")
+    class Bootstrap {
+
+        @Test
+        @DisplayName("should bootstrap default quota via atomic setOnInsert upsert")
+        void bootstrapsAtomically() {
+            // CDI constructor uses $setOnInsert with upsert — always calls findOneAndUpdate
+            lenient().when(quotasCollection.findOneAndUpdate(
+                    any(Bson.class), any(Bson.class), any(FindOneAndUpdateOptions.class))).thenReturn(null);
+
+            new MongoTenantQuotaStore(
+                    database, "default", false, -1, -1, -1, -1.0);
+
+            // Verify findOneAndUpdate was called with upsert(true) for atomic bootstrap
+            ArgumentCaptor<FindOneAndUpdateOptions> optionsCaptor = ArgumentCaptor.forClass(FindOneAndUpdateOptions.class);
+            verify(quotasCollection, atLeastOnce()).findOneAndUpdate(
+                    any(Bson.class), any(Bson.class), optionsCaptor.capture());
+            assertTrue(optionsCaptor.getValue().isUpsert());
+        }
+
+        /**
+         * Finding 17, the branch this class never took. {@code bootstrapsAtomically}
+         * stubs {@code findOneAndUpdate} to return null — the first-boot path, where
+         * {@code $setOnInsert} applied the properties and there is nothing to warn
+         * about. The interesting case is the one an operator actually hits: a row that
+         * already exists, so the properties did nothing and the stored values silently
+         * win.
+         * <p>
+         * The pre-image is a raw stored document, and mapping it is where a field-shape
+         * mismatch would throw — inside a {@code @PostConstruct}-time bootstrap, i.e.
+         * only ever discovered at startup against a real database. Capturing the
+         * argument fences both halves at once: that the branch runs at all, and that
+         * {@code toQuota} read the document the way the collection writes it.
+         */
+        @Test
+        @DisplayName("an existing row is mapped from its pre-image and compared against the configured properties")
+        void warnsWhenAStoredRowAlreadyExists() {
+            Document preImage = new Document()
+                    .append("tenantId", "default")
+                    .append("maxConversationsPerDay", 25)
+                    .append("maxAgentsPerTenant", 3)
+                    .append("maxApiCallsPerMinute", 7)
+                    .append("maxMonthlyCostUsd", 12.5)
+                    .append("enabled", false);
+            when(quotasCollection.findOneAndUpdate(
+                    any(Bson.class), any(Bson.class), any(FindOneAndUpdateOptions.class))).thenReturn(preImage);
+
+            try (MockedStatic<TenantQuotaBootstrapCheck> check = mockStatic(TenantQuotaBootstrapCheck.class)) {
+                new MongoTenantQuotaStore(database, "default", true, 1000, 5, 60, 100.0);
+
+                ArgumentCaptor<TenantQuota> stored = ArgumentCaptor.forClass(TenantQuota.class);
+                ArgumentCaptor<TenantQuota> configured = ArgumentCaptor.forClass(TenantQuota.class);
+                check.verify(() -> TenantQuotaBootstrapCheck.warnIfStoredQuotaDiffersFromConfig(
+                        stored.capture(), configured.capture()));
+
+                assertEquals(new TenantQuota("default", 25, 3, 7, 12.5, false), stored.getValue(),
+                        "the pre-image must be mapped with the same field names the collection stores");
+                assertEquals(new TenantQuota("default", 1000, 5, 60, 100.0, true), configured.getValue(),
+                        "and compared against what eddi.tenant.quota.* asks for");
+            }
+        }
+
+        /**
+         * The first-boot half of the same contract: the insert just applied the
+         * properties, so there is nothing to tell the operator.
+         */
+        @Test
+        @DisplayName("a genuine first boot does not run the divergence check")
+        void silentOnFirstBoot() {
+            when(quotasCollection.findOneAndUpdate(
+                    any(Bson.class), any(Bson.class), any(FindOneAndUpdateOptions.class))).thenReturn(null);
+
+            try (MockedStatic<TenantQuotaBootstrapCheck> check = mockStatic(TenantQuotaBootstrapCheck.class)) {
+                new MongoTenantQuotaStore(database, "default", true, 1000, 5, 60, 100.0);
+
+                check.verifyNoInteractions();
+            }
         }
     }
 }

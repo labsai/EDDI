@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.output.keys;
 
+import jakarta.annotation.security.RolesAllowed;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import jakarta.ws.rs.*;
@@ -14,7 +15,8 @@ import java.util.List;
  * @author ginccc
  */
 @Path("/outputstore/actions")
-@Tag(name = "Output")
+@Tag(name = "Configuration / Output", description = "Output template configuration and action keys")
+@RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestOutputActions {
     @GET
     @Produces(MediaType.APPLICATION_JSON)

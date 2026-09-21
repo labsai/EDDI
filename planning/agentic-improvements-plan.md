@@ -2,7 +2,7 @@
 
 > **Scope.** Capability-based A2A routing, cryptographic agent identity, multimodal context attachments, behavioral counterweights, MCP governance, and session safety (snapshots + forking).
 >
-> **Governing Principles.** All work MUST conform to the Nine Pillars in [`docs/project-philosophy.md`](../project-philosophy.md) and the engine rules in [`AGENTS.md`](../../AGENTS.md). Java is the engine; configuration is logic; security is architecture.
+> **Governing Principles.** All work MUST conform to the Nine Pillars in [`docs/project-philosophy.md`](../docs/project-philosophy.md) and the engine rules in [`AGENTS.md`](../AGENTS.md). Java is the engine; configuration is logic; security is architecture.
 >
 > **Out of scope (tracked elsewhere).** Memory architecture (see [`memory-architecture-plan.md`](memory-architecture-plan.md)), DAG pipeline (Phase 9), HITL framework (Phase 9b), guardrails (`guardrails-architecture.md`), multi-channel adapters (Phase 11b), visual builder (Phase 13), native image (`native-image-migration.md`).
 
@@ -10,7 +10,7 @@
 
 ## 0. How to read this document
 
-This plan is split into six **Waves** (delivery order) that map to six **Improvements** (topical grouping). The two numberings are kept deliberately distinct to avoid collision with the main roadmap's "Phase N" numbering in [`AGENTS.md` §3](../../AGENTS.md).
+This plan is split into six **Waves** (delivery order) that map to six **Improvements** (topical grouping). The two numberings are kept deliberately distinct to avoid collision with the main roadmap's "Phase N" numbering in [`AGENTS.md` §3](../AGENTS.md).
 
 | Wave   | Improvement                               | Code status (verified 2026-04-17) | Est. effort |
 | ------ | ----------------------------------------- | --------------------------------- | ----------- |
@@ -21,7 +21,7 @@ This plan is split into six **Waves** (delivery order) that map to six **Improve
 | Wave 5 | Improvement 3 — Multimodal Attachments    | Model only, no pipeline/REST      | Medium      |
 | Wave 6 | Improvement 2 — Cryptographic Identity    | Signing primitive only            | High        |
 
-**Verification method.** Every "implemented" claim below has been checked against [src/main/java](../../src/main/java) on branch `fix/security-hardening-6.0.2`. Claims are annotated ✅ (present and wired), ⚠️ (present but not wired end-to-end), ❌ (not present).
+**Verification method.** Every "implemented" claim below has been checked against [src/main/java](../src/main/java) on branch `fix/security-hardening-6.0.2`. Claims are annotated ✅ (present and wired), ⚠️ (present but not wired end-to-end), ❌ (not present).
 
 ---
 
@@ -31,12 +31,12 @@ This plan is split into six **Waves** (delivery order) that map to six **Improve
 
 | Component                                                                                                                  | Location                                       | Status | Notes                                                                                          |
 | -------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | ------ | ---------------------------------------------------------------------------------------------- |
-| [`CapabilityRegistryService`](../../src/main/java/ai/labs/eddi/configs/agents/CapabilityRegistryService.java)              | `ai.labs.eddi.configs.agents`                  | ✅     | In-memory skill index. Rebuilds on agent CRUD.                                                 |
-| [`CapabilityMatchCondition`](../../src/main/java/ai/labs/eddi/modules/rules/impl/conditions/CapabilityMatchCondition.java) | `ai.labs.eddi.modules.rules.impl.conditions`   | ✅     | Behavior-rule condition; wired in `RuleDeserialization`.                                       |
-| [`ContentTypeMatcher`](../../src/main/java/ai/labs/eddi/modules/rules/impl/conditions/ContentTypeMatcher.java)             | `ai.labs.eddi.modules.rules.impl.conditions`   | ✅     | Matches on attachment MIME type. Wired.                                                        |
-| [`Attachment`](../../src/main/java/ai/labs/eddi/engine/memory/model/Attachment.java)                                       | `ai.labs.eddi.engine.memory.model`             | ⚠️     | Metadata record exists. **Not wired to REST input; not fetched by `LlmTask` for forwarding.**  |
-| [`AgentSigningService`](../../src/main/java/ai/labs/eddi/configs/agents/AgentSigningService.java)                          | `ai.labs.eddi.configs.agents`                  | ⚠️     | Ed25519 sign/verify with vault-backed key storage. **Primitive only — no call sites wire it.** |
-| [`ToolResponseTruncator`](../../src/main/java/ai/labs/eddi/modules/llm/impl/ToolResponseTruncator.java)                    | `ai.labs.eddi.modules.llm.impl`                | ✅     | Character-based truncation with size note.                                                     |
+| [`CapabilityRegistryService`](../src/main/java/ai/labs/eddi/configs/agents/CapabilityRegistryService.java)              | `ai.labs.eddi.configs.agents`                  | ✅     | In-memory skill index. Rebuilds on agent CRUD.                                                 |
+| [`CapabilityMatchCondition`](../src/main/java/ai/labs/eddi/modules/rules/impl/conditions/CapabilityMatchCondition.java) | `ai.labs.eddi.modules.rules.impl.conditions`   | ✅     | Behavior-rule condition; wired in `RuleDeserialization`.                                       |
+| [`ContentTypeMatcher`](../src/main/java/ai/labs/eddi/modules/rules/impl/conditions/ContentTypeMatcher.java)             | `ai.labs.eddi.modules.rules.impl.conditions`   | ✅     | Matches on attachment MIME type. Wired.                                                        |
+| [`Attachment`](../src/main/java/ai/labs/eddi/engine/memory/model/Attachment.java)                                       | `ai.labs.eddi.engine.memory.model`             | ⚠️     | Metadata record exists. **Not wired to REST input; not fetched by `LlmTask` for forwarding.**  |
+| [`AgentSigningService`](../src/main/java/ai/labs/eddi/configs/agents/AgentSigningService.java)                          | `ai.labs.eddi.configs.agents`                  | ⚠️     | Ed25519 sign/verify with vault-backed key storage. **Primitive only — no call sites wire it.** |
+| [`ToolResponseTruncator`](../src/main/java/ai/labs/eddi/modules/llm/impl/ToolResponseTruncator.java)                    | `ai.labs.eddi.modules.llm.impl`                | ✅     | Character-based truncation with size note.                                                     |
 | `AgentConfiguration.identity`, `.security`, `.capabilities`                                                                | `configs/agents/model/AgentConfiguration.java` | ⚠️     | POJO fields exist; `security.*` flags have no consumer.                                        |
 
 ### 1.2 Not present (❌)
@@ -62,7 +62,7 @@ Every task in every Wave MUST satisfy these rules. Reviewers should reject PRs t
 
 ### 2.1 Template syntax
 
-EDDI v6 uses **Qute** (see [`AGENTS.md` §5.1](../../AGENTS.md)). In every config example in this plan and in test fixtures:
+EDDI v6 uses **Qute** (see [`AGENTS.md` §5.1](../AGENTS.md)). In every config example in this plan and in test fixtures:
 
 - Use **single braces**: `{properties.x}`, not `{{properties.x}}`.
 - `properties.*` returns **raw values**. Never use `.valueString`, `.valueObject`, etc.
@@ -79,7 +79,7 @@ All new fields added to `AgentConfiguration`, `LlmConfiguration`, or any other J
 
 - Be optional (nullable, default-valued).
 - Use `@JsonInclude(JsonInclude.Include.NON_NULL)` on getters (or class-level) so old configs round-trip byte-identical.
-- Pass an import round-trip test for a pre-v6 ZIP (use one of the fixtures under [`docs/agent-configs`](../agent-configs/)).
+- Pass an import round-trip test for a pre-v6 ZIP (use one of the fixtures under [`docs/agent-configs`](../docs/agent-configs/)).
 - Be absent from the ZIP export if left at default.
 
 ### 2.4 Security of new config fields
@@ -488,7 +488,7 @@ When building the chat message, iterate `memory.getCurrentStep().getAttachments(
 
 ### 7.5 Behavior rule matching
 
-`ContentTypeMatcher` already matches attachments on `currentStep`. Document in [`docs/behavior-rules.md`](../behavior-rules.md) with example routing `image/*` to an external OCR MCP tool.
+`ContentTypeMatcher` already matches attachments on `currentStep`. Document in [`docs/behavior-rules.md`](../docs/behavior-rules.md) with example routing `image/*` to an external OCR MCP tool.
 
 ### 7.6 Cost accounting
 
@@ -647,12 +647,12 @@ UI tasks live in **EDDI-Manager**, not this repo. Track in `EDDI-Manager/AGENTS.
 
 ### 9.2 Documentation updates (per Wave)
 
-- [`docs/architecture.md`](../architecture.md) — new components and flows.
-- [`docs/behavior-rules.md`](../behavior-rules.md) — new condition types with examples.
-- [`docs/langchain.md`](../langchain.md) — counterweight, tool-loading strategy, response limits.
-- [`docs/security.md`](../security.md) — signing model, replay protection, key rotation.
-- [`docs/compliance-data-flow.md`](../compliance-data-flow.md) — attachments in flow diagrams.
-- [`docs/changelog.md`](../changelog.md) — per-PR entries per [`AGENTS.md` §2](../../AGENTS.md).
+- [`docs/architecture.md`](../docs/architecture.md) — new components and flows.
+- [`docs/behavior-rules.md`](../docs/behavior-rules.md) — new condition types with examples.
+- [`docs/langchain.md`](../docs/langchain.md) — counterweight, tool-loading strategy, response limits.
+- [`docs/security.md`](../docs/security.md) — signing model, replay protection, key rotation.
+- [`docs/compliance-data-flow.md`](../docs/compliance-data-flow.md) — attachments in flow diagrams.
+- [`docs/changelog.md`](../docs/changelog.md) — per-PR entries per [`AGENTS.md` §2](../AGENTS.md).
 
 ### 9.3 MCP server surface additions
 
@@ -712,7 +712,7 @@ A Wave is "done" only when:
 - [ ] Manager UI surface is designed (implementation may lag).
 - [ ] Documentation updates merged.
 - [ ] `docs/changelog.md` entry added.
-- [ ] At least one end-to-end demo agent config in [`docs/agent-configs/`](../agent-configs/) exercises the feature.
+- [ ] At least one end-to-end demo agent config in [`docs/agent-configs/`](../docs/agent-configs/) exercises the feature.
 - [ ] Metrics visible on `docs/monitoring/eddi-grafana-dashboard.json`.
 
 ### 10.3 Rollback strategy
@@ -732,14 +732,14 @@ Each Wave is deployable independently. Feature flags:
 
 For any agent picking this up mid-stream:
 
-1. Read [`docs/project-philosophy.md`](../project-philosophy.md) first — non-negotiable.
-2. Read [`AGENTS.md`](../../AGENTS.md), especially §4 (Java guidelines) and §5 (agent config authoring).
+1. Read [`docs/project-philosophy.md`](../docs/project-philosophy.md) first — non-negotiable.
+2. Read [`AGENTS.md`](../AGENTS.md), especially §4 (Java guidelines) and §5 (agent config authoring).
 3. Run `git status`, `git branch --show-current`, `git log -5 --oneline`.
-4. Check [`docs/changelog.md`](../changelog.md) for recent entries on any of the six Waves.
+4. Check [`docs/changelog.md`](../docs/changelog.md) for recent entries on any of the six Waves.
 5. Do NOT trust historical "implemented" callouts in older plan revisions without re-verifying via `file_search` / `grep_search`.
 6. Do NOT commit to `main`. Create a `feature/agentic-<wave-name>` branch.
 7. Every commit MUST build (`./mvnw compile`) and new tests MUST pass (`./mvnw test -Dtest=<your-test>`).
-8. When finishing or switching context, append an entry to [`docs/changelog.md`](../changelog.md) describing what shipped, what's in progress, and what's next.
+8. When finishing or switching context, append an entry to [`docs/changelog.md`](../docs/changelog.md) describing what shipped, what's in progress, and what's next.
 
 ---
 
@@ -749,7 +749,7 @@ _End of plan. This document is the authoritative source for the six Waves. Super
 
 > **Scope**: Multi-agent orchestration, A2A evolution, cryptographic agent identity, multimodal context attachments, and behavioral governance.
 >
-> **Governing Principles**: All changes **must** conform to the [Nine Pillars](../project-philosophy.md). Java is the engine, configuration is logic, security is architecture.
+> **Governing Principles**: All changes **must** conform to the [Nine Pillars](../docs/project-philosophy.md). Java is the engine, configuration is logic, security is architecture.
 
 > [!IMPORTANT]
 > **Implementation Status (2026-04-07):**

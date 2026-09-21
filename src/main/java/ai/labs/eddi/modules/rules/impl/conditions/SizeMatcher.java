@@ -10,6 +10,8 @@ import ai.labs.eddi.modules.rules.impl.Rule;
 import ai.labs.eddi.utils.PathNavigator;
 import org.jboss.logging.Logger;
 
+import java.lang.reflect.Array;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -85,9 +87,7 @@ public class SizeMatcher implements IRuleCondition {
         int size = 0;
         try {
             Object rawValue = PathNavigator.getValue(valuePath, memoryItemConverter.convert(memory));
-            if (rawValue != null) {
-                size = Integer.parseInt(rawValue.toString());
-            }
+            size = determineSize(rawValue);
         } catch (Exception e) {
             LOGGER.error(e.getLocalizedMessage(), e);
         }
@@ -109,6 +109,44 @@ public class SizeMatcher implements IRuleCondition {
         }
 
         return isMin && isMax && isEqual ? ExecutionState.SUCCESS : ExecutionState.FAIL;
+    }
+
+    /**
+     * Determines the size of the value the {@code valuePath} points to.
+     * Collections, maps and arrays report their element count — this is the primary
+     * use case ({@code memory.current.httpCalls.results}), which used to blow up in
+     * {@code Integer.parseInt} and silently degrade to size 0. Numbers keep their
+     * long-standing meaning of "the value <em>is</em> the size", and any other
+     * scalar is measured by the length of its textual representation (a numeric
+     * string is still read as a number for backwards compatibility).
+     */
+    static int determineSize(Object rawValue) {
+        if (rawValue == null) {
+            return 0;
+        }
+
+        if (rawValue instanceof Collection<?> collection) {
+            return collection.size();
+        }
+
+        if (rawValue instanceof Map<?, ?> map) {
+            return map.size();
+        }
+
+        if (rawValue.getClass().isArray()) {
+            return Array.getLength(rawValue);
+        }
+
+        if (rawValue instanceof Number number) {
+            return number.intValue();
+        }
+
+        String value = rawValue.toString().trim();
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException e) {
+            return value.length();
+        }
     }
 
     public IRuleCondition clone() {

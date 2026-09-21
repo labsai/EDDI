@@ -116,6 +116,57 @@ class ConnectorTest {
         verify(c2, never()).execute(any(), any()); // short-circuited
     }
 
+    /**
+     * {@link ai.labs.eddi.modules.rules.impl.Rule} treats NOT_EXECUTED — a
+     * condition that could not evaluate itself — as a failure. The connector has to
+     * agree, otherwise the very same misconfigured condition decides a rule
+     * differently depending on whether it is wrapped in a connector.
+     */
+    @Test
+    void execute_and_notExecutedChild_returnsFail() throws Exception {
+        var conn = new Connector();
+        conn.setConfigs(Map.of("operator", "AND"));
+
+        var c1 = mock(IRuleCondition.class);
+        when(c1.execute(any(), any())).thenReturn(ExecutionState.NOT_EXECUTED);
+        var c2 = mock(IRuleCondition.class);
+        when(c2.execute(any(), any())).thenReturn(ExecutionState.SUCCESS);
+
+        conn.setConditions(List.of(c1, c2));
+
+        var result = conn.execute(mock(IConversationMemory.class), new ArrayList<>());
+        assertEquals(ExecutionState.FAIL, result, "a child that could not evaluate itself must not count as a pass");
+        verify(c2, never()).execute(any(), any()); // short-circuited
+    }
+
+    @Test
+    void execute_and_errorChild_returnsError() throws Exception {
+        var conn = new Connector();
+        conn.setConfigs(Map.of("operator", "AND"));
+
+        var c1 = mock(IRuleCondition.class);
+        when(c1.execute(any(), any())).thenReturn(ExecutionState.ERROR);
+
+        conn.setConditions(List.of(c1));
+
+        assertEquals(ExecutionState.ERROR, conn.execute(mock(IConversationMemory.class), new ArrayList<>()));
+    }
+
+    @Test
+    void validateConfiguration_withoutChildren_isRejected() {
+        var thrown = assertThrows(IllegalArgumentException.class, () -> new Connector().validateConfiguration());
+
+        assertTrue(thrown.getMessage().contains("connector"), thrown.getMessage());
+    }
+
+    @Test
+    void validateConfiguration_withChildren_passes() {
+        var conn = new Connector();
+        conn.setConditions(List.of(mock(IRuleCondition.class)));
+
+        assertDoesNotThrow(conn::validateConfiguration);
+    }
+
     @Test
     void clone_preservesOperatorAndConditions() throws Exception {
         var conn = new Connector();

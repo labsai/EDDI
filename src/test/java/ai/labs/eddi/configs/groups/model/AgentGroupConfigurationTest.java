@@ -47,12 +47,14 @@ class AgentGroupConfigurationTest {
 
     @Test
     void style_allValues() {
-        assertEquals(6, DiscussionStyle.values().length);
+        assertEquals(8, DiscussionStyle.values().length);
         assertNotNull(DiscussionStyle.valueOf("ROUND_TABLE"));
         assertNotNull(DiscussionStyle.valueOf("PEER_REVIEW"));
         assertNotNull(DiscussionStyle.valueOf("DEVIL_ADVOCATE"));
         assertNotNull(DiscussionStyle.valueOf("DELPHI"));
         assertNotNull(DiscussionStyle.valueOf("DEBATE"));
+        assertNotNull(DiscussionStyle.valueOf("TASK_FORCE"));
+        assertNotNull(DiscussionStyle.valueOf("NEGOTIATION"));
         assertNotNull(DiscussionStyle.valueOf("CUSTOM"));
     }
 
@@ -135,7 +137,10 @@ class AgentGroupConfigurationTest {
 
     @Test
     void phaseType_allValues() {
-        assertEquals(8, PhaseType.values().length);
+        assertEquals(15, PhaseType.values().length);
+        assertNotNull(PhaseType.valueOf("PROPOSAL"));
+        assertNotNull(PhaseType.valueOf("BARGAIN"));
+        assertNotNull(PhaseType.valueOf("RETRO"));
         assertNotNull(PhaseType.valueOf("OPINION"));
         assertNotNull(PhaseType.valueOf("CRITIQUE"));
         assertNotNull(PhaseType.valueOf("REVISION"));
@@ -144,16 +149,22 @@ class AgentGroupConfigurationTest {
         assertNotNull(PhaseType.valueOf("ARGUE"));
         assertNotNull(PhaseType.valueOf("REBUTTAL"));
         assertNotNull(PhaseType.valueOf("SYNTHESIS"));
+        assertNotNull(PhaseType.valueOf("PLAN"));
+        assertNotNull(PhaseType.valueOf("EXECUTE"));
+        assertNotNull(PhaseType.valueOf("VERIFY"));
+        assertNotNull(PhaseType.valueOf("VOTE"));
     }
 
     @Test
     void contextScope_allValues() {
-        assertEquals(5, ContextScope.values().length);
+        assertEquals(7, ContextScope.values().length);
         assertNotNull(ContextScope.valueOf("NONE"));
         assertNotNull(ContextScope.valueOf("FULL"));
         assertNotNull(ContextScope.valueOf("LAST_PHASE"));
         assertNotNull(ContextScope.valueOf("ANONYMOUS"));
         assertNotNull(ContextScope.valueOf("OWN_FEEDBACK"));
+        assertNotNull(ContextScope.valueOf("TASK_ONLY"));
+        assertNotNull(ContextScope.valueOf("TASK_WITH_DEPS"));
     }
 
     @Test
@@ -230,8 +241,158 @@ class AgentGroupConfigurationTest {
 
     @Test
     void memberType_allValues() {
-        assertEquals(2, MemberType.values().length);
+        assertEquals(3, MemberType.values().length);
         assertNotNull(MemberType.valueOf("AGENT"));
         assertNotNull(MemberType.valueOf("GROUP"));
+        assertNotNull(MemberType.valueOf("HUMAN"));
+    }
+
+    // ==================== Facilitator (I12) ====================
+
+    @Test
+    void facilitatorMove_allValues() {
+        assertEquals(6, FacilitatorMove.values().length);
+        assertNotNull(FacilitatorMove.valueOf("CONTINUE"));
+        assertNotNull(FacilitatorMove.valueOf("END_PHASE"));
+        assertNotNull(FacilitatorMove.valueOf("EXTEND_PHASE"));
+        assertNotNull(FacilitatorMove.valueOf("CALL_VOTE"));
+        assertNotNull(FacilitatorMove.valueOf("RECRUIT"));
+        assertNotNull(FacilitatorMove.valueOf("ESCALATE_HUMAN"));
+    }
+
+    @Test
+    void facilitatorCheckpoint_allValues() {
+        assertEquals(2, FacilitatorCheckpoint.values().length);
+        assertNotNull(FacilitatorCheckpoint.valueOf("EACH_PHASE"));
+        assertNotNull(FacilitatorCheckpoint.valueOf("EACH_REPEAT"));
+    }
+
+    @Test
+    void facilitatorConfig_compactConstructor_normalizesDefaults() {
+        var sparse = new FacilitatorConfig(true, "fac", null, null, 0, null);
+
+        assertEquals(List.of(FacilitatorMove.CONTINUE), sparse.allowedMoves(),
+                "an enabled-but-unconfigured facilitator is a pure observer");
+        assertEquals(FacilitatorCheckpoint.EACH_PHASE, sparse.checkAfter());
+        assertEquals(FacilitatorConfig.DEFAULT_MAX_MOVES, sparse.maxMovesPerDiscussion());
+
+        var emptyMoves = new FacilitatorConfig(true, "fac", List.of(), FacilitatorCheckpoint.EACH_REPEAT, -5, "boss");
+        assertEquals(List.of(FacilitatorMove.CONTINUE), emptyMoves.allowedMoves());
+        assertEquals(FacilitatorConfig.DEFAULT_MAX_MOVES, emptyMoves.maxMovesPerDiscussion(),
+                "non-positive caps fall back to the default, never to unlimited");
+    }
+
+    @Test
+    void facilitatorConfig_noArgConstructor_isDisabledObserver() {
+        var config = new FacilitatorConfig();
+
+        assertFalse(config.enabled());
+        assertEquals(List.of(FacilitatorMove.CONTINUE), config.allowedMoves());
+        assertEquals(FacilitatorCheckpoint.EACH_PHASE, config.checkAfter());
+    }
+
+    // ==================== LifecyclePolicy ====================
+
+    @Test
+    void lifecyclePolicy_toJson_allValues() {
+        assertEquals("ephemeral", LifecyclePolicy.EPHEMERAL.toJson());
+        assertEquals("keep-deployed", LifecyclePolicy.KEEP_DEPLOYED.toJson());
+        assertEquals("undeploy-only", LifecyclePolicy.UNDEPLOY_ONLY.toJson());
+        assertEquals("agent-decides", LifecyclePolicy.AGENT_DECIDES.toJson());
+    }
+
+    @Test
+    void lifecyclePolicy_fromJson_validValues() {
+        assertEquals(LifecyclePolicy.EPHEMERAL, LifecyclePolicy.fromJson("ephemeral"));
+        assertEquals(LifecyclePolicy.KEEP_DEPLOYED, LifecyclePolicy.fromJson("keep-deployed"));
+        assertEquals(LifecyclePolicy.UNDEPLOY_ONLY, LifecyclePolicy.fromJson("undeploy-only"));
+        assertEquals(LifecyclePolicy.AGENT_DECIDES, LifecyclePolicy.fromJson("agent-decides"));
+    }
+
+    @Test
+    void lifecyclePolicy_fromJson_null() {
+        assertEquals(LifecyclePolicy.EPHEMERAL, LifecyclePolicy.fromJson(null));
+    }
+
+    @Test
+    void lifecyclePolicy_fromJson_uppercase() {
+        assertEquals(LifecyclePolicy.EPHEMERAL, LifecyclePolicy.fromJson("EPHEMERAL"));
+    }
+
+    @Test
+    void lifecyclePolicy_fromJson_invalid() {
+        assertThrows(IllegalArgumentException.class,
+                () -> LifecyclePolicy.fromJson("unknown-value"));
+    }
+
+    // ==================== TaskDefinition ====================
+
+    @Test
+    void taskDefinition_fullConstructor() {
+        var td = new TaskDefinition("Subject", "Desc", "ROLE:analyst", List.of("dep1"), 2);
+
+        assertEquals("Subject", td.subject());
+        assertEquals("Desc", td.description());
+        assertEquals("ROLE:analyst", td.assignToRole());
+        assertEquals(List.of("dep1"), td.dependsOn());
+        assertEquals(2, td.priority());
+    }
+
+    @Test
+    void taskDefinition_convenienceConstructor() {
+        var td = new TaskDefinition("Subject", "Desc");
+
+        assertEquals("Subject", td.subject());
+        assertEquals("Desc", td.description());
+        assertEquals("ALL", td.assignToRole());
+        assertTrue(td.dependsOn().isEmpty());
+        assertEquals(0, td.priority());
+    }
+
+    @Test
+    void taskDefinition_nullSubject_throws() {
+        assertThrows(NullPointerException.class,
+                () -> new TaskDefinition(null, "Desc"));
+    }
+
+    @Test
+    void taskDefinition_nullDescription_throws() {
+        assertThrows(NullPointerException.class,
+                () -> new TaskDefinition("Subject", null));
+    }
+
+    @Test
+    void taskDefinition_nullDependsOn_defaultsToEmptyList() {
+        var td = new TaskDefinition("Subject", "Desc", "ALL", null, 0);
+
+        assertNotNull(td.dependsOn());
+        assertTrue(td.dependsOn().isEmpty());
+    }
+
+    @Test
+    void taskDefinition_nullAssignToRole_defaultsToALL() {
+        var td = new TaskDefinition("Subject", "Desc", null, List.of(), 0);
+
+        assertEquals("ALL", td.assignToRole());
+    }
+
+    // ==================== DiscussionPhase ====================
+
+    @Test
+    void discussionPhase_requiresApprovalTrue() {
+        var phase = new DiscussionPhase(
+                "PHASE", PhaseType.OPINION, "ALL",
+                TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1, true);
+
+        assertTrue(phase.requiresApproval());
+    }
+
+    @Test
+    void discussionPhase_requiresApprovalFalse() {
+        var phase = new DiscussionPhase(
+                "PHASE", PhaseType.OPINION, "ALL",
+                TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1, false);
+
+        assertFalse(phase.requiresApproval());
     }
 }

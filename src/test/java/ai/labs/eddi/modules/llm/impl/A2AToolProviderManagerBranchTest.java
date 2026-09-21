@@ -40,7 +40,7 @@ class A2AToolProviderManagerBranchTest {
     @BeforeEach
     void setUp() {
         openMocks(this);
-        manager = new A2AToolProviderManager(globalVariableResolver, secretResolver);
+        manager = new A2AToolProviderManager(globalVariableResolver, secretResolver, false);
     }
 
     // =========================================================

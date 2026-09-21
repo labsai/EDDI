@@ -17,7 +17,9 @@ import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
 import ai.labs.eddi.engine.runtime.service.IWorkflowStoreService;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.utils.RestUtilities;
+import org.jboss.logging.Logger;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -34,6 +36,8 @@ import static ai.labs.eddi.utils.RestUtilities.extractResourceId;
  */
 @ApplicationScoped
 public class WorkflowStoreClientLibrary implements IWorkflowStoreClientLibrary {
+    private static final Logger LOGGER = Logger.getLogger(WorkflowStoreClientLibrary.class);
+
     private final IWorkflowStoreService workflowStoreService;
     private final Map<String, Provider<ILifecycleTask>> lifecycleExtensionsProvider;
     private static final String URI_SCHEME_ID = "eddi";
@@ -70,28 +74,48 @@ public class WorkflowStoreClientLibrary implements IWorkflowStoreClientLibrary {
 
         try {
             List<WorkflowConfiguration.WorkflowStep> workflowSteps = workflowConfiguration.getWorkflowSteps();
-            for (int indexInWorkflow = 0; indexInWorkflow < workflowSteps.size(); indexInWorkflow++) {
-                WorkflowConfiguration.WorkflowStep workflowStep = workflowSteps.get(indexInWorkflow);
+
+            // Position of the NEXT task in the lifecycle manager's task list. It is
+            // deliberately not the workflow-step index: a step whose type URI does not
+            // use the `eddi` scheme is skipped below without producing a task, so the
+            // two counters diverge from that step on. LifecycleManager looks each
+            // component up by the task's ABSOLUTE position in its own task list
+            // (sublist offset added back on a selective execution), so keying off the
+            // raw step index would shift every later component one slot past the task
+            // that needs it — and the task would then run with component == null.
+            int indexInTaskList = 0;
+
+            for (WorkflowConfiguration.WorkflowStep workflowStep : workflowSteps) {
                 URI extensionType = workflowStep.getType();
-                if (URI_SCHEME_ID.equals(extensionType.getScheme())) {
-                    String type = extensionType.getHost();
-                    if (!lifecycleExtensionsProvider.containsKey(type)) {
-                        throw new UnrecognizedExtensionException(String.format("Extension '%s' not found", type));
-                    }
-
-                    var componentKey = createComponentKey(workflowId.getId(), workflowId.getVersion(), indexInWorkflow);
-                    var lifecycleTask = lifecycleExtensionsProvider.get(type).get();
-                    var component = lifecycleTask.configure(workflowStep.getConfig(), workflowStep.getExtensions());
-
-                    if (component != null) {
-                        if (lifecycleTask.getId() == null) {
-                            throw new WorkflowInitializationException(
-                                    "Lifecycle task returned null TaskId: " + lifecycleTask.getClass().getName(), null);
-                        }
-                        componentCache.put(lifecycleTask.getId().name(), componentKey, component);
-                    }
-                    lifecycleManager.addLifecycleTask(lifecycleTask);
+                if (!URI_SCHEME_ID.equals(extensionType.getScheme())) {
+                    // Not an error — historically these were skipped silently and a
+                    // stored config that still contains one must keep loading. But it
+                    // disables a pipeline step, so say so instead of no-opping quietly.
+                    LOGGER.warnf("Workflow '%s' declares step '%s', which does not use the '%s' URI scheme — "
+                            + "the step is skipped and will not run.",
+                            LogSanitizer.sanitize(String.valueOf(documentDescriptor.getResource())),
+                            LogSanitizer.sanitize(String.valueOf(extensionType)), URI_SCHEME_ID);
+                    continue;
                 }
+
+                String type = extensionType.getHost();
+                if (!lifecycleExtensionsProvider.containsKey(type)) {
+                    throw new UnrecognizedExtensionException(String.format("Extension '%s' not found", type));
+                }
+
+                var componentKey = createComponentKey(workflowId.getId(), workflowId.getVersion(), indexInTaskList);
+                var lifecycleTask = lifecycleExtensionsProvider.get(type).get();
+                var component = lifecycleTask.configure(workflowStep.getConfig(), workflowStep.getExtensions());
+
+                if (component != null) {
+                    if (lifecycleTask.getId() == null) {
+                        throw new WorkflowInitializationException(
+                                "Lifecycle task returned null TaskId: " + lifecycleTask.getClass().getName(), null);
+                    }
+                    componentCache.put(lifecycleTask.getId().name(), componentKey, component);
+                }
+                lifecycleManager.addLifecycleTask(lifecycleTask);
+                indexInTaskList++;
             }
         } catch (IllegalExtensionConfigurationException | UnrecognizedExtensionException e) {
             throw new WorkflowInitializationException(e.getMessage(), e);

@@ -54,21 +54,28 @@ public class TemplateSyntaxMigrator {
             return input;
         }
 
-        String result = input;
+        // concatenation is resolved first, while the Thymeleaf delimiters are still
+        // there to prove the expression is Thymeleaf and not ordinary document content
+        String result = migrateStringConcat(input);
         for (var entry : PATTERNS) {
             result = entry.getKey().matcher(result).replaceAll(entry.getValue());
         }
-        result = migrateCloseTags(result);
-        return migrateStringConcat(result);
+        return migrateCloseTags(result);
     }
 
-    // Pattern for string concatenation inside Qute expressions: {a + 'lit' + b}
-    private static final Pattern CONCAT_PATTERN = Pattern.compile("\\{([^}]*?\\+[^}]*?)\\}");
+    /**
+     * String concatenation inside a Thymeleaf output expression: {@code [[${a +
+     * 'lit' + b}]]} or {@code [(${a + 'lit' + b})]}. Anchored to the Thymeleaf
+     * delimiters on purpose — an unanchored <code>{…+…}</code> also matches JSON
+     * bodies ({@code {"a": 1+2}}) and plain arithmetic that merely happen to live
+     * in a document that contains Thymeleaf syntax elsewhere.
+     */
+    private static final Pattern CONCAT_PATTERN = Pattern.compile("\\[\\[\\$\\{([^}]*?\\+[^}]*?)\\}\\]\\]|\\[\\(\\$\\{([^}]*?\\+[^}]*?)\\}\\)\\]");
     private static final Pattern CONCAT_OPERATOR = Pattern.compile("\\s*\\+\\s*");
 
     /**
      * Convert Thymeleaf/OGNL string concatenation to Qute inline expressions. e.g.
-     * {a + '/' + b} → {a}/{b}, {a + '..' + b} → {a}..{b}
+     * [[${a + '/' + b}]] → {a}/{b}, [[${a + '..' + b}]] → {a}..{b}
      */
     private String migrateStringConcat(String input) {
         if (!input.contains("+")) {
@@ -77,7 +84,8 @@ public class TemplateSyntaxMigrator {
         Matcher m = CONCAT_PATTERN.matcher(input);
         var sb = new StringBuilder();
         while (m.find()) {
-            String expr = m.group(1).trim();
+            // group 1 = escaped output [[${…}]], group 2 = unescaped output [(${…})]
+            String expr = (m.group(1) != null ? m.group(1) : m.group(2)).trim();
             String[] parts = CONCAT_OPERATOR.split(expr);
             var replacement = new StringBuilder();
             for (String part : parts) {

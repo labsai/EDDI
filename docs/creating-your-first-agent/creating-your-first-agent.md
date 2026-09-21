@@ -43,11 +43,11 @@ Example :
 
 ### 4. Creating the Workflow
 
-Now we will align the just created `LifecycleTasks` in the `Workflow`. Make a **`POST`** to **`/packagestore/packages`** with a JSON in the body like this:
+Now we will align the just created `LifecycleTasks` in the `Workflow`. Make a **`POST`** to **`/workflowstore/workflows`** with a JSON in the body like this:
 
 ```javascript
 {
-  "packageExtensions": [
+  "workflowSteps": [
     {
       "type": "eddi://ai.labs.output",
       "config": {
@@ -62,10 +62,13 @@ Now we will align the just created `LifecycleTasks` in the `Workflow`. Make a **
 
 | Name                         | Description                                          | Required |
 | ---------------------------- | ---------------------------------------------------- | -------- |
-| packageextensions            | `Array` of `WorkflowExtension`                       |          |
-| WorkflowExtension.type       | possible values, see table below "`Extension Types`" |          |
-| WorkflowExtension.extensions | `Array` of `Object`                                  | False    |
-| WorkflowExtension.config     | `Config` object, but can be empty.                   | True     |
+| workflowSteps                | `Array` of `WorkflowStep`                            | True     |
+| WorkflowStep.type            | possible values, see table below "`Extension Types`" |          |
+| WorkflowStep.extensions      | `Object` (a map of extension name to value)          | False    |
+| WorkflowStep.config          | `Config` object, but can be empty.                   | True     |
+
+`workflowExtensions` is still accepted as a v5 alias. No other spelling is: writes go through a
+strict parser that rejects an unknown top-level key with a `400`.
 
 Extension Types in this examples
 
@@ -75,11 +78,11 @@ Extension Types in this examples
 
 >
 
-`eddi://ai.labs.package/packagestore/packages/<UNIQUE_WORKFLOW_ID>?version=<WORKFLOW_VERSION>`
+`eddi://ai.labs.workflow/workflowstore/workflows/<UNIQUE_WORKFLOW_ID>?version=<WORKFLOW_VERSION>`
 
 Example
 
-`eddi://ai.labs.package/packagestore/packages/5a2ae60f17312624f8b8a445?version=1`
+`eddi://ai.labs.workflow/workflowstore/workflows/5a2ae60f17312624f8b8a445?version=1`
 
 > See also the API documentation at [http://localhost:7070/q/swagger-ui](http://localhost:7070/q/swagger-ui)
 
@@ -90,7 +93,7 @@ Make a **`POST`** to **`/agentstore/agents`** with a JSON like this:
 ```javascript
 {
      "packages": [
-          "eddi://ai.labs.package/packagestore/packages/<UNIQUE_WORKFLOW_ID>?version=<WORKFLOW_VERSION>"
+          "eddi://ai.labs.workflow/workflowstore/workflows/<UNIQUE_WORKFLOW_ID>?version=<WORKFLOW_VERSION>"
      ]
 }
 ```
@@ -128,7 +131,7 @@ Otherwise via REST:
 2.  Since deployment could take a while it has been made **asynchronous**.
 3.  Make a **`GET`** to `/administration/production/deploymentstatus/`**`<UNIQUE_AGENT_ID>`**`?version=`**`<AGENT_VERSION>`** to find out the status of deployment.
 
-**`NOT_FOUND`**, **`IN_PROGRESS`**, **`ERROR` and `READY`** is what you can expect to be returned in the body.
+The body is JSON, e.g. `{"status":"READY"}`, where `status` is one of **`NOT_FOUND`**, **`IN_PROGRESS`**, **`ERROR`** and **`READY`**. Append `?format=text` if you want the bare status word as plain text (deprecated).
 
 1. As soon as the Agent is deployed and has `READY` status, make a **`POST`** to `/agents/`**`<UNIQUE_AGENT_ID>`**/start
    1. You will receive a `201` with the `URI` for the newly created Conversation, like this:
@@ -136,7 +139,7 @@ Otherwise via REST:
 
          `eddi://ai.labs.conversation/conversationstore/conversations/`**`<UNIQUE_CONVERSATION_ID>`**
 
-2. Now it's time to start talking to our Agent 1. Make a **`POST`** to `/agents/`**`<UNIQUE_AGENT_ID>`**/start`/`**`<UNIQUE_CONVERSATION_ID>`**
+2. Now it's time to start talking to our Agent 1. Make a **`POST`** to `/agents/`**`<UNIQUE_CONVERSATION_ID>`** (once the conversation exists, the agent id is no longer part of the path)
 
 **Option 1:** is to hand over the input text as `contentType text/plain`. Include the User Input in the body as `text/plain` (e.g. Hello)&#x20;
 
@@ -150,7 +153,7 @@ Otherwise via REST:
 
 1. You have two query params you can use to config the returned output 1. `returnDetailed` - default is false - will return all sub results of the entire conversation steps, otherwise only public ones such as input, action, output & quickreplies 2. `returnCurrentStepOnly` - default is true - will return only the latest conversation step that has just been processed, otherwise returns all conversation steps since the beginning of this conversation
 2. The output from the agent will be returned as JSON
-3. If you are interested in fetching the **`conversationmemory`** at any given time, make a **`GET`** to `/agents/`**`<UNIQUE_AGENT_ID>`**/start`/`**`<UNIQUE_CONVERSATION_ID>`**`?returnDetailed=true` (the query param is optional, default is false)
+3. If you are interested in fetching the **`conversationmemory`** at any given time, make a **`GET`** to `/agents/`**`<UNIQUE_CONVERSATION_ID>`**`?returnDetailed=true` (the query param is optional, default is false)
 
 > If you made it till here, CONGRATULATIONS, you have created your first Agent with **EDDI** !
 
@@ -163,7 +166,12 @@ By the way you can use the attached **postman collection** below to do all of th
 5. Create conversation
 6. Say Hello to the agent
 
-Download the [Postman collection](../.gitbook/assets/Creating%20and%20chatting%20with%20a%20bot.postman_collection.json) to run through all the steps above.
+> **Run it yourself.** The GitBook-hosted Postman collections that used to be linked here
+> were lost in the migration. You do not need them: every request is shown inline above,
+> and Postman can import EDDI's own spec directly — **Import → Link →**
+> `<your-eddi-host>/openapi` (`http://localhost:7070/openapi` for a local install).
+> It is generated from the running build, so unlike a committed collection it cannot go
+> out of date. The same spec is browsable at `<your-eddi-host>/q/swagger-ui`.
 
 ### External Links
 

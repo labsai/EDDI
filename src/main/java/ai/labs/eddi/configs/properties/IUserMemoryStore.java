@@ -25,10 +25,60 @@ import java.util.Optional;
  * Structured entry methods operate on the full {@code usermemories} collection
  * with visibility, categories, and agent scoping.
  *
- * @author ginccc
  * @since 6.0.0
  */
 public interface IUserMemoryStore {
+
+    /** Recall order that ranks primarily by {@code accessCount}. */
+    String RECALL_ORDER_MOST_ACCESSED = "most_accessed";
+
+    /**
+     * How a {@link #RECALL_ORDER_MOST_ACCESSED} recall window is split between its
+     * two ranking terms. Lives on the contract rather than in one store, because
+     * every backend must answer the same recall order with the same entries —
+     * otherwise {@code most_accessed} means something different depending on which
+     * database a deployment happens to use.
+     *
+     * @param accessSlots
+     *            slots filled by {@code accessCount} descending; {@code -1} means
+     *            unlimited, {@code 0} means "skip that query entirely"
+     * @param recencySlots
+     *            slots reserved for the most recently updated entries, same
+     *            encoding
+     */
+    record RecallWindow(int accessSlots, int recencySlots) {
+
+        /**
+         * Share of the window reserved for recency: 1/5th.
+         * <p>
+         * Without the reservation {@code most_accessed} is self-reinforcing: only
+         * entries already inside the window get their {@code accessCount} incremented,
+         * so a freshly written entry (count 0) can never climb in once the window is
+         * full. The reserved slots are the recency term of the ranking — a new entry
+         * always gets at least one chance to be recalled, and thereby to start
+         * accumulating access counts.
+         */
+        private static final int RECENCY_RESERVATION_DIVISOR = 5;
+
+        /**
+         * @param maxEntries
+         *            the caller's recall window; {@code <= 0} means "no limit"
+         */
+        public static RecallWindow forMaxEntries(int maxEntries) {
+            if (maxEntries <= 0) {
+                return new RecallWindow(-1, 0);
+            }
+            // Reserve recency slots only when the window can hold BOTH terms. At
+            // maxEntries == 1 an unconditional Math.max(1, ...) consumed the entire
+            // window, leaving zero access slots — so a `most_accessed` recall never
+            // queried by access count at all and returned the most RECENT entry, the
+            // exact opposite of the requested ordering. maxEntries is reachable as 1
+            // from the agent's maxRecallEntries, the REST query param and the MCP
+            // tool argument.
+            int recencySlots = maxEntries > 1 ? Math.max(1, maxEntries / RECENCY_RESERVATION_DIVISOR) : 0;
+            return new RecallWindow(maxEntries - recencySlots, recencySlots);
+        }
+    }
 
     // === Flat property view (global entries) ===
 
@@ -65,8 +115,13 @@ public interface IUserMemoryStore {
     // === Queries ===
 
     /**
-     * Returns entries visible to the given agent in the given groups. Combines:
-     * self(agentId) + group(groupIds) + global.
+     * Returns entries visible to the given agent in the given groups. Combines the
+     * user's own scope — self(agentId) + group(groupIds) + global — with,
+     * additively, TEAM-OWNED entries (I8): lessons stored under the synthetic owner
+     * {@link #TEAM_OWNER_PREFIX}{@code +groupId} with {@code group} visibility, for
+     * each supplied group. The team branch never widens the user's own scope — a
+     * personal entry of another human user is unreachable through it, because team
+     * owner ids are derived from the supplied group ids, not caller-supplied.
      *
      * @param recallOrder
      *            "most_recent" (updatedAt DESC) or "most_accessed" (accessCount
@@ -76,6 +131,14 @@ public interface IUserMemoryStore {
      */
     List<UserMemoryEntry> getVisibleEntries(String userId, String agentId, List<String> groupIds, String recallOrder, int maxEntries)
             throws IResourceStore.ResourceStoreException;
+
+    /**
+     * Owner prefix for TEAM-OWNED memory (I8): a group's retro lessons are stored
+     * under the synthetic user {@code "group:"+groupId} so they belong to the team,
+     * not to whichever human happened to run the discussion — and survive that
+     * human's GDPR erasure without carrying their identity.
+     */
+    String TEAM_OWNER_PREFIX = "group:";
 
     /**
      * Text filter across keys and values (v1: regex, v2: semantic search).

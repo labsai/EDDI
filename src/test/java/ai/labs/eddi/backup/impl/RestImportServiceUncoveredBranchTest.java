@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
 
+import jakarta.ws.rs.core.Response;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -149,57 +150,22 @@ class RestImportServiceUncoveredBranchTest {
         }
 
         @Test
-        @DisplayName("extracts legacy dictionary URIs")
-        void extractLegacyDictionaryUris() throws Exception {
-            String input = "\"eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/d1?version=1\"";
-            List<URI> result = invokeExtractResourcesUris(input, AbstractBackupService.LEGACY_DICTIONARY_URI_PATTERN);
-            assertEquals(1, result.size());
-        }
-
-        @Test
-        @DisplayName("extracts legacy behavior URIs")
-        void extractLegacyBehaviorUris() throws Exception {
-            String input = "\"eddi://ai.labs.behavior/behaviorstore/behaviorsets/b1?version=1\"";
-            List<URI> result = invokeExtractResourcesUris(input, AbstractBackupService.LEGACY_BEHAVIOR_URI_PATTERN);
-            assertEquals(1, result.size());
-        }
-
-        @Test
-        @DisplayName("extracts legacy httpcalls URIs")
-        void extractLegacyHttpcallsUris() throws Exception {
-            String input = "\"eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/h1?version=1\"";
-            List<URI> result = invokeExtractResourcesUris(input, AbstractBackupService.LEGACY_HTTPCALLS_URI_PATTERN);
-            assertEquals(1, result.size());
-        }
-
-        @Test
-        @DisplayName("extracts legacy langchain URIs")
-        void extractLegacyLangchainUris() throws Exception {
-            String input = "\"eddi://ai.labs.langchain/langchainstore/langchains/l1?version=1\"";
-            List<URI> result = invokeExtractResourcesUris(input, AbstractBackupService.LEGACY_LANGCHAIN_URI_PATTERN);
-            assertEquals(1, result.size());
-        }
-
-        @Test
-        @DisplayName("extracts legacy workflow URIs")
-        void extractLegacyWorkflowUris() throws Exception {
-            String input = "\"eddi://ai.labs.package/packagestore/packages/p1?version=1\"";
-            List<URI> result = invokeExtractResourcesUris(input, AbstractBackupService.LEGACY_WORKFLOW_URI_PATTERN);
-            assertEquals(1, result.size());
-        }
-
-        @Test
-        @DisplayName("extracts legacy agent URIs")
-        void extractLegacyAgentUris() throws Exception {
-            String input = "\"eddi://ai.labs.bot/botstore/bots/bot1?version=1\"";
-            List<URI> result = invokeExtractResourcesUris(input, AbstractBackupService.LEGACY_AGENT_URI_PATTERN);
-            assertEquals(1, result.size());
+        @DisplayName("every legacy authority in the rewrite table maps to a v6 URI")
+        void legacyUrisAreNormalizedNotMatched() {
+            // The six LEGACY_*_URI_PATTERN constants these cases used to exercise had
+            // no production call site; normalizeLegacyUris and its rewrite table are
+            // the live v5 mechanism, so that is what is asserted here.
+            for (String[] rewrite : AbstractBackupService.LEGACY_URI_REWRITES) {
+                String legacy = "\"" + rewrite[0] + "res1?version=1\"";
+                assertEquals("\"" + rewrite[1] + "res1?version=1\"",
+                        AbstractBackupService.normalizeLegacyUris(legacy));
+            }
         }
 
         @SuppressWarnings("unchecked")
         private List<URI> invokeExtractResourcesUris(String input, Pattern pattern) throws Exception {
             Method method = AbstractBackupService.class.getDeclaredMethod(
-                    "extractResourcesUris", String.class, java.util.regex.Pattern.class);
+                    "extractResourcesUris", String.class, Pattern.class);
             method.setAccessible(true);
             return (List<URI>) method.invoke(service, input, pattern);
         }
@@ -615,7 +581,7 @@ class RestImportServiceUncoveredBranchTest {
                     "createResourcePath", Path.class, String.class, String.class);
             method.setAccessible(true);
 
-            Path workflowPath = java.nio.file.Paths.get("tmp", "import");
+            Path workflowPath = Paths.get("tmp", "import");
             Path result = (Path) method.invoke(service, workflowPath, "out1", "output");
             assertTrue(result.toString().endsWith("out1.output.json"));
         }
@@ -627,7 +593,7 @@ class RestImportServiceUncoveredBranchTest {
                     "createResourcePath", Path.class, String.class, String.class);
             method.setAccessible(true);
 
-            Path workflowPath = java.nio.file.Paths.get("data");
+            Path workflowPath = Paths.get("data");
             Path result = (Path) method.invoke(service, workflowPath, "p1", "property");
             assertTrue(result.toString().endsWith("p1.property.json"));
         }
@@ -639,7 +605,7 @@ class RestImportServiceUncoveredBranchTest {
                     "createResourcePath", Path.class, String.class, String.class);
             method.setAccessible(true);
 
-            Path workflowPath = java.nio.file.Paths.get("data");
+            Path workflowPath = Paths.get("data");
             Path result = (Path) method.invoke(service, workflowPath, "h1", "httpcalls");
             assertTrue(result.toString().endsWith("h1.httpcalls.json"));
         }
@@ -651,7 +617,7 @@ class RestImportServiceUncoveredBranchTest {
                     "createResourcePath", Path.class, String.class, String.class);
             method.setAccessible(true);
 
-            Path workflowPath = java.nio.file.Paths.get("data");
+            Path workflowPath = Paths.get("data");
             Path result = (Path) method.invoke(service, workflowPath, "m1", "mcpcalls");
             assertTrue(result.toString().endsWith("m1.mcpcalls.json"));
         }
@@ -663,7 +629,7 @@ class RestImportServiceUncoveredBranchTest {
                     "createResourcePath", Path.class, String.class, String.class);
             method.setAccessible(true);
 
-            Path workflowPath = java.nio.file.Paths.get("data");
+            Path workflowPath = Paths.get("data");
             Path result = (Path) method.invoke(service, workflowPath, "s1", "snippet");
             assertTrue(result.toString().endsWith("s1.snippet.json"));
         }
@@ -717,10 +683,10 @@ class RestImportServiceUncoveredBranchTest {
         @DisplayName("status 201 passes silently")
         void status201Passes() throws Exception {
             Method method = RestImportService.class.getDeclaredMethod(
-                    "checkIfCreatedResponse", jakarta.ws.rs.core.Response.class);
+                    "checkIfCreatedResponse", Response.class);
             method.setAccessible(true);
 
-            var response = jakarta.ws.rs.core.Response.status(201).build();
+            var response = Response.status(201).build();
             method.invoke(service, response); // Should not throw
         }
 
@@ -728,10 +694,10 @@ class RestImportServiceUncoveredBranchTest {
         @DisplayName("non-201 status logs error but does not throw")
         void nonCreatedStatus() throws Exception {
             Method method = RestImportService.class.getDeclaredMethod(
-                    "checkIfCreatedResponse", jakarta.ws.rs.core.Response.class);
+                    "checkIfCreatedResponse", Response.class);
             method.setAccessible(true);
 
-            var response = jakarta.ws.rs.core.Response.status(400).build();
+            var response = Response.status(400).build();
             method.invoke(service, response); // Should not throw, just logs
         }
 
@@ -739,10 +705,10 @@ class RestImportServiceUncoveredBranchTest {
         @DisplayName("status 500 logs error but does not throw")
         void serverError() throws Exception {
             Method method = RestImportService.class.getDeclaredMethod(
-                    "checkIfCreatedResponse", jakarta.ws.rs.core.Response.class);
+                    "checkIfCreatedResponse", Response.class);
             method.setAccessible(true);
 
-            var response = jakarta.ws.rs.core.Response.status(500).build();
+            var response = Response.status(500).build();
             method.invoke(service, response); // Should not throw
         }
     }
@@ -862,19 +828,15 @@ class RestImportServiceUncoveredBranchTest {
     class CrossMatchPatterns {
 
         @Test
-        @DisplayName("legacy patterns don't match v6 URIs")
-        void legacyDontMatchV6() throws Exception {
-            String v6Dict = "\"eddi://ai.labs.dictionary/dictionarystore/dictionaries/x?version=1\"";
-            assertTrue(extractUris(v6Dict, AbstractBackupService.LEGACY_DICTIONARY_URI_PATTERN).isEmpty());
-
-            String v6Behavior = "\"eddi://ai.labs.rules/rulestore/rulesets/x?version=1\"";
-            assertTrue(extractUris(v6Behavior, AbstractBackupService.LEGACY_BEHAVIOR_URI_PATTERN).isEmpty());
-
-            String v6HttpCalls = "\"eddi://ai.labs.apicalls/apicallstore/apicalls/x?version=1\"";
-            assertTrue(extractUris(v6HttpCalls, AbstractBackupService.LEGACY_HTTPCALLS_URI_PATTERN).isEmpty());
-
-            String v6Llm = "\"eddi://ai.labs.llm/llmstore/llms/x?version=1\"";
-            assertTrue(extractUris(v6Llm, AbstractBackupService.LEGACY_LANGCHAIN_URI_PATTERN).isEmpty());
+        @DisplayName("normalizing an already-v6 URI leaves it untouched")
+        void normalizingV6IsIdempotent() {
+            for (String v6 : List.of(
+                    "\"eddi://ai.labs.dictionary/dictionarystore/dictionaries/x?version=1\"",
+                    "\"eddi://ai.labs.rules/rulestore/rulesets/x?version=1\"",
+                    "\"eddi://ai.labs.apicalls/apicallstore/apicalls/x?version=1\"",
+                    "\"eddi://ai.labs.llm/llmstore/llms/x?version=1\"")) {
+                assertEquals(v6, AbstractBackupService.normalizeLegacyUris(v6));
+            }
         }
 
         @Test
@@ -894,9 +856,9 @@ class RestImportServiceUncoveredBranchTest {
         }
 
         @SuppressWarnings("unchecked")
-        private List<URI> extractUris(String input, java.util.regex.Pattern pattern) throws Exception {
+        private List<URI> extractUris(String input, Pattern pattern) throws Exception {
             Method method = AbstractBackupService.class.getDeclaredMethod(
-                    "extractResourcesUris", String.class, java.util.regex.Pattern.class);
+                    "extractResourcesUris", String.class, Pattern.class);
             method.setAccessible(true);
             return (List<URI>) method.invoke(service, input, pattern);
         }
@@ -1039,9 +1001,13 @@ class RestImportServiceUncoveredBranchTest {
     // =========================================================
 
     private static RestImportService createMinimalInstance() throws Exception {
-        var constructor = RestImportService.class.getDeclaredConstructors()[0];
+        var constructors = RestImportService.class.getDeclaredConstructors();
+        assertEquals(1, constructors.length,
+                "RestImportService gained an overload — pick the @Inject one explicitly instead of the only one");
+        var constructor = constructors[0];
         constructor.setAccessible(true);
-        return (RestImportService) constructor.newInstance(
-                null, null, null, null, null, null, null, null, null);
+        // One null per parameter, derived from the constructor rather than
+        // hardcoded, so a signature change cannot break this at runtime again.
+        return (RestImportService) constructor.newInstance(new Object[constructor.getParameterCount()]);
     }
 }

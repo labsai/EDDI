@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.TestMemoryFactory.MemoryContext;
 import ai.labs.eddi.engine.lifecycle.exceptions.IllegalExtensionConfigurationException;
 import ai.labs.eddi.engine.lifecycle.exceptions.UnrecognizedExtensionException;
 import ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException;
+import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.modules.nlp.expressions.Expression;
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
@@ -27,9 +28,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.*;
 
+import static ai.labs.eddi.engine.memory.MemoryKeys.EXPRESSIONS_PARSED;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -50,12 +53,31 @@ class InputParserTaskBranchTest {
     @BeforeEach
     void setUp() throws Exception {
         expressionProvider = mock(IExpressionProvider.class);
+        // ExpressionProvider.parseExpressions is total — it answers an empty
+        // Expressions
+        // for null/blank input and never returns null. A bare mock answers null, which
+        // no implementation of the interface ever does; give the mock the real contract
+        // instead of guarding production code against an impossible value.
+        doAnswer(invocation -> parseExpressions(invocation.getArgument(0)))
+                .when(expressionProvider).parseExpressions(any());
         normalizerProviders = new HashMap<>();
         dictionaryProviders = new HashMap<>();
         correctionProviders = new HashMap<>();
         objectMapper = new ObjectMapper();
         task = new InputParserTask(expressionProvider, normalizerProviders, dictionaryProviders,
                 correctionProviders, objectMapper);
+    }
+
+    /**
+     * Mirrors {@code ExpressionProvider.parseExpressions} for the flat, comma
+     * separated expression strings these tests use.
+     */
+    private static Expressions parseExpressions(String raw) {
+        var expressions = new Expressions();
+        if (raw != null) {
+            Arrays.stream(raw.split(",")).map(String::trim).filter(part -> !part.isEmpty()).map(Expression::new).forEach(expressions::add);
+        }
+        return expressions;
     }
 
     // ==================== storeNormalizedResultInMemory — empty input
@@ -102,16 +124,16 @@ class InputParserTaskBranchTest {
     // ==================== storeResultInMemory — appendExpressions=false
     // ====================
 
-    @Test
-    @DisplayName("appendExpressions=false skips expression storage even with solutions")
-    void appendExpressionsFalse() throws Exception {
-        MemoryContext ctx = TestMemoryFactory.createWithInput("hello");
+    /**
+     * Builds a parser whose single solution yields exactly one expression named
+     * {@code greeting} for the input "hello".
+     */
+    private IInputParser parserYieldingGreeting(boolean appendExpressions) throws Exception {
         IInputParser parser = mock(IInputParser.class);
-        var config = new IInputParser.Config(false, true, true);
+        var config = new IInputParser.Config(appendExpressions, true, true);
         doReturn(config).when(parser).getConfig();
         doReturn("hello").when(parser).normalize(eq("hello"), isNull());
 
-        // Create solution with expressions
         RawSolution solution = mock(RawSolution.class);
         var foundWord = mock(IDictionary.IFoundWord.class);
         doReturn("hello").when(foundWord).getValue();
@@ -122,11 +144,56 @@ class InputParserTaskBranchTest {
         doReturn(List.of(foundWord)).when(solution).getDictionaryEntries();
 
         doReturn(List.of(solution)).when(parser).parse(eq("hello"), isNull(), anyList());
+        return parser;
+    }
 
-        task.execute(ctx.memory(), parser);
+    @Test
+    @DisplayName("appendExpressions=false still STORES expressions — it only suppresses the merge")
+    void appendExpressionsFalseStillStores() throws Exception {
+        MemoryContext ctx = TestMemoryFactory.createWithInput("hello");
 
-        // With appendExpressions=false, no expression data should be stored
-        verify(ctx.currentStep(), never()).addConversationOutputString(eq("expressions"), anyString());
+        task.execute(ctx.memory(), parserYieldingGreeting(false));
+
+        // The flag governs merging, not storing. Suppressing storage would leave every
+        // downstream behaviour rule with no expressions and no intents at all.
+        verify(ctx.currentStep()).addConversationOutputString("expressions", "greeting");
+    }
+
+    @Test
+    @DisplayName("appendExpressions=false does not merge with expressions already on the step")
+    void appendExpressionsFalseDoesNotMerge() throws Exception {
+        MemoryContext ctx = TestMemoryFactory.createWithInput("hello");
+        IData<String> existing = mock(IData.class);
+        doReturn("farewell").when(existing).getResult();
+        doReturn(existing).when(ctx.currentStep()).getLatestData(EXPRESSIONS_PARSED);
+
+        task.execute(ctx.memory(), parserYieldingGreeting(false));
+
+        verify(ctx.currentStep()).addConversationOutputString("expressions", "greeting");
+        verify(ctx.currentStep(), never()).addConversationOutputString(eq("expressions"), contains("farewell"));
+    }
+
+    @Test
+    @DisplayName("appendExpressions=true merges with expressions already on the step")
+    void appendExpressionsTrueMerges() throws Exception {
+        MemoryContext ctx = TestMemoryFactory.createWithInput("hello");
+        IData<String> existing = mock(IData.class);
+        doReturn("farewell").when(existing).getResult();
+        doReturn(existing).when(ctx.currentStep()).getLatestData(EXPRESSIONS_PARSED);
+
+        task.execute(ctx.memory(), parserYieldingGreeting(true));
+
+        var stored = ArgumentCaptor.forClass(String.class);
+        verify(ctx.currentStep()).addConversationOutputString(eq("expressions"), stored.capture());
+        assertEquals("farewell, greeting", stored.getValue(), "the already-parsed expressions keep their place, the new ones are appended");
+
+        // The merge has to reach the intents as well — behaviour rules match on
+        // intents,
+        // not on the joined expression string.
+        @SuppressWarnings("rawtypes")
+        ArgumentCaptor<List> intents = ArgumentCaptor.forClass(List.class);
+        verify(ctx.currentStep()).addConversationOutputList(eq("intents"), intents.capture());
+        assertEquals(List.of("farewell", "greeting"), intents.getValue());
     }
 
     // ==================== prepareTemporaryDictionaries — edge cases

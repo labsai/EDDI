@@ -99,6 +99,46 @@ class ConfidenceEvaluatorExtendedTest {
 
             assertEquals(0.8, result.confidence(), 0.01);
         }
+
+        @Test
+        @DisplayName("should keep braces balanced when a judge string contains an escaped quote")
+        void handlesEscapedQuoteInBalancedObject() {
+            // The first balanced {...} object contains a backslash-escaped quote inside a
+            // string; the '}' that immediately follows it is INSIDE the string and must not
+            // prematurely close the object.
+            String judgeText = "{\"note\": \"a\\\"}b\", \"confidence\": 0.3}";
+
+            // Direct assertion on the helper: the whole object is returned, not truncated
+            // at
+            // the in-string brace that follows the escaped quote.
+            assertEquals(judgeText, ConfidenceEvaluator.extractFirstBalancedObject(judgeText));
+
+            // And driven through the judge path, the confidence still parses correctly.
+            ChatModel judgeModel = mock(ChatModel.class);
+            var aiMessage = AiMessage.from(judgeText);
+            var chatResponse = ChatResponse.builder().aiMessage(aiMessage).build();
+            when(judgeModel.chat(any(List.class))).thenReturn(chatResponse);
+
+            var result = ConfidenceEvaluator.evaluateWithJudge("Some response", judgeModel);
+
+            assertEquals(0.3, result.confidence(), 0.01);
+        }
+
+        @Test
+        @DisplayName("should recover confidence via regex when the first balanced object is invalid JSON")
+        void regexFallbackWhenFirstBalancedObjectIsInvalidJson() {
+            // The first balanced {...} object is present but not valid JSON, so the inner
+            // readTree throws and the full-text confidence regex safety net recovers the
+            // score.
+            ChatModel judgeModel = mock(ChatModel.class);
+            var aiMessage = AiMessage.from("{bad json} {\"confidence\": 0.3}");
+            var chatResponse = ChatResponse.builder().aiMessage(aiMessage).build();
+            when(judgeModel.chat(any(List.class))).thenReturn(chatResponse);
+
+            var result = ConfidenceEvaluator.evaluateWithJudge("Some response", judgeModel);
+
+            assertEquals(0.3, result.confidence(), 0.01);
+        }
     }
 
     @Nested
@@ -146,6 +186,21 @@ class ConfidenceEvaluatorExtendedTest {
             assertTrue(result.response().contains("\n"));
             assertTrue(result.response().contains("\""));
             assertEquals(0.95, result.confidence(), 0.01);
+        }
+
+        @Test
+        @DisplayName("should return object text unchanged via stripJsonWrapper when confidence matches but response field is absent")
+        void stripJsonWrapperFallbackOnMalformedObject() {
+            // Object-shaped but malformed JSON (missing comma) → Jackson parse returns
+            // null.
+            // The confidence regex still extracts 0.5, but there is no "response" field, so
+            // evaluateStructuredOutput falls back to stripJsonWrapper — which, finding no
+            // response field either, returns the object text unchanged.
+            String malformed = "{\"confidence\": 0.5 \"foo\": \"bar\"}";
+            var result = ConfidenceEvaluator.evaluateStructuredOutput(malformed, null);
+
+            assertEquals(0.5, result.confidence(), 0.01);
+            assertEquals(malformed, result.response());
         }
     }
 
