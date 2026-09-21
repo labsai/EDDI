@@ -37,6 +37,7 @@ public interface IRestUserConversationStore {
 
     @POST
     @Path("/{intent}/{userId}")
+    @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Create user conversation", description = "Create a new user conversation for intent and user id.")
     Response createUserConversation(@PathParam("intent") String intent, @PathParam("userId") String userId, UserConversation userConversation);
