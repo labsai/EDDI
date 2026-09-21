@@ -52,6 +52,44 @@ public interface IngestionStateStoreContract {
     // === document state ===
 
     @Test
+    @DisplayName("a document reported as tombstoned says it is tombstoned")
+    default void tombstonedDocumentsComeBackTombstoned() {
+        String runOne = openRun(SOURCE);
+        store().recordIngested(SOURCE, DOC, "hash", null, null, runOne);
+        closeRun(runOne, SOURCE, IngestionRun.Status.COMPLETED);
+
+        String runTwo = openRun(SOURCE);
+        List<DocumentState> gone = store().tombstoneMissing(SOURCE, runTwo, 1);
+        closeRun(runTwo, SOURCE, IngestionRun.Status.COMPLETED);
+
+        assertEquals(1, gone.size());
+        // The state handed back describes the document after the transition, not
+        // before it. One backend read its candidates and marked them in a second
+        // call, so every state it returned still said false — and a caller that
+        // believed it would have re-reported the same documents next time.
+        assertTrue(gone.getFirst().tombstoned(),
+                "the returned state must reflect the transition that just happened");
+        assertTrue(store().lookup(SOURCE, DOC).orElseThrow().tombstoned());
+    }
+
+    @Test
+    @DisplayName("a document is reported as newly tombstoned exactly once")
+    default void aDocumentIsTombstonedOnlyOnce() {
+        String runOne = openRun(SOURCE);
+        store().recordIngested(SOURCE, DOC, "hash", null, null, runOne);
+        closeRun(runOne, SOURCE, IngestionRun.Status.COMPLETED);
+
+        String runTwo = openRun(SOURCE);
+        assertEquals(1, store().tombstoneMissing(SOURCE, runTwo, 1).size());
+        // Whatever the caller does with the second answer, it must not be told to
+        // delete the same document's vectors again — and on a store that reads
+        // before it writes, two callers racing here both get the document.
+        assertTrue(store().tombstoneMissing(SOURCE, runTwo, 1).isEmpty(),
+                "an already-tombstoned document must not be reported again");
+        closeRun(runTwo, SOURCE, IngestionRun.Status.COMPLETED);
+    }
+
+    @Test
     @DisplayName("an unknown document has no state")
     default void unknownDocumentIsAbsent() {
         assertTrue(store().lookup(SOURCE, DOC).isEmpty());

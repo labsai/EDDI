@@ -11,12 +11,15 @@ import ai.labs.eddi.modules.ingestion.IngestionStateStoreException;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.FindOneAndUpdateOptions;
+import com.mongodb.client.model.ReturnDocument;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
 import com.mongodb.client.model.Sorts;
 import com.mongodb.client.model.UpdateOptions;
 import com.mongodb.client.model.Updates;
 import com.mongodb.ErrorCategory;
+import com.mongodb.MongoException;
 import com.mongodb.MongoWriteException;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -30,6 +33,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 /**
  * MongoDB implementation of {@link IIngestionStateStore}.
@@ -96,13 +100,43 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
                         .partialFilterExpression(Filters.eq(FIELD_STATUS, IngestionRun.Status.RUNNING.name())));
     }
 
+    /**
+     * Runs a driver call, translating its failures.
+     *
+     * <p>
+     * The interface promises {@link IngestionStateStoreException}, and the
+     * PostgreSQL store translates every {@code SQLException} to it. This one used
+     * to translate a single case in {@link #startRun} and let the rest escape as
+     * {@code MongoException}, so what a caller had to catch during a database
+     * outage depended on which backend the operator had chosen — which is the drift
+     * the shared contract exists to prevent.
+     */
+    private <T> T translating(String what, Supplier<T> call) {
+        try {
+            return call.get();
+        } catch (IngestionStateStoreException e) {
+            throw e;
+        } catch (MongoException e) {
+            throw new IngestionStateStoreException("Failed to " + what, e);
+        }
+    }
+
+    private void translating(String what, Runnable call) {
+        translating(what, () -> {
+            call.run();
+            return null;
+        });
+    }
+
     @Override
     public Optional<DocumentState> lookup(String sourceId, String documentId) {
         if (sourceId == null || documentId == null) {
             return Optional.empty();
         }
-        Document found = documents.find(byDocument(sourceId, documentId)).first();
-        return Optional.ofNullable(found).map(MongoIngestionStateStore::toDocumentState);
+        return translating("look a document up", () -> {
+            Document found = documents.find(byDocument(sourceId, documentId)).first();
+            return Optional.ofNullable(found).map(MongoIngestionStateStore::toDocumentState);
+        });
     }
 
     @Override
@@ -122,17 +156,20 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
                 // entered the knowledge base rather than resetting its history.
                 Updates.setOnInsert(FIELD_FIRST_INGESTED_AT, Date.from(now)));
 
-        documents.updateOne(byDocument(sourceId, documentId), update, new UpdateOptions().upsert(true));
+        translating("record an ingested document",
+                () -> documents.updateOne(byDocument(sourceId, documentId), update,
+                        new UpdateOptions().upsert(true)));
     }
 
     @Override
     public void recordSeen(String sourceId, String documentId, String runId) {
-        documents.updateOne(byDocument(sourceId, documentId),
-                Updates.combine(
-                        Updates.set(FIELD_LAST_RUN_ID, runId),
-                        Updates.set(FIELD_MISSED_RUNS, 0),
-                        Updates.set(FIELD_TOMBSTONED, false)),
-                new UpdateOptions().upsert(false));
+        translating("record a document as seen",
+                () -> documents.updateOne(byDocument(sourceId, documentId),
+                        Updates.combine(
+                                Updates.set(FIELD_LAST_RUN_ID, runId),
+                                Updates.set(FIELD_MISSED_RUNS, 0),
+                                Updates.set(FIELD_TOMBSTONED, false)),
+                        new UpdateOptions().upsert(false)));
     }
 
     @Override
@@ -140,50 +177,68 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
         // Only the run marker: the miss counter and the tombstone flag are left
         // exactly as they were, so this run neither condemns the document nor
         // absolves it.
-        documents.updateOne(byDocument(sourceId, documentId),
-                Updates.set(FIELD_LAST_RUN_ID, runId),
-                new UpdateOptions().upsert(false));
+        translating("record a document as unreachable",
+                () -> documents.updateOne(byDocument(sourceId, documentId),
+                        Updates.set(FIELD_LAST_RUN_ID, runId),
+                        new UpdateOptions().upsert(false)));
     }
 
     @Override
     public List<DocumentState> tombstoneMissing(String sourceId, String runId, int missedRunsThreshold) {
         int threshold = Math.max(1, missedRunsThreshold);
+        return translating("tombstone missing documents", () -> {
 
-        Bson missed = Filters.and(
-                Filters.eq(FIELD_SOURCE_ID, sourceId),
-                Filters.ne(FIELD_LAST_RUN_ID, runId),
-                Filters.ne(FIELD_TOMBSTONED, true));
+            Bson missed = Filters.and(
+                    Filters.eq(FIELD_SOURCE_ID, sourceId),
+                    Filters.ne(FIELD_LAST_RUN_ID, runId),
+                    Filters.ne(FIELD_TOMBSTONED, true));
 
-        documents.updateMany(missed, Updates.inc(FIELD_MISSED_RUNS, 1));
+            documents.updateMany(missed, Updates.inc(FIELD_MISSED_RUNS, 1));
 
-        Bson dueForTombstone = Filters.and(
-                Filters.eq(FIELD_SOURCE_ID, sourceId),
-                Filters.ne(FIELD_TOMBSTONED, true),
-                Filters.gte(FIELD_MISSED_RUNS, threshold));
+            Bson dueForTombstone = Filters.and(
+                    Filters.eq(FIELD_SOURCE_ID, sourceId),
+                    Filters.ne(FIELD_TOMBSTONED, true),
+                    Filters.gte(FIELD_MISSED_RUNS, threshold));
 
-        List<DocumentState> tombstoned = new ArrayList<>();
-        for (Document document : documents.find(dueForTombstone)) {
-            tombstoned.add(toDocumentState(document));
-        }
-        if (!tombstoned.isEmpty()) {
-            documents.updateMany(dueForTombstone, Updates.set(FIELD_TOMBSTONED, true));
-        }
-        return tombstoned;
+            // One document at a time, each claimed by the same statement that marks
+            // it. Reading the candidates and then marking them in a second call let
+            // two callers finishing together both report the same document as newly
+            // tombstoned — and each would go on to delete its vectors — while the
+            // states they handed back still said tombstoned=false, because they were
+            // read before the write. PostgreSQL gets both properties from
+            // `UPDATE ... RETURNING`; this is the MongoDB equivalent.
+            //
+            // The loop terminates because every claim removes a document from the
+            // filter's own match set.
+            var claimOne = new FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER);
+            List<DocumentState> tombstoned = new ArrayList<>();
+            Document claimed;
+            while ((claimed = documents.findOneAndUpdate(dueForTombstone,
+                    Updates.set(FIELD_TOMBSTONED, true), claimOne)) != null) {
+                tombstoned.add(toDocumentState(claimed));
+            }
+            return tombstoned;
+        });
     }
 
     @Override
     public List<DocumentState> listDocuments(String sourceId, int limit) {
-        List<DocumentState> states = new ArrayList<>();
-        for (Document document : documents.find(Filters.eq(FIELD_SOURCE_ID, sourceId)).limit(Math.max(1, limit))) {
-            states.add(toDocumentState(document));
-        }
-        return states;
+        return translating("list a source's documents", () -> {
+            List<DocumentState> states = new ArrayList<>();
+            for (Document document : documents.find(Filters.eq(FIELD_SOURCE_ID, sourceId))
+                    .limit(Math.max(1, limit))) {
+                states.add(toDocumentState(document));
+            }
+            return states;
+        });
     }
 
     @Override
     public void purgeSource(String sourceId) {
-        documents.deleteMany(Filters.eq(FIELD_SOURCE_ID, sourceId));
-        runs.deleteMany(Filters.eq(FIELD_SOURCE_ID, sourceId));
+        translating("purge a source", () -> {
+            documents.deleteMany(Filters.eq(FIELD_SOURCE_ID, sourceId));
+            runs.deleteMany(Filters.eq(FIELD_SOURCE_ID, sourceId));
+        });
     }
 
     @Override
@@ -210,8 +265,9 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
 
     @Override
     public void finishRun(IngestionRun run) {
-        var result = runs.updateOne(Filters.and(Filters.eq(FIELD_RUN_ID, run.runId()),
-                Filters.eq(FIELD_STATUS, IngestionRun.Status.RUNNING.name())),
+        var result = translating("finish a run", () -> runs.updateOne(
+                Filters.and(Filters.eq(FIELD_RUN_ID, run.runId()),
+                        Filters.eq(FIELD_STATUS, IngestionRun.Status.RUNNING.name())),
                 Updates.combine(
                         Updates.set(FIELD_STATUS, run.status().name()),
                         Updates.set(FIELD_FINISHED_AT,
@@ -223,7 +279,7 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
                         Updates.set(FIELD_DOCS_TOMBSTONED, run.documentsTombstoned()),
                         Updates.set(FIELD_SEGMENTS_STORED, run.segmentsStored()),
                         Updates.set(FIELD_COST_USD, run.costUsd()),
-                        Updates.set(FIELD_ERROR, run.error())));
+                        Updates.set(FIELD_ERROR, run.error()))));
         if (result.getMatchedCount() == 0) {
             // The run was reaped while it was still working. Its own result is
             // discarded — the reaper already declared it dead, and a second run may
@@ -235,35 +291,42 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
 
     @Override
     public Optional<IngestionRun> activeRun(String sourceId) {
-        Document found = runs.find(Filters.and(
-                Filters.eq(FIELD_SOURCE_ID, sourceId),
-                Filters.eq(FIELD_STATUS, IngestionRun.Status.RUNNING.name()))).first();
-        return Optional.ofNullable(found).map(MongoIngestionStateStore::toRun);
+        return translating("read the active run", () -> {
+            Document found = runs.find(Filters.and(
+                    Filters.eq(FIELD_SOURCE_ID, sourceId),
+                    Filters.eq(FIELD_STATUS, IngestionRun.Status.RUNNING.name()))).first();
+            return Optional.ofNullable(found).map(MongoIngestionStateStore::toRun);
+        });
     }
 
     @Override
     public List<IngestionRun> listRuns(String sourceId, int limit) {
-        List<IngestionRun> history = new ArrayList<>();
-        for (Document document : runs.find(Filters.eq(FIELD_SOURCE_ID, sourceId))
-                .sort(Sorts.descending(FIELD_STARTED_AT))
-                .limit(Math.max(1, limit))) {
-            history.add(toRun(document));
-        }
-        return history;
+        return translating("list a source's runs", () -> {
+            List<IngestionRun> history = new ArrayList<>();
+            for (Document document : runs.find(Filters.eq(FIELD_SOURCE_ID, sourceId))
+                    .sort(Sorts.descending(FIELD_STARTED_AT))
+                    .limit(Math.max(1, limit))) {
+                history.add(toRun(document));
+            }
+            return history;
+        });
     }
 
     @Override
     public int reapStaleRuns(String sourceId, Instant startedBefore) {
-        var result = runs.updateMany(
-                Filters.and(
-                        Filters.eq(FIELD_SOURCE_ID, sourceId),
-                        Filters.eq(FIELD_STATUS, IngestionRun.Status.RUNNING.name()),
-                        Filters.lt(FIELD_STARTED_AT, Date.from(startedBefore))),
-                Updates.combine(
-                        Updates.set(FIELD_STATUS, IngestionRun.Status.FAILED.name()),
-                        Updates.set(FIELD_FINISHED_AT, Date.from(Instant.now())),
-                        Updates.set(FIELD_ERROR, "Run abandoned — no completion recorded before the stale threshold")));
-        return (int) result.getModifiedCount();
+        return translating("reap stale runs", () -> {
+            var result = runs.updateMany(
+                    Filters.and(
+                            Filters.eq(FIELD_SOURCE_ID, sourceId),
+                            Filters.eq(FIELD_STATUS, IngestionRun.Status.RUNNING.name()),
+                            Filters.lt(FIELD_STARTED_AT, Date.from(startedBefore))),
+                    Updates.combine(
+                            Updates.set(FIELD_STATUS, IngestionRun.Status.FAILED.name()),
+                            Updates.set(FIELD_FINISHED_AT, Date.from(Instant.now())),
+                            Updates.set(FIELD_ERROR,
+                                    "Run abandoned — no completion recorded before the stale threshold")));
+            return (int) result.getModifiedCount();
+        });
     }
 
     private static Bson byDocument(String sourceId, String documentId) {
