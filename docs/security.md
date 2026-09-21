@@ -64,6 +64,15 @@ This starts Keycloak alongside EDDI with pre-configured realm, clients, and test
 | `authorization.enabled`        | Runtime        | `${quarkus.oidc.tenant-enabled}`    | Fine-grained `@RolesAllowed` authorization      |
 | `quarkus.oidc.token.audience`  | Runtime        | `eddi-backend`                      | The `aud` an access token must carry            |
 | `quarkus.oidc.token-cache.max-size` | Runtime   | `1000`                              | Caches the per-request userinfo lookup (`0` disables) |
+| `quarkus.oidc.token-cache.time-to-live` | Runtime | `3M`                              | How long a cached entry stays valid |
+| `quarkus.oidc.token-cache.clean-up-timer-interval` | Runtime | `5M`                    | How often stale entries are swept |
+
+> **The token cache defers a revocation check, not a validation.** Signature, expiry and
+> audience are verified on every request, before the cache is consulted. What it caches is the
+> userinfo lookup — which doubles as the session-revocation check, since Keycloak refuses
+> userinfo for a logged-out session. So a session killed in Keycloak keeps working here for up
+> to `time-to-live` (3 minutes). Set `max-size=0` to disable the cache and pay a Keycloak
+> round trip per request instead.
 
 > **Audience validation.** Quarkus verifies `aud` on an *access* token only when
 > `quarkus.oidc.token.audience` is set. Without it EDDI accepts any token the realm

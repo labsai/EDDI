@@ -77,6 +77,12 @@ intended this check and never switched it on. It matters more now that a second 
 - **`DeploymentManifestsTest`** — every client that can mint a token (standard, direct-grant,
   implicit or service-account flow) must mint the audience the property requires, in all three realm copies, compared
   against the property rather than a spelling repeated in the test.
+- **`ui/manager/e2e/auth/mcp-oauth.spec.ts`** (new) — the middle of the feature, which the
+  discovery and 401 cases do not reach: authorization code + PKCE against `eddi-mcp`, the
+  token exchange, then `/mcp` `initialize` and a real `list_agents` call. It asserts the
+  token carries `aud=eddi-backend` and realm roles, so the two silent failures — a token the
+  backend refuses, and one that authenticates and is then refused by every tool — surface as
+  themselves rather than as a generic 401.
 - **`docs/security.md`**, **`docs/open-webui-integration.md`** — both properties in the table, what
   a hand-built realm has to do, and the `/v1` adapter's 401-under-OIDC entry, which now also means
   "and carrying `aud=eddi-backend`".
