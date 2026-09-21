@@ -26,6 +26,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -382,9 +383,38 @@ class RagSourceIngestionServiceTest {
             service.repairUnarmedSchedules();
 
             ArgumentCaptor<Instant> fireTime = ArgumentCaptor.forClass(Instant.class);
-            verify(scheduleStore).setScheduleEnabled(eq("sched-1"), eq(true), fireTime.capture());
+            verify(scheduleStore).armIfUnarmed(eq("sched-1"), fireTime.capture());
             assertNotNull(fireTime.getValue());
             assertEquals(2, fireTime.getValue().atZone(ZoneId.of("UTC")).getHour());
+        }
+
+        @Test
+        @DisplayName("the write is conditional, so a second node cannot move a fire time already set")
+        void armsOnlyWhileStillUnarmed() throws Exception {
+            // Each node computes its own occurrence from its own clock, so across a
+            // cron boundary they differ — an unconditional write let the slower node
+            // replace the earlier fire with the later one and skip it. The condition
+            // belongs in the store's predicate, which is the only place both nodes
+            // meet.
+            storeHolds(unarmedIngestionSchedule());
+
+            service.repairUnarmedSchedules();
+
+            verify(scheduleStore).armIfUnarmed(eq("sched-1"), any());
+            verify(scheduleStore, never()).setScheduleEnabled(anyString(), anyBoolean(), any());
+        }
+
+        @Test
+        @DisplayName("losing the race to another node is success, not a failure to report")
+        void aLostRaceIsNotAnError() throws Exception {
+            // false means somebody else armed it first. The row is armed either way,
+            // which is all the sweep exists to guarantee.
+            storeHolds(unarmedIngestionSchedule());
+            when(scheduleStore.armIfUnarmed(anyString(), any())).thenReturn(false);
+
+            assertDoesNotThrow(() -> service.repairUnarmedSchedules());
+
+            verify(scheduleStore).armIfUnarmed(eq("sched-1"), any());
         }
 
         @Test
@@ -396,7 +426,7 @@ class RagSourceIngestionServiceTest {
 
             service.repairUnarmedSchedules();
 
-            verify(scheduleStore, never()).setScheduleEnabled(anyString(), anyBoolean(), any());
+            verify(scheduleStore, never()).armIfUnarmed(anyString(), any());
         }
 
         @Test
@@ -414,7 +444,7 @@ class RagSourceIngestionServiceTest {
 
             service.repairUnarmedSchedules();
 
-            verify(scheduleStore, never()).setScheduleEnabled(anyString(), anyBoolean(), any());
+            verify(scheduleStore, never()).armIfUnarmed(anyString(), any());
         }
 
         @Test
@@ -425,7 +455,7 @@ class RagSourceIngestionServiceTest {
 
             service.repairUnarmedSchedules();
 
-            verify(scheduleStore, never()).setScheduleEnabled(anyString(), anyBoolean(), any());
+            verify(scheduleStore, never()).armIfUnarmed(anyString(), any());
         }
 
         @Test

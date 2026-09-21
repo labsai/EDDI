@@ -300,10 +300,16 @@ public class RagSourceIngestionService {
      * <p>
      * Safe to run on every boot and on every node of a cluster: it only touches
      * rows that are enabled, marked as ingestion schedules, carry a cron and have
-     * no {@code nextFire} at all, so after the first pass nothing matches. Two
-     * nodes repairing the same row compute the same next occurrence and write the
-     * same value. Arming is done through {@code setScheduleEnabled}, the existing
-     * store-agnostic re-arm, rather than a new store method.
+     * no {@code nextFire} at all, so after the first pass nothing matches.
+     *
+     * <p>
+     * Two nodes do <em>not</em> compute the same occurrence, which an earlier
+     * version of this comment claimed: each uses its own {@code Instant.now()}, so
+     * across a cron boundary one computes 10:01 and the other 10:02, and an
+     * unconditional write let the slower node replace the earlier fire with the
+     * later one. The write therefore goes through
+     * {@link IScheduleStore#armIfUnarmed}, whose predicate carries the "still
+     * unarmed" condition, so the first writer wins and the rest are no-ops.
      *
      * <p>
      * Failures are logged, never thrown: a repair that cannot read the store must
@@ -314,10 +320,12 @@ public class RagSourceIngestionService {
             return;
         }
         int repaired = 0;
+        boolean truncated = true;
         try {
             for (int page = 0; page < REPAIR_MAX_PAGES; page++) {
                 List<ScheduleConfiguration> batch = scheduleStore.readAllSchedules(REPAIR_PAGE_SIZE, page * REPAIR_PAGE_SIZE, true);
                 if (batch == null || batch.isEmpty()) {
+                    truncated = false;
                     break;
                 }
                 for (ScheduleConfiguration schedule : batch) {
@@ -326,6 +334,7 @@ public class RagSourceIngestionService {
                     }
                 }
                 if (batch.size() < REPAIR_PAGE_SIZE) {
+                    truncated = false;
                     break;
                 }
             }
@@ -337,6 +346,14 @@ public class RagSourceIngestionService {
         if (repaired > 0) {
             LOGGER.warnf("Armed %d ingestion schedule(s) that had been stored without a next fire time and "
                     + "could never have run", repaired);
+        }
+        if (truncated) {
+            // Silence here read as "nothing left to repair" on exactly the deployments
+            // where that was least likely to be true. The cap stays — an unbounded scan
+            // of every schedule delays every boot — but it now says when it ran out.
+            LOGGER.warnf("Stopped checking for unarmed ingestion schedules after %d rows, the scan limit. Any "
+                    + "beyond that are still enabled with no next fire time and will not run; raise "
+                    + "the limit or re-save the knowledge bases concerned.", REPAIR_MAX_PAGES * REPAIR_PAGE_SIZE);
         }
     }
 
@@ -356,10 +373,11 @@ public class RagSourceIngestionService {
         }
         try {
             Instant nextFire = RagIngestionSchedules.firstFire(cron);
-            scheduleStore.setScheduleEnabled(schedule.getId(), true, nextFire);
-            return true;
-        } catch (IllegalArgumentException | IResourceStore.ResourceStoreException
-                | IResourceStore.ResourceNotFoundException e) {
+            // A lost race is a success: another node armed the row a moment ago, so it
+            // is armed. Only the count of rows THIS node repaired is affected, and that
+            // number is a log line, not a decision.
+            return scheduleStore.armIfUnarmed(schedule.getId(), nextFire);
+        } catch (IllegalArgumentException | IResourceStore.ResourceStoreException e) {
             // One unrepairable row must not stop the sweep: the next one may be the
             // schedule somebody is waiting on.
             LOGGER.errorf(e, "Ingestion schedule %s has no next fire time and could not be given one — "
