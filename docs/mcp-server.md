@@ -639,9 +639,16 @@ The [Quick Start](#quick-start) configurations above assume an instance with aut
 **1. Get a token.** The shipped realm's `eddi-frontend` client is public and permits the direct access grant:
 
 ```bash
-curl -s -d grant_type=password -d client_id=eddi-frontend -d username=eddi -d password=YOUR_PASSWORD \
+read -rsp "Password for eddi: " EDDI_PASSWORD && echo
+printf '%s' "$EDDI_PASSWORD" | curl -s \
+  -d grant_type=password -d client_id=eddi-frontend -d username=eddi \
+  --data-urlencode "password@-" \
   http://localhost:8180/realms/eddi/protocol/openid-connect/token
 ```
+
+> The password is read without echo and reaches `curl` on stdin, so it lands in
+> neither your shell history nor the process table. `--data-urlencode` encodes it,
+> which a password with `&` or `+` in it needs.
 
 **2a. Clients that speak Streamable HTTP and accept headers** (IDE plugins, Antigravity, custom clients):
 
