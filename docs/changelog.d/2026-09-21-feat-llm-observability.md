@@ -81,3 +81,26 @@ assert a listener actually fires; mutation-checking the old override shape turns
 
 `docs/metrics.md` and the full-metrics Grafana dashboard gained the three meters —
 `MetricsDashboardCoverageTest` enforces both.
+
+### Follow-up: the p95 panel had no series to query
+
+Raised in review of [#809](https://github.com/labsai/EDDI/pull/809). A Micrometer timer
+publishes `_count`, `_sum` and `_max` and no buckets at all, so
+`eddi_llm_request_duration_seconds_bucket` — the series panel `id: 169` runs
+`histogram_quantile(0.95, ...)` over — was never exported. The panel would have rendered
+empty forever, which on a latency chart reads as "no LLM traffic" rather than "this metric
+does not exist".
+
+`eddi.llm.request.duration` is now registered with `publishPercentileHistogram()`, the same
+way `eddi.pipeline.task.duration` in `LifecycleManager` already is — which is also why the
+pipeline p95 panels next to it do work. The cost is one series per bucket per
+`provider`/`model`/`outcome`, and the tag set is bounded the same way: providers are a fixed
+list, `outcome` is success or error, and model names come from configuration rather than from
+user input. If a deployment does find that too much, the dashboard-side alternative is to plot
+`_sum / _count` as a mean and drop the line; that is recorded at the call site.
+
+`LlmTelemetryListenerTest.durationTimerPublishesHistogramBuckets` asserts against a real
+`PrometheusMeterRegistry.scrape()` rather than a `takeSnapshot().histogramCounts()`, because
+the scrape text is literally what the dashboard queries — a snapshot assertion would pass on a
+registry that never exports the buckets. Mutation-checked: removing
+`publishPercentileHistogram()` turns exactly that test red.

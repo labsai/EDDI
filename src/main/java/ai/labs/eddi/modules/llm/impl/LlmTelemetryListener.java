@@ -216,6 +216,22 @@ public class LlmTelemetryListener implements ChatModelListener {
                 .tag("provider", provider)
                 .tag("model", model)
                 .tag("outcome", outcome)
+                .description("LLM provider call duration")
+                // Without this the timer publishes only _count, _sum and _max: a
+                // Prometheus registry emits no _bucket series at all, and the p95
+                // dashboard panel that queries
+                // histogram_quantile(0.95, ... eddi_llm_request_duration_seconds_bucket ...)
+                // renders empty forever, which looks like "no LLM traffic" rather
+                // than "this metric was never published".
+                //
+                // The cost is one series per bucket per provider/model/outcome. That
+                // is the same bargain eddi.pipeline.task.duration already makes, and
+                // the tag set here is bounded the same way: providers are a fixed
+                // list, outcome is success or error, and model names come from
+                // configuration rather than from user input. If a deployment ever
+                // does find the cardinality too high, the dashboard-side fallback is
+                // to plot _sum / _count as a mean instead and drop this line.
+                .publishPercentileHistogram()
                 .register(meterRegistry)
                 .record(System.nanoTime() - start, TimeUnit.NANOSECONDS);
     }

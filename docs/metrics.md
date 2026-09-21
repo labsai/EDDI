@@ -385,6 +385,17 @@ distribution of actual provider calls — but it means `eddi_llm_request_errors_
 counts failed *attempts*, and a turn that succeeded on its second try contributes
 one error and one success.
 
+**The duration timer publishes percentile buckets.** It is registered with
+`publishPercentileHistogram()`, so a Prometheus scrape carries
+`eddi_llm_request_duration_seconds_bucket` alongside `_count` and `_sum`, and the
+p95 panel on the bundled dashboard works without any extra registry
+configuration. A Micrometer timer publishes no buckets by default, and a
+`histogram_quantile` query over a series that does not exist renders as an empty
+panel — which reads as "no LLM traffic" rather than "this was never published".
+The cost is one series per bucket per `provider`/`model`/`outcome`; the tag set is
+bounded the same way `eddi_pipeline_task_duration_seconds` is, which makes the
+same trade.
+
 **Do not add these to the cascade meters.** A cascading task reports through both:
 once here per step, and once through `eddi_llm_cascade_*` tagged by step. They
 measure the same calls from different angles.

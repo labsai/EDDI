@@ -18,6 +18,8 @@ import dev.langchain4j.model.output.TokenUsage;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.prometheus.PrometheusConfig;
+import io.micrometer.prometheus.PrometheusMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -224,5 +226,35 @@ class LlmTelemetryListenerTest {
         assertEquals(3, registry.find("eddi.llm.request.duration").timer().count());
         assertEquals(15.0, registry.find("eddi.llm.tokens").tag("type", "input").counter().count());
         assertTrue(registry.find("eddi.llm.tokens").tag("type", "output").counter().count() == 21.0);
+    }
+
+    /**
+     * The p95 panel on the shipped dashboard queries
+     * {@code eddi_llm_request_duration_seconds_bucket}. A Micrometer timer
+     * publishes {@code _count}, {@code _sum} and {@code _max} by default and no
+     * buckets at all, so without {@code publishPercentileHistogram()} that panel
+     * renders empty forever — and an empty latency panel reads as "no LLM traffic",
+     * not as "this series was never published".
+     * <p>
+     * Asserted against a real {@code PrometheusMeterRegistry} scrape rather than a
+     * snapshot, because the scrape text is literally what the dashboard queries. A
+     * {@code histogramCounts()} assertion would pass on a registry that never
+     * exports the buckets.
+     */
+    @Test
+    @DisplayName("the duration timer publishes the _bucket series the p95 dashboard panel queries")
+    void durationTimerPublishesHistogramBuckets() {
+        var prometheus = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
+        var prometheusListener = new LlmTelemetryListener(prometheus);
+        ChatRequest req = request("gpt-4o");
+        Map<Object, Object> attrs = attributes();
+
+        prometheusListener.onRequest(new ChatModelRequestContext(req, ModelProvider.OPEN_AI, attrs));
+        prometheusListener.onResponse(new ChatModelResponseContext(response(1, 1), req, ModelProvider.OPEN_AI, attrs));
+
+        String scrape = prometheus.scrape();
+        assertTrue(scrape.contains("eddi_llm_request_duration_seconds_bucket"),
+                "panel id 169 queries histogram_quantile over this series; without it the panel is empty forever."
+                        + " Scrape was:\n" + scrape);
     }
 }
