@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.deployment.IDeploymentStorage;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
+import com.mongodb.MongoCommandException;
 import com.mongodb.MongoException;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
@@ -16,15 +17,20 @@ import com.mongodb.client.model.Indexes;
 import com.mongodb.client.model.ReplaceOptions;
 import io.quarkus.arc.DefaultBean;
 import org.bson.Document;
+import org.bson.conversions.Bson;
 import org.jboss.logging.Logger;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
+import static com.mongodb.client.model.Filters.and;
 import static com.mongodb.client.model.Filters.eq;
+import static com.mongodb.client.model.Filters.exists;
 import static com.mongodb.client.model.Filters.in;
 
 /**
@@ -47,6 +53,27 @@ public class MongoDeploymentStorage implements IDeploymentStorage {
      */
     private static final String FIELD_DUPLICATE_IDS = "duplicateIds";
     private static final String FIELD_DUPLICATE_COUNT = "duplicateCount";
+
+    /**
+     * MongoDB {@code IndexOptionsConflict} — an index on this key pattern exists
+     * under a different name with different options.
+     */
+    private static final int INDEX_OPTIONS_CONFLICT_ERROR_CODE = 85;
+    /**
+     * MongoDB {@code IndexKeySpecsConflict} — an index of this <em>name</em> exists
+     * with a different specification. The difference may be the options alone, and
+     * on current servers that is how an earlier release's non-partial index on the
+     * same key under the same auto-generated name is reported; or it may be a
+     * different key pattern, i.e. some other index that is not ours to drop.
+     */
+    private static final int INDEX_KEY_SPECS_CONFLICT_ERROR_CODE = 86;
+
+    /** The deployment key as {@code listIndexes} reports an index's key pattern. */
+    private static final Document DEPLOYMENT_KEY_PATTERN = new Document(FIELD_ENVIRONMENT, 1).append(FIELD_AGENT_ID, 1)
+            .append(FIELD_AGENT_VERSION, 1);
+
+    /** The deployment key that the unique index is built on. */
+    private static final Bson DEPLOYMENT_KEY = Indexes.ascending(FIELD_ENVIRONMENT, FIELD_AGENT_ID, FIELD_AGENT_VERSION);
 
     private final MongoCollection<Document> deploymentsCollection;
     private final IDocumentBuilder documentBuilder;
@@ -128,9 +155,164 @@ public class MongoDeploymentStorage implements IDeploymentStorage {
         }
     }
 
+    /**
+     * The key index, restricted to rows that actually carry the key.
+     *
+     * <p>
+     * The restriction is what keeps it off a database that has not been through the
+     * 6.x rename migration yet. EDDI 5 wrote {@code botId}/{@code botVersion}, and
+     * Mongo indexes an absent field as null — so an unrestricted unique index reads
+     * every 5.x row as {@code (environment, null, null)}, i.e. as a duplicate of
+     * every other 5.x row. {@link #removeDuplicateDeploymentRows()} then keeps one
+     * row for the whole collection and deletes the rest. On a real staging database
+     * that was 113 deployment rows reduced to 1 before the rename migration had
+     * even started, with six of seven agents silently never redeployed. The filter
+     * uses {@code $exists}, not a null check, so a row that legitimately carries a
+     * null {@code agentVersion} is still covered by the constraint.
+     * </p>
+     *
+     * <p>
+     * Mongo does not quietly re-shape an index that is already there. An earlier
+     * EDDI built this same key pattern WITHOUT the partial filter, so every
+     * installation that ran it already has the unrestricted index — which it would
+     * keep, and keep the behaviour described above, while logging something that
+     * reads like a warning about duplicate rows. So that index is dropped and
+     * rebuilt.
+     * </p>
+     *
+     * <p>
+     * Which error the server raises for it is not something to reason about from
+     * the codes alone. Current servers report the same key under the same
+     * auto-generated name with different options as {@code IndexKeySpecsConflict}
+     * (86), not {@code IndexOptionsConflict} (85) — splitting on the code was tried
+     * and broke against a real server. So neither code decides anything: on either
+     * one the collection's own indexes are read and the decision is made from what
+     * is actually there.
+     * </p>
+     *
+     * <p>
+     * Two things have to hold, and the codes tell us neither. <b>Nothing that is
+     * not on this key may be dropped.</b> 86 also covers a same-named index on a
+     * <em>different</em> key — someone else's index that happens to hold the name
+     * this one would be given — and dropping the key-pattern index in that case
+     * removes a working constraint and then fails to rebuild, because the name
+     * conflict is still there. So if the generated name is held by an index on
+     * another key, nothing is dropped and the error is reported. <b>Everything that
+     * is on this key must go.</b> MongoDB allows two indexes on one key pattern
+     * when their names and options differ, which is the shape an installation lands
+     * in if the partial index was ever built beside the old unrestricted one;
+     * dropping only the first one listed could drop the good one and leave the
+     * conflict standing.
+     * </p>
+     *
+     * <p>
+     * Anything else (E11000 above all) goes up to
+     * {@link #createDeploymentKeyIndex()}, which dedupes and retries.
+     * </p>
+     */
     private void createUniqueKeyIndex() {
-        deploymentsCollection.createIndex(Indexes.ascending(FIELD_ENVIRONMENT, FIELD_AGENT_ID, FIELD_AGENT_VERSION),
-                new IndexOptions().unique(true));
+        try {
+            deploymentsCollection.createIndex(DEPLOYMENT_KEY, uniqueKeyIndexOptions());
+            return;
+        } catch (MongoCommandException e) {
+            if (e.getErrorCode() != INDEX_OPTIONS_CONFLICT_ERROR_CODE && e.getErrorCode() != INDEX_KEY_SPECS_CONFLICT_ERROR_CODE) {
+                throw e;
+            }
+            Map<String, Document> indexes = indexesByName();
+            Document nameHolder = indexes.get(generatedDeploymentKeyIndexName());
+            if (nameHolder != null && !isOnDeploymentKey(nameHolder)) {
+                // Someone else's index holds the name this one would be given.
+                // Dropping ours would remove a working constraint and still not get
+                // past the name. Leave everything alone and report.
+                LOGGER.errorf("Cannot build the deployment-key index on '%s': the name '%s' is already held by an "
+                        + "index on a different key (%s). Nothing was dropped. Rename or remove that index by hand.",
+                        COLLECTION_DEPLOYMENTS, generatedDeploymentKeyIndexName(), nameHolder.get("key"));
+                throw e;
+            }
+            List<String> staleIndexes = indexes.entrySet().stream()
+                    .filter(entry -> isOnDeploymentKey(entry.getValue()))
+                    .map(Map.Entry::getKey)
+                    .toList();
+            if (staleIndexes.isEmpty()) {
+                // The conflict is with an index on some other key pattern. Not ours:
+                // leave it and report.
+                throw e;
+            }
+            LOGGER.warnf("The deployment-key index(es) %s on '%s' exist with a specification other than the partial "
+                    + "one (%s). Dropping them and rebuilding one partial index, so that rows predating the 6.x "
+                    + "rename migration stay out of it.", staleIndexes, COLLECTION_DEPLOYMENTS, e.getErrorMessage());
+            staleIndexes.forEach(deploymentsCollection::dropIndex);
+        }
+
+        // Rebuilt outside the catch so an E11000 here — duplicates the old index did
+        // not constrain — reaches createDeploymentKeyIndex's dedupe-and-retry rather
+        // than being mistaken for another conflict.
+        deploymentsCollection.createIndex(DEPLOYMENT_KEY, uniqueKeyIndexOptions());
+    }
+
+    /** The collection's indexes, by name, in the order the server lists them. */
+    private Map<String, Document> indexesByName() {
+        var byName = new LinkedHashMap<String, Document>();
+        for (Document index : deploymentsCollection.listIndexes()) {
+            String name = index.getString("name");
+            if (name != null) {
+                byName.put(name, index);
+            }
+        }
+        return byName;
+    }
+
+    /**
+     * Whether an index's key pattern is exactly the deployment key. Compared field
+     * by field and in order, since a compound index's field order is part of what
+     * it is; the direction values are compared numerically, because the server may
+     * report {@code 1} as an int, a long or a double.
+     */
+    private static boolean isOnDeploymentKey(Document index) {
+        return index.get("key") instanceof Document pattern && sameKeyPattern(pattern);
+    }
+
+    /**
+     * The name MongoDB gives an index on {@link #DEPLOYMENT_KEY} when none is
+     * supplied: the fields and their directions joined by underscores, which is
+     * what {@code createIndex} asks for here.
+     *
+     * <p>
+     * Derived from {@link #DEPLOYMENT_KEY_PATTERN} rather than written out, so it
+     * cannot drift from the key the index is actually built on.
+     * </p>
+     */
+    private static String generatedDeploymentKeyIndexName() {
+        var name = new StringBuilder();
+        for (String field : DEPLOYMENT_KEY_PATTERN.keySet()) {
+            if (!name.isEmpty()) {
+                name.append('_');
+            }
+            name.append(field).append('_').append(DEPLOYMENT_KEY_PATTERN.get(field));
+        }
+        return name.toString();
+    }
+
+    private static boolean sameKeyPattern(Document pattern) {
+        var expected = new ArrayList<>(DEPLOYMENT_KEY_PATTERN.keySet());
+        var actual = new ArrayList<>(pattern.keySet());
+        if (!expected.equals(actual)) {
+            return false;
+        }
+        for (String field : expected) {
+            if (!(pattern.get(field) instanceof Number direction) || direction.doubleValue() != 1d) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Fresh options per call: {@link IndexOptions} is mutable, so it is not shared
+     * between the first attempt and the rebuild.
+     */
+    private static IndexOptions uniqueKeyIndexOptions() {
+        return new IndexOptions().unique(true).partialFilterExpression(and(exists(FIELD_AGENT_ID), exists(FIELD_AGENT_VERSION)));
     }
 
     /**
@@ -162,6 +344,10 @@ public class MongoDeploymentStorage implements IDeploymentStorage {
      */
     private int removeDuplicateDeploymentRows() {
         List<Document> pipeline = List.of(
+                // Only rows that carry the key: a row without agentId predates the 6.x
+                // rename migration and is not a duplicate of the other rows that lack it.
+                new Document("$match", new Document(FIELD_AGENT_ID, new Document("$exists", true))
+                        .append(FIELD_AGENT_VERSION, new Document("$exists", true))),
                 new Document("$sort", new Document("_id", 1)),
                 new Document("$group", new Document("_id",
                         new Document(FIELD_ENVIRONMENT, "$" + FIELD_ENVIRONMENT).append(FIELD_AGENT_ID, "$" + FIELD_AGENT_ID)

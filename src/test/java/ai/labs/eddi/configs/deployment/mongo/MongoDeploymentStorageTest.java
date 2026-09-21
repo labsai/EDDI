@@ -11,6 +11,7 @@ import com.mongodb.MongoClientSettings;
 import com.mongodb.MongoCommandException;
 import com.mongodb.client.AggregateIterable;
 import com.mongodb.client.FindIterable;
+import com.mongodb.client.ListIndexesIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
@@ -89,6 +90,222 @@ class MongoDeploymentStorageTest {
         String key = keyCaptor.getValue().toBsonDocument(Document.class, MongoClientSettings.getDefaultCodecRegistry()).toString();
         assertTrue(key.contains("environment") && key.contains("agentId") && key.contains("agentVersion"),
                 "unexpected unique index key: " + key);
+
+        // Partial, so the index does not span rows written before the 6.x rename
+        // migration: those carry botId/botVersion, Mongo indexes the absent agentId as
+        // null, and an unrestricted unique index reads every one of them as a
+        // duplicate of every other — which the dedupe below then acts on.
+        Bson partial = optionsCaptor.getValue().getPartialFilterExpression();
+        assertNotNull(partial, "the unique deployment-key index must be partial");
+        String filter = partial.toBsonDocument(Document.class, MongoClientSettings.getDefaultCodecRegistry()).toString();
+        assertTrue(filter.contains("agentId") && filter.contains("agentVersion") && filter.contains("exists"),
+                "unexpected partial filter: " + filter);
+    }
+
+    /**
+     * An installation that has already run an earlier 6.x release carries this same
+     * key pattern WITHOUT the partial filter — and Mongo does not silently re-shape
+     * an existing index: {@code createIndex} refuses, with
+     * {@code IndexOptionsConflict} (85) when the old index has a different name and
+     * {@code IndexKeySpecsConflict} (86) when it has the same one. Left unhandled,
+     * every such installation would keep the unrestricted index, keep reading
+     * pre-rename rows as duplicates of one another, and say so only in a log line
+     * about duplicate rows. So the conflicting index is dropped and rebuilt.
+     */
+    @Test
+    @DisplayName("an index that already exists with different options is dropped and rebuilt as the partial one")
+    void rebuildsAnIndexThatConflictsOnOptions() {
+        MongoDatabase database = mock(MongoDatabase.class);
+        MongoCollection<Document> stale = mock(MongoCollection.class);
+        when(database.getCollection("deployments")).thenReturn(stale);
+
+        MongoCommandException conflict = mock(MongoCommandException.class);
+        when(conflict.getErrorCode()).thenReturn(85);
+        when(stale.createIndex(any(Bson.class), any(IndexOptions.class)))
+                .thenThrow(conflict)
+                .thenReturn("environment_1_agentId_1_agentVersion_1");
+        // 85 is the same key under a different name, so the stale index is found by
+        // its key pattern and dropped by its own name.
+        stubIndexes(stale, List.of(ID_INDEX, index("legacy_deployment_key", DEPLOYMENT_KEY_PATTERN)));
+
+        assertDoesNotThrow(() -> new MongoDeploymentStorage(database, documentBuilder));
+
+        verify(stale).dropIndex("legacy_deployment_key");
+        // Rebuilt, and rebuilt as the partial index — not left as it was found.
+        ArgumentCaptor<IndexOptions> optionsCaptor = ArgumentCaptor.forClass(IndexOptions.class);
+        verify(stale, times(2)).createIndex(any(Bson.class), optionsCaptor.capture());
+        IndexOptions rebuilt = optionsCaptor.getAllValues().get(1);
+        assertEquals(Boolean.TRUE, rebuilt.isUnique());
+        assertNotNull(rebuilt.getPartialFilterExpression(), "the rebuilt index must be the partial one");
+
+        // No dedupe: the conflict says the index exists, not that the rows are broken.
+        verify(stale, never()).aggregate(anyList());
+        verify(stale, never()).deleteMany(any(Bson.class));
+    }
+
+    /**
+     * Only the two index-conflict codes are recovered by dropping the index. A
+     * duplicate-key failure (E11000) means the ROWS are wrong, and dropping the
+     * index would throw away the constraint instead of fixing them — that case
+     * belongs to the dedupe path below.
+     */
+    @Test
+    @DisplayName("a failure that is not an index conflict never drops an index")
+    void doesNotDropIndexOnAnUnrelatedFailure() {
+        MongoDatabase database = mock(MongoDatabase.class);
+        MongoCollection<Document> duplicated = mock(MongoCollection.class);
+        when(database.getCollection("deployments")).thenReturn(duplicated);
+
+        MongoCommandException duplicateKey = mock(MongoCommandException.class);
+        when(duplicateKey.getErrorCode()).thenReturn(11000);
+        when(duplicated.createIndex(any(Bson.class), any(IndexOptions.class)))
+                .thenThrow(duplicateKey)
+                .thenReturn("environment_1_agentId_1_agentVersion_1");
+        stubAggregate(duplicated, List.of());
+
+        assertDoesNotThrow(() -> new MongoDeploymentStorage(database, documentBuilder));
+
+        verify(duplicated, never()).dropIndex(any(Bson.class));
+        // It went down the dedupe-and-retry path instead.
+        verify(duplicated).aggregate(anyList());
+    }
+
+    /**
+     * {@code IndexKeySpecsConflict} (86) is how current servers report the case
+     * that matters most: an earlier release's index on the same key under the same
+     * auto-generated name, differing only in options. A review of this change
+     * suggested handling 85 alone; the real-server test in
+     * {@code datastore.mongo.MongoDeploymentStorageTest} showed that would have
+     * left the destructive index in place on every current MongoDB.
+     */
+    @Test
+    @DisplayName("an 86 on our own key pattern (same name, different options) is dropped and rebuilt")
+    void rebuildsOnAKeySpecsConflictOverOurOwnKey() {
+        MongoDatabase database = mock(MongoDatabase.class);
+        MongoCollection<Document> stale = mock(MongoCollection.class);
+        when(database.getCollection("deployments")).thenReturn(stale);
+
+        MongoCommandException keySpecsConflict = mock(MongoCommandException.class);
+        when(keySpecsConflict.getErrorCode()).thenReturn(86);
+        when(stale.createIndex(any(Bson.class), any(IndexOptions.class)))
+                .thenThrow(keySpecsConflict)
+                .thenReturn("environment_1_agentId_1_agentVersion_1");
+        stubIndexes(stale, List.of(ID_INDEX, index("environment_1_agentId_1_agentVersion_1", DEPLOYMENT_KEY_PATTERN)));
+
+        assertDoesNotThrow(() -> new MongoDeploymentStorage(database, documentBuilder));
+
+        verify(stale).dropIndex("environment_1_agentId_1_agentVersion_1");
+        verify(stale, times(2)).createIndex(any(Bson.class), any(IndexOptions.class));
+    }
+
+    /**
+     * 86 also means an index of this name on a <em>different</em> key pattern —
+     * someone else's index. Nothing sits on our key, so nothing of ours is stale,
+     * and the other index must not be dropped; the conflict goes the ordinary
+     * failure path and is reported.
+     */
+    @Test
+    @DisplayName("an 86 over some other key pattern drops nothing")
+    void doesNotDropSomeoneElsesIndexOnAKeySpecsConflict() {
+        MongoDatabase database = mock(MongoDatabase.class);
+        MongoCollection<Document> collection = mock(MongoCollection.class);
+        when(database.getCollection("deployments")).thenReturn(collection);
+
+        MongoCommandException keySpecsConflict = mock(MongoCommandException.class);
+        when(keySpecsConflict.getErrorCode()).thenReturn(86);
+        when(collection.createIndex(any(Bson.class), any(IndexOptions.class))).thenThrow(keySpecsConflict);
+        stubIndexes(collection, List.of(ID_INDEX, index("environment_1_agentId_1_agentVersion_1", new Document("tenant", 1))));
+        stubAggregate(collection, List.of());
+
+        assertDoesNotThrow(() -> new MongoDeploymentStorage(database, documentBuilder));
+
+        verify(collection, never()).dropIndex(anyString());
+        verify(collection, never()).dropIndex(any(Bson.class));
+    }
+
+    /**
+     * MongoDB allows two indexes on one key pattern when their names and options
+     * differ, which is the shape an installation lands in if the partial index was
+     * ever built beside the old unrestricted one. Dropping whichever the server
+     * happened to list first could drop the good one and leave the conflict
+     * standing, so the rebuild would fail and the destructive index would survive.
+     */
+    @Test
+    @DisplayName("every index on the deployment key is dropped, not the first one listed")
+    void dropsEveryIndexOnTheDeploymentKey() {
+        MongoDatabase database = mock(MongoDatabase.class);
+        MongoCollection<Document> collection = mock(MongoCollection.class);
+        when(database.getCollection("deployments")).thenReturn(collection);
+
+        MongoCommandException keySpecsConflict = mock(MongoCommandException.class);
+        when(keySpecsConflict.getErrorCode()).thenReturn(86);
+        when(collection.createIndex(any(Bson.class), any(IndexOptions.class)))
+                .thenThrow(keySpecsConflict)
+                .thenReturn("environment_1_agentId_1_agentVersion_1");
+        stubIndexes(collection, List.of(ID_INDEX,
+                index("a_custom_name", DEPLOYMENT_KEY_PATTERN),
+                index("environment_1_agentId_1_agentVersion_1", DEPLOYMENT_KEY_PATTERN)));
+
+        assertDoesNotThrow(() -> new MongoDeploymentStorage(database, documentBuilder));
+
+        verify(collection).dropIndex("a_custom_name");
+        verify(collection).dropIndex("environment_1_agentId_1_agentVersion_1");
+        verify(collection, times(2)).createIndex(any(Bson.class), any(IndexOptions.class));
+    }
+
+    /**
+     * The case that made dropping by key pattern alone unsafe: an index of some
+     * other key holds the name this one would be given, while a perfectly good
+     * deployment-key index exists under a name of its own. Dropping ours removes a
+     * working constraint and still does not get past the name, so nothing is
+     * dropped and the conflict is reported.
+     */
+    @Test
+    @DisplayName("nothing is dropped when a different key holds the name ours would be given")
+    void dropsNothingWhenTheGeneratedNameBelongsToAnotherKey() {
+        MongoDatabase database = mock(MongoDatabase.class);
+        MongoCollection<Document> collection = mock(MongoCollection.class);
+        when(database.getCollection("deployments")).thenReturn(collection);
+
+        MongoCommandException keySpecsConflict = mock(MongoCommandException.class);
+        when(keySpecsConflict.getErrorCode()).thenReturn(86);
+        when(collection.createIndex(any(Bson.class), any(IndexOptions.class))).thenThrow(keySpecsConflict);
+        stubIndexes(collection, List.of(ID_INDEX,
+                index("environment_1_agentId_1_agentVersion_1", new Document("tenant", 1)),
+                index("our_partial_deployment_key", DEPLOYMENT_KEY_PATTERN)));
+        stubAggregate(collection, List.of());
+
+        assertDoesNotThrow(() -> new MongoDeploymentStorage(database, documentBuilder));
+
+        verify(collection, never()).dropIndex(anyString());
+        verify(collection, never()).dropIndex(any(Bson.class));
+    }
+
+    private static final Document DEPLOYMENT_KEY_PATTERN = new Document("environment", 1).append("agentId", 1).append("agentVersion", 1);
+    private static final Document ID_INDEX = index("_id_", new Document("_id", 1));
+
+    private static Document index(String name, Document key) {
+        return new Document("name", name).append("key", key);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void stubIndexes(MongoCollection<Document> collection, List<Document> indexes) {
+        ListIndexesIterable<Document> iterable = mock(ListIndexesIterable.class);
+        when(collection.listIndexes()).thenReturn(iterable);
+        MongoCursor<Document> cursor = mock(MongoCursor.class);
+        doReturn(cursor).when(iterable).iterator();
+
+        OngoingStubbing<Boolean> hasNext = when(cursor.hasNext());
+        for (int i = 0; i < indexes.size(); i++) {
+            hasNext = hasNext.thenReturn(true);
+        }
+        hasNext.thenReturn(false);
+        if (!indexes.isEmpty()) {
+            OngoingStubbing<Document> next = when(cursor.next());
+            for (Document index : indexes) {
+                next = next.thenReturn(index);
+            }
+        }
     }
 
     /**

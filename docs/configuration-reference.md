@@ -398,8 +398,8 @@ These run once against an existing database and then stay off.
 
 | Property | Default | Description |
 |---|---|---|
-| `eddi.migration.v6-rename.enabled` | `false` | Rewrite v5 resource URIs to v6 spellings |
-| `eddi.migration.v6-qute.enabled` | `false` | Convert Thymeleaf templates to Qute |
+| `eddi.migration.v6-rename.enabled` | `false` | Rewrite v5 resource URIs to v6 spellings, and rename the v5 collections (`bots` → `agents`, …). While this is on and has not completed, the ten-second deployment sweep is **parked**: before the rename the agent configs are still under their v5 names, so the sweep would read every deployed agent as deleted and retire its deployment row. Nothing is deployed or reconciled until the migration records completion, so a run that keeps failing shows as agents that never come back — read the migration's own ERROR line for why |
+| `eddi.migration.v6-qute.enabled` | `false` | Convert Thymeleaf templates to Qute. A document whose template cannot be converted is logged with its collection and id and left unchanged, and the migration is then *not* recorded as complete — so it runs again on the next start, and keeps doing so until that document is fixed or removed |
 | `eddi.migration.backupBeforeWrite` | `true` | Snapshot documents into `.history` collections before rewriting. **Leave this on** |
 | `eddi.migration.skipConversationMemories` | `false` | Skip conversation memories, which are the bulk of the data and rarely need rewriting |
 
