@@ -220,8 +220,30 @@ gh pr view <n> --json reviews --jq '.reviews[] | select(.body != "") | "=== " + 
   | grep -inE 'nitpick|outside diff|duplicate|suppressed|previously missed|minor|major|critical|CAUTION'
 ```
 
-Read every **human** review body in full regardless. Close the un-threaded findings with
-**one PR comment** listing each and its disposition.
+Read every **human** review body in full regardless.
+
+**A nitpick is a finding.** It gets the same treatment as a threaded one: fix it, or refute it
+with a reason. *"It's only a nitpick"* is not a disposition — if you are not acting on it, say
+what you decided and why, in the same words you would use for anything else. These are the
+findings most likely to be quietly dropped precisely because nothing blocks on them, and the
+reason this skill's own description says "including nitpicks".
+
+The full set of body-only headings to grep — they change, so match loosely:
+
+```bash
+gh pr view <n> --json reviews --jq '.reviews[] | select(.body != "") | .body' \
+  | grep -inE 'nitpick|outside diff|duplicate comments|additional comments|suppressed|previously missed'
+```
+
+**Zero nitpicks does not mean zero nitpicks existed.** CodeRabbit's `profile` decides whether
+it raises them at all: the default **`chill`** surfaces significant issues and deliberately not
+style-level ones, while `assertive` is the profile that produces nitpicks. Each review body
+states the profile it ran under. Before reporting "no nitpicks", check which profile ran — and
+if it was `chill`, report *that*, not a clean sweep.
+
+Close the un-threaded findings with **one PR comment** listing each and its disposition —
+standalone, not folded into a reply on some other thread. They have no thread of their own, so
+an answer buried elsewhere is invisible to anyone reading the conversation.
 
 ### 4c. Issue-level comments, the PR body, and external checks
 
