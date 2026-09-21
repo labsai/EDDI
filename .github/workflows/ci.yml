@@ -162,6 +162,16 @@ jobs:
               - 'docs/kubernetes.md'
               - 'README.md'
               - 'docs/security.md'
+              # Same shape, one guard along. ChangelogRotationTest owns the live
+              # file's size cap and the Archive index, and ChangelogFragmentTest
+              # owns the shape of a pending fragment — and both of them grade
+              # files that a PR very often changes ALONE. A changelog-only PR is
+              # the normal case for the nightly collation job, so without these
+              # entries the one PR that rewrites the whole changelog is the one
+              # PR that never runs the tests guarding it.
+              - 'docs/changelog.md'
+              - 'docs/changelog.d/**'
+              - 'docs/changelog/**'
             # Gates the ui-* jobs. The workflow is listed so that a CI-only change
             # still runs the UI jobs it may have broken. pom.xml is deliberately not:
             # the ui-* jobs never run Maven, and the pom's UI wiring (node.version,
@@ -218,6 +228,66 @@ jobs:
           if [ "${{ steps.result.outputs.code }}" = "false" ]; then
             echo "- ⏭️ Skipping build/test/docker (docs/licenses/config-only change)" >> "$GITHUB_STEP_SUMMARY"
           fi
+
+  # ─── Job 0a2: Changelog Discipline ──────────────────────────────
+  # Entries belong in docs/changelog.d/ as their own file, never at the top of
+  # docs/changelog.md (AGENTS.md §2 rule 8). The whole point is that two
+  # branches adding an entry do not touch the same bytes, and that only holds
+  # while everyone actually does it — one branch inserting at the old spot
+  # conflicts with the nightly collation PR and with every other branch that
+  # does the same.
+  #
+  # This checks for ADDED entry headings and ADDED register rows, not for any
+  # change to the file. Editing the header, fixing a typo in a past entry or
+  # rotating an archive are all legitimate and stay allowed; adding an entry in
+  # place is the single thing that conflicts.
+  changelog-discipline:
+    name: Changelog Discipline
+    runs-on: ubuntu-latest
+    # The collation branch is the one place an entry is SUPPOSED to appear in
+    # docs/changelog.md — that is the job's entire output.
+    if: github.event_name == 'pull_request' && github.head_ref != 'chore/collate-changelog'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+
+      - name: Check for entries added in place
+        env:
+          BASE: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "$BASE"
+          DIFF=$(git diff "origin/${BASE}...HEAD" -- docs/changelog.md 'docs/changelog/**')
+
+          # '^+## ...(YYYY-MM-DD)' is an entry; '^+| YYYY-MM-DD |' is a row
+          # appended to the Decision Log or Regression Notes table. Both are
+          # fixed insertion points in a shared file.
+          ENTRIES=$(printf '%s\n' "$DIFF" | grep -E '^\+## .*\([0-9]{4}-[0-9]{2}-[0-9]{2}\)' || true)
+          ROWS=$(printf '%s\n' "$DIFF" | grep -E '^\+\| *[0-9]{4}-[0-9]{2}-[0-9]{2} *\|' || true)
+
+          if [ -z "$ENTRIES" ] && [ -z "$ROWS" ]; then
+            echo "### ✅ No changelog entries added in place" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          {
+            echo "### ❌ Changelog entry added directly to docs/changelog.md"
+            echo ""
+            echo "Move it into a new file \`docs/changelog.d/YYYY-MM-DD-<slug>.md\`, with the slug unique"
+            echo "to this branch, and give every relative link one extra \`../\`. Register rows go in a"
+            echo "fenced \`decision-log\` or \`regression-note\` block inside that file. The nightly job"
+            echo "folds it in — see \`docs/changelog.d/README.md\`."
+            echo ""
+            echo "This is not style: the top of \`changelog.md\` and the bottom of its two tables are fixed"
+            echo "insertion points, so every branch that writes there conflicts with every other one."
+            echo ""
+            echo '```diff'
+            printf '%s\n%s\n' "$ENTRIES" "$ROWS" | grep -v '^$' | head -20
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
 
   # ─── Job 0b: Shell Lint ─────────────────────────────────────────
   # install.sh is 55 KB, install.ps1 is 40 KB, and they are what the README tells
