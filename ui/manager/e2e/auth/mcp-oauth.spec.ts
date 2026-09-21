@@ -132,10 +132,14 @@ test.describe("MCP over OAuth — a client signs itself in and calls a tool", ()
 
     // What #805 validates. Without the audience mapper on eddi-mcp this token
     // would authenticate everywhere else and be refused here.
+    //
+    // `aud` is `string | string[]` (RFC 7519 §4.1.3) and Keycloak emits the bare
+    // string when there is exactly one audience, which is this token's shape.
+    const audiences = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
     expect(
-      payload.aud,
+      audiences,
       "the token carries no eddi-backend audience, so quarkus.oidc.token.audience will refuse it",
-    ).toEqual(expect.arrayContaining(["eddi-backend"]));
+    ).toContain("eddi-backend");
 
     // And the roles, which is the failure a self-registered client would hit.
     const roles = (payload.realm_access as { roles?: string[] } | undefined)?.roles ?? [];
