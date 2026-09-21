@@ -120,6 +120,7 @@ Full narrative and metrics: [scheduling.md → Deployment Configuration](schedul
 | `eddi.schedule.fire-timeout` | `5m` | How long one conversation fire may run before it is abandoned as failed. **Keep it at or below `lease-timeout`** — past the lease another instance may reclaim the schedule regardless |
 | `eddi.schedule.fire-log-retention` | `90d` | Fire logs older than this are deleted by a periodic sweep. `0` keeps everything — a 60-second heartbeat alone writes ~525,600 rows a year |
 | `eddi.schedule.fire-log-prune-interval` | `1h` | How often that sweep runs. The `DELETE` is by timestamp and therefore idempotent, so it needs no cluster claim |
+| `eddi.rag.ingestion.schedule-repair.enabled` | `true` | At startup, gives a next fire time to any RAG ingestion schedule stored without one. Such a row reads back enabled and can never be selected by the poller, so it looks scheduled and never runs. The sweep only touches rows that have no fire time at all, so it is a no-op on every boot after the first — see [rag.md](rag.md#ingestion-sources) |
 
 ---
 

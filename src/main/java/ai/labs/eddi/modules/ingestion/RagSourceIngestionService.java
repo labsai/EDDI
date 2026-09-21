@@ -14,10 +14,14 @@ import ai.labs.eddi.modules.ingestion.IIngestionStateStore.IngestionRun;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline.IngestionReport;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline.Mode;
 import ai.labs.eddi.utils.LogSanitizer;
+import io.quarkus.runtime.StartupEvent;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import java.time.Instant;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
@@ -44,10 +48,26 @@ public class RagSourceIngestionService {
     /** Scheduled runs are not a user's action. */
     private static final String SCHEDULE_USER_ID = "system:scheduler";
 
+    /**
+     * How many schedules the startup repair reads per page, and how many pages it
+     * is willing to walk. Both stores page this listing deterministically (sorted
+     * by {@code createdAt} then id), so the walk cannot skip or repeat a row.
+     */
+    private static final int REPAIR_PAGE_SIZE = 500;
+
+    private static final int REPAIR_MAX_PAGES = 40;
+
     private final IngestionPipeline pipeline;
     private final IIngestionStateStore stateStore;
     private final IScheduleStore scheduleStore;
     private final IRagStore ragStore;
+
+    /**
+     * Whether the startup repair below runs. There to be turned off, not tuned —
+     * see {@link #repairUnarmedSchedules()}.
+     */
+    @ConfigProperty(name = "eddi.rag.ingestion.schedule-repair.enabled", defaultValue = "true")
+    boolean scheduleRepairEnabled = true;
 
     @Inject
     public RagSourceIngestionService(IngestionPipeline pipeline, IIngestionStateStore stateStore,
@@ -262,9 +282,102 @@ public class RagSourceIngestionService {
         }
     }
 
-    /** The id a source is addressed and keyed by. */
+    void onStartup(@Observes StartupEvent event) {
+        repairUnarmedSchedules();
+    }
+
+    /**
+     * Arms the ingestion schedules that were stored before their creator computed a
+     * {@code nextFire}.
+     *
+     * <p>
+     * Fixing {@code buildSchedule} only helps schedules written after the fix. The
+     * rows already in the database read back {@code enabled=true} with a null
+     * {@code nextFire}, which no poll can ever match, so without this an operator's
+     * nightly crawl stays dead until somebody happens to re-save the knowledge base
+     * — and nothing tells them to.
+     *
+     * <p>
+     * Safe to run on every boot and on every node of a cluster: it only touches
+     * rows that are enabled, marked as ingestion schedules, carry a cron and have
+     * no {@code nextFire} at all, so after the first pass nothing matches. Two
+     * nodes repairing the same row compute the same next occurrence and write the
+     * same value. Arming is done through {@code setScheduleEnabled}, the existing
+     * store-agnostic re-arm, rather than a new store method.
+     *
+     * <p>
+     * Failures are logged, never thrown: a repair that cannot read the store must
+     * not stop the application from starting.
+     */
+    void repairUnarmedSchedules() {
+        if (!scheduleRepairEnabled) {
+            return;
+        }
+        int repaired = 0;
+        try {
+            for (int page = 0; page < REPAIR_MAX_PAGES; page++) {
+                List<ScheduleConfiguration> batch = scheduleStore.readAllSchedules(REPAIR_PAGE_SIZE, page * REPAIR_PAGE_SIZE, true);
+                if (batch == null || batch.isEmpty()) {
+                    break;
+                }
+                for (ScheduleConfiguration schedule : batch) {
+                    if (armIfUnarmed(schedule)) {
+                        repaired++;
+                    }
+                }
+                if (batch.size() < REPAIR_PAGE_SIZE) {
+                    break;
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.errorf(e, "Could not check stored ingestion schedules for a missing next fire time — "
+                    + "any that were stored unarmed will not run until their knowledge base is saved again");
+            return;
+        }
+        if (repaired > 0) {
+            LOGGER.warnf("Armed %d ingestion schedule(s) that had been stored without a next fire time and "
+                    + "could never have run", repaired);
+        }
+    }
+
+    /** @return whether this schedule was one of the broken ones, and was armed */
+    private boolean armIfUnarmed(ScheduleConfiguration schedule) {
+        if (schedule == null || schedule.getId() == null
+                || !RagIngestionSchedules.isIngestionSchedule(schedule.getMetadata())
+                || !schedule.isEnabled() || schedule.getNextFire() != null) {
+            return false;
+        }
+        String cron = schedule.getCronExpression();
+        if (cron == null || cron.isBlank()) {
+            // No cron and no nextFire is a schedule that was never meant to fire on
+            // its own; inventing a time for it would start crawling a third party
+            // on a cadence nobody configured.
+            return false;
+        }
+        try {
+            Instant nextFire = RagIngestionSchedules.firstFire(cron);
+            scheduleStore.setScheduleEnabled(schedule.getId(), true, nextFire);
+            return true;
+        } catch (IllegalArgumentException | IResourceStore.ResourceStoreException
+                | IResourceStore.ResourceNotFoundException e) {
+            // One unrepairable row must not stop the sweep: the next one may be the
+            // schedule somebody is waiting on.
+            LOGGER.errorf(e, "Ingestion schedule %s has no next fire time and could not be given one — "
+                    + "it will not run", LogSanitizer.sanitize(schedule.getId()));
+            return false;
+        }
+    }
+
+    /**
+     * The id a source is addressed and keyed by.
+     *
+     * <p>
+     * Delegates rather than repeating the rule: ingestion state, the schedule name
+     * and the run reports all have to agree on it, and two copies of "id, or name
+     * when it has none" is how they stop agreeing.
+     */
     public static String sourceIdOf(IngestionSource source) {
-        return source.getId() == null || source.getId().isBlank() ? source.getName() : source.getId();
+        return source.effectiveId();
     }
 
     private void deleteScheduleQuietly(String ragConfigId, String sourceId) {
@@ -293,8 +406,15 @@ public class RagSourceIngestionService {
         schedule.setName(name);
         schedule.setTriggerType(ScheduleConfiguration.TriggerType.CRON);
         schedule.setCronExpression(source.getCron());
+        schedule.setTimeZone(RagIngestionSchedules.ZONE.getId());
         schedule.setEnabled(true);
         schedule.setUserId(SCHEDULE_USER_ID);
+        // Armed here, exactly as every other creator that writes to the store
+        // directly does (RestGroupWorkspace, ConversationHitlService,
+        // GroupHitlCoordinator, HitlCrashRecoveryObserver). Neither store's
+        // createSchedule computes one, and findDueSchedules never matches a null
+        // nextFire, so an unarmed row is stored looking enabled and never fires.
+        schedule.setNextFire(RagIngestionSchedules.firstFire(source.getCron()));
         schedule.setMetadata(RagIngestionSchedules.metadata(ragConfigId, version, sourceId));
         return schedule;
     }

@@ -25,6 +25,7 @@ import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
 import ai.labs.eddi.configs.output.IOutputStore;
 import ai.labs.eddi.configs.propertysetter.IPropertySetterStore;
 import ai.labs.eddi.configs.rag.IRagStore;
+import ai.labs.eddi.modules.ingestion.RagIngestionSchedules;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import ai.labs.eddi.configs.rules.IRuleSetStore;
 import ai.labs.eddi.configs.rules.IRestRuleSetStore;
@@ -1191,8 +1192,9 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         }).toList();
     }
 
+    // Visible for testing
     /** Assigns source ids and validates, exactly as the REST create does. */
-    private void prepareImportedRag(RagConfiguration config) {
+    void prepareImportedRag(RagConfiguration config) {
         if (config == null || config.getSources() == null) {
             return;
         }
@@ -1205,6 +1207,12 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         // produce a knowledge base whose runs fail for ever, and the failure would
         // only be visible in a run history nobody is watching yet.
         config.validate();
+        // The same check RestRagStore.prepareForWrite runs, and for the same
+        // reason: validate() does not look at the cron, so an archive could store
+        // an expression POST /ragstore/rags refuses — and the schedule built from
+        // it either cannot be armed at all or is armed and never matches, while
+        // every screen shows the source as scheduled.
+        RagIngestionSchedules.requireValidCrons(config);
     }
 
     private void syncImportedRagSchedules(URI created, RagConfiguration config) {
@@ -1827,6 +1835,13 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      * ({@code ScheduleFireExecutor} → {@code DreamService.processScheduledFire},
      * which only falls back to the current version when the field is 0), so every
      * fire would be rejected, retried and eventually dead-lettered.
+     * <p>
+     * Clearing {@code nextFire} is safe here <em>only because</em> every write on
+     * this path goes through {@link IRestScheduleStore}, which arms the schedule
+     * again before it is stored. Nothing in either store computes one: a creator
+     * that writes to {@link IScheduleStore} directly has to arm its own schedule,
+     * and one that did not — the RAG ingestion sync — stored rows that read back
+     * enabled and could never be selected by {@code findDueSchedules}.
      *
      * @param importerPrincipal
      *            the authenticated importer, or {@code null} when there is none —

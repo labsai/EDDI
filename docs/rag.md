@@ -213,14 +213,24 @@ one table while retrieval read another.
 }
 ```
 
-Every field has a default; omitting `settings` entirely means "all defaults". `excludePatterns` are
-globs matched against the URL **path** (`*` stays inside one segment, `**` crosses them).
+**Three fields have no default and are rejected when missing:** `name`, the `web` block, and its
+`startUrl`. Everything else may be omitted — `type` defaults to `web` (the only type implemented),
+`id` is generated and then never changes, and omitting `settings` entirely means "all defaults". Two
+optional fields are simply absent rather than defaulted: without `cron` the source runs only when
+somebody asks, and without `costPerThousandSegments` a run reports no dollar figure.
+`excludePatterns` are globs matched against the URL **path** (`*` stays inside one segment, `**`
+crosses them).
 
 **`cron` is a standard five-field expression** — `min hour dom month dow` — the same form the schedule
 API takes. Six- and seven-field Quartz expressions with a seconds column are **refused when the
 knowledge base is saved**, with a 400 naming the source: stored, they would have become a schedule
-that never fires while every screen showed the source as scheduled. Omit `cron` for a source that only
-runs when someone asks.
+that never fires while every screen showed the source as scheduled. So is an expression that parses
+but can never match a date (`0 0 30 2 *`). The same check runs when a knowledge base arrives in an
+import archive, which used to be the way around it. Omit `cron` for a source that only runs when
+someone asks.
+
+The cron is read in **UTC**, which is written onto the schedule rather than left to the deployment's
+`eddi.schedule.default-timezone`, so the first run and every later one are computed the same way.
 
 #### Every field
 
@@ -234,10 +244,10 @@ runs when someone asks.
 | `pathPrefix` | `/` | Only paths under this prefix are ingested |
 | `maxDepth` | `3` | How many links from the seed |
 | `maxPages` | `200` | Pages ingested per run |
-| `excludePatterns` | none | Globs matched against the path |
+| `excludePatterns` | empty | Globs matched against the path |
 | `requestDelayMs` | `500` | Politeness delay between requests to one host. A `Crawl-delay` in robots.txt wins when it is slower |
 | `timeoutSeconds` | `15` | Per-request timeout. The body gets a multiple of it before it is cut off |
-| `userAgent` | EDDI's default | Sent on every request, and matched against robots.txt groups |
+| `userAgent` | `EDDI-Crawler/1.0 (+https://eddi.labs.ai)` | Sent on every request, and matched against robots.txt groups |
 | `respectRobots` | `true` | Honour robots.txt, its `Crawl-delay` and its `Sitemap` entries |
 
 `settings` — what to do with what was crawled:

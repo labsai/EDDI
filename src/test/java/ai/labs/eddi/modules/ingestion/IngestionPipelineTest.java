@@ -151,6 +151,35 @@ class IngestionPipelineTest {
         }
 
         @Test
+        @DisplayName("every report names the source the way everything else addresses it")
+        void reportsNameTheSource() {
+            // A source that arrived without an id — a ZIP import writes one, because
+            // that path never passes the REST layer that assigns ids — is keyed,
+            // scheduled and addressed by its NAME. The reports used getId(), so the
+            // run history, the REST answer and the fire log all said null.
+            var idLess = source();
+            idLess.setId(null);
+
+            var disabled = source();
+            disabled.setId(null);
+            disabled.setEnabled(false);
+            IngestionReport skipped = pipelineFor(new FakeSite())
+                    .run(KB_RESOURCE_ID, knowledgeBase(), disabled, Mode.INGEST);
+            assertEquals(SOURCE_NAME, skipped.sourceId(), "a skipped run must still say which source");
+
+            RagConfiguration nameless = knowledgeBase();
+            nameless.setName("  ");
+            IngestionReport failed = pipelineFor(new FakeSite())
+                    .run(KB_RESOURCE_ID, nameless, idLess, Mode.INGEST);
+            assertEquals(SOURCE_NAME, failed.sourceId(), "a failed run must still say which source");
+
+            stateStore.startRun(IngestionPipeline.stateKey(KB_RESOURCE_ID, idLess));
+            IngestionReport busy = pipelineFor(new FakeSite())
+                    .run(KB_RESOURCE_ID, knowledgeBase(), idLess, Mode.INGEST);
+            assertEquals(SOURCE_NAME, busy.sourceId(), "\"already running\" must still say which source");
+        }
+
+        @Test
         @DisplayName("scopes ingestion state per knowledge base, so two can crawl the same site")
         void stateIsScopedPerKnowledgeBase() {
             assertFalse(IngestionPipeline.stateKey("kb-a", source())

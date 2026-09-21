@@ -18,13 +18,21 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.time.Instant;
+import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -245,6 +253,191 @@ class RagSourceIngestionServiceTest {
             verify(pipeline).run(anyString(), any(), used.capture(), eq(Mode.PREVIEW));
             assertEquals(null, used.getValue().getCron());
             assertEquals(SOURCE_ID, used.getValue().getId(), "state must still be keyed the same way");
+        }
+    }
+
+    /**
+     * The rows {@code createSchedule} was handed, and what {@code findDueSchedules}
+     * would make of them.
+     *
+     * <p>
+     * The filter below is the one both stores run, transcribed: {@code enabled =
+     * true AND nextFire <= now AND fireStatus = PENDING}. It is spelled out here
+     * rather than mocked away because the whole defect lives in that comparison — a
+     * schedule created without a {@code nextFire} is stored looking enabled and is
+     * never selected, on either backend, for ever.
+     */
+    private static final class StoredSchedules {
+
+        private final List<ScheduleConfiguration> rows = new ArrayList<>();
+
+        String record(ScheduleConfiguration schedule) {
+            schedule.setId(UUID.randomUUID().toString());
+            rows.add(schedule);
+            return schedule.getId();
+        }
+
+        ScheduleConfiguration only() {
+            assertEquals(1, rows.size(), "expected exactly one schedule to have been created");
+            return rows.get(0);
+        }
+
+        List<ScheduleConfiguration> due(Instant now) {
+            return rows.stream()
+                    .filter(row -> row.isEnabled()
+                            && row.getNextFire() != null
+                            && !row.getNextFire().isAfter(now)
+                            && row.getFireStatus() == ScheduleConfiguration.FireStatus.PENDING)
+                    .toList();
+        }
+    }
+
+    private StoredSchedules recordingStore() throws Exception {
+        var stored = new StoredSchedules();
+        when(scheduleStore.createSchedule(any()))
+                .thenAnswer(invocation -> stored.record(invocation.getArgument(0)));
+        return stored;
+    }
+
+    @Nested
+    @DisplayName("arming the schedule")
+    class Arming {
+
+        @Test
+        @DisplayName("a source with a cron is due once its fire time arrives")
+        void scheduledSourceBecomesDue() throws Exception {
+            var stored = recordingStore();
+
+            service.syncSchedules(KB_ID, 1, knowledgeBase(source("0 2 * * *")), Set.of());
+
+            ScheduleConfiguration schedule = stored.only();
+            Instant fireTime = schedule.getNextFire();
+            assertNotNull(fireTime, "a schedule stored without a next fire time can never be selected by a poll");
+            assertTrue(stored.due(fireTime.minusSeconds(60)).isEmpty(), "it must not be due before its time");
+            assertEquals(List.of(schedule), stored.due(fireTime),
+                    "the schedule must come back from findDueSchedules once its time arrives");
+            assertEquals(List.of(schedule), stored.due(fireTime.plusSeconds(3600)),
+                    "a poll that ran late must still find it");
+        }
+
+        @Test
+        @DisplayName("the fire time is the cron read in UTC, and the schedule says so")
+        void armedInUtc() throws Exception {
+            // The poller re-arms in resolveTimeZone(schedule.getTimeZone()), which falls
+            // back to eddi.schedule.default-timezone. Leaving the zone unset would mean
+            // the first fire and every later one were computed in different zones on any
+            // deployment that sets it.
+            var stored = recordingStore();
+
+            service.syncSchedules(KB_ID, 1, knowledgeBase(source("0 2 * * *")), Set.of());
+
+            ScheduleConfiguration schedule = stored.only();
+            assertEquals("UTC", schedule.getTimeZone());
+            var fireTime = schedule.getNextFire().atZone(ZoneId.of("UTC"));
+            assertEquals(2, fireTime.getHour());
+            assertEquals(0, fireTime.getMinute());
+            assertTrue(schedule.getNextFire().isAfter(Instant.now()), "the first fire is in the future");
+        }
+
+        @Test
+        @DisplayName("a cron that can never match is refused rather than stored unfired")
+        void unsatisfiableCronIsRefused() throws Exception {
+            // "0 0 30 2 *" parses — CronParser.validate accepts it — and matches no day
+            // in any year. Stored, it is a source that shows as scheduled for ever.
+            var source = source("0 0 30 2 *");
+
+            assertThrows(IllegalArgumentException.class,
+                    () -> service.syncSchedules(KB_ID, 1, knowledgeBase(source), Set.of()));
+            verify(scheduleStore, never()).createSchedule(any());
+        }
+    }
+
+    @Nested
+    @DisplayName("startup repair of schedules stored before they were armed")
+    class StartupRepair {
+
+        private ScheduleConfiguration unarmedIngestionSchedule() {
+            var schedule = new ScheduleConfiguration();
+            schedule.setId("sched-1");
+            schedule.setName(RagIngestionSchedules.scheduleName(KB_ID, SOURCE_ID));
+            schedule.setTriggerType(ScheduleConfiguration.TriggerType.CRON);
+            schedule.setCronExpression("0 2 * * *");
+            schedule.setEnabled(true);
+            schedule.setMetadata(RagIngestionSchedules.metadata(KB_ID, 1, SOURCE_ID));
+            return schedule;
+        }
+
+        private void storeHolds(ScheduleConfiguration... schedules) throws Exception {
+            when(scheduleStore.readAllSchedules(anyInt(), anyInt(), anyBoolean()))
+                    .thenAnswer(invocation -> (int) invocation.getArgument(1) == 0
+                            ? List.of(schedules)
+                            : List.of());
+        }
+
+        @Test
+        @DisplayName("an ingestion schedule with no fire time is given one")
+        void armsTheBrokenRow() throws Exception {
+            storeHolds(unarmedIngestionSchedule());
+
+            service.repairUnarmedSchedules();
+
+            ArgumentCaptor<Instant> fireTime = ArgumentCaptor.forClass(Instant.class);
+            verify(scheduleStore).setScheduleEnabled(eq("sched-1"), eq(true), fireTime.capture());
+            assertNotNull(fireTime.getValue());
+            assertEquals(2, fireTime.getValue().atZone(ZoneId.of("UTC")).getHour());
+        }
+
+        @Test
+        @DisplayName("running it again changes nothing, because nothing is unarmed any more")
+        void isIdempotent() throws Exception {
+            var repaired = unarmedIngestionSchedule();
+            repaired.setNextFire(Instant.now().plusSeconds(3600));
+            storeHolds(repaired);
+
+            service.repairUnarmedSchedules();
+
+            verify(scheduleStore, never()).setScheduleEnabled(anyString(), anyBoolean(), any());
+        }
+
+        @Test
+        @DisplayName("schedules that are not this feature's are left alone")
+        void leavesOtherSchedulesAlone() throws Exception {
+            var foreign = unarmedIngestionSchedule();
+            foreign.setMetadata(Map.of("hitlType", "hitl_timeout"));
+            var disabled = unarmedIngestionSchedule();
+            disabled.setId("sched-2");
+            disabled.setEnabled(false);
+            var cronless = unarmedIngestionSchedule();
+            cronless.setId("sched-3");
+            cronless.setCronExpression(null);
+            storeHolds(foreign, disabled, cronless);
+
+            service.repairUnarmedSchedules();
+
+            verify(scheduleStore, never()).setScheduleEnabled(anyString(), anyBoolean(), any());
+        }
+
+        @Test
+        @DisplayName("a store that cannot be read does not stop the application starting")
+        void survivesAStoreFailure() throws Exception {
+            when(scheduleStore.readAllSchedules(anyInt(), anyInt(), anyBoolean()))
+                    .thenThrow(new IResourceStore.ResourceStoreException("nope"));
+
+            service.repairUnarmedSchedules();
+
+            verify(scheduleStore, never()).setScheduleEnabled(anyString(), anyBoolean(), any());
+        }
+
+        @Test
+        @DisplayName("the sweep can be turned off")
+        void canBeDisabled() throws Exception {
+            service.scheduleRepairEnabled = false;
+            storeHolds(unarmedIngestionSchedule());
+
+            service.repairUnarmedSchedules();
+
+            verify(scheduleStore, never()).readAllSchedules(anyInt(), anyInt(), anyBoolean());
+            assertFalse(service.scheduleRepairEnabled);
         }
     }
 
