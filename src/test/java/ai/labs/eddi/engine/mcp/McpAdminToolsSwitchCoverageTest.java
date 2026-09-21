@@ -14,6 +14,8 @@ import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
 import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
+import ai.labs.eddi.configs.rag.IRestRagStore;
+import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
 import ai.labs.eddi.configs.rules.IRestRuleSetStore;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
@@ -94,6 +96,8 @@ class McpAdminToolsSwitchCoverageTest {
     @Mock
     private IRestDictionaryStore dictionaryStore;
     @Mock
+    private IRestRagStore ragStore;
+    @Mock
     private IRestAgentStore restAgentStore;
     @Mock
     private IRestWorkflowStore workflowStore;
@@ -120,6 +124,7 @@ class McpAdminToolsSwitchCoverageTest {
         doReturn(outputStore).when(restInterfaceFactory).get(IRestOutputStore.class);
         doReturn(propertySetterStore).when(restInterfaceFactory).get(IRestPropertySetterStore.class);
         doReturn(dictionaryStore).when(restInterfaceFactory).get(IRestDictionaryStore.class);
+        doReturn(ragStore).when(restInterfaceFactory).get(IRestRagStore.class);
         doReturn(restAgentStore).when(restInterfaceFactory).get(IRestAgentStore.class);
         doReturn(workflowStore).when(restInterfaceFactory).get(IRestWorkflowStore.class);
         doReturn(descriptorStore).when(restInterfaceFactory).get(IRestDocumentDescriptorStore.class);
@@ -203,6 +208,29 @@ class McpAdminToolsSwitchCoverageTest {
             String result = tools.readResource("dictionaries", "id1", 1);
             assertNotNull(result);
             verify(dictionaryStore).readRegularDictionary("id1", 1, "", "", 0, 0);
+        }
+
+        @Test
+        @DisplayName("rag → reads RagConfiguration")
+        void readRag() throws Exception {
+            when(ragStore.readRag("id1", 1)).thenReturn(new RagConfiguration());
+            when(jsonSerialization.serialize(any())).thenReturn("{}");
+            String result = tools.readResource("rag", "id1", 1);
+            assertNotNull(result);
+            verify(ragStore).readRag("id1", 1);
+        }
+
+        @Test
+        @DisplayName("rag is readable but NOT writable — the asymmetry is deliberate")
+        void ragIsReadOnly() throws Exception {
+            // A knowledge base has to be readable for an agent's configuration to
+            // be explainable at all; authoring one (and ingesting into it) is a
+            // separate decision that has not been taken. Pinned so adding the
+            // write cases is a conscious edit rather than a symmetry reflex.
+            assertTrue(tools.updateResource("rag", "id1", 1, "{}").contains("error"));
+            assertTrue(tools.createResource("rag", "{}").contains("error"));
+            assertTrue(tools.deleteResource("rag", "id1", 1, false).contains("error"));
+            verifyNoInteractions(ragStore);
         }
 
         @Test
