@@ -10,6 +10,9 @@ import {
   grantsWriteCapability,
   grantsAgentCreation,
   grantsAgentModification,
+  grantsKnowledgeBaseReads,
+  grantsIngestionStatusReads,
+  grantsKnowledgeBaseAuthoring,
 } from "../tool-scopes";
 
 describe("tool-scopes", () => {
@@ -65,6 +68,56 @@ describe("tool-scopes", () => {
 
     it("can read a specific group in detail, not just its descriptor", () => {
       expect(READ_ENDPOINTS).toContain("GET /groupstore/groups/{id}");
+    });
+
+    it("can inspect a knowledge base by name, by id, and check an ingestion run", () => {
+      // The descriptor listing is the only path from a name ("the FinanzDash
+      // Manual KB") to the id the by-id read needs; the ingestion status is how
+      // "are the documents actually in there?" gets answered without a write.
+      expect(READ_ENDPOINTS).toContain("GET /ragstore/rags/descriptors");
+      expect(READ_ENDPOINTS).toContain("GET /ragstore/rags/{id}");
+      expect(READ_ENDPOINTS).toContain("GET /ragstore/rags/{id}/ingestion/{ingestionId}/status");
+    });
+
+    it("cannot change a knowledge base or ingest into one", () => {
+      // `planning/operator-write-scope-plan.md` §5 excludes the ingest verb by
+      // name; create/update are excluded for the same reason as every other
+      // store that was never argued through.
+      const ragWrites = WRITE_ENDPOINTS.filter((e) => e.includes("/ragstore/"));
+      expect(ragWrites).toEqual([]);
+      expect(grantsKnowledgeBaseAuthoring(endpointsForScope("read_write"))).toBe(false);
+    });
+
+    it("reports knowledge-base reads only when BOTH halves are granted", () => {
+      expect(grantsKnowledgeBaseReads(endpointsForScope("read_only"))).toBe(true);
+      expect(grantsKnowledgeBaseReads(["GET /ragstore/rags/{id}"])).toBe(false);
+      expect(grantsKnowledgeBaseReads(["GET /ragstore/rags/descriptors"])).toBe(false);
+    });
+
+    it("counts every RAG authoring route, duplicate included", () => {
+      // `POST /ragstore/rags/{id}` is duplicateRag — a copy is a new knowledge
+      // base. Missing it would make the prompt tell an operator that CAN create
+      // one that it cannot.
+      for (const write of [
+        "PUT /ragstore/rags/{id}",
+        "POST /ragstore/rags",
+        "POST /ragstore/rags/{id}",
+        "POST /ragstore/rags/{id}/ingest",
+      ]) {
+        expect(grantsKnowledgeBaseAuthoring([...READ_ENDPOINTS, write]), write).toBe(true);
+      }
+      expect(grantsKnowledgeBaseAuthoring(READ_ENDPOINTS)).toBe(false);
+    });
+
+    it("tracks the ingestion-status read on its own endpoint", () => {
+      // Deliberately NOT folded into grantsKnowledgeBaseReads: the two config
+      // reads are a complete capability without it, so requiring all three
+      // would drop the whole section on a deployment missing just this one.
+      // One predicate per claim is what keeps the prompt honest either way.
+      expect(grantsIngestionStatusReads(endpointsForScope("read_only"))).toBe(true);
+      expect(
+        grantsIngestionStatusReads(["GET /ragstore/rags/descriptors", "GET /ragstore/rags/{id}"]),
+      ).toBe(false);
     });
 
     it("has a by-id read for every workflow-extension store it can also write", () => {

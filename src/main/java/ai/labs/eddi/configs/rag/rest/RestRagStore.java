@@ -20,7 +20,11 @@ import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
@@ -96,11 +100,84 @@ public class RestRagStore implements IRestRagStore {
         }
 
         normalizeLegacyChunkStrategy(ragConfiguration);
+        warnOnPlaintextSecrets(ragConfiguration);
 
         try {
             ragConfiguration.validate();
         } catch (IllegalArgumentException e) {
             throw new BadRequestException(e.getMessage(), e);
+        }
+    }
+
+    // Visible for testing
+    /**
+     * Parameter names, in {@code embeddingParameters} and {@code storeParameters},
+     * that hold a credential.
+     * <p>
+     * A vector store's connection parameters are not only API keys: pgvector takes
+     * a database {@code password}, Elasticsearch a {@code password} and an
+     * {@code apiKey}, MongoDB Atlas a {@code connectionString} whose userinfo
+     * carries both.
+     */
+    static final Set<String> SECRET_PARAMETER_NAMES = Set.of("apikey", "password", "connectionstring", "token", "accesstoken",
+            "secretkey", "secretaccesskey", "clientsecret", "privatekey");
+
+    /**
+     * Warns — rather than rejects — when a knowledge base stores a credential in
+     * plaintext.
+     * <p>
+     * The same trade-off {@code RestLlmStore} and
+     * {@code RestChannelIntegrationStore} already made, and for the same reasons: a
+     * plaintext value is returned verbatim by {@code GET /ragstore/rags/{id}} and
+     * lands in exports, but whether a value is a secret is a guess from its key
+     * name, and rejecting would break every existing knowledge base on its next
+     * update — including on the vault-less instances EDDI ships as the default. A
+     * log line naming the parameter is the honest amount of certainty.
+     * <p>
+     * RAG was the one credential-carrying store with no such warning, which is how
+     * a plaintext key here could stay invisible while the equivalent in an LLM
+     * config was flagged. The value itself is never logged.
+     */
+    private static void warnOnPlaintextSecrets(RagConfiguration config) {
+        for (String parameter : plaintextSecretParameters(config)) {
+            LOGGER.warnf("Knowledge base '%s' stores %s in plaintext — it is returned verbatim by "
+                    + "GET /ragstore/rags/{id} and included in exports. Store it in the secrets vault and "
+                    + "reference it as ${vault:<key>} instead; it is resolved at retrieval time.",
+                    LogSanitizer.sanitize(config.getName()), LogSanitizer.sanitize(parameter));
+        }
+    }
+
+    // Visible for testing
+    /**
+     * The credential parameters of {@code config} whose value is a literal rather
+     * than a reference ({@code ${vault:…}}, {@code ${connection:…}}) or a template
+     * ({@code {properties.x}}).
+     */
+    static List<String> plaintextSecretParameters(RagConfiguration config) {
+        List<String> found = new ArrayList<>();
+        if (config == null) {
+            return found;
+        }
+        collectPlaintextSecrets(config.getEmbeddingParameters(), "embeddingParameters", found);
+        collectPlaintextSecrets(config.getStoreParameters(), "storeParameters", found);
+        return found;
+    }
+
+    private static void collectPlaintextSecrets(Map<String, String> parameters, String mapName, List<String> sink) {
+        if (parameters == null) {
+            return;
+        }
+        for (var parameter : parameters.entrySet()) {
+            String name = parameter.getKey();
+            String value = parameter.getValue();
+            // A "{" means a reference or template — ${vault:…}, ${connection:…},
+            // {properties.x} — resolved at runtime rather than a literal secret.
+            // Deliberately the same test RestLlmStore applies: two different
+            // answers to "is this a literal?" would be a bug waiting to happen.
+            if (name != null && SECRET_PARAMETER_NAMES.contains(name.toLowerCase(Locale.ROOT)) && value != null && !value.isBlank()
+                    && !value.contains("{")) {
+                sink.add(mapName + "." + name);
+            }
         }
     }
 
