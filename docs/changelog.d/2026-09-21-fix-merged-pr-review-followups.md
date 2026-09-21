@@ -20,7 +20,12 @@ all long since merged, judged against `main` as it stands rather than against th
   two-overlay command, lists the file among the available overlays, and states the two host
   prerequisites: **Docker Compose 2.30.0 or newer**, which is the release that introduced
   the `gpus` service attribute (older versions fail on it), and the NVIDIA Container
-  Toolkit, without which the container starts and Ollama quietly runs on the CPU. The file
+  Toolkit. The first draft of that sentence said the container "starts and Ollama quietly
+  runs on the CPU" without the toolkit, which is wrong and was caught in review (Copilot,
+  #819): `gpus: all` is a device *request*, so with no GPU driver registered the daemon
+  cannot satisfy it and the container **fails to start** — `could not select device driver
+  "" with capabilities: [[gpu]]`. Both the README and the overlay's own header now say
+  that, and point anyone who wants CPU-only Ollama back at the plain overlay. The file
   itself gained the header every other overlay here has — including why it repeats the
   image tag (an overlay of a service the *base* file does not declare needs an image of its
   own, which `ComposeStackTest` enforces) and that the two tags must stay equal, because
@@ -31,6 +36,17 @@ all long since merged, judged against `main` as it stands rather than against th
   README plus the pages under `docs/` count — that is where the Open WebUI stack and the
   MCP sidecar are explained — and the changelog does not, since an entry scrolls out into
   an archive nothing reads for current context.
+
+  The first version *listed* `docs/` instead of walking it, which was also caught in review
+  (Copilot, #819). It passes today, because every stack happens to be named in a top-level
+  page; it would have started failing later over a file documented in
+  `docs/monitoring/` or `docs/creating-your-first-agent/` — a false failure, which is how a
+  guard gets deleted rather than fixed. It now walks the tree, excluding the changelog in
+  all three of its shapes (`changelog.md`, the `changelog/` archives, the `changelog.d/`
+  fragments) and `docs/archive/`. Two assertions pin the sweep's own shape rather than
+  leaving it implied: that a nested page was reached at all, and that no changelog page
+  was. Mutation-checked — with `Files.walk` put back to `Files.list`, the first of those
+  fails and names the reason.
 - **A rotation count in an archived entry is corrected (PR #739).** The 2026-08-25 merge
   note in `docs/changelog/2026-08.md` said the rotation "moved the 18 oldest entries"; the
   archive went from 179 to 187 top-level entries in that commit, and the same commit
@@ -43,6 +59,10 @@ and CommonMark requires a space after `#` for an ATX heading, so those lines ren
 ordinary prose with GitHub's autolink on the PR reference, which is what they are meant to
 be. Seven such lines exist across the archives; rewriting two of them would be churn on a
 historical record for a rule the repository does not adopt.
+
+```decision-log
+| 2026-09-21 | Walk `docs/` rather than list it in `ComposeStackTest`, and assert the sweep's shape | A guard that reads only the top level would have failed over a nested page that *does* document a stack; a false failure is how a guard gets deleted rather than fixed | Listing the top level only (the reviewed version), naming the nested directories explicitly (a third place to forget when one is added) |
+```
 
 **Verification:** `mvnw compile`, `ComposeStackTest`, and the repo-wide guards
 (`ImportStyleTest`, `DocumentationLinksTest`, `DocumentationAccuracyTest`,

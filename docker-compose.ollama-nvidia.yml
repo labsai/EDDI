@@ -15,8 +15,12 @@
 #     `deploy.resources.reservations.devices` block). Older Compose versions do
 #     not know the attribute and fail the command — check yours with
 #     `docker compose version`.
-#   * The NVIDIA Container Toolkit, configured as a Docker runtime. Without it
-#     the container starts and Ollama falls back to the CPU.
+#   * The NVIDIA Container Toolkit, configured as a Docker runtime. `gpus: all`
+#     is a device REQUEST, not a preference: with no GPU driver registered the
+#     daemon cannot satisfy it and the container fails to start, with
+#     `could not select device driver "" with capabilities: [[gpu]]`. It does
+#     not quietly fall back to the CPU — for CPU-only Ollama, leave this
+#     overlay off and use docker-compose.ollama.yml on its own.
 #
 # The image is repeated from docker-compose.ollama.yml because an overlay whose
 # service the BASE file does not declare needs an image of its own to be a valid

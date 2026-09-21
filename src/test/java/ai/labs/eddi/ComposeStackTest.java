@@ -9,6 +9,7 @@ import com.fasterxml.jackson.dataformat.yaml.YAMLMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
@@ -270,22 +271,45 @@ class ComposeStackTest {
      * <p>
      * The README is not required to carry all of them: {@code docs/} counts too,
      * which is where the Open WebUI stack and the MCP sidecar are explained. The
-     * changelog does not count — it records what changed on a day, and an entry
-     * scrolls out of the live file into an archive nothing reads for current
-     * context.
+     * whole tree counts, not only its top level — {@code docs/monitoring/} and
+     * {@code docs/creating-your-first-agent/} hold real pages, and a stack
+     * explained on one of those is explained. Listing only the top level would
+     * eventually have failed this test over a file that <em>is</em> documented,
+     * which is the failure mode that gets a guard deleted rather than fixed.
+     * <p>
+     * The changelog does not count, in any of its three shapes
+     * ({@code changelog.md}, the {@code changelog/} archives, the
+     * {@code changelog.d/} fragments): it records what changed on a day, and an
+     * entry scrolls out of the live file into an archive nothing reads for current
+     * context. Nor does {@code docs/archive/}, for the same reason — a page kept
+     * for history is not a page a user is sent to.
      */
     @Test
     @DisplayName("every compose file the repository ships is documented somewhere")
     void everyComposeFileIsDocumented() {
         List<Path> pages = new ArrayList<>(List.of(README));
-        try (Stream<Path> docs = Files.list(Path.of("docs"))) {
-            docs.filter(path -> path.getFileName().toString().endsWith(".md")).sorted().forEach(pages::add);
+        try (Stream<Path> docs = Files.walk(Path.of("docs"))) {
+            docs.filter(Files::isRegularFile)
+                    .filter(path -> path.getFileName().toString().endsWith(".md"))
+                    .filter(ComposeStackTest::countsAsDocumentation)
+                    .sorted()
+                    .forEach(pages::add);
         } catch (IOException e) {
-            throw new UncheckedIOException("could not list docs/", e);
+            throw new UncheckedIOException("could not walk docs/", e);
         }
 
+        // The sweep's own shape, asserted rather than assumed. Listing only the top
+        // level of docs/ would still pass the check below today — every stack
+        // happens to be named in a top-level page — and would start failing later
+        // over a file that IS documented, in a nested page. Pin both edges now.
+        assertTrue(pages.stream().anyMatch(page -> page.getNameCount() > 2),
+                "the sweep must walk docs/ rather than list it: pages live in docs/monitoring/ and "
+                        + "docs/creating-your-first-agent/ too, and a stack explained there is explained");
+        assertFalse(pages.stream().anyMatch(ComposeStackTest::countsAsChangelog),
+                "the changelog must stay out of the sweep in all three of its shapes, or this guard "
+                        + "passes on the strength of the very entry that announced the undocumented file");
+
         String documentation = pages.stream()
-                .filter(page -> !page.getFileName().toString().equals("changelog.md"))
                 .map(ComposeStackTest::read)
                 .collect(Collectors.joining("\n"));
 
@@ -302,6 +326,41 @@ class ComposeStackTest {
                 "these compose files are named nowhere in README.md or docs/: " + undocumented
                         + ". A stack a user cannot find is a stack they do not run — say what it layers on,"
                         + " and what it needs of the host.");
+    }
+
+    /**
+     * Whether a page under {@code docs/} is somewhere a user is actually sent.
+     * <p>
+     * The changelog in all three of its shapes is not, and neither is
+     * {@code docs/archive/}: a mention there records that a file once existed, not
+     * how to run it. Counting them would let this guard pass on the strength of the
+     * very entry that announced the undocumented file.
+     * <p>
+     * The relative path is normalised to forward slashes first, because the walk
+     * yields a platform separator and these prefixes are written one way.
+     */
+    private static boolean countsAsDocumentation(Path page) {
+        return !countsAsChangelog(page) && !relativeToDocs(page).startsWith("archive/");
+    }
+
+    /** The changelog, in all three of the shapes it is stored in. */
+    private static boolean countsAsChangelog(Path page) {
+        String relative = relativeToDocs(page);
+        return relative.equals("changelog.md")
+                || relative.startsWith("changelog/")
+                || relative.startsWith("changelog.d/");
+    }
+
+    /**
+     * The page's path below {@code docs/}, always with forward slashes: the walk
+     * yields a platform separator and the prefixes above are written one way. A
+     * page outside {@code docs/} — the README — keeps its own path, which matches
+     * none of them.
+     */
+    private static String relativeToDocs(Path page) {
+        Path docs = Path.of("docs");
+        Path relative = page.startsWith(docs) ? docs.relativize(page) : page;
+        return relative.toString().replace(File.separatorChar, '/');
     }
 
     /**
