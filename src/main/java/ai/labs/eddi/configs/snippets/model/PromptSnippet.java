@@ -42,9 +42,10 @@ public class PromptSnippet {
     private String description;
 
     /**
-     * The prompt text (multiline). This content is injected into the template data
-     * map and resolved by the Jinja2 template engine. If {@code templateEnabled} is
-     * false, template markers in the content are escaped and output as literals.
+     * The prompt text (multiline). Injected verbatim into the template data map and
+     * pulled into a prompt with {@code {snippets.<name>}}. Qute does not re-parse
+     * what an expression resolved to, so any {@code {...}} in here reaches the
+     * model as literal text.
      */
     private String content;
 
@@ -54,11 +55,15 @@ public class PromptSnippet {
     private List<String> tags;
 
     /**
-     * Controls whether the snippet content undergoes template resolution. Default:
-     * true. When false, any {@code {{}}} markers in the content are treated as
-     * literal text (useful for snippets containing code examples or literal curly
-     * braces). Designers can also override per-usage via Jinja2
-     * {@code {%raw%}...{%endraw%}} blocks.
+     * Intended to control whether the snippet content undergoes template
+     * resolution. Default: true.
+     * <p>
+     * <b>Currently inert.</b> Snippet content is delivered as a template data value
+     * and Qute does not re-parse a resolved value, so markers are literal either
+     * way — {@code false} already describes the actual behaviour, and {@code true}
+     * does not obtain it. The field is kept because stored configs carry it and
+     * because honouring it is a live option; see {@code PromptSnippetService} for
+     * what enabling it would cost.
      */
     private boolean templateEnabled = true;
 

@@ -16,7 +16,9 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 
 import java.util.*;
+import java.util.ArrayList;
 
+import com.mongodb.client.FindIterable;
 import static ai.labs.eddi.configs.migration.MigrationManager.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -406,8 +408,8 @@ class MigrationManagerTest {
             MongoCollection<Document> conversationMemoryColl = mock(MongoCollection.class, "conversationMemoryColl");
             when(database.getCollection(anyString())).thenReturn(defaultColl);
             when(database.getCollection(COLLECTION_CONVERSATION_MEMORY)).thenReturn(conversationMemoryColl);
-            when(defaultColl.find()).thenReturn(mock(com.mongodb.client.FindIterable.class));
-            when(conversationMemoryColl.find()).thenReturn(mock(com.mongodb.client.FindIterable.class));
+            when(defaultColl.find()).thenReturn(mock(FindIterable.class));
+            when(conversationMemoryColl.find()).thenReturn(mock(FindIterable.class));
 
             var managerWithMemories = new MigrationManager(database, migrationLogStore, false);
             when(migrationLogStore.readMigrationLog(MIGRATION_CONFIRMATION)).thenReturn(null);
@@ -1004,7 +1006,7 @@ class MigrationManagerTest {
         @DisplayName("should handle output with empty valueAlternatives")
         void emptyValueAlternatives() {
             var output = new HashMap<String, Object>();
-            output.put("valueAlternatives", new java.util.ArrayList<>());
+            output.put("valueAlternatives", new ArrayList<>());
 
             var outputContainer = new HashMap<String, Object>();
             outputContainer.put("outputs", List.of(output));

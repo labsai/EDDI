@@ -1,0 +1,145 @@
+import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
+import { cn } from "@/lib/utils";
+import { useDebugStore } from "@/hooks/use-debug-events";
+import { Circle, ChevronRight, Workflow } from "lucide-react";
+import { getExtensionIcon, getExtensionColor } from "@/lib/api/extensions";
+
+// ==================== Types ====================
+
+interface WorkflowStep {
+  type: string;
+  extensions: Record<string, unknown>;
+  config: { uri?: string };
+}
+
+interface PipelineRailroadProps {
+  workflowSteps: WorkflowStep[];
+  selectedIndex: number | null;
+  onSelectStage: (index: number) => void;
+}
+
+// ==================== Component ====================
+
+export function PipelineRailroad({
+  workflowSteps,
+  selectedIndex,
+  onSelectStage,
+}: PipelineRailroadProps) {
+  const { t } = useTranslation();
+  const currentTurnEvents = useDebugStore((s) => s.currentTurnEvents);
+
+  // Build stage status from live SSE events
+  const stageStatuses = useMemo(() => {
+    const statuses = new Map<number, "idle" | "running" | "complete" | "error">();
+    const indexByTaskId = new Map<string, number>();
+    for (const event of currentTurnEvents) {
+      if (event.type === "task_start") {
+        statuses.set(event.index, "running");
+        indexByTaskId.set(event.taskId, event.index);
+      } else if (event.type === "task_complete") {
+        statuses.set(event.index, "complete");
+      } else if (event.type === "task_failed") {
+        // The failed payload carries no index — recover it from the task_start.
+        statuses.set(indexByTaskId.get(event.taskId) ?? event.index, "error");
+      }
+    }
+    return statuses;
+  }, [currentTurnEvents]);
+
+  return (
+    <div className="flex flex-col gap-0 py-4 px-3" data-testid="pipeline-railroad">
+      {workflowSteps.map((step, idx) => {
+        const Icon = getExtensionIcon(step.type);
+        const typeKey = step.type.replace("eddi://ai.labs.", "");
+        const label = t(`studio.type.${typeKey}`, typeKey.charAt(0).toUpperCase() + typeKey.slice(1));
+        const color = getExtensionColor(step.type);
+        const status = stageStatuses.get(idx) ?? "idle";
+        const isSelected = selectedIndex === idx;
+        const isLast = idx === workflowSteps.length - 1;
+
+        // Extract resource name from URI
+        const uri = step.config?.uri ?? "";
+        const resourceId = uri.split("/").pop()?.split("?")[0] ?? "";
+
+        return (
+          <div key={idx}>
+            {/* Stage button */}
+            <button
+              onClick={() => onSelectStage(idx)}
+              aria-current={isSelected ? "true" : undefined}
+              className={cn(
+                "group flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-start transition-all",
+                isSelected
+                  ? "bg-primary/10 border border-primary/30"
+                  : "hover:bg-muted/50 border border-transparent",
+              )}
+              data-testid={`stage-${idx}`}
+            >
+              {/* Status indicator */}
+              <div className="relative shrink-0">
+                <div
+                  className={cn(
+                    "flex h-9 w-9 items-center justify-center rounded-lg transition-colors",
+                    status === "running" && "bg-amber-500/10 animate-pulse",
+                    status === "complete" && "bg-emerald-500/10",
+                    status === "idle" && "bg-muted/50",
+                    isSelected && "bg-primary/15",
+                  )}
+                >
+                  <Icon className={cn("h-4 w-4", color)} />
+                </div>
+                {/* Live indicator dot */}
+                {status === "running" && (
+                  <Circle className="absolute -inset-e-0.5 -top-0.5 h-2.5 w-2.5 fill-amber-500 text-amber-500 animate-pulse" />
+                )}
+                {status === "complete" && (
+                  <Circle className="absolute -inset-e-0.5 -top-0.5 h-2.5 w-2.5 fill-emerald-500 text-emerald-500" />
+                )}
+              </div>
+
+              {/* Label */}
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-foreground truncate">{label}</p>
+                {resourceId && (
+                  <p className="text-[10px] text-muted-foreground truncate font-mono">
+                    {resourceId}
+                  </p>
+                )}
+              </div>
+
+              {/* Arrow */}
+              <ChevronRight
+                className={cn(
+                  "h-4 w-4 shrink-0 transition-colors",
+                  isSelected ? "text-primary" : "text-muted-foreground/30 group-hover:text-muted-foreground",
+                )}
+              />
+            </button>
+
+            {/* Connector line */}
+            {!isLast && (
+              <div className="flex justify-center py-0.5">
+                <div
+                  className={cn(
+                    "w-0.5 h-4 rounded-full transition-colors",
+                    stageStatuses.has(idx) ? "bg-emerald-500/40" : "bg-border",
+                  )}
+                />
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {workflowSteps.length === 0 && (
+        <div className="text-center py-8">
+          <Workflow className="mx-auto h-8 w-8 text-muted-foreground/30" />
+          <p className="mt-2 text-sm text-muted-foreground">
+            {t("studio.noPipeline", "No pipeline stages")}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}

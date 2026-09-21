@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -257,12 +258,12 @@ public class ConversationStepTest {
 
     @Test
     public void testAddConversationOutputMap() {
-        conversationStep.addConversationOutputMap("data", java.util.Map.of("k1", "v1"));
-        conversationStep.addConversationOutputMap("data", java.util.Map.of("k2", "v2"));
+        conversationStep.addConversationOutputMap("data", Map.of("k1", "v1"));
+        conversationStep.addConversationOutputMap("data", Map.of("k2", "v2"));
 
         var output = conversationStep.getConversationOutput();
         @SuppressWarnings("unchecked")
-        var data = (java.util.Map<String, Object>) output.get("data");
+        var data = (Map<String, Object>) output.get("data");
         Assertions.assertEquals("v1", data.get("k1"));
         Assertions.assertEquals("v2", data.get("k2"));
     }

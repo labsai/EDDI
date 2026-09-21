@@ -8,6 +8,7 @@ import ai.labs.eddi.modules.nlp.extensions.dictionaries.IDictionary;
 import ai.labs.eddi.modules.nlp.internal.matches.RawSolution;
 
 import java.util.List;
+import java.util.Objects;
 
 /**
  * @author ginccc
@@ -71,7 +72,7 @@ public interface IInputParser {
 
         @Override
         public int hashCode() {
-            return java.util.Objects.hash(appendExpressions, includeUnused, includeUnknown);
+            return Objects.hash(appendExpressions, includeUnused, includeUnknown);
         }
 
         @Override

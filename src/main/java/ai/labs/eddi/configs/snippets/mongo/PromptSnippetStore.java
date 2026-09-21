@@ -61,9 +61,15 @@ public class PromptSnippetStore extends AbstractResourceStore<PromptSnippet> imp
         throw new ResourceStoreException("Direct readAll not supported. Use PromptSnippetService for snippet enumeration.");
     }
 
-    private static void validateName(PromptSnippet snippet) throws ResourceStoreException {
+    /**
+     * A bad name is the caller's mistake, so it is an
+     * {@link IllegalArgumentException} (400). It used to be a
+     * {@code ResourceStoreException}, which the REST layer reports as a 500 — the
+     * status for a failing database, not a rejected field.
+     */
+    private static void validateName(PromptSnippet snippet) {
         if (snippet.getName() == null || !NAME_PATTERN.matcher(snippet.getName()).matches()) {
-            throw new ResourceStoreException(
+            throw new IllegalArgumentException(
                     "Snippet name must match [a-z0-9_]+ (lowercase letters, digits, underscores only). Got: " + snippet.getName());
         }
     }

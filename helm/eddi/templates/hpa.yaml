@@ -1,38 +1,17 @@
 {{- if .Values.autoscaling.enabled }}
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: {{ include "eddi.fullname" . }}
-  labels:
-    {{- include "eddi.labels" . | nindent 4 }}
-spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: {{ include "eddi.fullname" . }}
-  minReplicas: {{ .Values.autoscaling.minReplicas }}
-  maxReplicas: {{ .Values.autoscaling.maxReplicas }}
-  metrics:
-    - type: Resource
-      resource:
-        name: cpu
-        target:
-          type: Utilization
-          averageUtilization: {{ .Values.autoscaling.targetCPUUtilizationPercentage }}
-    - type: Resource
-      resource:
-        name: memory
-        target:
-          type: Utilization
-          averageUtilization: {{ .Values.autoscaling.targetMemoryUtilizationPercentage }}
-  behavior:
-    scaleDown:
-      stabilizationWindowSeconds: 300
-    scaleUp:
-      stabilizationWindowSeconds: 60
+{{- /*
+     Unreachable in practice: deployment.yaml already fails rendering when
+     autoscaling.enabled is true. Kept as a second gate so that lifting the
+     restriction is a deliberate, reviewed edit in both places rather than an
+     accidental one.
+
+     EDDI serialises the turns of a conversation with a JVM-local lock, so an
+     HPA that scales past one replica silently drops conversation turns. See
+     eddi.replicas in values.yaml.
+*/ -}}
+{{- fail "autoscaling.enabled=true is not supported — EDDI cannot run more than one replica until a distributed conversation coordinator ships. See eddi.replicas in values.yaml." }}
 {{- end }}
 {{- if .Values.podDisruptionBudget.enabled }}
----
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -40,7 +19,10 @@ metadata:
   labels:
     {{- include "eddi.labels" . | nindent 4 }}
 spec:
-  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  # maxUnavailable, not minAvailable: EDDI runs at exactly 1 replica, and
+  # `minAvailable: 1` against a single replica blocks the eviction API outright,
+  # so `kubectl drain` never completes and node maintenance stalls.
+  maxUnavailable: {{ .Values.podDisruptionBudget.maxUnavailable }}
   selector:
     matchLabels:
       {{- include "eddi.selectorLabels" . | nindent 6 }}

@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.shared.RetryConfiguration;
+import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
@@ -39,7 +41,7 @@ class LegacyChatExecutorExtendedTest {
         executor = new LegacyChatExecutor();
         task = new LlmConfiguration.Task();
         task.setId("testTask");
-        var retryConfig = new LlmConfiguration.RetryConfiguration();
+        var retryConfig = new RetryConfiguration();
         retryConfig.setMaxAttempts(1);
         retryConfig.setBackoffDelayMs(10L);
         task.setRetry(retryConfig);
@@ -149,7 +151,7 @@ class LegacyChatExecutorExtendedTest {
                 }
             };
 
-            var result = executor.execute(model, messages, task, true);
+            var result = executor.execute(model, messages, task, JsonResponseFormatPolicy.of(true, "openai", null));
 
             assertEquals("{\"key\":\"value\"}", result.response());
         }
@@ -171,7 +173,7 @@ class LegacyChatExecutorExtendedTest {
                 }
             };
 
-            var result = executor.execute(model, messages, task, true);
+            var result = executor.execute(model, messages, task, JsonResponseFormatPolicy.of(true, "openai", null));
 
             assertEquals("fallback response", result.response());
         }

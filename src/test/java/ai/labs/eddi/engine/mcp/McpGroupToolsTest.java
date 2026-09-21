@@ -4,20 +4,35 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.configs.rest.StrictConfigurationParser;
+import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
 import ai.labs.eddi.configs.groups.IRestAgentGroupStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.groups.model.GroupWorkspace;
+import ai.labs.eddi.configs.groups.model.SharedTaskList;
+import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.configs.groups.templates.GroupTemplateService;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IGroupConversationService;
+import ai.labs.eddi.engine.security.OwnershipValidator;
+import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.io.IOException;
 import java.net.URI;
 import java.util.List;
+import java.util.Map;
 
+import java.security.Principal;
+import io.smallrye.common.annotation.NonBlocking;
+import io.smallrye.common.annotation.Blocking;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -31,18 +46,30 @@ class McpGroupToolsTest {
     private IRestAgentGroupStore groupStore;
     private IGroupConversationService groupConversationService;
     private IJsonSerialization jsonSerialization;
+    private IGroupWorkspaceStore workspaceStore;
     private McpGroupTools tools;
+
+    private static GroupTemplateService templateService() {
+        var service = new GroupTemplateService(
+                new ObjectMapper());
+        service.loadTemplates();
+        return service;
+    }
 
     @BeforeEach
     void setUp() throws Exception {
         groupStore = mock(IRestAgentGroupStore.class);
         groupConversationService = mock(IGroupConversationService.class);
         jsonSerialization = mock(IJsonSerialization.class);
+        workspaceStore = mock(IGroupWorkspaceStore.class);
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
 
-        var mockIdentity = mock(io.quarkus.security.identity.SecurityIdentity.class);
+        var mockIdentity = mock(SecurityIdentity.class);
         lenient().when(mockIdentity.isAnonymous()).thenReturn(true);
-        tools = new McpGroupTools(groupStore, groupConversationService, jsonSerialization, mockIdentity, false);
+        // authorization disabled — OwnershipValidator's checks are no-ops, matching the
+        // pre-existing tests. Ownership enforcement is covered separately below.
+        tools = new McpGroupTools(groupStore, groupConversationService, jsonSerialization, strictConfigurationParser(),
+                mockIdentity, new OwnershipValidator(false), workspaceStore, templateService(), false);
     }
 
     // --- describe_discussion_styles ---
@@ -58,6 +85,24 @@ class McpGroupToolsTest {
         assertTrue(result.contains("DEVIL_ADVOCATE"));
         assertTrue(result.contains("DELPHI"));
         assertTrue(result.contains("DEBATE"));
+        assertTrue(result.contains("TASK_FORCE"));
+    }
+
+    /**
+     * Enumerating the enum rather than listing the styles by hand: the previous
+     * test hardcoded six names and stayed green for the whole life of NEGOTIATION,
+     * which the tool never described. A caller picks a style from this text, so a
+     * style missing from it is a style that effectively does not exist over MCP.
+     * Driving the assertion off {@code DiscussionStyle} means the next style added
+     * fails here until it is described.
+     */
+    @Test
+    void describeDiscussionStyles_describesEveryDiscussionStyle() {
+        String result = tools.describe_discussion_styles();
+
+        for (AgentGroupConfiguration.DiscussionStyle style : AgentGroupConfiguration.DiscussionStyle.values()) {
+            assertTrue(result.contains(style.name()), "describe_discussion_styles omits the style " + style.name());
+        }
     }
 
     // --- list_groups ---
@@ -119,7 +164,7 @@ class McpGroupToolsTest {
     void createGroup_defaultStyle_usesRoundTable() throws Exception {
         when(groupStore.createGroup(any())).thenReturn(Response.created(URI.create("/groupstore/groups/new-id?version=1")).build());
 
-        String result = tools.create_group("Panel", "desc", "a1,a2", "Alice,Bob", null, null, null, null, null, null);
+        String result = tools.create_group("Panel", "desc", "a1,a2", "Alice,Bob", null, null, null, null, null, null, null);
 
         assertTrue(result.contains("ROUND_TABLE"));
         assertTrue(result.contains("2 members"));
@@ -140,7 +185,7 @@ class McpGroupToolsTest {
     void createGroup_peerReviewStyle() throws Exception {
         when(groupStore.createGroup(any())).thenReturn(Response.created(URI.create("/groupstore/groups/id?version=1")).build());
 
-        String result = tools.create_group("Review", null, "a1,a2,a3", null, null, null, "mod1", "PEER_REVIEW", "1", null);
+        String result = tools.create_group("Review", null, "a1,a2,a3", null, null, null, "mod1", "PEER_REVIEW", "1", null, null);
 
         assertTrue(result.contains("PEER_REVIEW"));
 
@@ -158,7 +203,7 @@ class McpGroupToolsTest {
         when(groupStore.createGroup(any())).thenReturn(Response.created(URI.create("/groupstore/groups/id?version=1")).build());
 
         tools.create_group("DA Panel", null, "a1,a2,a3", "Optimist,Pragmatist,Skeptic", "PARTICIPANT,PARTICIPANT,DEVIL_ADVOCATE", null, "mod1",
-                "DEVIL_ADVOCATE", null, null);
+                "DEVIL_ADVOCATE", null, null, null);
 
         ArgumentCaptor<AgentGroupConfiguration> captor = ArgumentCaptor.forClass(AgentGroupConfiguration.class);
         verify(groupStore).createGroup(captor.capture());
@@ -173,7 +218,7 @@ class McpGroupToolsTest {
     void createGroup_invalidStyle_fallsBackToRoundTable() throws Exception {
         when(groupStore.createGroup(any())).thenReturn(Response.created(URI.create("/groupstore/groups/id")).build());
 
-        tools.create_group("Test", null, "a1", null, null, null, null, "INVALID", null, null);
+        tools.create_group("Test", null, "a1", null, null, null, null, "INVALID", null, null, null);
 
         ArgumentCaptor<AgentGroupConfiguration> captor = ArgumentCaptor.forClass(AgentGroupConfiguration.class);
         verify(groupStore).createGroup(captor.capture());
@@ -185,7 +230,7 @@ class McpGroupToolsTest {
     void createGroup_handlesException() {
         when(groupStore.createGroup(any())).thenThrow(new RuntimeException("Insert failed"));
 
-        String result = tools.create_group("Test", null, "a1", null, null, null, null, null, null, null);
+        String result = tools.create_group("Test", null, "a1", null, null, null, null, null, null, null, null);
 
         assertTrue(result.contains("error"));
     }
@@ -194,7 +239,7 @@ class McpGroupToolsTest {
     void createGroup_withGroupMembers() throws Exception {
         when(groupStore.createGroup(any())).thenReturn(Response.created(URI.create("/groupstore/groups/id?version=1")).build());
 
-        tools.create_group("Meta Panel", null, "g1,g2", "Team A,Team B", null, "GROUP,GROUP", "mod1", "ROUND_TABLE", null, null);
+        tools.create_group("Meta Panel", null, "g1,g2", "Team A,Team B", null, "GROUP,GROUP", "mod1", "ROUND_TABLE", null, null, null);
 
         ArgumentCaptor<AgentGroupConfiguration> captor = ArgumentCaptor.forClass(AgentGroupConfiguration.class);
         verify(groupStore).createGroup(captor.capture());
@@ -314,5 +359,561 @@ class McpGroupToolsTest {
         String result = tools.list_group_conversations("g1", null, null);
 
         assertTrue(result.contains("error"));
+    }
+
+    // --- start_group_discussion (async) ---
+
+    @Test
+    void startGroupDiscussion_returnsIdAndState() throws Exception {
+        GroupConversation gc = new GroupConversation();
+        gc.setId("gc-async-1");
+        gc.setState(GroupConversation.GroupConversationState.IN_PROGRESS);
+        when(groupConversationService.startAndDiscussAsync("g1", "Build it", "user1", null)).thenReturn(gc);
+        when(jsonSerialization.serialize(any(Map.class))).thenReturn(
+                "{\"groupConversationId\":\"gc-async-1\",\"state\":\"IN_PROGRESS\",\"message\":\"Discussion started.\"}");
+
+        String result = tools.start_group_discussion("g1", "Build it", "user1");
+
+        assertTrue(result.contains("gc-async-1"), "Should contain conversation ID");
+        assertTrue(result.contains("IN_PROGRESS"), "Should indicate in-progress state");
+        verify(groupConversationService).startAndDiscussAsync("g1", "Build it", "user1", null);
+
+        // Verify the Map passed to serialize contains the right keys
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(jsonSerialization).serialize(captor.capture());
+        var map = captor.getValue();
+        assertEquals("gc-async-1", map.get("groupConversationId"));
+        assertEquals("IN_PROGRESS", map.get("state"));
+        assertNotNull(map.get("message"), "Should include polling instructions");
+    }
+
+    @Test
+    void startGroupDiscussion_defaultsToMcpClient() throws Exception {
+        GroupConversation gc = new GroupConversation();
+        gc.setId("gc-async-2");
+        gc.setState(GroupConversation.GroupConversationState.IN_PROGRESS);
+        when(groupConversationService.startAndDiscussAsync(any(), any(), any(), any())).thenReturn(gc);
+
+        tools.start_group_discussion("g1", "Q?", null);
+
+        verify(groupConversationService).startAndDiscussAsync("g1", "Q?", "mcp-client", null);
+    }
+
+    @Test
+    void startGroupDiscussion_handlesBlankUserId() throws Exception {
+        GroupConversation gc = new GroupConversation();
+        gc.setId("gc-async-3");
+        gc.setState(GroupConversation.GroupConversationState.IN_PROGRESS);
+        when(groupConversationService.startAndDiscussAsync(any(), any(), any(), any())).thenReturn(gc);
+
+        tools.start_group_discussion("g1", "Q?", "  ");
+
+        verify(groupConversationService).startAndDiscussAsync("g1", "Q?", "mcp-client", null);
+    }
+
+    @Test
+    void startGroupDiscussion_handlesException() throws Exception {
+        when(groupConversationService.startAndDiscussAsync(any(), any(), any(), any()))
+                .thenThrow(new RuntimeException("Group not found"));
+
+        String result = tools.start_group_discussion("g1", "Q?", null);
+
+        assertTrue(result.contains("error"));
+        assertTrue(result.contains("Group not found"));
+    }
+
+    // --- delete_group_conversation ---
+
+    /**
+     * delete/followup/continue/close now load the conversation first to enforce the
+     * owner check (MCP parity with REST), so the read must be stubbed.
+     */
+    private void stubConversation(String id) throws Exception {
+        GroupConversation gc = new GroupConversation();
+        gc.setId(id);
+        when(groupConversationService.readGroupConversation(id)).thenReturn(gc);
+    }
+
+    @Test
+    void deleteGroupConversation_success() throws Exception {
+        stubConversation("gc-del-1");
+
+        tools.delete_group_conversation("gc-del-1");
+
+        verify(groupConversationService).deleteGroupConversation("gc-del-1");
+    }
+
+    @Test
+    void deleteGroupConversation_returnsConfirmation() throws Exception {
+        stubConversation("gc-del-1");
+
+        String result = tools.delete_group_conversation("gc-del-1");
+
+        assertEquals("Deleted group conversation gc-del-1", result);
+    }
+
+    @Test
+    void deleteGroupConversation_handlesException() throws Exception {
+        stubConversation("gc-bad");
+        doThrow(new RuntimeException("Not found")).when(groupConversationService).deleteGroupConversation("gc-bad");
+
+        String result = tools.delete_group_conversation("gc-bad");
+
+        assertTrue(result.contains("error"));
+        assertTrue(result.contains("Not found"));
+    }
+
+    // --- execution model (must stay off the Vert.x event loop) ---
+
+    /**
+     * These two tests used to assert the presence/absence of {@code @Blocking}.
+     * That was asserting the wrong thing, and it became actively wrong twice over.
+     * <p>
+     * quarkus-mcp-server resolves a {@code @Tool} method's execution model in this
+     * order (see {@code McpServerProcessor.executionModel}):
+     * {@code @RunOnVirtualThread} → {@code @Blocking} → {@code @NonBlocking} →
+     * {@code @Transactional} → {@code hasBlockingSignature()}. That last step
+     * treats every non-parameterized return type as blocking, so a
+     * {@code String}-returning tool already resolves to {@code WORKER_THREAD} —
+     * {@code @Blocking} added nothing. It also means the old "no {@code @Blocking},
+     * therefore async" premise was false: {@code
+     * start_group_discussion} runs on a worker thread too, for exactly the same
+     * reason.
+     * <p>
+     * The redundant annotations were removed because Quarkus 3.38's
+     * {@code ExecutionModelAnnotationsProcessor} rejects them outright, which
+     * stopped {@code quarkus:dev} from starting at all. So assert the property that
+     * actually keeps these off the event loop: a blocking signature, and no
+     * {@code @NonBlocking}.
+     */
+    @Test
+    void discussWithGroup_staysOffTheEventLoop() throws Exception {
+        var method = McpGroupTools.class.getMethod("discuss_with_group", String.class, String.class, String.class);
+        assertEquals(String.class, method.getReturnType(),
+                "discuss_with_group must keep a non-reactive return type; returning Uni/Multi would make "
+                        + "quarkus-mcp-server schedule this blocking work on the Vert.x event loop");
+        assertNull(method.getAnnotation(NonBlocking.class),
+                "discuss_with_group does blocking work and must never be marked @NonBlocking");
+    }
+
+    @Test
+    void startGroupDiscussion_staysOffTheEventLoop() throws Exception {
+        var method = McpGroupTools.class.getMethod("start_group_discussion", String.class, String.class, String.class);
+        assertEquals(String.class, method.getReturnType(),
+                "start_group_discussion must keep a non-reactive return type for the same reason");
+        assertNull(method.getAnnotation(NonBlocking.class),
+                "start_group_discussion must never be marked @NonBlocking");
+    }
+
+    /**
+     * Regression guard for the dev-mode breakage: re-adding {@code @Blocking} to
+     * any MCP tool method makes Quarkus 3.38's lint fail the build, and
+     * {@code quarkus:dev} will not start. It buys nothing either — see the note
+     * above. Fails here, in the plain unit suite, rather than the next time someone
+     * runs dev mode.
+     */
+    @Test
+    void noMcpToolMethodCarriesBlocking() {
+        // EVERY class carrying @Tool methods — the javadoc's "any MCP tool method"
+        // claim was previously a 3-of-8 sweep, so a @Blocking added to the other
+        // five broke quarkus:dev with no unit-test red.
+        for (Class<?> toolClass : List.of(McpGroupTools.class, McpHitlTools.class, McpConversationTools.class,
+                McpAdminTools.class, McpSetupTools.class, McpMemoryTools.class, McpDocTools.class, McpGdprTools.class)) {
+            for (var method : toolClass.getDeclaredMethods()) {
+                assertNull(method.getAnnotation(Blocking.class),
+                        toolClass.getSimpleName() + "." + method.getName() + " carries @Blocking. It is redundant "
+                                + "(a non-reactive return type already resolves to WORKER_THREAD) and Quarkus 3.38's "
+                                + "ExecutionModelAnnotationsProcessor rejects it, breaking quarkus:dev.");
+            }
+        }
+    }
+
+    // --- ownership enforcement (MCP must match the REST surface) ---
+
+    /**
+     * Builds the tools with auth ON, acting as {@code callerId} with the given
+     * roles.
+     */
+    private McpGroupTools toolsAsUser(String callerId, String role) {
+        var identity = mock(SecurityIdentity.class);
+        lenient().when(identity.isAnonymous()).thenReturn(false);
+        var principal = mock(Principal.class);
+        lenient().when(principal.getName()).thenReturn(callerId);
+        lenient().when(identity.getPrincipal()).thenReturn(principal);
+        lenient().when(identity.hasRole(role)).thenReturn(true);
+        return new McpGroupTools(groupStore, groupConversationService, jsonSerialization, strictConfigurationParser(),
+                identity, new OwnershipValidator(true), workspaceStore, templateService(), true);
+    }
+
+    /**
+     * An admin caller: holds eddi-admin (plus the baseline roles the tools
+     * require).
+     */
+    private McpGroupTools toolsAsAdmin(String callerId) {
+        var identity = mock(SecurityIdentity.class);
+        lenient().when(identity.isAnonymous()).thenReturn(false);
+        var principal = mock(Principal.class);
+        lenient().when(principal.getName()).thenReturn(callerId);
+        lenient().when(identity.getPrincipal()).thenReturn(principal);
+        lenient().when(identity.hasRole(anyString())).thenReturn(true);
+        return new McpGroupTools(groupStore, groupConversationService, jsonSerialization, strictConfigurationParser(),
+                identity, new OwnershipValidator(true), workspaceStore, templateService(), true);
+    }
+
+    @Test
+    void admin_mayActOnAnotherUsersConversation() throws Exception {
+        GroupConversation gc = ownedBy("alice");
+        when(groupConversationService.followUpWithMember("gc1", "Analyst", "why?")).thenReturn(gc);
+        when(jsonSerialization.serialize(gc)).thenReturn("{\"id\":\"gc1\"}");
+
+        // The other half of requireOwnerOrAdmin: an admin is NOT the owner but must
+        // pass.
+        String result = toolsAsAdmin("root").followup_with_member("gc1", "Analyst", "why?");
+
+        assertFalse(result.contains("Access denied"));
+        verify(groupConversationService).followUpWithMember("gc1", "Analyst", "why?");
+    }
+
+    @Test
+    void admin_seesAllConversationsInTheGroupListing() throws Exception {
+        var mine = new GroupConversation();
+        mine.setId("gc-mine");
+        mine.setUserId("bob");
+        var theirs = new GroupConversation();
+        theirs.setId("gc-theirs");
+        theirs.setUserId("alice");
+        when(groupConversationService.listGroupConversations("g1", 0, 20)).thenReturn(List.of(mine, theirs));
+
+        toolsAsAdmin("root").list_group_conversations("g1", null, null);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<GroupConversation>> captor = ArgumentCaptor.forClass(List.class);
+        verify(jsonSerialization).serialize(captor.capture());
+        assertEquals(2, captor.getValue().size(), "the owner filter must exempt admins");
+    }
+
+    @Test
+    void namelessCaller_seesNoConversationsInTheGroupListing() throws Exception {
+        var theirs = new GroupConversation();
+        theirs.setId("gc-theirs");
+        theirs.setUserId("alice");
+        // A legacy row with no owner must not match a caller with no name.
+        var unowned = new GroupConversation();
+        unowned.setId("gc-unowned");
+        when(groupConversationService.listGroupConversations("g1", 0, 20)).thenReturn(List.of(theirs, unowned));
+
+        String result = toolsAsUser(null, "eddi-viewer").list_group_conversations("g1", null, null);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<GroupConversation>> captor = ArgumentCaptor.forClass(List.class);
+        verify(jsonSerialization).serialize(captor.capture());
+        assertTrue(captor.getValue().isEmpty(), "a caller with no principal name owns nothing, got: " + result);
+    }
+
+    private GroupConversation ownedBy(String userId) throws Exception {
+        GroupConversation gc = new GroupConversation();
+        gc.setId("gc1");
+        gc.setUserId(userId);
+        when(groupConversationService.readGroupConversation("gc1")).thenReturn(gc);
+        return gc;
+    }
+
+    @Test
+    void followupWithMember_deniedForNonOwner() throws Exception {
+        ownedBy("alice");
+
+        String result = toolsAsUser("bob", "eddi-viewer").followup_with_member("gc1", "Analyst", "why?");
+
+        assertTrue(result.contains("Access denied"), "a non-owner must not follow up on someone else's conversation");
+        verify(groupConversationService, never()).followUpWithMember(any(), any(), any());
+    }
+
+    @Test
+    void continueGroupDiscussion_deniedForNonOwner() throws Exception {
+        ownedBy("alice");
+
+        String result = toolsAsUser("bob", "eddi-viewer").continue_group_discussion("gc1", "next?");
+
+        assertTrue(result.contains("Access denied"), "a non-owner must not continue someone else's conversation");
+        verify(groupConversationService, never()).continueDiscussion(any(), any(), any());
+    }
+
+    @Test
+    void closeGroupConversation_deniedForNonOwner() throws Exception {
+        ownedBy("alice");
+
+        String result = toolsAsUser("bob", "eddi-editor").close_group_conversation("gc1");
+
+        assertTrue(result.contains("Access denied"), "a non-owner must not close someone else's conversation");
+        verify(groupConversationService, never()).closeGroupConversation(any());
+    }
+
+    @Test
+    void readGroupConversation_deniedForNonOwner() throws Exception {
+        ownedBy("alice");
+
+        String result = toolsAsUser("bob", "eddi-viewer").read_group_conversation("gc1");
+
+        assertTrue(result.contains("Access denied"), "a non-owner must not read someone else's transcript");
+    }
+
+    @Test
+    void deleteGroupConversation_deniedForNonOwner() throws Exception {
+        ownedBy("alice");
+
+        String result = toolsAsUser("bob", "eddi-editor").delete_group_conversation("gc1");
+
+        assertTrue(result.contains("Access denied"), "a non-owner must not delete someone else's conversation");
+        verify(groupConversationService, never()).deleteGroupConversation(any());
+    }
+
+    // --- curated error contract for the post-discussion mutation tools ---
+    // The generic catch(Exception) must NOT echo the raw exception text to the MCP
+    // caller (info exposure); it returns a stable curated message + INTERNAL code
+    // and
+    // logs the full throwable server-side. These pin that contract against
+    // regression.
+
+    @Test
+    void followupWithMember_genericFailure_returnsCuratedErrorNotRawMessage() throws Exception {
+        stubConversation("gc1");
+        when(groupConversationService.followUpWithMember(eq("gc1"), any(), any()))
+                .thenThrow(new RuntimeException("boom-internal-detail-42"));
+
+        String result = tools.followup_with_member("gc1", "Analyst", "why?");
+
+        assertFalse(result.contains("boom-internal-detail-42"),
+                "the raw exception message must never reach the MCP caller");
+        assertTrue(result.contains("Failed to process follow-up with member"),
+                "a stable curated message is returned instead");
+        assertTrue(result.contains("\"errorCode\":\"INTERNAL\""),
+                "the curated error carries an INTERNAL errorCode");
+    }
+
+    @Test
+    void continueGroupDiscussion_genericFailure_returnsCuratedErrorNotRawMessage() throws Exception {
+        stubConversation("gc1");
+        when(groupConversationService.continueDiscussion(eq("gc1"), any(), any()))
+                .thenThrow(new RuntimeException("boom-internal-detail-42"));
+
+        String result = tools.continue_group_discussion("gc1", "next?");
+
+        assertFalse(result.contains("boom-internal-detail-42"),
+                "the raw exception message must never reach the MCP caller");
+        assertTrue(result.contains("Failed to continue group discussion"),
+                "a stable curated message is returned instead");
+        assertTrue(result.contains("\"errorCode\":\"INTERNAL\""),
+                "the curated error carries an INTERNAL errorCode");
+    }
+
+    @Test
+    void closeGroupConversation_genericFailure_returnsCuratedErrorNotRawMessage() throws Exception {
+        stubConversation("gc1");
+        when(groupConversationService.closeGroupConversation("gc1"))
+                .thenThrow(new RuntimeException("boom-internal-detail-42"));
+
+        String result = tools.close_group_conversation("gc1");
+
+        assertFalse(result.contains("boom-internal-detail-42"),
+                "the raw exception message must never reach the MCP caller");
+        assertTrue(result.contains("Failed to close group conversation"),
+                "a stable curated message is returned instead");
+        assertTrue(result.contains("\"errorCode\":\"INTERNAL\""),
+                "the curated error carries an INTERNAL errorCode");
+    }
+
+    @Test
+    void followupWithMember_allowedForOwner() throws Exception {
+        GroupConversation gc = ownedBy("alice");
+        when(groupConversationService.followUpWithMember("gc1", "Analyst", "why?")).thenReturn(gc);
+        when(jsonSerialization.serialize(gc)).thenReturn("{\"id\":\"gc1\"}");
+
+        String result = toolsAsUser("alice", "eddi-viewer").followup_with_member("gc1", "Analyst", "why?");
+
+        assertEquals("{\"id\":\"gc1\"}", result);
+        verify(groupConversationService).followUpWithMember("gc1", "Analyst", "why?");
+    }
+
+    // --- owner resolution on creation (the gate must not lock out the creator) ---
+
+    @Test
+    void startGroupDiscussion_recordsTheCallerAsOwner_notMcpClient() throws Exception {
+        var gc = new GroupConversation();
+        gc.setId("gc1");
+        when(groupConversationService.startAndDiscussAsync(eq("g1"), eq("Q?"), eq("alice"), isNull()))
+                .thenReturn(gc);
+
+        toolsAsUser("alice", "eddi-viewer").start_group_discussion("g1", "Q?", null);
+
+        // If the conversation were owned by the literal "mcp-client", the ownership
+        // gate
+        // would then deny the creator on every follow-up read/continue/close.
+        verify(groupConversationService).startAndDiscussAsync("g1", "Q?", "alice", null);
+    }
+
+    @Test
+    void startGroupDiscussion_cannotCreateAConversationOwnedByAnotherUser() throws Exception {
+        String result = toolsAsUser("bob", "eddi-viewer").start_group_discussion("g1", "Q?", "alice");
+
+        assertTrue(result.contains("Access denied"), "impersonating another owner must be rejected");
+        verify(groupConversationService, never()).startAndDiscussAsync(any(), any(), any(), any());
+    }
+
+    @Test
+    void discussWithGroup_recordsTheCallerAsOwner() throws Exception {
+        var gc = new GroupConversation();
+        gc.setId("gc1");
+        when(groupConversationService.discuss("g1", "Q?", "alice", 0)).thenReturn(gc);
+
+        toolsAsUser("alice", "eddi-viewer").discuss_with_group("g1", "Q?", null);
+
+        verify(groupConversationService).discuss("g1", "Q?", "alice", 0);
+    }
+
+    // --- listing must be owner-filtered, else the per-conversation gate is
+    // pointless ---
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void listGroupConversations_filtersToTheCallersOwnConversations() throws Exception {
+        var mine = new GroupConversation();
+        mine.setId("gc-mine");
+        mine.setUserId("bob");
+        var theirs = new GroupConversation();
+        theirs.setId("gc-theirs");
+        theirs.setUserId("alice");
+        when(groupConversationService.listGroupConversations("g1", 0, 20)).thenReturn(List.of(mine, theirs));
+
+        toolsAsUser("bob", "eddi-viewer").list_group_conversations("g1", null, null);
+
+        ArgumentCaptor<List<GroupConversation>> captor = ArgumentCaptor.forClass(List.class);
+        verify(jsonSerialization).serialize(captor.capture());
+        assertEquals(1, captor.getValue().size(), "a non-owner must not see another user's transcript via list");
+        assertEquals("gc-mine", captor.getValue().get(0).getId());
+    }
+
+    // --- I13: standing-team backlog ---
+
+    private GroupWorkspace teamWorkspace() throws Exception {
+        var workspace = new GroupWorkspace();
+        workspace.setId("ws-1");
+        workspace.setGroupId("g1");
+        var resourceId = mock(IResourceStore.IResourceId.class);
+        lenient().when(resourceId.getVersion()).thenReturn(1);
+        lenient().when(groupStore.getCurrentResourceId("g1")).thenReturn(resourceId);
+        lenient().when(workspaceStore.readOrCreate("g1")).thenReturn(workspace);
+        lenient().when(workspaceStore.find("g1")).thenReturn(workspace);
+        lenient().when(workspaceStore.casRevision(workspace)).thenReturn(true);
+        return workspace;
+    }
+
+    @Test
+    void addTeamTask_persistsWithPriority() throws Exception {
+        var workspace = teamWorkspace();
+
+        String result = tools.add_team_task("g1", "Ship the feature", "with tests", "7");
+
+        assertFalse(result.contains("error"), result);
+        assertEquals(1, workspace.getBacklog().size());
+        assertEquals(7, workspace.getBacklog().getTasks().get(0).priority());
+        verify(workspaceStore).casRevision(workspace);
+        verify(workspaceStore, never()).update(any());
+    }
+
+    @Test
+    void addTeamTask_backlogCap_isActionable() throws Exception {
+        var workspace = teamWorkspace();
+        for (int i = 0; i < GroupWorkspace.MAX_BACKLOG_SIZE; i++) {
+            workspace.getBacklog().addTask(
+                    new TaskItem("Task " + i, "", 0));
+        }
+
+        String result = tools.add_team_task("g1", "One more", null, null);
+
+        assertTrue(result.contains("complete or delete"), "the cap error says what to do about it: " + result);
+        verify(workspaceStore, never()).update(any());
+        verify(workspaceStore, never()).casRevision(any());
+    }
+
+    @Test
+    void addTeamTask_blankSubject_errors() throws Exception {
+        assertTrue(tools.add_team_task("g1", "  ", null, null).contains("error"));
+    }
+
+    @Test
+    void addTeamTask_lostCas_retriesThenGivesUp() throws Exception {
+        teamWorkspace();
+        // Each read returns a FRESH document — a re-read must reflect the
+        // concurrent writer's state, never this caller's failed mutation.
+        when(workspaceStore.readOrCreate("g1")).thenAnswer(inv -> {
+            var w = new GroupWorkspace();
+            w.setId("ws-1");
+            w.setGroupId("g1");
+            return w;
+        });
+        when(workspaceStore.casRevision(any())).thenReturn(false, true);
+        assertFalse(tools.add_team_task("g1", "Ship it", null, null).contains("error"));
+        verify(workspaceStore, times(2)).readOrCreate("g1");
+
+        when(workspaceStore.casRevision(any())).thenReturn(false);
+        String result = tools.add_team_task("g1", "Another", null, null);
+        assertTrue(result.contains("error"), result);
+        assertTrue(result.contains("concurrently"), "exhausted retries tell the caller to retry: " + result);
+    }
+
+    @Test
+    void addTeamTask_oversizedFields_error() throws Exception {
+        teamWorkspace();
+        String longSubject = "s".repeat(SharedTaskList.MAX_AGENT_TASK_SUBJECT_LENGTH + 1);
+        assertTrue(tools.add_team_task("g1", longSubject, null, null).contains("error"));
+        String longDescription = "d".repeat(SharedTaskList.MAX_AGENT_TASK_DESCRIPTION_LENGTH + 1);
+        assertTrue(tools.add_team_task("g1", "Ok", longDescription, null).contains("error"));
+        verify(workspaceStore, never()).update(any());
+        verify(workspaceStore, never()).casRevision(any());
+    }
+
+    @Test
+    void addTeamTask_duplicateSubject_errors() throws Exception {
+        var workspace = teamWorkspace();
+        workspace.getBacklog().addTask(new TaskItem("Ship it", "", 0));
+
+        String result = tools.add_team_task("g1", "ship IT", null, null);
+
+        assertTrue(result.contains("error"), result);
+        assertTrue(result.contains("subject"), "the error names the conflict: " + result);
+        assertEquals(1, workspace.getBacklog().size());
+        verify(workspaceStore, never()).update(any());
+        verify(workspaceStore, never()).casRevision(any());
+    }
+
+    @Test
+    void listTeamBacklog_serializesTasks_andEmptyWithoutWorkspace() throws Exception {
+        teamWorkspace();
+        tools.add_team_task("g1", "A task", null, null);
+
+        tools.list_team_backlog("g1");
+        verify(jsonSerialization, atLeastOnce()).serialize(any());
+
+        when(workspaceStore.find("g1")).thenReturn(null);
+        String result = tools.list_team_backlog("g1");
+        assertFalse(result.contains("error"), "no workspace is an empty backlog, not an error: " + result);
+    }
+
+    /**
+     * A parser that defers to this test's {@code jsonSerialization} mock, so the
+     * existing {@code when(jsonSerialization.deserialize(...))} stubs keep
+     * describing what these dispatch tests are about. Strictness itself is covered
+     * by {@code StrictConfigurationParserTest}.
+     */
+    private StrictConfigurationParser strictConfigurationParser() {
+        var parser = mock(StrictConfigurationParser.class);
+        try {
+            lenient().when(parser.parse(anyString(), any()))
+                    .thenAnswer(invocation -> jsonSerialization.deserialize(invocation.getArgument(0), invocation.getArgument(1)));
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+        return parser;
     }
 }

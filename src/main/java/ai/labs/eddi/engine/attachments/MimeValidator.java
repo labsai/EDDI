@@ -37,6 +37,24 @@ public final class MimeValidator {
      *            the file content (at least 12 bytes for reliable detection)
      * @return detected MIME type, or "application/octet-stream" if unknown
      */
+    private static final byte[] PDF_HEADER = {0x25, 0x50, 0x44, 0x46, 0x2D};
+    private static final int PDF_HEADER_SEARCH_WINDOW = 1024;
+
+    /** Whether {@code needle} starts within the first {@code window} bytes. */
+    private static boolean containsWithinFirst(byte[] bytes, byte[] needle, int window) {
+        int lastStart = Math.min(window, bytes.length) - needle.length;
+        for (int start = 0; start <= lastStart; start++) {
+            int matched = 0;
+            while (matched < needle.length && bytes[start + matched] == needle[matched]) {
+                matched++;
+            }
+            if (matched == needle.length) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public static String detectMime(byte[] bytes) {
         if (bytes == null || bytes.length < 4) {
             return "application/octet-stream";
@@ -67,8 +85,10 @@ public final class MimeValidator {
         if (startsWith(bytes, 0x49, 0x49, 0x2A, 0x00) || startsWith(bytes, 0x4D, 0x4D, 0x00, 0x2A)) {
             return "image/tiff";
         }
-        // PDF: 25 50 44 46 (%PDF)
-        if (startsWith(bytes, 0x25, 0x50, 0x44, 0x46)) {
+        // PDF: %PDF- — readers accept the header anywhere in the first 1024 bytes, and
+        // real generators emit leading bytes (BOM, print-job prefixes). Offset 0 only
+        // would refuse those as "mislabelled" now that PDFs require a signature.
+        if (containsWithinFirst(bytes, PDF_HEADER, PDF_HEADER_SEARCH_WINDOW)) {
             return "application/pdf";
         }
         // ZIP/DOCX/XLSX: 50 4B 03 04
@@ -133,7 +153,18 @@ public final class MimeValidator {
             return true; // lenient when detection fails
         }
         if ("application/octet-stream".equals(detectedMime)) {
-            return true; // unknown detection — allow declared
+            // Unrecognised content may carry any declared type — EXCEPT a type this
+            // class can recognise by its signature. Content that claims to be a PNG
+            // but has no PNG signature is not an unknown file, it is a mislabelled
+            // one, and allowing it through made the check pass exactly the uploads it
+            // exists to stop (plain text declared image/png was stored with
+            // forwardableInline=true and handed to a vision model).
+            String declared = normalize(declaredMime);
+            if (SIGNATURE_REQUIRED.contains(declared)) {
+                LOGGER.debugf("MIME mismatch: declared='%s' carries no matching signature", declared);
+                return false;
+            }
+            return true;
         }
 
         // Normalize
@@ -165,6 +196,21 @@ public final class MimeValidator {
         }
         return true;
     }
+
+    /**
+     * Declared types whose content this class can always recognise. A file declared
+     * as one of these must carry the signature: undetectable content is rejected
+     * rather than waved through as "unknown". Kept to the formats that are sent to
+     * a model inline (images, PDF), where a mislabelled upload does real harm; the
+     * audio/video/office signatures above stay lenient so an unusual but legitimate
+     * container variant is not refused.
+     */
+    static final Set<String> SIGNATURE_REQUIRED = Set.of(
+            "image/png",
+            "image/jpeg",
+            "image/gif",
+            "image/webp",
+            "application/pdf");
 
     /** ZIP-based MIME types that share the PK\x03\x04 signature */
     private static final Set<String> MIME_ZIP_SUBTYPES = Set.of(

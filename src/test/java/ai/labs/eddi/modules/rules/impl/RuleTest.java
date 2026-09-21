@@ -84,6 +84,43 @@ class RuleTest {
     }
 
     @Test
+    void execute_conditionNotExecuted_returnsFail() throws Exception {
+        // a condition that could not evaluate itself must not make the rule fire
+        var rule = new Rule("r1");
+        var cond = mock(IRuleCondition.class);
+        when(cond.execute(any(), any())).thenReturn(ExecutionState.NOT_EXECUTED);
+        rule.setConditions(List.of(cond));
+
+        var state = rule.execute(mock(IConversationMemory.class), new LinkedList<>());
+        assertEquals(ExecutionState.FAIL, state);
+    }
+
+    @Test
+    void execute_firstConditionSucceedsSecondNotExecuted_returnsFail() throws Exception {
+        var rule = new Rule("r1");
+        var cond1 = mock(IRuleCondition.class);
+        var cond2 = mock(IRuleCondition.class);
+        when(cond1.execute(any(), any())).thenReturn(ExecutionState.SUCCESS);
+        when(cond2.execute(any(), any())).thenReturn(ExecutionState.NOT_EXECUTED);
+        rule.setConditions(List.of(cond1, cond2));
+
+        var state = rule.execute(mock(IConversationMemory.class), new LinkedList<>());
+        assertEquals(ExecutionState.FAIL, state);
+    }
+
+    @Test
+    void execute_shortCircuitsOnNotExecuted() throws Exception {
+        var rule = new Rule("r1");
+        var cond1 = mock(IRuleCondition.class);
+        var cond2 = mock(IRuleCondition.class);
+        when(cond1.execute(any(), any())).thenReturn(ExecutionState.NOT_EXECUTED);
+        rule.setConditions(List.of(cond1, cond2));
+
+        rule.execute(mock(IConversationMemory.class), new LinkedList<>());
+        verify(cond2, never()).execute(any(), any());
+    }
+
+    @Test
     void execute_shortCircuitsOnFail() throws Exception {
         var rule = new Rule("r1");
         var cond1 = mock(IRuleCondition.class);

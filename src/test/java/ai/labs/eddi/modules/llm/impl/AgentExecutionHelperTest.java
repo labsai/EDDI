@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
+import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
@@ -39,7 +40,7 @@ class AgentExecutionHelperTest {
     @DisplayName("executeWithRetry should retry on retryable error")
     void testExecuteWithRetry_RetryOnTimeout() throws LifecycleException {
         var task = new LlmConfiguration.Task();
-        var retryConfig = new LlmConfiguration.RetryConfiguration();
+        var retryConfig = new RetryConfiguration();
         retryConfig.setMaxAttempts(3);
         retryConfig.setBackoffDelayMs(10L); // Short delay for testing
         task.setRetry(retryConfig);
@@ -62,7 +63,7 @@ class AgentExecutionHelperTest {
     @DisplayName("executeWithRetry should fail after max attempts")
     void testExecuteWithRetry_FailAfterMaxAttempts() {
         var task = new LlmConfiguration.Task();
-        var retryConfig = new LlmConfiguration.RetryConfiguration();
+        var retryConfig = new RetryConfiguration();
         retryConfig.setMaxAttempts(2);
         retryConfig.setBackoffDelayMs(10L);
         task.setRetry(retryConfig);
@@ -82,7 +83,7 @@ class AgentExecutionHelperTest {
     @DisplayName("executeWithRetry should fail immediately on non-retryable error")
     void testExecuteWithRetry_FailImmediatelyOnNonRetryableError() {
         var task = new LlmConfiguration.Task();
-        var retryConfig = new LlmConfiguration.RetryConfiguration();
+        var retryConfig = new RetryConfiguration();
         retryConfig.setMaxAttempts(3);
         task.setRetry(retryConfig);
 
@@ -112,7 +113,7 @@ class AgentExecutionHelperTest {
     @DisplayName("executeWithRetry should handle rate limit error as retryable")
     void testExecuteWithRetry_RateLimitIsRetryable() throws LifecycleException {
         var task = new LlmConfiguration.Task();
-        var retryConfig = new LlmConfiguration.RetryConfiguration();
+        var retryConfig = new RetryConfiguration();
         retryConfig.setMaxAttempts(3);
         retryConfig.setBackoffDelayMs(10L);
         task.setRetry(retryConfig);
@@ -136,7 +137,7 @@ class AgentExecutionHelperTest {
     @Test
     @DisplayName("RetryConfiguration should have correct defaults")
     void testRetryConfigurationDefaults() {
-        var retryConfig = new LlmConfiguration.RetryConfiguration();
+        var retryConfig = new RetryConfiguration();
 
         assertEquals(3, retryConfig.getMaxAttempts());
         assertEquals(1000L, retryConfig.getBackoffDelayMs());

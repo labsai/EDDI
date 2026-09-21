@@ -5,11 +5,21 @@
 package ai.labs.eddi.modules.llm.tools.impl;
 
 import ai.labs.eddi.engine.httpclient.SafeHttpClient;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.util.Comparator;
+import java.util.GregorianCalendar;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.net.http.HttpResponse;
+import java.net.http.HttpRequest;
+import java.io.IOException;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -21,7 +31,7 @@ class PdfReaderToolTest {
 
     @BeforeEach
     void setUp() {
-        pdfReaderTool = new PdfReaderTool(new SafeHttpClient(10000));
+        pdfReaderTool = new PdfReaderTool(new SafeHttpClient(10000), new AttachmentTextExtractor(10000));
     }
 
     // === SSRF Protection Tests ===
@@ -152,17 +162,17 @@ class PdfReaderToolTest {
         @BeforeEach
         void setUpMocked() {
             mockedHttpClient = org.mockito.Mockito.mock(SafeHttpClient.class);
-            mockedTool = new PdfReaderTool(mockedHttpClient);
+            mockedTool = new PdfReaderTool(mockedHttpClient, new AttachmentTextExtractor(10000));
         }
 
         @Test
         @org.junit.jupiter.api.DisplayName("extractTextFromPdf — non-200 status returns error")
         @SuppressWarnings("unchecked")
         void extractText_non200_returnsError() throws Exception {
-            var mockResponse = (java.net.http.HttpResponse<java.nio.file.Path>) org.mockito.Mockito.mock(java.net.http.HttpResponse.class);
+            var mockResponse = (HttpResponse<Path>) org.mockito.Mockito.mock(HttpResponse.class);
             org.mockito.Mockito.when(mockResponse.statusCode()).thenReturn(404);
             org.mockito.Mockito.doReturn(mockResponse).when(mockedHttpClient).send(
-                    org.mockito.ArgumentMatchers.any(java.net.http.HttpRequest.class),
+                    org.mockito.ArgumentMatchers.any(HttpRequest.class),
                     org.mockito.ArgumentMatchers.any());
 
             String result = mockedTool.extractTextFromPdf("https://example.com/notfound.pdf");
@@ -175,10 +185,10 @@ class PdfReaderToolTest {
         @org.junit.jupiter.api.DisplayName("extractTextFromPdfPages — non-200 status returns error")
         @SuppressWarnings("unchecked")
         void extractPages_non200_returnsError() throws Exception {
-            var mockResponse = (java.net.http.HttpResponse<java.nio.file.Path>) org.mockito.Mockito.mock(java.net.http.HttpResponse.class);
+            var mockResponse = (HttpResponse<Path>) org.mockito.Mockito.mock(HttpResponse.class);
             org.mockito.Mockito.when(mockResponse.statusCode()).thenReturn(500);
             org.mockito.Mockito.doReturn(mockResponse).when(mockedHttpClient).send(
-                    org.mockito.ArgumentMatchers.any(java.net.http.HttpRequest.class),
+                    org.mockito.ArgumentMatchers.any(HttpRequest.class),
                     org.mockito.ArgumentMatchers.any());
 
             String result = mockedTool.extractTextFromPdfPages("https://example.com/doc.pdf", 1, 3);
@@ -191,10 +201,10 @@ class PdfReaderToolTest {
         @org.junit.jupiter.api.DisplayName("getPdfInfo — non-200 status returns error")
         @SuppressWarnings("unchecked")
         void pdfInfo_non200_returnsError() throws Exception {
-            var mockResponse = (java.net.http.HttpResponse<java.nio.file.Path>) org.mockito.Mockito.mock(java.net.http.HttpResponse.class);
+            var mockResponse = (HttpResponse<Path>) org.mockito.Mockito.mock(HttpResponse.class);
             org.mockito.Mockito.when(mockResponse.statusCode()).thenReturn(403);
             org.mockito.Mockito.doReturn(mockResponse).when(mockedHttpClient).send(
-                    org.mockito.ArgumentMatchers.any(java.net.http.HttpRequest.class),
+                    org.mockito.ArgumentMatchers.any(HttpRequest.class),
                     org.mockito.ArgumentMatchers.any());
 
             String result = mockedTool.getPdfInfo("https://example.com/forbidden.pdf");
@@ -206,8 +216,8 @@ class PdfReaderToolTest {
         @Test
         @org.junit.jupiter.api.DisplayName("extractTextFromPdf — IOException returns error")
         void extractText_ioException_returnsError() throws Exception {
-            org.mockito.Mockito.doThrow(new java.io.IOException("Connection refused")).when(mockedHttpClient).send(
-                    org.mockito.ArgumentMatchers.any(java.net.http.HttpRequest.class),
+            org.mockito.Mockito.doThrow(new IOException("Connection refused")).when(mockedHttpClient).send(
+                    org.mockito.ArgumentMatchers.any(HttpRequest.class),
                     org.mockito.ArgumentMatchers.any());
 
             String result = mockedTool.extractTextFromPdf("https://example.com/doc.pdf");
@@ -219,8 +229,8 @@ class PdfReaderToolTest {
         @Test
         @org.junit.jupiter.api.DisplayName("extractTextFromPdfPages — IOException returns error")
         void extractPages_ioException_returnsError() throws Exception {
-            org.mockito.Mockito.doThrow(new java.io.IOException("Timeout")).when(mockedHttpClient).send(
-                    org.mockito.ArgumentMatchers.any(java.net.http.HttpRequest.class),
+            org.mockito.Mockito.doThrow(new IOException("Timeout")).when(mockedHttpClient).send(
+                    org.mockito.ArgumentMatchers.any(HttpRequest.class),
                     org.mockito.ArgumentMatchers.any());
 
             String result = mockedTool.extractTextFromPdfPages("https://example.com/doc.pdf", 1, 5);
@@ -232,8 +242,8 @@ class PdfReaderToolTest {
         @Test
         @org.junit.jupiter.api.DisplayName("getPdfInfo — IOException returns error")
         void pdfInfo_ioException_returnsError() throws Exception {
-            org.mockito.Mockito.doThrow(new java.io.IOException("DNS failed")).when(mockedHttpClient).send(
-                    org.mockito.ArgumentMatchers.any(java.net.http.HttpRequest.class),
+            org.mockito.Mockito.doThrow(new IOException("DNS failed")).when(mockedHttpClient).send(
+                    org.mockito.ArgumentMatchers.any(HttpRequest.class),
                     org.mockito.ArgumentMatchers.any());
 
             String result = mockedTool.getPdfInfo("https://example.com/doc.pdf");
@@ -246,7 +256,7 @@ class PdfReaderToolTest {
         @org.junit.jupiter.api.DisplayName("extractTextFromPdf — InterruptedException returns error")
         void extractText_interruptedException_returnsError() throws Exception {
             org.mockito.Mockito.doThrow(new InterruptedException("Interrupted")).when(mockedHttpClient).send(
-                    org.mockito.ArgumentMatchers.any(java.net.http.HttpRequest.class),
+                    org.mockito.ArgumentMatchers.any(HttpRequest.class),
                     org.mockito.ArgumentMatchers.any());
 
             String result = mockedTool.extractTextFromPdf("https://example.com/doc.pdf");
@@ -267,11 +277,11 @@ class PdfReaderToolTest {
         @BeforeEach
         void setUpMocked() {
             mockedHttpClient = org.mockito.Mockito.mock(SafeHttpClient.class);
-            mockedTool = new PdfReaderTool(mockedHttpClient);
+            mockedTool = new PdfReaderTool(mockedHttpClient, new AttachmentTextExtractor(10000));
         }
 
-        private java.nio.file.Path createTinyPdf(String text) throws Exception {
-            java.nio.file.Path tempFile = java.nio.file.Files.createTempFile("eddi-test-", ".pdf");
+        private Path createTinyPdf(String text) throws Exception {
+            Path tempFile = Files.createTempFile("eddi-test-", ".pdf");
             try (org.apache.pdfbox.pdmodel.PDDocument doc = new org.apache.pdfbox.pdmodel.PDDocument()) {
                 var page = new org.apache.pdfbox.pdmodel.PDPage();
                 doc.addPage(page);
@@ -288,8 +298,8 @@ class PdfReaderToolTest {
             return tempFile;
         }
 
-        private java.nio.file.Path createMultiPagePdf(String... texts) throws Exception {
-            java.nio.file.Path tempFile = java.nio.file.Files.createTempFile("eddi-test-multi-", ".pdf");
+        private Path createMultiPagePdf(String... texts) throws Exception {
+            Path tempFile = Files.createTempFile("eddi-test-multi-", ".pdf");
             try (org.apache.pdfbox.pdmodel.PDDocument doc = new org.apache.pdfbox.pdmodel.PDDocument()) {
                 for (String text : texts) {
                     var page = new org.apache.pdfbox.pdmodel.PDPage();
@@ -308,10 +318,10 @@ class PdfReaderToolTest {
             return tempFile;
         }
 
-        private java.nio.file.Path createPdfWithMetadata(String title, String author,
-                                                         String subject, String creator)
+        private Path createPdfWithMetadata(String title, String author,
+                                           String subject, String creator)
                 throws Exception {
-            java.nio.file.Path tempFile = java.nio.file.Files.createTempFile("eddi-test-meta-", ".pdf");
+            Path tempFile = Files.createTempFile("eddi-test-meta-", ".pdf");
             try (org.apache.pdfbox.pdmodel.PDDocument doc = new org.apache.pdfbox.pdmodel.PDDocument()) {
                 var page = new org.apache.pdfbox.pdmodel.PDPage();
                 doc.addPage(page);
@@ -328,9 +338,9 @@ class PdfReaderToolTest {
                 info.setAuthor(author);
                 info.setSubject(subject);
                 info.setCreator(creator);
-                info.setCreationDate(java.util.GregorianCalendar.from(
-                        java.time.ZonedDateTime.of(2025, 1, 15, 10, 30, 0, 0,
-                                java.time.ZoneId.of("UTC"))));
+                info.setCreationDate(GregorianCalendar.from(
+                        ZonedDateTime.of(2025, 1, 15, 10, 30, 0, 0,
+                                ZoneId.of("UTC"))));
                 doc.setDocumentInformation(info);
                 doc.save(tempFile.toFile());
             }
@@ -338,39 +348,39 @@ class PdfReaderToolTest {
         }
 
         @SuppressWarnings("unchecked")
-        private void mockHttpToServePdf(java.nio.file.Path sourcePdf) throws Exception {
+        private void mockHttpToServePdf(Path sourcePdf) throws Exception {
             org.mockito.Mockito.doAnswer(invocation -> {
                 // downloadPdf() creates a temp file with prefix "eddi-pdf-" immediately
                 // before calling send(). Find that temp file and copy our PDF into it.
-                java.nio.file.Path tempDir = java.nio.file.Path.of(System.getProperty("java.io.tmpdir"));
-                java.nio.file.Path target = java.nio.file.Files.list(tempDir)
+                Path tempDir = Path.of(System.getProperty("java.io.tmpdir"));
+                Path target = Files.list(tempDir)
                         .filter(p -> p.getFileName().toString().startsWith("eddi-pdf-")
                                 && p.getFileName().toString().endsWith(".pdf"))
-                        .max(java.util.Comparator.comparingLong(p -> {
+                        .max(Comparator.comparingLong(p -> {
                             try {
-                                return java.nio.file.Files.getLastModifiedTime(p).toMillis();
+                                return Files.getLastModifiedTime(p).toMillis();
                             } catch (Exception e) {
                                 return 0L;
                             }
                         }))
                         .orElseThrow(() -> new RuntimeException("Could not find eddi-pdf temp file"));
 
-                java.nio.file.Files.copy(sourcePdf, target,
-                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                Files.copy(sourcePdf, target,
+                        StandardCopyOption.REPLACE_EXISTING);
 
-                var mockResponse = (java.net.http.HttpResponse<java.nio.file.Path>) org.mockito.Mockito.mock(java.net.http.HttpResponse.class);
+                var mockResponse = (HttpResponse<Path>) org.mockito.Mockito.mock(HttpResponse.class);
                 org.mockito.Mockito.when(mockResponse.statusCode()).thenReturn(200);
                 org.mockito.Mockito.when(mockResponse.body()).thenReturn(target);
                 return mockResponse;
             }).when(mockedHttpClient).send(
-                    org.mockito.ArgumentMatchers.any(java.net.http.HttpRequest.class),
+                    org.mockito.ArgumentMatchers.any(HttpRequest.class),
                     org.mockito.ArgumentMatchers.any());
         }
 
         @org.junit.jupiter.api.Test
         @org.junit.jupiter.api.DisplayName("extractTextFromPdf — extracts text from a valid small PDF")
         void extractText_validPdf() throws Exception {
-            java.nio.file.Path pdfPath = createTinyPdf("Hello EDDI World");
+            Path pdfPath = createTinyPdf("Hello EDDI World");
             try {
                 mockHttpToServePdf(pdfPath);
                 String result = mockedTool.extractTextFromPdf("https://example.com/test.pdf");
@@ -379,14 +389,14 @@ class PdfReaderToolTest {
                 assertTrue(result.contains("Hello EDDI World"),
                         "Should extract text from PDF. Got: " + result);
             } finally {
-                java.nio.file.Files.deleteIfExists(pdfPath);
+                Files.deleteIfExists(pdfPath);
             }
         }
 
         @org.junit.jupiter.api.Test
         @org.junit.jupiter.api.DisplayName("extractTextFromPdfPages — startPage > totalPages returns error")
         void extractPages_startPageBeyondTotal() throws Exception {
-            java.nio.file.Path pdfPath = createTinyPdf("Only page");
+            Path pdfPath = createTinyPdf("Only page");
             try {
                 mockHttpToServePdf(pdfPath);
                 String result = mockedTool.extractTextFromPdfPages(
@@ -397,14 +407,14 @@ class PdfReaderToolTest {
                 assertTrue(result.contains("out of range") || result.contains("Start page"),
                         "Should mention out of range. Got: " + result);
             } finally {
-                java.nio.file.Files.deleteIfExists(pdfPath);
+                Files.deleteIfExists(pdfPath);
             }
         }
 
         @org.junit.jupiter.api.Test
         @org.junit.jupiter.api.DisplayName("extractTextFromPdfPages — endPage > totalPages clamps to totalPages")
         void extractPages_endPageClamped() throws Exception {
-            java.nio.file.Path pdfPath = createMultiPagePdf("Page one text", "Page two text");
+            Path pdfPath = createMultiPagePdf("Page one text", "Page two text");
             try {
                 mockHttpToServePdf(pdfPath);
                 String result = mockedTool.extractTextFromPdfPages(
@@ -418,14 +428,14 @@ class PdfReaderToolTest {
                 assertTrue(result.contains("Page two text"),
                         "Should contain page 2 text. Got: " + result);
             } finally {
-                java.nio.file.Files.deleteIfExists(pdfPath);
+                Files.deleteIfExists(pdfPath);
             }
         }
 
         @org.junit.jupiter.api.Test
         @org.junit.jupiter.api.DisplayName("getPdfInfo — extracts metadata from PDF")
         void pdfInfo_withMetadata() throws Exception {
-            java.nio.file.Path pdfPath = createPdfWithMetadata(
+            Path pdfPath = createPdfWithMetadata(
                     "EDDI Test Document", "Test Author", "Testing Subject", "PDFBox Creator");
             try {
                 mockHttpToServePdf(pdfPath);
@@ -445,14 +455,14 @@ class PdfReaderToolTest {
                 assertTrue(result.contains("Number of pages: 1"),
                         "Should contain page count. Got: " + result);
             } finally {
-                java.nio.file.Files.deleteIfExists(pdfPath);
+                Files.deleteIfExists(pdfPath);
             }
         }
 
         @org.junit.jupiter.api.Test
         @org.junit.jupiter.api.DisplayName("extractTextFromPdf — text > 10000 chars gets truncation message")
         void extractText_truncation() throws Exception {
-            java.nio.file.Path tempFile = java.nio.file.Files.createTempFile("eddi-test-long-", ".pdf");
+            Path tempFile = Files.createTempFile("eddi-test-long-", ".pdf");
             try {
                 try (org.apache.pdfbox.pdmodel.PDDocument doc = new org.apache.pdfbox.pdmodel.PDDocument()) {
                     var page = new org.apache.pdfbox.pdmodel.PDPage();
@@ -480,14 +490,14 @@ class PdfReaderToolTest {
                 assertTrue(result.contains("[Content truncated"),
                         "Should contain truncation message. Got length: " + result.length());
             } finally {
-                java.nio.file.Files.deleteIfExists(tempFile);
+                Files.deleteIfExists(tempFile);
             }
         }
 
         @org.junit.jupiter.api.Test
         @org.junit.jupiter.api.DisplayName("extractTextFromPdfPages — valid page range extracts correctly")
         void extractPages_validRange() throws Exception {
-            java.nio.file.Path pdfPath = createMultiPagePdf("First page", "Second page", "Third page");
+            Path pdfPath = createMultiPagePdf("First page", "Second page", "Third page");
             try {
                 mockHttpToServePdf(pdfPath);
                 String result = mockedTool.extractTextFromPdfPages(
@@ -502,14 +512,14 @@ class PdfReaderToolTest {
                 assertFalse(result.contains("Third page"),
                         "Should not contain page 3 text");
             } finally {
-                java.nio.file.Files.deleteIfExists(pdfPath);
+                Files.deleteIfExists(pdfPath);
             }
         }
 
         @org.junit.jupiter.api.Test
         @org.junit.jupiter.api.DisplayName("getPdfInfo — PDF without metadata fields still works")
         void pdfInfo_noMetadata() throws Exception {
-            java.nio.file.Path pdfPath = createTinyPdf("bare content");
+            Path pdfPath = createTinyPdf("bare content");
             try {
                 mockHttpToServePdf(pdfPath);
                 String result = mockedTool.getPdfInfo("https://example.com/bare.pdf");
@@ -520,7 +530,7 @@ class PdfReaderToolTest {
                 assertFalse(result.contains("Title:"),
                         "Should not contain title when none set");
             } finally {
-                java.nio.file.Files.deleteIfExists(pdfPath);
+                Files.deleteIfExists(pdfPath);
             }
         }
     }

@@ -59,6 +59,43 @@ public class InputMatcherTest extends BaseMatcherTest {
     }
 
     @Test
+    public void validateConfiguration_missingExpressionsKey_isRejected() {
+        // setup
+        Map<String, String> values = new HashMap<>();
+        values.put(KEY_OCCURRENCE, ConversationStepOccurrence.lastStep.toString());
+        matcher.setConfigs(values);
+
+        // test
+        IllegalArgumentException exception = Assertions.assertThrows(IllegalArgumentException.class, () -> matcher.validateConfiguration());
+
+        // assert
+        Assertions.assertTrue(exception.getMessage().contains(InputMatcher.ID), exception.getMessage());
+        Assertions.assertTrue(exception.getMessage().contains(KEY_EXPRESSIONS), exception.getMessage());
+    }
+
+    @Test
+    public void validateConfiguration_blankExpressionsValue_isRejected() {
+        // setup
+        Map<String, String> values = new HashMap<>();
+        values.put(KEY_EXPRESSIONS, "   ");
+        matcher.setConfigs(values);
+
+        // test / assert
+        Assertions.assertThrows(IllegalArgumentException.class, () -> matcher.validateConfiguration());
+    }
+
+    @Test
+    public void validateConfiguration_withExpressions_passes() {
+        // setup
+        Map<String, String> values = new HashMap<>();
+        values.put(KEY_EXPRESSIONS, expressionsValue);
+        matcher.setConfigs(values);
+
+        // test / assert
+        matcher.validateConfiguration();
+    }
+
+    @Test
     public void execute_occurrence_currentStep() throws Exception {
         // setup
         Map<String, String> values = new HashMap<>();

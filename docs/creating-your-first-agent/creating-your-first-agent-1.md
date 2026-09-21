@@ -10,7 +10,7 @@ Follow these steps to create the configuration files you will need:
 
 > See also [Semantic Parser](../semantic-parser.md)
 
-Create regular dictionaries in order to store custom words and phrases. A dictionary is there to map user input to expressions, which are later used in `Behavior Rules`. A **`POST`** to **`/regulardictionarystore/regulardictionaries`** with a JSON in the body like this:
+Create regular dictionaries in order to store custom words and phrases. A dictionary is there to map user input to expressions, which are later used in `Behavior Rules`. A **`POST`** to **`/dictionarystore/dictionaries`** with a JSON in the body like this:
 
 ```javascript
 {
@@ -53,7 +53,7 @@ Example using **`CURL`**:
 
 ```bash
 curl -X POST --header 'Content-Type: application/json' --header 'Accept: application/json' -d '{ \
-"language" : "en", \
+"lang" : "en", \
 "words" : [ \
 { \
 "word" : "hello", \
@@ -86,7 +86,7 @@ curl -X POST --header 'Content-Type: application/json' --header 'Accept: applica
 "expressions" : "how_are_you" \
 } \
 ] \
-}' 'http://localhost:7070/regulardictionarystore/regulardictionaries'
+}' 'http://localhost:7070/dictionarystore/dictionaries'
 ```
 
 ### Dictionary parameters
@@ -107,7 +107,7 @@ curl -X POST --header 'Content-Type: application/json' --header 'Accept: applica
 
 > See also Behavior Rules
 
-Next, create a `behaviorRule` resource to configure the decision making a. Make a **`POST`** to **`/behaviorstore/behaviorsets`** with a JSON in the body like this:
+Next, create a `behaviorRule` resource to configure the agent's decision making. Make a **`POST`** to **`/rulestore/rulesets`** with a JSON in the body like this:
 
 ```javascript
 {
@@ -169,7 +169,7 @@ Next, create a `behaviorRule` resource to configure the decision making a. Make 
             {
               "type": "inputmatcher",
               "configs": {
-                "expressions": "thank(*)"
+                "expressions": "thanks(*)"
               }
             }
           ]
@@ -211,11 +211,11 @@ Next, create a `behaviorRule` resource to configure the decision making a. Make 
 
 You should again get a return code of **`201`** with a **`URI`** in the **`location` header** referencing the newly created `Behavior Rules`:
 
-`eddi://ai.labs.behavior/behaviorstore/behaviorsets/`**`<UNIQUE_BEHAVIOR_ID>`**`?version=`**`<BEHAVIOR_VERSION>`**
+`eddi://ai.labs.rules/rulestore/rulesets/`**`<UNIQUE_BEHAVIOR_ID>`**`?version=`**`<BEHAVIOR_VERSION>`**
 
 Example:
 
-`eddi://ai.labs.behavior/behaviorstore/behaviorsets/5a26d8fd17312628b46119fb?version=1`
+`eddi://ai.labs.rules/rulestore/rulesets/5a26d8fd17312628b46119fb?version=1`
 
 ### 3. Creating Output
 
@@ -346,11 +346,11 @@ Example :
 
 ### 4. Creating the Workflow
 
-Now we will align the just created `LifecycleTasks` in the `Workflow`. Make a **`POST`** to **`/packagestore/packages`** with a JSON in the body like this:
+Now we will align the just created `LifecycleTasks` in the `Workflow`. Make a **`POST`** to **`/workflowstore/workflows`** with a JSON in the body like this:
 
 ```javascript
 {
-  "packageExtensions": [
+  "workflowSteps": [
     {
       "type": "eddi://ai.labs.parser",
       "extensions": {
@@ -376,15 +376,14 @@ Now we will align the just created `LifecycleTasks` in the `Workflow`. Make a **
           {
             "type": "eddi://ai.labs.parser.dictionaries.regular",
             "config": {
-              "uri": "eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/<UNIQUE_DICTIONARY_ID>?version=<DICTIONARY_VERSION>"
+              "uri": "eddi://ai.labs.dictionary/dictionarystore/dictionaries/<UNIQUE_DICTIONARY_ID>?version=<DICTIONARY_VERSION>"
             }
           }
         ],
         "corrections": [
           {
-            "type": "eddi://ai.labs.parser.corrections.stemming",
+            "type": "eddi://ai.labs.parser.corrections.phonetic",
             "config": {
-              "language": "english",
               "lookupIfKnown": "false"
             }
           },
@@ -404,7 +403,7 @@ Now we will align the just created `LifecycleTasks` in the `Workflow`. Make a **
     {
       "type": "eddi://ai.labs.behavior",
       "config": {
-        "uri": "eddi://ai.labs.behavior/behaviorstore/behaviorsets/<UNIQUE_BEHAVIOR_ID>?version=<BEHAVIOR_VERSION>"
+        "uri": "eddi://ai.labs.rules/rulestore/rulesets/<UNIQUE_BEHAVIOR_ID>?version=<BEHAVIOR_VERSION>"
       }
     },
     {
@@ -421,17 +420,20 @@ Now we will align the just created `LifecycleTasks` in the `Workflow`. Make a **
 
 | Name                         | Description                                          | Required |
 | ---------------------------- | ---------------------------------------------------- | -------- |
-| packageextensions            | `Array` of `WorkflowExtension`                       |          |
-| WorkflowExtension.type       | possible values, see table below "`Extension Types`" |          |
-| WorkflowExtension.extensions | `Array` of `Object`                                  | False    |
-| WorkflowExtension.config     | `Config` object, but can be empty.                   | True     |
+| workflowSteps                | `Array` of `WorkflowStep`                            | True     |
+| WorkflowStep.type            | possible values, see table below "`Extension Types`" |          |
+| WorkflowStep.extensions      | `Object` (a map of extension name to value)          | False    |
+| WorkflowStep.config          | `Config` object, but can be empty.                   | True     |
+
+`workflowExtensions` is still accepted as a v5 alias. No other spelling is: writes go through a
+strict parser that rejects an unknown top-level key with a `400`.
 
 Extension Types
 
 | Extension               | Config                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| eddi://ai.labs.parser   | <p><code>Dictionaries</code> and/or corrections </p><p>Object "<code>extensions</code>" can contain "<code>dictionaries</code>" (<code>Array</code> of <code>Dictionary</code>) and/or "<code>corrections</code>" (<code>Array</code> of <code>Correction</code>) </p><p>Object "<code>Dictionary</code>" has params "<code>type</code>" and "<code>config</code>" (optional) </p><p><code>Dictionary.type</code> can reference <code>Regular-Dictionaries</code> "<code>eddi://ai.labs.parser.dictionaries.regular</code>" (needs param "<code>config.uri</code>") or be one of the <strong>EDDI</strong> out of the box types: </p><p>—>"<code>eddi://ai.labs.parser.dictionaries.integer</code>" </p><p>—>"<code>eddi://ai.labs.parser.dictionaries.decimal</code>" </p><p>—>"<code>eddi://ai.labs.parser.dictionaries.punctuation</code>" </p><p>—>"<code>eddi://ai.labs.parser.dictionaries.email</code>" </p><p>—>"<code>eddi://ai.labs.parser.dictionaries.time</code>" </p><p>—>"<code>eddi://ai.labs.parser.dictionaries.ordinalNumber</code>"</p><p>Object "<code>Correction</code>" has params "<code>type</code>" and "<code>config</code>" (optional)</p><p><code>Correction.type</code> can reference one of the EDDI out of the box types: </p><p>—>"<code>eddi://ai.labs.parser.corrections.stemming</code>": Object "<code>config</code>" has params "<code>language</code>" (<code>String</code> e.g. "english") and "<code>lookupIfKnown</code>" (<code>Boolean</code>) </p><p>—>"<code>eddi://ai.labs.parser.corrections.levenshtein</code>": Object "<code>config</code>" has param "<code>distance</code>" (Integer, e.g. 2) </p><p>—>"<code>eddi://ai.labs.parser.corrections.mergedTerms</code>"</p> |
-| eddi://ai.labs.behavior | Object `Config` contains param `uri` with Link to a behavior set, e.g. `eddi://ai.labs.behavior/behaviorstore/behaviorsets/5a26d8fd17312628b46119fb?version=1`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| eddi://ai.labs.parser   | <p><code>Dictionaries</code> and/or corrections </p><p>Object "<code>extensions</code>" can contain "<code>dictionaries</code>" (<code>Array</code> of <code>Dictionary</code>) and/or "<code>corrections</code>" (<code>Array</code> of <code>Correction</code>) </p><p>Object "<code>Dictionary</code>" has params "<code>type</code>" and "<code>config</code>" (optional) </p><p><code>Dictionary.type</code> can reference <code>Regular-Dictionaries</code> "<code>eddi://ai.labs.parser.dictionaries.regular</code>" (needs param "<code>config.uri</code>") or be one of the <strong>EDDI</strong> out of the box types: </p><p>—>"<code>eddi://ai.labs.parser.dictionaries.integer</code>" </p><p>—>"<code>eddi://ai.labs.parser.dictionaries.decimal</code>" </p><p>—>"<code>eddi://ai.labs.parser.dictionaries.punctuation</code>" </p><p>—>"<code>eddi://ai.labs.parser.dictionaries.email</code>" </p><p>—>"<code>eddi://ai.labs.parser.dictionaries.time</code>" </p><p>—>"<code>eddi://ai.labs.parser.dictionaries.ordinalNumber</code>"</p><p>Object "<code>Correction</code>" has params "<code>type</code>" and "<code>config</code>" (optional)</p><p><code>Correction.type</code> can reference one of the EDDI out of the box types: </p><p>—>"<code>eddi://ai.labs.parser.corrections.phonetic</code>": Object "<code>config</code>" has param "<code>lookupIfKnown</code>" (<code>Boolean</code>) </p><p>—>"<code>eddi://ai.labs.parser.corrections.levenshtein</code>": Object "<code>config</code>" has param "<code>distance</code>" (Integer, e.g. 2) </p><p>—>"<code>eddi://ai.labs.parser.corrections.mergedTerms</code>"</p> |
+| eddi://ai.labs.behavior | Object `Config` contains param `uri` with Link to a behavior set, e.g. `eddi://ai.labs.rules/rulestore/rulesets/5a26d8fd17312628b46119fb?version=1`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | eddi://ai.labs.output   | Object Config contains param `uri` with Link to output set, e.g. `eddi://ai.labs.output/outputstore/outputsets/5a26d97417312628b46119fc?version=1`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 
 > New
@@ -472,7 +474,7 @@ Now you can use the new feature of defining properties in the package definition
 
 ```javascript
 {
-  "packageExtensions": [
+  "workflowSteps": [
    ...
     {
       "type": "eddi://ai.labs.property",
@@ -516,11 +518,11 @@ Now you can use the new feature of defining properties in the package definition
 
 You should again get a return code of `201` with an `URI` in the location header referencing the newly created package format
 
-`eddi://ai.labs.package/packagestore/packages/<UNIQUE_WORKFLOW_ID>?version=<WORKFLOW_VERSION>`
+`eddi://ai.labs.workflow/workflowstore/workflows/<UNIQUE_WORKFLOW_ID>?version=<WORKFLOW_VERSION>`
 
 Example
 
-`eddi://ai.labs.package/packagestore/packages/5a2ae60f17312624f8b8a445?version=1`
+`eddi://ai.labs.workflow/workflowstore/workflows/5a2ae60f17312624f8b8a445?version=1`
 
 > See also the API documentation at [http://localhost:7070/q/swagger-ui](http://localhost:7070/q/swagger-ui)
 
@@ -531,9 +533,8 @@ Make a **`POST`** to **`/agentstore/agents`** with a JSON like this:
 ```javascript
 {
 "packages": [
-"eddi://ai.labs.package/packagestore/packages/<UNIQUE_WORKFLOW_ID>?version=<WORKFLOW_VERSION>"
-],
-"channels": []
+"eddi://ai.labs.workflow/workflowstore/workflows/<UNIQUE_WORKFLOW_ID>?version=<WORKFLOW_VERSION>"
+]
 }
 ```
 
@@ -542,9 +543,10 @@ Make a **`POST`** to **`/agentstore/agents`** with a JSON like this:
 | Name           | Description                                                                                                                                           |
 | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | packages       | `Array` of `String`, references to `Workflows`                                                                                                        |
-| channels       | `Array` of `Channel`,                                                                                                                                 |
-| Channel.type   | `String`, e.g. `"eddi://ai.labs.channel.facebook"`                                                                                                    |
-| Channel.config | `Config` Object. For "Facebook" this object has the params "`appSecret`" (`String`), "`verificationToken`" (`String`), "`pageAccessToken`" (`String`) |
+
+Channel delivery is configured separately — see [Slack Integration](../slack-integration.md).
+The embedded `channels` field on the agent is deprecated since 6.1.0 and is auto-migrated to
+standalone channel documents at startup. There is no Facebook connector.
 
 b. You should again get a return code of **`201`** with a `URI` in the `location` header referencing the newly created agent :
 
@@ -581,7 +583,7 @@ Otherwise via REST:
 
          `eddi://ai.labs.conversation/conversationstore/conversations/`**`<UNIQUE_CONVERSATION_ID>`**
 
-2. Now it's time to start talking to our Agent 1. Make a **`POST`** to `/agents/`**`<UNIQUE_AGENT_ID>`**/start`/`**`<UNIQUE_CONVERSATION_ID>`**
+2. Now it's time to start talking to our Agent 1. Make a **`POST`** to `/agents/`**`<UNIQUE_CONVERSATION_ID>`**
 
 **Option 1:** is to hand over the input text as `contentType text/plain`. Include the User Input in the body as `text/plain` (e.g. Hello)&#x20;
 
@@ -595,7 +597,7 @@ Otherwise via REST:
 
 1. You have two query params you can use to config the returned output 1. `returnDetailed` - default is false - will return all sub results of the entire conversation steps, otherwise only public ones such as input, action, output & quickreplies 2. `returnCurrentStepOnly` - default is true - will return only the latest conversation step that has just been processed, otherwise returns all conversation steps since the beginning of this conversation
 2. The output from the agent will be returned as JSON
-3. If you are interested in fetching the **`conversationmemory`** at any given time, make a **`GET`** to `/agents/`**`<UNIQUE_AGENT_ID>`**/start`/`**`<UNIQUE_CONVERSATION_ID>`**`?returnDetailed=true` (the query param is optional, default is false)
+3. If you are interested in fetching the **`conversationmemory`** at any given time, make a **`GET`** to `/agents/`**`<UNIQUE_CONVERSATION_ID>`**`?returnDetailed=true` (the query param is optional, default is false)
 
 > If you made it till here, CONGRATULATIONS, you have created your first Agent with **EDDI** !
 
@@ -610,7 +612,12 @@ By the way you can use the attached **postman collection** below to do all of th
 7. Create conversation
 8. Say Hello to the agent
 
-Download the [Postman collection](../.gitbook/assets/Creating%20and%20chatting%20with%20a%20bot.postman_collection.json) to run through all the steps above.
+> **Run it yourself.** The GitBook-hosted Postman collections that used to be linked here
+> were lost in the migration. You do not need them: every request is shown inline above,
+> and Postman can import EDDI's own spec directly — **Import → Link →**
+> `<your-eddi-host>/openapi` (`http://localhost:7070/openapi` for a local install).
+> It is generated from the running build, so unlike a committed collection it cannot go
+> out of date. The same spec is browsable at `<your-eddi-host>/q/swagger-ui`.
 
 ### External Links
 

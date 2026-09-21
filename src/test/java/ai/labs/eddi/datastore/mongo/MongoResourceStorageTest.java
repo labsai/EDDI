@@ -8,20 +8,27 @@ import ai.labs.eddi.datastore.IResourceFilter;
 import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
+import com.mongodb.MongoClientSettings;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.IndexOptions;
+import com.mongodb.client.model.ReplaceOptions;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.bson.types.ObjectId;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.function.Consumer;
 
+import com.mongodb.client.result.UpdateResult;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -86,13 +93,19 @@ class MongoResourceStorageTest {
     }
 
     @Test
-    @DisplayName("store — updateOne with upsert when resource has id")
+    @DisplayName("store — REPLACES the document (never $set-merges) when resource has id")
     void storeExistingResource() throws Exception {
         when(documentBuilder.toString(any())).thenReturn("{\"data\":\"test\"}");
         IResourceStorage.IResource<String> resource = storage.newResource(VALID_ID, 1, "test");
 
         storage.store(resource);
-        verify(currentCollection).updateOne(any(Bson.class), any(Document.class), any());
+
+        // A $set update MERGES: with NON_NULL serialization, a cleared config field
+        // is simply absent from the document, so $set would leave the OLD value in
+        // the database while the API reported success. PostgreSQL replaces, so the
+        // same edit produced different results per backend.
+        verify(currentCollection).replaceOne(any(Bson.class), any(Document.class), any(ReplaceOptions.class));
+        verify(currentCollection, never()).updateOne(any(Bson.class), any(Document.class), any());
     }
 
     @Test
@@ -159,6 +172,76 @@ class MongoResourceStorageTest {
         storage.removeAllPermanently(VALID_ID);
         verify(currentCollection).deleteOne(any(Document.class));
         verify(historyCollection).deleteMany(any(Document.class));
+    }
+
+    /**
+     * A history row's {@code _id} is the embedded document {@code {_id: ObjectId,
+     * _version: int}}, and BSON compares embedded documents field by field. The old
+     * filter was a range — {@code $gt {_id, _version: 0}} — so a row archived at
+     * version 0 compared EQUAL to the lower bound and was excluded. Conversation
+     * descriptors are created at version 0, so permanent delete and GDPR erasure
+     * left an undeletable tombstone carrying {@code userId} behind, on MongoDB
+     * only; Postgres deletes by id and did not have the bug.
+     */
+    @Test
+    @DisplayName("removeAllPermanently — matches history rows by nested id, so version 0 is not skipped")
+    void removeAllPermanentlyCoversVersionZero() {
+        ArgumentCaptor<Document> filter = ArgumentCaptor.forClass(Document.class);
+
+        storage.removeAllPermanently(VALID_ID);
+
+        verify(historyCollection).deleteMany(filter.capture());
+        assertEquals(new ObjectId(VALID_ID), filter.getValue().get("_id._id"), "history rows must be matched by the nested id");
+        assertFalse(filter.getValue().toJson().contains("$gt"), "no range bound may exclude version 0: " + filter.getValue().toJson());
+        assertFalse(filter.getValue().toJson().contains("$lt"), "no range bound may exclude version 0: " + filter.getValue().toJson());
+    }
+
+    /** @see #removeAllPermanentlyCoversVersionZero() — same bound, same defect. */
+    @Test
+    @DisplayName("readHistoryLatest — matches by nested id and sorts on the nested version")
+    void readHistoryLatestCoversVersionZero() {
+        when(historyCollection.countDocuments(any(Document.class))).thenReturn(1L);
+
+        Document idDoc = new Document("_id", new ObjectId(VALID_ID)).append("_version", 0);
+        Document doc = new Document("_id", idDoc).append("data", "archived at v0");
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        when(historyCollection.find(any(Document.class))).thenReturn(iterable);
+        when(iterable.sort(any(Document.class))).thenReturn(iterable);
+        when(iterable.limit(1)).thenReturn(iterable);
+        when(iterable.first()).thenReturn(doc);
+
+        IResourceStorage.IHistoryResource<String> result = storage.readHistoryLatest(VALID_ID);
+
+        assertNotNull(result);
+        assertEquals(0, result.getVersion());
+
+        ArgumentCaptor<Document> filter = ArgumentCaptor.forClass(Document.class);
+        verify(historyCollection).find(filter.capture());
+        assertEquals(new ObjectId(VALID_ID), filter.getValue().get("_id._id"));
+
+        ArgumentCaptor<Document> sort = ArgumentCaptor.forClass(Document.class);
+        verify(iterable).sort(sort.capture());
+        assertEquals(-1, sort.getValue().get("_id._version"), "sorting on the composite _id would order by ObjectId, not by version");
+    }
+
+    /**
+     * The nested-id filter that fixed the version-0 escape is only servable by an
+     * index on that dotted path: MongoDB's built-in {@code _id} index covers the
+     * whole embedded subdocument, so without this one every
+     * {@code removeAllPermanently} and {@code readHistoryLatest} is a COLLSCAN of
+     * the history collection — once per conversation in
+     * {@code GdprComplianceService}'s erasure loop.
+     */
+    @Test
+    @DisplayName("the history collection is indexed on the nested id the history filter matches")
+    void historyCollectionIsIndexedOnTheNestedId() {
+        ArgumentCaptor<Bson> keys = ArgumentCaptor.forClass(Bson.class);
+        verify(historyCollection, atLeastOnce()).createIndex(keys.capture(), any(IndexOptions.class));
+
+        boolean indexed = keys.getAllValues().stream()
+                .map(key -> key.toBsonDocument(Document.class, MongoClientSettings.getDefaultCodecRegistry()).toString())
+                .anyMatch(key -> key.contains("_id._id"));
+        assertTrue(indexed, "no index on '_id._id' — the history filter would COLLSCAN: " + keys.getAllValues());
     }
 
     // ==================== readHistory ====================
@@ -275,6 +358,118 @@ class MongoResourceStorageTest {
         verify(historyCollection).insertOne(any(Document.class));
     }
 
+    // ==================== readMany ====================
+
+    @Test
+    @DisplayName("readMany — one query for the whole page, results in request order")
+    void readManyKeepsRequestOrder() {
+        String otherId = "aabbccddeeff112233445577";
+        Document first = new Document("_id", new ObjectId(VALID_ID)).append("_version", 1);
+        Document second = new Document("_id", new ObjectId(otherId)).append("_version", 1);
+
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        when(currentCollection.find(any(Bson.class))).thenReturn(iterable);
+        doAnswer(inv -> {
+            Consumer<Document> consumer = inv.getArgument(0);
+            // Cursor order deliberately differs from the requested order.
+            consumer.accept(first);
+            consumer.accept(second);
+            return null;
+        }).when(iterable).forEach(any(Consumer.class));
+
+        var results = storage.readMany(List.of(resourceId(otherId, 1), resourceId(VALID_ID, 1)));
+
+        assertEquals(List.of(otherId, VALID_ID), results.stream().map(IResourceStorage.IResource::getId).toList());
+        // The N+1 this replaces: one find() per descriptor in the listing.
+        verify(currentCollection, times(1)).find(any(Bson.class));
+    }
+
+    @Test
+    @DisplayName("readMany — empty input issues no query")
+    void readManyEmpty() {
+        assertTrue(storage.readMany(List.of()).isEmpty());
+        verify(currentCollection, never()).find(any(Bson.class));
+    }
+
+    private static IResourceStore.IResourceId resourceId(String id, int version) {
+        return new IResourceStore.IResourceId() {
+            @Override
+            public String getId() {
+                return id;
+            }
+
+            @Override
+            public Integer getVersion() {
+                return version;
+            }
+        };
+    }
+
+    // ==================== storeHistoryAnd* ====================
+
+    @Test
+    @DisplayName("storeHistoryAndUpdate — archives, then replaces, both majority-acknowledged")
+    void storeHistoryAndUpdate() throws Exception {
+        when(documentBuilder.toString(any())).thenReturn("{\"data\":\"test\"}");
+        var resource = storage.newResource(VALID_ID, 2, "test");
+        var history = storage.newHistoryResourceFor(resource, false);
+
+        MongoCollection<Document> durableCurrent = mock(MongoCollection.class);
+        MongoCollection<Document> durableHistory = mock(MongoCollection.class);
+        when(currentCollection.withWriteConcern(any())).thenReturn(durableCurrent);
+        when(historyCollection.withWriteConcern(any())).thenReturn(durableHistory);
+
+        var updateResult = mock(UpdateResult.class);
+        when(updateResult.getMatchedCount()).thenReturn(1L);
+        when(durableCurrent.replaceOne(any(Bson.class), any(Document.class))).thenReturn(updateResult);
+
+        storage.storeHistoryAndUpdate(history, resource, 1);
+
+        // History FIRST — a failure of the second write must never lose the
+        // archived predecessor.
+        InOrder inOrder = inOrder(durableHistory, durableCurrent);
+        inOrder.verify(durableHistory).insertOne(any(Document.class));
+        inOrder.verify(durableCurrent).replaceOne(any(Bson.class), any(Document.class));
+    }
+
+    @Test
+    @DisplayName("storeHistoryAndUpdate — version mismatch reports a concurrent edit")
+    void storeHistoryAndUpdateConcurrentEdit() throws Exception {
+        when(documentBuilder.toString(any())).thenReturn("{\"data\":\"test\"}");
+        var resource = storage.newResource(VALID_ID, 2, "test");
+        var history = storage.newHistoryResourceFor(resource, false);
+
+        MongoCollection<Document> durableCurrent = mock(MongoCollection.class);
+        MongoCollection<Document> durableHistory = mock(MongoCollection.class);
+        when(currentCollection.withWriteConcern(any())).thenReturn(durableCurrent);
+        when(historyCollection.withWriteConcern(any())).thenReturn(durableHistory);
+
+        var updateResult = mock(UpdateResult.class);
+        when(updateResult.getMatchedCount()).thenReturn(0L);
+        when(durableCurrent.replaceOne(any(Bson.class), any(Document.class))).thenReturn(updateResult);
+
+        assertThrows(IResourceStore.ResourceModifiedException.class, () -> storage.storeHistoryAndUpdate(history, resource, 1));
+    }
+
+    @Test
+    @DisplayName("storeHistoryAndRemove — archives, then deletes, both majority-acknowledged")
+    void storeHistoryAndRemove() throws Exception {
+        when(documentBuilder.toString(any())).thenReturn("{\"data\":\"test\"}");
+        var resource = storage.newResource(VALID_ID, 1, "test");
+        var history = storage.newHistoryResourceFor(resource, true);
+
+        MongoCollection<Document> durableCurrent = mock(MongoCollection.class);
+        MongoCollection<Document> durableHistory = mock(MongoCollection.class);
+        when(currentCollection.withWriteConcern(any())).thenReturn(durableCurrent);
+        when(historyCollection.withWriteConcern(any())).thenReturn(durableHistory);
+
+        storage.storeHistoryAndRemove(history, VALID_ID);
+
+        InOrder inOrder = inOrder(durableHistory, durableCurrent);
+        inOrder.verify(durableHistory).insertOne(any(Document.class));
+        inOrder.verify(durableCurrent).deleteOne(any(Document.class));
+    }
+
     // ==================== findResourceIdsContaining ====================
 
     @Test
@@ -285,10 +480,10 @@ class MongoResourceStorageTest {
         when(currentCollection.find(any(Document.class))).thenReturn(iterable);
 
         doAnswer(inv -> {
-            java.util.function.Consumer<Document> consumer = inv.getArgument(0);
+            Consumer<Document> consumer = inv.getArgument(0);
             consumer.accept(doc);
             return null;
-        }).when(iterable).forEach(any(java.util.function.Consumer.class));
+        }).when(iterable).forEach(any(Consumer.class));
 
         List<IResourceStore.IResourceId> result = storage.findResourceIdsContaining("field.path", "value");
         assertEquals(1, result.size());
@@ -305,5 +500,55 @@ class MongoResourceStorageTest {
 
         IResourceStorage.IResource<String> resource = storage.newResource("test");
         assertEquals("parsed-value", resource.getData());
+    }
+
+    // ==================== storeIfFieldEquals (deleted vs mismatch)
+    // ====================
+
+    @Test
+    @DisplayName("storeIfFieldEquals — matched update succeeds, no existence probe")
+    void storeIfFieldEqualsSuccess() throws Exception {
+        when(documentBuilder.toString(any())).thenReturn("{\"state\":\"AWAITING_APPROVAL\"}");
+        IResourceStorage.IResource<String> resource = storage.newResource(VALID_ID, 2, "test");
+
+        var updateResult = mock(UpdateResult.class);
+        when(updateResult.getMatchedCount()).thenReturn(1L);
+        when(currentCollection.replaceOne(any(Bson.class), any(Document.class))).thenReturn(updateResult);
+
+        assertDoesNotThrow(() -> storage.storeIfFieldEquals(resource, "state", "AWAITING_APPROVAL"));
+        // No deleted-vs-mismatch probe when the conditional update matched.
+        verify(currentCollection, never()).countDocuments(any(Bson.class));
+    }
+
+    @Test
+    @DisplayName("storeIfFieldEquals — deleted document → ResourceNotFoundException")
+    void storeIfFieldEqualsDeleted() throws Exception {
+        when(documentBuilder.toString(any())).thenReturn("{\"state\":\"AWAITING_APPROVAL\"}");
+        IResourceStorage.IResource<String> resource = storage.newResource(VALID_ID, 2, "test");
+
+        var updateResult = mock(UpdateResult.class);
+        when(updateResult.getMatchedCount()).thenReturn(0L);
+        when(currentCollection.replaceOne(any(Bson.class), any(Document.class))).thenReturn(updateResult);
+        // No document with that id exists any more → deleted.
+        when(currentCollection.countDocuments(any(Bson.class))).thenReturn(0L);
+
+        assertThrows(IResourceStore.ResourceNotFoundException.class,
+                () -> storage.storeIfFieldEquals(resource, "state", "AWAITING_APPROVAL"));
+    }
+
+    @Test
+    @DisplayName("storeIfFieldEquals — field mismatch → ResourceModifiedException")
+    void storeIfFieldEqualsMismatch() throws Exception {
+        when(documentBuilder.toString(any())).thenReturn("{\"state\":\"AWAITING_APPROVAL\"}");
+        IResourceStorage.IResource<String> resource = storage.newResource(VALID_ID, 2, "test");
+
+        var updateResult = mock(UpdateResult.class);
+        when(updateResult.getMatchedCount()).thenReturn(0L);
+        when(currentCollection.replaceOne(any(Bson.class), any(Document.class))).thenReturn(updateResult);
+        // The document exists, but its field value changed under us → mismatch.
+        when(currentCollection.countDocuments(any(Bson.class))).thenReturn(1L);
+
+        assertThrows(IResourceStore.ResourceModifiedException.class,
+                () -> storage.storeIfFieldEquals(resource, "state", "AWAITING_APPROVAL"));
     }
 }

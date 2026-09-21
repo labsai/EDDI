@@ -8,6 +8,9 @@
 *~
 .idea/
 .vscode/
+# NOTE: do not add a negation rule (e.g. "!README.md") here. A leading "!" in
+# .helmignore makes Helm's loader exclude the whole chart directory, so
+# `helm template`/`helm package`/`helm install` all fail with the misleading
+# "Chart.yaml file is missing". There is no README.md in this chart anyway.
 *.md
-!README.md
 LICENSE

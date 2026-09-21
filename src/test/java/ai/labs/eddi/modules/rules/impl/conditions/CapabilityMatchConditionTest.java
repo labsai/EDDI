@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.rules.impl.conditions;
 
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService.CapabilityMatch;
+import ai.labs.eddi.engine.audit.IAuditEntryCollector;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
@@ -202,7 +203,7 @@ class CapabilityMatchConditionTest {
     void execute_emitsAuditEventOnSuccess() {
         condition.setConfigs(Map.of("skill", "coding", "strategy", "all"));
 
-        var auditCollector = mock(ai.labs.eddi.engine.audit.IAuditEntryCollector.class);
+        var auditCollector = mock(IAuditEntryCollector.class);
         when(memory.getAuditCollector()).thenReturn(auditCollector);
         when(memory.getConversationId()).thenReturn("conv-123");
         when(memory.getAgentId()).thenReturn("agent-owner");
@@ -258,7 +259,7 @@ class CapabilityMatchConditionTest {
     void execute_auditFailureDoesNotBreakExecution() {
         condition.setConfigs(Map.of("skill", "coding"));
 
-        var auditCollector = mock(ai.labs.eddi.engine.audit.IAuditEntryCollector.class);
+        var auditCollector = mock(IAuditEntryCollector.class);
         when(memory.getAuditCollector()).thenReturn(auditCollector);
         when(memory.getConversationId()).thenReturn("conv-123");
         when(memory.getAgentId()).thenReturn("agent-owner");
@@ -284,7 +285,7 @@ class CapabilityMatchConditionTest {
     void execute_noAuditEventOnFailure() {
         condition.setConfigs(Map.of("skill", "nonexistent"));
 
-        var auditCollector = mock(ai.labs.eddi.engine.audit.IAuditEntryCollector.class);
+        var auditCollector = mock(IAuditEntryCollector.class);
         when(memory.getAuditCollector()).thenReturn(auditCollector);
 
         when(registryService.findBySkill("nonexistent", "highest_confidence"))

@@ -9,9 +9,10 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
-import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.ReplaceOptions;
 import com.mongodb.client.result.DeleteResult;
+import com.mongodb.client.result.UpdateResult;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.bson.types.ObjectId;
@@ -52,7 +53,7 @@ class ConversationMemoryStoreTest {
 
     @Test
     @DisplayName("storeConversationMemorySnapshot — inserts new when conversationId is null")
-    void storeSnapshotNew() {
+    void storeSnapshotNew() throws Exception {
         ConversationMemorySnapshot snapshot = new ConversationMemorySnapshot();
 
         String id = store.storeConversationMemorySnapshot(snapshot);
@@ -62,12 +63,42 @@ class ConversationMemoryStoreTest {
 
     @Test
     @DisplayName("storeConversationMemorySnapshot — replaces when conversationId exists")
-    void storeSnapshotReplace() {
+    void storeSnapshotReplace() throws Exception {
         ConversationMemorySnapshot snapshot = new ConversationMemorySnapshot();
         snapshot.setId(VALID_ID);
 
-        store.storeConversationMemorySnapshot(snapshot);
+        stubReplaceMatching(snapshot, 1L);
+
+        assertEquals(VALID_ID, store.storeConversationMemorySnapshot(snapshot));
         verify(objectCollection).replaceOne(any(Document.class), eq(snapshot));
+    }
+
+    @Test
+    @DisplayName("storeConversationMemorySnapshot — a conversation deleted mid-turn is reported, never silently dropped")
+    void storeSnapshotReplaceMissingDocument() {
+        ConversationMemorySnapshot snapshot = new ConversationMemorySnapshot();
+        snapshot.setId(VALID_ID);
+
+        // matchedCount 0 == the document vanished between load and store (GDPR
+        // erasure, retention sweep). Swallowing this lost the whole turn while the
+        // caller still saw a normal response.
+        stubReplaceMatching(snapshot, 0L);
+
+        var exception = assertThrows(IResourceStore.ResourceStoreException.class,
+                () -> store.storeConversationMemorySnapshot(snapshot));
+
+        assertTrue(exception.getMessage().contains(VALID_ID),
+                "the failure must name the conversation whose turn was lost, got: " + exception.getMessage());
+        // The turn must NOT be resurrected behind the erasure, neither by an upsert
+        // nor by falling through to the insert branch.
+        verify(objectCollection, never()).replaceOne(any(Document.class), eq(snapshot), any(ReplaceOptions.class));
+        verify(objectCollection, never()).insertOne(any(ConversationMemorySnapshot.class));
+    }
+
+    private void stubReplaceMatching(ConversationMemorySnapshot snapshot, long matchedCount) {
+        UpdateResult result = mock(UpdateResult.class);
+        when(result.getMatchedCount()).thenReturn(matchedCount);
+        when(objectCollection.replaceOne(any(Document.class), eq(snapshot))).thenReturn(result);
     }
 
     // ==================== loadConversationMemorySnapshot ====================
@@ -122,7 +153,7 @@ class ConversationMemoryStoreTest {
     @Test
     @DisplayName("setConversationState — updates state field")
     void setConversationState() {
-        when(documentCollection.updateOne(any(Document.class), any(Document.class))).thenReturn(mock(com.mongodb.client.result.UpdateResult.class));
+        when(documentCollection.updateOne(any(Document.class), any(Document.class))).thenReturn(mock(UpdateResult.class));
         store.setConversationState(VALID_ID, ConversationState.ENDED);
         verify(documentCollection).updateOne(any(Document.class), any(Document.class));
     }
@@ -238,7 +269,7 @@ class ConversationMemoryStoreTest {
 
     @Test
     @DisplayName("create — returns IResourceId with version 0")
-    void create() {
+    void create() throws IResourceStore.ResourceStoreException {
         ConversationMemorySnapshot snapshot = new ConversationMemorySnapshot();
 
         IResourceStore.IResourceId resourceId = store.create(snapshot);
@@ -256,11 +287,29 @@ class ConversationMemoryStoreTest {
 
     @Test
     @DisplayName("update — delegates to store")
-    void update() {
+    void update() throws IResourceStore.ResourceStoreException {
         ConversationMemorySnapshot snapshot = new ConversationMemorySnapshot();
         snapshot.setId(VALID_ID);
 
+        stubReplaceMatching(snapshot, 1L);
+
         Integer result = store.update(VALID_ID, 0, snapshot);
         assertEquals(0, result);
+        verify(objectCollection).replaceOne(any(Document.class), eq(snapshot));
+    }
+
+    @Test
+    @DisplayName("update — propagates the lost turn when the conversation was deleted mid-turn")
+    void updateMissingDocument() {
+        ConversationMemorySnapshot snapshot = new ConversationMemorySnapshot();
+        snapshot.setId(VALID_ID);
+
+        stubReplaceMatching(snapshot, 0L);
+
+        // update() must not report success (return 0) for a write that matched nothing.
+        var exception = assertThrows(IResourceStore.ResourceStoreException.class,
+                () -> store.update(VALID_ID, 0, snapshot));
+        assertTrue(exception.getMessage().contains(VALID_ID),
+                "the failure must name the conversation whose turn was lost, got: " + exception.getMessage());
     }
 }

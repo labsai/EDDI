@@ -4,19 +4,21 @@
  */
 package ai.labs.eddi.integrations.channels;
 
-import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration.ChannelConnector;
 import ai.labs.eddi.configs.channels.IChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.model.AgentDeploymentStatus;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.secrets.SecretResolver;
+import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -25,6 +27,7 @@ import java.time.Duration;
 import java.util.*;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static ai.labs.eddi.utils.RestUtilities.extractResourceId;
 
@@ -33,14 +36,17 @@ import static ai.labs.eddi.utils.RestUtilities.extractResourceId;
  * the correct {@link ChannelTarget} based on configured trigger keywords
  * (colon-required syntax: {@code keyword: message}).
  * <p>
- * Currently Slack-only with a platform-agnostic internal model; Teams/Discord
- * adapters will extend the platform-specific paths (signing secret aggregation,
- * legacy fallback) when added.
+ * Platform-agnostic: signing-secret aggregation and target resolution are keyed
+ * by {@code channelType} so multiple platform adapters can coexist. Currently,
+ * only {@code slack} is registered/validated (see
+ * {@code RestChannelIntegrationStore.REGISTERED_CHANNEL_TYPES}).
+ * Platform-specific adapters provide their own webhook and event-handler
+ * classes.
  * <p>
  * <b>Fallback rule:</b> If any {@code ChannelIntegrationConfiguration} matches
- * a channelId, ALL legacy {@code ChannelConnector} entries for that channel are
- * ignored. Legacy entries only activate for channels with zero new-style
- * coverage.
+ * a channelType + channelId pair, ALL legacy {@code ChannelConnector} entries
+ * for that same type + channel are ignored. Legacy entries only activate for
+ * channels with zero new-style coverage of the same type.
  *
  * @since 6.1.0
  */
@@ -54,7 +60,7 @@ public class ChannelTargetRouter {
     private final IChannelIntegrationStore channelStore;
     private final IDocumentDescriptorStore descriptorStore;
     private final IRestAgentAdministration agentAdmin;
-    private final IRestAgentStore agentStore;
+    private final IAgentStore agentStore;
     private final SecretResolver secretResolver;
 
     // ─── Cached state (atomic reference swap) ──────────────────────────────────
@@ -68,14 +74,33 @@ public class ChannelTargetRouter {
      */
     private volatile Map<String, ChannelIntegrationConfiguration> integrationMap = Map.of();
 
-    /** All unique signing secrets for Slack (from both new + legacy configs). */
-    private volatile Set<String> slackSigningSecrets = Set.of();
+    /** Signing secrets per channel type (from both new + legacy configs). */
+    private volatile Map<String, Set<String>> signingSecretsByType = Map.of();
 
     /** Legacy channelId → LegacyTarget for backward compat. */
     private volatile Map<String, LegacyTarget> legacyMap = Map.of();
 
     private volatile long lastRefreshTime = 0;
     private final AtomicBoolean refreshInProgress = new AtomicBoolean(false);
+
+    /**
+     * Counts invalidations, so a refresh can tell whether one landed while it was
+     * reading. Without it the marker this class exists to set was simply lost — see
+     * {@link #refreshIfNeeded}.
+     */
+    private final AtomicLong invalidationGeneration = new AtomicLong();
+
+    /**
+     * Guards the pair {@code (invalidationGeneration, lastRefreshTime)}.
+     * <p>
+     * Reading the generation and then stamping the timestamp is a check-then-act,
+     * and an invalidation landing between those two steps is exactly the case being
+     * defended against: it would zero the timestamp only for the stamp to overwrite
+     * it a moment later. The counter alone narrows that window, it does not close
+     * it. Both sides take this lock, so the check and the stamp are one step, as
+     * are the increment and the zeroing.
+     */
+    private final Object cacheStateLock = new Object();
 
     /**
      * Thread → locked target (prevents mid-thread target switching). TTL-evicted.
@@ -86,7 +111,7 @@ public class ChannelTargetRouter {
     public ChannelTargetRouter(IChannelIntegrationStore channelStore,
             IDocumentDescriptorStore descriptorStore,
             IRestAgentAdministration agentAdmin,
-            IRestAgentStore agentStore,
+            IAgentStore agentStore,
             SecretResolver secretResolver,
             ICacheFactory cacheFactory) {
         this.channelStore = channelStore;
@@ -229,10 +254,7 @@ public class ChannelTargetRouter {
     public Set<String> getSigningSecrets(String channelType) {
         refreshIfNeeded();
         String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
-        if (CHANNEL_TYPE_SLACK.equals(normalizedType)) {
-            return slackSigningSecrets;
-        }
-        return Set.of();
+        return signingSecretsByType.getOrDefault(normalizedType, Set.of());
     }
 
     /**
@@ -247,6 +269,106 @@ public class ChannelTargetRouter {
     }
 
     /**
+     * Find the integration whose {@code hitlApprovalChannel} equals
+     * {@code approvalChannelId}. Used by the interactivity endpoint to resolve
+     * which integration owns an approval message (and thus which approver list and
+     * bot token govern the decision).
+     * <p>
+     * <b>Caveat:</b> when two integrations of the same type share one
+     * {@code hitlApprovalChannel}, the first match (unspecified map order) is
+     * returned — see {@link #getIntegrationByName}, which HITL decisions prefer
+     * because the owning integration is carried explicitly in the button value.
+     *
+     * @return the owning integration, or empty if none is configured to post HITL
+     *         approvals to this channel
+     */
+    public Optional<ChannelIntegrationConfiguration> getIntegrationByApprovalChannel(String channelType,
+                                                                                     String approvalChannelId) {
+        refreshIfNeeded();
+        if (approvalChannelId == null || approvalChannelId.isBlank()) {
+            return Optional.empty();
+        }
+        String prefix = (channelType != null ? channelType.toLowerCase(Locale.ROOT) : "") + ":";
+        for (var entry : integrationMap.entrySet()) {
+            if (!entry.getKey().startsWith(prefix)) {
+                continue;
+            }
+            var cfg = entry.getValue();
+            var platformConfig = cfg.getPlatformConfig();
+            if (approvalChannelId.equals(platformConfig.get("hitlApprovalChannel"))) {
+                return Optional.of(cfg);
+            }
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * Find the new-style integration with the given (case-sensitive) name for a
+     * channel type. Unlike {@link #getIntegrationByApprovalChannel}, this resolves
+     * a specific integration deterministically even when several share one
+     * {@code hitlApprovalChannel} — the HITL interactivity handler carries the
+     * owning integration name in the approval button value and authorizes/verifies
+     * against exactly that integration (prevents cross-integration IDOR and the
+     * shared-channel nondeterminism).
+     *
+     * @return the named integration, or empty if none matches
+     */
+    public Optional<ChannelIntegrationConfiguration> getIntegrationByName(String channelType, String name) {
+        refreshIfNeeded();
+        if (name == null || name.isBlank()) {
+            return Optional.empty();
+        }
+        String prefix = (channelType != null ? channelType.toLowerCase(Locale.ROOT) : "") + ":";
+        for (var entry : integrationMap.entrySet()) {
+            if (!entry.getKey().startsWith(prefix)) {
+                continue;
+            }
+            var cfg = entry.getValue();
+            if (name.equals(cfg.getName())) {
+                return Optional.of(cfg);
+            }
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * The observe-mode targets configured for this channel, in configuration order.
+     *
+     * Deliberately separate from {@link #resolveTarget}, which answers "who was
+     * this message addressed to". An observer is addressed to nobody: it watches
+     * traffic it was not part of, so it must never be reachable as a trigger match
+     * or as the default target for a mention, and a channel with no observers must
+     * keep behaving exactly as it did before this existed. Whether any of these
+     * should actually answer is {@code ObserveGate}'s decision, not the router's.
+     *
+     * Legacy {@code ChannelConnector} entries have no observe configuration and so
+     * never appear here.
+     *
+     * @return the observers for this channel, or an empty list — never null
+     */
+    public List<ChannelTarget> observeCandidates(String channelType, String platformChannelId) {
+        refreshIfNeeded();
+        String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
+        ChannelIntegrationConfiguration integration = integrationMap.get(normalizedType + ":" + platformChannelId);
+        if (integration == null || integration.getTargets() == null) {
+            return List.of();
+        }
+        return integration.getTargets().stream()
+                .filter(ChannelTarget::isObserveMode)
+                .toList();
+    }
+
+    /**
+     * The integration serving this channel, for a caller that already holds a
+     * target from {@link #observeCandidates} and needs its credentials.
+     */
+    public ChannelIntegrationConfiguration integrationFor(String channelType, String platformChannelId) {
+        refreshIfNeeded();
+        String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
+        return integrationMap.get(normalizedType + ":" + platformChannelId);
+    }
+
+    /**
      * Get the bot token for a channel, checking new-style integrations first, then
      * legacy. Returns {@code null} if no token is configured for this channel.
      */
@@ -255,7 +377,7 @@ public class ChannelTargetRouter {
         String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
         String key = normalizedType + ":" + platformChannelId;
         ChannelIntegrationConfiguration integration = integrationMap.get(key);
-        if (integration != null && integration.getPlatformConfig() != null) {
+        if (integration != null) {
             String token = integration.getPlatformConfig().get("botToken");
             if (token != null && !token.isBlank()) {
                 return token;
@@ -321,6 +443,18 @@ public class ChannelTargetRouter {
             var targets = integration.getTargets();
             if (targets != null) {
                 for (ChannelTarget target : targets) {
+                    // Observers are excluded here for the same reason
+                    // `findDefaultTarget` excludes them: an observer watches
+                    // traffic it was not part of, under a cooldown and daily caps
+                    // that the addressed path does not apply. Its `triggers` are
+                    // an addressed-routing field it has no use for — keyword and
+                    // MIME matching for an observer live in `ObserveConfig` — so
+                    // one left set made the observer reachable as
+                    // `architect: ...`, running its agent with no limits at all,
+                    // as often as anyone cared to type it.
+                    if (target.isObserveMode()) {
+                        continue;
+                    }
                     if (target.getTriggers() != null) {
                         for (String trigger : target.getTriggers()) {
                             if (trigger != null && trigger.toLowerCase(Locale.ROOT).trim().equals(candidateTrigger)) {
@@ -343,6 +477,17 @@ public class ChannelTargetRouter {
         return null;
     }
 
+    /**
+     * The target an addressed message falls back to when no trigger matched.
+     * <p>
+     * Observers are excluded. An observer watches traffic it was not part of, so
+     * making it the answer to "the user mentioned the bot and named no trigger"
+     * inverts what it is for — and would let the same target answer both addressed
+     * and unaddressed messages, each under a different set of limits.
+     * {@code RestChannelIntegrationStore} refuses to store that pairing, so this
+     * only fires for a document written straight to the datastore, past the REST
+     * validation.
+     */
     private ChannelTarget findDefaultTarget(ChannelIntegrationConfiguration integration) {
         String defaultName = integration.getDefaultTargetName();
         if (defaultName == null || integration.getTargets() == null)
@@ -350,11 +495,38 @@ public class ChannelTargetRouter {
         return integration.getTargets().stream()
                 .filter(t -> t.getName() != null
                         && t.getName().equalsIgnoreCase(defaultName))
+                .filter(t -> !t.isObserveMode())
                 .findFirst()
                 .orElse(null);
     }
 
     // ─── Refresh ───────────────────────────────────────────────────────────────
+
+    /**
+     * Drop the resolved-secret cache the moment a vault secret changes, instead of
+     * waiting out the poll interval.
+     * <p>
+     * This cache holds bot tokens and signing secrets already RESOLVED to their
+     * plaintext values, so after a rotation it keeps presenting the revoked
+     * credential — for up to a minute of inbound webhooks, every one of which fails
+     * against the platform. Every other credential-holding cache in the codebase
+     * registers for this; the poll made the gap look bounded rather than absent,
+     * which is why it went unnoticed.
+     * <p>
+     * Zeroing the timestamp rather than refreshing inline: refreshing here would
+     * run store reads on whatever thread happened to write a secret, and the next
+     * inbound message rebuilds the maps anyway.
+     */
+    @PostConstruct
+    void registerSecretInvalidation() {
+        secretResolver.registerInvalidationListener(reference -> {
+            synchronized (cacheStateLock) {
+                invalidationGeneration.incrementAndGet();
+                lastRefreshTime = 0;
+            }
+            LOGGER.info("Channel integration cache marked stale after a vault secret change");
+        });
+    }
 
     private void refreshIfNeeded() {
         long now = System.currentTimeMillis();
@@ -364,12 +536,27 @@ public class ChannelTargetRouter {
         if (!refreshInProgress.compareAndSet(false, true)) {
             return;
         }
+        // Read BEFORE the store reads below. An invalidation that arrives while
+        // they are in flight would otherwise zero the timestamp only for this
+        // method to stamp it fresh again a moment later — with maps built from
+        // rows read before the rotation. The cache would then serve the revoked
+        // credential for a full interval, which is exactly the window the
+        // invalidation listener exists to close.
+        long generationAtStart = invalidationGeneration.get();
         try {
             refreshInternal();
-            lastRefreshTime = now;
+            synchronized (cacheStateLock) {
+                if (invalidationGeneration.get() == generationAtStart) {
+                    lastRefreshTime = now;
+                }
+            }
         } catch (Exception e) {
             LOGGER.warn("Failed to refresh channel target router", e);
-            lastRefreshTime = now; // Avoid hammering on repeated failures
+            // Stamped even when an invalidation raced, unlike the success path: the
+            // maps are stale either way, and a store that just failed will fail
+            // again on the next inbound message. Retrying it per webhook trades a
+            // stale cache for a hot loop against a store that is already down.
+            lastRefreshTime = now;
         } finally {
             refreshInProgress.set(false);
         }
@@ -377,20 +564,19 @@ public class ChannelTargetRouter {
 
     private void refreshInternal() {
         var newIntegrationMap = new HashMap<String, ChannelIntegrationConfiguration>();
-        var newSigningSecrets = new HashSet<String>();
-        var coveredChannelIds = new HashSet<String>();
+        var newSigningSecretsByType = new HashMap<String, Set<String>>();
+        var coveredChannelKeys = new HashSet<String>();
 
         // 1. Load new-style ChannelIntegrationConfigurations
         try {
             var descriptors = descriptorStore.readDescriptors("ai.labs.channel",
-                    "", 0, 1000, false);
+                    "", 0, IDescriptorStore.NO_LIMIT, false);
             for (var descriptor : descriptors) {
                 try {
                     var resId = extractResourceId(descriptor.getResource());
                     var config = channelStore.read(resId.getId(),
                             resId.getVersion());
-                    if (config != null && config.getChannelType() != null
-                            && config.getPlatformConfig() != null) {
+                    if (config != null && config.getChannelType() != null) {
 
                         // Deep-copy before resolving secrets so the store's
                         // cached instance keeps vault references intact
@@ -400,15 +586,15 @@ public class ChannelTargetRouter {
                             resolvePlatformSecrets(copy);
                             String key = copy.getChannelType().toLowerCase(Locale.ROOT) + ":" + channelId;
                             newIntegrationMap.put(key, copy);
-                            coveredChannelIds.add(channelId);
+                            coveredChannelKeys.add(key); // type:channelId — scoped to prevent cross-type suppression
 
-                            // Collect signing secrets for Slack
-                            if (CHANNEL_TYPE_SLACK.equals(
-                                    config.getChannelType().toLowerCase(Locale.ROOT))) {
-                                String ss = copy.getPlatformConfig().get("signingSecret");
-                                if (ss != null && !ss.isBlank()) {
-                                    newSigningSecrets.add(ss);
-                                }
+                            // Collect signing secrets per channel type
+                            String ss = copy.getPlatformConfig().get("signingSecret");
+                            if (ss != null && !ss.isBlank()) {
+                                String type = copy.getChannelType().toLowerCase(Locale.ROOT);
+                                newSigningSecretsByType
+                                        .computeIfAbsent(type, k -> new HashSet<>())
+                                        .add(ss);
                             }
                         }
                     }
@@ -431,7 +617,7 @@ public class ChannelTargetRouter {
                 }
                 String agentId = status.getAgentId();
                 try {
-                    AgentConfiguration agentConfig = agentStore.readAgent(
+                    AgentConfiguration agentConfig = agentStore.read(
                             agentId, status.getAgentVersion());
                     if (agentConfig != null && agentConfig.getChannels() != null) {
                         for (ChannelConnector connector : agentConfig.getChannels()) {
@@ -442,8 +628,11 @@ public class ChannelTargetRouter {
 
                                 String chId = connector.getConfig().get("channelId");
 
-                                // Strict rule: new config wins, skip legacy
-                                if (chId != null && !coveredChannelIds.contains(chId)) {
+                                // Strict rule: new-style config wins, skip legacy
+                                // (scoped by type — only a new-style Slack config suppresses a legacy Slack
+                                // connector)
+                                String coveredKey = CHANNEL_TYPE_SLACK + ":" + chId;
+                                if (chId != null && !coveredChannelKeys.contains(coveredKey)) {
                                     String bt = resolveSecret(
                                             connector.getConfig().get("botToken"));
                                     String ss = resolveSecret(
@@ -453,7 +642,9 @@ public class ChannelTargetRouter {
                                             new LegacyTarget(agentId, bt, ss,
                                                     gid != null && !gid.isBlank() ? gid : null));
                                     if (ss != null && !ss.isBlank()) {
-                                        newSigningSecrets.add(ss);
+                                        newSigningSecretsByType
+                                                .computeIfAbsent(CHANNEL_TYPE_SLACK, k -> new HashSet<>())
+                                                .add(ss);
                                     }
                                 }
                             }
@@ -468,13 +659,21 @@ public class ChannelTargetRouter {
             LOGGER.warn("Failed to scan legacy ChannelConnectors", e);
         }
 
-        // Atomic swap
+        // Swap cached references — each volatile write is individually atomic,
+        // but the three writes are NOT mutually atomic. A concurrent reader may
+        // briefly observe a mixed snapshot (e.g., new integrationMap with old
+        // signingSecretsByType). This is acceptable: the data converges within
+        // nanoseconds, and stale reads only affect a single request at worst.
         integrationMap = Map.copyOf(newIntegrationMap);
         legacyMap = Map.copyOf(newLegacyMap);
-        slackSigningSecrets = Set.copyOf(newSigningSecrets);
+        // Freeze each per-type set, then freeze the outer map
+        var frozenSecrets = new HashMap<String, Set<String>>();
+        newSigningSecretsByType.forEach((type, secrets) -> frozenSecrets.put(type, Set.copyOf(secrets)));
+        signingSecretsByType = Map.copyOf(frozenSecrets);
 
-        LOGGER.debugf("Channel target router refreshed: %d integrations, %d legacy, %d signing secrets",
-                newIntegrationMap.size(), newLegacyMap.size(), newSigningSecrets.size());
+        int totalSecrets = frozenSecrets.values().stream().mapToInt(Set::size).sum();
+        LOGGER.debugf("Channel target router refreshed: %d integrations, %d legacy, %d signing secrets across %d channel types",
+                newIntegrationMap.size(), newLegacyMap.size(), totalSecrets, frozenSecrets.size());
     }
 
     /**
@@ -492,9 +691,7 @@ public class ChannelTargetRouter {
         copy.setName(src.getName());
         copy.setChannelType(src.getChannelType());
         copy.setDefaultTargetName(src.getDefaultTargetName());
-        if (src.getPlatformConfig() != null) {
-            copy.setPlatformConfig(new HashMap<>(src.getPlatformConfig()));
-        }
+        copy.setPlatformConfig(new HashMap<>(src.getPlatformConfig()));
         if (src.getTargets() != null) {
             copy.setTargets(new ArrayList<>(src.getTargets()));
         }
@@ -534,7 +731,7 @@ public class ChannelTargetRouter {
             String legacySigningSecret) {
         /** Get bot token — from integration or legacy. */
         public String botToken() {
-            if (integration != null && integration.getPlatformConfig() != null) {
+            if (integration != null) {
                 return integration.getPlatformConfig().get("botToken");
             }
             return legacyBotToken;
@@ -542,7 +739,7 @@ public class ChannelTargetRouter {
 
         /** Get signing secret — from integration or legacy. */
         public String signingSecret() {
-            if (integration != null && integration.getPlatformConfig() != null) {
+            if (integration != null) {
                 return integration.getPlatformConfig().get("signingSecret");
             }
             return legacySigningSecret;

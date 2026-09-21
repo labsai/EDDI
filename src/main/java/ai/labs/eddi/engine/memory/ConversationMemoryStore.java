@@ -4,25 +4,32 @@
  */
 package ai.labs.eddi.engine.memory;
 
+import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
+import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Indexes;
+import com.mongodb.client.model.Projections;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.bson.types.ObjectId;
+import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 
+import com.mongodb.client.FindIterable;
 import static ai.labs.eddi.engine.model.Context.ContextType.valueOf;
 import static ai.labs.eddi.engine.memory.model.ConversationState.ENDED;
 
@@ -38,6 +45,7 @@ import static ai.labs.eddi.engine.memory.model.ConversationState.ENDED;
 @ApplicationScoped
 @DefaultBean
 public class ConversationMemoryStore implements IConversationMemoryStore, IResourceStore<ConversationMemorySnapshot> {
+    private static final Logger LOGGER = Logger.getLogger(ConversationMemoryStore.class);
     private static final String CONVERSATION_COLLECTION = "conversationmemories";
     private static final String OBJECT_ID = "_id";
     private static final String KEY_CONTEXT = "context";
@@ -56,19 +64,51 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
         conversationCollectionDocument.createIndex(Indexes.ascending(KEY_CONVERSATION_STATE));
         conversationCollectionDocument.createIndex(Indexes.ascending(KEY_AGENT_ID));
         conversationCollectionDocument.createIndex(Indexes.ascending(KEY_AGENT_VERSION));
+        // owner-scoped pending-approvals inbox: filter by (state, userId) in-query
+        conversationCollectionDocument.createIndex(Indexes.ascending(KEY_CONVERSATION_STATE, "userId"));
     }
 
     @Override
-    public String storeConversationMemorySnapshot(ConversationMemorySnapshot snapshot) {
+    public String storeConversationMemorySnapshot(ConversationMemorySnapshot snapshot) throws IResourceStore.ResourceStoreException {
         String conversationId = snapshot.getConversationId();
         if (conversationId != null) {
-            conversationCollectionObject.replaceOne(new Document(OBJECT_ID, new ObjectId(conversationId)), snapshot);
+            var result = conversationCollectionObject.replaceOne(new Document(OBJECT_ID, new ObjectId(conversationId)), snapshot);
+            // No upsert on purpose: a missing document means the conversation was
+            // deleted while the turn was running (GDPR erasure, retention sweep).
+            // Ignoring matchedCount discarded the turn's memory silently and still
+            // returned a normal response to the caller — surface the conflict instead.
+            if (result.getMatchedCount() == 0) {
+                throw new IResourceStore.ResourceStoreException(
+                        "Conversation '" + conversationId + "' no longer exists — the turn was NOT persisted. "
+                                + "The conversation document was deleted concurrently (e.g. erasure or retention cleanup).");
+            }
         } else {
             snapshot.setId(new ObjectId().toString());
             conversationCollectionObject.insertOne(snapshot);
         }
 
         return snapshot.getConversationId();
+    }
+
+    @Override
+    public boolean storeConversationMemorySnapshotIfState(ConversationMemorySnapshot snapshot, ConversationState expectedState) {
+        String conversationId = snapshot.getConversationId();
+        if (conversationId == null || expectedState == null) {
+            // A conditional store only makes sense against an existing document with a
+            // known expected state. expectedState can now be null when the caller
+            // derives it from a live lookup (say-path preTurnPersistedState, undo/redo
+            // loaded state) and the document was deleted concurrently — treat that as a
+            // CAS miss (discard) rather than NPE on expectedState.name().
+            return false;
+        }
+        var filter = new Document(OBJECT_ID, new ObjectId(conversationId))
+                .append(KEY_CONVERSATION_STATE, expectedState.name());
+        // Atomic compare-and-store: replaces the whole document (including its new
+        // state) only while the persisted state still equals expectedState. If a
+        // concurrent terminal writer already flipped it (ENDED/EXECUTION_INTERRUPTED),
+        // the filter misses and nothing is overwritten.
+        var result = conversationCollectionObject.replaceOne(filter, snapshot);
+        return result.getMatchedCount() > 0;
     }
 
     @Override
@@ -87,8 +127,23 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
                         if (result instanceof LinkedHashMap<?, ?>) {
                             @SuppressWarnings("unchecked")
                             var map = (LinkedHashMap<String, Object>) result;
-                            var context = new Context(valueOf(map.get(KEY_TYPE).toString()), map.get(KEY_VALUE));
-                            lifecycleTask.setResult(context);
+                            // Degrade per entry: a context entry written without a "type",
+                            // or with a ContextType a NEWER version knows and this one does
+                            // not, must not fail the load of the WHOLE conversation. Leave
+                            // the raw map in place and warn.
+                            Object rawType = map.get(KEY_TYPE);
+                            if (rawType == null) {
+                                LOGGER.warnf("Conversation '%s': context entry '%s' has no '%s' field — left unconverted.",
+                                        LogSanitizer.sanitize(conversationId), LogSanitizer.sanitize(lifecycleTask.getKey()), KEY_TYPE);
+                                continue;
+                            }
+                            try {
+                                lifecycleTask.setResult(new Context(valueOf(rawType.toString()), map.get(KEY_VALUE)));
+                            } catch (IllegalArgumentException e) {
+                                LOGGER.warnf("Conversation '%s': context entry '%s' has unknown %s '%s' — left unconverted.",
+                                        LogSanitizer.sanitize(conversationId), LogSanitizer.sanitize(lifecycleTask.getKey()), KEY_TYPE,
+                                        LogSanitizer.sanitize(String.valueOf(rawType)));
+                            }
                         }
                     }
                 }
@@ -108,7 +163,11 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
 
             Document query = new Document();
             query.put(KEY_AGENT_ID, agentId);
-            query.put(KEY_AGENT_VERSION, agentVersion);
+            if (agentVersion != null) {
+                // null means every version; putting it would match only documents
+                // that carry no version at all.
+                query.put(KEY_AGENT_VERSION, agentVersion);
+            }
             query.put(KEY_CONVERSATION_STATE, new Document("$ne", ENDED.toString()));
 
             conversationCollectionObject.find(query).forEach(retRet::add);
@@ -145,8 +204,14 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
 
     @Override
     public Long getActiveConversationCount(String agentId, Integer agentVersion) {
+        // Plan §10(a): AWAITING_HUMAN conversations do not count as active — with
+        // the default WAIT_INDEFINITELY policy a single forgotten approval would
+        // otherwise block undeploy and old-version GC forever. A paused
+        // conversation whose agent was undeployed keeps its pause; resume then
+        // reports 409 "agent not deployed" and restores the pause.
         Bson query = Filters.and(Filters.eq(KEY_AGENT_ID, agentId), Filters.eq(KEY_AGENT_VERSION, agentVersion),
-                Filters.not(new Document(KEY_CONVERSATION_STATE, ENDED.toString())));
+                Filters.nin(KEY_CONVERSATION_STATE,
+                        ENDED.toString(), ConversationState.AWAITING_HUMAN.toString()));
         return conversationCollectionDocument.countDocuments(query);
     }
 
@@ -156,6 +221,102 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
         conversationCollectionDocument.find(Filters.eq(KEY_CONVERSATION_STATE, ENDED.toString()))
                 .forEach(document -> ids.add(document.get(OBJECT_ID).toString()));
         return ids;
+    }
+
+    @Override
+    public boolean compareAndSetState(String conversationId, ConversationState expected, ConversationState target) {
+        var filter = Filters.and(
+                Filters.eq(OBJECT_ID, new ObjectId(conversationId)),
+                Filters.eq(KEY_CONVERSATION_STATE, expected.name()));
+        var update = new Document("$set", new Document(KEY_CONVERSATION_STATE, target.name()));
+        var result = conversationCollectionDocument.updateOne(filter, update);
+        // matchedCount (not modifiedCount) so a no-op CAS (expected == target) still
+        // reports success — consistent with storeConversationMemorySnapshotIfState.
+        return result.getMatchedCount() > 0;
+    }
+
+    @Override
+    public List<String> findConversationIdsByState(ConversationState state) {
+        List<String> ids = new ArrayList<>();
+        conversationCollectionDocument.find(Filters.eq(KEY_CONVERSATION_STATE, state.name()))
+                .projection(new Document(OBJECT_ID, 1))
+                .forEach(document -> ids.add(document.get(OBJECT_ID).toString()));
+        return ids;
+    }
+
+    /**
+     * Projected fields for pending-approval summaries — never the full document.
+     * {@code hitlPendingToolCalls.calls.toolName} pulls in ONLY the tool names
+     * (never {@code argumentsRaw}/{@code argumentsRedacted}) so this bulk listing
+     * stays cheap and never risks exposing tool-call arguments.
+     */
+    private static final Bson PENDING_SUMMARY_PROJECTION = Projections.include(KEY_AGENT_ID, "userId",
+            "hitlPausedAt", "hitlPauseReason", "hitlTimeoutPolicy", "hitlApprovalTimeout",
+            "hitlPauseType", "hitlPendingToolCalls.calls.toolName");
+
+    @Override
+    public List<PendingApprovalSummary> findPendingApprovalSummaries(int limit) {
+        // Single bounded, projected query on the indexed state field — the
+        // (potentially multi-MB) step/output data of paused conversations is
+        // never deserialized, and there are no per-id point-reads (this listing
+        // is polled and backs the crash-recovery sweep).
+        return collectPendingSummaries(
+                conversationCollectionObject.find(Filters.eq(KEY_CONVERSATION_STATE, ConversationState.AWAITING_HUMAN.name()))
+                        .projection(PENDING_SUMMARY_PROJECTION)
+                        .limit(limit));
+    }
+
+    @Override
+    public List<PendingApprovalSummary> findPendingApprovalSummaries(String ownerUserId, int limit) {
+        // Owner filter INSIDE the query: the limit applies after the restriction,
+        // so a user's inbox is complete even behind a large global backlog.
+        return collectPendingSummaries(
+                conversationCollectionObject.find(Filters.and(
+                        Filters.eq(KEY_CONVERSATION_STATE, ConversationState.AWAITING_HUMAN.name()),
+                        Filters.eq("userId", ownerUserId)))
+                        .projection(PENDING_SUMMARY_PROJECTION)
+                        .limit(limit));
+    }
+
+    private List<PendingApprovalSummary> collectPendingSummaries(
+                                                                 FindIterable<ConversationMemorySnapshot> snapshots) {
+        List<PendingApprovalSummary> out = new ArrayList<>();
+        snapshots.forEach(snapshot -> {
+            var summary = new PendingApprovalSummary(
+                    snapshot.getConversationId(), snapshot.getAgentId(), snapshot.getUserId(),
+                    snapshot.getHitlPausedAt(), snapshot.getHitlPauseReason(),
+                    snapshot.getHitlTimeoutPolicy() != null ? snapshot.getHitlTimeoutPolicy().name() : null);
+            summary.setApprovalTimeout(snapshot.getHitlApprovalTimeout());
+            // A rule pause written before the pause type survived clearToolPauseState()
+            // is stored with a null type; every pause that is not a tool gate is a RULE
+            // pause, and docs/hitl.md promises the field on every entry.
+            summary.setPauseType(snapshot.getHitlPauseType() != null
+                    ? snapshot.getHitlPauseType()
+                    : ConversationPauseException.PauseOrigin.RULE.name());
+            if (snapshot.getHitlPendingToolCalls() != null && snapshot.getHitlPendingToolCalls().getCalls() != null) {
+                summary.setToolNames(snapshot.getHitlPendingToolCalls().getCalls().stream()
+                        .map(PendingToolCallBatch.PendingToolCall::getToolName)
+                        .toList());
+            }
+            out.add(summary);
+        });
+        return out;
+    }
+
+    @Override
+    public void clearHitlBookmark(String conversationId) {
+        var unset = new Document();
+        // Terminal cleanup (end/cancel) must remove ALL pause state, including the
+        // tool-level HITL fields — otherwise a stale hitlPauseType / pending batch
+        // would linger on an ended or cancelled conversation document.
+        for (String field : List.of("hitlPausedWorkflowId", "hitlPausedAbsoluteTaskIndex", "hitlPausedAt",
+                "hitlPauseReason", "hitlTimeoutPolicy", "hitlApprovalTimeout",
+                "hitlPauseType", "hitlPendingToolCalls")) {
+            unset.append(field, "");
+        }
+        conversationCollectionDocument.updateOne(
+                new Document(OBJECT_ID, new ObjectId(conversationId)),
+                new Document("$unset", unset));
     }
 
     @Override
@@ -180,7 +341,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     }
 
     @Override
-    public IResourceStore.IResourceId create(ConversationMemorySnapshot content) {
+    public IResourceStore.IResourceId create(ConversationMemorySnapshot content) throws IResourceStore.ResourceStoreException {
         final String conversationId = storeConversationMemorySnapshot(content);
 
         return new IResourceStore.IResourceId() {
@@ -202,7 +363,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     }
 
     @Override
-    public Integer update(String id, Integer version, ConversationMemorySnapshot content) {
+    public Integer update(String id, Integer version, ConversationMemorySnapshot content) throws IResourceStore.ResourceStoreException {
         storeConversationMemorySnapshot(content);
         return 0;
     }

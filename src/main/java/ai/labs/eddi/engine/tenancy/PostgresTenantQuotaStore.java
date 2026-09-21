@@ -7,15 +7,18 @@ package ai.labs.eddi.engine.tenancy;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.engine.tenancy.model.TenantQuota;
 import ai.labs.eddi.engine.tenancy.model.UsageSnapshot;
+import static ai.labs.eddi.engine.tenancy.ITenantQuotaStore.accountingUnavailable;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import javax.sql.DataSource;
 import java.sql.*;
+import java.time.Clock;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.time.ZoneOffset;
@@ -69,14 +72,148 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
             )
             """;
 
+    /**
+     * Materialises the single usage row for a tenant with neutral counters and
+     * correctly truncated window starts. Never touches an existing row.
+     */
+    private static final String ENSURE_USAGE_ROW = """
+            INSERT INTO tenant_usage
+                (tenant_id, conversations_today, day_start,
+                 api_calls_this_minute, minute_start,
+                 monthly_cost_usd, cost_month)
+            VALUES (?, 0, ?, 0, ?, 0.0, NULL)
+            ON CONFLICT (tenant_id) DO NOTHING
+            """;
+
+    /**
+     * {@code day_start >= ?}, not {@code =}, matching
+     * {@code MongoTenantQuotaStore}'s {@code Filters.gte}.
+     * <p>
+     * Exact equality made a stored window that is <em>ahead</em> of the caller's
+     * clock unmatchable in every direction: the fast path missed (M+1 != M), the
+     * materialise-or-roll missed (its guard is {@code stored < now}), and the retry
+     * missed — so a node whose clock stepped backwards (NTP correction, VM
+     * suspend/resume) or lagged another instance by a minute denied every single
+     * request with "limit reached" until wall-clock time caught up. A window ahead
+     * of us is still a current window; counting into it is the conservative answer
+     * and it is what the MongoDB backend already did for the same input.
+     */
+    private static final String INCREMENT_CONVERSATIONS = """
+            UPDATE tenant_usage SET conversations_today = conversations_today + 1
+            WHERE tenant_id = ? AND day_start >= ? AND conversations_today < ?
+            RETURNING conversations_today
+            """;
+
+    /**
+     * Materialise-or-roll for the daily window. The {@code WHERE} on the
+     * {@code DO UPDATE} is load-bearing: without it a row whose window is still
+     * current is rewritten (or reported as updated) even when the counter has
+     * already reached the limit, which silently voids the cap.
+     */
+    private static final String ENSURE_AND_ROLL_DAY_WINDOW = """
+            INSERT INTO tenant_usage
+                (tenant_id, conversations_today, day_start,
+                 api_calls_this_minute, minute_start,
+                 monthly_cost_usd, cost_month)
+            VALUES (?, 0, ?, 0, ?, 0.0, NULL)
+            ON CONFLICT (tenant_id) DO UPDATE SET
+                conversations_today = 0,
+                day_start = ?
+            WHERE tenant_usage.day_start < ?
+            """;
+
+    /**
+     * See {@link #INCREMENT_CONVERSATIONS} for why the window match is {@code >=}.
+     */
+    private static final String INCREMENT_API_CALLS = """
+            UPDATE tenant_usage SET api_calls_this_minute = api_calls_this_minute + 1
+            WHERE tenant_id = ? AND minute_start >= ? AND api_calls_this_minute < ?
+            RETURNING api_calls_this_minute
+            """;
+
+    /**
+     * Materialise-or-roll for the per-minute window. See
+     * {@link #ENSURE_AND_ROLL_DAY_WINDOW} for why the {@code WHERE} matters.
+     */
+    private static final String ENSURE_AND_ROLL_MINUTE_WINDOW = """
+            INSERT INTO tenant_usage
+                (tenant_id, conversations_today, day_start,
+                 api_calls_this_minute, minute_start,
+                 monthly_cost_usd, cost_month)
+            VALUES (?, 0, ?, 0, ?, 0.0, NULL)
+            ON CONFLICT (tenant_id) DO UPDATE SET
+                api_calls_this_minute = 0,
+                minute_start = ?
+            WHERE tenant_usage.minute_start < ?
+            """;
+
+    private static final String ADD_COST = """
+            UPDATE tenant_usage SET
+                monthly_cost_usd = CASE WHEN cost_month = ? THEN monthly_cost_usd + ? ELSE ? END,
+                cost_month = ?
+            WHERE tenant_id = ?
+            RETURNING monthly_cost_usd
+            """;
+
     private final Instance<DataSource> dataSourceInstance;
+
+    /**
+     * The source of "now" for every rolling window. See
+     * {@code MongoTenantQuotaStore#clock} — same windows, same wall-clock
+     * alignment, same reason a test cannot assert two increments add up without
+     * pinning it.
+     * <p>
+     * Production always gets {@link Clock#systemUTC()}. Only tests pass anything
+     * else.
+     */
+    private final Clock clock;
     private volatile boolean schemaInitialized = false;
 
+    // Bootstrap config — stored as fields for lazy initialization in ensureSchema()
+    private final String defaultTenantId;
+    private final TenantQuota defaultQuota;
+
     @Inject
-    public PostgresTenantQuotaStore(Instance<DataSource> dataSourceInstance) {
+    public PostgresTenantQuotaStore(Instance<DataSource> dataSourceInstance,
+            @ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default") String defaultTenantId,
+            @ConfigProperty(name = "eddi.tenant.quota.enabled", defaultValue = "false") boolean enabled,
+            @ConfigProperty(name = "eddi.tenant.quota.max-conversations-per-day", defaultValue = "-1") int maxConvPerDay,
+            @ConfigProperty(name = "eddi.tenant.quota.max-agents-per-tenant", defaultValue = "-1") int maxAgents,
+            @ConfigProperty(name = "eddi.tenant.quota.max-api-calls-per-minute", defaultValue = "-1") int maxApiCalls,
+            @ConfigProperty(name = "eddi.tenant.quota.max-monthly-cost-usd", defaultValue = "-1") double maxCost) {
+
         this.dataSourceInstance = dataSourceInstance;
+        this.defaultTenantId = defaultTenantId;
+        this.defaultQuota = new TenantQuota(defaultTenantId, maxConvPerDay, maxAgents, maxApiCalls, maxCost, enabled);
+        this.clock = Clock.systemUTC();
     }
 
+    /**
+     * Test-only constructor — no CDI injection, no bootstrap.
+     */
+    PostgresTenantQuotaStore(Instance<DataSource> dataSourceInstance) {
+        this(dataSourceInstance, Clock.systemUTC());
+    }
+
+    /**
+     * Test-only constructor taking the clock, so a test can pin "now".
+     */
+    PostgresTenantQuotaStore(Instance<DataSource> dataSourceInstance, Clock clock) {
+        this.dataSourceInstance = dataSourceInstance;
+        this.defaultTenantId = null;
+        this.defaultQuota = null;
+        this.clock = clock;
+    }
+
+    /**
+     * Every public method calls this first, and until the first call succeeds it
+     * takes a connection — so on a database that has been unreachable since
+     * startup, this is where the outage surfaces rather than in the method that
+     * called it. It therefore raises the same refusal the rest of the store does; a
+     * plain {@code RuntimeException} here escaped {@code TenantQuotaService}'s
+     * gates (which match the refusal type) and left that window answering an opaque
+     * 500 while the identical outage a moment later answered 503.
+     */
     private synchronized void ensureSchema() {
         if (schemaInitialized)
             return;
@@ -84,49 +221,92 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
                 Statement stmt = conn.createStatement()) {
             stmt.execute(CREATE_QUOTAS_TABLE);
             stmt.execute(CREATE_USAGE_TABLE);
-            schemaInitialized = true;
             LOGGER.info("PostgresTenantQuotaStore initialized (tables=tenant_quotas, tenant_usage)");
+
+            // Bootstrap default tenant quota if none exists (parity with
+            // InMemoryTenantQuotaStore).
+            // Uses INSERT ... ON CONFLICT DO NOTHING so an existing quota is never
+            // overwritten.
+            if (defaultTenantId != null && defaultQuota != null) {
+                bootstrapDefaultQuota(conn, defaultQuota);
+            }
+
+            schemaInitialized = true;
         } catch (SQLException e) {
-            throw new RuntimeException("Failed to initialize tenant quota tables", e);
+            throw new QuotaAccountingUnavailableException(ACCOUNTING_UNAVAILABLE, e);
         }
     }
 
     // ─── Quota Configuration ───
 
-    @Override
-    public TenantQuota getQuota(String tenantId) {
-        ensureSchema();
-        try (Connection conn = dataSourceInstance.get().getConnection();
-                PreparedStatement ps = conn.prepareStatement(
-                        "SELECT * FROM tenant_quotas WHERE tenant_id = ?")) {
+    /**
+     * Bootstrap-only insert using ON CONFLICT DO NOTHING — never overwrites an
+     * existing quota.
+     */
+    private void bootstrapDefaultQuota(Connection conn, TenantQuota quota) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                """
+                        INSERT INTO tenant_quotas (tenant_id, max_conversations_per_day, max_agents_per_tenant,
+                                                   max_api_calls_per_minute, max_monthly_cost_usd, enabled)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        ON CONFLICT (tenant_id) DO NOTHING
+                        """)) {
+            ps.setString(1, quota.tenantId());
+            ps.setInt(2, quota.maxConversationsPerDay());
+            ps.setInt(3, quota.maxAgentsPerTenant());
+            ps.setInt(4, quota.maxApiCallsPerMinute());
+            ps.setDouble(5, quota.maxMonthlyCostUsd());
+            ps.setBoolean(6, quota.enabled());
+            int inserted = ps.executeUpdate();
+            if (inserted > 0) {
+                LOGGER.infof("Bootstrapped default tenant quota: tenantId=%s, enabled=%s, maxConv=%d, maxAgents=%d, maxApi=%d, maxCost=%.2f",
+                        quota.tenantId(), quota.enabled(), quota.maxConversationsPerDay(),
+                        quota.maxAgentsPerTenant(), quota.maxApiCallsPerMinute(), quota.maxMonthlyCostUsd());
+            } else {
+                // ON CONFLICT DO NOTHING fired: the row predates this start, so the
+                // properties changed nothing. Re-read it and tell the operator when it
+                // no longer describes what they configured. Costs one extra SELECT per
+                // start, and only on the branch where a row already exists.
+                TenantQuotaBootstrapCheck.warnIfStoredQuotaDiffersFromConfig(
+                        getQuotaInternal(conn, quota.tenantId()), quota);
+            }
+        }
+    }
+
+    /**
+     * Internal quota lookup reusing an existing connection. Serves
+     * {@link #getQuota}; bootstrap uses {@link #bootstrapDefaultQuota}.
+     */
+    private TenantQuota getQuotaInternal(Connection conn, String tenantId) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT * FROM tenant_quotas WHERE tenant_id = ?")) {
             ps.setString(1, tenantId);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
                     return toQuota(rs);
                 }
             }
-        } catch (SQLException e) {
-            LOGGER.warnf("Failed to read quota for tenant '%s': %s", sanitize(tenantId), sanitize(e.getMessage()));
         }
         return null;
     }
 
-    @Override
-    public void setQuota(TenantQuota quota) {
-        ensureSchema();
-        try (Connection conn = dataSourceInstance.get().getConnection();
-                PreparedStatement ps = conn.prepareStatement(
-                        """
-                                INSERT INTO tenant_quotas (tenant_id, max_conversations_per_day, max_agents_per_tenant,
-                                                           max_api_calls_per_minute, max_monthly_cost_usd, enabled)
-                                VALUES (?, ?, ?, ?, ?, ?)
-                                ON CONFLICT (tenant_id) DO UPDATE SET
-                                    max_conversations_per_day = EXCLUDED.max_conversations_per_day,
-                                    max_agents_per_tenant = EXCLUDED.max_agents_per_tenant,
-                                    max_api_calls_per_minute = EXCLUDED.max_api_calls_per_minute,
-                                    max_monthly_cost_usd = EXCLUDED.max_monthly_cost_usd,
-                                    enabled = EXCLUDED.enabled
-                                """)) {
+    /**
+     * Internal quota upsert reusing an existing connection. Serves
+     * {@link #setQuota}; bootstrap uses {@link #bootstrapDefaultQuota}.
+     */
+    private void setQuotaInternal(Connection conn, TenantQuota quota) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                """
+                        INSERT INTO tenant_quotas (tenant_id, max_conversations_per_day, max_agents_per_tenant,
+                                                   max_api_calls_per_minute, max_monthly_cost_usd, enabled)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        ON CONFLICT (tenant_id) DO UPDATE SET
+                            max_conversations_per_day = EXCLUDED.max_conversations_per_day,
+                            max_agents_per_tenant = EXCLUDED.max_agents_per_tenant,
+                            max_api_calls_per_minute = EXCLUDED.max_api_calls_per_minute,
+                            max_monthly_cost_usd = EXCLUDED.max_monthly_cost_usd,
+                            enabled = EXCLUDED.enabled
+                        """)) {
             ps.setString(1, quota.tenantId());
             ps.setInt(2, quota.maxConversationsPerDay());
             ps.setInt(3, quota.maxAgentsPerTenant());
@@ -134,6 +314,46 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
             ps.setDouble(5, quota.maxMonthlyCostUsd());
             ps.setBoolean(6, quota.enabled());
             ps.executeUpdate();
+        }
+    }
+
+    /**
+     * Fails <em>closed</em> on a store error, like the accounting writes below.
+     * <p>
+     * It used to return null, which {@code TenantQuotaService} reads as "no quota
+     * configured" and therefore as unlimited. That made the same outage produce
+     * opposite policies depending on which call happened to fail first: the read
+     * half silently disabled enforcement for every tenant, the write half refused
+     * the request with an honest 503. It cannot be both. The read is the one that
+     * runs first on every gate, so fail-open won in practice and the write-side
+     * refusal was mostly unreachable.
+     * <p>
+     * The "a database blip should not become a total outage" argument for fail-open
+     * does not survive contact with the deployment: {@code tenant_quotas} lives in
+     * the same database as conversation memory, so a store that cannot answer this
+     * query cannot serve the turn either. All that changed is the error the caller
+     * sees — an honest 503 with {@code Retry-After} and a tick on
+     * {@code eddi.tenant.quota.unavailable} instead of a bypassed limit.
+     * <p>
+     * A {@code null} return still means exactly one thing: this tenant has no quota
+     * row. Hence the exception rather than a sentinel.
+     */
+    @Override
+    public TenantQuota getQuota(String tenantId) {
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection()) {
+            return getQuotaInternal(conn, tenantId);
+        } catch (SQLException e) {
+            LOGGER.errorf("Failed to read quota for tenant '%s': %s", sanitize(tenantId), sanitize(e.getMessage()));
+            throw new QuotaAccountingUnavailableException(ACCOUNTING_UNAVAILABLE, e);
+        }
+    }
+
+    @Override
+    public void setQuota(TenantQuota quota) {
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection()) {
+            setQuotaInternal(conn, quota);
         } catch (SQLException e) {
             LOGGER.errorf("Failed to set quota for tenant '%s': %s", sanitize(quota.tenantId()), sanitize(e.getMessage()));
         }
@@ -185,6 +405,21 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
     }
 
     // ─── Atomic Usage Operations ───
+    //
+    // All three mutating operations share the same shape, mirroring
+    // MongoTenantQuotaStore so that the two backends cannot drift apart:
+    //
+    // 1. FAST PATH — one conditional UPDATE ... RETURNING (window current AND
+    // counter below the limit). In steady state this is the only statement.
+    // 2. MATERIALISE-OR-ROLL — INSERT ... ON CONFLICT DO UPDATE ... WHERE <window
+    // expired>, which creates the row or resets an expired window to zero, and is
+    // a strict no-op for a row whose window is still current.
+    // 3. RETRY — re-run the fast-path statement.
+    //
+    // Because step 2 resets to ZERO (never to 1) and step 3 does the counting, the
+    // limit is enforced by exactly one predicate — `counter < limit` — in every
+    // path. An at-limit request with a current window falls through both steps and
+    // is denied. `limit == 0` therefore denies without a special case.
 
     @Override
     public QuotaCheckResult tryIncrementConversations(String tenantId, int limit) {
@@ -192,57 +427,37 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
             return QuotaCheckResult.OK;
         }
 
-        long dayStartMs = Instant.now().truncatedTo(ChronoUnit.DAYS).toEpochMilli();
+        long dayStartMs = clock.instant().truncatedTo(ChronoUnit.DAYS).toEpochMilli();
+        long minuteStartMs = clock.instant().truncatedTo(ChronoUnit.MINUTES).toEpochMilli();
 
         ensureSchema();
         try (Connection conn = dataSourceInstance.get().getConnection()) {
-            // First: try atomic increment within current window
-            try (PreparedStatement ps = conn.prepareStatement(
-                    """
-                            UPDATE tenant_usage SET conversations_today = conversations_today + 1
-                            WHERE tenant_id = ? AND day_start = ? AND conversations_today < ?
-                            RETURNING conversations_today
-                            """)) {
-                ps.setString(1, tenantId);
-                ps.setLong(2, dayStartMs);
-                ps.setInt(3, limit);
-                try (ResultSet rs = ps.executeQuery()) {
-                    if (rs.next()) {
-                        return QuotaCheckResult.OK;
-                    }
-                }
+            if (tryConsumeSlot(conn, INCREMENT_CONVERSATIONS, tenantId, dayStartMs, limit)) {
+                return QuotaCheckResult.OK;
             }
 
-            // Window may be stale — try to reset and increment atomically
-            try (PreparedStatement ps = conn.prepareStatement(
-                    """
-                            INSERT INTO tenant_usage
-                                (tenant_id, conversations_today, day_start,
-                                 api_calls_this_minute, minute_start,
-                                 monthly_cost_usd, cost_month)
-                            VALUES (?, 1, ?, 0, ?, 0.0, ?)
-                            ON CONFLICT (tenant_id) DO UPDATE SET
-                                conversations_today = CASE WHEN tenant_usage.day_start < ? THEN 1 ELSE tenant_usage.conversations_today END,
-                                day_start = CASE WHEN tenant_usage.day_start < ? THEN ? ELSE tenant_usage.day_start END
-                            RETURNING conversations_today
-                            """)) {
-                long minuteStart = Instant.now().truncatedTo(ChronoUnit.MINUTES).toEpochMilli();
-                String costMonth = YearMonth.now(ZoneOffset.UTC).toString();
+            // Row missing, window expired, or limit reached — materialise / roll, then
+            // retry. A row whose window is still current is left untouched.
+            try (PreparedStatement ps = conn.prepareStatement(ENSURE_AND_ROLL_DAY_WINDOW)) {
                 ps.setString(1, tenantId);
                 ps.setLong(2, dayStartMs);
-                ps.setLong(3, minuteStart);
-                ps.setString(4, costMonth);
+                ps.setLong(3, minuteStartMs);
+                ps.setLong(4, dayStartMs);
                 ps.setLong(5, dayStartMs);
-                ps.setLong(6, dayStartMs);
-                ps.setLong(7, dayStartMs);
-                try (ResultSet rs = ps.executeQuery()) {
-                    if (rs.next() && rs.getInt(1) <= limit) {
-                        return QuotaCheckResult.OK;
-                    }
-                }
+                ps.executeUpdate();
+            }
+
+            if (tryConsumeSlot(conn, INCREMENT_CONVERSATIONS, tenantId, dayStartMs, limit)) {
+                return QuotaCheckResult.OK;
             }
         } catch (SQLException e) {
             LOGGER.errorf("Failed to increment conversations for tenant '%s': %s", sanitize(tenantId), sanitize(e.getMessage()));
+            // Still fail closed (matching tryAddCost), but do not dress an
+            // infrastructure fault as a quota breach: the caller used to receive
+            // "Daily conversation limit reached (1000)" with Retry-After for a
+            // SQLException, and the denied-counter metric spiked as if the tenant
+            // were over quota.
+            return accountingUnavailable();
         }
 
         return QuotaCheckResult.denied("Daily conversation limit reached (" + limit + ")");
@@ -254,56 +469,32 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
             return QuotaCheckResult.OK;
         }
 
-        long minuteStart = Instant.now().truncatedTo(ChronoUnit.MINUTES).toEpochMilli();
+        long minuteStartMs = clock.instant().truncatedTo(ChronoUnit.MINUTES).toEpochMilli();
+        long dayStartMs = clock.instant().truncatedTo(ChronoUnit.DAYS).toEpochMilli();
 
         ensureSchema();
         try (Connection conn = dataSourceInstance.get().getConnection()) {
-            try (PreparedStatement ps = conn.prepareStatement(
-                    """
-                            UPDATE tenant_usage SET api_calls_this_minute = api_calls_this_minute + 1
-                            WHERE tenant_id = ? AND minute_start = ? AND api_calls_this_minute < ?
-                            RETURNING api_calls_this_minute
-                            """)) {
-                ps.setString(1, tenantId);
-                ps.setLong(2, minuteStart);
-                ps.setInt(3, limit);
-                try (ResultSet rs = ps.executeQuery()) {
-                    if (rs.next()) {
-                        return QuotaCheckResult.OK;
-                    }
-                }
+            if (tryConsumeSlot(conn, INCREMENT_API_CALLS, tenantId, minuteStartMs, limit)) {
+                return QuotaCheckResult.OK;
             }
 
-            // Window may be stale — reset
-            try (PreparedStatement ps = conn.prepareStatement(
-                    """
-                            INSERT INTO tenant_usage
-                                (tenant_id, conversations_today, day_start,
-                                 api_calls_this_minute, minute_start,
-                                 monthly_cost_usd, cost_month)
-                            VALUES (?, 0, ?, 1, ?, 0.0, ?)
-                            ON CONFLICT (tenant_id) DO UPDATE SET
-                                api_calls_this_minute = CASE WHEN tenant_usage.minute_start < ? THEN 1 ELSE tenant_usage.api_calls_this_minute END,
-                                minute_start = CASE WHEN tenant_usage.minute_start < ? THEN ? ELSE tenant_usage.minute_start END
-                            RETURNING api_calls_this_minute
-                            """)) {
-                long dayStart = Instant.now().truncatedTo(ChronoUnit.DAYS).toEpochMilli();
-                String costMonth = YearMonth.now(ZoneOffset.UTC).toString();
+            try (PreparedStatement ps = conn.prepareStatement(ENSURE_AND_ROLL_MINUTE_WINDOW)) {
                 ps.setString(1, tenantId);
-                ps.setLong(2, dayStart);
-                ps.setLong(3, minuteStart);
-                ps.setString(4, costMonth);
-                ps.setLong(5, minuteStart);
-                ps.setLong(6, minuteStart);
-                ps.setLong(7, minuteStart);
-                try (ResultSet rs = ps.executeQuery()) {
-                    if (rs.next() && rs.getInt(1) <= limit) {
-                        return QuotaCheckResult.OK;
-                    }
-                }
+                ps.setLong(2, dayStartMs);
+                ps.setLong(3, minuteStartMs);
+                ps.setLong(4, minuteStartMs);
+                ps.setLong(5, minuteStartMs);
+                ps.executeUpdate();
+            }
+
+            if (tryConsumeSlot(conn, INCREMENT_API_CALLS, tenantId, minuteStartMs, limit)) {
+                return QuotaCheckResult.OK;
             }
         } catch (SQLException e) {
             LOGGER.errorf("Failed to increment API calls for tenant '%s': %s", sanitize(tenantId), sanitize(e.getMessage()));
+            // See tryIncrementConversations: fail closed, but say what actually
+            // happened.
+            return accountingUnavailable();
         }
 
         return QuotaCheckResult.denied("API rate limit reached (" + limit + "/min)");
@@ -311,48 +502,72 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
 
     @Override
     public QuotaCheckResult tryAddCost(String tenantId, double cost, double limit) {
-        String monthKey = YearMonth.now(ZoneOffset.UTC).toString();
+        String monthKey = YearMonth.now(clock.withZone(ZoneOffset.UTC)).toString();
+        long dayStartMs = clock.instant().truncatedTo(ChronoUnit.DAYS).toEpochMilli();
+        long minuteStartMs = clock.instant().truncatedTo(ChronoUnit.MINUTES).toEpochMilli();
 
         ensureSchema();
-        try (Connection conn = dataSourceInstance.get().getConnection();
-                PreparedStatement ps = conn.prepareStatement(
-                        """
-                                INSERT INTO tenant_usage
-                                    (tenant_id, conversations_today, day_start,
-                                     api_calls_this_minute, minute_start,
-                                     monthly_cost_usd, cost_month)
-                                VALUES (?, 0, ?, 0, ?, ?, ?)
-                                ON CONFLICT (tenant_id) DO UPDATE SET
-                                    monthly_cost_usd = CASE WHEN tenant_usage.cost_month = ? THEN tenant_usage.monthly_cost_usd + ? ELSE ? END,
-                                    cost_month = ?
-                                RETURNING monthly_cost_usd
-                                """)) {
-            long now = Instant.now().toEpochMilli();
-            ps.setString(1, tenantId);
-            ps.setLong(2, now);
-            ps.setLong(3, now);
-            ps.setDouble(4, cost);
-            ps.setString(5, monthKey);
-            ps.setString(6, monthKey);
-            ps.setDouble(7, cost);
-            ps.setDouble(8, cost);
-            ps.setString(9, monthKey);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) {
-                    double totalCost = rs.getDouble(1);
-                    if (limit >= 0 && totalCost > limit) {
-                        return QuotaCheckResult.denied(
-                                "Monthly cost budget exceeded ($%.2f / $%.2f)".formatted(totalCost, limit));
+        try (Connection conn = dataSourceInstance.get().getConnection()) {
+            // Materialise the shared usage row first, with correctly truncated window
+            // starts. Seeding raw wall-clock timestamps here would leave day_start /
+            // minute_start ahead of every truncated window value the increment paths
+            // compare against, permanently denying that tenant's conversations.
+            try (PreparedStatement ps = conn.prepareStatement(ENSURE_USAGE_ROW)) {
+                ps.setString(1, tenantId);
+                ps.setLong(2, dayStartMs);
+                ps.setLong(3, minuteStartMs);
+                ps.executeUpdate();
+            }
+
+            try (PreparedStatement ps = conn.prepareStatement(ADD_COST)) {
+                ps.setString(1, monthKey);
+                ps.setDouble(2, cost);
+                ps.setDouble(3, cost);
+                ps.setString(4, monthKey);
+                ps.setString(5, tenantId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        double totalCost = rs.getDouble(1);
+                        // >=, not >, to agree with TenantQuotaService.checkCostBudget
+                        // (currentCost >= limit) and InMemoryTenantQuotaStore. With > the
+                        // pre-call gate denied at exactly the limit while post-call
+                        // accounting allowed.
+                        if (limit >= 0 && totalCost >= limit) {
+                            return QuotaCheckResult.denied(
+                                    "Monthly cost budget exceeded ($%.2f / $%.2f)".formatted(totalCost, limit));
+                        }
                     }
                 }
             }
         } catch (SQLException e) {
             LOGGER.errorf("Failed to add cost for tenant '%s': %s", sanitize(tenantId), sanitize(e.getMessage()));
             // Fail closed — if cost accounting fails, deny the request rather than
-            // silently bypassing budget enforcement
-            return QuotaCheckResult.denied("Cost accounting failed — denying request for safety");
+            // silently bypassing budget enforcement. Flagged as an outage rather
+            // than a budget breach, for the reason accountingUnavailable() gives —
+            // and with its wording, not a second one of this method's own. The
+            // reason reaches the client verbatim (ConversationService puts it into
+            // the QuotaAccountingUnavailableException the 503 body is built from),
+            // so a private phrasing here meant one outage produced two different
+            // messages depending on which gate failed first.
+            return ITenantQuotaStore.accountingUnavailable();
         }
         return QuotaCheckResult.OK;
+    }
+
+    /**
+     * Conditional increment: succeeds only when the tenant's window is current and
+     * the counter is still below the limit. Never inserts.
+     */
+    private boolean tryConsumeSlot(Connection conn, String sql, String tenantId, long windowStart, int limit)
+            throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, tenantId);
+            ps.setLong(2, windowStart);
+            ps.setInt(3, limit);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        }
     }
 
     // ─── Usage Reporting ───
@@ -385,7 +600,7 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
                     String monthKey = rs.getString("cost_month");
-                    if (monthKey != null && monthKey.equals(YearMonth.now(ZoneOffset.UTC).toString())) {
+                    if (monthKey != null && monthKey.equals(YearMonth.now(clock.withZone(ZoneOffset.UTC)).toString())) {
                         return rs.getDouble("monthly_cost_usd");
                     }
                 }
@@ -421,16 +636,30 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
                 rs.getBoolean("enabled"));
     }
 
+    /**
+     * Map a stored usage row to a snapshot, zeroing every counter whose window has
+     * already expired — see {@code MongoTenantQuotaStore#toSnapshot} for why the
+     * read has to do this and why it must not write.
+     */
     private UsageSnapshot toSnapshot(String tenantId, ResultSet rs) throws SQLException {
+        Instant now = clock.instant();
+        long currentMinuteStartMs = now.truncatedTo(ChronoUnit.MINUTES).toEpochMilli();
+        long currentDayStartMs = now.truncatedTo(ChronoUnit.DAYS).toEpochMilli();
+        YearMonth currentMonth = YearMonth.now(clock.withZone(ZoneOffset.UTC));
+
+        long minuteStartMs = rs.getLong("minute_start");
+        long dayStartMs = rs.getLong("day_start");
+        YearMonth costMonth = rs.getString("cost_month") != null
+                ? YearMonth.parse(rs.getString("cost_month"))
+                : currentMonth;
+
         return new UsageSnapshot(
                 tenantId,
-                rs.getInt("conversations_today"),
-                rs.getInt("api_calls_this_minute"),
-                rs.getDouble("monthly_cost_usd"),
-                Instant.ofEpochMilli(rs.getLong("minute_start")),
-                Instant.ofEpochMilli(rs.getLong("day_start")),
-                rs.getString("cost_month") != null
-                        ? YearMonth.parse(rs.getString("cost_month"))
-                        : YearMonth.now(ZoneOffset.UTC));
+                dayStartMs < currentDayStartMs ? 0 : rs.getInt("conversations_today"),
+                minuteStartMs < currentMinuteStartMs ? 0 : rs.getInt("api_calls_this_minute"),
+                costMonth.equals(currentMonth) ? rs.getDouble("monthly_cost_usd") : 0.0,
+                Instant.ofEpochMilli(minuteStartMs),
+                Instant.ofEpochMilli(dayStartMs),
+                costMonth);
     }
 }

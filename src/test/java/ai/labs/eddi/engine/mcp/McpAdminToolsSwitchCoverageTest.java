@@ -14,6 +14,8 @@ import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
 import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
+import ai.labs.eddi.configs.rag.IRestRagStore;
+import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
 import ai.labs.eddi.configs.rules.IRestRuleSetStore;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
@@ -42,6 +44,7 @@ import org.mockito.Mock;
 
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -50,6 +53,8 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 import static org.mockito.MockitoAnnotations.openMocks;
+import ai.labs.eddi.configs.rest.StrictConfigurationParser;
+import java.io.IOException;
 
 /**
  * Covers ALL switch cases in readResourceByType, updateResourceByType,
@@ -91,6 +96,8 @@ class McpAdminToolsSwitchCoverageTest {
     @Mock
     private IRestDictionaryStore dictionaryStore;
     @Mock
+    private IRestRagStore ragStore;
+    @Mock
     private IRestAgentStore restAgentStore;
     @Mock
     private IRestWorkflowStore workflowStore;
@@ -105,6 +112,7 @@ class McpAdminToolsSwitchCoverageTest {
     void setUp() throws Exception {
         openMocks(this);
         tools = new McpAdminTools(restInterfaceFactory, agentAdmin, jsonSerialization,
+                strictConfigurationParser(),
                 scheduleStore, scheduleFireExecutor, schedulePollerService,
                 identity, false);
 
@@ -116,6 +124,7 @@ class McpAdminToolsSwitchCoverageTest {
         doReturn(outputStore).when(restInterfaceFactory).get(IRestOutputStore.class);
         doReturn(propertySetterStore).when(restInterfaceFactory).get(IRestPropertySetterStore.class);
         doReturn(dictionaryStore).when(restInterfaceFactory).get(IRestDictionaryStore.class);
+        doReturn(ragStore).when(restInterfaceFactory).get(IRestRagStore.class);
         doReturn(restAgentStore).when(restInterfaceFactory).get(IRestAgentStore.class);
         doReturn(workflowStore).when(restInterfaceFactory).get(IRestWorkflowStore.class);
         doReturn(descriptorStore).when(restInterfaceFactory).get(IRestDocumentDescriptorStore.class);
@@ -199,6 +208,29 @@ class McpAdminToolsSwitchCoverageTest {
             String result = tools.readResource("dictionaries", "id1", 1);
             assertNotNull(result);
             verify(dictionaryStore).readRegularDictionary("id1", 1, "", "", 0, 0);
+        }
+
+        @Test
+        @DisplayName("rag → reads RagConfiguration")
+        void readRag() throws Exception {
+            when(ragStore.readRag("id1", 1)).thenReturn(new RagConfiguration());
+            when(jsonSerialization.serialize(any())).thenReturn("{}");
+            String result = tools.readResource("rag", "id1", 1);
+            assertNotNull(result);
+            verify(ragStore).readRag("id1", 1);
+        }
+
+        @Test
+        @DisplayName("rag is readable but NOT writable — the asymmetry is deliberate")
+        void ragIsReadOnly() throws Exception {
+            // A knowledge base has to be readable for an agent's configuration to
+            // be explainable at all; authoring one (and ingesting into it) is a
+            // separate decision that has not been taken. Pinned so adding the
+            // write cases is a conscious edit rather than a symmetry reflex.
+            assertTrue(tools.updateResource("rag", "id1", 1, "{}").contains("error"));
+            assertTrue(tools.createResource("rag", "{}").contains("error"));
+            assertTrue(tools.deleteResource("rag", "id1", 1, false).contains("error"));
+            verifyNoInteractions(ragStore);
         }
 
         @Test
@@ -782,7 +814,7 @@ class McpAdminToolsSwitchCoverageTest {
 
             var step = new WorkflowConfiguration.WorkflowStep();
             step.setType(URI.create("ai.labs.rules"));
-            step.setConfig(new java.util.HashMap<>(Map.of("uri", "eddi://ai.labs.rules/rulestore/rulesets/rs1?version=1")));
+            step.setConfig(new HashMap<>(Map.of("uri", "eddi://ai.labs.rules/rulestore/rulesets/rs1?version=1")));
             var wfConfig = new WorkflowConfiguration();
             wfConfig.setWorkflowSteps(List.of(step));
             when(workflowStore.readWorkflow("wf1", 1)).thenReturn(wfConfig);
@@ -847,7 +879,7 @@ class McpAdminToolsSwitchCoverageTest {
 
             var step = new WorkflowConfiguration.WorkflowStep();
             step.setType(null);
-            step.setConfig(new java.util.HashMap<>());
+            step.setConfig(new HashMap<>());
             var wfConfig = new WorkflowConfiguration();
             wfConfig.setWorkflowSteps(List.of(step));
             when(workflowStore.readWorkflow("wf1", 1)).thenReturn(wfConfig);
@@ -1019,7 +1051,7 @@ class McpAdminToolsSwitchCoverageTest {
         @Test
         @DisplayName("workflow modified → agent updated with new workflow URIs")
         void workflowModified() throws Exception {
-            var mapping = new java.util.HashMap<String, String>();
+            var mapping = new HashMap<String, String>();
             mapping.put("oldUri", "eddi://ai.labs.rules/rulestore/rulesets/rs1?version=1");
             mapping.put("newUri", "eddi://ai.labs.rules/rulestore/rulesets/rs1?version=2");
             when(jsonSerialization.deserialize(anyString(), eq(List.class))).thenReturn(List.of(mapping));
@@ -1030,7 +1062,7 @@ class McpAdminToolsSwitchCoverageTest {
             when(restAgentStore.readAgent("agent1", 1)).thenReturn(agent);
 
             var step = new WorkflowConfiguration.WorkflowStep();
-            step.setConfig(new java.util.HashMap<>(Map.of("uri", "eddi://ai.labs.rules/rulestore/rulesets/rs1?version=1")));
+            step.setConfig(new HashMap<>(Map.of("uri", "eddi://ai.labs.rules/rulestore/rulesets/rs1?version=1")));
             var wfConfig = new WorkflowConfiguration();
             wfConfig.setWorkflowSteps(List.of(step));
             when(workflowStore.readWorkflow("wf1", 1)).thenReturn(wfConfig);
@@ -1053,7 +1085,7 @@ class McpAdminToolsSwitchCoverageTest {
         @Test
         @DisplayName("redeploy=true after cascade")
         void redeployAfterCascade() throws Exception {
-            var mapping = new java.util.HashMap<String, String>();
+            var mapping = new HashMap<String, String>();
             mapping.put("oldUri", "eddi://ai.labs.rules/rulestore/rulesets/rs1?version=1");
             mapping.put("newUri", "eddi://ai.labs.rules/rulestore/rulesets/rs1?version=2");
             when(jsonSerialization.deserialize(anyString(), eq(List.class))).thenReturn(List.of(mapping));
@@ -1064,7 +1096,7 @@ class McpAdminToolsSwitchCoverageTest {
             when(restAgentStore.readAgent("agent1", 1)).thenReturn(agent);
 
             var step = new WorkflowConfiguration.WorkflowStep();
-            step.setConfig(new java.util.HashMap<>(Map.of("uri", "eddi://ai.labs.rules/rulestore/rulesets/rs1?version=1")));
+            step.setConfig(new HashMap<>(Map.of("uri", "eddi://ai.labs.rules/rulestore/rulesets/rs1?version=1")));
             var wfConfig = new WorkflowConfiguration();
             wfConfig.setWorkflowSteps(List.of(step));
             when(workflowStore.readWorkflow("wf1", 1)).thenReturn(wfConfig);
@@ -1090,7 +1122,7 @@ class McpAdminToolsSwitchCoverageTest {
         @Test
         @DisplayName("redeploy exception → deployError in result")
         void redeployException() throws Exception {
-            var mapping = new java.util.HashMap<String, String>();
+            var mapping = new HashMap<String, String>();
             mapping.put("oldUri", "eddi://ai.labs.rules/rulestore/rulesets/rs1?version=1");
             mapping.put("newUri", "eddi://ai.labs.rules/rulestore/rulesets/rs1?version=2");
             when(jsonSerialization.deserialize(anyString(), eq(List.class))).thenReturn(List.of(mapping));
@@ -1101,7 +1133,7 @@ class McpAdminToolsSwitchCoverageTest {
             when(restAgentStore.readAgent("agent1", 1)).thenReturn(agent);
 
             var step = new WorkflowConfiguration.WorkflowStep();
-            step.setConfig(new java.util.HashMap<>(Map.of("uri", "eddi://ai.labs.rules/rulestore/rulesets/rs1?version=1")));
+            step.setConfig(new HashMap<>(Map.of("uri", "eddi://ai.labs.rules/rulestore/rulesets/rs1?version=1")));
             var wfConfig = new WorkflowConfiguration();
             wfConfig.setWorkflowSteps(List.of(step));
             when(workflowStore.readWorkflow("wf1", 1)).thenReturn(wfConfig);
@@ -1125,7 +1157,7 @@ class McpAdminToolsSwitchCoverageTest {
         @Test
         @DisplayName("workflow config null → keep URI as-is")
         void workflowConfigNull() throws Exception {
-            var mapping = new java.util.HashMap<String, String>();
+            var mapping = new HashMap<String, String>();
             mapping.put("oldUri", "old");
             mapping.put("newUri", "new");
             when(jsonSerialization.deserialize(anyString(), eq(List.class))).thenReturn(List.of(mapping));
@@ -1141,5 +1173,23 @@ class McpAdminToolsSwitchCoverageTest {
             assertNotNull(result);
             verify(restAgentStore, never()).updateAgent(anyString(), anyInt(), any());
         }
+    }
+
+    /**
+     * A parser that defers to this test's {@code jsonSerialization} mock, so the
+     * existing {@code when(jsonSerialization.deserialize(...))} stubs keep
+     * describing what these dispatch tests are actually about. Strictness itself is
+     * covered by {@code StrictConfigurationParserTest}; here the only thing that
+     * matters is that each resource type reaches the right store.
+     */
+    private StrictConfigurationParser strictConfigurationParser() {
+        var parser = mock(StrictConfigurationParser.class);
+        try {
+            lenient().when(parser.parse(anyString(), any()))
+                    .thenAnswer(invocation -> jsonSerialization.deserialize(invocation.getArgument(0), invocation.getArgument(1)));
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+        return parser;
     }
 }

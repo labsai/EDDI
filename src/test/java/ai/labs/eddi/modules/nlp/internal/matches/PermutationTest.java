@@ -18,6 +18,18 @@ import static org.junit.jupiter.api.Assertions.*;
 @DisplayName("Permutation Tests")
 class PermutationTest {
 
+    /**
+     * Upper bound on how many permutations a single count walks, to keep the tests
+     * fast.
+     */
+    private static final int CAP = 1_000;
+
+    /**
+     * Largest input size exercised — must stay above the point where {@code n!}
+     * overflows an int.
+     */
+    private static final int MAX_SIZE = 18;
+
     @Nested
     @DisplayName("Single element")
     class SingleElementTests {
@@ -138,10 +150,61 @@ class PermutationTest {
         void duplicateValues() {
             var perm = new Permutation(new Integer[]{1, 1});
             var results = collect(perm);
-            // With duplicates, factorial is 2 but only 1 unique perm
-            // Iterator produces based on factorial counter
-            assertTrue(results.size() >= 1);
+            // With duplicates there is only one distinct ordering
+            assertEquals(1, results.size());
         }
+
+        @Test
+        @DisplayName("empty input yields a single empty permutation")
+        void emptyInput() {
+            var results = collect(new Permutation(new Integer[0]));
+            assertEquals(1, results.size());
+            assertEquals(0, results.get(0).length);
+        }
+    }
+
+    @Nested
+    @DisplayName("Large inputs")
+    class LargeInputTests {
+
+        @Test
+        @DisplayName("permutation count is monotonic non-decreasing in input size")
+        void countIsMonotonicInInputSize() {
+            long previous = 0;
+            for (int size = 1; size <= MAX_SIZE; size++) {
+                long count = countUpTo(size, CAP);
+                assertTrue(count >= previous, "Permutation count dropped from " + previous + " (size " + (size - 1) + ") to " + count
+                        + " (size " + size + ") — longer input must never yield fewer permutations");
+                previous = count;
+            }
+        }
+
+        @Test
+        @DisplayName("17 elements still yield permutations (factorial counter no longer overflows)")
+        void largeInputStillYieldsPermutations() {
+            assertEquals(CAP, countUpTo(17, CAP));
+        }
+    }
+
+    /**
+     * Counts the permutations produced for an input of the given size, stopping
+     * once {@code cap} permutations have been seen so the test stays fast.
+     */
+    private static long countUpTo(int size, int cap) {
+        var values = new Integer[size];
+        for (int i = 0; i < size; i++) {
+            values[i] = i;
+        }
+
+        long count = 0;
+        for (Integer[] permutation : new Permutation(values)) {
+            assertEquals(size, permutation.length);
+            if (++count == cap) {
+                break;
+            }
+        }
+
+        return count;
     }
 
     private List<Integer[]> collect(Permutation perm) {

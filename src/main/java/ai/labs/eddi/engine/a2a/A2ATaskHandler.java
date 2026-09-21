@@ -8,19 +8,36 @@ import ai.labs.eddi.engine.a2a.A2AModels.*;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
+import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
+import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 /**
  * Handles incoming A2A JSON-RPC requests by bridging them to EDDI's
  * {@link IConversationService}. Each A2A task maps to a conversation.
+ *
+ * <p>
+ * <strong>Peer scoping.</strong> {@code taskId} and {@code contextId} are
+ * chosen by the calling peer, so they are request payload — never proof of
+ * ownership. Both caches are therefore keyed on the authenticated peer
+ * <em>plus</em> the supplied id, and every conversation this handler creates is
+ * stamped with that same principal as its owner. A peer can only ever resolve
+ * tasks and contexts it created itself, and the resulting conversation is
+ * reachable through the regular ownership model
+ * ({@link ai.labs.eddi.engine.security.OwnershipValidator}) rather than being
+ * owned by nobody.
+ * </p>
  *
  * @author ginccc
  */
@@ -29,27 +46,99 @@ public class A2ATaskHandler {
 
     private static final Logger LOGGER = Logger.getLogger(A2ATaskHandler.class);
     private static final String CACHE_NAME = "a2aTaskMapping";
-    private static final int TASK_TIMEOUT_SECONDS = 60;
 
-    private final IConversationService conversationService;
+    /** Last-resort turn budget when neither configured value is positive. */
+    static final int DEFAULT_TASK_TIMEOUT_SECONDS = 60;
 
     /**
-     * Maps A2A taskId → conversationId for multi-turn conversations. A task that
-     * uses the same contextId should reuse the same conversation.
+     * Owner recorded for peers that arrive without an authenticated identity — the
+     * case when {@code authorization.enabled=false}, where the JSON-RPC endpoint's
+     * {@code @Authenticated} gate is a no-op and there is a single trust domain
+     * anyway. Deliberately a value no OIDC principal can ever equal: switching
+     * authorization on later must not hand these conversations to a real user.
+     */
+    static final String ANONYMOUS_PEER = "a2a:anonymous";
+
+    private final IConversationService conversationService;
+    private final AgentCardService agentCardService;
+
+    /**
+     * The calling peer's identity. The JSON-RPC endpoint is {@code @Authenticated},
+     * so for a remote agent this is the principal of the Bearer token it presented
+     * (typically the OIDC subject / client id of the peer agent) — the only
+     * caller-independent identity available on this surface.
+     */
+    private final SecurityIdentity identity;
+
+    /**
+     * How long a peer's {@code tasks/send} may wait for the turn.
+     * <p>
+     * Defaults to {@code systemRuntime.agentTimeoutInSeconds}, the same budget the
+     * REST surface gives a turn, because an operator who raised that has already
+     * decided how long a turn may legitimately take. This was a hard-coded 60
+     * seconds, so an agent with a tool loop or a model cascade timed out on the A2A
+     * surface only: the peer got "Internal error" while the conversation carried on
+     * running server-side. {@code eddi.a2a.task-timeout-seconds} overrides it for a
+     * deployment whose peers cannot wait that long.
+     */
+    private final int taskTimeoutSeconds;
+
+    /**
+     * Reads an optional string parameter, treating a missing key, an explicit JSON
+     * null and a blank string alike as "not supplied".
+     */
+    private static String optionalStringParam(Map<String, Object> params, String key) {
+        Object raw = params.get(key);
+        if (raw == null) {
+            return null;
+        }
+        String value = raw.toString().trim();
+        return value.isEmpty() ? null : value;
+    }
+
+    /**
+     * Maps (peer, A2A taskId) → conversationId for multi-turn conversations. A task
+     * that uses the same contextId should reuse the same conversation.
      */
     private final ICache<String, String> taskConversationCache;
 
     /**
-     * Maps A2A contextId → conversationId so multi-turn requests on the same
-     * context reuse the same conversation.
+     * Maps (peer, A2A contextId) → conversationId so multi-turn requests on the
+     * same context reuse the same conversation.
      */
     private final ICache<String, String> contextConversationCache;
 
+    /**
+     * Maps (peer, A2A taskId) → the task's own {@link TaskState} name.
+     * <p>
+     * A task's state cannot be read off its conversation: a finished turn leaves
+     * the conversation {@code READY} for the next one, and one conversation serves
+     * every task of a context. Inferring it did both wrong things — a completed
+     * task read back as {@code submitted}, and {@code tasks/cancel} on it ended the
+     * reusable conversation and reported success.
+     */
+    private final ICache<String, String> taskStateCache;
+
     @Inject
-    public A2ATaskHandler(IConversationService conversationService, ICacheFactory cacheFactory) {
+    public A2ATaskHandler(IConversationService conversationService, ICacheFactory cacheFactory, SecurityIdentity identity,
+            AgentCardService agentCardService,
+            @ConfigProperty(name = "systemRuntime.agentTimeoutInSeconds", defaultValue = "60") int agentTimeoutSeconds,
+            @ConfigProperty(name = "eddi.a2a.task-timeout-seconds") Optional<Integer> a2aTaskTimeoutSeconds) {
+        this.agentCardService = agentCardService;
         this.conversationService = conversationService;
         this.taskConversationCache = cacheFactory.getCache(CACHE_NAME);
         this.contextConversationCache = cacheFactory.getCache(CACHE_NAME + ":context");
+        this.taskStateCache = cacheFactory.getCache(CACHE_NAME + ":state");
+        this.identity = identity;
+        // A non-positive budget makes Future.get return immediately and fails every
+        // peer
+        // request, so neither source may supply one.
+        // systemRuntime.agentTimeoutInSeconds
+        // carries no positive-value validation of its own, so falling back to it is not
+        // enough — a deployment that sets it to 0 would still land here.
+        int resolved = a2aTaskTimeoutSeconds.filter(seconds -> seconds > 0)
+                .orElseGet(() -> agentTimeoutSeconds > 0 ? agentTimeoutSeconds : DEFAULT_TASK_TIMEOUT_SECONDS);
+        this.taskTimeoutSeconds = resolved;
     }
 
     /**
@@ -60,39 +149,80 @@ public class A2ATaskHandler {
         @SuppressWarnings("unchecked")
         Map<String, Object> message = (Map<String, Object>) params.get("message");
         if (message == null) {
-            throw new IllegalArgumentException("Missing 'message' in params");
+            throw new InvalidA2ARequestException("Missing 'message' in params");
         }
 
-        String taskId = params.containsKey("id") ? params.get("id").toString() : UUID.randomUUID().toString();
-        String contextId = params.containsKey("contextId") ? params.get("contextId").toString() : null;
+        // containsKey is true for an explicit JSON null, so a malformed peer sending
+        // {"id": null} used to NPE on toString() and surface as a generic internal
+        // error instead of the invalid-request path this method already has.
+        // A null or blank id is treated as absent, which is what a peer omitting it
+        // gets anyway.
+        String taskId = optionalStringParam(params, "id");
+        if (taskId == null) {
+            taskId = UUID.randomUUID().toString();
+        }
+        String contextId = optionalStringParam(params, "contextId");
 
         // Extract text from message parts
         String userInput = extractTextFromMessage(message);
         if (userInput == null || userInput.isBlank()) {
-            throw new IllegalArgumentException("No text content found in message parts");
+            throw new InvalidA2ARequestException("No text content found in message parts");
         }
 
-        // Resolve or create conversation
-        String conversationId = resolveConversation(agentId, taskId, contextId);
+        // A2A sits outside the workspace model on purpose — a peer is a remote system,
+        // not an EDDI user, so it has no space to scope to. But the gate this surface
+        // does claim is `isA2aEnabled()` on the target, and discovery was enforcing it
+        // while conversing was not: a peer that knew an id could talk to an agent
+        // nobody had opted into A2A, private ones included. getAgentCard returns null
+        // for both "no such agent" and "not A2A-enabled", which is the same refusal a
+        // peer gets from discovery.
+        if (agentCardService.getAgentCard(agentId) == null) {
+            throw new InvalidA2ARequestException("Agent is not available over A2A: " + agentId);
+        }
 
         // Build InputData
         InputData inputData = new InputData();
         inputData.setInput(userInput);
 
+        // The same input cap the conversationId entry points enforce: A2A drives the
+        // agent-id overload on behalf of an external peer, so it applies the check
+        // itself — before resolving the task, so a refused message does not leave a
+        // started conversation behind. Reported as invalid params, not an internal
+        // error.
+        try {
+            conversationService.requireInputWithinLimit(inputData);
+        } catch (IConversationService.InputTooLargeException e) {
+            throw new InvalidA2ARequestException(e.getMessage());
+        }
+
+        // Resolve or create conversation — scoped to the calling peer
+        String principal = callerPrincipal();
+        String conversationId = resolveConversation(agentId, taskId, contextId, principal);
+        String taskKey = scopedKey(principal, taskId);
+        taskStateCache.put(taskKey, TaskState.working.name());
+
         // Execute synchronously via ConversationService
         CompletableFuture<String> responseFuture = new CompletableFuture<>();
 
-        conversationService.say(Environment.production, agentId, conversationId, false, true, null, inputData, false, snapshot -> {
-            String response = "";
-            if (snapshot != null && snapshot.getConversationOutputs() != null && !snapshot.getConversationOutputs().isEmpty()) {
-                var outputs = snapshot.getConversationOutputs();
-                var lastOutput = outputs.get(outputs.size() - 1);
-                response = lastOutput != null ? lastOutput.toString() : "";
-            }
-            responseFuture.complete(response);
-        });
+        try {
+            conversationService.say(Environment.production, agentId, conversationId, false, true, null, inputData, false, snapshot -> {
+                String response = "";
+                if (snapshot != null && snapshot.getConversationOutputs() != null && !snapshot.getConversationOutputs().isEmpty()) {
+                    var outputs = snapshot.getConversationOutputs();
+                    var lastOutput = outputs.get(outputs.size() - 1);
+                    response = lastOutput != null ? lastOutput.toString() : "";
+                }
+                // Recorded when the turn completes rather than after the wait below, so a
+                // turn that outlives the peer's timeout still reads back as completed.
+                taskStateCache.put(taskKey, TaskState.completed.name());
+                responseFuture.complete(response);
+            });
+        } catch (Exception e) {
+            taskStateCache.put(taskKey, TaskState.failed.name());
+            throw e;
+        }
 
-        String response = responseFuture.get(TASK_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        String response = responseFuture.get(taskTimeoutSeconds, TimeUnit.SECONDS);
 
         // Build A2A response
         List<Part> responseParts = List.of(Part.textPart(response));
@@ -105,11 +235,22 @@ public class A2ATaskHandler {
 
     /**
      * Handle a {@code tasks/get} request — retrieve task status.
+     * <p>
+     * Only tasks created by the <em>calling</em> peer resolve: a taskId belonging
+     * to another peer is indistinguishable from an unknown one.
      */
     public A2ATask handleTaskGet(String taskId) {
-        String conversationId = taskConversationCache.get(taskId);
+        String taskKey = scopedKey(callerPrincipal(), taskId);
+        String conversationId = taskConversationCache.get(taskKey);
         if (conversationId == null) {
-            return null; // Task not found
+            return null; // Task not found (or not this peer's task)
+        }
+
+        // A finished task answers from its own record: its conversation is READY
+        // again, which would read as submitted.
+        TaskState terminal = terminalStateOf(taskKey);
+        if (terminal != null) {
+            return new A2ATask(taskId, null, terminal, null, null, null);
         }
 
         try {
@@ -124,49 +265,116 @@ public class A2ATaskHandler {
 
             return new A2ATask(taskId, null, taskState, null, null, null);
         } catch (Exception e) {
-            LOGGER.warnf("Failed to get task state for taskId=%s: %s", taskId, e.getMessage());
+            LOGGER.warnf("Failed to get task state for taskId=%s: %s", sanitize(taskId), e.getMessage());
             return new A2ATask(taskId, null, TaskState.unknown, null, null, null);
         }
     }
 
     /**
      * Handle a {@code tasks/cancel} request — end the conversation.
+     * <p>
+     * Cancelling is scoped the same way {@link #handleTaskGet} is: a peer can only
+     * cancel a task it created itself.
      */
     public boolean handleTaskCancel(String taskId) {
-        String conversationId = taskConversationCache.get(taskId);
+        String taskKey = scopedKey(callerPrincipal(), taskId);
+        String conversationId = taskConversationCache.get(taskKey);
         if (conversationId == null) {
             return false;
         }
 
+        // A task that already reached a terminal state cannot be cancelled (A2A
+        // TaskNotCancelableError). Ending it again reported success for a no-op and
+        // told the peer its cancel had stopped work that was long finished. The
+        // task's own record decides first: after a completed turn the conversation is
+        // READY, and ending it would also end the context's later tasks.
+        if (terminalStateOf(taskKey) != null) {
+            return false;
+        }
+
         try {
+            ConversationState state = conversationService.getConversationState(conversationId);
+            if (state == ConversationState.ENDED || state == ConversationState.ERROR) {
+                return false;
+            }
             conversationService.endConversation(conversationId);
+            taskStateCache.put(taskKey, TaskState.canceled.name());
             return true;
         } catch (Exception e) {
-            LOGGER.warnf("Failed to cancel task %s: %s", taskId, e.getMessage());
+            LOGGER.warnf("Failed to cancel task %s: %s", sanitize(taskId), e.getMessage());
             return false;
         }
     }
 
     // === Internal helpers ===
 
-    private String resolveConversation(String agentId, String taskId, String contextId) throws Exception {
-        // If contextId is provided, try to reuse an existing conversation
+    /**
+     * The identity a task/context is filed under. The JSON-RPC surface is
+     * authenticated, so a remote peer always has a principal; the anonymous
+     * fallback only applies with authorization disabled.
+     */
+    private String callerPrincipal() {
+        if (identity != null && !identity.isAnonymous() && identity.getPrincipal() != null) {
+            String name = identity.getPrincipal().getName();
+            if (name != null && !name.isBlank()) {
+                return name;
+            }
+        }
+        return ANONYMOUS_PEER;
+    }
+
+    /**
+     * Compound cache key binding a caller-supplied id to the peer that supplied it.
+     * The principal is length-prefixed so the encoding stays injective even if a
+     * principal or an id contains the separator — without that, a peer could craft
+     * an id that collides with another peer's key.
+     */
+    static String scopedKey(String principal, String id) {
+        return principal.length() + ":" + principal + "|" + id;
+    }
+
+    /**
+     * The task's recorded state when it is terminal ({@code completed},
+     * {@code canceled}, {@code failed}); {@code null} while it is still running or
+     * was never recorded.
+     */
+    private TaskState terminalStateOf(String taskKey) {
+        String recorded = taskStateCache.get(taskKey);
+        if (recorded == null) {
+            return null;
+        }
+        try {
+            TaskState state = TaskState.valueOf(recorded);
+            return switch (state) {
+                case completed, canceled, failed -> state;
+                default -> null;
+            };
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    private String resolveConversation(String agentId, String taskId, String contextId, String principal) throws Exception {
+        // If contextId is provided, try to reuse an existing conversation — but only
+        // one this same peer opened. Another peer's contextId simply does not resolve.
         if (contextId != null) {
-            String existingConvId = contextConversationCache.get(contextId);
+            String existingConvId = contextConversationCache.get(scopedKey(principal, contextId));
             if (existingConvId != null) {
-                taskConversationCache.put(taskId, existingConvId);
+                taskConversationCache.put(scopedKey(principal, taskId), existingConvId);
                 return existingConvId;
             }
         }
 
-        // Start a new conversation
-        var result = conversationService.startConversation(Environment.production, agentId, null, Map.of());
+        // Start a new conversation owned by the calling peer. Passing null here would
+        // let ConversationService substitute a random anonymous-* id, leaving the
+        // conversation owned by a principal that can never authenticate.
+        var result = conversationService.startConversation(Environment.production, agentId, principal, Map.of());
         String conversationId = result.conversationId();
 
         // Cache the mapping
-        taskConversationCache.put(taskId, conversationId);
+        taskConversationCache.put(scopedKey(principal, taskId), conversationId);
         if (contextId != null) {
-            contextConversationCache.put(contextId, conversationId);
+            contextConversationCache.put(scopedKey(principal, contextId), conversationId);
         }
 
         return conversationId;

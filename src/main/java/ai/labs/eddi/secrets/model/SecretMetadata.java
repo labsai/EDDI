@@ -13,11 +13,16 @@ import java.util.List;
  * Non-sensitive metadata about a stored secret. Plaintext values are NEVER
  * exposed through this record.
  * <p>
- * Secrets are scoped at the <b>tenant level</b>, not per-agent. Access control
- * is via configuration authorship — the admin who writes the agent config
- * decides which vault references to include. The {@code allowedAgents} field is
- * for <b>visibility and documentation only</b>, helping admins track which
- * agents use which secrets.
+ * Secrets are stored at the <b>tenant level</b>. Which agents may use one is
+ * governed by {@code allowedAgents}, checked when an agent is deployed (see
+ * {@link ai.labs.eddi.secrets.VaultGrantGate}) rather than when a secret is
+ * resolved, so a misconfiguration surfaces before the agent serves traffic
+ * rather than in the middle of a live conversation.
+ * <p>
+ * What a violation costs depends on {@code eddi.vault.grant-enforcement}: under
+ * {@code enforce} (the default) the deployment is blocked, under {@code warn}
+ * it is logged and allowed, and under {@code off} the check does not run at
+ * all.
  *
  * @param tenantId
  *            the owning tenant
@@ -37,8 +42,8 @@ import java.util.List;
  *            "OpenAI API key for production")
  * @param allowedAgents
  *            list of agent IDs allowed to use this secret, or {@code ["*"]} for
- *            all agents. This is for <b>visibility only</b> — enforcement is
- *            via configuration authorship, not runtime resolution.
+ *            all agents. {@code null} or empty means unrestricted, not "deny
+ *            all". Enforced at deployment time, not at resolution time.
  *
  * @author ginccc
  * @since 6.0.0

@@ -9,6 +9,7 @@ import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
+import com.mongodb.ReadPreference;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
@@ -24,7 +25,6 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.time.Instant;
-import java.util.Date;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -55,7 +55,27 @@ class MongoScheduleStoreBranchTest {
         doReturn(scheduleCollection).when(database).getCollection("eddi_schedules");
         doReturn(fireLogCollection).when(database).getCollection("eddi_schedule_fire_logs");
 
-        store = new MongoScheduleStore(database, jsonSerialization, documentBuilder);
+        // The store keeps a primary-read view of the schedule collection for the two
+        // reads the erasure guarantee rests on. One logical node here, so the two
+        // views are the same mock and the stubs below apply to both; that they are
+        // distinct on a replica set is pinned in MongoScheduleStoreTest.
+        doReturn(scheduleCollection).when(scheduleCollection).withReadPreference(any(ReadPreference.class));
+
+        // Every delete path now cascades to the schedule's fire logs (they are
+        // unreachable once the schedule row is gone, and each carries a
+        // conversationId). Permissive defaults; tests that care re-stub them.
+        DeleteResult noneDeleted = mock(DeleteResult.class);
+        when(noneDeleted.getDeletedCount()).thenReturn(0L);
+        when(fireLogCollection.deleteMany(any(Bson.class))).thenReturn(noneDeleted);
+        when(scheduleCollection.deleteOne(any(Bson.class))).thenReturn(noneDeleted);
+        FindIterable<Document> empty = mock(FindIterable.class);
+        MongoCursor<Document> emptyCursor = mock(MongoCursor.class);
+        when(emptyCursor.hasNext()).thenReturn(false);
+        when(empty.projection(any())).thenReturn(empty);
+        when(empty.iterator()).thenReturn(emptyCursor);
+        when(scheduleCollection.find(any(Bson.class))).thenReturn(empty);
+
+        store = new MongoScheduleStore(database, jsonSerialization, documentBuilder, 100);
     }
 
     // ==================== readSchedule error paths ====================
@@ -85,8 +105,13 @@ class MongoScheduleStoreBranchTest {
     @Test
     @DisplayName("updateSchedule wraps RuntimeException in ResourceStoreException")
     void updateScheduleRuntimeException() throws Exception {
+        // The failure is provoked at the write, not at serialization: updateSchedule is
+        // now an explicit $set of the editable fields and never serializes the object.
+        // Stubbing serialize() here still "passed" afterwards, but only because the
+        // unstubbed updateOne returned null and the NPE happened to be wrapped too.
         ScheduleConfiguration config = new ScheduleConfiguration();
-        doThrow(new RuntimeException("serialize fail")).when(jsonSerialization).serialize(any());
+        doThrow(new RuntimeException("db error")).when(scheduleCollection)
+                .updateOne(any(Bson.class), any(Bson.class));
 
         assertThrows(IResourceStore.ResourceStoreException.class,
                 () -> store.updateSchedule("s1", config));
@@ -164,7 +189,7 @@ class MongoScheduleStoreBranchTest {
                 .findOneAndUpdate(any(Bson.class), any(Bson.class));
 
         assertThrows(IResourceStore.ResourceStoreException.class,
-                () -> store.tryClaim("s1", "inst1", Instant.now()));
+                () -> store.tryClaim("s1", "inst1", Instant.now(), Instant.now().minusSeconds(300)));
     }
 
     // ==================== markCompleted error path ====================
@@ -264,88 +289,79 @@ class MongoScheduleStoreBranchTest {
                 () -> store.readAllSchedules(100));
     }
 
-    // ==================== convertInstantField edge cases ====================
+    // ==================== Instant field write/read helpers ====================
 
     @Nested
-    @DisplayName("convertInstantField via storeInstantsAsLong")
-    class ConvertInstantFieldTests {
+    @DisplayName("Instant field write/read helpers")
+    class InstantFieldHelpers {
 
         @Test
-        @DisplayName("handles Date fields by converting to epoch millis")
-        void dateField() throws Exception {
-            var method = MongoScheduleStore.class.getDeclaredMethod("storeInstantsAsLong", Document.class);
+        @DisplayName("writeScheduleInstants stores Instant getters as epoch-MILLIS Long (not seconds)")
+        void writeScheduleInstantsAsMillis() throws Exception {
+            var method = MongoScheduleStore.class.getDeclaredMethod("writeScheduleInstants", Document.class, ScheduleConfiguration.class);
             method.setAccessible(true);
 
+            ScheduleConfiguration schedule = new ScheduleConfiguration();
+            schedule.setNextFire(Instant.ofEpochMilli(1719964800123L));
             Document doc = new Document();
-            Date now = new Date();
-            doc.put("nextFire", now);
 
-            method.invoke(null, doc);
+            method.invoke(null, doc, schedule);
 
             Object result = doc.get("nextFire");
             assertInstanceOf(Long.class, result);
-            assertEquals(now.getTime(), result);
+            assertEquals(1719964800123L, result, "must be epoch-MILLIS, not the epoch-SECONDS the mapper would produce");
         }
 
         @Test
-        @DisplayName("handles Instant fields by converting to epoch millis")
-        void instantField() throws Exception {
-            var method = MongoScheduleStore.class.getDeclaredMethod("storeInstantsAsLong", Document.class);
+        @DisplayName("writeScheduleInstants stores null for a null Instant getter")
+        void writeScheduleInstantsNull() throws Exception {
+            var method = MongoScheduleStore.class.getDeclaredMethod("writeScheduleInstants", Document.class, ScheduleConfiguration.class);
             method.setAccessible(true);
 
             Document doc = new Document();
-            Instant now = Instant.now();
-            doc.put("lastFired", now);
+            method.invoke(null, doc, new ScheduleConfiguration());
 
-            method.invoke(null, doc);
-
-            Object result = doc.get("lastFired");
-            assertInstanceOf(Long.class, result);
-            assertEquals(now.toEpochMilli(), result);
-        }
-
-        @Test
-        @DisplayName("handles Number fields by normalizing to Long")
-        void numberField() throws Exception {
-            var method = MongoScheduleStore.class.getDeclaredMethod("storeInstantsAsLong", Document.class);
-            method.setAccessible(true);
-
-            Document doc = new Document();
-            doc.put("claimedAt", 12345); // Integer
-
-            method.invoke(null, doc);
-
-            Object result = doc.get("claimedAt");
-            assertInstanceOf(Long.class, result);
-            assertEquals(12345L, result);
-        }
-
-        @Test
-        @DisplayName("null fields are left as-is")
-        void nullField() throws Exception {
-            var method = MongoScheduleStore.class.getDeclaredMethod("storeInstantsAsLong", Document.class);
-            method.setAccessible(true);
-
-            Document doc = new Document();
-            doc.put("nextRetryAt", null);
-
-            method.invoke(null, doc);
-
+            assertTrue(doc.containsKey("nextRetryAt"));
             assertNull(doc.get("nextRetryAt"));
         }
 
         @Test
-        @DisplayName("string fields are left as-is")
-        void stringField() throws Exception {
-            var method = MongoScheduleStore.class.getDeclaredMethod("storeInstantsAsLong", Document.class);
+        @DisplayName("writeFireLogInstants stores Instant components as epoch-MILLIS Long")
+        void writeFireLogInstantsAsMillis() throws Exception {
+            var method = MongoScheduleStore.class.getDeclaredMethod("writeFireLogInstants", Document.class, ScheduleFireLog.class);
             method.setAccessible(true);
 
+            ScheduleFireLog log = new ScheduleFireLog("l1", "s1", "f1",
+                    Instant.ofEpochMilli(1719964800123L), Instant.ofEpochMilli(1719964800456L), null,
+                    "COMPLETED", "inst1", "conv1", null, 1, 0.0);
             Document doc = new Document();
-            doc.put("createdAt", "not-a-date");
 
-            method.invoke(null, doc);
+            method.invoke(null, doc, log);
 
-            assertEquals("not-a-date", doc.get("createdAt"));
+            assertEquals(1719964800123L, doc.get("fireTime"));
+            assertEquals(1719964800456L, doc.get("startedAt"));
+            assertTrue(doc.containsKey("completedAt"));
+            assertNull(doc.get("completedAt"));
+        }
+
+        @Test
+        @DisplayName("readEpochMillis converts a stored Long back to the same Instant")
+        void readEpochMillisRoundTrip() throws Exception {
+            var method = MongoScheduleStore.class.getDeclaredMethod("readEpochMillis", Document.class, String.class);
+            method.setAccessible(true);
+
+            Document doc = new Document("nextFire", 1719964800123L);
+            assertEquals(Instant.ofEpochMilli(1719964800123L), method.invoke(null, doc, "nextFire"));
+        }
+
+        @Test
+        @DisplayName("readEpochMillis returns null for a missing or non-numeric field")
+        void readEpochMillisNull() throws Exception {
+            var method = MongoScheduleStore.class.getDeclaredMethod("readEpochMillis", Document.class, String.class);
+            method.setAccessible(true);
+
+            assertNull(method.invoke(null, new Document(), "nextFire"));
+            assertNull(method.invoke(null, new Document("nextFire", "not-a-number"), "nextFire"));
         }
     }
 

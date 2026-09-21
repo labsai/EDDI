@@ -1,6 +1,6 @@
 # Conversation Memory and State Management
 
-**Version: 6.0.0**
+[![Version](https://img.shields.io/github/v/release/labsai/EDDI?label=version&color=blue)](https://github.com/labsai/EDDI/releases)
 
 ## Overview
 
@@ -117,7 +117,8 @@ public enum ConversationState {
     IN_PROGRESS,     // Currently processing a message
     EXECUTION_INTERRUPTED,  // Processing was interrupted
     ERROR,           // An error occurred
-    ENDED            // Conversation has ended
+    ENDED,           // Conversation has ended
+    AWAITING_HUMAN   // Paused awaiting human approval (HITL) — see hitl.md
 }
 ```
 
@@ -193,25 +194,25 @@ memory.getCurrentStep().storeData(
 You said: {memory.current.input}
 
 <!-- Access previous step data -->
-Previously, you mentioned: {memory.previous.userPreference}
+Previously, you mentioned: {memory.last.userPreference}
 
 <!-- Access context data -->
-Welcome, {memory.current.context.userName}!
+Welcome, {context.userName}!
 
 <!-- Access HTTP call response -->
 The weather is: {memory.current.httpCalls.weatherResponse.temperature}
 
 <!-- Access LLM response -->
-AI says: {memory.current.llmResponse}
+AI says: {memory.current.output}
 ```
 
 ### In HTTP Call Body Templates
 
 ```json
 {
-  "userId": "{memory.current.context.userId}",
+  "userId": "{context.userId}",
   "message": "{memory.current.input}",
-  "conversationId": "{memory.conversationId}"
+  "conversationId": "{conversationInfo.conversationId}"
 }
 ```
 
@@ -315,9 +316,8 @@ When calling LLMs, you can control how much history is sent:
 ```json
 {
   "parameters": {
-    "sendConversation": "true",
     "includeFirstAgentMessage": "true",
-    "logSizeLimit": "10" // Only last 10 messages
+    "logSizeLimit": "10"
   }
 }
 ```
@@ -327,13 +327,13 @@ When calling LLMs, you can control how much history is sent:
 Pass data from your application via context instead of hardcoding:
 
 ```javascript
-// API Request
-POST /agents/prod/myagent/conversation123
+// API Request — the conversationId comes from POST /agents/{agentId}/start
+POST /agents/conversation123
 {
   "input": "What's my order status?",
   "context": {
-    "userId": "user-789",
-    "sessionId": "session-xyz"
+    "userId": { "type": "string", "value": "user-789" },
+    "sessionId": { "type": "string", "value": "session-xyz" }
   }
 }
 ```
@@ -350,12 +350,12 @@ Let's trace how memory flows through a complete conversation step:
 
 ### 1. User Request
 
-```json
-POST /agents/prod/weatheragent/conv-123
+```http
+POST /agents/conv-123
 {
   "input": "What's the weather in Paris?",
   "context": {
-    "userId": "john-doe"
+    "userId": { "type": "string", "value": "john-doe" }
   }
 }
 ```
@@ -514,20 +514,24 @@ When tasks process templates (system prompts, HTTP call bodies, property instruc
 | Key | Type | Source | Example Access |
 |---|---|---|---|
 | `context` | `Map<String, Object>` | Input context variables set per turn | `{context.language}` |
-| `properties` | `Map<String, Property>` | **All conversation properties** — includes both session-scoped and `longTerm` properties loaded from persistent storage | `{properties.preferred_language.valueString}` |
+| `properties` | `Map<String, Object>` (**raw values**) | **All conversation properties** — includes both session-scoped and `longTerm` properties loaded from persistent storage | `{properties.preferred_language}` |
 | `memory` | `Map` with `current`, `last`, `past` | Conversation step data from the pipeline | `{memory.current.output}`, `{memory.last.input}` |
+| `snippets` | `Map<String, Object>` | Prompt Snippets — auto-injected from `PromptSnippetService` | `{snippets.cautious_mode}` |
+| `vars` | `Map<String, Object>` | Global Variables — deployment-wide config from `GlobalVariableResolver` | `{vars.default-model}` |
 | `userInfo` | `Map` with `userId` | Authenticated user identity | `{userInfo.userId}` |
 | `conversationInfo` | `Map` with `conversationId`, `agentId`, etc. | Conversation metadata | `{conversationInfo.agentId}` |
 | `conversationLog` | `String` | Formatted conversation history | `{conversationLog}` |
 
 > **Key insight**: `longTerm` properties are loaded into `conversationProperties` at conversation init and are immediately available via `{properties.key}` in any template. You do NOT need a separate template namespace for persistent data — properties IS the namespace.
 
+> ⚠️ **`properties` holds raw values, not `Property` objects.** `MemoryItemConverter.convert()` inserts `ConversationProperties.toMap()`, and `toMap()` returns the unwrapped Java value (`String`, `Integer`, `Boolean`, `List`, `Map`) that was stored — the `Property` wrapper is gone by the time a template sees it. Write `{properties.preferred_language}`; `{properties.preferred_language.valueString}` resolves against a `String` and fails at render time. See AGENTS.md §5.1 for the authoritative template data model.
+
 ### When to Use Which
 
 | Need | Use | Why |
 |---|---|---|
 | Data from your application | `{context.X}` | Per-request, set by caller |
-| Persistent user preferences | `{properties.X.valueString}` | Survives across conversations (scope=longTerm) |
+| Persistent user preferences | `{properties.X}` | Survives across conversations (scope=longTerm) |
 | Current turn's input/output | `{memory.current.X}` | Step-level data from the pipeline |
 | Previous turn's data | `{memory.last.X}` | One step back |
 | Who the user is | `{userInfo.userId}` | Authenticated identity |
@@ -563,7 +567,7 @@ LifecycleManager.executeLifecycle(memory)
   ├─→ Input Parser
   ├─→ Behavior Rules → emit actions
   ├─→ PropertySetterTask → set properties based on actions
-  ├─→ HttpCallsTask → execute API calls based on actions
+  ├─→ ApiCallsTask → execute API calls based on actions
   ├─→ LlmTask → call LLM based on actions
   └─→ OutputGenerationTask → format response
 ```

@@ -12,6 +12,7 @@ import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import ai.labs.eddi.configs.migration.model.MigrationLog;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -240,7 +241,7 @@ public class ChannelConnectorMigration {
         var keys = new HashSet<String>();
         try {
             var descriptors = descriptorStore.readDescriptors(
-                    "ai.labs.channel", "", 0, 1000, false);
+                    "ai.labs.channel", "", 0, IDescriptorStore.NO_LIMIT, false);
             for (var descriptor : descriptors) {
                 try {
                     var resId = extractResourceId(

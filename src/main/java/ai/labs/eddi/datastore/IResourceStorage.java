@@ -5,13 +5,57 @@
 package ai.labs.eddi.datastore;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
 /**
- * @author ginccc
+ * Backend-facing half of the versioned store contract: raw persistence of
+ * resource revisions and their history, without the validation or interception
+ * {@link IResourceStore} adds on top.
+ * <p>
+ * Implementations are database-specific (MongoDB by default, PostgreSQL as an
+ * alternative) and are obtained through {@link IResourceStorageFactory} rather
+ * than injected directly. Reads are version-addressed, {@link #store} appends a
+ * revision, and history is written separately so a superseded revision stays
+ * retrievable.
+ * <p>
+ * {@link #MAX_RESULT_LIMIT} and {@link #resolveLimit} live here so every
+ * backend clamps unbounded queries identically.
+ *
+ * @param <T>
+ *            the configuration model being stored
  */
 public interface IResourceStorage<T> {
+
+    /**
+     * Hard safety ceiling for any single {@link #findResources} query. Applies even
+     * when the caller asks for "no limit" — an unbounded query against a large
+     * collection is a memory risk, so the storage layer never returns more than
+     * this many ids in one call.
+     * <p>
+     * Callers that must be exhaustive on collections this large have to page (see
+     * {@code RestOrphanAdmin} for the pattern).
+     */
+    int MAX_RESULT_LIMIT = 10_000;
+
+    /**
+     * Resolve a caller-supplied limit into the concrete number of rows a backend
+     * should fetch.
+     * <p>
+     * {@code limit <= 0} is the explicit "no caller-imposed limit" sentinel and
+     * resolves to {@link #MAX_RESULT_LIMIT}; a positive limit is honoured but still
+     * clamped to the ceiling. Shared by every backend so the two implementations
+     * cannot drift apart.
+     *
+     * @param limit
+     *            the caller-supplied limit ({@code <= 0} means unlimited)
+     * @return a positive row count, never above {@link #MAX_RESULT_LIMIT}
+     */
+    static int resolveLimit(int limit) {
+        return limit < 1 ? MAX_RESULT_LIMIT : Math.min(limit, MAX_RESULT_LIMIT);
+    }
+
     IResource<T> newResource(T content) throws IOException;
 
     IResource<T> newResource(String id, Integer version, T content) throws IOException;
@@ -21,6 +65,33 @@ public interface IResourceStorage<T> {
     void createNew(IResource<T> resource);
 
     IResource<T> read(String id, Integer version);
+
+    /**
+     * Batch counterpart of {@link #read(String, Integer)}.
+     * <p>
+     * Exists so listing code does not have to issue one round trip per id. The
+     * default implementation is the naive N+1 loop and is only there so backends
+     * that cannot batch keep working; every backend that can express an
+     * {@code IN (...)} should override it.
+     * <p>
+     * Contract: the returned list is in the <b>same order</b> as {@code ids}, and
+     * entries that no longer exist (or whose version no longer matches) are
+     * silently skipped — so the result may be shorter than the input.
+     *
+     * @param ids
+     *            the resource ids (with versions) to read
+     * @return the resources, in request order, missing ones omitted
+     */
+    default List<IResource<T>> readMany(List<IResourceStore.IResourceId> ids) {
+        List<IResource<T>> resources = new ArrayList<>(ids.size());
+        for (IResourceStore.IResourceId id : ids) {
+            IResource<T> resource = read(id.getId(), id.getVersion());
+            if (resource != null) {
+                resources.add(resource);
+            }
+        }
+        return resources;
+    }
 
     void remove(String id);
 
@@ -61,13 +132,107 @@ public interface IResourceStorage<T> {
     }
 
     /**
+     * Store a new version of a resource only if the JSON field {@code fieldName}
+     * currently equals {@code expectedValue}. Atomic compare-and-swap on an
+     * arbitrary indexed field (not _version).
+     * <p>
+     * Zero-match outcomes are distinguished so callers can report honestly:
+     * {@link IResourceStore.ResourceNotFoundException} when the resource no longer
+     * exists (REST: 404), {@link IResourceStore.ResourceModifiedException} when it
+     * exists but the field value did not match (a genuine CAS conflict — REST:
+     * 409).
+     * <p>
+     * There is deliberately NO fallback default: silently degrading a CAS to an
+     * unconditional store would defeat every race-hardening built on it. New
+     * backends must implement this.
+     */
+    default void storeIfFieldEquals(IResource<T> newResource, String fieldName, String expectedValue)
+            throws IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
+        throw new UnsupportedOperationException(
+                "storeIfFieldEquals is not implemented by " + getClass().getName()
+                        + " — a compare-and-swap must never silently degrade to an unconditional store");
+    }
+
+    /**
+     * As {@link #storeIfFieldEquals(IResource, String, String)}, but comparing a
+     * JSON <em>number</em> field. A separate overload because the two backends
+     * disagree about text-comparing numbers: PostgreSQL's {@code data ->> field}
+     * renders a JSON number as text so {@code "3"} matches, but MongoDB's typed
+     * BSON equality never matches an int64 against a string — a string-typed CAS on
+     * a numeric field would "work" on one backend and silently never match on the
+     * other. Used by the shared-artifact store's version CAS (I17).
+     * <p>
+     * Same no-fallback contract as the String overload.
+     */
+    default void storeIfFieldEquals(IResource<T> newResource, String fieldName, long expectedValue)
+            throws IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
+        throw new UnsupportedOperationException(
+                "storeIfFieldEquals(long) is not implemented by " + getClass().getName()
+                        + " — a compare-and-swap must never silently degrade to an unconditional store");
+    }
+
+    /**
+     * Archive {@code history} and apply the version-checked update as ONE unit of
+     * work.
+     * <p>
+     * {@link ai.labs.eddi.datastore.HistorizedResourceStore#update} previously
+     * issued the two writes back to back: a crash in between left the old version
+     * archived twice-over or the new version stored without its predecessor
+     * archived. Backends that have transactions must override this and run both
+     * statements inside one.
+     * <p>
+     * The default is the historical sequential behaviour — history FIRST, so a
+     * failure of the second write can never lose the archived predecessor.
+     *
+     * @param history
+     *            the archived predecessor
+     * @param newResource
+     *            the new version to store
+     * @param expectedCurrentVersion
+     *            the version the caller believes is currently stored
+     * @throws IResourceStore.ResourceModifiedException
+     *             if the current version no longer matches (concurrent edit)
+     */
+    default void storeHistoryAndUpdate(IHistoryResource<T> history, IResource<T> newResource, int expectedCurrentVersion)
+            throws IResourceStore.ResourceModifiedException {
+        store(history);
+        storeIfCurrentVersion(newResource, expectedCurrentVersion);
+    }
+
+    /**
+     * Archive {@code history} (flagged deleted) and remove the current row as ONE
+     * unit of work.
+     * <p>
+     * Non-atomically, a crash between the two writes leaves an archived-as-deleted
+     * row while the live row is still present — the resource looks deleted in
+     * history and alive in the current collection at the same time. Backends that
+     * have transactions must override this.
+     *
+     * @param history
+     *            the archived, deleted-flagged version
+     * @param id
+     *            the resource id to remove from the current collection
+     */
+    default void storeHistoryAndRemove(IHistoryResource<T> history, String id) {
+        store(history);
+        remove(id);
+    }
+
+    /**
      * Find resource IDs where the JSON data contains the given value at the given
      * path. Used by AgentStore/WorkflowStore for "find configs containing resource"
      * queries.
+     * <p>
+     * {@code jsonPath} is a dot-separated path and every backend MUST traverse it,
+     * descending into arrays along the way: {@code workflowSteps.config.uri}
+     * matches a document whose {@code workflowSteps} array holds an element with
+     * {@code config.uri == value}. A backend that treats the dotted string as a
+     * single literal key silently returns nothing forever, which is worse than
+     * failing.
      *
      * @param jsonPath
-     *            the JSON field/array path (e.g. "packages",
-     *            "WorkflowSteps.config.uri")
+     *            the JSON field/array path (e.g. "workflows",
+     *            "workflowSteps.config.uri")
      * @param value
      *            the value to search for within the field
      * @return list of matching resource IDs with their current versions
@@ -102,7 +267,10 @@ public interface IResourceStorage<T> {
      * @param skip
      *            number of results to skip
      * @param limit
-     *            maximum number of results
+     *            maximum number of results; {@code <= 0} means "no caller-imposed
+     *            limit" and returns up to {@link #MAX_RESULT_LIMIT}.
+     *            Implementations must resolve this through
+     *            {@link #resolveLimit(int)}.
      * @return list of matching resource IDs
      */
     default List<IResourceStore.IResourceId> findResources(IResourceFilter.QueryFilters[] filters, String sortField, int skip, int limit) {

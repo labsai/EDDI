@@ -7,8 +7,11 @@ package ai.labs.eddi.integration;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import io.restassured.http.ContentType;
+import java.util.List;
 import org.junit.jupiter.api.*;
 
+import java.net.URI;
+import java.net.HttpURLConnection;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
 
@@ -50,7 +53,7 @@ public class LogAdminIT {
     @DisplayName("GET /administration/logs should return recent log entries from ring buffer")
     void getRecentLogs_returnsEntries() {
         // By the time this test runs, Quarkus boot has already generated log entries
-        given().get(BASE).then().assertThat().statusCode(200).contentType(ContentType.JSON).body("$", instanceOf(java.util.List.class));
+        given().get(BASE).then().assertThat().statusCode(200).contentType(ContentType.JSON).body("$", instanceOf(List.class));
     }
 
     @Test
@@ -83,7 +86,7 @@ public class LogAdminIT {
     @Order(6)
     @DisplayName("GET /administration/logs/history should return list (may be empty if DB logging is off)")
     void getHistoryLogs_returnsListOrEmpty() {
-        given().get(BASE + "/history").then().assertThat().statusCode(200).contentType(ContentType.JSON).body("$", instanceOf(java.util.List.class));
+        given().get(BASE + "/history").then().assertThat().statusCode(200).contentType(ContentType.JSON).body("$", instanceOf(List.class));
     }
 
     @Test
@@ -102,8 +105,8 @@ public class LogAdminIT {
     void streamLogs_returnsSseContentType() throws Exception {
         // SSE is a long-lived connection — RestAssured blocks. Use raw HTTP with
         // timeout.
-        var url = java.net.URI.create("http://localhost:8081" + BASE + "/stream").toURL();
-        var conn = (java.net.HttpURLConnection) url.openConnection();
+        var url = URI.create("http://localhost:8081" + BASE + "/stream").toURL();
+        var conn = (HttpURLConnection) url.openConnection();
         conn.setReadTimeout(3000); // 3 second timeout
         conn.setConnectTimeout(3000);
         conn.setRequestProperty("Accept", "text/event-stream");
