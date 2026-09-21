@@ -3,14 +3,17 @@
 **Audience:** a coding agent picking this up cold. Everything needed is in this document; you should
 not need to reconstruct history from chat logs or PR threads.
 
-**Status:** all three are unimplemented. They are independent — do them in any order, or in parallel
-in separate worktrees.
+**Status: all three are implemented.** This document is kept as the reasoning record — why each
+route was chosen and which routes were rejected — not as work to pick up. The sizes below are the
+estimates made before the work, left in place so the estimates can be judged against what landed.
+Where the text below still says "unimplemented", "today" or "what exists today", read it as the
+state at the time of writing.
 
-| # | Task | Repo | Rough size |
-|---|---|---|---|
-| A | Operator can converse with other agents / groups (test-drive) | EDDI-Manager | ~half a day |
-| B | Operator conversation survives navigation + restart; history tab | EDDI-Manager | ~1 day |
-| C | A tool call whose body is invalid JSON fails at the API, not before | EDDI | ~2 hours |
+| # | Task | Repo | Rough size | Landed as |
+|---|---|---|---|---|
+| A | Operator can converse with other agents / groups (test-drive) | Manager (`ui/manager`) | ~half a day | `c031cc8c95` — see `ui/manager/src/lib/operator/tool-scopes.ts` |
+| B | Operator conversation survives navigation + restart; history tab | Manager (`ui/manager`) | ~1 day | `5550010a3d` — see `use-operator-chat.ts` `hydrate()` and `components/operator/operator-history.tsx` |
+| C | A tool call whose body is invalid JSON should fail **before** the API call, not at it | EDDI | ~2 hours | `08e76415cc` — see `HttpCallToolsProvider` |
 
 ---
 
@@ -351,7 +354,10 @@ it consumes tokens, creates conversation records, and is the first hole ever pun
 
 5. **Tests** (`src/hooks/__tests__/use-operator-chat.test.tsx`, plus a page test)
    - hydrate rebuilds user/agent messages in order from a snapshot;
-   - hydrating a paused conversation sets `isPaused` and the pause reason;
+   - hydrating a paused conversation sets `isPaused` — note that the *reason* is not in the
+     snapshot (`SimpleConversationMemorySnapshot` carries `conversationState`, `hitlPausedAt`,
+     `hitlPauseType` and `hitlPendingToolCalls`, but no pause reason), so it comes from
+     `useApprovalStatus`, which the restored `isPaused` is what enables;
    - a 404 clears the stored id and leaves an empty, usable chat;
    - a `reset()` during hydration discards the in-flight result;
    - the history list renders and selecting an entry loads it.
