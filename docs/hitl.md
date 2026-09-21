@@ -424,6 +424,8 @@ A group has no per-member human reviewer, so a member agent's gated tool call in
 
 A tool pause serializes the **exact** in-flight langchain4j message list (the AiMessage + prior tool results of the current LLM loop) at pause time and persists it on the snapshot. On resume — even days later — the loop re-enters the **same** task index and replays that frozen transcript, then applies the verdicts and continues. The human therefore approves against, and the model resumes against, **pause-time prompt state** — not a transcript rebuilt from current memory. This is why the design persists the transcript rather than reconstructing it: a multi-iteration turn rebuilt from memory would lose intermediate tool results.
 
+If the transcript exceeds `eddi.hitl.tool.transcript-max-bytes` it is omitted, and resume falls back to rebuilding the history from memory — losing the turn's earlier iterations. That degraded path still replays the **assistant message that made the gated calls** unchanged, kept separately on the pause (`gatingAssistantMessageJson`, capped at 64 KB, written only when the transcript was omitted), because it carries provider-opaque fields the API demands back — Gemini 3.x's `thoughtSignature` among them. Its ungated calls, which were handled before the pause, are answered with an explicit "handled before the pause; result could not be restored" result, so they are neither left dangling nor blindly repeated — without claiming an outcome the degraded path cannot know.
+
 ### Rolling upgrade
 
 The gate is guarded by a feature flag: `eddi.hitl.tool.enabled` (default `true`; injected into `LlmTask`). When `false`, the effective tool-approvals config resolves to `null` and the gate is inert.
