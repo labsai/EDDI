@@ -4,7 +4,9 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
+import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService.*;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
@@ -27,6 +29,11 @@ import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.engine.runtime.IConversationSetup;
+import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -57,7 +64,10 @@ class ConversationServiceExtendedTest {
     private AuditLedgerService auditLedgerService;
     private GdprComplianceService gdprComplianceService;
     private TenantQuotaService tenantQuotaService;
+    private IScheduleStore scheduleStore;
+    private IAgentStore agentStore;
     private IUserMemoryStore userMemoryStore;
+    private IJsonSerialization jsonSerialization;
 
     private static final Environment ENV = Environment.production;
     private static final String AGENT_ID = "test-agent-id";
@@ -80,7 +90,10 @@ class ConversationServiceExtendedTest {
         auditLedgerService = mock(AuditLedgerService.class);
         gdprComplianceService = mock(GdprComplianceService.class);
         tenantQuotaService = mock(TenantQuotaService.class);
+        scheduleStore = mock(IScheduleStore.class);
+        agentStore = mock(IAgentStore.class);
         userMemoryStore = mock(IUserMemoryStore.class);
+        jsonSerialization = mock(IJsonSerialization.class);
 
         when(tenantQuotaService.acquireConversationSlot()).thenReturn(QuotaCheckResult.OK);
         when(tenantQuotaService.acquireApiCallSlot()).thenReturn(QuotaCheckResult.OK);
@@ -93,7 +106,9 @@ class ConversationServiceExtendedTest {
         conversationService = new ConversationService(agentFactory, conversationMemoryStore,
                 conversationDescriptorStore, userMemoryStore, conversationCoordinator,
                 conversationSetup, cacheFactory, runtime, contextLogger, auditLedgerService,
-                gdprComplianceService, tenantQuotaService, meterRegistry, AGENT_TIMEOUT);
+                gdprComplianceService, tenantQuotaService, scheduleStore, agentStore,
+                jsonSerialization,
+                meterRegistry, ConversationServiceTestFixtures.hitlResumeEvent(), new CallerIdentityContext(null, null), AGENT_TIMEOUT);
     }
 
     @Nested
@@ -217,7 +232,7 @@ class ConversationServiceExtendedTest {
         @Test
         @DisplayName("with memoryConfig — stores config correctly")
         void withMemoryConfig() {
-            var config = new ai.labs.eddi.configs.agents.model.AgentConfiguration.UserMemoryConfig();
+            var config = new AgentConfiguration.UserMemoryConfig();
             config.setMaxRecallEntries(100);
 
             var handler = conversationService.createPropertiesHandler(USER_ID, config);
@@ -253,7 +268,7 @@ class ConversationServiceExtendedTest {
             when(mockAgent.startConversation(anyString(), anyMap(), any(), any()))
                     .thenThrow(new InstantiationException("Agent init failed"));
 
-            assertThrows(ai.labs.eddi.datastore.IResourceStore.ResourceStoreException.class,
+            assertThrows(IResourceStore.ResourceStoreException.class,
                     () -> conversationService.startConversation(ENV, AGENT_ID, USER_ID, new LinkedHashMap<>()));
         }
     }
@@ -318,8 +333,8 @@ class ConversationServiceExtendedTest {
             step.setWorkflows(new ArrayList<>());
             snapshot.setConversationSteps(new ArrayList<>(List.of(step, step)));
             snapshot.setConversationOutputs(new ArrayList<>(List.of(
-                    new ai.labs.eddi.engine.memory.model.ConversationOutput(),
-                    new ai.labs.eddi.engine.memory.model.ConversationOutput())));
+                    new ConversationOutput(),
+                    new ConversationOutput())));
             when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(snapshot);
 
             Boolean result = conversationService.isUndoAvailable(ENV, AGENT_ID, CONVERSATION_ID);

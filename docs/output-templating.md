@@ -33,7 +33,7 @@ The **output templating** is evaluated by the **Quarkus Qute templating engine**
 ### Common Use Cases
 
 - **Personalization**: Greet users by name: `"Hello {context.userName}!"`
-- **API Response Formatting**: Display data from HTTP calls: `"Your order #{httpCalls.orderData.orderId} is on the way"`
+- **API Response Formatting**: Display data from HTTP calls: `"Your order #{memory.current.httpCalls.orderData.orderId} is on the way"`
 - **Conditional Outputs**: `"{#if user.isPremium}Exclusive offer for you!{/if}"`
 - **Iteration**: Loop through arrays: `"Available options: {#for opt in options}{opt}{#if opt_hasNext}, {/if}{/for}"`
 
@@ -42,10 +42,11 @@ The **output templating** is evaluated by the **Quarkus Qute templating engine**
 In templates, you have access to:
 
 - **`memory.current.*`** - Current step data (input, httpCalls, properties)
-- **`memory.previous.*`** - Previous step data
+- **`memory.last.*`** - Previous step data
+- **`memory.past.*`** - All earlier steps (list)
 - **`context.*`** - Context passed from your application
 - **`properties.*`** - Conversation properties (stored data)
-- **`httpCalls.*`** - Responses from external APIs
+- **`memory.current.httpCalls.*`** - Responses from external APIs (per step)
 
 ## Configuration
 
@@ -154,7 +155,7 @@ EDDI provides custom namespace extensions for use in templates (output, httpcall
 **`extractId` and `extractVersion`** work with both MongoDB ObjectIds (24-char hex) and PostgreSQL UUIDs (36-char with dashes):
 
 ```
-// Input: "http://localhost:7070/behaviorstore/behaviorsets/6740832a2b0f614abcaee7ab?version=1"
+// Input: "http://localhost:7070/rulestore/rulesets/6740832a2b0f614abcaee7ab?version=1"
 {uuidUtils:extractId(properties.location)}     → "6740832a2b0f614abcaee7ab"
 {uuidUtils:extractVersion(properties.location)} → "1"
 ```
@@ -183,6 +184,40 @@ If you are upgrading from EDDI v5, template syntax is automatically migrated:
 | `#uuidUtils.method()` | `{uuidUtils:method()}` |
 | `#json.method()` | `{json:method()}` |
 | `a + '/' + b` | `{a}/{b}` |
+
+## Previewing a template
+
+Rather than deploying an agent to find out what a template resolves to, resolve it directly:
+
+```http
+POST /administration/preview/template
+```
+
+Requires the `eddi-admin` or `eddi-editor` role.
+
+```json
+{
+  "template": "Hello {properties.firstName}, your booking is {properties.bookingId}.",
+  "conversationId": "68b1f0c2d4e5a60012ab34cd"
+}
+```
+
+`conversationId` is optional. With it, the template resolves against that conversation's real
+memory; without it, against built-in sample data. Because supplying a conversation returns the
+flattened variable values as well as the resolved text, the role check is paired with a
+per-conversation ownership check — an editor cannot read someone else's conversation this way.
+
+```json
+{
+  "resolved": "Hello Ada, your booking is BK-12345.",
+  "availableVariables": ["properties.firstName", "properties.bookingId", "memory.current.input"],
+  "variableValues": { "properties.firstName": "Ada", "properties.bookingId": "BK-12345" },
+  "error": null
+}
+```
+
+A template that fails to render returns the failure in `error` rather than as an HTTP error, so a
+preview of a broken template still tells you which variables were available.
 
 ## _**Additional Information:**_
 

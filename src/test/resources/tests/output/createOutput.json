@@ -5,7 +5,6 @@
       "timesOccurred": 0,
       "outputs": [
         {
-          "type": "text",
           "valueAlternatives": [
             {
               "type": "text",
@@ -20,7 +19,6 @@
       "timesOccurred": 0,
       "outputs": [
         {
-          "type": "text",
           "valueAlternatives": [
             {
               "type": "text",
@@ -39,7 +37,6 @@
       "timesOccurred": 1,
       "outputs": [
         {
-          "type": "text",
           "valueAlternatives": [
             {
               "type": "text",
@@ -54,7 +51,6 @@
       "timesOccurred": 0,
       "outputs": [
         {
-          "type": "text",
           "valueAlternatives": [
             {
               "type": "text",
@@ -69,7 +65,6 @@
       "timesOccurred": 0,
       "outputs": [
         {
-          "type": "text",
           "valueAlternatives": [
             {
               "type": "text",
@@ -84,7 +79,6 @@
       "timesOccurred": 0,
       "outputs": [
         {
-          "type": "text",
           "valueAlternatives": [
             {
               "type": "text",

@@ -249,8 +249,8 @@ enum FeedbackRating { POSITIVE, NEGATIVE, NEUTRAL }
 ## 4. References
 
 - Source research paper (removed during docs cleanup — distilled into this document)
-- [architecture.md](../architecture.md) — EDDI architecture overview
-- [project-philosophy.md](../project-philosophy.md) — The Nine Pillars
-- [GroupConversationService.java](../../src/main/java/ai/labs/eddi/engine/internal/GroupConversationService.java) — Phase-based orchestrator
-- [AgentGroupConfiguration.java](../../src/main/java/ai/labs/eddi/configs/groups/model/AgentGroupConfiguration.java) — Group configuration model
-- [A2ATaskHandler.java](../../src/main/java/ai/labs/eddi/engine/a2a/A2ATaskHandler.java) — A2A protocol handler
+- [architecture.md](../docs/architecture.md) — EDDI architecture overview
+- [project-philosophy.md](../docs/project-philosophy.md) — The Nine Pillars
+- [GroupConversationService.java](../src/main/java/ai/labs/eddi/engine/internal/GroupConversationService.java) — Phase-based orchestrator
+- [AgentGroupConfiguration.java](../src/main/java/ai/labs/eddi/configs/groups/model/AgentGroupConfiguration.java) — Group configuration model
+- [A2ATaskHandler.java](../src/main/java/ai/labs/eddi/engine/a2a/A2ATaskHandler.java) — A2A protocol handler

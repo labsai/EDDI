@@ -10,6 +10,7 @@ import jakarta.enterprise.event.Observes;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -27,15 +28,39 @@ public class ComplianceStartupChecks {
 
     private static final Logger LOGGER = Logger.getLogger("ai.labs.eddi.COMPLIANCE");
 
-    private final String sslCertFile;
+    private final boolean tlsConfigured;
     private final boolean dbEncryptionAcknowledged;
+    private final String vaultMasterKey;
+    private final boolean auditEnabled;
+    private final boolean auditSigningRequired;
 
     public ComplianceStartupChecks(
-            @ConfigProperty(name = "quarkus.http.ssl.certificate.file") Optional<String> sslCertFile,
+            @ConfigProperty(name = "quarkus.http.ssl.certificate.files") Optional<List<String>> sslCertFiles,
+            @ConfigProperty(name = "quarkus.http.ssl.certificate.key-files") Optional<List<String>> sslKeyFiles,
+            @ConfigProperty(name = "quarkus.http.ssl.certificate.key-store-file") Optional<String> sslKeyStoreFile,
             @ConfigProperty(name = "eddi.compliance.database-encryption-acknowledged",
-                            defaultValue = "false") boolean dbEncryptionAcknowledged) {
-        this.sslCertFile = sslCertFile.orElse("");
+                            defaultValue = "false") boolean dbEncryptionAcknowledged,
+            @ConfigProperty(name = "eddi.vault.master-key") Optional<String> vaultMasterKey,
+            @ConfigProperty(name = "eddi.audit.enabled", defaultValue = "true") boolean auditEnabled,
+            @ConfigProperty(name = "eddi.compliance.audit-signing-required",
+                            defaultValue = "false") boolean auditSigningRequired) {
+        // The real Quarkus keys are plural: quarkus.http.ssl.certificate.files and
+        // .key-files. This check read the singular "…certificate.file", which no
+        // working TLS configuration ever sets, so an operator who terminated TLS in
+        // Quarkus correctly still got the warning on every boot. Worse in the other
+        // direction: following the old banner and setting the singular key silenced
+        // the warning while Quarkus ignored it, so the check reported satisfied on a
+        // plaintext listener. Accept either the PEM pair or a keystore.
+        // A certificate without its key does not start a TLS listener, so it must not
+        // silence the warning either — that would be the same fail-open the singular
+        // key
+        // name produced. Quarkus pairs the two lists positionally, so their cardinality
+        // has to match as well as their presence.
+        this.tlsConfigured = pemPairIsComplete(sslCertFiles, sslKeyFiles) || sslKeyStoreFile.filter(f -> !f.isBlank()).isPresent();
         this.dbEncryptionAcknowledged = dbEncryptionAcknowledged;
+        this.vaultMasterKey = vaultMasterKey.orElse("");
+        this.auditEnabled = auditEnabled;
+        this.auditSigningRequired = auditSigningRequired;
     }
 
     void onStartup(@Observes StartupEvent event) {
@@ -44,10 +69,80 @@ public class ComplianceStartupChecks {
         }
         checkTls();
         checkDatabaseEncryption();
+        checkAuditSigning();
+    }
+
+    /**
+     * Surface an unsigned audit ledger.
+     * <p>
+     * {@code eddi.vault.master-key} ships empty, so out of the box
+     * {@code AuditLedgerService} derives no HMAC key and writes every entry
+     * unsigned — while the documentation presents the ledger as evidence-grade and
+     * the EU AI Act Art. 12/19 obligations it is sold against assume tamper
+     * evidence. Nothing warned about that until now.
+     * <p>
+     * Advisory by default (an unsigned ledger is still a useful log). Deployments
+     * that actually rely on the ledger as evidence set
+     * {@code eddi.compliance.audit-signing-required=true} and get a hard startup
+     * failure instead of a warning they will scroll past.
+     */
+    private void checkAuditSigning() {
+        if (!auditEnabled || !vaultMasterKey.isBlank()) {
+            return;
+        }
+
+        if (auditSigningRequired) {
+            throw new IllegalStateException("COMPLIANCE: eddi.compliance.audit-signing-required=true but no vault master key is configured. "
+                    + "Audit ledger entries would be written WITHOUT an HMAC integrity signature and tampering would be undetectable. "
+                    + "Set EDDI_VAULT_MASTER_KEY, or disable the requirement.");
+        }
+
+        LOGGER.warn("""
+
+                +------------------------------------------------------------------+
+                |  COMPLIANCE: Audit ledger is UNSIGNED                            |
+                +------------------------------------------------------------------+
+                |                                                                  |
+                |  No vault master key is configured, so audit entries are written |
+                |  without an HMAC integrity signature. Tampering with the ledger  |
+                |  — editing or deleting entries — cannot be detected, and the     |
+                |  /auditstore/verify endpoints can prove nothing.                 |
+                |                                                                  |
+                |  EU AI Act Arts. 12/19 traceability assumes a tamper-evident     |
+                |  record. To enable signing:                                      |
+                |    EDDI_VAULT_MASTER_KEY=<your-32-char-passphrase>               |
+                |                                                                  |
+                |  To make this a hard startup failure instead of a warning:       |
+                |    eddi.compliance.audit-signing-required=true                   |
+                |                                                                  |
+                |  To suppress entirely, disable the ledger:                       |
+                |    eddi.audit.enabled=false                                      |
+                +------------------------------------------------------------------+
+
+                """);
+    }
+
+    /**
+     * Whether {@code quarkus.http.ssl.certificate.files} and {@code …key-files}
+     * together describe a usable PEM configuration: both present, neither holding a
+     * blank entry, and the same number of entries in each, because Quarkus pairs
+     * them by position.
+     */
+    private static boolean pemPairIsComplete(Optional<List<String>> certFiles, Optional<List<String>> keyFiles) {
+        List<String> certs = certFiles.orElse(List.of());
+        List<String> keys = keyFiles.orElse(List.of());
+        if (certs.isEmpty() || certs.size() != keys.size()) {
+            return false;
+        }
+        return certs.stream().noneMatch(ComplianceStartupChecks::isBlankEntry) && keys.stream().noneMatch(ComplianceStartupChecks::isBlankEntry);
+    }
+
+    private static boolean isBlankEntry(String value) {
+        return value == null || value.isBlank();
     }
 
     private void checkTls() {
-        if (sslCertFile == null || sslCertFile.isBlank()) {
+        if (!tlsConfigured) {
             LOGGER.warn("""
 
                     +------------------------------------------------------------------+
@@ -61,8 +156,8 @@ public class ComplianceStartupChecks {
                     |  this warning is safe to ignore.                                 |
                     |                                                                  |
                     |  To suppress, configure TLS directly:                            |
-                    |    quarkus.http.ssl.certificate.file=/path/to/cert.pem           |
-                    |    quarkus.http.ssl.certificate.key-file=/path/to/key.pem        |
+                    |    quarkus.http.ssl.certificate.files=/path/to/cert.pem          |
+                    |    quarkus.http.ssl.certificate.key-files=/path/to/key.pem       |
                     |                                                                  |
                     |  See: https://docs.labs.ai/hipaa-compliance                      |
                     +------------------------------------------------------------------+

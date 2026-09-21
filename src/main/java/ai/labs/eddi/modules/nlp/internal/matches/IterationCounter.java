@@ -13,7 +13,13 @@ public class IterationCounter implements Iterator<IterationCounter.IterationPlan
     private IterationPlan next;
     private Integer[] indexes;
     private Iterator<Integer[]> permutationIterator;
-    private List<IterationPlan> previousIterationPlans = new LinkedList<>();
+    /**
+     * Membership set of the plans handed out so far. A list here meant every
+     * duplicate check was a linear scan, making the enumeration quadratic in the
+     * number of plans; {@link IterationPlan} hashes and compares by index content,
+     * so a hash set gives the same answer in constant time.
+     */
+    private final Set<IterationPlan> previousIterationPlans = new HashSet<>();
     private Integer inputLength;
     private Integer[] resultLengths;
     private int overallIterations;
@@ -90,7 +96,7 @@ public class IterationCounter implements Iterator<IterationCounter.IterationPlan
     private IterationPlan permuteNext() {
         while (permutationIterator.hasNext()) {
             Integer[] indexes = permutationIterator.next();
-            if (!contains(previousIterationPlans, indexes)) {
+            if (!contains(indexes)) {
                 return returnNewIterationPlan(indexes);
             }
         }
@@ -103,7 +109,7 @@ public class IterationCounter implements Iterator<IterationCounter.IterationPlan
             while (counter <= resultLengths[index]) {
                 indexes[0] = counter;
                 counter++;
-                if (!contains(previousIterationPlans, indexes)) {
+                if (!contains(indexes)) {
                     permutationIterator = new Permutation(indexes).iterator();
                     return permuteNext();
                 }
@@ -120,7 +126,7 @@ public class IterationCounter implements Iterator<IterationCounter.IterationPlan
             while (index > 0 && indexes[index] < resultLengths[index]) {
                 indexes[index]++;
                 index--;
-                if (!contains(previousIterationPlans, indexes)) {
+                if (!contains(indexes)) {
                     return incrementThisIndex();
                 }
             }
@@ -137,14 +143,8 @@ public class IterationCounter implements Iterator<IterationCounter.IterationPlan
         return iterationPlan;
     }
 
-    private boolean contains(List<IterationPlan> listIndexes, Integer[] indexes) {
-        for (IterationPlan listIndex : listIndexes) {
-            if (Arrays.equals(listIndex.getIndexes(), indexes)) {
-                return true;
-            }
-        }
-
-        return false;
+    private boolean contains(Integer[] indexes) {
+        return previousIterationPlans.contains(new IterationPlan(indexes));
     }
 
     public class IterationPlan {
@@ -166,12 +166,14 @@ public class IterationCounter implements Iterator<IterationCounter.IterationPlan
             if (o == null || getClass() != o.getClass())
                 return false;
             IterationPlan that = (IterationPlan) o;
-            return java.util.Objects.equals(indexes, that.indexes);
+            // Compare by content — hashCode() hashes the array contents, so reference
+            // equality here would make IterationPlan unusable as a hash key.
+            return Arrays.equals(indexes, that.indexes);
         }
 
         @Override
         public int hashCode() {
-            return java.util.Objects.hash((Object[]) indexes);
+            return Arrays.hashCode(indexes);
         }
     }
 }

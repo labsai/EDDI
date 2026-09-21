@@ -26,11 +26,16 @@ public class RestWorkflowStepStore implements IRestWorkflowStepStore {
 
     @Override
     public List<ExtensionDescriptor> getWorkflowSteps(String filter) {
-        return lifecycleExtensionsProvider.keySet().stream()
-                .filter(type -> filter == null || filter.isEmpty() || type.contains(filter))
-                .map(type -> {
-                    Provider<ILifecycleTask> taskProvider = lifecycleExtensionsProvider.get(type);
-                    return taskProvider.get().getExtensionDescriptor();
-                }).toList();
+        // The v6 aliases (ai.labs.rules → ai.labs.behavior, ai.labs.apicalls →
+        // ai.labs.httpcalls) are registered as a second key pointing at the SAME
+        // provider, so listing keys returned those two steps twice. Distinct on the
+        // provider keeps one descriptor per task while a filter matching only the
+        // alias name still finds it.
+        return lifecycleExtensionsProvider.entrySet().stream()
+                .filter(entry -> filter == null || filter.isEmpty() || entry.getKey().contains(filter))
+                .map(Map.Entry::getValue)
+                .distinct()
+                .map(taskProvider -> taskProvider.get().getExtensionDescriptor())
+                .toList();
     }
 }

@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.output.model.types;
 import ai.labs.eddi.modules.output.model.OutputItem;
 
 import java.util.Objects;
+import java.util.function.UnaryOperator;
 
 public class TextOutputItem extends OutputItem {
     private String text;
@@ -30,6 +31,11 @@ public class TextOutputItem extends OutputItem {
     @Override
     protected void initType() {
         super.type = "text";
+    }
+
+    @Override
+    protected OutputItem templatedCopy(UnaryOperator<String> templating) {
+        return new TextOutputItem(templating.apply(text), delay);
     }
 
     @Override

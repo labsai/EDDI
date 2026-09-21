@@ -4,12 +4,14 @@
  */
 package ai.labs.eddi.engine.memory;
 
+import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.memory.model.Attachment;
 import ai.labs.eddi.engine.model.Context;
 import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -38,7 +40,21 @@ import java.util.Map;
 public final class AttachmentContextExtractor {
 
     private static final Logger LOGGER = Logger.getLogger(AttachmentContextExtractor.class);
-    private static final String ATTACHMENT_PREFIX = "attachment_";
+
+    /**
+     * Context keys with this prefix carry attachment references (attachment_0,
+     * attachment_1, …).
+     */
+    public static final String ATTACHMENT_PREFIX = "attachment_";
+
+    /** Inline base64 payload field inside an attachment context value map. */
+    public static final String FIELD_DATA = "data";
+
+    /** Uploaded-blob reference field inside an attachment context value map. */
+    public static final String FIELD_STORAGE_REF = "storageRef";
+
+    /** Default per-turn cap on the number of attachments forwarded. */
+    public static final int DEFAULT_MAX_ATTACHMENTS_PER_TURN = 5;
 
     private AttachmentContextExtractor() {
         // non-instantiable utility
@@ -94,6 +110,19 @@ public final class AttachmentContextExtractor {
 
         Map<String, Object> attachMap = (Map<String, Object>) map;
 
+        // Stored-reference path (highest precedence). The client sends only
+        // {storageRef} (+ an optional fileName display hint); the authoritative
+        // MIME type and size are resolved from validated store metadata later
+        // (see resolveAndGuard), so no client-supplied MIME is trusted for
+        // stored blobs.
+        String storageRef = getStringField(attachMap, FIELD_STORAGE_REF);
+        if (storageRef != null && !storageRef.isBlank()) {
+            Attachment attachment = new Attachment();
+            attachment.setStorageRef(storageRef);
+            attachment.setFileName(getStringField(attachMap, "fileName"));
+            return attachment;
+        }
+
         String mimeType = getStringField(attachMap, "mimeType");
         if (mimeType == null || mimeType.isBlank()) {
             LOGGER.warnv("Attachment context '{0}' missing required 'mimeType' field", contextKey);
@@ -112,7 +141,7 @@ public final class AttachmentContextExtractor {
         }
 
         // Base64 inline path
-        String data = getStringField(attachMap, "data");
+        String data = getStringField(attachMap, FIELD_DATA);
         if (data != null && !data.isBlank()) {
             attachment.setBase64Data(data);
             // Estimate size from base64 length (3/4 of encoded length)
@@ -127,5 +156,273 @@ public final class AttachmentContextExtractor {
     private static String getStringField(Map<String, Object> map, String key) {
         Object value = map.get(key);
         return value instanceof String s ? s : null;
+    }
+
+    /**
+     * Result of resolving parsed attachments against the store and per-turn cap.
+     *
+     * @param attachments
+     *            the forwardable attachments (stored refs resolved)
+     * @param errors
+     *            human-readable notes for dropped/failed attachments (never silent)
+     */
+    public record ExtractionResult(List<Attachment> attachments, List<String> errors) {
+    }
+
+    /**
+     * Resolve server-side metadata for {@link Attachment.ContentSource#STORED}
+     * attachments and enforce the per-turn count cap.
+     * <p>
+     * For each stored reference, {@link IAttachmentStore#getMetadata} supplies the
+     * authoritative MIME type / size (owner-or-grant authorized), so behavior rules
+     * and the forwarder see the truth rather than client-declared values. URL and
+     * inline attachments pass through unchanged. Anything dropped — an unresolvable
+     * reference, a missing store, or an attachment beyond the per-turn cap — is
+     * reported in {@link ExtractionResult#errors()} and never silently discarded.
+     *
+     * @param parsed
+     *            attachments from {@link #extractAttachments(Map)}
+     * @param store
+     *            the attachment store (may be null if none configured)
+     * @param conversationId
+     *            the requesting conversation (authorization boundary)
+     * @param maxPerTurn
+     *            per-turn cap; non-positive means unlimited
+     * @return resolved attachments plus error notes
+     */
+    public static ExtractionResult resolveAndGuard(List<Attachment> parsed, IAttachmentStore store,
+                                                   String conversationId, int maxPerTurn) {
+        List<Attachment> out = new ArrayList<>();
+        List<String> errors = new ArrayList<>();
+        int cap = maxPerTurn > 0 ? maxPerTurn : Integer.MAX_VALUE;
+
+        for (Attachment att : parsed) {
+            if (out.size() >= cap) {
+                errors.add("Attachment '" + displayName(att) + "' skipped: per-turn limit of "
+                        + maxPerTurn + " attachment(s) reached.");
+                continue;
+            }
+            if (att.getContentSource() == Attachment.ContentSource.STORED) {
+                if (store == null) {
+                    errors.add("Stored attachment '" + att.getStorageRef()
+                            + "' could not be resolved: no attachment store is configured.");
+                    continue;
+                }
+                try {
+                    IAttachmentStore.Attachment meta = store.getMetadata(att.getStorageRef(), conversationId);
+                    att.setMimeType(meta.mimeType());
+                    if (att.getFileName() == null) {
+                        att.setFileName(meta.filename());
+                    }
+                    att.setSizeBytes(meta.sizeBytes());
+                    out.add(att);
+                } catch (IAttachmentStore.AttachmentStoreException e) {
+                    errors.add("Stored attachment '" + att.getStorageRef()
+                            + "' could not be resolved: " + e.getMessage());
+                }
+            } else {
+                out.add(att);
+            }
+        }
+        return new ExtractionResult(out, errors);
+    }
+
+    /**
+     * Attachments from the <em>earlier</em> turns of this conversation that can
+     * still be fetched, most recent first and de-duplicated by storage reference.
+     * <p>
+     * An attachment is inlined into the LLM message only on the turn it arrives —
+     * re-sending a document on every subsequent turn would burn the context window.
+     * Without this lookup, though, a follow-up question about a file uploaded two
+     * turns ago reaches a model that has no trace of it, and the
+     * {@code readAttachment} tool — which reads per <em>conversation</em>, not per
+     * turn — is never even offered. Callers use this to keep an uploaded file
+     * reachable for the rest of the conversation.
+     * <p>
+     * Only blob-backed attachments (a {@code storageRef}) are returned: that is
+     * exactly what {@link ai.labs.eddi.engine.attachments.IAttachmentStore} can
+     * serve later. An inline base64 payload is deliberately never persisted, and a
+     * URL reference is not in the store either, so neither can be re-read on a
+     * later turn — listing them would only advertise a file the tool then fails to
+     * fetch.
+     * <p>
+     * Read straight from conversation memory (no attachment-store round trip), so
+     * this is safe to call on every turn.
+     *
+     * @param memory
+     *            the conversation memory for the current turn (may be null)
+     * @return earlier turns' still-retrievable attachments, newest turn first
+     *         (never null)
+     */
+    public static List<Attachment> attachmentsFromPreviousTurns(IConversationMemory memory) {
+        if (memory == null) {
+            return Collections.emptyList();
+        }
+        IConversationMemory.IConversationStepStack previousSteps = memory.getPreviousSteps();
+        if (previousSteps == null || previousSteps.size() == 0) {
+            return Collections.emptyList();
+        }
+
+        // Keyed by identity so the same file re-sent across turns is listed once,
+        // insertion-ordered so the most recent turn's attachments come first.
+        Map<String, Attachment> unique = new LinkedHashMap<>();
+        for (int i = 0; i < previousSteps.size(); i++) {
+            // Exact-match read: "attachments" is a prefix of the
+            // attachments:extracts / attachments:errors keys the forwarder persists,
+            // so a prefix scan would return the wrong entry.
+            IData<List<?>> data = previousSteps.get(i).getData(MemoryKeys.ATTACHMENTS);
+            if (data == null || data.getResult() == null) {
+                continue;
+            }
+            for (Object value : data.getResult()) {
+                Attachment attachment = asAttachment(value);
+                // Retrievable only: see the note on inline/URL attachments above.
+                if (attachment != null && attachment.getStorageRef() != null) {
+                    unique.putIfAbsent(identity(attachment), attachment);
+                }
+            }
+        }
+        return List.copyOf(unique.values());
+    }
+
+    /**
+     * Read an ATTACHMENTS memory entry into {@link Attachment}s, accepting both the
+     * live objects and the map form a step comes back as once it has been through
+     * the conversation store.
+     * <p>
+     * Use this for <em>every</em> read of {@link MemoryKeys#ATTACHMENTS}, including
+     * the current step: a HITL resume re-enters the same step of a conversation
+     * reloaded from the store, so "current step" does not imply "live objects". A
+     * bare {@code instanceof Attachment} filter silently drops everything there.
+     * <p>
+     * No retrievability filter — a current-turn attachment may legitimately be an
+     * inline or URL payload, both of which are forwardable on the turn they arrive.
+     *
+     * @param rawStepData
+     *            the value of an ATTACHMENTS data entry (may be null)
+     * @return the attachments it holds, in order (never null)
+     */
+    public static List<Attachment> attachmentsFrom(List<?> rawStepData) {
+        if (rawStepData == null || rawStepData.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<Attachment> attachments = new ArrayList<>();
+        for (Object value : rawStepData) {
+            Attachment attachment = asAttachment(value);
+            if (attachment != null) {
+                attachments.add(attachment);
+            }
+        }
+        return attachments;
+    }
+
+    /**
+     * Coerce one stored ATTACHMENTS entry back into an {@link Attachment}.
+     * <p>
+     * The current turn's entries are the live objects, but every earlier turn has
+     * been through the conversation store, and
+     * {@code ConversationMemorySnapshot.ResultSnapshot#getResult()} is a bare
+     * {@code Object} — so Jackson hands those back as plain maps, not
+     * {@code Attachment}s. Both the Mongo and Postgres stores repair only
+     * {@code context*} entries on load ({@code fixContextTypes}); everything else,
+     * this key included, stays a map. An {@code instanceof Attachment} test alone
+     * therefore matches nothing from turn two onwards, which is exactly when this
+     * lookup matters.
+     * <p>
+     * {@code base64Data} is {@code @JsonIgnore}d and never persisted, so a
+     * recovered attachment is a stored/URL reference — which is all the
+     * readAttachment tool needs.
+     *
+     * @param value
+     *            a live Attachment, or the map form read back from the store
+     * @return the attachment, or {@code null} if the entry is neither
+     */
+    private static Attachment asAttachment(Object value) {
+        if (value instanceof Attachment attachment) {
+            return attachment;
+        }
+        if (!(value instanceof Map<?, ?> map)) {
+            return null;
+        }
+
+        String storageRef = stringValue(map, FIELD_STORAGE_REF);
+        String url = stringValue(map, "url");
+        String mimeType = stringValue(map, "mimeType");
+        if (storageRef == null && url == null && mimeType == null) {
+            // Not an attachment shape — leave it alone rather than inventing one.
+            return null;
+        }
+
+        Attachment attachment = new Attachment();
+        attachment.setStorageRef(storageRef);
+        attachment.setUrl(url);
+        attachment.setMimeType(mimeType);
+        attachment.setFileName(stringValue(map, "fileName"));
+        if (map.get("sizeBytes") instanceof Number sizeBytes) {
+            attachment.setSizeBytes(sizeBytes.longValue());
+        }
+        return attachment;
+    }
+
+    /** Non-blank string field from a map of unknown key/value types. */
+    private static String stringValue(Map<?, ?> map, String key) {
+        return map.get(key) instanceof String s && !s.isBlank() ? s : null;
+    }
+
+    /**
+     * Stable de-duplication key: the storage ref if there is one, else the name.
+     */
+    private static String identity(Attachment att) {
+        if (att.getStorageRef() != null) {
+            return "ref:" + att.getStorageRef();
+        }
+        if (att.getUrl() != null) {
+            return "url:" + att.getUrl();
+        }
+        return "name:" + displayName(att);
+    }
+
+    private static String displayName(Attachment att) {
+        if (att.getFileName() != null) {
+            return att.getFileName();
+        }
+        if (att.getStorageRef() != null) {
+            return att.getStorageRef();
+        }
+        return att.getMimeType() != null ? att.getMimeType() : "attachment";
+    }
+
+    /**
+     * Return a metadata-only copy of an {@code attachment_*} context whose value
+     * map carries an inline base64 {@link #FIELD_DATA} payload; every other context
+     * — and payload-free attachment contexts such as URL references — is returned
+     * unchanged.
+     * <p>
+     * Callers use this to build the <em>persisted</em> copy of the context (step
+     * data and {@code context.*} conversation output) so the raw base64 never lands
+     * in the Mongo conversation document (~1.33&times; file size per turn against
+     * the 16&nbsp;MB limit) and is never exposed via
+     * {@code {context.attachment_*.data}} templates. The live payload has already
+     * been captured into ATTACHMENTS memory for the turn by
+     * {@link #extractAttachments(Map)} reading the original context map, so LLM
+     * forwarding is unaffected. Mirrors the secret-input scrubbing pattern.
+     *
+     * @param contextKey
+     *            the context key (only {@code attachment_*} keys are scrubbed)
+     * @param ctx
+     *            the original context (may be null)
+     * @return a scrubbed copy when a payload is present, otherwise {@code ctx}
+     *         unchanged
+     */
+    public static Context scrubInlinePayload(String contextKey, Context ctx) {
+        if (contextKey == null || !contextKey.startsWith(ATTACHMENT_PREFIX) || ctx == null) {
+            return ctx;
+        }
+        if (!(ctx.getValue() instanceof Map<?, ?> value) || !value.containsKey(FIELD_DATA)) {
+            return ctx;
+        }
+        Map<Object, Object> scrubbed = new LinkedHashMap<>(value);
+        scrubbed.remove(FIELD_DATA);
+        return new Context(ctx.getType(), scrubbed);
     }
 }

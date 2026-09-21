@@ -7,8 +7,11 @@ package ai.labs.eddi.engine.memory.rest;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
-import ai.labs.eddi.datastore.IResourceStore;
-import ai.labs.eddi.engine.memory.IAttachmentStorage;
+import ai.labs.eddi.datastore.IResourceStore.ResourceModifiedException;
+import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
+import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
+import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
@@ -16,7 +19,11 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.ConversationStatus;
 import ai.labs.eddi.engine.runtime.IRuntime;
+import ai.labs.eddi.engine.security.ConversationAccessGuard;
+import io.quarkus.security.ForbiddenException;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.enterprise.inject.Instance;
+import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -25,6 +32,7 @@ import org.junit.jupiter.api.Test;
 
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
 
@@ -39,10 +47,12 @@ class RestConversationStoreTest {
     private IDocumentDescriptorStore documentDescriptorStore;
     private IConversationDescriptorStore conversationDescriptorStore;
     private IConversationMemoryStore conversationMemoryStore;
+    private IConversationService conversationService;
     private IUserMemoryStore userMemoryStore;
     private IRuntime runtime;
-    private Instance<IAttachmentStorage> attachmentStorageInstance;
-    private IAttachmentStorage attachmentStorage;
+    private ConversationAccessGuard conversationAccessGuard;
+    private Instance<IAttachmentStore> attachmentStorageInstance;
+    private IAttachmentStore attachmentStorage;
     private RestConversationStore restConversationStore;
 
     @SuppressWarnings("unchecked")
@@ -51,15 +61,20 @@ class RestConversationStoreTest {
         documentDescriptorStore = mock(IDocumentDescriptorStore.class);
         conversationDescriptorStore = mock(IConversationDescriptorStore.class);
         conversationMemoryStore = mock(IConversationMemoryStore.class);
+        conversationService = mock(IConversationService.class);
         userMemoryStore = mock(IUserMemoryStore.class);
         runtime = mock(IRuntime.class);
+        conversationAccessGuard = mock(ConversationAccessGuard.class);
+        // These tests do not exercise ownership scoping — the caller sees everything,
+        // so listing behaves exactly as before this endpoint became owner-filtered.
+        when(conversationAccessGuard.seesAllConversations()).thenReturn(true);
         attachmentStorageInstance = mock(Instance.class);
-        attachmentStorage = mock(IAttachmentStorage.class);
+        attachmentStorage = mock(IAttachmentStore.class);
         when(attachmentStorageInstance.isResolvable()).thenReturn(false);
 
         restConversationStore = new RestConversationStore(
                 documentDescriptorStore, conversationDescriptorStore,
-                conversationMemoryStore, userMemoryStore, runtime,
+                conversationMemoryStore, conversationService, userMemoryStore, runtime, conversationAccessGuard,
                 30, 90, attachmentStorageInstance);
     }
 
@@ -129,6 +144,49 @@ class RestConversationStoreTest {
     }
 
     @Nested
+    @DisplayName("reads of a conversation that is not there")
+    class MissingConversationReads {
+
+        /**
+         * {@code loadConversationMemorySnapshot} answers {@code null} rather than
+         * throwing, and these two surfaces passed it straight on. The raw read returned
+         * it, which JAX-RS renders as 204 No Content — indistinguishable from an empty
+         * conversation that does exist — and the simple read dereferenced it into a 500
+         * with an error id. Both endpoints document a 404, which is also what the
+         * troubleshooting guide tells people to expect when they are already trying to
+         * work out what went wrong.
+         */
+        @Test
+        @DisplayName("the raw read is a 404, not an empty 204")
+        void rawReadIsNotFound() throws Exception {
+            when(conversationMemoryStore.loadConversationMemorySnapshot("gone")).thenReturn(null);
+
+            assertThrows(ResourceNotFoundException.class,
+                    () -> restConversationStore.readRawConversationLog("gone"));
+        }
+
+        @Test
+        @DisplayName("the simple read is a 404, not a 500")
+        void simpleReadIsNotFound() throws Exception {
+            when(conversationMemoryStore.loadConversationMemorySnapshot("gone")).thenReturn(null);
+
+            assertThrows(ResourceNotFoundException.class,
+                    () -> restConversationStore.readSimpleConversationLog("gone", false, true, null));
+        }
+
+        @Test
+        @DisplayName("the message names the conversation asked for")
+        void messageNamesTheConversation() throws Exception {
+            when(conversationMemoryStore.loadConversationMemorySnapshot("gone")).thenReturn(null);
+
+            var thrown = assertThrows(ResourceNotFoundException.class,
+                    () -> restConversationStore.readRawConversationLog("gone"));
+
+            assertTrue(thrown.getMessage().contains("gone"), thrown.getMessage());
+        }
+    }
+
+    @Nested
     @DisplayName("deleteConversationLog")
     class DeleteConversationLog {
 
@@ -138,6 +196,37 @@ class RestConversationStoreTest {
             restConversationStore.deleteConversationLog("conv-1", true);
 
             verify(conversationMemoryStore).deleteConversationMemorySnapshot("conv-1");
+            verify(conversationDescriptorStore).deleteAllDescriptor("conv-1");
+        }
+
+        @Test
+        @DisplayName("Finding #44: HITL cleanup before permanently deleting a paused conversation")
+        void permanentDelete_paused_runsHitlCleanupFirst() throws Exception {
+            when(conversationMemoryStore.getConversationState("conv-paused"))
+                    .thenReturn(ConversationState.AWAITING_HUMAN);
+
+            restConversationStore.deleteConversationLog("conv-paused", true);
+
+            // endConversation disarms the schedule, clears the bookmark, audits,
+            // and clears the cached state before the document is removed. G4: the
+            // pause-terminating end is attributed to system:admin-end.
+            verify(conversationService).endConversation("conv-paused", "system:admin-end");
+            verify(conversationMemoryStore).deleteConversationMemorySnapshot("conv-paused");
+            verify(conversationDescriptorStore).deleteAllDescriptor("conv-paused");
+        }
+
+        @Test
+        @DisplayName("Finding #44: no HITL cleanup for a non-paused permanent delete")
+        void permanentDelete_notPaused_skipsHitlCleanup() throws Exception {
+            when(conversationMemoryStore.getConversationState("conv-ready"))
+                    .thenReturn(ConversationState.READY);
+
+            restConversationStore.deleteConversationLog("conv-ready", true);
+
+            verify(conversationService, never()).endConversation(any());
+            verify(conversationService, never()).endConversation(any(), any());
+            verify(conversationMemoryStore).deleteConversationMemorySnapshot("conv-ready");
+            verify(conversationDescriptorStore).deleteAllDescriptor("conv-ready");
         }
 
         @Test
@@ -146,6 +235,51 @@ class RestConversationStoreTest {
             restConversationStore.deleteConversationLog("conv-1", false);
 
             verify(conversationMemoryStore, never()).deleteConversationMemorySnapshot("conv-1");
+            verify(conversationDescriptorStore, never()).deleteAllDescriptor(any());
+        }
+
+        @Test
+        @DisplayName("soft delete retires the descriptor, so the conversation stops being listed")
+        void softDelete_retiresDescriptor() throws Exception {
+            // The whole point of the non-permanent branch. It used to do nothing at
+            // all — the endpoint answered 204, the descriptor stayed deleted=false,
+            // and the Manager's "Conversation deleted" toast sat next to a row that
+            // was still there.
+            restConversationStore.deleteConversationLog("conv-1", false);
+
+            verify(conversationDescriptorStore).deleteDescriptor("conv-1", 0);
+        }
+
+        @Test
+        @DisplayName("a permanent delete does not also soft-delete")
+        void permanentDelete_doesNotAlsoSoftDelete() throws Exception {
+            restConversationStore.deleteConversationLog("conv-1", true);
+
+            // deleteAllDescriptor already removed every version; calling
+            // deleteDescriptor afterwards would only raise a spurious not-found.
+            verify(conversationDescriptorStore, never()).deleteDescriptor(anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("a concurrent modification is reported, not swallowed")
+        void softDelete_concurrentModificationSurfaces() throws Exception {
+            doThrow(new ResourceModifiedException("moved"))
+                    .when(conversationDescriptorStore).deleteDescriptor("conv-race", 0);
+
+            assertThrows(ResourceStoreException.class,
+                    () -> restConversationStore.deleteConversationLog("conv-race", false));
+        }
+
+        @Test
+        @DisplayName("the ownership gate still runs before a soft delete")
+        void softDelete_checksOwnershipFirst() {
+            doThrow(new ForbiddenException("not yours"))
+                    .when(conversationAccessGuard).requireConversationOwner("conv-other");
+
+            assertThrows(ForbiddenException.class,
+                    () -> restConversationStore.deleteConversationLog("conv-other", false));
+
+            verifyNoInteractions(conversationDescriptorStore);
         }
 
         @Test
@@ -164,13 +298,14 @@ class RestConversationStoreTest {
 
             var store = new RestConversationStore(
                     documentDescriptorStore, conversationDescriptorStore,
-                    conversationMemoryStore, userMemoryStore, runtime,
+                    conversationMemoryStore, conversationService, userMemoryStore, runtime, conversationAccessGuard,
                     30, 90, attachmentStorageInstance);
 
             store.deleteConversationLog("conv-1", true);
 
             verify(attachmentStorage).deleteByConversation("conv-1");
             verify(conversationMemoryStore).deleteConversationMemorySnapshot("conv-1");
+            verify(conversationDescriptorStore).deleteAllDescriptor("conv-1");
         }
 
         @Test
@@ -182,12 +317,95 @@ class RestConversationStoreTest {
 
             var store = new RestConversationStore(
                     documentDescriptorStore, conversationDescriptorStore,
-                    conversationMemoryStore, userMemoryStore, runtime,
+                    conversationMemoryStore, conversationService, userMemoryStore, runtime, conversationAccessGuard,
                     30, 90, attachmentStorageInstance);
 
             // Should not throw — logs warning and continues
             assertDoesNotThrow(() -> store.deleteConversationLog("conv-1", true));
             verify(conversationMemoryStore).deleteConversationMemorySnapshot("conv-1");
+            verify(conversationDescriptorStore).deleteAllDescriptor("conv-1");
+        }
+    }
+
+    @Nested
+    @DisplayName("A3 — conversation store roles")
+    class ConversationStoreRoles {
+
+        @Test
+        @DisplayName("the deployment-wide bulk delete is admin-only")
+        void bulkDeleteIsAdminOnly() throws Exception {
+            RolesAllowed roles = IRestConversationStore.class
+                    .getMethod("permanentlyDeleteEndedConversationLogs", Integer.class)
+                    .getAnnotation(RolesAllowed.class);
+
+            assertNotNull(roles, "permanentlyDeleteEndedConversationLogs must declare @RolesAllowed");
+            assertEquals(List.of("eddi-admin"), Arrays.asList(roles.value()));
+        }
+    }
+
+    /**
+     * The interface javadoc claims the per-conversation operations are owner-scoped
+     * through {@code ConversationAccessGuard}. These pin that claim: none of the
+     * three may touch the stores when the guard denies, and each must consult the
+     * guard on every call. Without the guard any authenticated caller could read
+     * (raw memory document included) or permanently delete any conversation whose
+     * id they learned.
+     */
+    @Nested
+    @DisplayName("per-conversation operations are owner-scoped")
+    class PerConversationOwnerScoping {
+
+        @Test
+        @DisplayName("readRawConversationLog denies a foreign conversation and never loads it")
+        void rawReadIsGuarded() throws Exception {
+            doThrow(new ForbiddenException("Access denied: you do not own this conversation"))
+                    .when(conversationAccessGuard).requireConversationOwner("conv-of-user-a");
+
+            assertThrows(ForbiddenException.class,
+                    () -> restConversationStore.readRawConversationLog("conv-of-user-a"));
+
+            verify(conversationMemoryStore, never()).loadConversationMemorySnapshot(anyString());
+        }
+
+        @Test
+        @DisplayName("readSimpleConversationLog denies a foreign conversation and never loads it")
+        void simpleReadIsGuarded() throws Exception {
+            doThrow(new ForbiddenException("Access denied: you do not own this conversation"))
+                    .when(conversationAccessGuard).requireConversationOwner("conv-of-user-a");
+
+            assertThrows(ForbiddenException.class,
+                    () -> restConversationStore.readSimpleConversationLog("conv-of-user-a", false, false, null));
+
+            verify(conversationMemoryStore, never()).loadConversationMemorySnapshot(anyString());
+        }
+
+        @Test
+        @DisplayName("deleteConversationLog denies a foreign conversation and deletes nothing")
+        void deleteIsGuarded() {
+            doThrow(new ForbiddenException("Access denied: you do not own this conversation"))
+                    .when(conversationAccessGuard).requireConversationOwner("conv-of-user-a");
+
+            assertThrows(ForbiddenException.class,
+                    () -> restConversationStore.deleteConversationLog("conv-of-user-a", true));
+
+            verifyNoInteractions(conversationMemoryStore);
+            verifyNoInteractions(conversationDescriptorStore);
+            verifyNoInteractions(conversationService);
+        }
+
+        @Test
+        @DisplayName("the owner check runs on every per-conversation call")
+        void guardIsConsultedOnEveryCall() throws Exception {
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setConversationState(ConversationState.READY);
+            snapshot.setConversationSteps(new ArrayList<>());
+            when(conversationMemoryStore.loadConversationMemorySnapshot("conv-1")).thenReturn(snapshot);
+
+            restConversationStore.readRawConversationLog("conv-1");
+            restConversationStore.readSimpleConversationLog("conv-1", false, false, null);
+            restConversationStore.deleteConversationLog("conv-1", false);
+
+            verify(conversationAccessGuard, times(3)).requireConversationOwner("conv-1");
         }
     }
 
@@ -195,18 +413,25 @@ class RestConversationStoreTest {
     @DisplayName("permanentlyDeleteEndedConversationLogs")
     class PermanentlyDeleteEndedConversations {
 
+        // A3: this sweep deletes EVERY ended conversation in the deployment older
+        // than the given age. An absent or sub-day age is rejected (400) rather
+        // than silently treated as "everything" — and nothing is deleted.
         @Test
-        @DisplayName("should return 0 when deleteOlderThanDays is null")
-        void nullDays() throws Exception {
-            Integer result = restConversationStore.permanentlyDeleteEndedConversationLogs(null);
-            assertEquals(0, result);
+        @DisplayName("should reject a missing deleteOlderThanDays with 400 and delete nothing")
+        void nullDays() {
+            assertThrows(BadRequestException.class,
+                    () -> restConversationStore.permanentlyDeleteEndedConversationLogs(null));
+
+            verifyNoInteractions(conversationMemoryStore);
         }
 
         @Test
-        @DisplayName("should return 0 when deleteOlderThanDays is -1")
-        void negativeDays() throws Exception {
-            Integer result = restConversationStore.permanentlyDeleteEndedConversationLogs(-1);
-            assertEquals(0, result);
+        @DisplayName("should reject deleteOlderThanDays=-1 with 400 and delete nothing")
+        void negativeDays() {
+            assertThrows(BadRequestException.class,
+                    () -> restConversationStore.permanentlyDeleteEndedConversationLogs(-1));
+
+            verifyNoInteractions(conversationMemoryStore);
         }
 
         @Test
@@ -224,6 +449,7 @@ class RestConversationStoreTest {
             assertEquals(1, result);
             verify(conversationMemoryStore).deleteConversationMemorySnapshot("conv-old");
             verify(documentDescriptorStore).deleteAllDescriptor("conv-old");
+            verify(conversationDescriptorStore).deleteAllDescriptor("conv-old");
         }
 
         @Test
@@ -239,6 +465,7 @@ class RestConversationStoreTest {
 
             assertEquals(0, result);
             verify(conversationMemoryStore, never()).deleteConversationMemorySnapshot("conv-recent");
+            verify(conversationDescriptorStore, never()).deleteAllDescriptor(any());
         }
 
         @Test
@@ -247,26 +474,39 @@ class RestConversationStoreTest {
             when(conversationMemoryStore.getEndedConversationIds())
                     .thenReturn(List.of("conv-orphan"));
             when(documentDescriptorStore.readDescriptor("conv-orphan", 0))
-                    .thenThrow(new IResourceStore.ResourceNotFoundException("not found"));
+                    .thenThrow(new ResourceNotFoundException("not found"));
 
             Integer result = restConversationStore.permanentlyDeleteEndedConversationLogs(30);
 
             assertEquals(0, result);
             verify(conversationMemoryStore).deleteConversationMemorySnapshot("conv-orphan");
+            verify(conversationDescriptorStore).deleteAllDescriptor("conv-orphan");
         }
 
         @Test
-        @DisplayName("should work with deleteOlderThanDays=0 (delete all)")
-        void zeroDeletes() throws Exception {
+        @DisplayName("A3: deleteOlderThanDays=0 is rejected — it would wipe every ended conversation")
+        void zeroIsRejected() {
+            assertThrows(BadRequestException.class,
+                    () -> restConversationStore.permanentlyDeleteEndedConversationLogs(0));
+
+            // The whole point: not a single conversation may be touched.
+            verifyNoInteractions(conversationMemoryStore);
+            verifyNoInteractions(documentDescriptorStore);
+            verifyNoInteractions(conversationDescriptorStore);
+        }
+
+        @Test
+        @DisplayName("A3: the smallest accepted age is 1 day, and it still deletes")
+        void oneDayIsAccepted() throws Exception {
             when(conversationMemoryStore.getEndedConversationIds())
                     .thenReturn(List.of("conv-1"));
             var descriptor = new DocumentDescriptor();
-            // Set to 2 days ago so it's reliably older than any threshold
+            // Set to 2 days ago so it's reliably older than the 1-day threshold
             descriptor.setLastModifiedOn(new Date(System.currentTimeMillis() - 2 * 86400_000L));
             when(documentDescriptorStore.readDescriptor("conv-1", 0)).thenReturn(descriptor);
 
-            // deleteOlderThanDays=0 means "delete conversations older than 0 days ago"
-            Integer result = restConversationStore.permanentlyDeleteEndedConversationLogs(0);
+            Integer result = restConversationStore.permanentlyDeleteEndedConversationLogs(1);
+
             assertEquals(1, result);
         }
     }
@@ -303,10 +543,27 @@ class RestConversationStoreTest {
         }
 
         @Test
-        @DisplayName("should throw for null agentVersion")
-        void throwsForNullVersion() {
-            assertThrows(IllegalArgumentException.class,
-                    () -> restConversationStore.getActiveConversations("agent-1", null));
+        @DisplayName("a null agentVersion lists every version, reporting each snapshot's own version")
+        void nullVersionMeansEveryVersion() throws Exception {
+            var v1 = new ConversationMemorySnapshot();
+            v1.setId("conv-v1");
+            v1.setAgentVersion(1);
+            v1.setConversationState(ConversationState.READY);
+            var v2 = new ConversationMemorySnapshot();
+            v2.setId("conv-v2");
+            v2.setAgentVersion(2);
+            v2.setConversationState(ConversationState.IN_PROGRESS);
+            when(conversationMemoryStore.loadActiveConversationMemorySnapshot("agent-1", null))
+                    .thenReturn(List.of(v1, v2));
+            var convDesc = new ConversationDescriptor();
+            convDesc.setLastModifiedOn(new Date());
+            when(conversationDescriptorStore.readDescriptor(anyString(), eq(0))).thenReturn(convDesc);
+
+            List<ConversationStatus> result = restConversationStore.getActiveConversations("agent-1", null);
+
+            assertEquals(2, result.size());
+            assertEquals(1, result.get(0).getAgentVersion());
+            assertEquals(2, result.get(1).getAgentVersion());
         }
     }
 
@@ -346,6 +603,39 @@ class RestConversationStoreTest {
             verify(conversationMemoryStore).setConversationState("conv-1", ConversationState.ENDED);
             verify(conversationMemoryStore).setConversationState("conv-2", ConversationState.ENDED);
         }
+
+        @Test
+        @DisplayName("Finding #26: routes AWAITING_HUMAN through HITL-aware endConversation")
+        void pausedGoesThroughService() throws Exception {
+            var paused = new ConversationStatus();
+            paused.setConversationId("conv-paused");
+            paused.setConversationState(ConversationState.AWAITING_HUMAN);
+            when(conversationDescriptorStore.readDescriptor("conv-paused", 0))
+                    .thenReturn(new ConversationDescriptor());
+
+            restConversationStore.endActiveConversations(List.of(paused));
+
+            // G4: the pause-terminating end is attributed to system:admin-end.
+            verify(conversationService).endConversation("conv-paused", "system:admin-end");
+            // Must NOT take the raw ENDED write path for a paused conversation.
+            verify(conversationMemoryStore, never())
+                    .setConversationState(eq("conv-paused"), any());
+        }
+
+        @Test
+        @DisplayName("Finding #26: non-paused conversations still use the raw ENDED write")
+        void activeUsesRawWrite() throws Exception {
+            var ready = new ConversationStatus();
+            ready.setConversationId("conv-ready");
+            ready.setConversationState(ConversationState.READY);
+            when(conversationDescriptorStore.readDescriptor("conv-ready", 0))
+                    .thenReturn(new ConversationDescriptor());
+
+            restConversationStore.endActiveConversations(List.of(ready));
+
+            verify(conversationMemoryStore).setConversationState("conv-ready", ConversationState.ENDED);
+            verify(conversationService, never()).endConversation(any());
+        }
     }
 
     @Nested
@@ -357,7 +647,7 @@ class RestConversationStoreTest {
         void skipsWhenZero() {
             var store = new RestConversationStore(
                     documentDescriptorStore, conversationDescriptorStore,
-                    conversationMemoryStore, userMemoryStore, runtime,
+                    conversationMemoryStore, conversationService, userMemoryStore, runtime, conversationAccessGuard,
                     30, 0, attachmentStorageInstance);
 
             // Should not throw
@@ -371,7 +661,7 @@ class RestConversationStoreTest {
         void skipsWhenNull() {
             var store = new RestConversationStore(
                     documentDescriptorStore, conversationDescriptorStore,
-                    conversationMemoryStore, userMemoryStore, runtime,
+                    conversationMemoryStore, conversationService, userMemoryStore, runtime, conversationAccessGuard,
                     30, null, attachmentStorageInstance);
 
             store.cleanupOldUserMemories();
@@ -384,7 +674,7 @@ class RestConversationStoreTest {
         void submitsTaskWhenPositive() {
             var store = new RestConversationStore(
                     documentDescriptorStore, conversationDescriptorStore,
-                    conversationMemoryStore, userMemoryStore, runtime,
+                    conversationMemoryStore, conversationService, userMemoryStore, runtime, conversationAccessGuard,
                     30, 90, attachmentStorageInstance);
 
             store.cleanupOldUserMemories();
@@ -516,6 +806,19 @@ class RestConversationStoreTest {
             restConversationStore.deleteEndedConversationsOlderThanXDays();
 
             verify(runtime).submitCallable(any(), any());
+        }
+
+        @Test
+        @DisplayName("A3: a sub-day configured retention disables the sweep instead of wiping everything")
+        void disabledWhenRetentionBelowOneDay() {
+            var store = new RestConversationStore(
+                    documentDescriptorStore, conversationDescriptorStore,
+                    conversationMemoryStore, conversationService, userMemoryStore, runtime, conversationAccessGuard,
+                    0, 90, attachmentStorageInstance);
+
+            store.deleteEndedConversationsOlderThanXDays();
+
+            verifyNoInteractions(runtime);
         }
     }
     @Nested
@@ -783,7 +1086,7 @@ class RestConversationStoreTest {
 
             var store = new RestConversationStore(
                     documentDescriptorStore, conversationDescriptorStore,
-                    conversationMemoryStore, userMemoryStore, runtime,
+                    conversationMemoryStore, conversationService, userMemoryStore, runtime, conversationAccessGuard,
                     30, 90, attachmentStorageInstance);
 
             when(conversationMemoryStore.getEndedConversationIds())
@@ -1026,9 +1329,9 @@ class RestConversationStoreTest {
             status.setConversationId("conv-err");
 
             when(conversationDescriptorStore.readDescriptor("conv-err", 0))
-                    .thenThrow(new IResourceStore.ResourceStoreException("DB error"));
+                    .thenThrow(new ResourceStoreException("DB error"));
 
-            assertThrows(IResourceStore.ResourceStoreException.class,
+            assertThrows(ResourceStoreException.class,
                     () -> restConversationStore.endActiveConversations(List.of(status)));
         }
     }
@@ -1045,7 +1348,7 @@ class RestConversationStoreTest {
 
             var store = new RestConversationStore(
                     documentDescriptorStore, conversationDescriptorStore,
-                    conversationMemoryStore, userMemoryStore, runtime,
+                    conversationMemoryStore, conversationService, userMemoryStore, runtime, conversationAccessGuard,
                     30, 90, attachmentStorageInstance);
 
             store.deleteConversationLog("conv-1", false);

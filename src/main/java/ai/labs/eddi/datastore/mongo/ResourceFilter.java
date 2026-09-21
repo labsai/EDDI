@@ -6,6 +6,7 @@ package ai.labs.eddi.datastore.mongo;
 
 import ai.labs.eddi.datastore.IResourceFilter;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.model.Filters;
 import org.bson.BsonDocument;
@@ -40,13 +41,17 @@ public class ResourceFilter<T> implements IResourceFilter<T> {
         BsonDocument query = createQuery(queryFilters);
         Document sort = createSortQuery(sortTypes);
         var iterable = collection.find(query).sort(sort);
-        if (limit == null || limit < 1) {
-            limit = 20;
-        }
-        iterable.limit(limit);
+        // Same limit contract as IDescriptorStore.readDescriptors: null means
+        // "no opinion" (default page), <= 0 means "no limit" (up to the ceiling).
+        int effectiveLimit = IDescriptorStore.resolveDescriptorLimit(limit);
+        iterable.limit(effectiveLimit);
 
         if (index != null) {
-            iterable.skip(index > 0 ? (index * limit) : 0);
+            // long arithmetic: with the ceiling as the effective limit, an int
+            // multiply here overflows to a negative skip at a far lower index
+            // than it used to. Same guard as DescriptorStore.readDescriptors.
+            long skipLong = index > 0 ? (long) index * effectiveLimit : 0L;
+            iterable.skip((int) Math.min(skipLong, Integer.MAX_VALUE));
         }
 
         for (Document result : iterable) {

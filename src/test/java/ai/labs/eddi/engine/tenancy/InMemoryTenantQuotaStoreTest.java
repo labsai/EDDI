@@ -175,6 +175,30 @@ class InMemoryTenantQuotaStoreTest {
         assertDoesNotThrow(() -> store.resetUsage("nonexistent"));
     }
 
+    /**
+     * The CDI constructor — the only one a deployment that has no datastore
+     * producer ever uses. It has to turn the five {@code eddi.tenant.quota.*}
+     * properties into the default tenant's stored quota, and it has to pin a UTC
+     * clock: the day and minute windows this store enforces are derived from it, so
+     * a null there would fail on the first increment rather than at startup.
+     */
+    @Test
+    void cdiConstructor_storesTheConfiguredDefaultQuotaAndAUsableClock() {
+        var configured = new InMemoryTenantQuotaStore("acme", true, 1000, 20, 60, 250.0);
+
+        TenantQuota quota = configured.getQuota("acme");
+        assertNotNull(quota, "the configured default tenant must exist before the first request");
+        assertEquals(1000, quota.maxConversationsPerDay());
+        assertEquals(20, quota.maxAgentsPerTenant());
+        assertEquals(60, quota.maxApiCallsPerMinute());
+        assertEquals(250.0, quota.maxMonthlyCostUsd());
+        assertTrue(quota.enabled());
+
+        // Proves the clock was wired: both counters resolve their window from it.
+        assertTrue(configured.tryIncrementConversations("acme", 1000).allowed());
+        assertEquals(1, configured.getUsage("acme").conversationsToday());
+    }
+
     // --- New tenant counters auto-created ---
 
     @Test

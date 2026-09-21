@@ -69,7 +69,13 @@ A `RagConfiguration` is a versioned resource at `/ragstore/rags/`. It defines:
 
 ### LLM Task RAG Configuration
 
-RAG is wired into LLM tasks via three fields on `LlmConfiguration.Task`:
+RAG is wired into LLM tasks via four fields on `LlmConfiguration.Task`. Three of them choose what
+is retrieved:
+
+The fourth bounds the result. `maxRagContextChars` (default `20000`) caps the assembled
+RAG context in characters, across every matched knowledge base and any `httpCallRag` response.
+Without it the prompt grows with the corpus until the provider rejects the request. Set `-1`
+or `0` to disable the cap.
 
 #### Option 1: Explicit Knowledge Base References
 
@@ -115,6 +121,12 @@ When `enableWorkflowRag` is `true`, the system discovers all RAG steps from the 
 ```
 
 Zero-infrastructure RAG: execute a named httpCall and inject its response as `## Search Results:` context. The user's input is available as `{userInput}` in httpCall templates. No vector store needed. Both httpCall RAG and vector RAG can be active simultaneously.
+
+#### Context Injection
+
+Retrieved vector-RAG context (Options 1 and 2) is **always** appended to the LLM **system message** under a `## Relevant Context:` heading. `RagContextProvider` returns one formatted block covering every matched knowledge base, and `LlmTask` appends it. There is no per-knowledge-base or per-task switch for the injection point or for the formatting.
+
+> **Note for existing configurations:** older `langchain.json` documents may still carry `injectionStrategy` (on `knowledgeBases[]` or `ragDefaults`) or `contextTemplate` (on `knowledgeBases[]`). Neither key was ever read by the engine — context has always gone to the system message — and both were removed from `LlmConfiguration`. Stored configurations remain valid: the leftover keys are ignored on load and dropped the next time the configuration is saved. No migration is required.
 
 ## REST API
 
@@ -191,6 +203,7 @@ These are visible in the conversation memory snapshot and the audit ledger.
 | `mistral` | `mistral-embed` | `apiKey` | Mistral AI embedding model |
 | `bedrock` | `amazon.titan-embed-text-v2:0` | — | Uses AWS credentials chain; `region` (default: `us-east-1`) |
 | `cohere` | `embed-english-v3.0` | `apiKey` | Excellent multilingual support |
+| `gemini` | `gemini-embedding-2` | `apiKey` | Google Gemini embeddings |
 | `vertex` | `text-embedding-005` | `project` | `location` (default: `us-central1`); uses GCP credentials |
 
 ## Vector Stores
@@ -202,6 +215,7 @@ These are visible in the conversation memory snapshot and the audit ledger.
 | `mongodb-atlas` | `connectionString` | MongoDB Atlas Vector Search; `databaseName`, `collectionName`, `indexName` |
 | `elasticsearch` | — | `serverUrl` (default: `localhost:9200`); optional `apiKey` or `userName`+`password`; `indexName` |
 | `qdrant` | — | `host` (default: `localhost`), `port` (default: `6334`); optional `apiKey`, `useTls`; `collectionName` |
+| `chroma` | — | `baseUrl` (default: `http://localhost:8000`); `collectionName` |
 
 ## Status
 

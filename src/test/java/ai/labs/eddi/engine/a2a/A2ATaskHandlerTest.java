@@ -6,50 +6,117 @@ package ai.labs.eddi.engine.a2a;
 
 import ai.labs.eddi.engine.a2a.A2AModels.*;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
+import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Deployment.Environment;
+import io.quarkus.security.identity.SecurityIdentity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
+import java.security.Principal;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
+import static ai.labs.eddi.engine.a2a.A2ATaskHandler.scopedKey;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 /**
  * Unit tests for {@link A2ATaskHandler} covering task send/get/cancel,
- * conversation resolution, and message extraction.
+ * conversation resolution, message extraction, and — since taskId/contextId are
+ * caller-supplied — isolation between A2A peers.
  */
 class A2ATaskHandlerTest {
 
+    private static final String PEER_A = "peer-a";
+    private static final String PEER_B = "peer-b";
+
     private IConversationService conversationService;
+    private ICacheFactory cacheFactory;
+    private AgentCardService agentCardService;
     private A2ATaskHandler handler;
     private MapCache<String, String> taskCache;
     private MapCache<String, String> contextCache;
+    private MapCache<String, String> stateCache;
 
     @BeforeEach
     void setUp() {
         conversationService = mock(IConversationService.class);
         taskCache = new MapCache<>();
         contextCache = new MapCache<>();
+        stateCache = new MapCache<>();
 
-        ICacheFactory cacheFactory = mock(ICacheFactory.class);
+        cacheFactory = mock(ICacheFactory.class);
         when(cacheFactory.<String, String>getCache("a2aTaskMapping")).thenReturn(taskCache);
         when(cacheFactory.<String, String>getCache("a2aTaskMapping:context")).thenReturn(contextCache);
+        when(cacheFactory.<String, String>getCache("a2aTaskMapping:state")).thenReturn(stateCache);
 
-        handler = new A2ATaskHandler(conversationService, cacheFactory);
+        // A2A-enabled by default here; the refusal path has its own test.
+        agentCardService = mock(AgentCardService.class);
+        when(agentCardService.getAgentCard(anyString())).thenReturn(mock(A2AModels.AgentCard.class));
+
+        handler = handlerFor(PEER_A);
+    }
+
+    /**
+     * A handler seeing the world as the given authenticated peer. All handlers
+     * share the same cache instances — exactly like the singleton bean sharing one
+     * global cache across peers in production.
+     */
+    private A2ATaskHandler handlerFor(String principalName) {
+        SecurityIdentity identity = mock(SecurityIdentity.class);
+        when(identity.isAnonymous()).thenReturn(false);
+        Principal principal = () -> principalName;
+        when(identity.getPrincipal()).thenReturn(principal);
+        return new A2ATaskHandler(conversationService, cacheFactory, identity, agentCardService, 60, Optional.empty());
+    }
+
+    private A2ATaskHandler anonymousHandler() {
+        SecurityIdentity identity = mock(SecurityIdentity.class);
+        when(identity.isAnonymous()).thenReturn(true);
+        return new A2ATaskHandler(conversationService, cacheFactory, identity, agentCardService, 60, Optional.empty());
+    }
+
+    private static Map<String, Object> sendParams(String taskId, String contextId, String text) {
+        Map<String, Object> params = new HashMap<>();
+        if (taskId != null) {
+            params.put("id", taskId);
+        }
+        if (contextId != null) {
+            params.put("contextId", contextId);
+        }
+        params.put("message", Map.of("parts", List.of(Map.of("type", "text", "text", text))));
+        return params;
+    }
+
+    /** Answers every {@code say} call with a one-output snapshot. */
+    private void stubSay() throws Exception {
+        doAnswer(invocation -> {
+            ConversationResponseHandler responseHandler = invocation.getArgument(8);
+            var snapshot = new SimpleConversationMemorySnapshot();
+            var output = new ConversationOutput();
+            output.put("output", "Response");
+            snapshot.setConversationOutputs(List.of(output));
+            responseHandler.onComplete(snapshot);
+            return null;
+        }).when(conversationService).say(any(), anyString(), anyString(), any(), any(), any(), any(), anyBoolean(), any());
+    }
+
+    private static ConversationResult conversation(String conversationId) {
+        return new ConversationResult(conversationId, URI.create("/conversations/" + conversationId));
     }
 
     // ─── handleTaskSend ──────────────────────────────────────────
@@ -62,26 +129,21 @@ class A2ATaskHandlerTest {
         @DisplayName("should create conversation, send input, and return completed A2ATask")
         void happyPath() throws Exception {
             String agentId = "agent-123";
-            var convResult = new ConversationResult("conv-abc", URI.create("/conversations/conv-abc"));
-            when(conversationService.startConversation(eq(Environment.production), eq(agentId), isNull(), anyMap()))
-                    .thenReturn(convResult);
+            when(conversationService.startConversation(eq(Environment.production), eq(agentId), anyString(), anyMap()))
+                    .thenReturn(conversation("conv-abc"));
 
             doAnswer(invocation -> {
-                IConversationService.ConversationResponseHandler handler = invocation.getArgument(8);
+                ConversationResponseHandler responseHandler = invocation.getArgument(8);
                 var snapshot = new SimpleConversationMemorySnapshot();
-                var output = new ai.labs.eddi.engine.memory.model.ConversationOutput();
+                var output = new ConversationOutput();
                 output.put("output", "Hello from EDDI!");
                 snapshot.setConversationOutputs(List.of(output));
-                handler.onComplete(snapshot);
+                responseHandler.onComplete(snapshot);
                 return null;
             }).when(conversationService).say(eq(Environment.production), eq(agentId), eq("conv-abc"),
                     eq(false), eq(true), isNull(), any(), eq(false), any());
 
-            Map<String, Object> params = new HashMap<>();
-            params.put("id", "task-1");
-            params.put("message", Map.of("parts", List.of(Map.of("type", "text", "text", "Hi!"))));
-
-            A2ATask result = handler.handleTaskSend(agentId, params);
+            A2ATask result = handler.handleTaskSend(agentId, sendParams("task-1", null, "Hi!"));
 
             assertNotNull(result);
             assertEquals("task-1", result.id());
@@ -93,8 +155,40 @@ class A2ATaskHandlerTest {
             assertNotNull(result.artifacts());
             assertFalse(result.artifacts().isEmpty());
 
-            // Verify conversation was cached
-            assertEquals("conv-abc", taskCache.get("task-1"));
+            // Cached under the calling peer, not under the bare taskId
+            assertEquals("conv-abc", taskCache.get(scopedKey(PEER_A, "task-1")));
+            assertNull(taskCache.get("task-1"));
+        }
+
+        @Test
+        @DisplayName("refuses an agent that was never opted into A2A, and starts no conversation")
+        void refusesAgentNotExposedOverA2A() throws Exception {
+            // Discovery already enforced this — listA2AAgents and getAgentCard both hide
+            // an agent with a2aEnabled=false. Conversing did not, so a peer that knew an
+            // id could talk to an agent nobody had exposed, private ones included.
+            // getAgentCard returns null for both "no such agent" and "not enabled", which
+            // is the same answer discovery gives.
+            when(agentCardService.getAgentCard("not-exposed")).thenReturn(null);
+
+            assertThrows(InvalidA2ARequestException.class,
+                    () -> handler.handleTaskSend("not-exposed", sendParams("task-1", null, "Hi!")));
+
+            verify(conversationService, never())
+                    .startConversation(any(), anyString(), anyString(), anyMap());
+        }
+
+        @Test
+        @DisplayName("input above eddi.conversations.max-input-chars is invalid params and never reaches the agent")
+        void oversizedInputIsRejectedBeforeTheTurn() throws Exception {
+            doThrow(new IConversationService.InputTooLargeException(5_000_000, 200_000))
+                    .when(conversationService).requireInputWithinLimit(any());
+
+            InvalidA2ARequestException e = assertThrows(InvalidA2ARequestException.class,
+                    () -> handler.handleTaskSend("agent-1", sendParams("task-big", null, "too long")));
+
+            assertTrue(e.getMessage().contains("200000"), e.getMessage());
+            verify(conversationService, never()).say(any(Environment.class), anyString(), anyString(), anyBoolean(), anyBoolean(), any(),
+                    any(), anyBoolean(), any(ConversationResponseHandler.class));
         }
 
         @Test
@@ -103,7 +197,7 @@ class A2ATaskHandlerTest {
             Map<String, Object> params = new HashMap<>();
             params.put("id", "task-2");
 
-            assertThrows(IllegalArgumentException.class,
+            assertThrows(InvalidA2ARequestException.class,
                     () -> handler.handleTaskSend("agent-1", params));
         }
 
@@ -113,7 +207,7 @@ class A2ATaskHandlerTest {
             Map<String, Object> params = new HashMap<>();
             params.put("message", Map.of("parts", List.of(Map.of("type", "text", "text", ""))));
 
-            assertThrows(IllegalArgumentException.class,
+            assertThrows(InvalidA2ARequestException.class,
                     () -> handler.handleTaskSend("agent-1", params));
         }
 
@@ -123,61 +217,159 @@ class A2ATaskHandlerTest {
             Map<String, Object> params = new HashMap<>();
             params.put("message", Map.of("parts", List.of()));
 
-            assertThrows(IllegalArgumentException.class,
+            assertThrows(InvalidA2ARequestException.class,
                     () -> handler.handleTaskSend("agent-1", params));
         }
 
         @Test
         @DisplayName("should reuse conversation for same contextId")
         void reuseConversationWithContextId() throws Exception {
-            // Pre-populate the context cache
-            contextCache.put("ctx-shared", "existing-conv-id");
+            // Pre-populate the context cache for THIS peer
+            contextCache.put(scopedKey(PEER_A, "ctx-shared"), "existing-conv-id");
+            stubSay();
 
-            doAnswer(invocation -> {
-                IConversationService.ConversationResponseHandler handler = invocation.getArgument(8);
-                var snapshot = new SimpleConversationMemorySnapshot();
-                var output = new ai.labs.eddi.engine.memory.model.ConversationOutput();
-                output.put("output", "Response");
-                snapshot.setConversationOutputs(List.of(output));
-                handler.onComplete(snapshot);
-                return null;
-            }).when(conversationService).say(any(), anyString(), eq("existing-conv-id"),
-                    anyBoolean(), anyBoolean(), isNull(), any(), anyBoolean(), any());
-
-            Map<String, Object> params = new HashMap<>();
-            params.put("id", "task-reuse");
-            params.put("contextId", "ctx-shared");
-            params.put("message", Map.of("parts", List.of(Map.of("type", "text", "text", "Hello"))));
-
-            handler.handleTaskSend("agent-1", params);
+            handler.handleTaskSend("agent-1", sendParams("task-reuse", "ctx-shared", "Hello"));
 
             // Should not start a new conversation — should reuse existing
             verify(conversationService, never()).startConversation(any(), anyString(), any(), anyMap());
-            assertEquals("existing-conv-id", taskCache.get("task-reuse"));
+            assertEquals("existing-conv-id", taskCache.get(scopedKey(PEER_A, "task-reuse")));
         }
 
         @Test
         @DisplayName("should generate taskId when not provided in params")
         void generatedTaskId() throws Exception {
-            var convResult = new ConversationResult("conv-gen", URI.create("/conversations/conv-gen"));
-            when(conversationService.startConversation(any(), anyString(), isNull(), anyMap()))
-                    .thenReturn(convResult);
+            when(conversationService.startConversation(any(), anyString(), anyString(), anyMap()))
+                    .thenReturn(conversation("conv-gen"));
+            stubSay();
 
-            doAnswer(invocation -> {
-                IConversationService.ConversationResponseHandler handler = invocation.getArgument(8);
-                handler.onComplete(new SimpleConversationMemorySnapshot());
-                return null;
-            }).when(conversationService).say(any(), anyString(), eq("conv-gen"),
-                    anyBoolean(), anyBoolean(), isNull(), any(), anyBoolean(), any());
-
-            Map<String, Object> params = new HashMap<>();
             // No "id" key — should auto-generate
-            params.put("message", Map.of("parts", List.of(Map.of("type", "text", "text", "Test"))));
-
-            A2ATask result = handler.handleTaskSend("agent-1", params);
+            A2ATask result = handler.handleTaskSend("agent-1", sendParams(null, null, "Test"));
 
             assertNotNull(result.id());
             assertFalse(result.id().isBlank());
+        }
+    }
+
+    // ─── Conversation ownership ─────────────────────────────────
+
+    @Nested
+    @DisplayName("conversation ownership")
+    class ConversationOwnership {
+
+        @Test
+        @DisplayName("should own A2A-created conversations with the calling peer's principal")
+        void conversationIsOwnedByCallingPeer() throws Exception {
+            when(conversationService.startConversation(any(), anyString(), anyString(), anyMap()))
+                    .thenReturn(conversation("conv-owned"));
+            stubSay();
+
+            handler.handleTaskSend("agent-1", sendParams("task-owned", null, "Hello"));
+
+            verify(conversationService).startConversation(Environment.production, "agent-1", PEER_A, Map.of());
+            verify(conversationService, never()).startConversation(any(), anyString(), isNull(), anyMap());
+        }
+
+        @Test
+        @DisplayName("should stamp a non-null owner even for an anonymous peer")
+        void anonymousPeerStillGetsAnOwner() throws Exception {
+            when(conversationService.startConversation(any(), anyString(), anyString(), anyMap()))
+                    .thenReturn(conversation("conv-anon"));
+            stubSay();
+
+            anonymousHandler().handleTaskSend("agent-1", sendParams("task-anon", null, "Hello"));
+
+            verify(conversationService).startConversation(Environment.production, "agent-1",
+                    A2ATaskHandler.ANONYMOUS_PEER, Map.of());
+            verify(conversationService, never()).startConversation(any(), anyString(), isNull(), anyMap());
+        }
+    }
+
+    // ─── Peer isolation ─────────────────────────────────────────
+
+    @Nested
+    @DisplayName("peer isolation")
+    class PeerIsolation {
+
+        @Test
+        @DisplayName("peer B cannot read peer A's task")
+        void peerBCannotGetPeerATask() throws Exception {
+            when(conversationService.startConversation(any(), anyString(), anyString(), anyMap()))
+                    .thenReturn(conversation("conv-a"));
+            when(conversationService.getConversationState("conv-a")).thenReturn(ConversationState.READY);
+            stubSay();
+
+            A2ATaskHandler peerA = handlerFor(PEER_A);
+            A2ATaskHandler peerB = handlerFor(PEER_B);
+            peerA.handleTaskSend("agent-1", sendParams("task-shared", null, "Hello"));
+
+            // Control: the creating peer still resolves its own task — completed, from the
+            // task's own record, although its conversation is READY again
+            A2ATask ownView = peerA.handleTaskGet("task-shared");
+            assertNotNull(ownView);
+            assertEquals(TaskState.completed, ownView.status());
+
+            assertNull(peerB.handleTaskGet("task-shared"),
+                    "peer B must not resolve a task created by peer A");
+            assertNull(stateCache.get(scopedKey(PEER_B, "task-shared")), "the recorded state is peer-scoped too");
+        }
+
+        @Test
+        @DisplayName("peer B cannot cancel peer A's task")
+        void peerBCannotCancelPeerATask() throws Exception {
+            when(conversationService.startConversation(any(), anyString(), anyString(), anyMap()))
+                    .thenReturn(conversation("conv-a"));
+            stubSay();
+
+            A2ATaskHandler peerA = handlerFor(PEER_A);
+            A2ATaskHandler peerB = handlerFor(PEER_B);
+            peerA.handleTaskSend("agent-1", sendParams("task-shared", null, "Hello"));
+
+            assertFalse(peerB.handleTaskCancel("task-shared"),
+                    "peer B must not cancel a task created by peer A");
+            verify(conversationService, never()).endConversation(anyString());
+
+            // Control: the creating peer can cancel a task of its own that is still running
+            taskCache.put(scopedKey(PEER_A, "task-running"), "conv-a");
+            when(conversationService.getConversationState("conv-a")).thenReturn(ConversationState.IN_PROGRESS);
+            assertFalse(peerB.handleTaskCancel("task-running"));
+            assertTrue(peerA.handleTaskCancel("task-running"));
+            verify(conversationService).endConversation("conv-a");
+        }
+
+        @Test
+        @DisplayName("peer B cannot join peer A's conversation by reusing its contextId")
+        void peerBCannotReusePeerAContext() throws Exception {
+            when(conversationService.startConversation(any(), anyString(), anyString(), anyMap()))
+                    .thenReturn(conversation("conv-a"), conversation("conv-b"));
+            stubSay();
+
+            A2ATaskHandler peerA = handlerFor(PEER_A);
+            A2ATaskHandler peerB = handlerFor(PEER_B);
+
+            peerA.handleTaskSend("agent-1", sendParams("task-a", "ctx-1", "Hello"));
+            peerB.handleTaskSend("agent-1", sendParams("task-b", "ctx-1", "Hello"));
+
+            // Peer B got a fresh conversation instead of joining peer A's
+            verify(conversationService).startConversation(Environment.production, "agent-1", PEER_A, Map.of());
+            verify(conversationService).startConversation(Environment.production, "agent-1", PEER_B, Map.of());
+            assertEquals("conv-a", taskCache.get(scopedKey(PEER_A, "task-a")));
+            assertEquals("conv-b", taskCache.get(scopedKey(PEER_B, "task-b")));
+
+            // Peer A's turn went to conv-a exactly once — peer B's did not join it
+            verify(conversationService, times(1)).say(any(), anyString(), eq("conv-a"),
+                    any(), any(), any(), any(), anyBoolean(), any());
+            verify(conversationService).say(eq(Environment.production), eq("agent-1"), eq("conv-b"),
+                    any(), any(), any(), any(), anyBoolean(), any());
+        }
+
+        @Test
+        @DisplayName("scoped keys stay distinct when ids contain the separator")
+        void scopedKeyIsInjective() {
+            // Naive concatenation would collapse these two into the same key, letting a
+            // peer craft an id that lands on another peer's entry.
+            assertNotEquals(scopedKey("a", "b|c"), scopedKey("a|b", "c"));
+            assertNotEquals(scopedKey(PEER_A, "t"), scopedKey(PEER_B, "t"));
+            assertEquals(scopedKey(PEER_A, "t"), scopedKey(PEER_A, "t"));
         }
     }
 
@@ -196,7 +388,7 @@ class A2ATaskHandlerTest {
         @Test
         @DisplayName("should map READY state to submitted")
         void readyMapsToSubmitted() {
-            taskCache.put("t1", "conv-1");
+            taskCache.put(scopedKey(PEER_A, "t1"), "conv-1");
             when(conversationService.getConversationState("conv-1")).thenReturn(ConversationState.READY);
 
             A2ATask result = handler.handleTaskGet("t1");
@@ -208,7 +400,7 @@ class A2ATaskHandlerTest {
         @Test
         @DisplayName("should map IN_PROGRESS state to working")
         void inProgressMapsToWorking() {
-            taskCache.put("t2", "conv-2");
+            taskCache.put(scopedKey(PEER_A, "t2"), "conv-2");
             when(conversationService.getConversationState("conv-2")).thenReturn(ConversationState.IN_PROGRESS);
 
             assertEquals(TaskState.working, handler.handleTaskGet("t2").status());
@@ -217,7 +409,7 @@ class A2ATaskHandlerTest {
         @Test
         @DisplayName("should map ENDED state to completed")
         void endedMapsToCompleted() {
-            taskCache.put("t3", "conv-3");
+            taskCache.put(scopedKey(PEER_A, "t3"), "conv-3");
             when(conversationService.getConversationState("conv-3")).thenReturn(ConversationState.ENDED);
 
             assertEquals(TaskState.completed, handler.handleTaskGet("t3").status());
@@ -226,7 +418,7 @@ class A2ATaskHandlerTest {
         @Test
         @DisplayName("should map ERROR state to failed")
         void errorMapsToFailed() {
-            taskCache.put("t4", "conv-4");
+            taskCache.put(scopedKey(PEER_A, "t4"), "conv-4");
             when(conversationService.getConversationState("conv-4")).thenReturn(ConversationState.ERROR);
 
             assertEquals(TaskState.failed, handler.handleTaskGet("t4").status());
@@ -235,7 +427,7 @@ class A2ATaskHandlerTest {
         @Test
         @DisplayName("should map EXECUTION_INTERRUPTED state to unknown")
         void executionInterruptedMapsToUnknown() {
-            taskCache.put("t4b", "conv-4b");
+            taskCache.put(scopedKey(PEER_A, "t4b"), "conv-4b");
             when(conversationService.getConversationState("conv-4b")).thenReturn(ConversationState.EXECUTION_INTERRUPTED);
 
             assertEquals(TaskState.unknown, handler.handleTaskGet("t4b").status());
@@ -244,7 +436,7 @@ class A2ATaskHandlerTest {
         @Test
         @DisplayName("should return unknown on exception")
         void exceptionReturnsUnknown() {
-            taskCache.put("t5", "conv-5");
+            taskCache.put(scopedKey(PEER_A, "t5"), "conv-5");
             when(conversationService.getConversationState("conv-5"))
                     .thenThrow(new RuntimeException("DB error"));
 
@@ -267,7 +459,7 @@ class A2ATaskHandlerTest {
         @Test
         @DisplayName("should end conversation and return true")
         void successfulCancel() {
-            taskCache.put("t-cancel", "conv-cancel");
+            taskCache.put(scopedKey(PEER_A, "t-cancel"), "conv-cancel");
             doNothing().when(conversationService).endConversation("conv-cancel");
 
             assertTrue(handler.handleTaskCancel("t-cancel"));
@@ -277,10 +469,76 @@ class A2ATaskHandlerTest {
         @Test
         @DisplayName("should return false on exception during cancel")
         void cancelExceptionReturnsFalse() {
-            taskCache.put("t-fail", "conv-fail");
+            taskCache.put(scopedKey(PEER_A, "t-fail"), "conv-fail");
             doThrow(new RuntimeException("fail")).when(conversationService).endConversation("conv-fail");
 
             assertFalse(handler.handleTaskCancel("t-fail"));
+        }
+
+        @Test
+        @DisplayName("a task that already completed or failed is not cancelable and is left untouched")
+        void terminalTaskIsNotCancelable() {
+            taskCache.put(scopedKey(PEER_A, "t-done"), "conv-done");
+            taskCache.put(scopedKey(PEER_A, "t-failed"), "conv-failed");
+            when(conversationService.getConversationState("conv-done")).thenReturn(ConversationState.ENDED);
+            when(conversationService.getConversationState("conv-failed")).thenReturn(ConversationState.ERROR);
+
+            assertFalse(handler.handleTaskCancel("t-done"));
+            assertFalse(handler.handleTaskCancel("t-failed"));
+            verify(conversationService, never()).endConversation(anyString());
+        }
+
+        @Test
+        @DisplayName("a task still in flight is cancelled")
+        void inFlightTaskIsCancelled() {
+            taskCache.put(scopedKey(PEER_A, "t-live"), "conv-live");
+            when(conversationService.getConversationState("conv-live")).thenReturn(ConversationState.IN_PROGRESS);
+
+            assertTrue(handler.handleTaskCancel("t-live"));
+            verify(conversationService).endConversation("conv-live");
+        }
+
+        @Test
+        @DisplayName("a completed task reads back as completed and is not cancelable, although its conversation is READY again")
+        void completedTaskIsTerminalEvenWhenItsConversationIsReady() throws Exception {
+            when(conversationService.startConversation(any(), anyString(), anyString(), anyMap()))
+                    .thenReturn(conversation("conv-reused"));
+            // What Conversation leaves behind after a successful turn: ready for the next.
+            when(conversationService.getConversationState("conv-reused")).thenReturn(ConversationState.READY);
+            stubSay();
+
+            handler.handleTaskSend("agent-1", sendParams("t-finished", "ctx-1", "Hi"));
+
+            assertEquals(TaskState.completed, handler.handleTaskGet("t-finished").status());
+            assertFalse(handler.handleTaskCancel("t-finished"), "a completed task is not cancelable");
+            verify(conversationService, never()).endConversation(anyString());
+        }
+
+        @Test
+        @DisplayName("a cancelled task reads back as canceled and cannot be cancelled twice")
+        void cancelledTaskReadsBackAsCanceled() {
+            taskCache.put(scopedKey(PEER_A, "t-stop"), "conv-stop");
+            when(conversationService.getConversationState("conv-stop")).thenReturn(ConversationState.IN_PROGRESS);
+
+            assertTrue(handler.handleTaskCancel("t-stop"));
+
+            assertEquals(TaskState.canceled, handler.handleTaskGet("t-stop").status());
+            assertFalse(handler.handleTaskCancel("t-stop"));
+            verify(conversationService, times(1)).endConversation("conv-stop");
+        }
+
+        @Test
+        @DisplayName("a turn that fails to start records the task as failed")
+        void failedSendRecordsFailed() throws Exception {
+            when(conversationService.startConversation(any(), anyString(), anyString(), anyMap()))
+                    .thenReturn(conversation("conv-broken"));
+            doThrow(new IllegalStateException("agent not ready")).when(conversationService)
+                    .say(any(), anyString(), anyString(), any(), any(), any(), any(), anyBoolean(), any());
+
+            assertThrows(IllegalStateException.class, () -> handler.handleTaskSend("agent-1", sendParams("t-broken", null, "Hi")));
+
+            assertEquals(TaskState.failed, handler.handleTaskGet("t-broken").status());
+            assertFalse(handler.handleTaskCancel("t-broken"));
         }
     }
 
@@ -312,6 +570,80 @@ class A2ATaskHandlerTest {
     }
 
     // ─── Test helper: simple ConcurrentHashMap-based ICache ─────
+
+    /**
+     * The turn budget was a hard-coded 60 seconds, so an agent with a tool loop or
+     * a model cascade timed out on the A2A surface only: the peer got "Internal
+     * error" while the conversation carried on running server-side, and a retry on
+     * the same contextId then landed on the still-running conversation. The REST
+     * surface has always used the operator's own
+     * {@code systemRuntime.agentTimeoutInSeconds}, so inheriting it here is the
+     * smaller of the two possible defaults.
+     */
+    @Nested
+    @DisplayName("turn timeout")
+    class TaskTimeoutTests {
+
+        private A2ATaskHandler handlerWith(int agentTimeout, Optional<Integer> override) {
+            SecurityIdentity identity = mock(SecurityIdentity.class);
+            when(identity.isAnonymous()).thenReturn(false);
+            when(identity.getPrincipal()).thenReturn((Principal) () -> PEER_A);
+            return new A2ATaskHandler(conversationService, cacheFactory, identity, agentCardService, agentTimeout, override);
+        }
+
+        private int configuredTimeoutOf(A2ATaskHandler h) throws Exception {
+            var field = A2ATaskHandler.class.getDeclaredField("taskTimeoutSeconds");
+            field.setAccessible(true);
+            return field.getInt(h);
+        }
+
+        @Test
+        @DisplayName("inherits the REST surface's agent timeout when no override is set")
+        void inheritsTheAgentTimeout() throws Exception {
+            assertEquals(600, configuredTimeoutOf(handlerWith(600, Optional.empty())),
+                    "an operator who raised systemRuntime.agentTimeoutInSeconds has already decided how long a turn may take");
+        }
+
+        @Test
+        @DisplayName("a dedicated override wins over the agent timeout")
+        void theOverrideWins() throws Exception {
+            assertEquals(45, configuredTimeoutOf(handlerWith(600, Optional.of(45))),
+                    "eddi.a2a.task-timeout-seconds exists for a deployment whose peers cannot wait the full turn budget");
+        }
+
+        /**
+         * A non-positive budget would make {@code Future.get} return immediately and
+         * fail every peer request, so it falls back rather than shipping a surface that
+         * can never answer.
+         */
+        @Test
+        @DisplayName("a non-positive override falls back rather than failing every request")
+        void nonPositiveOverrideFallsBack() throws Exception {
+            assertEquals(120, configuredTimeoutOf(handlerWith(120, Optional.of(0))));
+            assertEquals(120, configuredTimeoutOf(handlerWith(120, Optional.of(-5))));
+        }
+
+        /**
+         * {@code systemRuntime.agentTimeoutInSeconds} carries no positive-value
+         * validation of its own, so falling back to it is not enough: a deployment that
+         * sets it to zero would hand {@code Future.get} a zero budget and time out
+         * every peer request the moment it arrives.
+         */
+        @Test
+        @DisplayName("a non-positive inherited timeout falls back too")
+        void nonPositiveInheritedTimeoutFallsBack() throws Exception {
+            for (int bad : new int[]{0, -1, Integer.MIN_VALUE}) {
+                assertEquals(A2ATaskHandler.DEFAULT_TASK_TIMEOUT_SECONDS, configuredTimeoutOf(handlerWith(bad, Optional.empty())),
+                        "an inherited budget of " + bad + " would fail every tasks/send immediately");
+            }
+        }
+
+        @Test
+        @DisplayName("a positive override still wins over a broken inherited value")
+        void overrideWinsOverABrokenInheritedValue() throws Exception {
+            assertEquals(45, configuredTimeoutOf(handlerWith(0, Optional.of(45))));
+        }
+    }
 
     private static class MapCache<K, V> extends ConcurrentHashMap<K, V> implements ICache<K, V> {
 

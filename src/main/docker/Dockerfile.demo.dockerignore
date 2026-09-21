@@ -1,0 +1,20 @@
+# BuildKit uses <dockerfile>.dockerignore in preference to the repo-root one,
+# so this file scopes the demo build's context without touching production.
+#
+# The root .dockerignore excludes everything and allowlists only the prebuilt
+# target/quarkus-app — exactly right for the published image, but this build
+# compiles from source and needs src/, pom.xml and the Maven wrapper.
+#
+# Excluded here: anything that would only slow the context upload or leak local
+# state into the image.
+
+.git/
+.github/
+target/
+tmp/
+.claude/
+.idea/
+*.iml
+**/node_modules/
+*.log
+.env

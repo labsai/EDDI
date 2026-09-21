@@ -4,9 +4,18 @@
  */
 package ai.labs.eddi.engine.memory.rest;
 
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.attachments.IAttachmentStore.Attachment;
+import ai.labs.eddi.engine.attachments.IAttachmentStore.AttachmentNotFoundException;
 import ai.labs.eddi.engine.attachments.IAttachmentStore.AttachmentStoreException;
+import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
+import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
+import ai.labs.eddi.engine.security.ConversationAccessGuard;
+import io.quarkus.security.ForbiddenException;
+import jakarta.ws.rs.NotFoundException;
+import jakarta.annotation.security.RolesAllowed;
+import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.container.AsyncResponse;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.context.ManagedExecutor;
@@ -33,16 +42,25 @@ import static org.mockito.Mockito.*;
 class RestAttachmentUploadTest {
 
     private static final long MAX_UPLOAD_BYTES = 20 * 1024 * 1024; // 20MB
+    private static final long MAX_FORWARD_BYTES = 10 * 1024 * 1024; // 10MB
 
     private IAttachmentStore attachmentStore;
+    private ConversationAccessGuard conversationAccessGuard;
+    private IConversationDescriptorStore conversationDescriptorStore;
     private ManagedExecutor managedExecutor;
     private RestAttachmentUpload endpoint;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         attachmentStore = mock(IAttachmentStore.class);
+        conversationAccessGuard = mock(ConversationAccessGuard.class);
+        conversationDescriptorStore = mock(IConversationDescriptorStore.class);
+        // Every fixture below drives an EXISTING conversation.
+        when(conversationDescriptorStore.readDescriptor(anyString(), any()))
+                .thenReturn(mock(ConversationDescriptor.class));
         managedExecutor = ManagedExecutor.builder().build();
-        endpoint = new RestAttachmentUpload(attachmentStore, managedExecutor, MAX_UPLOAD_BYTES);
+        endpoint = new RestAttachmentUpload(attachmentStore, conversationAccessGuard, conversationDescriptorStore,
+                managedExecutor, MAX_UPLOAD_BYTES, MAX_FORWARD_BYTES);
     }
 
     /**
@@ -114,6 +132,35 @@ class RestAttachmentUploadTest {
             assertEquals("image/png", body.get("mimeType"));
             assertEquals(42L, body.get("sizeBytes"));
             assertEquals("conv-1", body.get("conversationId"));
+            assertEquals(true, body.get("forwardableInline"));
+
+            Files.deleteIfExists(tempFile);
+        }
+
+        @Test
+        void shouldMarkOversizeUploadNotForwardableInline() throws Exception {
+            // store reports an 11 MB blob (> 10 MB forward cap) though the temp file is
+            // tiny
+            var attachment = new Attachment(
+                    "ref-big", "huge.png", "image/png", 11L * 1024 * 1024, "conv-1");
+            when(attachmentStore.store(any(byte[].class), eq("image/png"),
+                    eq("huge.png"), eq("conv-1"), isNull()))
+                    .thenReturn(attachment);
+
+            Path tempFile = Files.createTempFile("test-upload", ".png");
+            Files.write(tempFile, new byte[10]);
+
+            FileUpload file = mock(FileUpload.class);
+            when(file.fileName()).thenReturn("huge.png");
+            when(file.contentType()).thenReturn("image/png");
+            when(file.uploadedFile()).thenReturn(tempFile);
+
+            Response response = captureAsync(ar -> endpoint.uploadAttachment("conv-1", file, null, ar));
+
+            assertEquals(201, response.getStatus());
+            @SuppressWarnings("unchecked")
+            var body = (Map<String, Object>) response.getEntity();
+            assertEquals(false, body.get("forwardableInline"));
 
             Files.deleteIfExists(tempFile);
         }
@@ -251,7 +298,8 @@ class RestAttachmentUploadTest {
         @Test
         void shouldReturn400WhenFileTooLarge() throws Exception {
             // Create endpoint with very small max size
-            var smallEndpoint = new RestAttachmentUpload(attachmentStore, managedExecutor, 100);
+            var smallEndpoint = new RestAttachmentUpload(attachmentStore, conversationAccessGuard,
+                    conversationDescriptorStore, managedExecutor, 100, MAX_FORWARD_BYTES);
 
             Path tempFile = Files.createTempFile("test-large", ".bin");
             Files.write(tempFile, new byte[200]); // Exceeds 100 byte limit
@@ -309,6 +357,15 @@ class RestAttachmentUploadTest {
             var list = (List<Attachment>) response.getEntity();
             assertTrue(list.isEmpty());
         }
+
+        @Test
+        void shouldReturn500WhenListFails() throws Exception {
+            when(attachmentStore.listByConversation("conv-err")).thenThrow(new RuntimeException("db down"));
+
+            Response response = captureAsync(ar -> endpoint.listAttachments("conv-err", ar));
+
+            assertEquals(500, response.getStatus());
+        }
     }
 
     // ==================== Delete Tests ====================
@@ -341,6 +398,325 @@ class RestAttachmentUploadTest {
             @SuppressWarnings("unchecked")
             var body = (Map<String, Object>) response.getEntity();
             assertEquals(0L, body.get("deletedCount"));
+        }
+
+        @Test
+        void shouldReturn500WhenDeleteAllFails() throws Exception {
+            when(attachmentStore.deleteByConversation("conv-err")).thenThrow(new RuntimeException("db down"));
+
+            Response response = captureAsync(ar -> endpoint.deleteAttachments("conv-err", ar));
+
+            assertEquals(500, response.getStatus());
+        }
+    }
+
+    // ==================== Download Tests ====================
+
+    @Nested
+    class DownloadTests {
+
+        @Test
+        void shouldStreamBytesWithHeaders() throws Exception {
+            var meta = new Attachment("ref-1", "doc.pdf", "application/pdf", 4, "conv-1");
+            when(attachmentStore.getMetadata("ref-1", "conv-1")).thenReturn(meta);
+            when(attachmentStore.load("ref-1", "conv-1")).thenReturn(new byte[]{1, 2, 3, 4});
+
+            Response response = captureAsync(ar -> endpoint.downloadAttachment("conv-1", "ref-1", ar));
+
+            assertEquals(200, response.getStatus());
+            assertInstanceOf(byte[].class, response.getEntity());
+            assertEquals("application/pdf", response.getHeaderString("Content-Type"));
+            assertTrue(response.getHeaderString("Content-Disposition").contains("doc.pdf"));
+        }
+
+        @Test
+        void shouldReturn404WhenNotFound() throws Exception {
+            when(attachmentStore.getMetadata("missing", "conv-1"))
+                    .thenThrow(new AttachmentNotFoundException("Attachment not found: missing"));
+
+            Response response = captureAsync(ar -> endpoint.downloadAttachment("conv-1", "missing", ar));
+
+            assertEquals(404, response.getStatus());
+            @SuppressWarnings("unchecked")
+            var body = (Map<String, Object>) response.getEntity();
+            assertEquals("ATTACHMENT_NOT_FOUND", body.get("code"));
+        }
+
+        @Test
+        void shouldReturn403WhenDenied() throws Exception {
+            when(attachmentStore.getMetadata("ref-1", "conv-other"))
+                    .thenThrow(new IAttachmentStore.AttachmentAccessDeniedException(
+                            "Cross-conversation access denied: attachment belongs to 'conv-1', requested from 'conv-other'"));
+
+            Response response = captureAsync(ar -> endpoint.downloadAttachment("conv-other", "ref-1", ar));
+
+            assertEquals(403, response.getStatus());
+            @SuppressWarnings("unchecked")
+            var body = (Map<String, Object>) response.getEntity();
+            assertEquals("ATTACHMENT_ACCESS_DENIED", body.get("code"));
+        }
+
+        @Test
+        void shouldReturn500OnUnexpectedError() throws Exception {
+            when(attachmentStore.getMetadata("ref-1", "conv-1"))
+                    .thenThrow(new RuntimeException("unexpected"));
+
+            Response response = captureAsync(ar -> endpoint.downloadAttachment("conv-1", "ref-1", ar));
+
+            assertEquals(500, response.getStatus());
+        }
+
+        @Test
+        void shouldReturn500OnStoreError() throws Exception {
+            // A backend/store failure (not a missing blob) must be a 500, not a 404.
+            when(attachmentStore.getMetadata("ref-1", "conv-1"))
+                    .thenThrow(new AttachmentStoreException("Failed to load attachment"));
+
+            Response response = captureAsync(ar -> endpoint.downloadAttachment("conv-1", "ref-1", ar));
+
+            assertEquals(500, response.getStatus());
+            @SuppressWarnings("unchecked")
+            var body = (Map<String, Object>) response.getEntity();
+            assertEquals("ATTACHMENT_STORE_ERROR", body.get("code"));
+        }
+
+        @Test
+        void shouldSanitizeContentDispositionFilename() throws Exception {
+            var meta = new Attachment("ref-1", "bad\"name\r\n.png", "image/png", 2, "conv-1");
+            when(attachmentStore.getMetadata("ref-1", "conv-1")).thenReturn(meta);
+            when(attachmentStore.load("ref-1", "conv-1")).thenReturn(new byte[]{1, 2});
+
+            Response response = captureAsync(ar -> endpoint.downloadAttachment("conv-1", "ref-1", ar));
+
+            String cd = response.getHeaderString("Content-Disposition");
+            assertFalse(cd.contains("\"" + "name"), "quotes must be stripped from filename");
+            assertFalse(cd.contains("\r") || cd.contains("\n"), "CR/LF must be stripped");
+        }
+    }
+
+    // ==================== Delete-One Tests ====================
+
+    @Nested
+    class DeleteOneTests {
+
+        @Test
+        void shouldDeleteAndReturnTrue() throws Exception {
+            when(attachmentStore.delete("ref-1", "conv-1")).thenReturn(true);
+
+            Response response = captureAsync(ar -> endpoint.deleteAttachment("conv-1", "ref-1", ar));
+
+            assertEquals(200, response.getStatus());
+            @SuppressWarnings("unchecked")
+            var body = (Map<String, Object>) response.getEntity();
+            assertEquals(true, body.get("deleted"));
+        }
+
+        @Test
+        void shouldReturn404WhenNotFound() throws Exception {
+            when(attachmentStore.delete("missing", "conv-1")).thenReturn(false);
+
+            Response response = captureAsync(ar -> endpoint.deleteAttachment("conv-1", "missing", ar));
+
+            assertEquals(404, response.getStatus());
+        }
+
+        @Test
+        void shouldReturn403WhenNotOwner() throws Exception {
+            when(attachmentStore.delete("ref-1", "conv-other"))
+                    .thenThrow(new IAttachmentStore.AttachmentAccessDeniedException(
+                            "Delete denied: attachment belongs to 'conv-1', requested from 'conv-other'"));
+
+            Response response = captureAsync(ar -> endpoint.deleteAttachment("conv-other", "ref-1", ar));
+
+            assertEquals(403, response.getStatus());
+            @SuppressWarnings("unchecked")
+            var body = (Map<String, Object>) response.getEntity();
+            assertEquals("ATTACHMENT_ACCESS_DENIED", body.get("code"));
+        }
+    }
+
+    // ==================== Caller-ownership Tests (finding A2) ====================
+
+    /**
+     * A2 — {@code IAttachmentStore} only verifies that the conversation NAMED in
+     * the path owns the blob, and the caller picks that name, so the check is
+     * self-satisfying. Every endpoint must therefore assert that the CALLER owns
+     * the conversation, and must do so before touching the store.
+     */
+    @Nested
+    class CallerOwnershipTests {
+
+        private static final String FOREIGN = "conversation-of-user-a";
+
+        @BeforeEach
+        void denyForeignConversation() {
+            doThrow(new ForbiddenException("Access denied: you do not own this conversation"))
+                    .when(conversationAccessGuard).requireExistingConversationOwner(FOREIGN);
+        }
+
+        /**
+         * requireConversationOwner returns null both when the descriptor is MISSING and
+         * when the conversation exists but is unowned (a legacy row the validator
+         * deliberately admits). Calling it purely for its side effect therefore could
+         * not tell those apart, and a deleted conversation's id still reached the store
+         * — which matters here because attachment blobs can outlive the conversation
+         * that owned them. The endpoints use the variant that turns a missing
+         * conversation into a 404 instead.
+         */
+        @Test
+        void unknownConversationIsNotFoundAndNeverReachesTheStore() {
+            doThrow(new NotFoundException("Conversation not found"))
+                    .when(conversationAccessGuard).requireExistingConversationOwner("deleted-conv");
+
+            assertThrows(NotFoundException.class,
+                    () -> endpoint.listAttachments("deleted-conv", mock(AsyncResponse.class)));
+
+            verifyNoInteractions(attachmentStore);
+        }
+
+        @Test
+        void uploadToForeignConversationIsDenied() {
+            FileUpload file = mock(FileUpload.class);
+
+            assertThrows(ForbiddenException.class,
+                    () -> endpoint.uploadAttachment(FOREIGN, file, null, mock(AsyncResponse.class)));
+
+            verifyNoInteractions(attachmentStore);
+        }
+
+        @Test
+        void listOfForeignConversationIsDenied() {
+            assertThrows(ForbiddenException.class,
+                    () -> endpoint.listAttachments(FOREIGN, mock(AsyncResponse.class)));
+
+            verifyNoInteractions(attachmentStore);
+        }
+
+        @Test
+        void downloadFromForeignConversationIsDenied() {
+            assertThrows(ForbiddenException.class,
+                    () -> endpoint.downloadAttachment(FOREIGN, "ref-1", mock(AsyncResponse.class)));
+
+            verifyNoInteractions(attachmentStore);
+        }
+
+        @Test
+        void deleteOneInForeignConversationIsDenied() {
+            assertThrows(ForbiddenException.class,
+                    () -> endpoint.deleteAttachment(FOREIGN, "ref-1", mock(AsyncResponse.class)));
+
+            verifyNoInteractions(attachmentStore);
+        }
+
+        @Test
+        void deleteAllInForeignConversationIsDenied() {
+            assertThrows(ForbiddenException.class,
+                    () -> endpoint.deleteAttachments(FOREIGN, mock(AsyncResponse.class)));
+
+            verifyNoInteractions(attachmentStore);
+        }
+
+        @Test
+        void ownedConversationIsAdmittedAndStillChecked() throws Exception {
+            when(attachmentStore.listByConversation("conv-1")).thenReturn(List.of());
+
+            Response response = captureAsync(ar -> endpoint.listAttachments("conv-1", ar));
+
+            assertEquals(200, response.getStatus());
+            verify(conversationAccessGuard).requireExistingConversationOwner("conv-1");
+        }
+
+        @Test
+        void attachmentEndpointsAreNotAnonymous() {
+            RolesAllowed roles = RestAttachmentUpload.class.getAnnotation(RolesAllowed.class);
+
+            assertNotNull(roles, "RestAttachmentUpload must declare @RolesAllowed");
+            assertFalse(List.of(roles.value()).isEmpty());
+        }
+    }
+
+    // ============ Unknown-conversation Tests (fail-closed) ============
+
+    /**
+     * The ownership guard deliberately ADMITS a conversation whose descriptor is
+     * missing (legacy data without an owner). On {@code RestAgentEngine} that is
+     * harmless — the operation itself 404s. The attachment store has no such
+     * backstop: it creates a record for any id and serves it back, so an unknown
+     * conversationId was a shared cross-user blob namespace. These endpoints must
+     * fail closed on an id that was never a conversation.
+     */
+    @Nested
+    class UnknownConversationTests {
+
+        private static final String INVENTED = "not-a-real-conversation";
+
+        @BeforeEach
+        void noDescriptorForInventedId() throws Exception {
+            when(conversationDescriptorStore.readDescriptor(eq(INVENTED), any())).thenReturn(null);
+        }
+
+        @Test
+        void uploadUnderAnUnknownConversationIs404() {
+            FileUpload file = mock(FileUpload.class);
+
+            assertThrows(NotFoundException.class,
+                    () -> endpoint.uploadAttachment(INVENTED, file, null, mock(AsyncResponse.class)));
+
+            verifyNoInteractions(attachmentStore);
+        }
+
+        @Test
+        void listingAnUnknownConversationIs404() {
+            assertThrows(NotFoundException.class,
+                    () -> endpoint.listAttachments(INVENTED, mock(AsyncResponse.class)));
+
+            verifyNoInteractions(attachmentStore);
+        }
+
+        @Test
+        void downloadingFromAnUnknownConversationIs404() {
+            assertThrows(NotFoundException.class,
+                    () -> endpoint.downloadAttachment(INVENTED, "ref-1", mock(AsyncResponse.class)));
+
+            verifyNoInteractions(attachmentStore);
+        }
+
+        @Test
+        void deletingOneInAnUnknownConversationIs404() {
+            assertThrows(NotFoundException.class,
+                    () -> endpoint.deleteAttachment(INVENTED, "ref-1", mock(AsyncResponse.class)));
+
+            verifyNoInteractions(attachmentStore);
+        }
+
+        @Test
+        void deletingAllInAnUnknownConversationIs404() {
+            assertThrows(NotFoundException.class,
+                    () -> endpoint.deleteAttachments(INVENTED, mock(AsyncResponse.class)));
+
+            verifyNoInteractions(attachmentStore);
+        }
+
+        @Test
+        void aDescriptorLookupFailureIsDeniedRatherThanAdmitted() throws Exception {
+            when(conversationDescriptorStore.readDescriptor(eq("conv-flaky"), any()))
+                    .thenThrow(new IResourceStore.ResourceStoreException("db down"));
+
+            assertThrows(ForbiddenException.class,
+                    () -> endpoint.listAttachments("conv-flaky", mock(AsyncResponse.class)));
+
+            verifyNoInteractions(attachmentStore);
+        }
+
+        @Test
+        void aResourceNotFoundExceptionIs404Too() throws Exception {
+            when(conversationDescriptorStore.readDescriptor(eq("conv-gone"), any()))
+                    .thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+
+            assertThrows(NotFoundException.class,
+                    () -> endpoint.deleteAttachments("conv-gone", mock(AsyncResponse.class)));
+
+            verifyNoInteractions(attachmentStore);
         }
     }
 }

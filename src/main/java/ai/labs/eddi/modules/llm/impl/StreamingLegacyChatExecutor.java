@@ -4,17 +4,28 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
+import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
+import dev.langchain4j.model.chat.request.ResponseFormat;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.jboss.logging.Logger;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -28,9 +39,38 @@ import java.util.concurrent.atomic.AtomicReference;
 class StreamingLegacyChatExecutor {
     private static final Logger LOGGER = Logger.getLogger(StreamingLegacyChatExecutor.class);
     private static final long DEFAULT_TIMEOUT_SECONDS = 120;
+    private static final String KEY_TIMEOUT = "timeout";
+
+    /**
+     * Optional — used to count providers that never emit partial responses (finding
+     * F8). {@code null} in the direct-construction unit tests.
+     */
+    private final MeterRegistry meterRegistry;
+
+    StreamingLegacyChatExecutor() {
+        this(null);
+    }
+
+    StreamingLegacyChatExecutor(MeterRegistry meterRegistry) {
+        this.meterRegistry = meterRegistry;
+    }
+
+    /**
+     * Result of a streaming chat execution, including response text and metadata.
+     *
+     * @param response
+     *            the full accumulated response text
+     * @param metadata
+     *            metadata about the streaming execution (finishReason, warnings)
+     */
+    record StreamingResult(String response, Map<String, Object> metadata) {
+    }
 
     /**
      * Execute a streaming chat completion, emitting tokens via the event sink.
+     * <p>
+     * Backward-compatible wrapper that delegates to the task-aware overload with a
+     * null task (uses default timeout, no retry).
      *
      * @param streamingModel
      *            the streaming-capable chat model
@@ -41,53 +81,522 @@ class StreamingLegacyChatExecutor {
      * @return the full accumulated response text (for memory storage)
      */
     String execute(StreamingChatModel streamingModel, List<ChatMessage> messages, ConversationEventSink eventSink) {
+        return execute(streamingModel, messages, eventSink, null, JsonResponseFormatPolicy.DISABLED).response();
+    }
 
-        LOGGER.debug("Executing with streaming (legacy mode)");
+    /**
+     * Result of a streaming execution — the full text plus response metadata
+     * (finish reason, token usage) captured from the final response.
+     */
+    record StreamResult(String response, Map<String, Object> responseMetadata) {
+    }
 
-        var latch = new CountDownLatch(1);
-        var fullResponse = new StringBuilder();
-        var errorRef = new AtomicReference<Throwable>();
+    /**
+     * Execute a streaming chat completion, emitting tokens via the event sink and
+     * capturing the final response metadata (token usage). Used by the cascade to
+     * stream the final step live without losing cost/token evidence.
+     * <p>
+     * Unlike
+     * {@link #execute(StreamingChatModel, List, ConversationEventSink, LlmConfiguration.Task)},
+     * a mid-stream error is <em>always</em> propagated here, even when tokens were
+     * already emitted: the cascade must see the failure to fall back to the best
+     * previous step. Salvaging the partial text would let a failed final step be
+     * accepted as a successful one.
+     */
+    StreamResult executeCapturing(StreamingChatModel streamingModel, List<ChatMessage> messages, ConversationEventSink eventSink) {
+        return executeCapturing(streamingModel, messages, eventSink, null, JsonResponseFormatPolicy.DISABLED);
+    }
 
-        var chatRequest = ChatRequest.builder().messages(messages).build();
+    /**
+     * As
+     * {@link #executeCapturing(StreamingChatModel, List, ConversationEventSink)},
+     * but honouring the task's resolved streaming backstop (see
+     * {@link #resolveTimeoutSeconds(LlmConfiguration.Task)}).
+     * <p>
+     * The task's retry config is deliberately <em>not</em> applied: the cascade
+     * owns escalation, and retrying inside a step would multiply spend against the
+     * very model the cascade is about to escalate away from. Each step gets one
+     * attempt.
+     */
+    StreamResult executeCapturing(StreamingChatModel streamingModel, List<ChatMessage> messages, ConversationEventSink eventSink,
+                                  LlmConfiguration.Task task, JsonResponseFormatPolicy jsonPolicy) {
+        var result = execute(streamingModel, messages, eventSink, task, false, 1, jsonPolicy);
+        return new StreamResult(result.response(), result.metadata());
+    }
 
-        streamingModel.chat(chatRequest, new StreamingChatResponseHandler() {
-            @Override
-            public void onPartialResponse(String partialResponse) {
-                fullResponse.append(partialResponse);
-                try {
-                    eventSink.onToken(partialResponse);
-                } catch (Exception e) {
-                    LOGGER.warnf("Error sending token event: %s", e.getMessage());
+    /**
+     * Backward-compatible overload without a JSON response-format policy.
+     */
+    StreamResult executeCapturing(StreamingChatModel streamingModel, List<ChatMessage> messages, ConversationEventSink eventSink,
+                                  LlmConfiguration.Task task) {
+        return executeCapturing(streamingModel, messages, eventSink, task, JsonResponseFormatPolicy.DISABLED);
+    }
+
+    /**
+     * Execute a streaming chat completion with configurable timeout, retry on total
+     * failure, and response metadata capture (finish reason and token usage).
+     *
+     * @param streamingModel
+     *            the streaming-capable chat model
+     * @param messages
+     *            the full message list (system + history + user)
+     * @param eventSink
+     *            the sink to emit token events to
+     * @param task
+     *            task configuration (for timeout and retry settings, may be null)
+     * @param jsonPolicy
+     *            decides whether the streamed request carries
+     *            {@code ResponseFormat.JSON}; {@code null} is treated as
+     *            {@link JsonResponseFormatPolicy#DISABLED}
+     * @return a {@link StreamingResult} with the response text and metadata
+     */
+    StreamingResult execute(StreamingChatModel streamingModel, List<ChatMessage> messages,
+                            ConversationEventSink eventSink, LlmConfiguration.Task task, JsonResponseFormatPolicy jsonPolicy) {
+        return execute(streamingModel, messages, eventSink, task, true, resolveMaxAttempts(task), jsonPolicy);
+    }
+
+    /**
+     * Backward-compatible overload without a JSON response-format policy — the
+     * streamed request carries no response format.
+     */
+    StreamingResult execute(StreamingChatModel streamingModel, List<ChatMessage> messages,
+                            ConversationEventSink eventSink, LlmConfiguration.Task task) {
+        return execute(streamingModel, messages, eventSink, task, JsonResponseFormatPolicy.DISABLED);
+    }
+
+    /**
+     * Resolve the attempt count from the task's retry config, bounded at both ends.
+     *
+     * <p>
+     * At least one: {@code maxAttempts <= 0} means "don't retry", not "never call
+     * the model". Without that the retry loop body never runs and the caller gets a
+     * null response indistinguishable from silence.
+     * </p>
+     *
+     * <p>
+     * And at most {@code RetryConfiguration.MAX_ATTEMPTS_CEILING}. This used to
+     * read {@code getMaxAttempts()} raw, so the engine ceiling that bounds the tool
+     * loop did not apply here: the identical {@code retry} block was capped on one
+     * path and unbounded on the other, and a streaming task could hold its worker
+     * for as many attempts as the config asked for.
+     * </p>
+     */
+    private static int resolveMaxAttempts(LlmConfiguration.Task task) {
+        RetryConfiguration retryConfig = task != null ? task.getRetry() : null;
+        int configured = retryConfig != null && retryConfig.getMaxAttempts() != null ? retryConfig.getMaxAttempts() : 1;
+        return Math.max(1, RetryConfiguration.clampAttempts(configured));
+    }
+
+    /**
+     * Resolve the overall wall-clock backstop for one streaming attempt.
+     * <p>
+     * Two settings bound a stream, and they are deliberately kept distinct rather
+     * than merged, because they bound different things:
+     * <ul>
+     * <li>the {@code timeout} model parameter (milliseconds) is handed to the
+     * provider's streaming HTTP client — for the JDK client it bounds the time to
+     * the first response, so it detects a provider that never answers without
+     * truncating one that answers slowly;</li>
+     * <li>{@code streamingTimeoutSeconds} is this overall backstop, covering the
+     * whole stream for providers whose native timeout does not fire (or does not
+     * exist).</li>
+     * </ul>
+     * Precedence, preserving both back-compatible shapes:
+     * <ol>
+     * <li>an explicit positive {@code streamingTimeoutSeconds} always wins —
+     * configs that set only that field behave exactly as before;</li>
+     * <li>otherwise the backstop is the 120s default, raised (never lowered) to
+     * cover an explicitly configured {@code timeout}. A config that sets only
+     * {@code timeout} therefore keeps the 120s default for any value up to 120s,
+     * and no longer has a long deliberate timeout silently cut short at 120s;</li>
+     * <li>otherwise the 120s default.</li>
+     * </ol>
+     * The {@code timeout} value is read from the task's raw parameters. A
+     * Qute-templated value cannot be resolved here and simply leaves the default in
+     * place — the pre-existing behaviour, never a shorter bound.
+     */
+    /**
+     * Tasks already warned about a below-backstop {@code timeout}, keyed by task id
+     * and configured value.
+     * <p>
+     * {@link #resolveTimeoutSeconds} runs on the PER-REQUEST path (once per
+     * streaming turn, and again per cascade step via
+     * {@code CascadingModelExecutor.resolveStreamingStepTimeoutMs}), so an
+     * unconditional warning fires on every single turn for the whole lifetime of a
+     * config that will never change. {@code ChatModelRegistry} makes the same
+     * distinction deliberately — it warns on the build path only, never on a cache
+     * hit.
+     * <p>
+     * Explicitly bounded. An earlier comment claimed it was "bounded because a
+     * config edit re-keys the entry", which is backwards: re-keying ADDS a key and
+     * leaves the old one behind, so config edits are exactly what made this grow.
+     * Keyed on (taskId, timeoutMs), the key space is unbounded over the life of a
+     * process.
+     * <p>
+     * Bounded with a size check and a clear, NOT with a Caffeine cache: this is
+     * read on the per-request path (once per streaming turn, again per cascade
+     * step), and putting cache machinery there measurably slowed it — two
+     * timing-sensitive tests failed on a 66ms budget when it was tried. A plain key
+     * set plus an O(1) size check costs nothing per call.
+     * <p>
+     * Clearing on overflow rather than refusing to add: a hard cap would silently
+     * stop warning about genuinely new misconfigurations, which is the failure mode
+     * this warning exists to prevent. Worst case here is that an already-warned
+     * task warns once more — noise, not silence.
+     */
+    private static final Set<String> shortTimeoutWarned = ConcurrentHashMap.newKeySet();
+
+    /** Upper bound on retained warn-suppression keys. */
+    private static final int MAX_WARNED_TIMEOUT_KEYS = 1_000;
+
+    /**
+     * Record that {@code key} has been warned about, returning true when this call
+     * is the one that should emit the warning.
+     */
+    private static boolean rememberWarned(String key) {
+        if (shortTimeoutWarned.size() >= MAX_WARNED_TIMEOUT_KEYS) {
+            shortTimeoutWarned.clear();
+        }
+        return shortTimeoutWarned.add(key);
+    }
+
+    /** How many below-backstop warnings have actually been emitted. */
+    private static final AtomicInteger shortTimeoutWarnings = new AtomicInteger();
+
+    private static String warnKey(LlmConfiguration.Task task, long millis) {
+        String id = task != null && task.getId() != null ? task.getId() : "<unnamed>";
+        return id + '@' + millis;
+    }
+
+    /** Test hook: emitted below-backstop warnings since the last reset. */
+    static int shortTimeoutWarningCount() {
+        return shortTimeoutWarnings.get();
+    }
+
+    /** Test hook: forget which tasks have been warned about. */
+    static void resetShortTimeoutWarnings() {
+        shortTimeoutWarned.clear();
+        shortTimeoutWarnings.set(0);
+    }
+
+    static long resolveTimeoutSeconds(LlmConfiguration.Task task) {
+        if (task == null) {
+            return DEFAULT_TIMEOUT_SECONDS;
+        }
+        if (task.getStreamingTimeoutSeconds() != null && task.getStreamingTimeoutSeconds() > 0) {
+            return task.getStreamingTimeoutSeconds();
+        }
+        Map<String, String> parameters = task.getParameters();
+        String timeoutMs = parameters != null ? parameters.get(KEY_TIMEOUT) : null;
+        if (timeoutMs == null || timeoutMs.isBlank()) {
+            return DEFAULT_TIMEOUT_SECONDS;
+        }
+        try {
+            long millis = Long.parseLong(timeoutMs.trim());
+            if (millis <= 0) {
+                return DEFAULT_TIMEOUT_SECONDS;
+            }
+            // Round up so a sub-second timeout never collapses the backstop to zero.
+            long seconds = (millis + 999) / 1000;
+            // Finding F11: the raise-only floor is deliberate (see the javadoc above),
+            // but it used to be silent — an operator configuring timeout=5000 still
+            // waited the full 120s with nothing in the log explaining why. Say so.
+            if (seconds < DEFAULT_TIMEOUT_SECONDS && rememberWarned(warnKey(task, millis))) {
+                shortTimeoutWarnings.incrementAndGet();
+                LOGGER.warnf("The 'timeout' parameter (%dms ≈ %ds) is SHORTER than the %ds streaming backstop and does NOT shorten it — "
+                        + "the provider's own client timeout still applies, but this executor will wait up to %ds. "
+                        + "Set 'streamingTimeoutSeconds' to lower the backstop.", millis, seconds, DEFAULT_TIMEOUT_SECONDS, DEFAULT_TIMEOUT_SECONDS);
+            }
+            return Math.max(DEFAULT_TIMEOUT_SECONDS, seconds);
+        } catch (NumberFormatException e) {
+            LOGGER.debugf("Ignoring non-numeric 'timeout' parameter '%s' when deriving the streaming backstop", timeoutMs);
+            return DEFAULT_TIMEOUT_SECONDS;
+        }
+    }
+
+    /**
+     * Core streaming execution.
+     *
+     * @param salvagePartialOnError
+     *            when {@code true}, a mid-stream error that already produced tokens
+     *            returns the partial text with a {@code streaming_error_partial}
+     *            warning instead of throwing — the turn keeps whatever the model
+     *            managed to produce. When {@code false}, any error is propagated so
+     *            the caller can treat the step as failed.
+     * @param maxAttempts
+     *            number of attempts; already clamped to >= 1 by the caller.
+     * @param jsonPolicy
+     *            decides whether the streamed request carries
+     *            {@code ResponseFormat.JSON}. Streaming never carries tool
+     *            specifications, so the policy is resolved with
+     *            {@code toolsInRequest=false}.
+     */
+    private StreamingResult execute(StreamingChatModel streamingModel, List<ChatMessage> messages,
+                                    ConversationEventSink eventSink, LlmConfiguration.Task task, boolean salvagePartialOnError, int maxAttempts,
+                                    JsonResponseFormatPolicy jsonPolicy) {
+
+        ResponseFormat responseFormat = jsonPolicy != null ? jsonPolicy.resolve(false) : null;
+
+        LOGGER.debug("Executing with streaming (legacy mode)" + (responseFormat != null ? " with JSON response format" : ""));
+
+        long timeoutSeconds = resolveTimeoutSeconds(task);
+
+        RetryConfiguration retryConfig = task != null ? task.getRetry() : null;
+
+        Map<String, Object> metadata = new HashMap<>();
+        String responseText = null;
+        // Carried across attempts so this loop honours the same total-backoff
+        // budget executeWithRetry applies. The per-sleep ceiling alone does not
+        // bound it: ten attempts at a configured 30s delay is 270s of blocked
+        // pipeline thread.
+        long totalBackoffMs = 0L;
+
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            // Each attempt reports its own outcome. Without this reset, a
+            // streamingTimeout/warning recorded by a failed attempt survives into a
+            // successful retry, and responseValidation then acts on a stale signal —
+            // replacing a perfectly good answer with the timeout fallback.
+            metadata.clear();
+
+            var latch = new CountDownLatch(1);
+            var fullResponse = new StringBuilder();
+            var errorRef = new AtomicReference<Throwable>();
+            var responseRef = new AtomicReference<ChatResponse>();
+            // Abandoning an attempt (timeout, interrupt, or a retried error) does not
+            // stop the provider's callback thread — this executor cannot cancel it. Without
+            // this gate a late token from a timed-out attempt keeps writing to the shared
+            // event sink while the retry streams its own tokens into the same sink, so the
+            // client renders two answers interleaved and neither matches what is stored in
+            // memory. Once an attempt is abandoned its handler goes silent.
+            var abandoned = new AtomicBoolean(false);
+            // Appending, emitting and abandoning must be mutually exclusive.
+            // KEEP IN SYNC: ToolLoopStreamingChatModel mirrors this whole
+            // latch/abandoned/lock skeleton for the tool loop; a concurrency fix
+            // here almost certainly applies there too.
+            // fullResponse is written only by the provider's callback thread and read
+            // only here; on the normal path latch.countDown()/await() publishes those
+            // writes, but the timeout/interrupt path has no such edge — abandoned is a
+            // volatile write ordering executor -> callback, not callback -> executor.
+            // Reading the StringBuilder unsynchronized while it is being mutated can
+            // observe a torn buffer (count advanced before the char data is visible, or
+            // a stale value array after a grow). The same lock also closes the
+            // check-then-act on `abandoned`: a callback already past the check could
+            // otherwise still push a token into the shared event sink after this thread
+            // believed the attempt silenced.
+            final Object streamLock = new Object();
+
+            var requestBuilder = ChatRequest.builder().messages(messages);
+            if (responseFormat != null) {
+                requestBuilder.responseFormat(responseFormat);
+            }
+            var chatRequest = requestBuilder.build();
+
+            streamingModel.chat(chatRequest, new StreamingChatResponseHandler() {
+                @Override
+                public void onPartialResponse(String partialResponse) {
+                    synchronized (streamLock) {
+                        if (abandoned.get()) {
+                            return;
+                        }
+                        fullResponse.append(partialResponse);
+                        try {
+                            eventSink.onToken(partialResponse);
+                        } catch (Exception e) {
+                            LOGGER.warnf("Error sending token event: %s", e.getMessage());
+                        }
+                    }
+                }
+
+                @Override
+                public void onCompleteResponse(ChatResponse completeResponse) {
+                    responseRef.set(completeResponse);
+                    latch.countDown();
+                }
+
+                @Override
+                public void onError(Throwable error) {
+                    errorRef.set(error);
+                    latch.countDown();
+                }
+            });
+
+            boolean timedOut = false;
+            boolean interrupted = false;
+            try {
+                if (!latch.await(timeoutSeconds, TimeUnit.SECONDS)) {
+                    LOGGER.warn("Streaming chat timed out");
+                    timedOut = true;
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                LOGGER.warn("Streaming chat was interrupted");
+                interrupted = true;
+            }
+
+            synchronized (streamLock) {
+                if (timedOut || interrupted) {
+                    // Silence the still-running handler before reading what it produced, so the
+                    // text returned to memory is exactly the text the client was sent. Under the
+                    // lock an in-flight emission completes first and is therefore included —
+                    // never half-included.
+                    abandoned.set(true);
+                }
+                responseText = fullResponse.toString();
+            }
+            metadata.putAll(buildMetadata(responseRef.get()));
+
+            // Finding F8: a provider that completes without ever calling
+            // onPartialResponse leaves the accumulated buffer empty, and the buffer used
+            // to be the ONLY text source — onCompleteResponse's ChatResponse was read for
+            // metadata and its aiMessage().text() thrown away. The turn then returned a
+            // silent empty answer with no error, warning or metric. Fall back to the
+            // complete response, and emit the token to the sink so the SSE client is not
+            // left with nothing.
+            if (!timedOut && !interrupted && errorRef.get() == null && responseText.isEmpty()) {
+                String completeText = completeResponseText(responseRef.get());
+                if (completeText != null && !completeText.isEmpty()) {
+                    LOGGER.warnf("Streaming provider emitted no partial responses; falling back to the complete response (%d chars). "
+                            + "This provider does not support incremental streaming.", completeText.length());
+                    metadata.put("streamingNoPartials", true);
+                    // putIfAbsent, NOT put: buildMetadata may already have recorded
+                    // "truncated" (finishReason=LENGTH) or "content_filter" — the only
+                    // signals LlmTask.applyResponseValidation dispatches on. Overwriting
+                    // them here would silently disable responseValidation.onTruncation /
+                    // onContentFilter for this provider. The transport-capability note is
+                    // the weaker signal and is already carried by streamingNoPartials.
+                    metadata.putIfAbsent("warning", "streaming_no_partials");
+                    incrementNoPartials();
+                    responseText = completeText;
+                    synchronized (streamLock) {
+                        if (!abandoned.get()) {
+                            try {
+                                eventSink.onToken(completeText);
+                            } catch (Exception e) {
+                                LOGGER.warnf("Error sending fallback token event: %s", e.getMessage());
+                            }
+                        }
+                    }
                 }
             }
 
-            @Override
-            public void onCompleteResponse(ChatResponse completeResponse) {
-                latch.countDown();
+            // An interrupt is a cancellation request — the cascade cancelling a step, or
+            // the request being aborted. Never retry it (that would ignore the
+            // cancellation) and never report it as a successful empty response, which
+            // would let a cancelled step be accepted as a real answer. This matches how
+            // AgentOrchestrator treats a set interrupt flag.
+            if (interrupted) {
+                metadata.put("streamingInterrupted", true);
+                if (salvagePartialOnError && !responseText.isEmpty()) {
+                    metadata.put("warning", "streaming_interrupted_partial");
+                    LOGGER.warnf("Streaming interrupted with partial response (%d chars)", responseText.length());
+                    return new StreamingResult(responseText, metadata);
+                }
+                throw new RuntimeException("Streaming chat interrupted");
             }
 
-            @Override
-            public void onError(Throwable error) {
-                errorRef.set(error);
-                latch.countDown();
+            if (timedOut) {
+                metadata.put("streamingTimeout", true);
+                if (!responseText.isEmpty()) {
+                    // Partial response available — return it with a warning
+                    metadata.put("warning", "streaming_timeout_partial");
+                    LOGGER.warnf("Streaming timed out after %ds with partial response (%d chars)", timeoutSeconds, responseText.length());
+                    return new StreamingResult(responseText, metadata);
+                }
+                // No response at all — treat as retryable failure
+                if (attempt < maxAttempts) {
+                    long slept = RetryConfiguration.backoff(attempt, retryConfig, totalBackoffMs);
+                    if (slept >= 0) {
+                        totalBackoffMs += slept;
+                        LOGGER.warnf("Streaming timed out with empty response, retrying (attempt %d/%d)", attempt, maxAttempts);
+                        continue;
+                    }
+                    LOGGER.warnf("Streaming timed out with empty response and the retry backoff budget is spent after %d attempt(s)",
+                            attempt);
+                }
+                LOGGER.errorf("Streaming timed out with empty response after %d attempt(s)", attempt);
+                return new StreamingResult("", metadata);
             }
-        });
 
-        try {
-            if (!latch.await(DEFAULT_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-                LOGGER.warn("Streaming chat timed out");
-                return fullResponse.toString();
+            if (errorRef.get() != null) {
+                if (salvagePartialOnError && !responseText.isEmpty()) {
+                    // Error fired but we have partial content — return it with warning
+                    metadata.put("warning", "streaming_error_partial");
+                    metadata.put("errorMessage", errorRef.get().getMessage());
+                    LOGGER.warnf("Streaming error with partial response (%d chars): %s", responseText.length(), errorRef.get().getMessage());
+                    return new StreamingResult(responseText, metadata);
+                }
+                // Nothing salvageable (no content, or the caller wants errors
+                // propagated) — retry if possible
+                if (attempt < maxAttempts) {
+                    synchronized (streamLock) {
+                        abandoned.set(true);
+                    }
+                    long slept = RetryConfiguration.backoff(attempt, retryConfig, totalBackoffMs);
+                    if (slept >= 0) {
+                        totalBackoffMs += slept;
+                        LOGGER.warnf("Streaming error with empty response, retrying (attempt %d/%d): %s",
+                                attempt, maxAttempts, errorRef.get().getMessage());
+                        continue;
+                    }
+                    LOGGER.warnf("Streaming error with empty response and the retry backoff budget is spent after %d attempt(s): %s",
+                            attempt, errorRef.get().getMessage());
+                }
+                LOGGER.errorf("Streaming chat error after %d attempt(s): %s", attempt, errorRef.get().getMessage());
+                throw new RuntimeException("Streaming chat failed", errorRef.get());
             }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            LOGGER.warn("Streaming chat was interrupted");
+
+            // Success — break out of retry loop
+            break;
         }
 
-        if (errorRef.get() != null) {
-            LOGGER.errorf("Streaming chat error: %s", errorRef.get().getMessage());
-            throw new RuntimeException("Streaming chat failed", errorRef.get());
-        }
+        return new StreamingResult(responseText, metadata);
+    }
 
-        return fullResponse.toString();
+    /**
+     * The text of a completed streaming response, or {@code null} when the provider
+     * gave none. Finding F8 — this value was previously never read.
+     */
+    static String completeResponseText(ChatResponse response) {
+        if (response == null || response.aiMessage() == null) {
+            return null;
+        }
+        return response.aiMessage().text();
+    }
+
+    private void incrementNoPartials() {
+        if (meterRegistry != null) {
+            meterRegistry.counter("eddi.llm.streaming.no_partials").increment();
+        }
+    }
+
+    private static Map<String, Object> buildMetadata(ChatResponse response) {
+        Map<String, Object> metadata = new HashMap<>();
+        if (response != null && response.metadata() != null) {
+            var meta = response.metadata();
+            if (meta.finishReason() != null) {
+                var finishReason = meta.finishReason().toString();
+                metadata.put("finishReason", finishReason);
+
+                // Flag non-normal finish reasons for downstream validation, matching
+                // LegacyChatExecutor. Without this, responseValidation.onTruncation and
+                // onContentFilter are unreachable on the streaming path. A later
+                // timeout/error warning deliberately overwrites this — a transport
+                // failure is the more urgent signal.
+                if ("CONTENT_FILTER".equalsIgnoreCase(finishReason)) {
+                    metadata.put("warning", "content_filter");
+                    LOGGER.warnf("Streaming response was filtered by content policy (finishReason=%s)", finishReason);
+                } else if ("LENGTH".equalsIgnoreCase(finishReason)) {
+                    metadata.put("warning", "truncated");
+                    LOGGER.warnf("Streaming response was truncated due to token limit (finishReason=%s)", finishReason);
+                }
+            }
+            if (meta.tokenUsage() != null) {
+                var usage = meta.tokenUsage();
+                metadata.put("tokenUsage", Map.of("inputTokens", usage.inputTokenCount() != null ? usage.inputTokenCount() : 0, "outputTokens",
+                        usage.outputTokenCount() != null ? usage.outputTokenCount() : 0, "totalTokens",
+                        usage.totalTokenCount() != null ? usage.totalTokenCount() : 0));
+            }
+        }
+        return metadata;
     }
 }

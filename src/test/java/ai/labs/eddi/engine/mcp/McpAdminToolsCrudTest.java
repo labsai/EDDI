@@ -40,6 +40,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import ai.labs.eddi.configs.rest.StrictConfigurationParser;
+import io.quarkus.security.identity.SecurityIdentity;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -104,9 +107,10 @@ class McpAdminToolsCrudTest {
         scheduleStore = mock(IScheduleStore.class);
         scheduleFireExecutor = mock(ScheduleFireExecutor.class);
         schedulePollerService = mock(SchedulePollerService.class);
-        var mockIdentity = mock(io.quarkus.security.identity.SecurityIdentity.class);
+        var mockIdentity = mock(SecurityIdentity.class);
         lenient().when(mockIdentity.isAnonymous()).thenReturn(true);
-        tools = new McpAdminTools(restInterfaceFactory, agentAdmin, jsonSerialization, scheduleStore, scheduleFireExecutor, schedulePollerService,
+        tools = new McpAdminTools(restInterfaceFactory, agentAdmin, jsonSerialization, strictConfigurationParser(), scheduleStore,
+                scheduleFireExecutor, schedulePollerService,
                 mockIdentity, false);
     }
 
@@ -544,5 +548,48 @@ class McpAdminToolsCrudTest {
         String result = tools.deleteAgentTrigger(null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("intent is required"));
+    }
+
+    /**
+     * A parser that defers to this test's {@code jsonSerialization} mock, so the
+     * existing {@code when(jsonSerialization.deserialize(...))} stubs keep
+     * describing what these dispatch tests are actually about. Strictness itself is
+     * covered by {@code StrictConfigurationParserTest}; here the only thing that
+     * matters is that each resource type reaches the right store.
+     */
+    private StrictConfigurationParser strictConfigurationParser() {
+        var parser = mock(StrictConfigurationParser.class);
+        try {
+            lenient().when(parser.parse(anyString(), any()))
+                    .thenAnswer(invocation -> jsonSerialization.deserialize(invocation.getArgument(0), invocation.getArgument(1)));
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+        return parser;
+    }
+
+    // ==================== D12: strict rejection reaches the MCP caller
+    // ====================
+
+    /**
+     * End-to-end pin for the parity fix: the strict parser's rejection travels as a
+     * 4xx response entity, and {@code errorJson(prefix, cause)} must surface it —
+     * {@code getMessage()} on that exception is only "HTTP 400 Bad Request", which
+     * is what MCP callers used to see instead of the field-level diagnosis.
+     */
+    @Test
+    void createResource_unknownField_reportsTheKnownFieldsMessage() {
+        var strictTools = new McpAdminTools(mock(IRestInterfaceFactory.class), agentAdmin, jsonSerialization,
+                new StrictConfigurationParser(new ObjectMapper()), scheduleStore,
+                scheduleFireExecutor, schedulePollerService,
+                mock(SecurityIdentity.class), false);
+
+        String result = strictTools.createResource("propertysetter",
+                "{\"setProperties\":[{\"name\":\"x\",\"valueString\":\"y\"}]}");
+
+        assertTrue(result.contains("error"));
+        assertTrue(result.contains("setProperties"), "the offending field must be named: " + result);
+        assertTrue(result.contains("setOnActions"), "the legal fields must be listed: " + result);
+        assertFalse(result.contains("HTTP 400"), "the status line is not a diagnosis: " + result);
     }
 }

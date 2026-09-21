@@ -24,9 +24,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -80,9 +82,16 @@ class ConversationExtendedTest {
         @Test
         @DisplayName("say succeeds when state is READY and sets state back to READY after")
         void saySucceeds() throws Exception {
-            when(memory.getConversationState())
-                    .thenReturn(ConversationState.READY)
-                    .thenReturn(ConversationState.IN_PROGRESS);
+            // Mirror real memory: return whatever was last set. Stubbing consecutive
+            // returns would couple this test to how many times runStep reads the
+            // state, and the EXECUTION_INTERRUPTED auto-recovery adds a read before
+            // the in-progress guard.
+            var state = new AtomicReference<>(ConversationState.READY);
+            when(memory.getConversationState()).thenAnswer(invocation -> state.get());
+            doAnswer(invocation -> {
+                state.set(invocation.getArgument(0));
+                return null;
+            }).when(memory).setConversationState(any(ConversationState.class));
 
             when(propertiesHandler.getUserMemoryStore()).thenReturn(null);
 
@@ -201,6 +210,47 @@ class ConversationExtendedTest {
             verify(currentStep).resetConversationOutput("output");
             verify(currentStep).resetConversationOutput("quickReplies");
         }
+
+        /**
+         * A rerun must not clear a result it will not regenerate. The answer lives
+         * under {@code output} but is written by the {@code langchain} task, which runs
+         * before the output task — so restarting at {@code output} wiped the reply and
+         * never re-ran the model. The turn returned 200 with an empty output array,
+         * which is destruction, not a retry.
+         */
+        @Test
+        @DisplayName("rerun restarts the pipeline at the langchain task, not at output")
+        void rerunRestartsAtTheTaskThatProducesTheOutput() throws Exception {
+            when(memory.getConversationState()).thenReturn(ConversationState.READY);
+            when(propertiesHandler.getUserMemoryStore()).thenReturn(null);
+
+            var conv = createConversation();
+            conv.rerun(Map.of());
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<List<String>> types = ArgumentCaptor.forClass(List.class);
+            verify(lifecycleManager).executeLifecycle(eq(memory), types.capture());
+
+            assertTrue(types.getValue().contains("langchain"),
+                    "without langchain the model never re-runs and the cleared answer is gone for good");
+            assertTrue(types.getValue().contains("output"),
+                    "a rule-based agent has no langchain task and must still restart at output");
+        }
+
+        @Test
+        @DisplayName("rerun does not reset a langchain output key it never wrote")
+        void rerunDoesNotClearLangchainOutput() throws Exception {
+            when(memory.getConversationState()).thenReturn(ConversationState.READY);
+            when(propertiesHandler.getUserMemoryStore()).thenReturn(null);
+
+            var conv = createConversation();
+            conv.rerun(Map.of());
+
+            // resetConversationOutput(key) creates the key as an empty list, so
+            // clearing "langchain" would add a spurious entry to every rerun's output.
+            verify(currentStep, never()).resetConversationOutput("langchain");
+            verify(currentStep, never()).removeData("langchain");
+        }
     }
 
     // ==================== init — loadUserProperties ====================
@@ -253,8 +303,20 @@ class ConversationExtendedTest {
             verify(store).getVisibleEntries("u1", "a1", List.of(), "oldest_first", 50);
         }
 
+        /**
+         * No config and an empty config must recall the same number of entries.
+         * <p>
+         * They did not. {@code Conversation} held its own
+         * {@code DEFAULT_MAX_RECALL_ENTRIES = 1000} for the absent-config case while
+         * {@code UserMemoryConfig.maxRecallEntries} defaults to 50, so adding a
+         * {@code userMemoryConfig} block for an unrelated reason — to set
+         * {@code defaultVisibility}, say — cut recall twentyfold in a diff that never
+         * mentions {@code maxRecallEntries}. Nothing above DEBUG said so, and templates
+         * for the dropped keys render empty rather than failing. This test used to pin
+         * the 1000 side of that divergence; it now pins the agreement.
+         */
         @Test
-        @DisplayName("init uses default recall settings when no UserMemoryConfig")
+        @DisplayName("init recalls the same depth with no UserMemoryConfig as with an empty one")
         void initUsesDefaultRecallSettings() throws Exception {
             var store = mock(IUserMemoryStore.class);
             when(propertiesHandler.getUserMemoryStore()).thenReturn(store);
@@ -262,13 +324,16 @@ class ConversationExtendedTest {
             when(memory.getAgentId()).thenReturn("a1");
             when(memory.getUserMemoryConfig()).thenReturn(null);
 
-            when(store.getVisibleEntries("u1", "a1", List.of(), "most_recent", 1000))
+            var defaults = new AgentConfiguration.UserMemoryConfig();
+            when(store.getVisibleEntries("u1", "a1", List.of(), defaults.getRecallOrder(), defaults.getMaxRecallEntries()))
                     .thenReturn(List.of());
 
             var conv = createConversation();
             conv.init(new HashMap<>());
 
-            verify(store).getVisibleEntries("u1", "a1", List.of(), "most_recent", 1000);
+            // Asserted against the config's own defaults rather than a literal, so the
+            // two cannot drift apart again without this failing.
+            verify(store).getVisibleEntries("u1", "a1", List.of(), defaults.getRecallOrder(), defaults.getMaxRecallEntries());
         }
 
         @Test

@@ -31,13 +31,22 @@ patches:
       - op: add
         path: /data/QUARKUS_DATASOURCE_JDBC_URL
         value: "jdbc:postgresql://postgres:5432/eddi"
-  # Inject PG credentials into EDDI from postgres-secrets
+  # Provide the JDBC credentials to EDDI as a mounted FILE, not env vars.
+  # Indexes are stable because they refer to the base manifest:
+  #   volumes[0]  = the "eddi-secrets" projected volume
+  #   env[0]      = QUARKUS_CONFIG_LOCATIONS
   - target:
       kind: Deployment
       name: eddi
     patch: |
       - op: add
-        path: /spec/template/spec/containers/0/envFrom/-
+        path: /spec/template/spec/volumes/0/projected/sources/-
         value:
-          secretRef:
+          secret:
             name: postgres-secrets
+            items:
+              - key: postgres-secrets.properties
+                path: postgres-secrets.properties
+      - op: replace
+        path: /spec/template/spec/containers/0/env/0/value
+        value: "/etc/eddi/secrets/application-secrets.properties,/etc/eddi/secrets/postgres-secrets.properties"

@@ -1,0 +1,70 @@
+{
+  "manifest": {
+    "templateId": "editorial-team",
+    "title": "Editorial Team",
+    "description": "A writer drafts a shared artifact, editors critique and the writer revises, dissents are recorded against the final synthesis, and the deliverable lives as a versioned shared document (CAS-guarded, validator-bounded) rather than prose scattered through the transcript.",
+    "requiredRoles": [
+      { "role": "writer", "description": "Drafts and revises the shared document" },
+      { "role": "editor1", "description": "First editor — critiques each draft" },
+      { "role": "editor2", "description": "Second editor — critiques each draft" },
+      { "role": "moderator", "description": "Synthesizes, quoting the final artifact" }
+    ]
+  },
+  "config": {
+    "name": "Editorial Team",
+    "description": "Peer-review authoring around a shared artifact with recorded dissents",
+    "style": "CUSTOM",
+    "moderatorAgentId": "$moderator",
+    "members": [
+      { "agentId": "$writer", "displayName": "Writer", "speakingOrder": 1, "role": "WRITER" },
+      { "agentId": "$editor1", "displayName": "Editor 1", "speakingOrder": 2, "role": "EDITOR" },
+      { "agentId": "$editor2", "displayName": "Editor 2", "speakingOrder": 3, "role": "EDITOR" }
+    ],
+    "phases": [
+      {
+        "name": "Draft",
+        "type": "OPINION",
+        "participants": "ROLE:WRITER",
+        "turnOrder": "SEQUENTIAL",
+        "contextScope": "FULL",
+        "inputTemplate": "Draft the requested document for:\n\"{question}\"\n\nCreate it as a shared artifact (createArtifact) so the editors can propose changes against a versioned copy, then summarize what you drafted.",
+        "repeats": 1
+      },
+      {
+        "name": "Editorial Review",
+        "type": "OPINION",
+        "participants": "ROLE:EDITOR",
+        "turnOrder": "SEQUENTIAL",
+        "contextScope": "FULL",
+        "inputTemplate": "Review the shared artifact for:\n\"{question}\"\n\nRead it (readArtifact), then either propose a concrete improvement (proposeArtifactUpdate, re-reading first if your version is stale) or state precisely why it is ready as-is.",
+        "repeats": 2,
+        "allowAbstention": true
+      },
+      {
+        "name": "Final Synthesis",
+        "type": "SYNTHESIS",
+        "participants": "MODERATOR",
+        "turnOrder": "SEQUENTIAL",
+        "contextScope": "FULL",
+        "repeats": 1
+      }
+    ],
+    "recordDissents": true,
+    "artifactConfig": {
+      "allowArtifactTools": true,
+      "maxArtifactsPerDiscussion": 3,
+      "validators": [
+        { "kind": "MAX_LENGTH", "spec": "50000" }
+      ]
+    },
+    "protocol": {
+      "agentTimeoutSeconds": 180,
+      "onAgentFailure": "SKIP",
+      "maxRetries": 2,
+      "onMemberUnavailable": "SKIP",
+      "maxTurns": 40,
+      "maxCostPerDiscussion": 5.0,
+      "onCostExceeded": "SYNTHESIZE_NOW"
+    }
+  }
+}

@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.tenancy.model;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
+
 import java.time.Instant;
 import java.time.YearMonth;
 import java.time.ZoneOffset;
@@ -34,7 +36,12 @@ public record UsageSnapshot(
         double monthlyCostUsd,
         Instant minuteWindowStart,
         Instant dayStart,
-        YearMonth costMonth) {
+        // Without an explicit shape, Jackson's YearMonthSerializer takes the
+        // useTimestamp branch under quarkus.jackson.write-dates-as-timestamps=true
+        // and emits the ARRAY [2026,7] rather than "2026-07". Both quota stores
+        // already persist this as an ISO string (YearMonth.toString() /
+        // YearMonth.parse), so only the REST representation disagreed.
+        @JsonFormat(shape = JsonFormat.Shape.STRING) YearMonth costMonth) {
 
     /**
      * Creates an empty snapshot (zero counters) for an unknown tenant.

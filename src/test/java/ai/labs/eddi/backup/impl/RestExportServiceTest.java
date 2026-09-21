@@ -4,7 +4,9 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.backup.IZipArchive;
+import ai.labs.eddi.configs.connections.IConnectionStore;
 import ai.labs.eddi.backup.model.ExportPreview;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
@@ -37,6 +39,7 @@ import java.io.IOException;
 import java.lang.reflect.Method;
 import java.net.URI;
 import java.util.*;
+import java.util.ArrayList;
 import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -83,7 +86,7 @@ class RestExportServiceTest {
                 dictionaryStore, behaviorStore, httpCallsStore, llmStore,
                 propertySetterStore, outputStore, mcpCallsStore, ragStore,
                 snippetStore, jsonSerialization, zipArchive, secretScrubber,
-                scheduleStore);
+                scheduleStore, mock(ResourceAccessGuard.class), mock(BackupMetrics.class), mock(IConnectionStore.class));
     }
 
     // ─── getAgentZipArchive security ─────────────────────────────
@@ -152,35 +155,35 @@ class RestExportServiceTest {
         @DisplayName("should reject agentId with path traversal")
         void pathTraversalInAgentId() {
             assertThrows(BadRequestException.class,
-                    () -> exportService.exportAgent("../../../etc/passwd", 1, null));
+                    () -> exportService.exportAgent("../../../etc/passwd", 1, null, null, null));
         }
 
         @Test
         @DisplayName("should reject agentId with forward slash")
         void slashInAgentId() {
             assertThrows(BadRequestException.class,
-                    () -> exportService.exportAgent("agents/evil", 1, null));
+                    () -> exportService.exportAgent("agents/evil", 1, null, null, null));
         }
 
         @Test
         @DisplayName("should reject agentId with backslash")
         void backslashInAgentId() {
             assertThrows(BadRequestException.class,
-                    () -> exportService.exportAgent("agents\\evil", 1, null));
+                    () -> exportService.exportAgent("agents\\evil", 1, null, null, null));
         }
 
         @Test
         @DisplayName("should reject empty agentId")
         void emptyAgentId() {
             assertThrows(BadRequestException.class,
-                    () -> exportService.exportAgent("", 1, null));
+                    () -> exportService.exportAgent("", 1, null, null, null));
         }
 
         @Test
         @DisplayName("should reject null agentId")
         void nullAgentId() {
             assertThrows(BadRequestException.class,
-                    () -> exportService.exportAgent(null, 1, null));
+                    () -> exportService.exportAgent(null, 1, null, null, null));
         }
     }
 
@@ -209,7 +212,7 @@ class RestExportServiceTest {
             when(secretScrubber.scrubJson(anyString())).thenAnswer(inv -> inv.getArgument(0));
             when(scheduleStore.readSchedulesByAgentId(agentId)).thenReturn(List.of());
 
-            Response response = exportService.exportAgent(agentId, agentVersion, null);
+            Response response = exportService.exportAgent(agentId, agentVersion, null, null, null);
 
             assertNotNull(response);
             assertEquals(200, response.getStatus());
@@ -225,7 +228,7 @@ class RestExportServiceTest {
                     .thenThrow(new IResourceStore.ResourceNotFoundException("Not found"));
 
             assertThrows(IResourceStore.ResourceNotFoundException.class,
-                    () -> exportService.exportAgent("nonexistent", 1, null));
+                    () -> exportService.exportAgent("nonexistent", 1, null, null, null));
         }
     }
 
@@ -495,14 +498,17 @@ class RestExportServiceTest {
         }
 
         @Test
-        @DisplayName("named agent includes URL-encoded name prefix")
+        @DisplayName("named agent includes a slugified name prefix the download endpoint accepts")
         void namedAgent() throws Exception {
             var desc = new DocumentDescriptor();
             desc.setName("My Agent");
             String filename = invokePrepareZipFilename(desc, "abc123", 2);
             assertTrue(filename.contains("abc123"));
             assertTrue(filename.contains("-2.zip"));
-            assertTrue(filename.contains("My+Agent-") || filename.contains("My%20Agent-"));
+            assertTrue(filename.startsWith("My-Agent-"), filename);
+            // The filename doubles as the download URL's path segment, so it has to
+            // survive sanitizeFileName's character class.
+            assertTrue(filename.matches("^[a-zA-Z0-9_.+\\-]+$"), filename);
         }
 
         @Test
@@ -600,7 +606,7 @@ class RestExportServiceTest {
         void multipleSnippets() {
             String config = "{{snippets.intro}} and {{snippets.outro}} and {snippets.middle_part}";
             var matcher = SNIPPET_REF_PATTERN.matcher(config);
-            var names = new java.util.ArrayList<String>();
+            var names = new ArrayList<String>();
             while (matcher.find()) {
                 names.add(matcher.group(1));
             }

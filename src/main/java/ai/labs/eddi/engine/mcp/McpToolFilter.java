@@ -19,7 +19,7 @@ import java.util.Set;
  * Agent tools (calculator, datetime, websearch, etc.), which are meant ONLY for
  * internal Agent workflow use — not for external MCP clients.
  * <p>
- * This whitelist ensures only the 33 intended MCP tools are visible.
+ * This whitelist ensures only the intended MCP tools are visible.
  *
  * @author ginccc
  */
@@ -29,8 +29,16 @@ public class McpToolFilter implements ToolFilter {
     /**
      * Whitelist of MCP tool names that should be exposed to external clients. All
      * other tools (built-in langchain4j Agent tools) are hidden.
+     * <p>
+     * <b>A tool missing from this set is invisible, silently.</b>
+     * {@code ToolFilter} sees only a name, so a newly added {@code @Tool} that
+     * nobody adds here still compiles, still passes its own unit test (which calls
+     * the method directly), and simply never appears in {@code tools/list}.
+     * {@code McpToolFilterCoverageTest} pins both directions — every {@code @Tool}
+     * is listed, and every listed name exists — so that failure mode cannot recur.
+     * Package-visible for exactly that test.
      */
-    private static final Set<String> MCP_TOOLS = Set.of(
+    static final Set<String> MCP_TOOLS = Set.of(
             // Conversation tools
             "list_agents", "list_agent_configs", "create_conversation", "talk_to_agent", "chat_with_agent", "read_conversation",
             "read_conversation_log", "list_conversations", "get_agent",
@@ -49,7 +57,30 @@ public class McpToolFilter implements ToolFilter {
             "list_agent_triggers", "create_agent_trigger", "update_agent_trigger", "delete_agent_trigger",
             // Group Conversations (Phase 10)
             "describe_discussion_styles", "list_groups", "read_group", "create_group", "update_group", "delete_group", "discuss_with_group",
-            "read_group_conversation", "list_group_conversations");
+            "add_team_task", "list_team_backlog",
+            "list_group_templates", "create_group_from_template",
+            "read_group_conversation", "list_group_conversations", "start_group_discussion", "delete_group_conversation",
+            // Group Conversation Follow-Ups
+            "followup_with_member", "continue_group_discussion", "close_group_conversation",
+            // Schedule Management
+            "create_schedule", "list_schedules", "read_schedule", "delete_schedule", "fire_schedule_now", "retry_failed_schedule",
+            // Channel Integrations
+            "list_channel_integrations", "read_channel_integration", "create_channel_integration", "update_channel_integration",
+            "delete_channel_integration",
+            // HITL approval surface (McpHitlTools) — mirrors the REST HITL endpoints
+            "list_pending_approvals", "get_approval_status", "resume_conversation", "cancel_conversation",
+            "list_group_pending_approvals", "list_all_group_pending_approvals", "get_group_approval_status",
+            "approve_group_phase", "cancel_group_discussion", "submit_group_human_input",
+            // Persistent user memory (McpMemoryTools) — role-guarded (viewer read / admin
+            // write) + per-user ownership
+            "list_user_memories", "get_visible_memories", "search_user_memories", "get_memory_by_key",
+            "upsert_user_memory", "delete_user_memory", "delete_all_user_memories", "count_user_memories",
+            // GDPR/CCPA data-subject operations (McpGdprTools) — admin-only
+            "delete_user_data", "export_user_data",
+            // EDDI's own documentation (McpDocTools) — the tool counterpart to the
+            // eddi://docs/* resources, for agentic clients that consume tools/list
+            // and never call resources/read
+            "list_docs", "read_docs");
 
     @Override
     public boolean test(ToolInfo toolInfo, FilterContext filterContext) {
