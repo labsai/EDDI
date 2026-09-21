@@ -44,15 +44,30 @@ committed.
 
 ### Decisions
 
-- **The NATS fix goes at the log call, not in `sanitizeSubject`.** `subject` is `SUBJECT_PREFIX +
-  sanitizeSubject(conversationId)`, and `sanitizeSubject` is not a log sanitizer despite the name: it
-  replaces `.` and space because a NATS subject token may not contain them, and leaves CR and LF —
-  which a subject token may not contain either — untouched. Widening it would change the subject
-  namespace every deployment already publishes and consumes under, for a log bug. It is also what the
-  file already does one method down: `routeToDeadLetter` logs `sanitize(deadLetterSubject)`.
-  `NatsConversationCoordinatorLogInjectionTest` pins that premise with a second test asserting
-  `sanitizeSubject` still lets a CR/LF through — if anyone ever widens it, that test fails and the
-  redundancy is a decision rather than a drift.
+- **The NATS fix goes at the log call — and, after review, in `sanitizeSubject` as well.** `subject`
+  is `SUBJECT_PREFIX + sanitizeSubject(conversationId)`, and `sanitizeSubject` is not a log sanitizer
+  despite the name: it replaces `.` and space because a NATS subject token may not contain them. The
+  log call is fixed the way the file already does it one method down, where `routeToDeadLetter` logs
+  `sanitize(deadLetterSubject)`.
+
+  This entry first argued CR and LF should be left in `sanitizeSubject`, because widening it would
+  move the subject namespace every deployment already publishes and consumes under. **That was
+  wrong, and the review caught it.** The argument holds for `.` and space, which remap ids that
+  work. It does not hold for CR, LF and tab: `Validator.validateSubjectTerm` in the NATS client
+  refuses a subject containing any of them, so an id carrying one produced a subject the broker
+  never accepted — there was no namespace to move, and every id that works maps where it always did.
+
+  Worse, that rejection is an `IllegalArgumentException`, which is *unchecked*. The publish is
+  wrapped in `catch (IOException | JetStreamApiException)`, whose whole purpose is to degrade to
+  local execution when NATS is unavailable; an invalid subject escapes it instead. Not reachable
+  today — `ConversationService.say` loads the conversation from the store before it ever reaches
+  the coordinator, so an id that is not store-issued fails first — but it cost nothing to close.
+
+  Both sanitizers stay. They answer different questions — what the broker will accept, and what
+  cannot end a log record — and several lines in the file log the conversation id directly, building
+  no subject to be cleaned. The test that pinned "CR/LF survives `sanitizeSubject`" is inverted: it
+  now asserts the method produces a token the broker accepts, and a second test pins that the publish
+  line still logs through `sanitize`.
 - **Behavioural tests rather than entries in `SanitizedLogSinksTest`.** That source guard exists for
   the ~38 group-conversation sinks that need a whole discussion to reach, where building one to
   observe a single WARN tests the harness more than the fix. All four sinks here are reachable from a
@@ -79,5 +94,5 @@ flagged them and this branch is scoped to what it did flag: the HITL-cleanup WAR
 `populateDataToDescriptor`'s "Memory snapshot not found" WARN quotes `resourceId.getId()` raw.
 
 ```decision-log
-| 2026-09-21 | Fix CWE-117 in `NatsConversationCoordinator` at the log call rather than by widening `sanitizeSubject` | `sanitizeSubject` builds a valid NATS subject token (`.` and space only); it is not a log sanitizer, and CR/LF reach the log through it | Widen `sanitizeSubject` to strip CR/LF — changes the subject namespace every deployment already publishes and consumes under, to fix a log bug |
+| 2026-09-21 | Fix CWE-117 in `NatsConversationCoordinator` at the log call, and also widen `sanitizeSubject` to strip CR, LF and tab | The log call and the subject token answer different questions, so both are fixed. Widening was first rejected as moving the subject namespace; that was wrong — NATS refuses a subject containing those characters outright, so nothing was published under one, and the rejection is an unchecked `IllegalArgumentException` that escapes the publish's `IOException \| JetStreamApiException` handler | Leave CR/LF in `sanitizeSubject` and rely on the log call alone — keeps a latent unchecked-exception path for no gain |
 ```

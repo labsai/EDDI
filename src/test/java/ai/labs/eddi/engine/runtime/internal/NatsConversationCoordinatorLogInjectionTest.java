@@ -42,11 +42,14 @@ import static org.mockito.Mockito.when;
  * </p>
  *
  * <p>
- * The fix is at the log call rather than inside {@code sanitizeSubject},
- * because widening that method would change the subject namespace every
- * deployment already publishes and consumes under. It is also what the file
- * already does: {@code routeToDeadLetter} logs
- * {@code sanitize(deadLetterSubject)} for exactly this reason.
+ * The fix is at the log call, which is what the file already does:
+ * {@code routeToDeadLetter} logs {@code sanitize(deadLetterSubject)} for
+ * exactly this reason. {@code sanitizeSubject} was widened as well, in review
+ * -- see {@link #sanitizeSubjectProducesAValidNatsToken()} -- so the two now
+ * overlap on this line. They are kept apart deliberately: one answers what the
+ * broker will accept, the other what cannot end a log record, and several lines
+ * in the file log the conversation id directly, building no subject to be
+ * cleaned.
  * </p>
  */
 @DisplayName("NatsConversationCoordinator log injection (CWE-117)")
@@ -105,21 +108,49 @@ class NatsConversationCoordinatorLogInjectionTest {
     }
 
     /**
-     * Pins the premise of the test above, so the reason the fix sits at the log
-     * call cannot quietly stop being true.
+     * The subject this method builds has to be one the broker will accept.
+     *
+     * <p>
+     * It previously left CR, LF and tab in place. The NATS client rejects a subject
+     * containing any of them with an {@link IllegalArgumentException}, which is
+     * unchecked and so escapes the {@code IOException |
+     * JetStreamApiException} handler around the publish instead of degrading to
+     * local execution. Widening the method cost nothing: an id carrying one of
+     * those characters produced a subject the broker refused, so no deployment was
+     * publishing or consuming under it, and every id that works maps where it
+     * always did.
+     * </p>
      */
     @Test
-    @DisplayName("sanitizeSubject is a NATS token rule, not a log sanitizer")
-    void sanitizeSubjectDoesNotRemoveRecordBoundaries() {
-        // Pins the premise of the test above: if sanitizeSubject is ever widened to
-        // strip CR/LF, this fails and whoever widened it can decide, deliberately,
-        // whether the sanitize(...) at the log call is now redundant — rather than
-        // the two silently drifting apart.
+    @DisplayName("sanitizeSubject produces a token the broker will accept")
+    void sanitizeSubjectProducesAValidNatsToken() {
         String subject = coordinator.sanitizeSubject("conv-1" + LogCaptureSupport.FORGED_RECORD);
 
-        assertTrue(subject.indexOf('\n') >= 0,
-                "sanitizeSubject is documented as replacing dots and spaces only: " + subject);
+        // The four characters NATS's own Validator.validateSubjectTerm refuses.
+        for (char forbidden : new char[]{' ', '\t', '\r', '\n'}) {
+            assertTrue(subject.indexOf(forbidden) < 0,
+                    "a NATS subject token may not contain " + (int) forbidden + ": " + subject);
+        }
         assertFalse(subject.contains("."),
-                "sanitizeSubject still has to make a valid NATS token: " + subject);
+                "sanitizeSubject still has to make a single NATS token: " + subject);
+        // Sanitized, not dropped: an operator still has to be able to tell which
+        // conversation the subject belongs to.
+        assertTrue(subject.startsWith("conv-1"), subject);
+    }
+
+    /**
+     * The log call keeps its own {@code sanitize(...)} even though the subject is
+     * now clean, because the file logs the raw conversation id elsewhere. This pins
+     * that the two are not the same guarantee.
+     */
+    @Test
+    @DisplayName("a valid subject is still logged through sanitize, not raw")
+    void publishLineStillSanitizesWhatItLogs() {
+        String forgedConversationId = "conv-1" + LogCaptureSupport.FORGED_RECORD;
+
+        List<String> logged = captureLogsOf(NatsConversationCoordinator.class,
+                () -> coordinator.submitInOrder(forgedConversationId, () -> null));
+
+        assertNoForgedRecordBoundary(logged, "the NATS publish line of NatsConversationCoordinator");
     }
 }
