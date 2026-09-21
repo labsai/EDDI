@@ -6,8 +6,10 @@ package ai.labs.eddi.modules.output.model.types;
 
 import ai.labs.eddi.modules.output.model.OutputItem;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.UnaryOperator;
 
 public class ButtonOutputItem extends OutputItem {
     private String buttonType;
@@ -28,6 +30,20 @@ public class ButtonOutputItem extends OutputItem {
     @Override
     protected void initType() {
         super.type = "button";
+    }
+
+    @Override
+    protected OutputItem templatedCopy(UnaryOperator<String> templating) {
+        return new ButtonOutputItem(buttonType, templating.apply(label), templatedOnPress(templating));
+    }
+
+    private Map<String, Object> templatedOnPress(UnaryOperator<String> templating) {
+        if (onPress == null) {
+            return null;
+        }
+        var templated = new LinkedHashMap<String, Object>();
+        onPress.forEach((key, value) -> templated.put(key, value instanceof String stringValue ? templating.apply(stringValue) : value));
+        return templated;
     }
 
     @Override

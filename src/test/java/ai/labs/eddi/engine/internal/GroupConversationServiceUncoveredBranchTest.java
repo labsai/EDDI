@@ -3,9 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.engine.internal;
+import ai.labs.eddi.configs.agents.AgentSigningService;
+import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
 
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
+import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ContextScope;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
@@ -47,6 +52,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import io.micrometer.core.instrument.Timer;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Counter;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -91,17 +99,17 @@ class GroupConversationServiceUncoveredBranchTest {
     @Mock
     private IJsonSerialization jsonSerialization;
     @Mock
-    private ai.labs.eddi.configs.agents.AgentSigningService agentSigningService;
+    private AgentSigningService agentSigningService;
     @Mock
-    private ai.labs.eddi.configs.agents.IAgentStore agentStore;
+    private IAgentStore agentStore;
     @Mock
-    private ai.labs.eddi.configs.agents.crypto.NonceCacheService nonceCacheService;
+    private NonceCacheService nonceCacheService;
     @Mock
-    private io.micrometer.core.instrument.MeterRegistry meterRegistry;
+    private MeterRegistry meterRegistry;
     @Mock
-    private io.micrometer.core.instrument.Timer timer;
+    private Timer timer;
     @Mock
-    private io.micrometer.core.instrument.Counter counter;
+    private Counter counter;
 
     private GroupConversationService service;
 
@@ -118,7 +126,7 @@ class GroupConversationServiceUncoveredBranchTest {
                 groupStore, conversationStore, conversationService,
                 agentFactory, templatingEngine, jsonSerialization,
                 meterRegistry, agentSigningService, agentStore,
-                nonceCacheService, "default", 3);
+                org.mockito.Mockito.mock(IScheduleStore.class), nonceCacheService, null, new CallerIdentityContext(null, null), "default", 3);
     }
 
     // === Helpers ===
@@ -318,13 +326,15 @@ class GroupConversationServiceUncoveredBranchTest {
     class ExtractResponseMetadata {
 
         @Test
-        @DisplayName("no output or reply keys returns null")
+        @DisplayName("no output or reply keys returns empty string")
         void metadataOnly() throws Exception {
             var output = new ConversationOutput();
             output.put("actions", List.of("greet"));
             output.put("input", "hello");
             var snapshot = createSnapshot(output);
-            assertNull(invokeExtractResponse(snapshot));
+            // ConversationOutputExtractor returns null for metadata-only;
+            // GCS wrapper converts null → "" for backward compat
+            assertEquals("", invokeExtractResponse(snapshot));
         }
 
         @Test
@@ -616,18 +626,20 @@ class GroupConversationServiceUncoveredBranchTest {
         }
 
         @Test
-        @DisplayName("MODERATOR with null moderatorAgentId falls back to ALL")
+        @DisplayName("MODERATOR with null moderatorAgentId picks one deterministic synthesizer")
         void moderatorNull() throws Exception {
             var phase = new DiscussionPhase("Synth", PhaseType.SYNTHESIS, "MODERATOR", TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1);
             var allMembers = List.of(
                     new GroupMember("a1", "Agent 1", 0, null),
                     new GroupMember("a2", "Agent 2", 1, null));
             var result = invokeResolveParticipants(phase, allMembers, null);
-            assertEquals(2, result.size());
+            // I3(a): one deterministic synthesizer, not every member.
+            assertEquals(1, result.size());
+            assertEquals("a1", result.getFirst().agentId());
         }
 
         @Test
-        @DisplayName("MODERATOR with blank moderatorAgentId falls back to ALL")
+        @DisplayName("MODERATOR with blank moderatorAgentId picks one deterministic synthesizer")
         void moderatorBlank() throws Exception {
             var phase = new DiscussionPhase("Synth", PhaseType.SYNTHESIS, "MODERATOR", TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1);
             var allMembers = List.of(new GroupMember("a1", "Agent 1", 0, null));

@@ -37,7 +37,7 @@ class SchedulePollerServiceBranchTest {
         fireExecutor = mock(ScheduleFireExecutor.class);
         poller = new SchedulePollerService(scheduleStore, fireExecutor, new SimpleMeterRegistry(),
                 true, Duration.ofMinutes(5), 3, 15, 4,
-                Optional.of("test-instance"), "UTC");
+                Optional.of("test-instance"), "UTC", Duration.ofDays(90));
         poller.init();
     }
 
@@ -50,7 +50,7 @@ class SchedulePollerServiceBranchTest {
         void blankConfiguredId() {
             var p = new SchedulePollerService(scheduleStore, fireExecutor, new SimpleMeterRegistry(),
                     true, Duration.ofMinutes(5), 3, 15, 4,
-                    Optional.of("   "), "UTC");
+                    Optional.of("   "), "UTC", Duration.ofDays(90));
             p.init();
             assertNotNull(p.getInstanceId());
             assertFalse(p.getInstanceId().isBlank());
@@ -61,7 +61,7 @@ class SchedulePollerServiceBranchTest {
         void emptyOptional() {
             var p = new SchedulePollerService(scheduleStore, fireExecutor, new SimpleMeterRegistry(),
                     true, Duration.ofMinutes(5), 3, 15, 4,
-                    Optional.empty(), "UTC");
+                    Optional.empty(), "UTC", Duration.ofDays(90));
             p.init();
             assertNotNull(p.getInstanceId());
         }
@@ -91,12 +91,12 @@ class SchedulePollerServiceBranchTest {
             var schedule = makeCronSchedule("sched-1", "0 9 * * *");
             schedule.setFailCount(0);
             when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
-            when(scheduleStore.tryClaim(any(), any(), any())).thenReturn(true);
+            when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
             when(fireExecutor.fire(any(), any(), anyInt())).thenThrow(new RuntimeException("fire exploded"));
 
             poller.pollDueSchedules();
 
-            verify(scheduleStore).markFailed(eq("sched-1"), any());
+            verify(scheduleStore).markFailed(eq("sched-1"), any(), any());
         }
 
         @Test
@@ -105,9 +105,9 @@ class SchedulePollerServiceBranchTest {
             var schedule = makeCronSchedule("sched-1", "0 9 * * *");
             schedule.setFailCount(0);
             when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
-            when(scheduleStore.tryClaim(any(), any(), any())).thenReturn(true);
+            when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
             when(fireExecutor.fire(any(), any(), anyInt())).thenThrow(new RuntimeException("fire error"));
-            doThrow(new RuntimeException("mark failed error")).when(scheduleStore).markFailed(any(), any());
+            doThrow(new RuntimeException("mark failed error")).when(scheduleStore).markFailed(any(), any(), any());
 
             assertDoesNotThrow(() -> poller.pollDueSchedules());
         }
@@ -122,10 +122,10 @@ class SchedulePollerServiceBranchTest {
         void markCompletedException() throws Exception {
             var schedule = makeCronSchedule("sched-1", "0 9 * * *");
             when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
-            when(scheduleStore.tryClaim(any(), any(), any())).thenReturn(true);
+            when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
             when(fireExecutor.fire(any(), any(), anyInt()))
                     .thenReturn(makeFireLog("sched-1", FireStatus.COMPLETED.name()));
-            doThrow(new RuntimeException("mark error")).when(scheduleStore).markCompleted(any(), any());
+            doThrow(new RuntimeException("mark error")).when(scheduleStore).markCompleted(any(), any(), any());
 
             assertDoesNotThrow(() -> poller.pollDueSchedules());
         }
@@ -141,13 +141,13 @@ class SchedulePollerServiceBranchTest {
             var schedule = makeCronSchedule("sched-1", "0 9 * * *");
             schedule.setTriggerType(null);
             when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
-            when(scheduleStore.tryClaim(any(), any(), any())).thenReturn(true);
+            when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
             when(fireExecutor.fire(any(), any(), anyInt()))
                     .thenReturn(makeFireLog("sched-1", FireStatus.COMPLETED.name()));
 
             poller.pollDueSchedules();
 
-            verify(scheduleStore).markCompleted(eq("sched-1"), any());
+            verify(scheduleStore).markCompleted(eq("sched-1"), any(), any());
         }
 
         @Test
@@ -155,13 +155,13 @@ class SchedulePollerServiceBranchTest {
         void cronNullExpression() throws Exception {
             var schedule = makeCronSchedule("sched-1", null);
             when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
-            when(scheduleStore.tryClaim(any(), any(), any())).thenReturn(true);
+            when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
             when(fireExecutor.fire(any(), any(), anyInt()))
                     .thenReturn(makeFireLog("sched-1", FireStatus.COMPLETED.name()));
 
             poller.pollDueSchedules();
 
-            verify(scheduleStore).markCompleted(eq("sched-1"), isNull());
+            verify(scheduleStore).markCompleted(eq("sched-1"), any(), isNull());
         }
 
         @Test
@@ -169,13 +169,13 @@ class SchedulePollerServiceBranchTest {
         void cronBlankExpression() throws Exception {
             var schedule = makeCronSchedule("sched-1", "   ");
             when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
-            when(scheduleStore.tryClaim(any(), any(), any())).thenReturn(true);
+            when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
             when(fireExecutor.fire(any(), any(), anyInt()))
                     .thenReturn(makeFireLog("sched-1", FireStatus.COMPLETED.name()));
 
             poller.pollDueSchedules();
 
-            verify(scheduleStore).markCompleted(eq("sched-1"), isNull());
+            verify(scheduleStore).markCompleted(eq("sched-1"), any(), isNull());
         }
 
         @Test
@@ -184,13 +184,13 @@ class SchedulePollerServiceBranchTest {
             var schedule = makeHeartbeatSchedule("hb-1", null);
             schedule.setCronExpression(null);
             when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
-            when(scheduleStore.tryClaim(any(), any(), any())).thenReturn(true);
+            when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
             when(fireExecutor.fire(any(), any(), anyInt()))
                     .thenReturn(makeFireLog("hb-1", FireStatus.COMPLETED.name()));
 
             poller.pollDueSchedules();
 
-            verify(scheduleStore).markCompleted(eq("hb-1"), isNull());
+            verify(scheduleStore).markCompleted(eq("hb-1"), any(), isNull());
         }
 
         @Test
@@ -199,14 +199,14 @@ class SchedulePollerServiceBranchTest {
             var schedule = makeHeartbeatSchedule("hb-1", 0L);
             schedule.setCronExpression("0 9 * * *");
             when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
-            when(scheduleStore.tryClaim(any(), any(), any())).thenReturn(true);
+            when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
             when(fireExecutor.fire(any(), any(), anyInt()))
                     .thenReturn(makeFireLog("hb-1", FireStatus.COMPLETED.name()));
 
             poller.pollDueSchedules();
 
             // nextFire should be non-null (from cron parser)
-            verify(scheduleStore).markCompleted(eq("hb-1"), argThat(next -> next != null));
+            verify(scheduleStore).markCompleted(eq("hb-1"), any(), argThat(next -> next != null));
         }
 
         @Test
@@ -215,13 +215,13 @@ class SchedulePollerServiceBranchTest {
             var schedule = makeHeartbeatSchedule("hb-1", -5L);
             schedule.setCronExpression("  ");
             when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
-            when(scheduleStore.tryClaim(any(), any(), any())).thenReturn(true);
+            when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
             when(fireExecutor.fire(any(), any(), anyInt()))
                     .thenReturn(makeFireLog("hb-1", FireStatus.COMPLETED.name()));
 
             poller.pollDueSchedules();
 
-            verify(scheduleStore).markCompleted(eq("hb-1"), isNull());
+            verify(scheduleStore).markCompleted(eq("hb-1"), any(), isNull());
         }
     }
 
@@ -235,7 +235,7 @@ class SchedulePollerServiceBranchTest {
             var schedule = makeCronSchedule("sched-1", "0 9 * * *");
             schedule.setTimeZone("Invalid/Zone");
             when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
-            when(scheduleStore.tryClaim(any(), any(), any())).thenReturn(true);
+            when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
             when(fireExecutor.fire(any(), any(), anyInt()))
                     .thenReturn(makeFireLog("sched-1", FireStatus.COMPLETED.name()));
 
@@ -248,7 +248,7 @@ class SchedulePollerServiceBranchTest {
             var schedule = makeCronSchedule("sched-1", "0 9 * * *");
             schedule.setTimeZone(null);
             when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
-            when(scheduleStore.tryClaim(any(), any(), any())).thenReturn(true);
+            when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
             when(fireExecutor.fire(any(), any(), anyInt()))
                     .thenReturn(makeFireLog("sched-1", FireStatus.COMPLETED.name()));
 
@@ -261,7 +261,7 @@ class SchedulePollerServiceBranchTest {
             var schedule = makeCronSchedule("sched-1", "0 9 * * *");
             schedule.setTimeZone("   ");
             when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
-            when(scheduleStore.tryClaim(any(), any(), any())).thenReturn(true);
+            when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
             when(fireExecutor.fire(any(), any(), anyInt()))
                     .thenReturn(makeFireLog("sched-1", FireStatus.COMPLETED.name()));
 
@@ -279,10 +279,10 @@ class SchedulePollerServiceBranchTest {
             var schedule = makeCronSchedule("sched-1", "0 9 * * *");
             schedule.setFailCount(0);
             when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
-            when(scheduleStore.tryClaim(any(), any(), any())).thenReturn(true);
+            when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
             when(fireExecutor.fire(any(), any(), anyInt()))
                     .thenReturn(makeFireLog("sched-1", FireStatus.FAILED.name()));
-            doThrow(new RuntimeException("mark error")).when(scheduleStore).markFailed(any(), any());
+            doThrow(new RuntimeException("mark error")).when(scheduleStore).markFailed(any(), any(), any());
 
             assertDoesNotThrow(() -> poller.pollDueSchedules());
         }
@@ -293,14 +293,14 @@ class SchedulePollerServiceBranchTest {
             var schedule = makeCronSchedule("sched-1", "0 9 * * *");
             schedule.setFailCount(2); // maxRetries=3, newFailCount=3 → dead-letter
             when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
-            when(scheduleStore.tryClaim(any(), any(), any())).thenReturn(true);
+            when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
             when(fireExecutor.fire(any(), any(), anyInt()))
                     .thenReturn(makeFireLog("sched-1", FireStatus.FAILED.name()));
 
             poller.pollDueSchedules();
 
-            verify(scheduleStore).markDeadLettered("sched-1");
-            verify(scheduleStore, never()).markFailed(any(), any());
+            verify(scheduleStore).markDeadLettered(eq("sched-1"), any());
+            verify(scheduleStore, never()).markFailed(any(), any(), any());
         }
 
         @Test
@@ -309,14 +309,14 @@ class SchedulePollerServiceBranchTest {
             var schedule = makeCronSchedule("sched-1", "0 9 * * *");
             schedule.setFailCount(1); // newFailCount=2 < 3
             when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
-            when(scheduleStore.tryClaim(any(), any(), any())).thenReturn(true);
+            when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
             when(fireExecutor.fire(any(), any(), anyInt()))
                     .thenReturn(makeFireLog("sched-1", FireStatus.FAILED.name()));
 
             poller.pollDueSchedules();
 
-            verify(scheduleStore).markFailed(eq("sched-1"), any());
-            verify(scheduleStore, never()).markDeadLettered(any());
+            verify(scheduleStore).markFailed(eq("sched-1"), any(), any());
+            verify(scheduleStore, never()).markDeadLettered(any(), any());
         }
     }
 

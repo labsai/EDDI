@@ -4,10 +4,14 @@
  */
 package ai.labs.eddi.integrations.slack;
 
+import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionRecord;
+import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionType;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
+import ai.labs.eddi.utils.LogSanitizer;
 import org.jboss.logging.Logger;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -24,9 +28,8 @@ import java.util.concurrent.TimeUnit;
  * response lives in a thread reply. Peer feedback threads under the target
  * agent's message; revisions thread under the agent's own message.
  * <p>
- * Compact mode code paths remain as a safety net for potential future styles
- * but are currently unreachable ({@code EXPANDED_STYLES} contains all 5
- * styles).
+ * Compact mode code paths remain as a fallback for styles not in
+ * {@code EXPANDED_STYLES} (e.g. {@code CUSTOM}).
  *
  * @since 6.0.0
  */
@@ -40,12 +43,23 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
      * mode (single thread) is too hard to follow with multiple agents.
      */
     private static final Set<String> EXPANDED_STYLES = Set.of(
-            "ROUND_TABLE", "PEER_REVIEW", "DEVIL_ADVOCATE", "DEBATE", "DELPHI");
+            "ROUND_TABLE", "PEER_REVIEW", "DEVIL_ADVOCATE", "DEBATE", "DELPHI", "TASK_FORCE", "NEGOTIATION");
 
     private final SlackWebApiClient slackApi;
     private final String authToken;
     private final String channelId;
     private final String userThreadTs;
+
+    /** Slack channel id for HITL approval notifications, or {@code null}. */
+    private final String hitlApprovalChannel;
+    /** Comma-separated approver Slack user ids, or {@code null}. */
+    private final String hitlApproverUserIds;
+    /**
+     * Owning integration name — carried in the approval button value so a group
+     * HITL decision binds to THIS integration at the interactivity endpoint. May be
+     * {@code null} (e.g. no integration context), yielding a legacy bare value.
+     */
+    private final String integrationName;
 
     /** agentId → Slack message ts of their first contribution (for threading). */
     private final Map<String, String> agentMessageTs = new ConcurrentHashMap<>();
@@ -80,10 +94,35 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
 
     public SlackGroupDiscussionListener(SlackWebApiClient slackApi, String authToken,
             String channelId, String userThreadTs) {
+        this(slackApi, authToken, channelId, userThreadTs, null, null, null);
+    }
+
+    /**
+     * Constructor with HITL approval configuration. {@code hitlApprovalChannel} and
+     * {@code hitlApproverUserIds} are read from the integration's
+     * {@code platformConfig} — both may be {@code null} (no approval channel /
+     * fail-closed no buttons).
+     */
+    public SlackGroupDiscussionListener(SlackWebApiClient slackApi, String authToken,
+            String channelId, String userThreadTs,
+            String hitlApprovalChannel, String hitlApproverUserIds) {
+        this(slackApi, authToken, channelId, userThreadTs, hitlApprovalChannel, hitlApproverUserIds, null);
+    }
+
+    /**
+     * Constructor carrying the owning integration name (for IDOR-safe approval
+     * button values) in addition to the HITL approval configuration.
+     */
+    public SlackGroupDiscussionListener(SlackWebApiClient slackApi, String authToken,
+            String channelId, String userThreadTs,
+            String hitlApprovalChannel, String hitlApproverUserIds, String integrationName) {
         this.slackApi = slackApi;
         this.authToken = authToken;
         this.channelId = channelId;
         this.userThreadTs = userThreadTs;
+        this.hitlApprovalChannel = hitlApprovalChannel;
+        this.hitlApproverUserIds = hitlApproverUserIds;
+        this.integrationName = integrationName;
     }
 
     @Override
@@ -183,6 +222,267 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
             } else {
                 postSafe(channelId, userThreadTs, msg);
             }
+        } finally {
+            completionLatch.countDown();
+        }
+    }
+
+    @Override
+    public void onTaskPlanCreated(GroupConversationEventSink.TaskPlanCreatedEvent event) {
+        List<GroupConversationEventSink.TaskSummary> tasks = event.tasks();
+        if (tasks == null || tasks.isEmpty()) {
+            return;
+        }
+
+        var sb = new StringBuilder();
+        sb.append(event.preConfigured()
+                ? "📝 *Task plan loaded* (pre-configured)\n"
+                : "📝 *Task plan created*\n");
+
+        for (int i = 0; i < tasks.size(); i++) {
+            var task = tasks.get(i);
+            sb.append(String.format("%d. *%s*", i + 1, task.subject()));
+            if (task.assignedTo() != null && !task.assignedTo().isBlank()) {
+                sb.append(String.format(" — assigned to _%s_", task.assignedTo()));
+            }
+            if (task.priority() > 0) {
+                sb.append(String.format(" [P%d]", task.priority()));
+            }
+            sb.append('\n');
+        }
+
+        String threadTs = expandedMode ? null : userThreadTs;
+        postSafe(channelId, threadTs, sb.toString().stripTrailing());
+    }
+
+    @Override
+    public void onTaskVerified(GroupConversationEventSink.TaskVerifiedEvent event) {
+        String emoji = event.passed() ? "✅" : "❌";
+        String status = event.passed() ? "passed" : "failed";
+
+        var sb = new StringBuilder();
+        sb.append(String.format("%s *Task %s* — %s\n", emoji, event.taskSubject(), status));
+
+        if (event.feedback() != null && !event.feedback().isBlank()) {
+            sb.append(String.format("> %s\n", event.feedback().replace("\n", "\n> ")));
+        }
+
+        String threadTs = expandedMode ? null : userThreadTs;
+        postSafe(channelId, threadTs, sb.toString().stripTrailing());
+    }
+
+    @Override
+    public void onDecisionReached(GroupConversationEventSink.DecisionReachedEvent event) {
+        var decision = event.decision();
+        // NONE means the producing feature's own parse fell back rather than
+        // leaving the record unset (see DecisionRecord's Javadoc) — that failure
+        // is the producing feature's own concern, not something to surface here.
+        if (decision == null || decision.type() == DecisionType.NONE) {
+            return;
+        }
+
+        var sb = new StringBuilder();
+        sb.append(String.format("⚖️ *Decision reached* (%s)\n", decision.type()));
+        if (decision.outcome() != null && !decision.outcome().isBlank()) {
+            sb.append(String.format("> %s\n", decision.outcome()));
+        }
+        if (decision.winner() != null && !decision.winner().isBlank()) {
+            sb.append(String.format("Winner: *%s*\n", decision.winner()));
+        }
+        appendVoteTally(sb, decision);
+        if (decision.dissents() != null && !decision.dissents().isEmpty()) {
+            sb.append(String.format("Dissents: %d\n", decision.dissents().size()));
+        }
+
+        String threadTs = expandedMode ? null : userThreadTs;
+        postSafe(channelId, threadTs, sb.toString().stripTrailing());
+    }
+
+    /**
+     * The per-option tally block for VOTE decisions (I14). Bounded and defensive:
+     * the tally map is model-shaped data that crossed serialization, so every read
+     * is instanceof-guarded rather than cast.
+     */
+    private static void appendVoteTally(StringBuilder sb, DecisionRecord decision) {
+        if (decision.type() != DecisionType.VOTE || decision.tally() == null) {
+            return;
+        }
+        Object totals = decision.tally().get("totals");
+        if (totals instanceof Map<?, ?> totalsMap && !totalsMap.isEmpty()) {
+            sb.append("Tally:\n");
+            totalsMap.entrySet().stream().limit(MAX_TALLY_LINES).forEach(entry -> sb.append(String.format("• %s — %s\n",
+                    buildPreview(String.valueOf(entry.getKey()), MAX_TALLY_OPTION_CHARS), entry.getValue())));
+            if (totalsMap.size() > MAX_TALLY_LINES) {
+                sb.append(String.format("… and %d more option(s)\n", totalsMap.size() - MAX_TALLY_LINES));
+            }
+        }
+        Object valid = decision.tally().get("validBallots");
+        Object participants = decision.tally().get("participants");
+        if (valid instanceof Number && participants instanceof Number) {
+            sb.append(String.format("Ballots: %s of %s\n", valid, participants));
+        }
+    }
+
+    /** Slack messages are skimmed, not scrolled — a ten-option tally is noise. */
+    private static final int MAX_TALLY_LINES = 6;
+
+    /**
+     * Same reasoning per line: a LAST_SYNTHESIS-derived option is whatever text
+     * followed "Option X:", which can be a paragraph — six of those could push the
+     * whole decision message past Slack's per-message limit, and postSafe would
+     * swallow the loss.
+     */
+    private static final int MAX_TALLY_OPTION_CHARS = 120;
+
+    /**
+     * I6: a HUMAN member's turn is up. Slack is notification-only in v1 — the
+     * member responds through the EDDI UI/API (free-text reply capture from Slack
+     * is a planned follow-up); this message tells them they are up and where.
+     */
+    @Override
+    public void onHumanInputRequested(GroupConversationEventSink.HumanInputRequestedEvent event) {
+        if (event == null || event.memberId() == null) {
+            return;
+        }
+        String name = event.displayName() != null && !event.displayName().isBlank()
+                ? event.displayName()
+                : event.memberId();
+        String msg = String.format("🙋 *%s* — you're up in *%s*. Respond in EDDI (conversation `%s`).",
+                escapeMrkdwnHuman(name), escapeMrkdwnHuman(event.phaseName()),
+                groupConversationId != null ? groupConversationId : "unknown");
+        String threadTs = expandedMode ? null : userThreadTs;
+        postSafe(channelId, threadTs, msg);
+        // A human pause is terminal for THIS listener instance — the discussion
+        // leg ends, and a resumed leg gets its own listener. Without the count
+        // down, SlackEventHandler blocks its full awaitCompletion timeout on
+        // every human pause (the same rule onHitlPause follows).
+        completionLatch.countDown();
+    }
+
+    /**
+     * Escapes Slack's three mrkdwn control characters — a member display name
+     * containing {@code <!channel>} must render as text, not broadcast.
+     */
+    private static String escapeMrkdwnHuman(String value) {
+        return value == null
+                ? ""
+                : value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+    }
+
+    @Override
+    public void onArtifactUpdated(GroupConversationEventSink.ArtifactUpdatedEvent event) {
+        // Degenerate payload → skip rather than posting noise, same as
+        // onDecisionReached's NONE guard.
+        if (event == null || event.name() == null) {
+            return;
+        }
+        String emoji = event.created() ? "📄" : "✏️";
+        String verb = event.created() ? "created" : "updated";
+        var sb = new StringBuilder();
+        sb.append(String.format("%s *Artifact \"%s\"* %s (v%d)", emoji, escapeMrkdwn(event.name()), verb, event.version()));
+        if (event.editorAgentId() != null && !event.editorAgentId().isBlank()) {
+            sb.append(String.format(" by %s", escapeMrkdwn(event.editorAgentId())));
+        }
+        if ("FINAL".equals(event.status())) {
+            sb.append(" — FINAL");
+        }
+
+        String threadTs = expandedMode ? null : userThreadTs;
+        postSafe(channelId, threadTs, sb.toString().stripTrailing());
+    }
+
+    /**
+     * Escapes Slack's three mrkdwn control characters. Without this, an
+     * LLM-authored artifact name (or an agent id) containing e.g.
+     * {@code <!channel>} renders as a real channel broadcast.
+     */
+    private static String escapeMrkdwn(String value) {
+        return value == null
+                ? null
+                : value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+    }
+
+    // ─── HITL (human-in-the-loop) ───
+
+    @Override
+    public void onHitlPause(GroupConversationEventSink.HitlPauseEvent event) {
+        try {
+            // In-thread notice so the discussion participants know it's blocked.
+            String reason = event.reason() != null && !event.reason().isBlank()
+                    ? "\n> " + event.reason()
+                    : "";
+            postSafe(channelId, userThreadTs, "⏸️ *Discussion awaiting approval*" + reason);
+
+            // Optional interactive approval notification with buttons. The action value
+            // carries "group:<groupConversationId>" so the interactivity handler routes
+            // it to resumeDiscussion. Fail-closed: no approver list → no buttons.
+            if (hitlApprovalChannel == null || hitlApprovalChannel.isBlank() || groupConversationId == null) {
+                return;
+            }
+            boolean includeButtons = !SlackHitlSupport.parseApproverUserIds(hitlApproverUserIds).isEmpty();
+            String phase = event.phaseName() != null ? event.phaseName() : ("phase " + event.phaseIndex());
+            // The button value carries the owning integration name so the group
+            // decision is bound to THIS integration at the interactivity endpoint.
+            String actionValue = SlackHitlSupport.buildActionValue(integrationName,
+                    SlackHitlSupport.GROUP_VALUE_PREFIX + groupConversationId);
+            var blocks = SlackHitlSupport.buildApprovalBlocks(
+                    "⏸️ Discussion awaiting approval", "Discussion", groupConversationId,
+                    phase, event.reason(), null,
+                    actionValue, includeButtons);
+            String fallback = "Group discussion " + groupConversationId + " is awaiting human approval.";
+            try {
+                slackApi.postBlocksMessage(authToken, hitlApprovalChannel, null, blocks, fallback);
+            } catch (SlackDeliveryException e) {
+                LOGGER.warnf("Failed to post group HITL approval notification for %s: %s",
+                        LogSanitizer.sanitize(groupConversationId), LogSanitizer.sanitize(e.getMessage()));
+            }
+        } finally {
+            // A HITL pause is TERMINAL for this listener's lifecycle: the discussion
+            // suspends here and any resume runs through a DIFFERENT listener instance,
+            // so this one will never receive onGroupComplete/onCancelled. Release the
+            // completion latch now — otherwise registerAgentThreadMappings() parks for
+            // the full awaitCompletion timeout on every paused expanded-mode discussion
+            // (leaking a virtual thread), and follow-up routing for the agents that
+            // already spoke stays unregistered for that whole window.
+            completionLatch.countDown();
+        }
+    }
+
+    @Override
+    public void onHitlResume(GroupConversationEventSink.HitlResumeEvent event) {
+        String verdict = event.verdict() != null ? event.verdict() : "resolved";
+        String who = event.decidedBy() != null ? " by " + event.decidedBy() : "";
+        String emoji = "APPROVED".equalsIgnoreCase(verdict)
+                ? "✅"
+                : ("REJECTED".equalsIgnoreCase(verdict) ? "⛔" : "ℹ️");
+        var sb = new StringBuilder();
+        sb.append(String.format("%s *Discussion %s*%s", emoji, verdict.toLowerCase(), who));
+        if (event.note() != null && !event.note().isBlank()) {
+            sb.append("\n> ").append(event.note());
+        }
+        postSafe(channelId, userThreadTs, sb.toString());
+    }
+
+    @Override
+    public void onMemberPauseSkipped(GroupConversationEventSink.MemberPauseSkippedEvent event) {
+        String displayName = event.displayName() != null ? event.displayName() : event.agentId();
+        String reason = event.reason() != null && !event.reason().isBlank()
+                ? " (" + event.reason() + ")"
+                : "";
+        postSafe(channelId, userThreadTs, String.format(
+                "⚠️ *%s* requested human approval mid-turn — not supported inside a group discussion; "
+                        + "its turn was skipped%s.",
+                displayName, reason));
+    }
+
+    @Override
+    public void onCancelled(GroupConversationEventSink.CancelledEvent event) {
+        try {
+            String who = event.cancelledBy() != null ? " by " + event.cancelledBy() : "";
+            String reason = event.reason() != null && !event.reason().isBlank()
+                    ? " — " + event.reason()
+                    : "";
+            postSafe(channelId, userThreadTs, "🛑 *Discussion cancelled*" + who + reason);
         } finally {
             completionLatch.countDown();
         }

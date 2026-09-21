@@ -10,6 +10,7 @@ import java.time.Instant;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * Immutable snapshot of conversation state at a specific point in time. Used
@@ -66,7 +67,7 @@ public record MemoryCheckpoint(
     public static MemoryCheckpoint create(String conversationId, int stepIndex,
                                           Map<String, Property> properties, String triggeredBy, String triggeredByClass) {
         return new MemoryCheckpoint(
-                java.util.UUID.randomUUID().toString(),
+                UUID.randomUUID().toString(),
                 conversationId,
                 null,
                 stepIndex,

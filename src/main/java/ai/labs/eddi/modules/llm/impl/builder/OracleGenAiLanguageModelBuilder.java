@@ -11,7 +11,10 @@ import jakarta.enterprise.context.ApplicationScoped;
 
 import java.io.IOException;
 import java.util.Map;
+import java.util.Set;
 
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyDouble;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyInt;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 /**
@@ -37,6 +40,11 @@ public class OracleGenAiLanguageModelBuilder implements ILanguageModelBuilder {
     private static final String DEFAULT_CONFIG_PROFILE = "DEFAULT";
 
     @Override
+    public Set<String> recognisedParameters() {
+        return Set.of(KEY_MODEL_NAME, KEY_COMPARTMENT_ID, KEY_CONFIG_PROFILE, KEY_TEMPERATURE, KEY_MAX_TOKENS);
+    }
+
+    @Override
     public ChatModel build(Map<String, String> parameters) {
         var builder = OciGenAiChatModel.builder();
 
@@ -55,12 +63,8 @@ public class OracleGenAiLanguageModelBuilder implements ILanguageModelBuilder {
         if (!isNullOrEmpty(parameters.get(KEY_COMPARTMENT_ID))) {
             builder.compartmentId(parameters.get(KEY_COMPARTMENT_ID));
         }
-        if (!isNullOrEmpty(parameters.get(KEY_TEMPERATURE))) {
-            builder.temperature(Double.parseDouble(parameters.get(KEY_TEMPERATURE)));
-        }
-        if (!isNullOrEmpty(parameters.get(KEY_MAX_TOKENS))) {
-            builder.maxTokens(Integer.parseInt(parameters.get(KEY_MAX_TOKENS)));
-        }
+        applyDouble(parameters, KEY_TEMPERATURE, builder::temperature);
+        applyInt(parameters, KEY_MAX_TOKENS, builder::maxTokens);
 
         return builder.build();
     }

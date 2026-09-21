@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.runtime.rest.interceptors;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.descriptors.model.ResourceDescriptor;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -35,13 +36,19 @@ class DocumentDescriptorFilterTest {
     private IConversationDescriptorStore conversationDescriptorStore;
     private DocumentDescriptorFilter filter;
     private UriInfo uriInfo;
+    private ResourceAccessGuard resourceAccessGuard;
 
     @BeforeEach
     void setUp() throws Exception {
         documentDescriptorStore = mock(IDocumentDescriptorStore.class);
         conversationDescriptorStore = mock(IConversationDescriptorStore.class);
         uriInfo = mock(UriInfo.class);
-        filter = new DocumentDescriptorFilter(documentDescriptorStore, conversationDescriptorStore);
+        // A guard that stamps nothing: these tests are about descriptor bookkeeping,
+        // and
+        // the ownership stamping it would otherwise apply has its own tests.
+        resourceAccessGuard = mock(ResourceAccessGuard.class);
+        when(resourceAccessGuard.stampNewDescriptor(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        filter = new DocumentDescriptorFilter(documentDescriptorStore, conversationDescriptorStore, resourceAccessGuard);
 
         // Inject UriInfo
         Field uriInfoField = DocumentDescriptorFilter.class.getDeclaredField("uriInfo");

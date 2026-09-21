@@ -12,7 +12,9 @@ import ai.labs.eddi.configs.output.IOutputStore;
 import ai.labs.eddi.configs.output.keys.IRestOutputActions;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.utils.CollectionUtilities;
 import ai.labs.eddi.utils.RestUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -35,9 +37,12 @@ public class RestOutputActions implements IRestOutputActions {
     private final IWorkflowStore workflowStore;
     private final IRuleSetStore behaviorStore;
     private final IOutputStore outputStore;
+    private final ResourceAccessGuard accessGuard;
 
     @Inject
-    public RestOutputActions(IWorkflowStore workflowStore, IRuleSetStore behaviorStore, IOutputStore outputStore) {
+    public RestOutputActions(IWorkflowStore workflowStore, IRuleSetStore behaviorStore, IOutputStore outputStore,
+            ResourceAccessGuard accessGuard) {
+        this.accessGuard = accessGuard;
         this.workflowStore = workflowStore;
         this.behaviorStore = behaviorStore;
         this.outputStore = outputStore;
@@ -46,6 +51,11 @@ public class RestOutputActions implements IRestOutputActions {
     @Override
     public List<String> readOutputActions(String workflowId, Integer workflowVersion, String filter, Integer limit) {
         List<String> retOutputKeys = new LinkedList<>();
+        // This fans out from one workflow into whichever rule sets, api calls, output
+        // sets and dictionaries it references, reading those stores directly. The
+        // workflow is the entry point the caller named, so it is what access is
+        // decided against — without this the helper reads any workflow, unguarded.
+        accessGuard.requireAccess(workflowId, AccessLevel.VIEW, "workflow");
         try {
             WorkflowConfiguration workflowConfig = workflowStore.read(workflowId, workflowVersion);
             List<IResourceStore.IResourceId> resourceIds;

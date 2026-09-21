@@ -21,6 +21,7 @@ import java.util.Date;
 import java.util.Iterator;
 import java.util.List;
 
+import com.mongodb.client.MongoCursor;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -306,7 +307,7 @@ class DatabaseLogsTest {
         when(findIterable.limit(anyInt())).thenReturn(findIterable);
         when(findIterable.skip(anyInt())).thenReturn(findIterable);
 
-        com.mongodb.client.MongoCursor<Document> cursor = mock(com.mongodb.client.MongoCursor.class);
+        MongoCursor<Document> cursor = mock(MongoCursor.class);
         Iterator<Document> iter = docs.iterator();
         when(cursor.hasNext()).thenAnswer(inv -> iter.hasNext());
         when(cursor.next()).thenAnswer(inv -> iter.next());

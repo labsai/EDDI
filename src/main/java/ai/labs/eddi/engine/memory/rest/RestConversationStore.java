@@ -6,8 +6,12 @@ package ai.labs.eddi.engine.memory.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
-import ai.labs.eddi.datastore.IResourceStore;
-import ai.labs.eddi.engine.memory.IAttachmentStorage;
+import ai.labs.eddi.datastore.IResourceStore.IResourceId;
+import ai.labs.eddi.datastore.IResourceStore.ResourceModifiedException;
+import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
+import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
+import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
@@ -18,11 +22,15 @@ import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.ConversationStatus;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.ThreadContext;
+import ai.labs.eddi.engine.security.ConversationAccessGuard;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
+import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -35,6 +43,8 @@ import java.util.LinkedList;
 import java.util.List;
 
 import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.convertSimpleConversationMemory;
+import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.redactRawPendingToolCallsForRead;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.utils.RestUtilities.extractResourceId;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
@@ -48,14 +58,47 @@ import static java.lang.String.format;
 public class RestConversationStore implements IRestConversationStore {
     public static final String DESCRIPTOR_TYPE = "ai.labs.conversation";
 
+    /**
+     * Conversation descriptors are written once and then updated in place, so they
+     * never leave version 0 — every other read in this class hard-codes it too.
+     */
+    private static final int CONVERSATION_DESCRIPTOR_VERSION = 0;
+
+    /**
+     * Upper bound on how many descriptors an owner-filtered listing will scan
+     * before giving up, so a caller who owns few/none of a large shared store
+     * cannot turn one list request into a full-collection scan. This is the single
+     * owner-scan budget in the system — the MCP {@code list_conversations} tool
+     * delegates to this endpoint rather than scanning itself. Admins /
+     * auth-disabled callers are not filtered and never reach this bound.
+     */
+    private static final int MAX_OWNER_SCAN = 500;
+
+    /**
+     * Smallest age (in days) the deployment-wide retention sweep accepts. Zero used
+     * to be legal and meant "every ended conversation, regardless of age" — one
+     * query parameter away from wiping the deployment. Values below this bound are
+     * rejected on the REST path and treated as "retention disabled" by the
+     * scheduled sweep.
+     */
+    static final int MIN_RETENTION_DAYS = 1;
+
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IConversationDescriptorStore conversationDescriptorStore;
     private final IConversationMemoryStore conversationMemoryStore;
+    private final IConversationService conversationService;
     private final IUserMemoryStore userMemoryStore;
     private final IRuntime runtime;
+    private final ConversationAccessGuard conversationAccessGuard;
     private final Integer deleteEndedConversationsOnceOlderThanDays;
     private final Integer deleteMemoriesOlderThanDays;
-    private final Instance<IAttachmentStorage> attachmentStorageInstance;
+    private final Instance<IAttachmentStore> attachmentStorageInstance;
+
+    // Field-injected per the AGENTS.md metrics pattern; the SimpleMeterRegistry
+    // default keeps it non-null in unit tests that construct this bean directly
+    // (CDI overwrites it with the real registry in production).
+    @Inject
+    MeterRegistry meterRegistry = new SimpleMeterRegistry();
 
     private static final Logger log = Logger.getLogger(RestConversationStore.class);
 
@@ -65,20 +108,24 @@ public class RestConversationStore implements IRestConversationStore {
             IDocumentDescriptorStore documentDescriptorStore,
             IConversationDescriptorStore conversationDescriptorStore,
             IConversationMemoryStore conversationMemoryStore,
+            IConversationService conversationService,
             IUserMemoryStore userMemoryStore,
             IRuntime runtime,
+            ConversationAccessGuard conversationAccessGuard,
             @ConfigProperty(name = "eddi.conversations.deleteEndedConversationsOnceOlderThanDays")
             Integer deleteEndedConversationsOnceOlderThanDays,
             @ConfigProperty(name = "eddi.usermemories.deleteOlderThanDays")
             Integer deleteMemoriesOlderThanDays,
-            Instance<IAttachmentStorage> attachmentStorageInstance) {
+            Instance<IAttachmentStore> attachmentStorageInstance) {
     // @formatter:on
 
         this.documentDescriptorStore = documentDescriptorStore;
         this.conversationDescriptorStore = conversationDescriptorStore;
         this.conversationMemoryStore = conversationMemoryStore;
+        this.conversationService = conversationService;
         this.userMemoryStore = userMemoryStore;
         this.runtime = runtime;
+        this.conversationAccessGuard = conversationAccessGuard;
         this.deleteEndedConversationsOnceOlderThanDays = deleteEndedConversationsOnceOlderThanDays;
         this.deleteMemoriesOlderThanDays = deleteMemoriesOlderThanDays;
         this.attachmentStorageInstance = attachmentStorageInstance;
@@ -99,9 +146,22 @@ public class RestConversationStore implements IRestConversationStore {
             limit = 100;
         }
 
+        // Owner-scoping: a non-admin caller may only enumerate their own
+        // conversations. The descriptor store has no owner-scoped query, so we
+        // post-filter each descriptor by its resolved owner. Admins (and any caller
+        // when authorization is disabled) see all — resolved once, up front, so the
+        // per-row check is skipped entirely on that path. The existing do-while
+        // back-fills across pages so a filtered-out row does not starve a personal
+        // list, but that back-fill is bounded by MAX_OWNER_SCAN so a caller who owns
+        // few/none of a large shared store cannot force a full-collection scan
+        // (descriptors come back most-recent-first, so a typical caller's own
+        // conversations fall well within the budget).
+        final boolean seesAllConversations = conversationAccessGuard.seesAllConversations();
+
         try {
             List<ConversationDescriptor> conversationDescriptors;
             List<ConversationDescriptor> retConversationDescriptors = new LinkedList<>();
+            int scannedDescriptors = 0;
 
             do {
                 conversationDescriptors = readConversationDescriptors(index, limit, filter);
@@ -110,6 +170,14 @@ public class RestConversationStore implements IRestConversationStore {
                 }
 
                 for (var conversationDescriptor : conversationDescriptors) {
+                    // Enforce the scan budget per-descriptor, not just per-page, so a
+                    // non-admin scan honours MAX_OWNER_SCAN exactly rather than
+                    // overrunning by up to a page (and the exhaustion metric fires at
+                    // the documented bound).
+                    if (!seesAllConversations && scannedDescriptors >= MAX_OWNER_SCAN) {
+                        break;
+                    }
+                    scannedDescriptors++;
                     try {
                         URI resourceUri = conversationDescriptor.getResource();
                         var conversationResourceId = extractResourceId(resourceUri);
@@ -118,7 +186,30 @@ public class RestConversationStore implements IRestConversationStore {
                             continue;
                         }
 
+                        // Ownership gate — split around the expensive snapshot load so a
+                        // foreign conversation is skipped WITHOUT loading its memory
+                        // document. Every conversation since v5.1.6 records its owner on
+                        // the descriptor, so decide here for the common case; only a
+                        // legacy row with no recorded owner falls through to the
+                        // post-populate re-check below (populate resolves its owner from
+                        // the snapshot). A fully unowned (null both ways) conversation
+                        // stays visible, matching OwnershipValidator.requireOwnerOrAdmin.
+                        String recordedOwner = conversationDescriptor.getUserId();
+                        boolean ownerRecorded = !isNullOrEmpty(recordedOwner);
+                        if (!seesAllConversations && ownerRecorded
+                                && !conversationAccessGuard.canAccessConversation(recordedOwner)) {
+                            continue;
+                        }
+
                         populateDataToDescriptor(conversationDescriptor, conversationResourceId);
+
+                        // Legacy safety net: the descriptor recorded no owner; populate
+                        // has now resolved it from the snapshot (pre-v5.1.6 fallback), so
+                        // re-check before returning it.
+                        if (!seesAllConversations && !ownerRecorded
+                                && !conversationAccessGuard.canAccessConversation(conversationDescriptor.getUserId())) {
+                            continue;
+                        }
 
                         // Agent filtering uses the agentResource URI (which contains
                         // the agent's ID), NOT the conversation's resource URI.
@@ -158,23 +249,35 @@ public class RestConversationStore implements IRestConversationStore {
                 } else {
                     break; // prevent integer overflow
                 }
-            } while (!conversationDescriptors.isEmpty() && retConversationDescriptors.size() < limit);
+                // Bound the owner-filtered back-fill: stop once the scan budget is spent
+                // (admins/auth-disabled are never filtered, so they page only as far as
+                // filling `limit` requires and never hit this).
+            } while (!conversationDescriptors.isEmpty() && retConversationDescriptors.size() < limit
+                    && (seesAllConversations || scannedDescriptors < MAX_OWNER_SCAN));
+
+            // Observability: a non-admin listing that stopped on the scan budget with
+            // fewer than `limit` results may have owned conversations beyond what was
+            // scanned (the List return type can't signal that truncation to the
+            // caller). Count it so a persistently-truncated user is not invisible.
+            if (!seesAllConversations && retConversationDescriptors.size() < limit && scannedDescriptors >= MAX_OWNER_SCAN) {
+                meterRegistry.counter("eddi.conversations.listing.owner_scan_exhausted").increment();
+            }
 
             return retConversationDescriptors;
 
-        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
+        } catch (ResourceStoreException | ResourceNotFoundException e) {
             throw sneakyThrow(e);
         }
     }
 
     private List<ConversationDescriptor> readConversationDescriptors(Integer index, Integer limit, String filter)
-            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+            throws ResourceStoreException, ResourceNotFoundException {
 
         return conversationDescriptorStore.readDescriptors(DESCRIPTOR_TYPE, filter, index, limit, false);
     }
 
-    private void populateDataToDescriptor(ConversationDescriptor conversationDescriptor, IResourceStore.IResourceId resourceId)
-            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+    private void populateDataToDescriptor(ConversationDescriptor conversationDescriptor, IResourceId resourceId)
+            throws ResourceStoreException, ResourceNotFoundException {
 
         try {
             var memorySnapshot = conversationMemoryStore.loadConversationMemorySnapshot(resourceId.getId());
@@ -198,7 +301,7 @@ public class RestConversationStore implements IRestConversationStore {
                 conversationDescriptor.setAgentName(documentDescriptor.getName());
             }
 
-        } catch (IResourceStore.ResourceNotFoundException e) {
+        } catch (ResourceNotFoundException e) {
             String message = "Resource referenced in descriptor does not exist (anymore) [%s, %s]. ";
             message += "Ignoring this resource.";
             log.warn(format(message, resourceId.getId(), resourceId.getVersion()));
@@ -208,10 +311,22 @@ public class RestConversationStore implements IRestConversationStore {
     @Override
     public ConversationMemorySnapshot readRawConversationLog(String conversationId) {
         checkNotNull(conversationId, "conversationId");
+        // Owner-or-admin, the same gate RestAgentEngine/RestAttachmentUpload apply.
+        // Without it any authenticated caller could read any conversation by id — the
+        // raw surface returns the full memory document, properties included.
+        conversationAccessGuard.requireConversationOwner(conversationId);
 
         try {
-            return conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
-        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
+            // Project the pending tool-call batch down to names-only before returning:
+            // this generic raw-read surface is reachable by any authenticated caller
+            // and must NOT leak the unredacted tool arguments or the frozen LLM
+            // transcript of a paused conversation — those stay behind the approver-only
+            // detail=full gate. Mirrors fix #4's confinement on the Simple surface.
+            // requireSnapshot, not the raw load: a missing conversation returned null
+            // here, which JAX-RS renders as 204 No Content — indistinguishable from a
+            // conversation that exists and happens to be empty.
+            return redactRawPendingToolCallsForRead(requireSnapshot(conversationId));
+        } catch (ResourceStoreException | ResourceNotFoundException e) {
             throw sneakyThrow(e);
         }
     }
@@ -222,34 +337,131 @@ public class RestConversationStore implements IRestConversationStore {
         checkNotNull(conversationId, "conversationId");
         checkNotNull(returnDetailed, "returnDetailed");
         checkNotNull(returnCurrentStepOnly, "returnCurrentStepOnly");
+        conversationAccessGuard.requireConversationOwner(conversationId);
 
         try {
-            return convertSimpleConversationMemory(conversationMemoryStore.loadConversationMemorySnapshot(conversationId), returnDetailed,
-                    returnCurrentStepOnly);
+            return convertSimpleConversationMemory(requireSnapshot(conversationId), returnDetailed, returnCurrentStepOnly);
 
-        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
+        } catch (ResourceStoreException | ResourceNotFoundException e) {
             throw sneakyThrow(e);
         }
     }
 
+    /**
+     * The snapshot, or a 404 — never a {@code null} for the caller to dereference.
+     *
+     * <p>
+     * {@code loadConversationMemorySnapshot} answers {@code null} for a
+     * conversation that is not there, and the read paths went straight on to call
+     * {@code getEnvironment()} on it. So a deleted or mistyped conversation id
+     * produced a {@link NullPointerException}, which reached the client as
+     * {@code 500 Internal Server Error} plus an error id — from endpoints whose own
+     * {@code @APIResponse} promised a 404, and which the troubleshooting
+     * documentation tells people to call precisely when something has already gone
+     * wrong.
+     * </p>
+     *
+     * <p>
+     * Throws the checked {@code ResourceNotFoundException} rather than
+     * {@code ConversationNotFoundException}, which {@code ConversationService}'s
+     * twin uses: both read endpoints here already declare it on
+     * {@link IRestConversationStore}, so this is the contract they publish. Both
+     * map to 404.
+     * </p>
+     */
+    private ConversationMemorySnapshot requireSnapshot(String conversationId)
+            throws ResourceStoreException, ResourceNotFoundException {
+        var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+        if (snapshot == null) {
+            throw new ResourceNotFoundException(
+                    String.format("No conversation found! (conversationId=%s)", sanitize(conversationId)));
+        }
+        return snapshot;
+    }
+
     @Override
     public void deleteConversationLog(String conversationId, Boolean deletePermanently)
-            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+            throws ResourceStoreException, ResourceNotFoundException {
         checkNotNull(conversationId, "conversationId");
+        // Deletion is irreversible, so the gate runs before anything is touched —
+        // the soft-delete path included, which still removes the conversation from
+        // every listing.
+        conversationAccessGuard.requireConversationOwner(conversationId);
 
         if (deletePermanently) {
+            // If the conversation is a live pending approval, resolve the HITL state
+            // BEFORE removing the document: endConversation disarms the armed
+            // timeout schedule (otherwise it fires later against a deleted
+            // conversation, logs "Conversation not found", and leaves a dead
+            // schedule row), clears the bookmark, writes the hitl.approval
+            // cancellation audit, and invalidates the cached AWAITING_HUMAN state
+            // (which getConversationState would otherwise keep serving for a
+            // nonexistent conversation until TTL).
+            try {
+                if (conversationMemoryStore.getConversationState(conversationId) == ConversationState.AWAITING_HUMAN) {
+                    // G4: attribute the pause-terminating end (this store has no request
+                    // principal and also runs from scheduled cleanup).
+                    conversationService.endConversation(conversationId, "system:admin-end");
+                }
+            } catch (Exception e) {
+                log.warn(format("HITL cleanup before permanent delete failed for conversation %s: %s",
+                        sanitize(conversationId), e.getMessage()));
+            }
+
             deleteAttachmentsForConversation(conversationId);
             conversationMemoryStore.deleteConversationMemorySnapshot(conversationId);
-            log.info(format("Conversation has been permanently deleted (conversationId=%s)", conversationId));
+            conversationDescriptorStore.deleteAllDescriptor(conversationId);
+            log.info(format("Conversation has been permanently deleted (conversationId=%s)", sanitize(conversationId)));
+        } else {
+            softDelete(conversationId);
         }
+    }
 
-        // DocumentDescriptorInterceptor will mark the DocumentDescriptor of this
-        // resource as deleted,
-        // regardless of whether it has been permanently deleted or not
+    /**
+     * Retires the conversation's descriptor so the conversation disappears from
+     * every listing, while its memory snapshot and attachments stay on the server.
+     *
+     * <p>
+     * This branch used to do <em>nothing at all</em>. A comment claimed a
+     * {@code DocumentDescriptorInterceptor} would mark the descriptor deleted
+     * "regardless of whether it has been permanently deleted or not", but no such
+     * interceptor exists anywhere in the code base — so {@code DELETE
+     * /conversationstore/conversations/{id}} (whose {@code deletePermanently}
+     * defaults to {@code false}) answered 204 and left the row untouched, still
+     * {@code "deleted": false} and still listed. The Manager's delete dialog
+     * describes exactly the behaviour implemented here and then reports
+     * "Conversation deleted", so the honest-looking answer was the wrong one: users
+     * saw a success toast next to a conversation that was still there.
+     * </p>
+     *
+     * <p>
+     * {@code deleteDescriptor} archives the descriptor into its history collection
+     * with {@code deleted=true} and drops the live row, which is what the
+     * {@code includeDeleted=false} listings filter on. The snapshot itself is
+     * deliberately untouched — that is the whole distinction from the permanent
+     * path, and it is what lets the retention sweep and GDPR erasure still find the
+     * data.
+     * </p>
+     */
+    private void softDelete(String conversationId) throws ResourceStoreException, ResourceNotFoundException {
+        try {
+            conversationDescriptorStore.deleteDescriptor(conversationId, CONVERSATION_DESCRIPTOR_VERSION);
+            log.info(format("Conversation has been deleted (conversationId=%s)", sanitize(conversationId)));
+        } catch (ResourceModifiedException e) {
+            // The descriptor moved under us — surface it rather than reporting a
+            // deletion that did not happen.
+            throw new ResourceStoreException(
+                    format("Could not delete conversation %s: its descriptor was modified concurrently", sanitize(conversationId)), e);
+        }
     }
 
     @Scheduled(every = "24h")
     public void deleteEndedConversationsOlderThanXDays() {
+        if (deleteEndedConversationsOnceOlderThanDays == null || deleteEndedConversationsOnceOlderThanDays < MIN_RETENTION_DAYS) {
+            log.debugf("Ended-conversation retention sweep disabled (deleteEndedConversationsOnceOlderThanDays < %d)", MIN_RETENTION_DAYS);
+            return;
+        }
+
         runtime.submitCallable(() -> {
             try {
                 var amountOfEndedConversations = permanentlyDeleteEndedConversationLogs(deleteEndedConversationsOnceOlderThanDays);
@@ -258,7 +470,7 @@ public class RestConversationStore implements IRestConversationStore {
                     log.info(format("Successfully deleted %s conversations, which were older than %s days", amountOfEndedConversations,
                             deleteEndedConversationsOnceOlderThanDays));
                 }
-            } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
+            } catch (ResourceStoreException | ResourceNotFoundException e) {
                 log.error(e.getLocalizedMessage(), e);
             }
             return null;
@@ -287,27 +499,33 @@ public class RestConversationStore implements IRestConversationStore {
 
     @Override
     public Integer permanentlyDeleteEndedConversationLogs(Integer deleteOlderThanDays)
-            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+            throws ResourceStoreException, ResourceNotFoundException {
+
+        if (deleteOlderThanDays == null || deleteOlderThanDays < MIN_RETENTION_DAYS) {
+            throw new BadRequestException(
+                    "deleteOlderThanDays must be at least " + MIN_RETENTION_DAYS
+                            + " — a smaller value would permanently delete every ended conversation in the deployment");
+        }
 
         int amountOfEndedConversations = 0;
-        if (deleteOlderThanDays != null && deleteOlderThanDays > -1) {
-            var deleteOlderThanThisDate = Date.from(Instant.now().minus(Duration.ofDays(deleteOlderThanDays)));
-            var endedConversationIds = conversationMemoryStore.getEndedConversationIds();
+        var deleteOlderThanThisDate = Date.from(Instant.now().minus(Duration.ofDays(deleteOlderThanDays)));
+        var endedConversationIds = conversationMemoryStore.getEndedConversationIds();
 
-            for (var endedConversationId : endedConversationIds) {
-                try {
-                    var descriptor = documentDescriptorStore.readDescriptor(endedConversationId, 0);
-                    if (descriptor.getLastModifiedOn().before(deleteOlderThanThisDate)) {
-                        documentDescriptorStore.deleteAllDescriptor(endedConversationId);
-                        deleteAttachmentsForConversation(endedConversationId);
-                        conversationMemoryStore.deleteConversationMemorySnapshot(endedConversationId);
-                        amountOfEndedConversations++;
-                    }
-                } catch (IResourceStore.ResourceNotFoundException e) {
+        for (var endedConversationId : endedConversationIds) {
+            try {
+                var descriptor = documentDescriptorStore.readDescriptor(endedConversationId, CONVERSATION_DESCRIPTOR_VERSION);
+                if (descriptor.getLastModifiedOn().before(deleteOlderThanThisDate)) {
+                    documentDescriptorStore.deleteAllDescriptor(endedConversationId);
+                    conversationDescriptorStore.deleteAllDescriptor(endedConversationId);
                     deleteAttachmentsForConversation(endedConversationId);
                     conversationMemoryStore.deleteConversationMemorySnapshot(endedConversationId);
-                    log.debug(format("Cleaned up orphaned conversation memory without descriptor (id=%s)", endedConversationId));
+                    amountOfEndedConversations++;
                 }
+            } catch (ResourceNotFoundException e) {
+                conversationDescriptorStore.deleteAllDescriptor(endedConversationId);
+                deleteAttachmentsForConversation(endedConversationId);
+                conversationMemoryStore.deleteConversationMemorySnapshot(endedConversationId);
+                log.debug(format("Cleaned up orphaned conversation memory without descriptor (id=%s)", endedConversationId));
             }
         }
 
@@ -316,9 +534,12 @@ public class RestConversationStore implements IRestConversationStore {
 
     @Override
     public List<ConversationStatus> getActiveConversations(String agentId, Integer agentVersion)
-            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+            throws ResourceStoreException, ResourceNotFoundException {
         checkNotNull(agentId, "agentId");
-        checkNotNull(agentVersion, "agentVersion");
+        // agentVersion is optional: absent means every version of the agent. It was
+        // mandatory and a bare GET answered 400 "Argument must not be null", although
+        // "which conversations of this agent are still open" is the question an
+        // operator asks before undeploying — across versions, not for one.
 
         List<ConversationMemorySnapshot> conversationMemorySnapshots;
         List<ConversationStatus> conversationStatuses = new LinkedList<>();
@@ -329,9 +550,9 @@ public class RestConversationStore implements IRestConversationStore {
             String conversationId = snapshot.getId();
             conversationStatus.setConversationId(conversationId);
             conversationStatus.setAgentId(agentId);
-            conversationStatus.setAgentVersion(agentVersion);
+            conversationStatus.setAgentVersion(agentVersion != null ? agentVersion : snapshot.getAgentVersion());
             conversationStatus.setConversationState(snapshot.getConversationState());
-            var conversationDescriptor = conversationDescriptorStore.readDescriptor(conversationId, 0);
+            var conversationDescriptor = conversationDescriptorStore.readDescriptor(conversationId, CONVERSATION_DESCRIPTOR_VERSION);
             conversationStatus.setLastInteraction(conversationDescriptor.getLastModifiedOn());
             conversationStatuses.add(conversationStatus);
         }
@@ -344,17 +565,30 @@ public class RestConversationStore implements IRestConversationStore {
         try {
             for (ConversationStatus conversationStatus : conversationStatuses) {
                 String conversationId = conversationStatus.getConversationId();
-                conversationMemoryStore.setConversationState(conversationId, ConversationState.ENDED);
 
-                ConversationDescriptor conversationDescriptor = conversationDescriptorStore.readDescriptor(conversationId, 0);
+                // A paused (AWAITING_HUMAN) conversation must be ended through the
+                // HITL-aware service path: a raw setConversationState(ENDED) would
+                // leave the armed timeout schedule (a later stale fire logs errors),
+                // keep the bookmark, skip the hitl.approval cancellation audit, and
+                // miss the in-flight-resume signal that stops a concurrent resume
+                // from persisting its snapshot back over the ENDED state.
+                if (conversationStatus.getConversationState() == ConversationState.AWAITING_HUMAN) {
+                    // G4: attribute the pause-terminating end (admin bulk-end path).
+                    conversationService.endConversation(conversationId, "system:admin-end");
+                } else {
+                    conversationMemoryStore.setConversationState(conversationId, ConversationState.ENDED);
+                }
+
+                ConversationDescriptor conversationDescriptor = conversationDescriptorStore.readDescriptor(conversationId,
+                        CONVERSATION_DESCRIPTOR_VERSION);
                 conversationDescriptor.setConversationState(ConversationState.ENDED);
-                conversationDescriptorStore.setDescriptor(conversationId, 0, conversationDescriptor);
+                conversationDescriptorStore.setDescriptor(conversationId, CONVERSATION_DESCRIPTOR_VERSION, conversationDescriptor);
 
                 log.info(format("conversation (%s) has been set to ENDED", conversationId));
             }
 
             return Response.ok().build();
-        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
+        } catch (ResourceStoreException | ResourceNotFoundException e) {
             throw sneakyThrow(e);
         }
     }

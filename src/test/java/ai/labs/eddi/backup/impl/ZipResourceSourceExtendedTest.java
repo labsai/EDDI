@@ -6,6 +6,7 @@ package ai.labs.eddi.backup.impl;
 
 import ai.labs.eddi.backup.IResourceSource.*;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.snippets.model.PromptSnippet;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -72,9 +73,9 @@ class ZipResourceSourceExtendedTest {
             config.setWorkflows(new ArrayList<>());
             when(jsonSerialization.deserialize("{agent config}", AgentConfiguration.class))
                     .thenReturn(config);
-            var descriptor = new ai.labs.eddi.configs.descriptors.model.DocumentDescriptor();
+            var descriptor = new DocumentDescriptor();
             descriptor.setName("My Agent");
-            when(jsonSerialization.deserialize("{\"name\": \"My Agent\"}", ai.labs.eddi.configs.descriptors.model.DocumentDescriptor.class))
+            when(jsonSerialization.deserialize("{\"name\": \"My Agent\"}", DocumentDescriptor.class))
                     .thenReturn(descriptor);
 
             var source = new ZipResourceSource(tempDir, jsonSerialization);

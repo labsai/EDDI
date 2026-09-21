@@ -1,6 +1,6 @@
 # Agent Manager Dashboard
 
-**Version: 6.0.0**
+[![Version](https://img.shields.io/github/v/release/labsai/EDDI?label=version&color=blue)](https://github.com/labsai/EDDI/releases)
 
 ## Overview
 
@@ -8,13 +8,13 @@ The EDDI Manager is a modern **React 19 single-page application** for building, 
 
 ## Access
 
-Open your browser to the EDDI root URL:
+Open your browser to the Manager URL:
 
 ```
-http://localhost:7070
+http://localhost:7070/manage
 ```
 
-The Manager is the default landing page. No `apiUrl` query parameter is needed — the Manager automatically connects to the backend that serves it.
+The EDDI root URL (`http://localhost:7070`) redirects to the `/welcome` chooser on a first visit, where you pick between the Manager and the Workforce workspace; the choice is remembered afterwards and the root sends you straight there. No `apiUrl` query parameter is needed — the Manager automatically connects to the backend that serves it.
 
 ## Features
 
@@ -89,4 +89,4 @@ When Keycloak is enabled (`QUARKUS_OIDC_TENANT_ENABLED=true`), the Manager uses 
 
 ## Source Code
 
-The Manager is developed in the [EDDI-Manager](https://github.com/labsai/EDDI-Manager) repository and bundled into the EDDI Docker image at build time.
+The Manager is developed in [`ui/manager`](https://github.com/labsai/EDDI/tree/main/ui/manager) of the EDDI repository (it was the separate `EDDI-Manager` repository until September 2026) and is built into the EDDI jar, and therefore the Docker image, by the Maven build.

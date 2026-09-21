@@ -550,9 +550,6 @@ OVERRIDE_EOF
     sleep 5
   done
 
-  # Import Agent Father (first install.sh may have raced; retry here)
-  curl -sf -X POST "http://localhost:${p_port}/backup/import/initialAgents" &>/dev/null || true
-
   # ── Update Keycloak client with HTTPS redirect URIs ───────────────────────────
   echo "Updating Keycloak eddi-frontend client..."
   KC_TOKEN=""

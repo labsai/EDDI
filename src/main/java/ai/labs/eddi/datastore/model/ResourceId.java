@@ -5,6 +5,7 @@
 package ai.labs.eddi.datastore.model;
 
 import ai.labs.eddi.datastore.IResourceStore;
+import java.util.Objects;
 
 public class ResourceId implements IResourceStore.IResourceId {
     private String id;
@@ -38,12 +39,12 @@ public class ResourceId implements IResourceStore.IResourceId {
         if (o == null || getClass() != o.getClass())
             return false;
         ResourceId that = (ResourceId) o;
-        return java.util.Objects.equals(id, that.id) && java.util.Objects.equals(version, that.version);
+        return Objects.equals(id, that.id) && Objects.equals(version, that.version);
     }
 
     @Override
     public int hashCode() {
-        return java.util.Objects.hash(id, version);
+        return Objects.hash(id, version);
     }
 
     @Override

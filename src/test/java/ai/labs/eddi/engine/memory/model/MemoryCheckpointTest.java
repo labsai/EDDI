@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -111,7 +112,7 @@ class MemoryCheckpointTest {
         @DisplayName("Should deep-copy properties (original mutation doesn't affect checkpoint)")
         void testCreateDeepCopiesProperties() {
             Property mutableProp = new Property("name", "original", Scope.conversation);
-            Map<String, Property> properties = new java.util.LinkedHashMap<>();
+            Map<String, Property> properties = new LinkedHashMap<>();
             properties.put("name", mutableProp);
 
             MemoryCheckpoint checkpoint = MemoryCheckpoint.create(

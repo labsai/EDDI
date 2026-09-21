@@ -4,8 +4,8 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
-import ai.labs.eddi.configs.agents.IRestAgentStore;
-import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IDataFactory;
@@ -27,9 +27,9 @@ import static org.mockito.MockitoAnnotations.openMocks;
 class RagContextProviderTest {
 
     @Mock
-    private IRestAgentStore restAgentStore;
+    private IAgentStore restAgentStore;
     @Mock
-    private IRestWorkflowStore restWorkflowStore;
+    private IWorkflowStore restWorkflowStore;
     @Mock
     private IResourceClientLibrary resourceClientLibrary;
     @Mock
@@ -46,7 +46,7 @@ class RagContextProviderTest {
     private RagContextProvider ragContextProvider;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         openMocks(this);
         ragContextProvider = new RagContextProvider(restAgentStore, restWorkflowStore, resourceClientLibrary, embeddingModelFactory,
                 embeddingStoreFactory, dataFactory);
@@ -61,7 +61,7 @@ class RagContextProviderTest {
     }
 
     @Test
-    void noKnowledgeBases_andNoWorkflowRag_shouldReturnNull() {
+    void noKnowledgeBases_andNoWorkflowRag_shouldReturnNull() throws Exception {
         var task = new LlmConfiguration.Task();
         task.setKnowledgeBases(null);
         task.setEnableWorkflowRag(false);
@@ -69,11 +69,11 @@ class RagContextProviderTest {
         String result = ragContextProvider.retrieveContext(memory, task, "hello");
 
         assertNull(result);
-        verify(restAgentStore, never()).readAgent(anyString(), anyInt());
+        verify(restAgentStore, never()).read(anyString(), anyInt());
     }
 
     @Test
-    void emptyKnowledgeBases_andNoWorkflowRag_shouldReturnNull() {
+    void emptyKnowledgeBases_andNoWorkflowRag_shouldReturnNull() throws Exception {
         var task = new LlmConfiguration.Task();
         task.setKnowledgeBases(List.of());
         task.setEnableWorkflowRag(false);
@@ -84,11 +84,11 @@ class RagContextProviderTest {
     }
 
     @Test
-    void autoDiscovery_withNoWorkflowSteps_shouldReturnNull() {
+    void autoDiscovery_withNoWorkflowSteps_shouldReturnNull() throws Exception {
         var task = new LlmConfiguration.Task();
         task.setEnableWorkflowRag(true);
 
-        when(restAgentStore.readAgent("agent-123", 1)).thenReturn(null);
+        when(restAgentStore.read("agent-123", 1)).thenReturn(null);
 
         String result = ragContextProvider.retrieveContext(memory, task, "hello");
 
@@ -96,7 +96,7 @@ class RagContextProviderTest {
     }
 
     @Test
-    void explicitKbRef_withNoWorkflowSteps_shouldReturnNull() {
+    void explicitKbRef_withNoWorkflowSteps_shouldReturnNull() throws Exception {
         var ref = new KnowledgeBaseReference();
         ref.setName("product-docs");
 
@@ -104,16 +104,16 @@ class RagContextProviderTest {
         task.setId("testTask");
         task.setKnowledgeBases(List.of(ref));
 
-        when(restAgentStore.readAgent("agent-123", 1)).thenReturn(null);
+        when(restAgentStore.read("agent-123", 1)).thenReturn(null);
 
         String result = ragContextProvider.retrieveContext(memory, task, "hello");
 
         assertNull(result);
-        verify(restAgentStore).readAgent("agent-123", 1);
+        verify(restAgentStore).read("agent-123", 1);
     }
 
     @Test
-    void nullTaskId_shouldUseDefaultSuffix() {
+    void nullTaskId_shouldUseDefaultSuffix() throws Exception {
         var ref = new KnowledgeBaseReference();
         ref.setName("kb1");
 
@@ -121,7 +121,7 @@ class RagContextProviderTest {
         task.setId(null);
         task.setKnowledgeBases(List.of(ref));
 
-        when(restAgentStore.readAgent("agent-123", 1)).thenReturn(null);
+        when(restAgentStore.read("agent-123", 1)).thenReturn(null);
 
         // Should not throw
         ragContextProvider.retrieveContext(memory, task, "hello");

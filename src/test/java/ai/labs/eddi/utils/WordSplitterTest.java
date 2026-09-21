@@ -95,9 +95,44 @@ class WordSplitterTest {
         @Test
         @DisplayName("dot at start — treated as punctuation")
         void dotAtStart() {
+            // This asserted StringIndexOutOfBoundsException and called it a "known edge
+            // case", which pinned the defect in place: the digit-guard's bounds test
+            // indexed the punctuation string ("!?:.,;") instead of the text, so a '.' at
+            // either end of the input read charAt(-1) or charAt(length). Punctuation at
+            // the start is ordinary input and must simply be split.
             StringBuilder sb = new StringBuilder(".hello");
-            // Leading dot triggers StringIndexOutOfBounds in WordSplitter — known edge case
-            assertThrows(StringIndexOutOfBoundsException.class, () -> new WordSplitter(sb).splitWords());
+
+            assertDoesNotThrow(() -> new WordSplitter(sb).splitWords());
+
+            assertTrue(sb.toString().contains(". "), sb.toString());
+        }
+
+        /**
+         * The decimal guard needs digits on BOTH sides, and "both sides" has to be
+         * decided on the TEXT index. The guard's bounds test indexed the punctuation
+         * string ("!?:.,;", where n is always 3 for '.'), so it never constrained i: a
+         * dot in the last position with a digit in front of it read charAt(i + 1) past
+         * the end of the text and threw instead of splitting.
+         * <p>
+         * Both halves of the contract are asserted on the resulting TEXT rather than on
+         * the mere absence of an exception: "42." has to come apart in either position,
+         * because a sentence that happens to end in a digit is not a decimal.
+         */
+        @Test
+        @DisplayName("digit before the dot, letter or end-of-text after — still split")
+        void digitBeforeDotWithoutADigitAfterIsStillSplit() {
+            StringBuilder atEnd = new StringBuilder("costs 42.");
+            assertDoesNotThrow(() -> new WordSplitter(atEnd).splitWords());
+            assertFalse(atEnd.toString().contains("42."),
+                    "a trailing dot is punctuation, not a decimal point: " + atEnd);
+            assertTrue(atEnd.toString().startsWith("costs 42 "), atEnd.toString());
+            assertTrue(atEnd.toString().endsWith("."), atEnd.toString());
+
+            StringBuilder midString = new StringBuilder("costs 42.Then");
+            new WordSplitter(midString).splitWords();
+            assertFalse(midString.toString().contains("42."),
+                    "a letter after the dot is a sentence boundary, not a decimal point: " + midString);
+            assertTrue(midString.toString().contains(" . "), midString.toString());
         }
 
         @Test
@@ -270,6 +305,31 @@ class WordSplitterTest {
             assertEquals("12345", sb.toString());
         }
 
+        /**
+         * This branch inserts a separator in FRONT of a digit, so it only has something
+         * to do when a preceding character exists and is not already a separator. At
+         * index 0 there is no preceding character at all — the guard that says so is
+         * the {@code i > 0} term, and without it charAt(i - 1) reads position -1.
+         * <p>
+         * The assertion is on the resulting text rather than on the absence of an
+         * exception, so a guard that merely stopped throwing but still inserted a
+         * leading space (or doubled an existing one) is caught too: both inputs must
+         * come back byte-for-byte unchanged.
+         */
+        @Test
+        @DisplayName("nothing to separate a digit from — text left exactly as it is")
+        void digitWithNoSeparableCharacterBeforeItIsUntouched() {
+            StringBuilder atIndexZero = new StringBuilder("5 apples");
+            new WordSplitter(atIndexZero).notNumeric();
+            assertEquals("5 apples", atIndexZero.toString(),
+                    "a digit at index 0 has no preceding character to separate it from");
+
+            StringBuilder alreadySpaced = new StringBuilder("abc 5");
+            new WordSplitter(alreadySpaced).notNumeric();
+            assertEquals("abc 5", alreadySpaced.toString(),
+                    "a digit already preceded by the separator needs no second one");
+        }
+
         @Test
         @DisplayName("all letters — unchanged")
         void allLetters() {
@@ -352,6 +412,47 @@ class WordSplitterTest {
         void emptyString() {
             StringBuilder sb = new StringBuilder("");
             assertDoesNotThrow(() -> new WordSplitter(sb).isPunctuation());
+        }
+    }
+
+    @Nested
+    @DisplayName("index bounds")
+    class IndexBoundsTests {
+
+        /**
+         * The digit-guard's bounds test indexed the PUNCTUATION string ("!?:.,;", where
+         * n is always 3 for '.') instead of the text, so it never guarded i. A sentence
+         * ending in a digit and a full stop read charAt(i + 1) past the end and threw —
+         * "The answer is 42." was enough.
+         */
+        @Test
+        @DisplayName("trailing dot after a digit — no StringIndexOutOfBounds")
+        void trailingDotAfterDigit() {
+            StringBuilder sb = new StringBuilder("The answer is 42.");
+            assertDoesNotThrow(() -> new WordSplitter(sb).splitWords());
+            assertTrue(sb.toString().contains(" ."), sb.toString());
+        }
+
+        /** The other end of the same guard: a leading dot read charAt(-1). */
+        @Test
+        @DisplayName("leading dot before a digit — no StringIndexOutOfBounds")
+        void leadingDotBeforeDigit() {
+            StringBuilder sb = new StringBuilder(".5");
+            assertDoesNotThrow(() -> new WordSplitter(sb).splitWords());
+        }
+
+        /**
+         * notNumeric() read charAt(i - 1) and was only safe at i == 0 because
+         * isStringInteger("") answered true for the empty substring and skipped that
+         * iteration — a bounds check standing on an unrelated method's wrong answer.
+         * That method is now correct, so the guard has to be explicit.
+         */
+        @Test
+        @DisplayName("notNumeric at index 0 — no StringIndexOutOfBounds")
+        void notNumericFirstCharacter() {
+            assertDoesNotThrow(() -> new WordSplitter(new StringBuilder("5 apples")).notNumeric());
+            assertDoesNotThrow(() -> new WordSplitter(new StringBuilder("abc5")).notNumeric());
+            assertDoesNotThrow(() -> new WordSplitter(new StringBuilder("")).notNumeric());
         }
     }
 }

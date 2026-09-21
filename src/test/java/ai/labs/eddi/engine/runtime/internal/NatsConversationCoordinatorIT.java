@@ -18,6 +18,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.*;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -65,7 +66,8 @@ class NatsConversationCoordinatorIT {
 
         // Create coordinator with real NATS connection (no mocks)
         coordinator = new NatsConversationCoordinator(runtime, null, // no metrics instance for IT
-                new SimpleMeterRegistry(), natsUrl, "EDDI_IT_CONVERSATIONS", "EDDI_IT_DEAD_LETTERS", 3, // maxRetries
+                // eddi.nats.max-retries — retained config knob, no longer re-executes turns
+                new SimpleMeterRegistry(), natsUrl, "EDDI_IT_CONVERSATIONS", "EDDI_IT_DEAD_LETTERS", 3,
                 10000);
 
         // Start coordinator (connects to NATS, creates streams)
@@ -134,7 +136,7 @@ class NatsConversationCoordinatorIT {
     }
 
     @Test
-    @DisplayName("should route to dead-letter after max retries exhausted")
+    @DisplayName("should route a failed task to dead-letter without re-executing it")
     void deadLetterAfterMaxRetries() throws Exception {
         String convId = "conv-dead-letter-test";
 
@@ -155,8 +157,8 @@ class NatsConversationCoordinatorIT {
             throw new RuntimeException("intentional failure for dead-letter test");
         });
 
-        // Wait for all retries to be exhausted + dead-letter published
-        // maxRetries=3 so we wait for attempts to complete
+        // The task is dead-lettered on its FIRST failure (C13: a turn that reported
+        // failure has already run and is never re-executed); wait for the publish.
         Thread.sleep(3000);
 
         // Verify message exists in dead-letter stream
@@ -178,7 +180,7 @@ class NatsConversationCoordinatorIT {
             throw new RuntimeException("payload test failure");
         });
 
-        // Wait for retries to exhaust
+        // Wait for the dead-letter publish (no retries — see C13)
         Thread.sleep(3000);
 
         // Consume the dead-letter message
@@ -234,12 +236,12 @@ class NatsConversationCoordinatorIT {
         }
 
         @Override
-        public <T> Future<T> submitCallable(Callable<T> callable, java.util.Map<Object, Object> threadBindings) {
+        public <T> Future<T> submitCallable(Callable<T> callable, Map<Object, Object> threadBindings) {
             return executor.submit(callable);
         }
 
         @Override
-        public <T> Future<T> submitCallable(Callable<T> callable, IFinishedExecution<T> callback, java.util.Map<Object, Object> threadBindings) {
+        public <T> Future<T> submitCallable(Callable<T> callable, IFinishedExecution<T> callback, Map<Object, Object> threadBindings) {
             return executor.submit(() -> {
                 try {
                     T result = callable.call();

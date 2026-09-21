@@ -3,8 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.configs.agents.model;
+import ai.labs.eddi.configs.agents.crypto.AgentPublicKey;
 
+import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
+import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import java.net.URI;
 import java.util.ArrayList;
@@ -249,6 +253,22 @@ public class AgentConfiguration {
     }
 
     /**
+     * Human-in-the-loop (HITL) configuration. Controls approval timeouts and
+     * timeout policies for paused conversations.
+     *
+     * @since 6.0.0
+     */
+    private HitlConfig hitlConfig;
+
+    public HitlConfig getHitlConfig() {
+        return hitlConfig;
+    }
+
+    public void setHitlConfig(HitlConfig hitlConfig) {
+        this.hitlConfig = hitlConfig;
+    }
+
+    /**
      * Cryptographic identity for an agent. The public key is stored in the agent
      * configuration; the private key is in SecretsVault.
      *
@@ -260,7 +280,7 @@ public class AgentConfiguration {
         /**
          * Versioned key list for rotation. If empty, falls back to {@code publicKey}.
          */
-        private List<ai.labs.eddi.configs.agents.crypto.AgentPublicKey> keys = new ArrayList<>();
+        private List<AgentPublicKey> keys = new ArrayList<>();
 
         public AgentIdentity() {
         }
@@ -286,11 +306,11 @@ public class AgentConfiguration {
             this.publicKey = publicKey;
         }
 
-        public List<ai.labs.eddi.configs.agents.crypto.AgentPublicKey> getKeys() {
+        public List<AgentPublicKey> getKeys() {
             return keys;
         }
 
-        public void setKeys(List<ai.labs.eddi.configs.agents.crypto.AgentPublicKey> keys) {
+        public void setKeys(List<AgentPublicKey> keys) {
             this.keys = keys != null ? keys : new ArrayList<>();
         }
 
@@ -306,11 +326,20 @@ public class AgentConfiguration {
             if (keys == null || keys.isEmpty()) {
                 return version == 0 ? publicKey : null;
             }
-            return keys.stream()
+            String versioned = keys.stream()
                     .filter(k -> k.version() == version)
-                    .map(ai.labs.eddi.configs.agents.crypto.AgentPublicKey::publicKeyB64)
+                    .map(AgentPublicKey::publicKeyB64)
                     .findFirst()
                     .orElse(null);
+            // Version 0 means "signed before key versioning existed", so the legacy
+            // single publicKey field IS its key — even once a versioned list has been
+            // added. Without this, onboarding a keys list starting at v1 (the normal
+            // rotation path) made every pre-rotation entry resolve to null, and peer
+            // verification reported authentic entries as unverifiable. The old
+            // getKeyValidAt lookup ended `.orElse(publicKey)` and so never had the
+            // problem; the version-exact lookup that replaced it dropped the fallback
+            // along with the rotation-window bug it was fixing.
+            return versioned != null || version != 0 ? versioned : publicKey;
         }
 
         /**
@@ -328,7 +357,7 @@ public class AgentConfiguration {
             return keys.stream()
                     .filter(k -> k.isValidAt(epochMs))
                     .reduce((a, b) -> a.version() > b.version() ? a : b)
-                    .map(ai.labs.eddi.configs.agents.crypto.AgentPublicKey::publicKeyB64)
+                    .map(AgentPublicKey::publicKeyB64)
                     .orElse(publicKey);
         }
     }
@@ -516,8 +545,15 @@ public class AgentConfiguration {
     }
 
     /**
-     * Background Dream consolidation configuration. Uses
-     * {@code ScheduleFireExecutor} with SERVICE trigger type.
+     * Background Dream consolidation configuration.
+     * <p>
+     * Dream runs through the regular cluster-aware schedule machinery: a
+     * {@code ScheduleConfiguration} carrying the metadata marker
+     * {@code {"dreamType": "dream_consolidation"}} plus the target {@code agentId}
+     * and {@code userId} is dispatched by {@code ScheduleFireExecutor} to
+     * {@code DreamService}, which resolves this block off the agent and runs the
+     * cycle. {@link #getSchedule()} is the cron expression such a schedule should
+     * use.
      */
     public static class DreamConfig {
         private boolean enabled = false;
@@ -552,11 +588,76 @@ public class AgentConfiguration {
          * Whether to sub-group by sourceAgentId before consolidating. true = entries
          * from different agents stay separate (preserves provenance). false = entries
          * from all agents consolidated together (better compression).
+         * <p>
+         * <b>Note:</b> this switch never applies to {@code self}-scoped memories. Those
+         * are always sub-grouped by {@code sourceAgentId}, because merging them across
+         * agents would produce a single entry readable by agents that never had access
+         * to the originals.
          */
         private boolean preserveAgentProvenance = false;
 
-        /** Maximum LLM calls per dream cycle per user. Bounds cost. */
+        /**
+         * Whether this agent's dream cycle may act on memories written by
+         * <em>other</em> agents.
+         * <p>
+         * Every knob in this block — {@link #getPruneStaleAfterDays()}, the grouping
+         * strategy, the consolidation model and its endpoint — comes from exactly one
+         * agent. Letting that agent's cycle delete or rewrite another agent's memories
+         * means a retention value their owner never configured decides when their data
+         * disappears, and (with {@link #isSummarizeInteractions()} on) their text is
+         * sent to this agent's provider. So the default is {@code false}: the cycle
+         * only touches entries whose {@code sourceAgentId} is the firing agent, the
+         * same ownership rule {@code UserMemoryTool} applies before evicting.
+         * <p>
+         * Set to {@code true} for a dedicated housekeeping agent that is meant to
+         * maintain the user's whole memory set across agents — the cross-agent
+         * consolidation {@link #isPreserveAgentProvenance()}{@code =false} describes.
+         * Entries without a {@code sourceAgentId} (legacy/migrated rows) are only in
+         * scope in this mode, since no agent owns them.
+         *
+         * @since 6.1.0
+         */
+        private boolean crossAgentMaintenance = false;
+
+        /**
+         * Model parameters for the consolidation LLM — {@code apiKey}, {@code baseUrl},
+         * {@code temperature}, … — passed through to {@code ChatModelRegistry} exactly
+         * like an LLM task's {@code parameters} block, so {@code ${vault:...}} and
+         * {@code ${vars:...}} references resolve the same way.
+         * <p>
+         * Dream is a background job with no parent LLM task, so unlike the rolling
+         * conversation summary it has nothing to inherit credentials from — they must
+         * be configured here. Example:
+         *
+         * <pre>
+         * "parameters": { "apiKey": "${vault:anthropic-api-key}" }
+         * </pre>
+         */
+        private Map<String, String> parameters = new HashMap<>();
+
+        /**
+         * @deprecated Since 6.1.0. Superseded by {@link #getMaxCostPerRun()}, which is
+         *             the real budget: a call count says nothing about spend, because
+         *             different consolidations cost vastly different amounts. It is
+         *             <em>still enforced as a secondary backstop</em> whenever a stored
+         *             configuration actually carries the field
+         *             ({@link #isMaxSummarizationCallsSet()}) — silently discarding a
+         *             ceiling an operator wrote would let a config that says "at most 3
+         *             calls" make hundreds. Configurations that never set it are
+         *             bounded by the dollar budget alone, so this field's default value
+         *             never caps anything on its own.
+         */
+        @Deprecated(since = "6.1.0", forRemoval = true)
         private int maxSummarizationCalls = 10;
+
+        /**
+         * Whether {@link #maxSummarizationCalls} was explicitly configured, as opposed
+         * to sitting at its default. Set by the setter, which Jackson calls only when
+         * the property is present in the stored/imported JSON — that is what lets the
+         * deprecated ceiling stay honoured for the configs that declare it without
+         * imposing it on the ones that do not.
+         */
+        private boolean maxSummarizationCallsSet = false;
 
         /**
          * LLM instructions for memory consolidation. Customizable by the agent
@@ -669,10 +770,19 @@ public class AgentConfiguration {
             return summarizeTargetEntries;
         }
 
+        /**
+         * Plain assignment — the {@code >= 1} rule is enforced on the WRITE path, by
+         * {@code AgentStore.create}/{@code update}, not here.
+         * <p>
+         * Jackson calls this setter on every MongoDB read, ZIP import and instance
+         * sync, so throwing from it made any agent already stored with
+         * {@code summarizeTargetEntries: 0} — legal when it was written — permanently
+         * unreadable: not deployable, not exportable, and not even repairable by PUT,
+         * because the read happens first. See {@code AbstractResourceStore.validate}:
+         * "a document already in the database must keep loading even if the rules
+         * tightened".
+         */
         public void setSummarizeTargetEntries(int summarizeTargetEntries) {
-            if (summarizeTargetEntries < 1) {
-                throw new IllegalArgumentException("summarizeTargetEntries must be >= 1");
-            }
             this.summarizeTargetEntries = summarizeTargetEntries;
         }
 
@@ -692,12 +802,56 @@ public class AgentConfiguration {
             this.preserveAgentProvenance = preserveAgentProvenance;
         }
 
+        public boolean isCrossAgentMaintenance() {
+            return crossAgentMaintenance;
+        }
+
+        public void setCrossAgentMaintenance(boolean crossAgentMaintenance) {
+            this.crossAgentMaintenance = crossAgentMaintenance;
+        }
+
+        public Map<String, String> getParameters() {
+            return parameters;
+        }
+
+        public void setParameters(Map<String, String> parameters) {
+            this.parameters = parameters != null ? parameters : new HashMap<>();
+        }
+
+        /**
+         * @deprecated Since 6.1.0. Secondary backstop only, and only when
+         *             {@link #isMaxSummarizationCallsSet()} — see
+         *             {@link #getMaxCostPerRun()} for the real budget.
+         */
+        @Deprecated(since = "6.1.0", forRemoval = true)
         public int getMaxSummarizationCalls() {
             return maxSummarizationCalls;
         }
 
+        /**
+         * @deprecated Since 6.1.0. Prefer {@link #setMaxCostPerRun(double)}. Calling
+         *             this marks the ceiling as explicitly configured, which keeps it
+         *             enforced as a backstop until the field is removed.
+         */
+        @Deprecated(since = "6.1.0", forRemoval = true)
         public void setMaxSummarizationCalls(int maxSummarizationCalls) {
             this.maxSummarizationCalls = maxSummarizationCalls;
+            this.maxSummarizationCallsSet = true;
+        }
+
+        /**
+         * True when {@link #getMaxSummarizationCalls()} was explicitly configured
+         * (present in the stored/imported JSON, or set programmatically) rather than
+         * left at its default. Never serialized — it is derived from the presence of
+         * {@code maxSummarizationCalls}, so it survives an export/import round trip
+         * without adding a field to stored agent configurations.
+         *
+         * @deprecated Since 6.1.0, together with the ceiling it guards.
+         */
+        @JsonIgnore
+        @Deprecated(since = "6.1.0", forRemoval = true)
+        public boolean isMaxSummarizationCallsSet() {
+            return maxSummarizationCallsSet;
         }
 
         public String getSummarizationPrompt() {
@@ -730,7 +884,14 @@ public class AgentConfiguration {
         /**
          * Returns true if strict write discipline is enabled and its mode is not
          * "keep_all" (which preserves backwards-compatible behavior).
+         * <p>
+         * {@code @JsonIgnore} because it is derived from {@code strictWriteDiscipline}
+         * rather than stored alongside it. Jackson wrote an {@code effectivelyEnabled}
+         * key that nothing could read back, which turned into a 400 on every agent
+         * configuration EDDI itself serializes once
+         * {@code StrictConfigurationBodyInterceptor} began rejecting unknown keys.
          */
+        @JsonIgnore
         public boolean isEffectivelyEnabled() {
             return strictWriteDiscipline != null && strictWriteDiscipline.isEnabled()
                     && !"keep_all".equals(strictWriteDiscipline.getOnFailure());
@@ -778,6 +939,20 @@ public class AgentConfiguration {
      * <strong>Note:</strong> Conversation forking (session branching) is planned
      * for a future release. When implemented, forking config fields will be added
      * here alongside the implementation.
+     * <p>
+     * <strong>Current wiring status — read before relying on these fields.</strong>
+     * A checkpoint captures the conversation PROPERTIES only; rolling one back does
+     * not restore steps, outputs or external side-effects (see
+     * {@code MemorySnapshotService#rollbackToCheckpoint}). Checkpointing itself is
+     * performed unconditionally by {@code AgentOrchestrator} before every tool call
+     * — {@link AutoSnapshot#isEnabled()} and {@link AutoSnapshot#getTriggerOn()}
+     * are NOT consulted yet, and {@link #getMaxCheckpointsPerConversation()} is
+     * honoured only where a caller passes it to
+     * {@code MemorySnapshotService#createCheckpoint(..., int)}. No production
+     * caller does: {@code AgentOrchestrator} uses the 3-arg overload because
+     * {@code SessionManagement} has no slot on {@code IConversationMemory} (unlike
+     * {@link UserMemoryConfig} and {@link MemoryPolicy}), so auto-checkpointing
+     * always prunes to the service default of 10.
      *
      * @since 6.0.0
      */
@@ -804,6 +979,10 @@ public class AgentConfiguration {
         /**
          * Auto-snapshot configuration. When enabled, checkpoints are created
          * automatically before state-changing tool executions.
+         * <p>
+         * <strong>Reserved — not yet honoured by the engine.</strong>
+         * Auto-checkpointing currently runs before every tool call regardless of these
+         * values; see the wiring note on {@link SessionManagement}.
          */
         public static class AutoSnapshot {
             private boolean enabled = false;
@@ -825,6 +1004,69 @@ public class AgentConfiguration {
             public void setTriggerOn(List<String> triggerOn) {
                 this.triggerOn = triggerOn;
             }
+        }
+    }
+
+    /**
+     * HITL approval timeout configuration. Controls what happens when a
+     * human-in-the-loop approval is not provided within the configured duration.
+     *
+     * @since 6.0.0
+     */
+    public static class HitlConfig {
+        /** ISO-8601 duration (e.g., "PT30S"), null = indefinite. */
+        private String approvalTimeout;
+        private HitlTimeoutPolicy timeoutPolicy = HitlTimeoutPolicy.WAIT_INDEFINITELY;
+        /**
+         * Designer-supplied reason shown to approvers in pending-approval listings and
+         * approval-status (e.g. "Deletion requires manager sign-off"). Answers "what am
+         * I approving?" — falls back to a generic reason when absent.
+         */
+        private String pauseReason;
+
+        public String getApprovalTimeout() {
+            return approvalTimeout;
+        }
+
+        public void setApprovalTimeout(String approvalTimeout) {
+            this.approvalTimeout = approvalTimeout;
+        }
+
+        public HitlTimeoutPolicy getTimeoutPolicy() {
+            return timeoutPolicy;
+        }
+
+        public void setTimeoutPolicy(HitlTimeoutPolicy timeoutPolicy) {
+            // JSON "timeoutPolicy": null must not wipe the default (mirrors the
+            // group-level HitlConfig setters)
+            if (timeoutPolicy != null) {
+                this.timeoutPolicy = timeoutPolicy;
+            }
+        }
+
+        public String getPauseReason() {
+            return pauseReason;
+        }
+
+        public void setPauseReason(String pauseReason) {
+            this.pauseReason = pauseReason;
+        }
+
+        /**
+         * Agent-level default tool-approval gating (tool-level HITL). Applies to every
+         * LLM task in the agent unless a task overrides it with its own
+         * {@code toolApprovals}. Absent = no tool gating.
+         *
+         * @since 6.0.0
+         */
+        private ToolApprovalsConfig toolApprovals;
+
+        public ToolApprovalsConfig getToolApprovals() {
+            return toolApprovals;
+        }
+
+        public void setToolApprovals(ToolApprovalsConfig toolApprovals) {
+            this.toolApprovals = toolApprovals;
         }
     }
 }

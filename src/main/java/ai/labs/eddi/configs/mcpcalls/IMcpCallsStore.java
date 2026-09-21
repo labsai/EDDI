@@ -10,7 +10,10 @@ import ai.labs.eddi.datastore.IResourceStore;
 import java.util.List;
 
 /**
- * Store interface for MCP Calls configurations.
+ * Store interface for MCP Calls configurations. Each configuration describes a
+ * connection to an external MCP server (URL, transport, credentials and the
+ * tool allow/deny lists); readActions() lists the actions defined across the
+ * entries of a configuration version for the editor endpoints.
  */
 public interface IMcpCallsStore extends IResourceStore<McpCallsConfiguration> {
 

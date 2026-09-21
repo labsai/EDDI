@@ -17,7 +17,14 @@ import java.util.List;
  * ceiling ({@link #maxCostPerDay}) is primary; call count
  * ({@link #maxDailyResponses}) is a secondary hard cap.
  * <p>
- * <b>Note:</b> Schema-ready; implementation deferred to a future PR.
+ * Enforced by {@code ObserveGate}, which applies the trigger match, then the
+ * cooldown, then both daily caps — in that order, so an observer that did not
+ * match is never reported as rate-limited.
+ * <p>
+ * {@code observeMode} is currently supported on {@code AGENT} targets only: the
+ * per-turn cost {@link #getMaxCostPerDay()} is measured against can be
+ * attributed to a 1:1 conversation, and not to a group discussion, so a GROUP
+ * observer would run with its primary ceiling unenforceable.
  *
  * @since 6.1.0
  */

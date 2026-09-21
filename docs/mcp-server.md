@@ -10,7 +10,19 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 | --------------------------- | ------------------------------------- |
 | `http://localhost:7070/mcp` | MCP server endpoint (default + admin) |
 
-## Available Tools (48)
+**Client notes**
+
+- **Protocol version warnings.** A client that announces an `MCP-Protocol-Version`
+  newer than the bundled Quarkus MCP server knows makes the server log
+  `Invalid MCP protocol header: <version>` on every call. The call still succeeds
+  on the negotiated version; the line is noise until the extension is upgraded.
+- **Retries are not idempotent.** Most tools that create things — `setup_agent`,
+  `create_api_agent`, `create_group`, `create_schedule` — are not idempotent. If a
+  call fails with a transport error such as "session expired", it may still have
+  completed on the server. Check first (`list_agents`, `list_groups`, …) before
+  retrying, or you get a duplicate.
+
+## Available Tools (84)
 
 ### Conversation Tools (11)
 
@@ -40,7 +52,7 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 | `delete_agent`          | Delete an agent (with optional cascade)                                          |
 | `update_agent`          | Update an agent's name/description and optionally redeploy                       |
 | `read_workflow`         | Read a package's full pipeline configuration                                    |
-| `read_resource`         | Read any resource config by type (behavior, langchain, httpcalls, output, etc.) |
+| `read_resource`         | Read any resource config by type (behavior, langchain, httpcalls, output, rag, etc.) — read only; `rag` has no create/update/delete case |
 | `list_agent_triggers`   | List all agent triggers (intent→agent mappings) for managed conversations       |
 | `create_agent_trigger`  | Create an agent trigger mapping an intent to one or more agent deployments       |
 | `update_agent_trigger`  | Update an existing agent trigger                                                |
@@ -60,7 +72,7 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 
 | Tool               | Description                                                                                |
 | ------------------ | ------------------------------------------------------------------------------------------ |
-| `read_agent_logs`  | Read server-side pipeline logs (errors, LLM timeouts) filtered by agent/conversation/level |
+| `read_agent_logs`  | Read server-side pipeline logs (errors, LLM timeouts) filtered by agent/conversation/level. An unscoped or agent-only read additionally requires `eddi-admin` — it pulls from a shared buffer mixing every user's logs; only a `conversationId`-scoped read is open to a viewer (owner or admin) |
 | `read_audit_trail` | Read per-task audit entries with LLM details, timing, cost, and tool calls                 |
 
 ### Setup Tools (2)
@@ -68,34 +80,109 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 | Tool               | Description                                                                                                                                                                                                                                         |
 | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `setup_agent`      | Create a fully working agent in one call: creates behavior rules, LangChain config, optional output/greeting, package, agent, and deploys. Supports built-in tools, quick replies, and sentiment analysis. Default: `anthropic`/`claude-sonnet-4-6` |
-| `create_api_agent` | Create an agent from an OpenAPI 3.0/3.1 spec. Parses the spec, generates HttpCalls configs (grouped by API tag), creates the full pipeline, and deploys. Supports endpoint filtering, base URL override, and auth header propagation                 |
+| `create_api_agent` | Create an agent from an OpenAPI 3.0/3.1 spec. Parses the spec, generates HttpCalls configs (grouped by API tag), creates the full pipeline, and deploys. Supports endpoint filtering, base URL override, auth header propagation, and `mcpServerUrls` to add an MCP server's tools alongside the generated ones. A generated write tool takes the whole request body as one `requestBody` parameter — see below |
+
+> **The approval gate is not settable over MCP.** `POST /administration/agents/setup-api` accepts a `hitlConfig` on the request body, so a caller can provision an agent whose write tools are gated from v1 onward. The MCP `create_api_agent` tool deliberately has **no** such parameter and always passes `null`: it already provisions an agent with a caller-chosen endpoint filter, so letting the caller also choose the gate would make it a complete escape from whatever allow-list governs the agent doing the calling. Provisioning a gated agent goes through REST (`eddi-admin`).
 
 ### Schedule Management Tools (6)
 
 | Tool                    | Description                                                                                                                                                                                         |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `create_schedule`       | Create a new scheduled agent trigger (cron job or heartbeat). For CRON: provide `cronExpression`. For HEARTBEAT: provide `heartbeatIntervalSeconds`. Heartbeats default to persistent conversations |
+| `create_schedule`       | Create a new scheduled agent trigger (cron job or heartbeat). For CRON: provide `cron`. For HEARTBEAT: provide `heartbeatIntervalSeconds`. Heartbeats default to persistent conversations |
 | `list_schedules`        | List all scheduled agent triggers with name, type, cron/interval, status, next fire time, and fire count. Optionally filter by agentId                                                              |
 | `read_schedule`         | Read a schedule's full configuration including recent fire history (last 10 executions)                                                                                                             |
 | `delete_schedule`       | Delete a scheduled agent trigger                                                                                                                                                                    |
 | `fire_schedule_now`     | Manually trigger a schedule fire immediately. Useful for testing or one-off executions                                                                                                              |
 | `retry_failed_schedule` | Re-queue a dead-lettered schedule for another fire attempt after fixing the cause of failure                                                                                                        |
 
-### Group Conversation Tools (9)
+### Group Conversation Tools (18)
 
 | Tool                        | Description                                                                                                                                                |
 | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `describe_discussion_styles` | Rich descriptions of all 5 discussion styles with phase flows, member roles, and use cases                                                                |
+| `describe_discussion_styles` | Rich descriptions of all seven built-in discussion styles plus `CUSTOM`, with phase flows, member roles, and use cases |
 | `list_groups`               | List all group configurations with name, style, member count                                                                                               |
 | `read_group`                | Read a group configuration's full details                                                                                                                  |
-| `create_group`              | Create a group (members, moderator, style, roles, member types). Supports nested groups via `memberTypes=GROUP`                                           |
+| `create_group`              | Create a group (members, moderator, style, roles, member types, tasks). Supports nested groups via `memberTypes=GROUP` and pre-configured TASK_FORCE tasks via `tasks` param |
 | `update_group`              | Update a group configuration (full JSON replacement)                                                                                                       |
 | `delete_group`              | Delete a group configuration                                                                                                                               |
 | `discuss_with_group`        | Start a multi-agent discussion on a question. Returns full transcript + synthesized answer                                                                 |
 | `read_group_conversation`   | Read a group conversation transcript                                                                                                                       |
 | `list_group_conversations`  | List past group discussions for a group, with state and timestamps                                                                                         |
+| `start_group_discussion`    | Start a discussion asynchronously (returns immediately with groupConversationId). Poll with `read_group_conversation`                                     |
+| `delete_group_conversation` | Delete a group conversation. Its shared artifacts and any ephemeral agents are deleted; member conversations are **ended**, not deleted, and remain readable |
+| `followup_with_member`      | Ask one member a follow-up on a finished discussion. The agent retains its full context; question and answer are both recorded on the group transcript. Accepts an agent ID or a member's display name |
+| `continue_group_discussion` | Continue a finished discussion with a new question. Every member re-runs the phases retaining memory of prior rounds; the round counter increments        |
+| `close_group_conversation`  | Close a conversation permanently — ends member conversations and cleans up dynamically-created agents. No further follow-ups or continuations             |
+| `add_team_task`             | File a task on a standing team's backlog (I13). The backlog outlives any one discussion; cadences pull executable tasks from it into task-force runs      |
+| `list_team_backlog`         | List a standing team's backlog (I13) with each task's status, priority, assignee, and verification outcome                                                |
+| `list_group_templates`      | List the packaged group templates (I10), each naming the roles `create_group_from_template` expects                                                       |
+| `create_group_from_template` | Create a group from a template by assigning agents to its named roles (`roleAssignments` maps role → agent ID, or principal ID for HUMAN roles). Saves through the normal store path, so every save-time validation applies |
 
 See [Group Conversations](group-conversations.md) for full style details, custom phases, and nested groups.
+
+### Docs Tools (2)
+
+Read EDDI's own documentation over MCP **tools** — the counterpart to the `eddi://docs/*` **resources** below, and the pair the `toolsWhitelist: ["read_docs", "list_docs"]` example further down consumes. Tools and resources serve different clients: agentic MCP clients (EDDI's own included) consume `tools/list` and never call `resources/read`, so before these existed EDDI's docs were readable by a desktop client and not by any agent consuming EDDI's MCP server. Role set mirrors the REST docs endpoints exactly (any of the five roles). Both delegate to `DocsService`, so `eddi.docs.enabled=false` switches this surface off together with REST and the resources.
+
+| Tool        | Description                                                                                                   |
+| ----------- | ------------------------------------------------------------------------------------------------------------- |
+| `list_docs` | List the documentation pages this deployment serves (one name per line, no `.md` suffix). Read this first — the runtime set is smaller than the repository's |
+| `read_docs` | Read one page as markdown by name, e.g. `architecture`. Distinguishes an invalid name from an absent page      |
+
+### HITL Tools (10)
+
+Resolve Human-in-the-Loop approval gates over MCP — the counterpart to the REST HITL endpoints, at parity for both the regular (1:1) and group surfaces. Authorization mirrors REST exactly (per-conversation owner / `eddi-admin` / `eddi-approver` via the shared `HitlAccessGuard`); decisions are attributed server-side as `mcp:<principal>`. Mutating tools honour the `eddi.mcp.hitl.mutations.enabled` kill-switch and return structured errors (`errorCode` ∈ `NOT_FOUND | WRONG_STATE | FORBIDDEN | DISABLED | BAD_REQUEST`).
+
+| Tool                              | Description                                                                                                                    |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `list_pending_approvals`          | List regular (1:1) conversations awaiting approval (owner-scoped; includes RULE and TOOL_CALL pauses)                          |
+| `get_approval_status`             | Read a paused conversation's status; summary reports `pauseType`, `detail=full` returns the snapshot incl. any tool-call batch |
+| `resume_conversation`             | Resume with APPROVED/REJECTED (case-insensitive); resolves both RULE and TOOL_CALL pauses                                      |
+| `cancel_conversation`             | Cancel a paused or running conversation                                                                                        |
+| `list_group_pending_approvals`    | List a group's conversations awaiting approval (owner-scoped)                                                                  |
+| `list_all_group_pending_approvals`| Cross-group HITL inbox across all groups (owner-scoped)                                                                        |
+| `get_group_approval_status`       | Read a paused group discussion's status (summary; `detail=full` returns the whole conversation)                               |
+| `approve_group_phase`             | Approve/reject a paused phase, with optional `taskApprovals` JSON for TASK granularity; returns the resumed discussion         |
+| `submit_group_human_input`        | Submit a HUMAN member's response for the turn an `AWAITING_HUMAN_INPUT` discussion is waiting on (I6). Recorded as that member's transcript entry; the discussion resumes from the next speaker. Only the pending member's own principal (or an admin) may submit — this is the member **speaking**, not approving |
+| `cancel_group_discussion`         | Cancel an in-progress or paused group discussion                                                                              |
+
+See [HITL](hitl.md#mcp-surface) for the full authority model, the kill-switch, and REST-endpoint parity.
+
+### Memory Tools (8)
+
+| Tool                      | Description                                                                                          |
+| ------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `list_user_memories`      | List all persistent memory entries for a user                                                        |
+| `get_visible_memories`    | Get memories visible to a specific agent, considering self/group/global visibility scopes             |
+| `search_user_memories`    | Search user memories by keyword across keys and values                                               |
+| `get_memory_by_key`       | Get a specific memory entry by key for a user                                                        |
+| `upsert_user_memory`      | Create or update a persistent memory entry for a user                                                |
+| `delete_user_memory`      | Delete a specific memory entry by ID                                                                 |
+| `delete_all_user_memories` | Delete all memory entries for a user (GDPR-compliant bulk erasure)                                  |
+| `count_user_memories`     | Count total memory entries for a user                                                                |
+
+See [User Memory](user-memory.md) for visibility scoping, recall order, and dream consolidation.
+
+### GDPR Tools (2)
+
+| Tool               | Description                                                                                                                      |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| `delete_user_data` | Cascade-delete all user data across all stores (GDPR Art. 17 Right to Erasure). Requires `confirmation='CONFIRM'`. Irreversible |
+| `export_user_data` | Export all data for a user (GDPR Art. 15/20 Right of Access / Data Portability)                                                  |
+
+See [GDPR / CCPA Compliance](gdpr-compliance.md) for data erasure, export, and retention details.
+
+### Channel Integration Tools (5)
+
+| Tool                            | Description                                                                                                     |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `list_channel_integrations`     | List all channel integrations with name, type, and target count                                                 |
+| `read_channel_integration`      | Read a channel integration's full configuration                                                                 |
+| `create_channel_integration`    | Create a new channel integration (Slack, Teams, etc.) with platform config and agent targets                    |
+| `update_channel_integration`    | Update an existing channel integration                                                                          |
+| `delete_channel_integration`    | Delete a channel integration (soft or permanent)                                                                |
+
+See [Slack Integration](slack-integration.md) for Slack-specific setup and multi-agent thread discussions.
 
 ## MCP Resources
 
@@ -108,11 +195,34 @@ EDDI also exposes its documentation as MCP **resources**, allowing AI agents to 
 
 Configure the docs path with: `eddi.docs.path` (default: `docs/`, in Docker: `/deployments/docs`).
 
+### The same docs over REST
+
+> **MCP resources do not reach an EDDI agent.** A resource is only usable by a client that asks for it, and EDDI's own MCP client never calls `resources/read` — it consumes *tools*. So `eddi://docs/*` made EDDI's documentation readable by a desktop MCP client and not by an agent running on EDDI, which is precisely backwards for an agent whose job is to explain the platform.
+
+The same doc set is therefore served read-only over REST, where an agent generated from EDDI's OpenAPI spec picks it up as ordinary tools:
+
+| Endpoint | Role | Returns |
+| -------- | ---- | ------- |
+| `GET /administration/docs` | any of `eddi-admin`, `eddi-editor`, `eddi-user`, `eddi-approver`, `eddi-viewer` | JSON array of page names, without the `.md` suffix |
+| `GET /administration/docs/{name}` | same | The page's markdown source as `text/plain`; `404` if absent |
+
+> **Roles are enumerated, not inherited.** EDDI has no role hierarchy — JAX-RS `@RolesAllowed` and the MCP layer's `requireRole` are both literal `hasRole` checks — so `eddi-viewer` alone would refuse an `eddi-admin`. The widest read tier is spelled out because these are published documentation pages.
+
+Both surfaces delegate to `DocsService`, which owns the filesystem access and the path-traversal guard.
+
+> **The runtime doc set is smaller than the repository's.** The container image copies only top-level `docs/*.md` (non-recursive, so nothing under `docs/agent-configs/` or `docs/templates/` is reachable) and then removes `changelog.md`, `code-review-standards.md`, `incident-response.md` and `SUMMARY.md`. Call the index and read from it — do not assume a particular page exists.
+
 ## Quick Start
 
-### Claude Desktop Configuration
+### Client Configuration
 
-Add to `claude_desktop_config.json`:
+EDDI uses **Streamable HTTP** transport at `http://localhost:7070/mcp`. How you connect depends on your client's transport support.
+
+> The configurations below are for an instance with authentication **off**. If OIDC is enabled, each one additionally needs a bearer token — see [Connecting to an authenticated instance](#connecting-to-an-authenticated-instance).
+
+#### Direct HTTP (Streamable HTTP clients)
+
+Clients that natively support HTTP transport (e.g., IDE plugins, custom MCP clients) can connect directly:
 
 ```json
 {
@@ -123,6 +233,54 @@ Add to `claude_desktop_config.json`:
   }
 }
 ```
+
+#### Antigravity (Google)
+
+Add EDDI as an MCP server in your Antigravity settings (`.gemini/config/settings.json` or workspace `.agents/settings.json`):
+
+```json
+{
+  "mcpServers": {
+    "eddi": {
+      "serverUrl": "http://localhost:7070/mcp"
+    }
+  }
+}
+```
+
+Antigravity connects natively via Streamable HTTP — no bridge required.
+
+#### stdio Bridge (Claude Desktop, Cursor, Windsurf, etc.)
+
+Many MCP clients — including Claude Desktop's `claude_desktop_config.json` — only support **stdio** transport (spawning a local subprocess). They cannot connect to HTTP endpoints directly.
+
+Use [`mcp-remote`](https://github.com/geelen/mcp-remote) to bridge the gap. It runs as a local stdio process and proxies requests to EDDI's HTTP endpoint:
+
+```json
+{
+  "mcpServers": {
+    "eddi": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "http://localhost:7070/mcp"]
+    }
+  }
+}
+```
+
+**Windows users** — if `npx` is not on your shell PATH, wrap via `cmd`:
+
+```json
+{
+  "mcpServers": {
+    "eddi": {
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "mcp-remote", "http://localhost:7070/mcp"]
+    }
+  }
+}
+```
+
+> **What is `mcp-remote`?** An open-source npm package ([github.com/geelen/mcp-remote](https://github.com/geelen/mcp-remote)) that acts as an invisible bridge between stdio-only MCP clients and HTTP-based MCP servers. It handles protocol translation, session management, and authentication. Requires Node.js 18+.
 
 ### Example Workflow
 
@@ -245,8 +403,8 @@ Discover deployed agents with their capabilities. Returns an enriched list of de
     },
     {
       "agentId": "64513b3c...",
-      "name": "Agent Father",
-      "description": "Agent to create Connector Agents...",
+      "name": "Platform Operator",
+      "description": "Agent that reads and operates this EDDI deployment...",
       "version": 110,
       "status": "READY",
       "environment": "production"
@@ -416,7 +574,7 @@ Delete an agent trigger for a given intent. After deletion, `chat_managed` calls
 
 ```
 # 1. Create an agent (using setup_agent or the Manager UI)
-setup_agent(name: "Support Agent", systemPrompt: "You are a helpful support agent...", ...)
+setup_agent(agentName: "Support Agent", systemPrompt: "You are a helpful support agent...", ...)
 → { agentId: "abc123", version: 1, status: "deployed" }
 
 # 2. Create a trigger mapping an intent to this agent
@@ -447,33 +605,95 @@ In `application.properties`:
 
 ```properties
 # MCP Server — Streamable HTTP at /mcp
-quarkus.mcp-server.http.root-path=/mcp
+quarkus.mcp.server.http.root-path=/mcp
 
 # Documentation path for MCP resources (default: docs/)
 eddi.docs.path=docs
 ```
 
+> The namespace is `quarkus.mcp.server.*` with dots. The hyphenated
+> `quarkus.mcp-server.*` is not a key the extension knows — setting it moves
+> nothing and only logs an "Unrecognized configuration key" warning.
+
 ## Tool Filtering
 
 EDDI uses a **whitelist-based `ToolFilter`** (`McpToolFilter.java`) to control which tools are exposed via MCP.
 
-**Why?** EDDI's langchain4j integration registers internal agent tools (calculator, datetime, websearch, etc.) that are meant ONLY for agent pipeline execution — not for external MCP clients. The filter ensures only the 48 intended tools are visible.
+**Why?** EDDI's langchain4j integration registers internal agent tools (calculator, datetime, websearch, etc.) that are meant ONLY for agent pipeline execution — not for external MCP clients. The `ToolFilter` SPI only sees a tool's *name* (not its declaring class or annotation type), so the whitelist is by name. It currently exposes all 84 intended tools — conversation, admin/resource/schedule/channel, setup, group, **HITL approvals** (`McpHitlTools`), **persistent user memory** (`McpMemoryTools`), **GDPR/CCPA** (`McpGdprTools`), and **docs** (`McpDocTools`).
 
-To add a new MCP tool: add it to the `MCP_TOOLS` set in `McpToolFilter.java`.
+To add a new MCP tool: add its name to the `MCP_TOOLS` set in `McpToolFilter.java`. A quarkus-MCP `@Tool` has no other invocation path, so a tool that is *not* whitelisted is unreachable dead code. `McpToolFilterTest.test_allMcpToolMethods_areWhitelisted()` auto-discovers every `@Tool` in the `engine.mcp` package and fails the build if any is missing from the whitelist — so forgetting this step is caught by CI.
 
 ## Authentication & Authorization
 
 - The MCP endpoint inherits EDDI's existing OIDC/Keycloak authentication
 - When auth is enabled (`quarkus.oidc.tenant-enabled=true`), MCP clients must provide valid tokens
-- Admin tools (deploy, undeploy, delete) should be production to authorized users via `@RolesAllowed`
+- Authorization is enforced **in-code**, not via `@RolesAllowed`: most tools call `requireRole(identity, authEnabled, "<role>")` (`McpToolUtils`), and the HITL tools use the shared `HitlAccessGuard` (per-conversation owner / `eddi-admin` / `eddi-approver`). When `authorization.enabled=false` (the default dev posture) `requireRole` is a no-op — production is guarded by `AuthStartupGuard`, which fails startup if OIDC is disabled.
 - **Future**: Per-agent MCP access control via agent configuration for multi-tenant SaaS
 
-### Recommended Role Mapping
+### Connecting to an authenticated instance
 
-| Role        | Tools                                                                                                                                                                                                            |
-| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mcp-user`  | `list_agents`, `discover_agents`, `create_conversation`, `talk_to_agent`, `chat_with_agent`, `chat_managed`, `read_conversation*`, `list_agent_triggers`, `read_agent_logs`, `read_audit_trail`, `describe_discussion_styles`, `discuss_with_group`, `read_group_conversation`, `list_group_conversations` |
-| `mcp-admin` | All user tools + `deploy_agent`, `undeploy_agent`, `create_agent`, `delete_agent`, `update_agent`, `setup_agent`, `create_api_agent`, resource CRUD, `apply_agent_changes`, `list_agent_resources`, trigger CRUD, group CRUD (`create_group`, `update_group`, `delete_group`) |
+The [Quick Start](#quick-start) configurations above assume an instance with authentication off. When `quarkus.oidc.tenant-enabled=true`, `/mcp` carries an explicit `authenticated` HTTP policy and every request needs a bearer token.
+
+**EDDI does not yet advertise itself as an OAuth protected resource**, so a client that expects to log in by itself — a Claude Desktop connector, or `mcp-remote`'s automatic OAuth — receives a bare 401 with nothing to discover, and stops. Until that lands ([`planning/mcp-oauth-protected-resource-plan.md`](../planning/mcp-oauth-protected-resource-plan.md)), the token has to be supplied by hand.
+
+**1. Get a token.** The shipped realm's `eddi-frontend` client is public and permits the direct access grant:
+
+```bash
+read -rsp "Password for eddi: " KC_PASSWORD && echo
+printf '%s' "$KC_PASSWORD" | curl -s \
+  -d grant_type=password -d client_id=eddi-frontend -d username=eddi \
+  --data-urlencode "password@-" \
+  http://localhost:8180/realms/eddi/protocol/openid-connect/token
+```
+
+> The password is read without echo and reaches `curl` on stdin, so it lands in
+> neither your shell history nor the process table. `--data-urlencode` encodes it,
+> which a password with `&` or `+` in it needs.
+
+**2a. Clients that speak Streamable HTTP and accept headers** (IDE plugins, Antigravity, custom clients):
+
+```json
+{
+  "mcpServers": {
+    "eddi": {
+      "url": "http://localhost:7070/mcp",
+      "headers": { "Authorization": "Bearer <access_token>" }
+    }
+  }
+}
+```
+
+**2b. stdio-only clients** keep the `mcp-remote` bridge and pass the header through it. `mcp-remote` splits arguments on whitespace, so put the whole value in an environment variable:
+
+```json
+{
+  "mcpServers": {
+    "eddi": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "http://localhost:7070/mcp", "--header", "Authorization:${AUTH_HEADER}"],
+      "env": { "AUTH_HEADER": "Bearer <access_token>" }
+    }
+  }
+}
+```
+
+**Caveats, in the order they will bite you:**
+
+- **The token expires.** The shipped realm does not override Keycloak's default access-token lifespan of five minutes, and a static header never refreshes. This recipe is for trying things out, not for running an assistant against EDDI all day.
+- **There is no long-lived API key for `/mcp`.** The only api-key surface in EDDI is the `/v1` OpenAI-compatible adapter (`eddi.openai-compat.api-key`), which is a different protocol — see [Open WebUI integration](open-webui-integration.md).
+- **Roles decide which tools work, and there is no hierarchy.** A token whose realm roles are missing authenticates fine and then fails every tool with "requires role" — see [Role Mapping](#role-mapping) below.
+- **`/mcp` cannot be opened selectively.** `eddi.mcp.allow-unauthenticated` only lets a *fully* unauthenticated deployment boot past `HighValueSurfaceGuard`; it does not exempt `/mcp` on an instance where authentication is on.
+
+### Role Mapping
+
+These are the **actual Keycloak role strings** the tools check (not aliases). Roles are additive in intent — grant an editor/admin the read scope too. For exact per-tool roles see the code (`requireRole` calls) and the per-category sections above (HITL / Memory / GDPR).
+
+| Role           | Scope |
+| -------------- | ----- |
+| `eddi-viewer`  | The conversation tools (`list_agents`, `list_agent_configs`, `get_agent`, `discover_agents`, `create_conversation`, `talk_to_agent`/`chat_with_agent`/`chat_managed`, `read_conversation`, `read_conversation_log`, `list_conversations`, `read_agent_logs`, `read_audit_trail`), running a discussion and reading its transcript (`describe_discussion_styles`, `discuss_with_group`, `start_group_discussion`, `read_group_conversation`, `list_group_conversations`, `followup_with_member`, `continue_group_discussion`, `list_team_backlog`, `list_group_templates`), and the memory **read** tools (`list_user_memories`, `get_visible_memories`, `search_user_memories`, `get_memory_by_key`, `count_user_memories`). `read_agent_logs` additionally requires `eddi-admin` unless a `conversationId` is supplied |
+| `eddi-editor`  | `setup_agent`, `create_api_agent`, and the group configuration/lifecycle tools: `list_groups`, `read_group`, `create_group`, `update_group`, `delete_group`, `create_group_from_template`, `add_team_task`, `close_group_conversation`, `delete_group_conversation` |
+| `eddi-admin`   | **Every** tool in `McpAdminTools`, read as well as write — `deploy_agent`/`undeploy_agent`, `get_deployment_status`, agent and resource CRUD (`list_workflows`, `read_workflow`, `read_resource`, `create_resource`, `update_resource`, `delete_resource`, `list_agent_resources`, `apply_agent_changes`), and trigger/schedule/channel authoring *and* listing — plus the **memory writes** (`upsert_user_memory`, `delete_user_memory`, `delete_all_user_memories`) and **GDPR** tools (`delete_user_data`, `export_user_data`) |
+| `eddi-approver`| Decide HITL approvals (with the conversation owner and `eddi-admin`): `resume_conversation`, `approve_group_phase`, `cancel_*`, `*_pending_approvals`, `*_approval_status` — see [HITL](hitl.md#who-may-decide) |
 
 ## Sentiment Monitoring
 
@@ -518,50 +738,120 @@ In addition to acting as an MCP server, EDDI agents can also **consume external 
 
 ### Configuration
 
-Add `mcpServers` to a LangChain task configuration:
+External MCP servers are configured as **`mcpcalls` workflow extensions** — a first-class, versioned configuration resource (the MCP equivalent of `httpcalls`). There is **no** inline MCP server array on the LLM task.
+
+**Step 1 — create an `mcpcalls` configuration** (`POST /mcpcallsstore/mcpcalls`), one per MCP server:
 
 ```json
 {
-  "tasks": [
-    {
-      "type": "anthropic",
-      "mcpServers": [
-        {
-          "url": "http://localhost:7070/mcp",
-          "name": "eddi-docs",
-          "apiKey": "${vault:mcp-api-key}",
-          "timeoutMs": 30000
-        },
-        {
-          "url": "https://tools.example.com/mcp",
-          "name": "external-tools"
-        }
-      ]
-    }
+  "mcpServerUrl": "http://localhost:7070/mcp",
+  "name": "eddi-docs",
+  "transport": "http",
+  "apiKey": "${vault:mcp-api-key}",
+  "timeoutMs": 30000,
+  "toolsWhitelist": ["read_docs", "list_docs"],
+  "toolsBlacklist": []
+}
+```
+
+| Field            | Type       | Required | Default   | Description                                                                                                              |
+| ---------------- | ---------- | -------- | --------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `mcpServerUrl`   | string     | **Yes**  | —         | MCP server URL                                                                                                           |
+| `name`           | string     | No       | —         | Human-readable name for logging                                                                                          |
+| `transport`      | string     | No       | `"http"`  | Only Streamable HTTP is implemented; an unimplemented value is rejected as invalid configuration rather than silently substituted |
+| `apiKey`         | string     | No       | —         | API key, sent as `Authorization: Bearer <key>`. Resolved through global variables and `${vault:key}` references, or `${caller:token}` to call as the chatting user (see below) |
+| `timeoutMs`      | long       | No       | `30000`   | Connection and request timeout in milliseconds                                                                           |
+| `toolsWhitelist` | string[]   | No       | —         | If non-empty, only these tool names are exposed (names as returned by the server's `tools/list`)                          |
+| `toolsBlacklist` | string[]   | No       | —         | Tool names to exclude. Applied *after* the whitelist                                                                     |
+| `mcpCalls`       | object[]   | No       | —         | Deterministic, action-triggered tool bindings (see *Pipeline mode* below). Omit for agent-mode-only servers               |
+| `exposeResources` | boolean   | No       | `false`   | Opt-in bridge for the server's MCP **resources**: synthesizes `<name>_list_resources` and `<name>_read_resource` tools so the agent can list and read them (text capped at 64K chars, binary described, not returned). Independent of the whitelist/blacklist, which govern server-advertised names |
+
+#### How `create_api_agent` builds a write tool's body
+
+A generated `POST`/`PUT`/`PATCH` tool takes the **entire request body as a single
+`requestBody` parameter**, whose description names the schema's properties, their
+types, and which are required. The model writes the JSON itself.
+
+It is worth knowing why, because the obvious alternative is worse. Decomposing the
+schema into one parameter per property means every one becomes *required* (an
+`ApiCall`'s parameter map has nowhere to record optionality), so a `PATCH` of one
+field forces the model to restate all the others and a partial update silently
+becomes a full overwrite. It also substitutes model-written values into JSON
+unescaped, so a value containing a quote can break the body or add fields the
+schema never declared.
+
+The whole-body form matters most under [HITL approval](hitl.md): the approval card
+shows tool **arguments**, so "what the approver sees is what gets sent" only holds
+while the body is one of them.
+
+#### Calling an MCP server as the chatting user
+
+Set `apiKey` to `${caller:token}` and the tool call carries the identity of the
+person chatting, instead of a standing service credential:
+
+```json
+{ "mcpServerUrl": "https://eddi.example/mcp", "apiKey": "${caller:token}" }
+```
+
+The same guarantees apply as for API call headers — same origin only, fails
+closed rather than sending a placeholder, never persisted. See
+[`httpcalls.md`](httpcalls.md#calling-as-the-signed-in-user).
+
+Two behaviours worth knowing, because they are deliberate:
+
+- **Only tool calls carry the caller.** The `initialize` handshake and
+  `tools/list` are sent unauthenticated, because the client is cached: a session
+  opened with one user's token would be reused by everyone after them, and a
+  tool list reflecting one user's permissions would be offered to the next. If
+  your server requires authentication to *list* tools, use a static key.
+- **Clients are cached per credential, not per URL.** Two agents pointing at the
+  same server with different keys get separate clients. A caller-bound config
+  still yields one shared client — the credential is applied per request, so
+  there is no client per user.
+
+A `${caller:token}` key with `eddi.caller-identity.enabled=false` is rejected as
+invalid configuration when the server is validated, rather than failing on every
+tool call.
+
+**Step 2 — add an `mcpcalls` step to the agent's workflow**, before the LLM step:
+
+```json
+{
+  "workflowSteps": [
+    { "type": "eddi://ai.labs.parser",   "config": { "uri": "eddi://ai.labs.parser/parserstore/parsers/<id>?version=1" } },
+    { "type": "eddi://ai.labs.behavior", "config": { "uri": "eddi://ai.labs.rules/rulestore/rulesets/<id>?version=1" } },
+    { "type": "eddi://ai.labs.mcpcalls", "config": { "uri": "eddi://ai.labs.mcpcalls/mcpcallsstore/mcpcalls/<id>?version=1" } },
+    { "type": "eddi://ai.labs.llm",      "config": { "uri": "eddi://ai.labs.llm/llmstore/llms/<id>?version=1" } }
   ]
 }
 ```
 
-| Field       | Type   | Required | Default            | Description                                                                        |
-| ----------- | ------ | -------- | ------------------ | ---------------------------------------------------------------------------------- |
-| `url`       | string | **Yes**  | —                  | MCP server URL (Streamable HTTP transport)                                         |
-| `name`      | string | No       | URL                | Human-readable name for logging                                                    |
-| `transport` | string | No       | `"streamableHttp"` | Transport type (only `streamableHttp` supported)                                   |
-| `apiKey`    | string | No       | —                  | API key, sent as `Authorization: Bearer <key>`. Supports `${vault:key}` references |
-| `timeoutMs` | long   | No       | `30000`            | Connection and request timeout in milliseconds                                     |
+A workflow may contain any number of `mcpcalls` steps — one per MCP server.
+
+### Two Modes, One Configuration
+
+- **Agent mode** — `AgentOrchestrator.discoverMcpCallTools()` traverses the agent → workflow → every `mcpcalls` step at execution time, connects to each server, applies that config's whitelist/blacklist, and hands the surviving tools to the LLM. The LLM calls them reactively. Controlled by `enableMcpCallTools` on the LLM task (`langchain.json`), **default `true`** — no per-server opt-in is needed:
+
+  ```json
+  { "tasks": [ { "type": "anthropic", "enableMcpCallTools": false } ] }
+  ```
+
+- **Pipeline mode** — `McpCallsTask` (`eddi://ai.labs.mcpcalls`, pipeline position `Parser → Rules → HttpCalls → McpCalls → LLM → Output`) matches behavior-rule actions against `mcpCalls[].actions` and invokes the named tool deterministically, with **no LLM involved**. Only active when `mcpCalls` is non-empty.
+
+Both modes read the same `mcpcalls` configuration; they are not mutually exclusive.
 
 ### Using `setup_agent` with MCP Servers
 
 ```
 setup_agent(
-  name: "My Agent",
+  agentName: "My Agent",
   systemPrompt: "You are helpful",
-  mcpServers: "http://localhost:7070/mcp, https://tools.example.com/mcp",
+  mcpServerUrls: "http://localhost:7070/mcp, https://tools.example.com/mcp",
   ...
 )
 ```
 
-The `mcpServers` parameter accepts a comma-separated list of URLs.
+The `mcpServerUrls` parameter accepts a comma-separated list of URLs. For each URL, `AgentSetupService` creates one `mcpcalls` configuration (`transport: "http"`, `timeoutMs: 30000`, no whitelist/blacklist, no `mcpCalls` bindings — i.e. agent-mode only) and inserts a matching `eddi://ai.labs.mcpcalls` step into the generated workflow ahead of the LLM step. Nothing is written inline into the LLM configuration.
 
 ### Architecture
 

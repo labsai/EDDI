@@ -1,0 +1,157 @@
+# Operator over MCP with full guardrails — Implementation Plan
+
+> **For agentic workers:** implement task-by-task; each phase is independently shippable. Do not skip to Phase 4 — earlier phases are what keep the operator from holding ungated write tools.
+
+**Status:** proposed, not started.
+**Audience:** a coding agent with no prior context on this thread. Everything needed is below or cited by exact file/symbol.
+**Repos:** `EDDI` (Java/Quarkus backend) and `EDDI-Manager` (React admin UI). Both are checked out side by side in the same parent directory.
+**Prerequisite:** EDDI PR #668 (`feat/agent-docs-and-hitl-strict`) merged, or branch from it. It adds `McpDocTools`, the MCP resource bridge, and `TaskToolApprovalsResolver`. Nothing here depends on those *semantically*, but Phase 2 touches adjacent code and will conflict textually.
+
+---
+
+## 1. Why this exists (read this before touching anything)
+
+EDDI-Manager provisions a **Platform Operator** — an EDDI agent whose tools are generated from EDDI's own OpenAPI spec via `POST /administration/agents/setup-api` with an `endpoints` allow-list. It can read and (with approval on every write) operate the deployment.
+
+EDDI *also* exposes ~76 tools over MCP at `/mcp` (`McpAdminTools`, `McpConversationTools`, `McpSetupTools`, `McpGroupTools`, `McpHitlTools`, `McpGdprTools`, `McpMemoryTools`, `McpDocTools`). Any EDDI agent can consume an MCP server by referencing an `mcpcalls` config from its workflow. **So an agent could technically point at EDDI's own MCP server today.** The Manager deliberately does not wire this, because three safety mechanisms that protect the operator's HTTP tools do **not** currently apply to MCP tools.
+
+The goal of this plan is to close those three gaps so MCP becomes a first-class, safely gateable tool source — then optionally wire the operator to it for the composite verbs REST lacks (above all `apply_agent_changes`).
+
+**Do not skip to Phase 4.** Wiring the operator to MCP before Phases 1–3 land would give it ungated write tools.
+
+### The three gaps, precisely
+
+| # | Gap | Where | Consequence today |
+|---|-----|-------|-------------------|
+| G1 | The gate cannot tell an MCP read from an MCP write | `ToolApprovalGate` classifies by pattern; HTTP tools carry `method:path` so `http.post:*` gates every write **fail-safe**. MCP tools are opaque names — `mcp:list_agents` and `mcp:delete_agent` look identical | To gate MCP writes you must enumerate names, and any tool added later is **ungated by default** — the exact fail-open the allow-list design refuses |
+| G2 | Approval previews for MCP are thin | `ToolApprovalGateSupport.toPreview` builds `ResolvedRequestPreview` (method/uri/headers/body) only for http tools | An approver sees a tool name + redacted args, not a resolved request. **Integrity is fine** (see §2), but reviewability is worse |
+| G3 | The Manager's two hard controls are blind to MCP | `EDDI-Manager/src/lib/operator/self-guard.ts` and `gate-guard.ts` both match on `requestPreview.uri` | An MCP `update_resource` aimed at the operator's own LLM config passes both guards |
+
+### What is NOT a gap (verified — do not "fix" these)
+
+- **Request pinning.** For HTTP, `ToolApprovalGateSupport` fingerprints the resolved request and re-checks before execution, because a pre-request resolution step could otherwise change what runs. **MCP has no such step**: a gated MCP call's arguments are frozen into `PendingToolCallBatch` at pause time and the approved call executes those exact arguments. There is nothing to drift. G2 is about preview *quality*, not integrity.
+- **Capability.** EDDI's MCP admin tools are conveniences over the same REST stores. MCP adds no reachable capability except composite verbs (§Phase 4).
+
+---
+
+## 2. Key facts an implementer needs (all verified against the code)
+
+**Gate classification** — `src/main/java/ai/labs/eddi/engine/hitl/tools/ToolApprovalGate.java`:
+```java
+public GateResult classify(List<ToolExecutionRequest> batch,
+                           Map<String,String> toolSources,     // name -> "http"|"mcp"|"builtin"|...
+                           Map<String,String> toolEndpoints,   // name -> "post:/path"  (http ONLY)
+                           ToolApprovalsConfig cfg,
+                           Set<String> clearedCallIds)
+```
+Precedence, from its javadoc: **P1** exempt beats requireApproval · **P2** any pattern match suffices · **P3** empty/absent `requireApproval` = gate fully inactive. `addressesOf(name, toolSources, toolEndpoints)` derives the three addressable forms: `source.method:path` (http only), `source:name`, bare `name`.
+
+**How `toolEndpoints` reaches the gate** — this is the template Phase 2 copies:
+`ToolContribution` (record, `modules/llm/tools/spi/ToolContribution.java`) carries `toolSources` + `toolEndpoints` → each provider returns one → `AgentOrchestrator` merges them (~line 689) into `ToolSetup` → `ToolLoopRunner` (~line 337) passes `setup.toolEndpoints()` into `classify`. **Adding a parallel `toolReadOnly` map follows exactly this path.**
+
+**Pattern validation** — `HitlConfigValidation` rejects a method qualifier on any source but `http` (`mcp.post:` is refused at save time) with a typo suggestion. Accepted sources: `builtin, http, mcp, a2a, dynamic, memory, recall`.
+
+**Server side is ready.** quarkus-mcp-server **1.13.1** (see `pom.xml` property `quarkus-mcp-server.version`) supports:
+```java
+@Tool(name = "...", description = "...",
+      annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false,
+                                      idempotentHint = true, openWorldHint = false))
+```
+Verified via `javap io.quarkiverse.mcp.server.Tool$Annotations` → `title, readOnlyHint, destructiveHint, idempotentHint, openWorldHint`.
+
+**Client side is the blocker.** langchain4j-mcp **1.18.1-beta28** drops annotations: `McpClient.listTools()` returns `List<ToolSpecification>` and no annotation type exists in the jar (`unzip -l` shows only `ToolSpecificationHelper`). `ToolSpecification` has a generic `metadata()` map, but the langchain4j MCP client does not populate it from `tools/list` annotations. **So a foreign MCP server's hints cannot be read today without an upstream contribution.** Phase 2 therefore uses a first-party map for EDDI's own server and treats foreign servers fail-safe.
+
+**Manager guard shape** — `EDDI-Manager/src/lib/operator/blocked-calls.ts` combines `findSelfTargetedCalls` (self-guard) + `findGateCarryingCalls` (gate-guard) and is called from all three approval surfaces (`pages/operator.tsx`, `pages/approvals.tsx`, `pages/conversation-detail.tsx`). `PendingToolCallView` (`src/lib/api/hitl.ts`) has: `callId, toolName, source, arguments (redacted, may be truncated), argsTruncated, gateReason, requestPinned, requestPreview`. **Note `source` and `arguments` already exist — that is what the MCP branch keys on.**
+
+---
+
+## 3. Phases
+
+Each phase is independently shippable and independently valuable. Do them in order.
+
+### Phase 1 — Annotate EDDI's own MCP tools (backend, no behavior change)
+
+**Goal:** every `@Tool` in `src/main/java/ai/labs/eddi/engine/mcp/` declares whether it mutates.
+
+1. For each `@Tool` method in `McpAdminTools`, `McpConversationTools`, `McpSetupTools`, `McpGroupTools`, `McpHitlTools`, `McpGdprTools`, `McpMemoryTools`, `McpDocTools`, add `annotations = @Tool.Annotations(...)`.
+2. `readOnlyHint = true` **only** for tools that cannot change state. Judge by what the tool *does*, not its name. Reads: `list_agents`, `get_agent`, `read_workflow`, `read_resource`, `list_docs`, `read_docs`, `get_deployment_status`, `read_conversation`, `list_conversations`, `read_audit_trail`, `read_agent_logs`, `discover_agents`, `list_schedules`, `read_schedule`, `list_groups`, `read_group`, `get_approval_status`, `list_pending_approvals`, … Writes (`readOnlyHint = false`): everything in `create_*`, `update_*`, `delete_*`, `deploy_*`, `undeploy_*`, `setup_*`, `apply_agent_changes`, `resume_conversation`, `approve_group_phase`, `cancel_*`, `fire_schedule_now`, `chat_*`/`talk_to_agent` (they create conversation state and can trigger tool calls).
+   - **`destructiveHint = true`** for anything deleting or undeploying.
+   - When in doubt, `readOnlyHint = false`. A needlessly gated read costs one approval click; a mis-declared write costs the gate.
+3. **Add a test that pins annotation VALUES, not merely their presence.** Put it in `src/test/java/ai/labs/eddi/engine/mcp/McpToolAnnotationsCoverageTest.java`. Presence alone is not enough and would be actively dangerous: Phase 2 derives the read-only registry from these annotations, so a *write* tool mistakenly carrying `readOnlyHint = true` passes a presence check and then gets exempted by `mcp.readonly:*` — a mislabelled annotation becomes an ungated write. The test must therefore hold an **explicit expected read-only name set** and assert:
+   - every `@Tool` declares `annotations` (no rot), **and**
+   - `readOnlyHint == true` for exactly the names in that expected set — no more, no fewer.
+
+   Adding a tool then forces a deliberate edit to that set, which is the review moment where "is this really read-only?" gets asked. Belt and braces: also assert `readOnlyHint == false` for every name matching the mutating prefixes (`create_|update_|delete_|deploy_|undeploy_|setup_|cancel_|approve_|resume_|fire_|apply_`), so a rename into a mutating shape cannot silently keep a stale read-only hint.
+4. Update `docs/mcp-server.md`: note that tools carry MCP annotations and what `readOnlyHint` means for gating.
+
+**Done when:** every MCP tool is annotated, the coverage test passes, `./mvnw.cmd test` green.
+
+### Phase 2 — Teach the gate about MCP read/write (backend, the core of this plan)
+
+**Goal:** `mcp:*` gating becomes fail-safe, i.e. "exempt known reads, gate everything else" — mirroring what `http.get:*` gives HTTP.
+
+1. **Add `toolReadOnly` to the SPI.** In `ToolContribution`, add a `Map<String,Boolean> toolReadOnly` component (dispatch name → true when the tool is known read-only). Follow the existing defensive-copy pattern in the compact constructor; add it to the convenience constructors as `Map.of()`. Update the record javadoc the same way `toolEndpoints` is documented ("empty for every source that cannot determine it").
+2. **Thread it through** exactly like `toolEndpoints`: `AgentOrchestrator` merge (~line 689) → `ToolSetup` → `ToolLoopRunner` (~lines 337, 398) → `ToolApprovalGate.classify(...)` gains a `Map<String,Boolean> toolReadOnly` parameter. **Keep the existing `classify` overloads** delegating with `Map.of()` so no caller or test breaks.
+3. **Populate it for EDDI's own server.** In `McpToolProviderManager`, after `tools/list`, resolve read-only per tool:
+   - langchain4j does not surface annotations (see §2), so introduce a small first-party source of truth: a `McpReadOnlyToolRegistry` listing EDDI's own read-only tool names, derived from the Phase 1 annotations. **Generate or test-pin it against the annotations so the two cannot drift** — e.g. a test that reflects over the `@Tool` methods and asserts the registry matches exactly.
+   - Apply it **only** to a server the deployment has independently established as EDDI's own. **Trust must not come from asking the server.** An earlier draft of this plan proposed probing `GET {baseUrl}/administration/docs` or an identity tool; that is unsound — a hostile server can simply answer the probe, then expose a write tool under a read-only name and inherit the exemption. An unauthenticated probe is a liveness check, never a trust decision.
+     The trust decision must be **configuration-side and authenticated**: e.g. the URL matches this deployment's own configured MCP endpoint *and* the connection carries credentials the deployment issued (or a pinned certificate / trusted origin). Anything short of that is not identification.
+   - For every other server — foreign, or merely unproven — leave the entry **absent**, which Phase 2's gate semantics already treat as "gate it".
+4. **Gate semantics.** In `ToolApprovalGate.classify`, add a fourth addressable form for MCP tools whose read-only status is *known true*: they may match an exemption like `mcp.readonly:*`. **Absent knowledge must never mean exempt** — an unknown tool stays gated whenever `mcp:*` is in `requireApproval`. Extend `HitlConfigValidation` to accept `mcp.readonly:` as a valid qualifier (it currently rejects any non-http qualifier) with the same typo-suggestion path.
+5. **Tests.** Extend `ToolApprovalGateTest`: a known-read-only MCP tool is exempted by `mcp.readonly:*`; an unknown MCP tool with the same config is **gated**; a known-write MCP tool is gated; the absence of the map degrades to "everything gated" (fail-safe). Add a `HitlConfigValidationTest` case for the new qualifier.
+6. Update `docs/hitl.md` §"Pattern forms" and the precedence table.
+
+**Done when:** a config of `requireApproval: ["mcp:*"]` + `exempt: ["mcp.readonly:*"]` gates every EDDI MCP write and no EDDI MCP read, and an unknown/foreign MCP tool is gated.
+
+**Fallback if step 3 proves too invasive:** ship Phase 2 with the registry only (skip foreign-server detection) and gate all foreign MCP tools unconditionally. Still a strict improvement.
+
+### Phase 3 — Manager guards understand MCP calls (EDDI-Manager)
+
+**Goal:** the two hard controls stop being blind to MCP.
+
+1. **`self-guard.ts`** — `findSelfTargetedCalls` currently returns `[]` for any call without `requestPreview`. Add an MCP branch: when `call.source === "mcp"` and the tool is not a known read, parse `call.arguments` (JSON) and refuse if the operator's own `agentId` appears in any string value. Reuse the existing `uriTargetsAgent` case-insensitive/percent-decoded comparison semantics for the id match.
+   **`arguments` is a display payload, so absence of evidence is not evidence of absence.** It is **redacted** as well as size-capped (`PendingToolCallView.arguments` / `argsTruncated`), so the id can be missing from what the Manager holds while being present in what would execute — searching it and finding nothing yields a **false negative**, i.e. a silently unguarded write.
+   Truncation is the *easy* half: refuse when `argsTruncated` is true, and refuse when the payload does not parse — the same fail-closed rule `gate-guard.ts` already applies to `bodyTruncated`. **Redaction is the harder half, and it does not have a client-side answer**: a complete, valid-JSON payload can still have had the id scrubbed by `SecretRedactionFilter`, so "parsed fine and the id is not there" is *not* proof either. Do not pretend otherwise. Resolve it one of two ways, and state which in the PR:
+   - preferred — have the backend expose an authoritative, un-redacted **self-target determination** (a boolean the server computes, since it holds the real arguments), and have the guard read that rather than re-deriving it from a display payload; or
+   - failing that, treat every MCP write that could name an agent as unverifiable and refuse it, accepting the false-positive cost.
+   What is **not** acceptable is scanning the redacted payload and treating a miss as a pass — that is a guard that reports success precisely when it cannot see.
+   **Preserve the module's stated asymmetry**: a false positive costs one refused approval; a false negative costs the gate.
+2. **`gate-guard.ts`** — `findGateCarryingCalls` matches `/llmstore/llms` in the URI. Add an MCP branch that inspects `arguments` for a `toolApprovals` key at any depth (reuse the existing `containsToolApprovalsKey` walker) and for a `resourceType` naming the llm store. **`argsTruncated: true`, and any unparseable payload, must fail closed** — exactly as `bodyTruncated` does today, and for the reason spelled out in step 1.
+   **Do not make an enumerated tool list the security boundary.** An earlier draft scoped this branch to `update_resource`, `create_resource`, `apply_agent_changes`; that fails open the moment a resource-writing tool is added — the same fail-open-enumeration bug that shipped `list_docs`/`read_docs` invisible through `McpToolFilter`, and the reason `tool-scopes.ts` is an allow-list rather than a deny-list. Classify instead: **an MCP tool is a write unless it is positively known to be read-only**, reusing the Phase 2 read-only classification rather than a second hand-maintained list. Then the guard inspects every MCP call that is not a known read, and an unrecognised future tool is covered by default.
+3. **Tests** — mirror the existing `gate-guard.test.ts` / self-guard tests with MCP-shaped `PendingToolCallView` fixtures (`source: "mcp"`, `requestPreview: null`, `arguments` JSON).
+4. Update the doc comments in both files — they currently justify themselves purely in URI terms.
+
+**Done when:** an MCP call carrying `toolApprovals`, or aimed at the operator's own agent, disables Approve on all three Manager surfaces; `npm test` green.
+
+### Phase 4 — Actually wire the operator to MCP (EDDI-Manager + small backend)
+
+**Only after 1–3.** Two sub-steps, each optional.
+
+1. **Backend: curated MCP tool subsets at provisioning time.** `POST /administration/agents/setup-api` accepts `mcpServerUrls` (comma-separated) and `AgentSetupService.createMcpCallsResources` creates one `mcpcalls` config per URL **with no whitelist** — so "give the operator only `apply_agent_changes` and `list_agent_resources`" is not expressible in one call. Add an optional per-URL tool whitelist to the setup request (e.g. `mcpToolsWhitelist`, applied to every created config, or a richer `url|tool1;tool2` form). Validate it the same way the existing fields are.
+2. **Manager: opt-in MCP for the operator.** In `EDDI-Manager/src/lib/operator/tool-scopes.ts`, add a curated MCP tool allow-list beside `READ_ENDPOINTS`/`WRITE_ENDPOINTS`, pass `mcpServerUrls` + the whitelist through `provisionOperator` (`src/lib/api/operator.ts`), and extend `buildToolApprovals()` to add `mcp:*` to `requireApproval` and `mcp.readonly:*` to `exempt`. Update `system-prompt.ts` so the operator is told what the MCP tools do — in particular that `apply_agent_changes` replaces the four-step landing procedure the prompt currently teaches.
+3. **Update the write canary** (`src/lib/operator/write-canary.ts`) if an MCP write is in scope — it currently provokes `PATCH /descriptorstore/descriptors/{id}` and asserts the pause. The equivalent MCP probe must be equally cheap and reversible.
+
+**The prize:** `apply_agent_changes` batch-cascades URI changes through workflow → agent and optionally redeploys, in one gated, approvable call — replacing the config → workflow repoint → agent repoint → deploy chain the operator currently walks in four separate approvals, and which `system-prompt.ts` spends a paragraph explaining.
+
+---
+
+## 4. Guardrails for whoever implements this
+
+- **Fail-safe or don't ship.** Every classification decision must default to "gated" on missing information. If you cannot determine that an MCP tool is read-only, it is a write.
+- **Never let an enumerated list be the boundary.** Any list of "the dangerous tools" fails open for the next tool added. Classify positively (known-read-only) and treat everything else as a write. This repo has already been bitten twice: `McpToolFilter`'s name whitelist silently hid two tools, and `tool-scopes.ts` is an allow-list for exactly this reason.
+- **Never derive trust from the untrusted party.** A server answering a probe proves only that it can answer a probe. Identity must come from configuration plus credentials, not from a question asked over the same channel you are trying to validate.
+- **A display payload is not an authority.** `arguments` / `requestPreview.body` are redacted and capped. Finding nothing in them is not proof; truncated or unparseable means refuse.
+- **No new bypass surface.** `HitlConfigValidation` refuses `mcp.post:` today *on purpose* (no MCP tool records a method). If you add `mcp.readonly:`, add it to the accepted set explicitly — do not relax the qualifier check generally.
+- **Do not weaken `TaskToolApprovalsResolver`.** Strict mode (PR #668) is what stops a task-level `toolApprovals` from removing the gate. If MCP gating lands, the Manager's `gate-guard.ts` can eventually relax — that is a separate, deliberate decision, not a side effect.
+- **Read `docs/project-philosophy.md`** (EDDI's supreme directive) and `AGENTS.md` §2 (workflow protocol: branch from `origin/main`, never commit to `main`, never force-push, **ask before pushing**).
+- **Sandbox caveat:** tests binding loopback sockets (`A2AToolProviderManager*`, `Embedding*`) fail in sandboxed agent environments with `Unable to establish loopback connection`. That is environmental, not a regression — CI is the source of truth. Run `./mvnw.cmd test` (unit) locally; `./mvnw.cmd verify` needs Docker.
+- **Windows:** use `.\mvnw.cmd`, not `./mvnw`.
+
+## 5. Suggested branch/PR split
+
+| Branch | Phase | Rough size |
+|---|---|---|
+| `feat/mcp-tool-annotations` | 1 | small, mechanical + one coverage test |
+| `feat/mcp-readonly-gating` | 2 | medium; SPI + gate + validation + tests |
+| `feat/manager-mcp-guards` (Manager repo) | 3 | small-medium; two guards + tests |
+| `feat/operator-mcp-tools` (both repos) | 4 | medium; provisioning + scope + prompt + canary |

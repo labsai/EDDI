@@ -9,7 +9,7 @@ description: >-
 
 Welcome to the official documentation for **E.D.D.I** (Enhanced Dialog Driven Interface) — a production-grade multi-agent orchestration middleware for conversational AI.
 
-**Latest version: 6.0.0** · License: Apache 2.0 · [GitHub](https://github.com/labsai/EDDI) · [Website](https://eddi.labs.ai/)
+[![Version](https://img.shields.io/github/v/release/labsai/EDDI?label=version&color=blue)](https://github.com/labsai/EDDI/releases) · License: Apache 2.0 · [GitHub](https://github.com/labsai/EDDI) · [Website](https://eddi.labs.ai/)
 
 ---
 
@@ -37,14 +37,19 @@ Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker im
 ### 🤖 Multi-Agent Orchestration
 
 - **12 LLM Providers** — OpenAI, Anthropic, Google Gemini, Mistral AI, Azure OpenAI, Amazon Bedrock, Oracle GenAI, Vertex AI, Ollama, Jlama, Hugging Face, plus OpenAI-compatible endpoints
-- **[Group Conversations](group-conversations.md)** — Multi-agent debates (Round Table, Peer Review, Devil's Advocate, Delphi, Debate)
+- **[Group Conversations](group-conversations.md)** — Multi-agent debates, voting, shared artifacts, and standing teams across 7 discussion styles (Round Table, Peer Review, Devil's Advocate, Delphi, Debate, Task Force, Negotiation)
 - **[Managed Agents](managed-agents.md)** — Intent-based auto-routing with one conversation per user per intent
 - **[Model Cascading](model-cascade.md)** — Cost-optimized multi-model routing with confidence-based escalation
+- **Platform Operator** — Meta-agent that reads and operates the deployment, including creating other agents, with every write behind a human approval gate. Activate it at `/manage/operator`, or use the form-based wizard at `/manage/agents/wizard` — see **[Getting Started](getting-started.md)**
 
 ### 🔗 Protocols & Interoperability
 
-- **[MCP Server](mcp-server.md)** (48+ tools) — Full EDDI control from Claude Desktop, IDE plugins, or any MCP client
+- **[MCP Server](mcp-server.md)** (80+ tools) — Full EDDI control from Claude Desktop, IDE plugins, or any MCP client
+- **[MCP Client](mcp-client.md)** — Point an agent at somebody else's MCP server, including stdio servers via a bridge sidecar
 - **[A2A Protocol](a2a-protocol.md)** — Agent-to-Agent peer communication with skill discovery
+- **[Connections](connections.md)** — One credential model for every outbound call: static keys, HTTP Basic, OAuth service accounts, and per-end-user OAuth
+- **[OpenAI-Compatible API](open-webui-integration.md)** — Deployed agents presented as OpenAI models for Open WebUI and OpenAI SDK clients
+- **SSE Streaming** — Token-by-token responses, including most tool-enabled turns (a single-chunk fallback applies to cascade agents, providers without a streaming builder, and a few other configurations), plus a live `tool_call` event so clients can show "Using {tool}…" while the turn is still running
 
 ### 🧠 Intelligence & Memory
 
@@ -58,6 +63,7 @@ Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker im
 - **[Secrets Vault](secrets-vault.md)** — Envelope encryption (AES-256-GCM + PBKDF2) for API keys
 - **[Security](security.md)** — SSRF protection, sandboxed evaluation, Keycloak auth
 - **[Audit Ledger](audit-ledger.md)** — Write-once trail with HMAC integrity for EU AI Act compliance
+- **[Human-in-the-Loop](hitl.md)** — Turn-level and per-tool-call approval gates with timeout policies, plus Slack and MCP approval surfaces
 
 ---
 
@@ -82,6 +88,7 @@ Build agent behavior by composing these extensions:
 
 | Topic                   | Guide                                              |
 | ----------------------- | -------------------------------------------------- |
+| ⚙️ Configuration Reference | [→ Guide](configuration-reference.md)           |
 | 🐳 Docker               | [→ Guide](docker.md)                               |
 | ☸️ Kubernetes & Helm    | [→ Guide](kubernetes.md)                           |
 | 🔴 Red Hat & OpenShift  | [→ Guide](redhat-openshift.md)                     |

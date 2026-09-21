@@ -4,22 +4,29 @@
  */
 package ai.labs.eddi.engine.tenancy;
 
+import static ai.labs.eddi.engine.tenancy.ITenantQuotaStore.accountingUnavailable;
+
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.engine.tenancy.model.TenantQuota;
 import ai.labs.eddi.engine.tenancy.model.UsageSnapshot;
 import ai.labs.eddi.utils.LogSanitizer;
+import com.mongodb.MongoException;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.FindOneAndUpdateOptions;
+import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.ReturnDocument;
+import com.mongodb.client.model.UpdateOptions;
 import com.mongodb.client.model.Updates;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.bson.Document;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import java.time.Clock;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.time.ZoneOffset;
@@ -37,6 +44,16 @@ import java.util.List;
  * <li>{@code tenant_usage} — rolling usage counters (daily conversations,
  * per-minute API calls, monthly cost)</li>
  * </ul>
+ * <p>
+ * <strong>Document identity:</strong> {@code tenant_usage} holds exactly ONE
+ * document per tenant, carrying all three counters (daily conversations,
+ * per-minute API calls, monthly cost), guarded by a unique index on
+ * {@code tenantId}. Every write that may insert therefore filters on
+ * {@code tenantId} and nothing else — see {@link #ensureUsageDocument(String)}.
+ * Mixing a window predicate ({@code dayStart} / {@code minuteStart} /
+ * {@code costMonth}) into an upsert filter would make the filter miss the
+ * existing document and attempt a second insert, which the unique index rejects
+ * with an E11000 duplicate-key error.
  *
  * @since 6.0.0
  */
@@ -48,26 +65,153 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
     private static final String QUOTAS_COLLECTION = "tenant_quotas";
     private static final String USAGE_COLLECTION = "tenant_usage";
 
+    private static final String FIELD_TENANT_ID = "tenantId";
+    private static final String FIELD_CONVERSATIONS_TODAY = "conversationsToday";
+    private static final String FIELD_DAY_START = "dayStart";
+    private static final String FIELD_API_CALLS_THIS_MINUTE = "apiCallsThisMinute";
+    private static final String FIELD_MINUTE_START = "minuteStart";
+    private static final String FIELD_MONTHLY_COST = "monthlyCostUsd";
+    private static final String FIELD_COST_MONTH = "costMonth";
+
     private final MongoCollection<Document> quotas;
     private final MongoCollection<Document> usage;
 
+    /**
+     * The source of "now" for every rolling window.
+     * <p>
+     * A field rather than {@code Instant.now()} at each use because the windows are
+     * wall-clock aligned — {@code truncatedTo(MINUTES)}, {@code truncatedTo(DAYS)},
+     * {@code YearMonth.now()} — so a test that increments a counter twice is
+     * asserting that both calls landed in the same window, and nothing made that
+     * true. Two calls milliseconds apart straddle a minute boundary roughly once
+     * every six hundred runs, and the counter reads 1 where the test expects 2.
+     * That is not a rare correctness question, it is a rare scheduling one, and it
+     * failed CI.
+     * <p>
+     * Production always gets {@link Clock#systemUTC()}. Only tests pass anything
+     * else.
+     */
+    private final Clock clock;
+
     @Inject
-    public MongoTenantQuotaStore(MongoDatabase database) {
+    public MongoTenantQuotaStore(MongoDatabase database,
+            @ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default") String defaultTenantId,
+            @ConfigProperty(name = "eddi.tenant.quota.enabled", defaultValue = "false") boolean enabled,
+            @ConfigProperty(name = "eddi.tenant.quota.max-conversations-per-day", defaultValue = "-1") int maxConvPerDay,
+            @ConfigProperty(name = "eddi.tenant.quota.max-agents-per-tenant", defaultValue = "-1") int maxAgents,
+            @ConfigProperty(name = "eddi.tenant.quota.max-api-calls-per-minute", defaultValue = "-1") int maxApiCalls,
+            @ConfigProperty(name = "eddi.tenant.quota.max-monthly-cost-usd", defaultValue = "-1") double maxCost) {
+
         this.quotas = database.getCollection(QUOTAS_COLLECTION);
         this.usage = database.getCollection(USAGE_COLLECTION);
+        this.clock = Clock.systemUTC();
 
-        // Ensure unique index on tenantId to prevent duplicate rows from upsert races
-        var indexOptions = new com.mongodb.client.model.IndexOptions().unique(true);
-        quotas.createIndex(new Document("tenantId", 1), indexOptions);
-        usage.createIndex(new Document("tenantId", 1), indexOptions);
+        ensureUniqueTenantIdIndex(quotas, QUOTAS_COLLECTION);
+        ensureUniqueTenantIdIndex(usage, USAGE_COLLECTION);
+
+        // Bootstrap default tenant quota if none exists (parity with
+        // InMemoryTenantQuotaStore).
+        // Uses $setOnInsert so an existing quota is never overwritten, even under
+        // races.
+        Document existing = quotas.findOneAndUpdate(
+                Filters.eq("tenantId", defaultTenantId),
+                Updates.combine(
+                        Updates.setOnInsert("tenantId", defaultTenantId),
+                        Updates.setOnInsert("maxConversationsPerDay", maxConvPerDay),
+                        Updates.setOnInsert("maxAgentsPerTenant", maxAgents),
+                        Updates.setOnInsert("maxApiCallsPerMinute", maxApiCalls),
+                        Updates.setOnInsert("maxMonthlyCostUsd", maxCost),
+                        Updates.setOnInsert("enabled", enabled)),
+                new FindOneAndUpdateOptions().upsert(true));
+        LOGGER.infof("Ensured default tenant quota exists: tenantId=%s, enabled=%s, maxConv=%d, maxAgents=%d, maxApi=%d, maxCost=%.2f",
+                defaultTenantId, enabled, maxConvPerDay, maxAgents, maxApiCalls, maxCost);
+        // findOneAndUpdate returns the document as it was BEFORE the upsert, so a
+        // non-null result means the row already existed and $setOnInsert did
+        // nothing. See TenantQuotaBootstrapCheck for why an operator has to be told
+        // rather than silently overridden.
+        if (existing != null) {
+            TenantQuotaBootstrapCheck.warnIfStoredQuotaDiffersFromConfig(toQuota(existing),
+                    new TenantQuota(defaultTenantId, maxConvPerDay, maxAgents, maxApiCalls, maxCost, enabled));
+        }
+    }
+
+    /**
+     * Test-only constructor — no CDI injection, no bootstrap.
+     */
+    MongoTenantQuotaStore(MongoDatabase database) {
+        this(database, Clock.systemUTC());
+    }
+
+    /**
+     * Test-only constructor taking the clock, so a test can pin "now".
+     * <p>
+     * A fixed clock is the difference between asserting that two increments landed
+     * in one window and hoping they did. Tests that need a window to expire set the
+     * stored {@code dayStart}/{@code minuteStart} to a stale value directly, which
+     * is both deterministic and closer to what the rollover path actually reads.
+     */
+    MongoTenantQuotaStore(MongoDatabase database, Clock clock) {
+        this.quotas = database.getCollection(QUOTAS_COLLECTION);
+        this.usage = database.getCollection(USAGE_COLLECTION);
+        this.clock = clock;
+
+        ensureUniqueTenantIdIndex(quotas, QUOTAS_COLLECTION);
+        ensureUniqueTenantIdIndex(usage, USAGE_COLLECTION);
+    }
+
+    /**
+     * Creates the unique {@code tenantId} index, tolerating failure.
+     * <p>
+     * A deployment that ran an earlier build with quotas enabled may already hold
+     * duplicate {@code tenantId} rows (they were produced by upserts whose filter
+     * pinned a rolling window, so they could miss the existing document). Index
+     * creation then fails, and an unguarded {@code createIndex} would take down
+     * bean construction — and with it application startup. The store no longer
+     * depends on the index for correctness: every write that can insert filters on
+     * {@code tenantId} alone, so the index is a safety net, not a precondition. Log
+     * loudly and carry on.
+     */
+    private static void ensureUniqueTenantIdIndex(MongoCollection<Document> collection, String collectionName) {
+        try {
+            collection.createIndex(new Document(FIELD_TENANT_ID, 1), new IndexOptions().unique(true));
+        } catch (RuntimeException e) {
+            LOGGER.errorf(e,
+                    "Could not create the unique tenantId index on '%s'. The collection most likely contains "
+                            + "duplicate tenantId documents written by an earlier build; de-duplicate it and restart "
+                            + "to restore the safety net. Quota accounting continues to work without the index.",
+                    collectionName);
+        }
     }
 
     // ─── Quota Configuration ───
 
+    /**
+     * Fails closed and <em>honestly</em> on a driver error, exactly like the three
+     * mutators below.
+     * <p>
+     * This is the first store call every gate in {@code TenantQuotaService} makes,
+     * so on a real outage it is the one that throws — the mutators are never
+     * reached. Left unwrapped, a {@code MongoTimeoutException} travelled through
+     * {@code TenantQuotaService} (which does not catch) into
+     * {@code ConversationService}'s generic handler and out as an opaque 500, with
+     * no tick on {@code eddi.tenant.quota.unavailable} and nothing on the dashboard
+     * panel that promises it. Wrapping only the write half therefore covered just
+     * the partial outage where reads succeed and writes fail.
+     * <p>
+     * A {@code null} return cannot carry the outage: it already means "no quota
+     * configured for this tenant", which the service treats as unlimited. Hence the
+     * exception — see {@link QuotaAccountingUnavailableException}.
+     */
     @Override
     public TenantQuota getQuota(String tenantId) {
-        Document doc = quotas.find(Filters.eq("tenantId", tenantId)).first();
-        return doc != null ? toQuota(doc) : null;
+        try {
+            Document doc = quotas.find(Filters.eq("tenantId", tenantId)).first();
+            return doc != null ? toQuota(doc) : null;
+        } catch (MongoException e) {
+            LOGGER.errorf("Failed to read quota for tenant '%s': %s",
+                    LogSanitizer.sanitize(tenantId), LogSanitizer.sanitize(e.getMessage()));
+            throw new QuotaAccountingUnavailableException(ACCOUNTING_UNAVAILABLE, e);
+        }
     }
 
     @Override
@@ -101,131 +245,244 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
 
     // ─── Atomic Usage Operations ───
     //
-    // Note: The increment methods use two sequential findOneAndUpdate calls
-    // (1: increment if in window + under limit, 2: reset if stale window).
-    // There is a minor TOCTOU race at window boundaries in multi-instance
-    // deployments: between call 1 and call 2, another instance may reset the
-    // window. This can cause a single false denial per window transition.
-    // This is acceptable for quota enforcement — the consequence is one
-    // request getting a "limit reached" response at a boundary that would
-    // succeed on retry. Not a data corruption risk.
+    // All three mutating operations share the same three-step shape:
+    //
+    // 1. FAST PATH — one conditional findOneAndUpdate (window current AND under
+    // limit) with NO upsert. In steady state this is the only round trip.
+    // 2. MATERIALISE — ensureUsageDocument(), the ONLY write that may insert. Its
+    // filter is `tenantId` alone, so it can never miss the existing document and
+    // attempt a duplicate insert against the unique index.
+    // 3. ROLL + RETRY — reset the expired window (conditional, no upsert), then
+    // re-run the fast-path update.
+    //
+    // Steps 2-3 only run when the fast path misses: first call for a tenant,
+    // window rollover, or an actual limit breach.
+    //
+    // Note: there is a minor TOCTOU race at window boundaries in multi-instance
+    // deployments — between the roll and the retry another instance may also
+    // roll. Document-level atomicity in MongoDB means at most one roll wins, so
+    // the consequence is at worst a single false denial per window transition,
+    // never over- or under-counting. Not a data corruption risk.
 
+    /**
+     * The three mutators below each wrap their body rather than letting a
+     * {@link MongoException} escape.
+     * <p>
+     * An escaping driver exception is not a quota answer at all: it travelled
+     * through {@code TenantQuotaService.acquireConversationSlot} (which does not
+     * catch) into {@code ConversationService}'s generic handler and out as a 500
+     * with a stack trace, while the same outage on PostgreSQL produced 503
+     * {@code quota_accounting_unavailable}, a {@code Retry-After} and a tick on
+     * {@code eddi.tenant.quota.unavailable}. Since {@code eddi.datastore.type}
+     * defaults to mongodb, the documented behaviour applied to neither the default
+     * deployment nor its dashboard panel.
+     * <p>
+     * Failing closed is unchanged — the request is still refused. Only its
+     * <em>description</em> changes, from "the server broke" to "quota accounting is
+     * down".
+     */
     @Override
     public QuotaCheckResult tryIncrementConversations(String tenantId, int limit) {
+        try {
+            return incrementConversationsWithinLimit(tenantId, limit);
+        } catch (MongoException e) {
+            LOGGER.errorf("Failed to increment conversations for tenant '%s': %s",
+                    LogSanitizer.sanitize(tenantId), LogSanitizer.sanitize(e.getMessage()));
+            return accountingUnavailable();
+        }
+    }
+
+    private QuotaCheckResult incrementConversationsWithinLimit(String tenantId, int limit) {
         if (limit < 0) {
             return QuotaCheckResult.OK;
         }
 
-        Instant dayStart = Instant.now().truncatedTo(ChronoUnit.DAYS);
+        long dayStart = clock.instant().truncatedTo(ChronoUnit.DAYS).toEpochMilli();
 
-        // Atomic: reset if expired + increment if under limit
-        Document result = usage.findOneAndUpdate(
-                Filters.and(
-                        Filters.eq("tenantId", tenantId),
-                        Filters.gte("dayStart", dayStart.toEpochMilli()),
-                        Filters.lt("conversationsToday", limit)),
-                Updates.combine(
-                        Updates.inc("conversationsToday", 1),
-                        Updates.setOnInsert("tenantId", tenantId),
-                        Updates.setOnInsert("dayStart", dayStart.toEpochMilli())),
-                new FindOneAndUpdateOptions().upsert(true).returnDocument(ReturnDocument.AFTER));
-
-        if (result == null) {
-            // Slot not acquired — check if it's a window reset or a real limit breach
-            Document existing = usage.findOneAndUpdate(
-                    Filters.and(
-                            Filters.eq("tenantId", tenantId),
-                            Filters.lt("dayStart", dayStart.toEpochMilli())),
-                    Updates.combine(
-                            Updates.set("conversationsToday", 1),
-                            Updates.set("dayStart", dayStart.toEpochMilli())),
-                    new FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER));
-
-            if (existing != null) {
-                return QuotaCheckResult.OK; // Window was stale, reset succeeded
-            }
-            return QuotaCheckResult.denied("Daily conversation limit reached (" + limit + ")");
+        if (tryConsumeSlot(tenantId, FIELD_CONVERSATIONS_TODAY, FIELD_DAY_START, dayStart, limit)) {
+            return QuotaCheckResult.OK;
         }
-        return QuotaCheckResult.OK;
+
+        ensureUsageDocument(tenantId);
+        rollWindowIfExpired(tenantId, FIELD_CONVERSATIONS_TODAY, FIELD_DAY_START, dayStart);
+
+        if (tryConsumeSlot(tenantId, FIELD_CONVERSATIONS_TODAY, FIELD_DAY_START, dayStart, limit)) {
+            return QuotaCheckResult.OK;
+        }
+        return QuotaCheckResult.denied("Daily conversation limit reached (" + limit + ")");
     }
 
+    /** See {@link #tryIncrementConversations} for why the body is wrapped. */
     @Override
     public QuotaCheckResult tryIncrementApiCalls(String tenantId, int limit) {
+        try {
+            return incrementApiCallsWithinLimit(tenantId, limit);
+        } catch (MongoException e) {
+            LOGGER.errorf("Failed to increment API calls for tenant '%s': %s",
+                    LogSanitizer.sanitize(tenantId), LogSanitizer.sanitize(e.getMessage()));
+            return accountingUnavailable();
+        }
+    }
+
+    private QuotaCheckResult incrementApiCallsWithinLimit(String tenantId, int limit) {
         if (limit < 0) {
             return QuotaCheckResult.OK;
         }
 
-        long minuteStart = Instant.now().truncatedTo(ChronoUnit.MINUTES).toEpochMilli();
+        long minuteStart = clock.instant().truncatedTo(ChronoUnit.MINUTES).toEpochMilli();
 
-        Document result = usage.findOneAndUpdate(
-                Filters.and(
-                        Filters.eq("tenantId", tenantId),
-                        Filters.gte("minuteStart", minuteStart),
-                        Filters.lt("apiCallsThisMinute", limit)),
-                Updates.combine(
-                        Updates.inc("apiCallsThisMinute", 1),
-                        Updates.setOnInsert("tenantId", tenantId),
-                        Updates.setOnInsert("minuteStart", minuteStart)),
-                new FindOneAndUpdateOptions().upsert(true).returnDocument(ReturnDocument.AFTER));
-
-        if (result == null) {
-            Document existing = usage.findOneAndUpdate(
-                    Filters.and(
-                            Filters.eq("tenantId", tenantId),
-                            Filters.lt("minuteStart", minuteStart)),
-                    Updates.combine(
-                            Updates.set("apiCallsThisMinute", 1),
-                            Updates.set("minuteStart", minuteStart)),
-                    new FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER));
-
-            if (existing != null) {
-                return QuotaCheckResult.OK;
-            }
-            return QuotaCheckResult.denied("API rate limit reached (" + limit + "/min)");
-        }
-        return QuotaCheckResult.OK;
-    }
-
-    @Override
-    public QuotaCheckResult tryAddCost(String tenantId, double cost, double limit) {
-        YearMonth currentMonth = YearMonth.now(ZoneOffset.UTC);
-        String monthKey = currentMonth.toString();
-
-        // Always add the cost (post-call accounting)
-        Document result = usage.findOneAndUpdate(
-                Filters.and(
-                        Filters.eq("tenantId", tenantId),
-                        Filters.eq("costMonth", monthKey)),
-                Updates.combine(
-                        Updates.inc("monthlyCostUsd", cost),
-                        Updates.setOnInsert("tenantId", tenantId),
-                        Updates.setOnInsert("costMonth", monthKey)),
-                new FindOneAndUpdateOptions().upsert(true).returnDocument(ReturnDocument.AFTER));
-
-        if (result == null) {
-            // Stale month — reset
-            usage.findOneAndUpdate(
-                    Filters.eq("tenantId", tenantId),
-                    Updates.combine(
-                            Updates.set("monthlyCostUsd", cost),
-                            Updates.set("costMonth", monthKey)),
-                    new FindOneAndUpdateOptions().upsert(true));
+        if (tryConsumeSlot(tenantId, FIELD_API_CALLS_THIS_MINUTE, FIELD_MINUTE_START, minuteStart, limit)) {
             return QuotaCheckResult.OK;
         }
 
-        double totalCost = result.getDouble("monthlyCostUsd");
-        if (limit >= 0 && totalCost > limit) {
+        ensureUsageDocument(tenantId);
+        rollWindowIfExpired(tenantId, FIELD_API_CALLS_THIS_MINUTE, FIELD_MINUTE_START, minuteStart);
+
+        if (tryConsumeSlot(tenantId, FIELD_API_CALLS_THIS_MINUTE, FIELD_MINUTE_START, minuteStart, limit)) {
+            return QuotaCheckResult.OK;
+        }
+        return QuotaCheckResult.denied("API rate limit reached (" + limit + "/min)");
+    }
+
+    /**
+     * See {@link #tryIncrementConversations} for why the body is wrapped. Cost
+     * accounting fails closed for the same reason the PostgreSQL store does: a
+     * budget that cannot be read must not be treated as a budget with room left.
+     * <p>
+     * The refusal carries {@link ITenantQuotaStore#ACCOUNTING_UNAVAILABLE} like
+     * every other outage path. It used to carry a wording of its own, which reached
+     * the client verbatim — {@code ConversationService} puts {@code reason()} into
+     * the {@code QuotaAccountingUnavailableException} the 503 body is built from —
+     * so one outage produced two different {@code message} strings depending on
+     * which gate happened to fail first. That is precisely the parity
+     * {@code ACCOUNTING_UNAVAILABLE} was extracted to hold.
+     */
+    @Override
+    public QuotaCheckResult tryAddCost(String tenantId, double cost, double limit) {
+        try {
+            return addCostWithinBudget(tenantId, cost, limit);
+        } catch (MongoException e) {
+            LOGGER.errorf("Failed to add cost for tenant '%s': %s",
+                    LogSanitizer.sanitize(tenantId), LogSanitizer.sanitize(e.getMessage()));
+            return ITenantQuotaStore.accountingUnavailable();
+        }
+    }
+
+    private QuotaCheckResult addCostWithinBudget(String tenantId, double cost, double limit) {
+        String monthKey = YearMonth.now(clock.withZone(ZoneOffset.UTC)).toString();
+
+        // Fast path: the document already carries the current month.
+        Document result = addCostWithinMonth(tenantId, monthKey, cost);
+
+        if (result == null) {
+            ensureUsageDocument(tenantId);
+            // Roll the month. $ne also matches documents that have no costMonth at
+            // all, which is exactly the freshly materialised case.
+            usage.updateOne(
+                    Filters.and(
+                            Filters.eq(FIELD_TENANT_ID, tenantId),
+                            Filters.ne(FIELD_COST_MONTH, monthKey)),
+                    Updates.combine(
+                            Updates.set(FIELD_MONTHLY_COST, 0.0),
+                            Updates.set(FIELD_COST_MONTH, monthKey)));
+            result = addCostWithinMonth(tenantId, monthKey, cost);
+        }
+
+        if (result == null) {
+            // The usage document was removed concurrently (resetUsage / deleteQuota).
+            // Nothing to account against; do not deny the caller over a bookkeeping race.
+            LOGGER.warnf("Could not record cost for tenant '%s' — usage document disappeared mid-update",
+                    LogSanitizer.sanitize(tenantId));
+            return QuotaCheckResult.OK;
+        }
+
+        Double stored = result.getDouble(FIELD_MONTHLY_COST);
+        double totalCost = stored != null ? stored : cost;
+        // >=, not >, to agree with TenantQuotaService.checkCostBudget (currentCost >=
+        // limit) and InMemoryTenantQuotaStore. With > the pre-call gate denied at
+        // exactly the limit while post-call accounting allowed.
+        if (limit >= 0 && totalCost >= limit) {
             return QuotaCheckResult.denied(
                     "Monthly cost budget exceeded ($%.2f / $%.2f)".formatted(totalCost, limit));
         }
         return QuotaCheckResult.OK;
     }
 
+    /**
+     * Materialises the single {@code tenant_usage} document for a tenant.
+     * <p>
+     * This is the ONLY write in this class that is allowed to insert, and its
+     * filter is deliberately the unique-index key ({@code tenantId}) and nothing
+     * else. All counters are seeded together so that whichever operation runs first
+     * for a tenant, the other two find their fields present rather than triggering
+     * a second insert.
+     */
+    private void ensureUsageDocument(String tenantId) {
+        long now = clock.instant().toEpochMilli();
+        usage.updateOne(
+                Filters.eq(FIELD_TENANT_ID, tenantId),
+                Updates.combine(
+                        Updates.setOnInsert(FIELD_TENANT_ID, tenantId),
+                        Updates.setOnInsert(FIELD_CONVERSATIONS_TODAY, 0),
+                        Updates.setOnInsert(FIELD_DAY_START,
+                                Instant.ofEpochMilli(now).truncatedTo(ChronoUnit.DAYS).toEpochMilli()),
+                        Updates.setOnInsert(FIELD_API_CALLS_THIS_MINUTE, 0),
+                        Updates.setOnInsert(FIELD_MINUTE_START,
+                                Instant.ofEpochMilli(now).truncatedTo(ChronoUnit.MINUTES).toEpochMilli()),
+                        Updates.setOnInsert(FIELD_MONTHLY_COST, 0.0)),
+                new UpdateOptions().upsert(true));
+    }
+
+    /**
+     * Conditional increment: succeeds only when the tenant's window is current and
+     * the counter is still below the limit. Never inserts, so it can never collide
+     * with the unique index.
+     */
+    private boolean tryConsumeSlot(String tenantId, String counterField, String windowField,
+                                   long windowStart, int limit) {
+        Document updated = usage.findOneAndUpdate(
+                Filters.and(
+                        Filters.eq(FIELD_TENANT_ID, tenantId),
+                        Filters.gte(windowField, windowStart),
+                        Filters.lt(counterField, limit)),
+                Updates.inc(counterField, 1),
+                new FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER));
+        return updated != null;
+    }
+
+    /**
+     * Resets an expired rolling window to zero. Also repairs legacy documents that
+     * predate single-document accounting and are missing the window field entirely.
+     */
+    private void rollWindowIfExpired(String tenantId, String counterField, String windowField, long windowStart) {
+        usage.updateOne(
+                Filters.and(
+                        Filters.eq(FIELD_TENANT_ID, tenantId),
+                        Filters.or(
+                                Filters.exists(windowField, false),
+                                Filters.lt(windowField, windowStart))),
+                Updates.combine(
+                        Updates.set(counterField, 0),
+                        Updates.set(windowField, windowStart)));
+    }
+
+    /**
+     * Adds cost only if the stored month matches. Never inserts.
+     */
+    private Document addCostWithinMonth(String tenantId, String monthKey, double cost) {
+        return usage.findOneAndUpdate(
+                Filters.and(
+                        Filters.eq(FIELD_TENANT_ID, tenantId),
+                        Filters.eq(FIELD_COST_MONTH, monthKey)),
+                Updates.inc(FIELD_MONTHLY_COST, cost),
+                new FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER));
+    }
+
     // ─── Usage Reporting ───
 
     @Override
     public UsageSnapshot getUsage(String tenantId) {
-        Document doc = usage.find(Filters.eq("tenantId", tenantId)).first();
+        Document doc = usage.find(Filters.eq(FIELD_TENANT_ID, tenantId)).first();
         if (doc == null) {
             return UsageSnapshot.empty(tenantId);
         }
@@ -234,21 +491,21 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
 
     @Override
     public double getMonthlyCost(String tenantId) {
-        Document doc = usage.find(Filters.eq("tenantId", tenantId)).first();
+        Document doc = usage.find(Filters.eq(FIELD_TENANT_ID, tenantId)).first();
         if (doc == null) {
             return 0.0;
         }
-        YearMonth currentMonth = YearMonth.now(ZoneOffset.UTC);
-        String monthKey = doc.getString("costMonth");
+        YearMonth currentMonth = YearMonth.now(clock.withZone(ZoneOffset.UTC));
+        String monthKey = doc.getString(FIELD_COST_MONTH);
         if (monthKey == null || !monthKey.equals(currentMonth.toString())) {
             return 0.0; // Stale month
         }
-        return doc.getDouble("monthlyCostUsd") != null ? doc.getDouble("monthlyCostUsd") : 0.0;
+        return doc.getDouble(FIELD_MONTHLY_COST) != null ? doc.getDouble(FIELD_MONTHLY_COST) : 0.0;
     }
 
     @Override
     public void resetUsage(String tenantId) {
-        usage.deleteOne(Filters.eq("tenantId", tenantId));
+        usage.deleteOne(Filters.eq(FIELD_TENANT_ID, tenantId));
         LOGGER.infof("Reset usage counters for tenant '%s'", LogSanitizer.sanitize(tenantId));
     }
 
@@ -264,21 +521,43 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
                 doc.getBoolean("enabled", false));
     }
 
+    /**
+     * Map a stored usage document to a snapshot, zeroing every counter whose window
+     * has already expired.
+     * <p>
+     * {@link ITenantQuotaStore#getUsage} documents that the snapshot "reflects
+     * current-window values only", and enforcement does roll the windows — but this
+     * read did not, so the dashboard showed yesterday's {@code conversationsToday}
+     * and the last active minute's {@code apiCallsThisMinute} until the next
+     * increment happened to roll them. An operator saw a tenant "at its daily
+     * limit" the morning after while the very next request would have been allowed.
+     * The predicate is the same one {@code rollWindowIfExpired} uses, so read and
+     * enforcement agree; the stored document is left untouched, because a read must
+     * not write.
+     */
     private UsageSnapshot toSnapshot(String tenantId, Document doc) {
+        Instant now = clock.instant();
+        Instant currentMinuteStart = now.truncatedTo(ChronoUnit.MINUTES);
+        Instant currentDayStart = now.truncatedTo(ChronoUnit.DAYS);
+        YearMonth currentMonth = YearMonth.now(clock.withZone(ZoneOffset.UTC));
+
         Instant minuteStart = doc.getLong("minuteStart") != null
                 ? Instant.ofEpochMilli(doc.getLong("minuteStart"))
-                : Instant.now();
+                : now;
         Instant dayStart = doc.getLong("dayStart") != null
                 ? Instant.ofEpochMilli(doc.getLong("dayStart"))
-                : Instant.now();
+                : now;
         YearMonth costMonth = doc.getString("costMonth") != null
                 ? YearMonth.parse(doc.getString("costMonth"))
-                : YearMonth.now(ZoneOffset.UTC);
-        return new UsageSnapshot(
-                tenantId,
-                doc.getInteger("conversationsToday", 0),
-                doc.getInteger("apiCallsThisMinute", 0),
-                doc.getDouble("monthlyCostUsd") != null ? doc.getDouble("monthlyCostUsd") : 0.0,
+                : currentMonth;
+
+        int conversationsToday = dayStart.isBefore(currentDayStart) ? 0 : doc.getInteger("conversationsToday", 0);
+        int apiCallsThisMinute = minuteStart.isBefore(currentMinuteStart) ? 0 : doc.getInteger("apiCallsThisMinute", 0);
+        double monthlyCost = costMonth.equals(currentMonth) && doc.getDouble("monthlyCostUsd") != null
+                ? doc.getDouble("monthlyCostUsd")
+                : 0.0;
+
+        return new UsageSnapshot(tenantId, conversationsToday, apiCallsThisMinute, monthlyCost,
                 minuteStart, dayStart, costMonth);
     }
 }

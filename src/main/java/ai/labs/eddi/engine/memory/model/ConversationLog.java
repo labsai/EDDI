@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.memory.model;
 
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 public class ConversationLog {
@@ -59,12 +60,12 @@ public class ConversationLog {
                 if (o == null || getClass() != o.getClass())
                     return false;
                 Content that = (Content) o;
-                return java.util.Objects.equals(type, that.type) && java.util.Objects.equals(value, that.value);
+                return Objects.equals(type, that.type) && Objects.equals(value, that.value);
             }
 
             @Override
             public int hashCode() {
-                return java.util.Objects.hash(type, value);
+                return Objects.hash(type, value);
             }
 
             @Override
@@ -108,12 +109,12 @@ public class ConversationLog {
             if (o == null || getClass() != o.getClass())
                 return false;
             ConversationPart that = (ConversationPart) o;
-            return java.util.Objects.equals(role, that.role) && java.util.Objects.equals(content, that.content);
+            return Objects.equals(role, that.role) && Objects.equals(content, that.content);
         }
 
         @Override
         public int hashCode() {
-            return java.util.Objects.hash(role, content);
+            return Objects.hash(role, content);
         }
 
         @Override
@@ -144,11 +145,11 @@ public class ConversationLog {
         if (o == null || getClass() != o.getClass())
             return false;
         ConversationLog that = (ConversationLog) o;
-        return java.util.Objects.equals(messages, that.messages);
+        return Objects.equals(messages, that.messages);
     }
 
     @Override
     public int hashCode() {
-        return java.util.Objects.hash(messages);
+        return Objects.hash(messages);
     }
 }
