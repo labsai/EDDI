@@ -448,6 +448,45 @@ miss threshold fails three of them.
 The crawler, then the source config plus the pipeline that ties fetch → convert → this store → embed,
 with vector removal driven by the tombstone list.
 
+## ♿ fix(ui): closing a dialog hands focus back to what opened it (2026-09-19)
+
+**Repo:** EDDI (`fix/dialog-return-focus`)
+
+`AccessibleDialog` promises "return focus to trigger element on close". It did not keep that promise
+in either of the two ways the Manager closes a dialog, so keyboard and screen-reader users were left on
+`<body>` and had to find their place from the top of the page again.
+
+### What was wrong
+
+- **With an `autoFocus` field inside** (`CreateAgentDialog`'s Name, the dictionary picker's search),
+  "what had focus" was recorded in a `useEffect`. React applies `autoFocus` during commit, before any
+  effect runs, so the recorded element was the dialog's own field. On close it had unmounted, and
+  focusing it did nothing.
+- **When closed by unmounting.** `ShareDialog` (on the Agents, Workflows and resource list pages) and
+  the Triggers dialog are rendered as `{target && <X open … />}` and close by unmounting. Focus was
+  only restored on an `open === false` render, which an unmount never produces.
+
+### What changed
+
+- `ui/manager/src/components/ui/accessible-dialog.tsx`: the trigger is recorded while rendering the
+  opening render, before React commits the dialog. It is restored in the effect's cleanup, which runs
+  on close and on unmount alike, but only if focus was actually lost with the dialog (it sits on
+  `<body>`). That guard does two things: StrictMode runs the cleanup once on mount with the dialog
+  still up, where an unconditional restore pulled focus out of the open dialog, and focus the user
+  deliberately moved elsewhere is not taken back.
+- `ui/manager/src/components/ui/__tests__/accessible-dialog-focus-return.test.tsx` (new): autoFocus
+  close, unmount close, StrictMode mount, and focus moved elsewhere. Against `main` the first two fail;
+  with the `<body>` guard removed the last two fail.
+
+### Note
+
+This rewrites the same effect as #788 (initial focus no longer steals from a focused field), which
+landed first. `main` is merged in here and the conflict resolved to keep both: #788's guarded,
+cancelled frame, and this branch's cleanup restore — the cleanup now cancels the frame *and* returns
+focus.
+
+---
+
 ## 🧪 fix(ui): a dialog no longer takes focus from a field the user is typing in (2026-09-18)
 
 **Repo:** EDDI (`fix/share-dialog-flaky-test`)
@@ -498,6 +537,119 @@ so on close focus "returns" to that (now unmounted) field instead of the trigger
 separate; left alone here.
 
 ---
+
+## 🔏 chore(ci): settle the dependency-review licence policy — deny-list kept, broadened, documented (2026-09-17)
+
+**Repo:** EDDI (`chore/dependency-review-license-policy`)
+
+### Why
+
+`.github/workflows/dependency-review.yml` printed a deprecation warning on every PR
+("The deny-licenses option is deprecated for possible removal in the next major
+release"). The comment above the option already recorded the deferral: migrating to
+`allow-licenses` means enumerating every licence the project accepts, which is a
+repo-wide policy decision, not a mechanical swap. This session established the real
+input, put the decision to the maintainer, and implemented the answer.
+
+### What the dependency graph actually contains
+
+Enumerated three ways: `license-maven-plugin:add-third-party` for the resolved Maven
+tree (582 artefacts), `npm query ":not(.dev)"` for both UIs, and — the one that
+matters — the live graph the action actually reads,
+`gh api repos/labsai/EDDI/dependency-graph/sbom`.
+
+GitHub's Maven graph parses `pom.xml` directly and does **not** resolve transitives,
+so the policy is evaluated against 95 Maven entries, not 582:
+
+| Count | Licence |
+|---|---|
+| 58 | `NOASSERTION` — BOM-managed (`io.quarkus:*`, `jakarta.annotation`, `caffeine`) or `${property}`-versioned (all 22 `dev.langchain4j:*`) |
+| 27 | `Apache-2.0` |
+| 4 | `MIT` (testcontainers) |
+| 2 | `Apache-2.0 AND BSD-3-Clause AND MIT` (maven plugins) |
+| 2 | `LicenseRef-bad-non-standard` — `org.jsoup:jsoup`, `io.github.classgraph:classgraph`; both are really MIT |
+| 1 | `BSD-2-Clause` (postgresql) |
+| 1 | `EPL-2.0 OR (Apache-2.0 AND EPL-2.0)` (jacoco) |
+
+npm contributes 1137 graph entries but `fail-on-scopes` defaults to `runtime` and
+`main.ts` runs the licence check on the scope-filtered set, so only production deps
+count: manager 179 (MIT 164, OFL-1.1 8, ISC 2, Apache-2.0 2, BSD-3-Clause 1,
+`MPL-2.0 OR Apache-2.0` 1) and chat 126 (MIT 122, ISC 2, BSD-3-Clause 1). The
+MPL-2.0, CC-BY-4.0 and Python-2.0 entries in the graph are all devDependencies.
+
+### Decision
+
+Keep `deny-licenses`, broaden it, and record why the warning is accepted. Three
+findings from reading the action's source made the allow-list migration the worse
+option rather than merely the more expensive one:
+
+1. **It would fail the build today.** `spdx.satisfies()` returns `false` for an
+   expression it cannot match, so the two `LicenseRef-bad-non-standard` entries land
+   in `forbidden` → `setFailed` under an allow-list. Under a deny-list
+   `satisfiesAny()` returns `false` and they pass. Migrating would mean two permanent
+   per-package exclusions that exist only to work around GitHub's own normalisation.
+2. **It buys no coverage.** The 58 unknown-licence entries go to the `unlicensed`
+   bucket, and `printNullLicenses()` only prints — it never sets `issueFound`. They
+   are informational in *both* modes.
+3. **Removal is not scheduled.** Upstream issue #997 was closed by stalebot after 180
+   days of inactivity, not by a decision, and v5.0.0 (2026-05-08) is a node20 → node24
+   runtime bump that leaves `deny-licenses` fully documented in `action.yml`. There is
+   no newer v4 digest, so the pin stays at v4.9.0.
+
+The line is drawn at the library level, because EDDI is Apache-2.0 and ships a fat jar
+inside a distributed Docker image — a combined work. Permissive and weak (file-level)
+copyleft stay acceptable; EPL especially has to, since the whole Jakarta EE / JUnit /
+JaCoCo layer Quarkus pulls in is EPL, usually dual with GPL-2.0 under the Classpath
+Exception. Denied: AGPL-3.0, GPL-2.0, GPL-3.0, LGPL-2.0/2.1/3.0 (each `-only` and
+`-or-later`), SSPL-1.0, BUSL-1.1, Elastic-2.0. The additions past the original two are
+not hypothetical — the realistic hazard for middleware is a dependency relicensing to
+source-available, and EDDI already depends on MongoDB and Elasticsearch clients.
+
+### Verified, not assumed
+
+Ran the candidate list through the same libraries the action uses
+(`@onebeyond/spdx-license-satisfies`, `spdx-expression-parse`) against every licence
+value in the live SBOM:
+
+- nothing currently in the graph is newly denied — the change is a strict superset of
+  the old behaviour with no regression;
+- every listed hazard is caught;
+- deprecated ids still match: a dep declared `GPL-3.0` is caught by `GPL-3.0-only`, so
+  modernising the identifiers does not weaken the gate;
+- Classpath-Exception artefacts do **not** false-positive —
+  `EPL-2.0 OR GPL-2.0-with-classpath-exception` and
+  `CDDL-1.1 OR GPL-2.0-only WITH Classpath-exception-2.0` both pass with `GPL-2.0-only`
+  and `GPL-2.0-or-later` denied. This was the main risk of adding GPL-2.0 and it is
+  disproven, not hoped.
+
+Known trade-off, recorded in the workflow: `satisfiesAny()` treats `A OR B` as denied
+when either side is, so a *directly declared* dep offering `Apache-2.0 OR LGPL-2.1`
+would be flagged despite the Apache option. Nothing hits this today — the dual-licensed
+artefacts (`net.java.dev.jna`, `org.javassist`, `com.github.java-json-tools:*`) are all
+transitive and invisible to GitHub's Maven graph.
+
+### Dropped the Caffeine exemption
+
+The `allow-dependencies-licenses` entry for Caffeine is **removed**. It was first kept
+with a corrected comment calling it cosmetic; CodeRabbit pushed back on the PR, and it
+was right. `groupChanges` in the action's `src/licenses.ts` says so in its own comment —
+*"we leave it off of the `licensed` and `unlicensed` lists"* — so the input drops a
+package from the licence check **entirely**, not just from the unknown-licence notice.
+The exemption therefore also waived `deny-licenses` for any future Caffeine release
+whose licence GitHub *can* resolve, while buying nothing: per finding 2 an unresolved
+licence cannot fail the build anyway, and 57 other entries sit in the same bucket
+unexempted. Caffeine remains verified Apache-2.0 (its own POM on Maven Central at 3.2.4,
+the version the Quarkus BOM resolves), shipped transitively via `quarkus-caffeine`
+before it was ever declared here — nothing needed waiving. The replacement note records
+when that input *is* appropriate: a package whose licence GitHub reports wrongly, naming
+the licence being accepted.
+
+### Files
+
+- `.github/workflows/dependency-review.yml` — broadened `deny-licenses`, removed
+  `allow-dependencies-licenses`; rewrote the comments to record the decision, the
+  evidence, and the revisit condition (upstream announcing removal, or GitHub resolving
+  BOM-managed Maven coordinates).
 
 ## ⬆️ chore(ui): Node 22 toolchain, Stryker 10, Vitest 5 for the Chat UI (2026-09-17)
 
@@ -3611,6 +3763,7 @@ _For recording decisions that come up during implementation that aren't in the p
 | 2026-03-05 | Use Astro (not Expo) for website                                      | Static site on GitHub Pages           | Expo would add unnecessary abstraction for a marketing site |
 | 2026-03-05 | Use AI complexity scale (🟢/🟡/🔴/⚫) instead of human time estimates | AI will do all implementation work    | Human hours are meaningless for AI execution                |
 | 2026-03-05 | Docs already published at docs.labs.ai                                | Third-party tool reads `docs/` folder | Could migrate to Astro Content Collections later            |
+| 2026-09-17 | Keep `deny-licenses` in dependency-review, broadened to GPL-2.0, LGPL-2.0/2.1/3.0, SSPL-1.0, BUSL-1.1 and Elastic-2.0 | An allow-list would fail today on the `LicenseRef-bad-non-standard` values GitHub reports for jsoup and classgraph, and would gate nothing extra — unknown licences are informational in both modes | Migrate to `allow-licenses` (needs two permanent per-package exclusions to work around GitHub's normalisation); leave the list at GPL-3.0/AGPL-3.0 (misses the source-available relicensing hazard that actually threatens a project depending on MongoDB and Elasticsearch clients) |
 | 2026-09-17 | Mark secret context on the value (`"secret": true`), scrub every copy when the turn ends | A per-user credential sent as context was stored, echoed and copied into properties; `scope: secret` holds one vault slot per agent | A list of secret keys in the agent configuration — couples every agent to one client's field names |
 | 2026-09-14 | Connection deployment settings are runtime-writable; a set property pins its value (409 on change) | Properties-only meant a restart per change and protected nothing from `eddi-admin`, who already writes the vault and can send any `${vault:}` value anywhere via an httpcall | Keep properties only (restart, no real protection); store without pinning (removes the operator/admin split for deployments that have one); seed the store from properties (a removed property would be silently replaced by its copy) |
 | 2026-09-13 | Block the cloud metadata service on every outbound path, even with `eddi.security.ssrf-protection.enabled=false` | E2E: a config-authored httpcall reached `169.254.169.254` | Flip SSRF protection on by default — breaks every configured internal API |
