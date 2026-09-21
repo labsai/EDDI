@@ -33,6 +33,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Optional;
 
+import com.mongodb.MongoClientSettings;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
@@ -103,7 +104,7 @@ class HitlToolJournalStoreTest {
         assertTrue(uniqueOptions.isUnique(), "the key index must be unique");
 
         BsonDocument renderedKey = uniqueKey
-                .toBsonDocument(Document.class, com.mongodb.MongoClientSettings.getDefaultCodecRegistry());
+                .toBsonDocument(Document.class, MongoClientSettings.getDefaultCodecRegistry());
         assertEquals(List.of("conversationId", "pauseEpoch", "callId"),
                 List.copyOf(renderedKey.keySet()),
                 "unique index must compose exactly (conversationId, pauseEpoch, callId) in order");
@@ -216,7 +217,7 @@ class HitlToolJournalStoreTest {
             var updateCaptor = org.mockito.ArgumentCaptor.forClass(Bson.class);
             verify(collection).updateOne(any(Bson.class), updateCaptor.capture());
             BsonDocument rendered = updateCaptor.getValue()
-                    .toBsonDocument(Document.class, com.mongodb.MongoClientSettings.getDefaultCodecRegistry());
+                    .toBsonDocument(Document.class, MongoClientSettings.getDefaultCodecRegistry());
             String cappedResult = rendered.getDocument("$set").getString("resultCapped").getValue();
             assertEquals(32 * 1024, cappedResult.getBytes(java.nio.charset.StandardCharsets.UTF_8).length);
         }
@@ -235,7 +236,7 @@ class HitlToolJournalStoreTest {
             var updateCaptor = org.mockito.ArgumentCaptor.forClass(Bson.class);
             verify(collection).updateOne(any(Bson.class), updateCaptor.capture());
             BsonDocument rendered = updateCaptor.getValue()
-                    .toBsonDocument(Document.class, com.mongodb.MongoClientSettings.getDefaultCodecRegistry());
+                    .toBsonDocument(Document.class, MongoClientSettings.getDefaultCodecRegistry());
             String cappedResult = rendered.getDocument("$set").getString("resultCapped").getValue();
 
             byte[] cappedBytes = cappedResult.getBytes(java.nio.charset.StandardCharsets.UTF_8);

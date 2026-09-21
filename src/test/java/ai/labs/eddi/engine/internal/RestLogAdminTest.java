@@ -18,6 +18,9 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
+import jakarta.ws.rs.sse.SseEventSink;
+import jakarta.ws.rs.sse.Sse;
+import jakarta.ws.rs.sse.OutboundSseEvent;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -117,9 +120,9 @@ class RestLogAdminTest {
                     .thenReturn(List.of(entry));
             when(boundedLogStore.addListener(any())).thenReturn("listener-1");
 
-            var eventSink = mock(jakarta.ws.rs.sse.SseEventSink.class);
-            var sse = mock(jakarta.ws.rs.sse.Sse.class, RETURNS_DEEP_STUBS);
-            var event = mock(jakarta.ws.rs.sse.OutboundSseEvent.class);
+            var eventSink = mock(SseEventSink.class);
+            var sse = mock(Sse.class, RETURNS_DEEP_STUBS);
+            var event = mock(OutboundSseEvent.class);
 
             // The stub chain must mirror RestLogAdmin#sendEvent exactly. With
             // RETURNS_DEEP_STUBS an unmatched link silently yields a *different* deep
@@ -133,7 +136,7 @@ class RestLogAdminTest {
                     .data(any(Class.class), any())
                     .build())
                     .thenReturn(event);
-            when(eventSink.send(any(jakarta.ws.rs.sse.OutboundSseEvent.class)))
+            when(eventSink.send(any(OutboundSseEvent.class)))
                     .thenReturn(CompletableFuture.completedFuture(null));
             when(eventSink.isClosed()).thenReturn(true); // close immediately to prevent cleanup thread from running long
 
@@ -151,8 +154,8 @@ class RestLogAdminTest {
             when(boundedLogStore.getEntries(any(), any(), any(), anyInt())).thenReturn(List.of());
             when(boundedLogStore.addListener(any())).thenReturn("listener-2");
 
-            var eventSink = mock(jakarta.ws.rs.sse.SseEventSink.class);
-            var sse = mock(jakarta.ws.rs.sse.Sse.class);
+            var eventSink = mock(SseEventSink.class);
+            var sse = mock(Sse.class);
             when(eventSink.isClosed()).thenReturn(true);
 
             restLogAdmin.streamLogs(null, null, null, eventSink, sse);

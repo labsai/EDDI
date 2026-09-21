@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.triggermanagement.IRestAgentTriggerStore;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
@@ -19,6 +20,7 @@ import ai.labs.eddi.engine.api.IRestAgentEngine;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.audit.rest.IRestAuditStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
+import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.*;
@@ -41,7 +43,9 @@ import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
+import io.quarkus.security.identity.SecurityIdentity;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -79,14 +83,15 @@ class McpConversationToolsTest {
         RestAgentEngine = mock(IRestAgentEngine.class);
         // Default: lenient serialize returns empty JSON
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
-        var mockIdentity = mock(io.quarkus.security.identity.SecurityIdentity.class);
+        var mockIdentity = mock(SecurityIdentity.class);
         lenient().when(mockIdentity.isAnonymous()).thenReturn(true);
         // Authorization disabled: the guard admits every caller (an unstubbed
         // descriptor store reads back no descriptor, i.e. no owner to check against).
         var conversationAccessGuard = new ConversationAccessGuard(mockIdentity, new OwnershipValidator(false),
                 mock(IConversationDescriptorStore.class));
         tools = new McpConversationTools(conversationService, agentAdmin, AgentStore, restInterfaceFactory, jsonSerialization, boundedLogStore,
-                auditStore, AgentTriggerStore, userConversationStore, RestAgentEngine, mockIdentity, conversationAccessGuard, false);
+                auditStore, AgentTriggerStore, userConversationStore, RestAgentEngine, mockIdentity, conversationAccessGuard,
+                mock(ResourceAccessGuard.class), false);
     }
 
     // --- listAgents ---
@@ -130,23 +135,23 @@ class McpConversationToolsTest {
     @Test
     void listAgentConfigs_returnsDescriptors() throws IOException {
         var descriptor = new DocumentDescriptor();
-        when(AgentStore.readAgentDescriptors("", 0, 20)).thenReturn(List.of(descriptor));
+        when(AgentStore.readAgentDescriptors("", 0, 20, "")).thenReturn(List.of(descriptor));
         when(jsonSerialization.serialize(any())).thenReturn("[{\"name\":\"TestAgent\"}]");
 
         String result = tools.listAgentConfigs(null, null);
 
         assertNotNull(result);
-        verify(AgentStore).readAgentDescriptors("", 0, 20);
+        verify(AgentStore).readAgentDescriptors("", 0, 20, "");
     }
 
     @Test
     void listAgentConfigs_withFilterAndLimit() throws IOException {
-        when(AgentStore.readAgentDescriptors("search", 0, 5)).thenReturn(Collections.emptyList());
+        when(AgentStore.readAgentDescriptors("search", 0, 5, "")).thenReturn(Collections.emptyList());
         when(jsonSerialization.serialize(any())).thenReturn("[]");
 
         tools.listAgentConfigs("search", 5);
 
-        verify(AgentStore).readAgentDescriptors("search", 0, 5);
+        verify(AgentStore).readAgentDescriptors("search", 0, 5, "");
     }
 
     // --- createConversation ---
@@ -290,13 +295,39 @@ class McpConversationToolsTest {
 
     @Test
     void readConversation_withReturningFields() throws Exception {
+        var output = new ConversationOutput();
+        output.put("input", "hello");
+        output.put("output", List.of("hi"));
+        output.put("actions", List.of("greet"));
         var snapshot = new SimpleConversationMemorySnapshot();
-        when(conversationService.readConversation(eq(CONV_ID), eq(false), eq(false), eq(List.of("input", "output")))).thenReturn(snapshot);
+        snapshot.setConversationOutputs(List.of(output));
+        when(conversationService.readConversation(eq(CONV_ID), eq(false), eq(false), anyList())).thenReturn(snapshot);
         when(jsonSerialization.serialize(snapshot)).thenReturn("{}");
 
-        tools.readConversation(AGENT_ID, CONV_ID, "production", false, false, "input,output");
+        tools.readConversation(AGENT_ID, CONV_ID, "production", false, false, " input , output ");
 
-        verify(conversationService).readConversation(any(), eq(false), eq(false), eq(List.of("input", "output")));
+        // Output keys are not sections: the service is asked for conversationOutputs
+        // (it filters by section only — passing "input" dropped every section) and the
+        // keys select within it.
+        verify(conversationService).readConversation(any(), eq(false), eq(false), eq(List.of("conversationOutputs")));
+        assertEquals(1, snapshot.getConversationOutputs().size());
+        assertEquals(Set.of("input", "output"), snapshot.getConversationOutputs().getFirst().keySet());
+    }
+
+    @Test
+    void readConversation_sectionNamesPassThroughAndKeepTheWholeSection() throws Exception {
+        var output = new ConversationOutput();
+        output.put("input", "hello");
+        output.put("actions", List.of("greet"));
+        var snapshot = new SimpleConversationMemorySnapshot();
+        snapshot.setConversationOutputs(List.of(output));
+        when(conversationService.readConversation(eq(CONV_ID), eq(false), eq(true), anyList())).thenReturn(snapshot);
+        when(jsonSerialization.serialize(snapshot)).thenReturn("{}");
+
+        tools.readConversation(AGENT_ID, CONV_ID, null, null, null, "conversationOutputs,conversationProperties,input");
+
+        verify(conversationService).readConversation(any(), eq(false), eq(true), eq(List.of("conversationOutputs", "conversationProperties")));
+        assertEquals(Set.of("input", "actions"), snapshot.getConversationOutputs().getFirst().keySet());
     }
 
     @Test

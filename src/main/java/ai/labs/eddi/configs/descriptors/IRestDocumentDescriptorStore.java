@@ -26,6 +26,14 @@ public interface IRestDocumentDescriptorStore {
     String DESCRIPTOR_STORE_PATH = "/descriptorstore/descriptors/";
     String resourceURI = "eddi://ai.labs.descriptor" + DESCRIPTOR_STORE_PATH;
 
+    /**
+     * @param space
+     *            narrows the listing to one space id ({@code user:<principal>} or
+     *            {@code team:<group>}) — the server side of the Manager's space
+     *            switcher. A narrowing only: asking for a space you cannot reach
+     *            returns nothing rather than granting it. Blank means every space
+     *            you can reach.
+     */
     @GET
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read list of descriptors.")
@@ -35,7 +43,9 @@ public interface IRestDocumentDescriptorStore {
                                              @QueryParam("index")
                                              @DefaultValue("0") Integer index,
                                              @QueryParam("limit")
-                                             @DefaultValue("20") Integer limit);
+                                             @DefaultValue("20") Integer limit,
+                                             @QueryParam("space")
+                                             @DefaultValue("") String space);
 
     @GET
     @Path("/{id}")

@@ -80,7 +80,7 @@ class DynamicAgentToolsTest {
         void createSubAgent_success() throws Exception {
             when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
                     .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/DataAnalyst",
-                            "anthropic", "claude-sonnet-4-6", true, "ready", null, null, null, null, null));
+                            "anthropic", "claude-sonnet-4-6", true, "ready", null, null, null, null, null, null));
 
             String result = tool.createSubAgent("DataAnalyst", "You analyze data", "anthropic", "claude-sonnet-4-6", null, null);
 
@@ -88,6 +88,20 @@ class DynamicAgentToolsTest {
             assertTrue(result.contains("sub-agent-1"));
             assertEquals(1, createdAgentIds.size());
             assertEquals("sub-agent-1", createdAgentIds.get(0));
+        }
+
+        @Test
+        void createSubAgent_failedInheritanceIsExplained() throws Exception {
+            // The parent's profile could not be read (the mock returns null), so no key
+            // was inherited — the model must be told that, not just "API key is required".
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
+                    .thenThrow(new AgentSetupService.AgentSetupException("API key is required for cloud LLM providers"));
+
+            String result = tool.createSubAgent("Helper", "You help", null, null, null, null);
+
+            assertTrue(result.contains("API key is required"), result);
+            assertTrue(result.contains("nothing was inherited"), result);
+            assertTrue(result.contains("could not be read"), result);
         }
 
         @Test
@@ -156,7 +170,7 @@ class DynamicAgentToolsTest {
             // The tool no longer holds a TenantQuotaService reference at all.
             when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
                     .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
-                            null, null, true, "ready", null, null, null, null, null));
+                            null, null, true, "ready", null, null, null, null, null, null));
 
             String result = tool.createSubAgent("Test", "prompt", null, null, null, null);
 
@@ -193,7 +207,7 @@ class DynamicAgentToolsTest {
         void createSubAgent_retainFlag() throws Exception {
             when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
                     .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
-                            null, null, true, "ready", null, null, null, null, null));
+                            null, null, true, "ready", null, null, null, null, null, null));
 
             String result = tool.createSubAgent("Test", "prompt", null, null, null, true);
 
@@ -210,7 +224,7 @@ class DynamicAgentToolsTest {
 
             when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
                     .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
-                            "openai", "gpt-4o-mini", true, "ready", null, null, null, null, null));
+                            "openai", "gpt-4o-mini", true, "ready", null, null, null, null, null, null));
 
             String result = tool.createSubAgent("Test", "prompt", "openai", "gpt-4o-mini", null, null);
 
@@ -239,7 +253,7 @@ class DynamicAgentToolsTest {
 
             when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
                     .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
-                            null, "gpt-4o-mini", true, "ready", null, null, null, null, null));
+                            null, "gpt-4o-mini", true, "ready", null, null, null, null, null, null));
 
             String result = tool.createSubAgent("Test", "prompt", "openai", "gpt-4o-mini", null, null);
 
@@ -317,7 +331,7 @@ class DynamicAgentToolsTest {
         void createSubAgent_withInitialMessage_success() throws Exception {
             when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
                     .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
-                            "openai", "gpt-4o-mini", true, "ready", null, null, null, null, null));
+                            "openai", "gpt-4o-mini", true, "ready", null, null, null, null, null, null));
 
             // Stub startConversation
             when(conversationService.startConversation(any(Environment.class), eq("sub-agent-1"), eq("user-1"), anyMap()))
@@ -351,7 +365,7 @@ class DynamicAgentToolsTest {
         void createSubAgent_withInitialMessage_failure() throws Exception {
             when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
                     .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
-                            null, null, true, "ready", null, null, null, null, null));
+                            null, null, true, "ready", null, null, null, null, null, null));
 
             // Stub startConversation to throw
             when(conversationService.startConversation(any(Environment.class), eq("sub-agent-1"), eq("user-1"), anyMap()))
@@ -367,7 +381,7 @@ class DynamicAgentToolsTest {
         void createSubAgent_noProviderNoModel_omitsFromResult() throws Exception {
             when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
                     .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
-                            null, null, true, "ready", null, null, null, null, null));
+                            null, null, true, "ready", null, null, null, null, null, null));
 
             String result = tool.createSubAgent("Test", "prompt", null, null, null, null);
 
@@ -408,7 +422,7 @@ class DynamicAgentToolsTest {
 
             when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
                     .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
-                            "anthropic", null, true, "ready", null, null, null, null, null));
+                            "anthropic", null, true, "ready", null, null, null, null, null, null));
 
             String result = tool.createSubAgent("Test", "prompt", "anthropic", null, null, null);
             assertTrue(result.contains("✅"));
@@ -421,7 +435,7 @@ class DynamicAgentToolsTest {
 
             when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
                     .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
-                            null, "any-model", true, "ready", null, null, null, null, null));
+                            null, "any-model", true, "ready", null, null, null, null, null, null));
 
             String result = tool.createSubAgent("Test", "prompt", null, "any-model", null, null);
             assertTrue(result.contains("✅"));
@@ -431,7 +445,7 @@ class DynamicAgentToolsTest {
         void createSubAgent_retainFalse_notTracked() throws Exception {
             when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
                     .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
-                            null, null, true, "ready", null, null, null, null, null));
+                            null, null, true, "ready", null, null, null, null, null, null));
 
             String result = tool.createSubAgent("Test", "prompt", null, null, null, false);
 
@@ -444,7 +458,7 @@ class DynamicAgentToolsTest {
         void createSubAgent_withInitialMessage_extractResponseMapFormat() throws Exception {
             when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
                     .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
-                            null, null, true, "ready", null, null, null, null, null));
+                            null, null, true, "ready", null, null, null, null, null, null));
 
             when(conversationService.startConversation(any(Environment.class), eq("sub-agent-1"), eq("user-1"), anyMap()))
                     .thenReturn(new ConversationResult("conv-123", null));
@@ -509,7 +523,7 @@ class DynamicAgentToolsTest {
 
             when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
                     .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
-                            "openai", "gpt-4o", true, "ready", null, null, null, null, null));
+                            "openai", "gpt-4o", true, "ready", null, null, null, null, null, null));
 
             // Should not NPE — null list is filtered, so model check is skipped
             String result = tool.createSubAgent("Test", "prompt", "openai", "gpt-4o", null, null);
@@ -552,7 +566,7 @@ class DynamicAgentToolsTest {
 
             when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
                     .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
-                            null, null, true, "ready", null, null, null, null, null));
+                            null, null, true, "ready", null, null, null, null, null, null));
 
             // Should not NPE
             String result = toolNullLists.createSubAgent("Test", "prompt", null, null, null, null);

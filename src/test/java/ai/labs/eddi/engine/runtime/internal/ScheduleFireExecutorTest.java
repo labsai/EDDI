@@ -11,13 +11,17 @@ import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.internal.HitlTimeoutHandler;
+import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.modules.llm.tools.ToolCostTracker;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.mockito.ArgumentCaptor;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -37,6 +41,7 @@ class ScheduleFireExecutorTest {
     private HitlTimeoutHandler hitlTimeoutHandler;
     private DreamService dreamService;
     private TeamCadenceService teamCadenceService;
+    private ToolCostTracker toolCostTracker;
     private ScheduleFireExecutor executor;
 
     @BeforeEach
@@ -46,6 +51,7 @@ class ScheduleFireExecutorTest {
         hitlTimeoutHandler = mock(HitlTimeoutHandler.class);
         dreamService = mock(DreamService.class);
         teamCadenceService = mock(TeamCadenceService.class);
+        toolCostTracker = mock(ToolCostTracker.class);
 
         executor = new ScheduleFireExecutor();
         // Inject mocks via reflection (field injection)
@@ -54,6 +60,306 @@ class ScheduleFireExecutorTest {
         setField(executor, "hitlTimeoutHandler", hitlTimeoutHandler);
         setField(executor, "dreamService", dreamService);
         setField(executor, "teamCadenceService", teamCadenceService);
+        setField(executor, "toolCostTracker", toolCostTracker);
+    }
+
+    /**
+     * The outcome of a fire has to come from the SNAPSHOT, not from the latch.
+     * <p>
+     * The latch is counted down from {@code Conversation.runStep}'s finally block,
+     * which also runs on the failure branch, and {@code ConversationService.say}
+     * swallows the {@code LifecycleException} — so "the handler was called" only
+     * ever meant "the turn was attempted". Reporting COMPLETED there made every
+     * in-pipeline failure (LLM outage, tool error, unresolvable workflow config)
+     * look like a green fire: failCount never incremented, backoff never applied,
+     * nothing was ever dead-lettered, and the deadlettered counter operators are
+     * told to alert on stayed flat while a nightly agent errored for a month.
+     */
+    @Test
+    void fire_conversationEndedInError_isRecordedFailedNotCompleted() throws Exception {
+        var schedule = makeCronSchedule("sched-err", "new");
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-err", null));
+
+        var errored = new SimpleConversationMemorySnapshot();
+        errored.setConversationState(ConversationState.ERROR);
+        doAnswer(inv -> {
+            ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onComplete(errored);
+            return null;
+        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals(FireStatus.FAILED.name(), result.status());
+        assertNotNull(result.errorMessage(), "a failed fire must record why, or the fire log says nothing went wrong");
+
+        ArgumentCaptor<ScheduleFireLog> logged = ArgumentCaptor.forClass(ScheduleFireLog.class);
+        verify(scheduleStore).logFire(logged.capture());
+        assertEquals(FireStatus.FAILED.name(), logged.getValue().status());
+    }
+
+    /**
+     * A SKIPPED turn is not a successful fire.
+     * <p>
+     * {@code ConversationResponseHandler.onSkipped} defaults to {@code onComplete},
+     * so a single-method handler cannot tell them apart — and {@code onSkipped}
+     * means the coordinator DROPPED the input without consuming it, because the
+     * conversation was already IN_PROGRESS or AWAITING_HUMAN when the queued turn
+     * ran. That is the ordinary case for {@code conversationStrategy=persistent}
+     * (the default for every HEARTBEAT) while a previous fire is still executing,
+     * or while a human is chatting in the same conversation. Recorded COMPLETED,
+     * the poller re-armed the schedule and cleared failCount: the message the
+     * schedule existed to send was lost, with a green fire log and a null
+     * errorMessage.
+     * <p>
+     * It is not a FAILED fire either — that was the over-correction. A skip is its
+     * own outcome: visible in the fire log with a reason, but never fed to the
+     * retry/dead-letter machine, because a persistent heartbeat is skipped on every
+     * fire for as long as its conversation is paused and a HITL approval left open
+     * for ~21 minutes would otherwise dead-letter it. See
+     * {@code SchedulePollerService.onFireSkipped}.
+     */
+    @Test
+    void fire_turnSkippedBecauseTheConversationWasBusy_isRecordedSkipped() throws Exception {
+        var schedule = makeCronSchedule("sched-skip", "new");
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-skip", null));
+
+        var busy = new SimpleConversationMemorySnapshot();
+        busy.setConversationState(ConversationState.IN_PROGRESS);
+        doAnswer(inv -> {
+            ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onSkipped(busy);
+            return null;
+        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals(FireStatus.SKIPPED.name(), result.status(), "a dropped turn is neither a success nor a failure");
+        assertNotEquals(FireStatus.COMPLETED.name(), result.status(), "a dropped turn must not re-arm the schedule as a success");
+        assertNotEquals(FireStatus.FAILED.name(), result.status(), "a dropped turn must not enter the retry/dead-letter machine");
+        assertNotNull(result.errorMessage(), "a skipped fire must say why, or nothing distinguishes it from a green one");
+        assertTrue(result.errorMessage().contains("skipped"), "the reason must name the skip: " + result.errorMessage());
+    }
+
+    /** The same, for a conversation already paused on a human approval. */
+    @Test
+    void fire_turnSkippedBecauseTheConversationAwaitsAHuman_isRecordedSkipped() throws Exception {
+        var schedule = makeCronSchedule("sched-paused", "new");
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-paused", null));
+
+        var paused = new SimpleConversationMemorySnapshot();
+        paused.setConversationState(ConversationState.AWAITING_HUMAN);
+        doAnswer(inv -> {
+            ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onSkipped(paused);
+            return null;
+        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        assertEquals(FireStatus.SKIPPED.name(), executor.fire(schedule, "instance-1", 1).status());
+    }
+
+    /**
+     * The case the handler-based skip detection above cannot see.
+     * <p>
+     * {@code ConversationService.say} fast-fails a conversation that is ALREADY
+     * persisted {@code AWAITING_HUMAN} by throwing
+     * {@code ConversationAwaitingApprovalException} BEFORE the response handler is
+     * wired, so {@code onSkipped} is never called on this road. The handler branch
+     * only covers the race where the pause commits after this say loaded the
+     * memory; for a {@code conversationStrategy=persistent} heartbeat sitting on an
+     * open approval, the throw is the STEADY state and every single fire takes it.
+     * <p>
+     * Caught by the broad {@code catch (Exception e)} it was recorded FAILED, which
+     * incremented failCount, applied backoff and dead-lettered the schedule — the
+     * exact regression SKIPPED exists to prevent, and the opposite of what
+     * {@code docs/scheduling.md} promises operators.
+     */
+    @Test
+    void fire_sayRejectsThePausedConversation_isRecordedSkippedNotFailed() throws Exception {
+        var schedule = makeCronSchedule("sched-paused-throw", "persistent");
+        schedule.setPersistentConversationId("conv-paused");
+
+        doThrow(new IConversationService.ConversationAwaitingApprovalException(
+                "Conversation is awaiting human approval")).when(conversationService)
+                .say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals(FireStatus.SKIPPED.name(), result.status(),
+                "a conversation paused on an approval rejected the input — nothing ran, but nothing broke");
+        assertNotEquals(FireStatus.FAILED.name(), result.status(),
+                "recorded FAILED it enters the retry/backoff machine and dead-letters the heartbeat");
+        assertNotNull(result.errorMessage(), "a skipped fire must say why");
+        assertTrue(result.errorMessage().contains("skipped"), "the reason must name the skip: " + result.errorMessage());
+
+        ArgumentCaptor<ScheduleFireLog> logged = ArgumentCaptor.forClass(ScheduleFireLog.class);
+        verify(scheduleStore).logFire(logged.capture());
+        assertEquals(FireStatus.SKIPPED.name(), logged.getValue().status());
+    }
+
+    /**
+     * A turn cut short mid-pipeline did not do the schedule's work either, so it
+     * belongs with ERROR rather than with success. Only ERROR used to be rejected.
+     */
+    @Test
+    void fire_conversationExecutionInterrupted_isRecordedFailed() throws Exception {
+        var schedule = makeCronSchedule("sched-interrupted", "new");
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-interrupted", null));
+
+        var interrupted = new SimpleConversationMemorySnapshot();
+        interrupted.setConversationState(ConversationState.EXECUTION_INTERRUPTED);
+        doAnswer(inv -> {
+            ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onComplete(interrupted);
+            return null;
+        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        assertEquals(FireStatus.FAILED.name(), executor.fire(schedule, "instance-1", 1).status());
+    }
+
+    /**
+     * A turn that paused for a human approval of its OWN accord still ran: the
+     * input was consumed and the pipeline executed, so it stays COMPLETED. That
+     * distinction is exactly what {@code onSkipped} carries, and it is why the
+     * handler has to implement both methods rather than inspect the state alone.
+     */
+    @Test
+    void fire_turnThatPausedItselfForApproval_isStillCompleted() throws Exception {
+        var schedule = makeCronSchedule("sched-hitl", "new");
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-hitl", null));
+
+        var awaiting = new SimpleConversationMemorySnapshot();
+        awaiting.setConversationState(ConversationState.AWAITING_HUMAN);
+        doAnswer(inv -> {
+            ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onComplete(awaiting);
+            return null;
+        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        assertEquals(FireStatus.COMPLETED.name(), executor.fire(schedule, "instance-1", 1).status());
+    }
+
+    @Test
+    void fire_conversationEndedReady_isStillCompleted() throws Exception {
+        var schedule = makeCronSchedule("sched-ok", "new");
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-ok", null));
+
+        var ready = new SimpleConversationMemorySnapshot();
+        ready.setConversationState(ConversationState.READY);
+        doAnswer(inv -> {
+            ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onComplete(ready);
+            return null;
+        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        assertEquals(FireStatus.COMPLETED.name(), executor.fire(schedule, "instance-1", 1).status());
+    }
+
+    /**
+     * The persistent strategy must record its conversation with a single-field
+     * write. Calling {@code updateSchedule} here persisted the PRE-claim copy of
+     * the schedule — fireStatus still PENDING, claim columns empty, nextFire still
+     * the past due time — which un-claimed the row in the middle of its own fire.
+     * The next poll then claimed it again and pushed a second concurrent turn into
+     * this very same persistent conversation.
+     */
+    @Test
+    void fire_persistentStrategy_recordsConversationWithoutRewritingTheWholeSchedule() throws Exception {
+        var schedule = makeCronSchedule("sched-persist", "persistent");
+        schedule.setPersistentConversationId(null);
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-new", null));
+        doAnswer(inv -> {
+            ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onComplete(null);
+            return null;
+        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        executor.fire(schedule, "instance-1", 1);
+
+        verify(scheduleStore).setPersistentConversationId("sched-persist", "conv-new");
+        verify(scheduleStore, never()).updateSchedule(anyString(), any());
+    }
+
+    /**
+     * The fire log's cost was hard-wired to 0.0 on the conversation path, so the
+     * number shown to operators (and read by Dream) meant nothing. It is a DELTA: a
+     * persistent schedule reuses one conversation across every fire, so the running
+     * total would otherwise attribute the whole history to a single fire.
+     */
+    @Test
+    void fire_recordsTheCostThisFireAdded_notTheConversationTotal() throws Exception {
+        var schedule = makeCronSchedule("sched-cost", "new");
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-cost", null));
+
+        var before = new ToolCostTracker.ConversationCostMetrics("conv-cost");
+        before.addToolCost("websearch", 2.0);
+        var after = new ToolCostTracker.ConversationCostMetrics("conv-cost");
+        after.addToolCost("websearch", 2.0);
+        after.addToolCost("websearch", 0.5);
+        when(toolCostTracker.getConversationCosts("conv-cost")).thenReturn(before, after);
+
+        doAnswer(inv -> {
+            ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onComplete(null);
+            return null;
+        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        assertEquals(0.5, executor.fire(schedule, "instance-1", 1).cost(), 1e-9);
+    }
+
+    /**
+     * The wait was a hard-coded five minutes while {@code lease-timeout} — the
+     * window after which another instance may reclaim the schedule — was already
+     * configurable, so a deployment that raised the lease still had its fires
+     * abandoned at five minutes with no way to change it. The bound now comes from
+     * {@code eddi.schedule.fire-timeout}.
+     * <p>
+     * The {@code @Timeout} is load-bearing: against the hard-coded constant this
+     * test does not fail with a wrong value, it blocks for five minutes.
+     */
+    @Test
+    @Timeout(30)
+    void fire_waitIsBoundedByTheConfiguredFireTimeout_notAHardCodedFiveMinutes() throws Exception {
+        var schedule = makeCronSchedule("sched-timeout", "new");
+        setField(executor, "fireTimeout", Duration.ofMillis(50));
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-timeout", null));
+        // The response handler is never invoked: the turn is still running when the
+        // configured bound elapses.
+        doNothing().when(conversationService)
+                .say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals(FireStatus.FAILED.name(), result.status());
+        assertNotNull(result.errorMessage());
+        assertTrue(result.errorMessage().contains("PT0.05S"),
+                "the configured bound must be the one enforced, and the message must name it: " + result.errorMessage());
+    }
+
+    /**
+     * An absent or unconvertible {@code eddi.schedule.fire-timeout} must fall back
+     * to the same five minutes the constant used, not NPE the fire. A fire that
+     * dies on its own configuration lookup is recorded FAILED and retried, so one
+     * typo in a properties file would take every scheduled agent in the deployment
+     * down without saying why.
+     */
+    @Test
+    void fire_nullFireTimeout_fallsBackToTheDefaultInsteadOfFailingTheFire() throws Exception {
+        var schedule = makeCronSchedule("sched-null-timeout", "new");
+        setField(executor, "fireTimeout", null);
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-null-timeout", null));
+        doAnswer(inv -> {
+            ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onComplete(null);
+            return null;
+        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-null-timeout", 1);
+
+        assertEquals(FireStatus.COMPLETED.name(), result.status(),
+                "a null timeout must resolve to the default, not throw inside the fire");
+        assertNull(result.errorMessage());
     }
 
     @Test
@@ -584,6 +890,28 @@ class ScheduleFireExecutorTest {
         ScheduleFireLog failed = executor.fire(failing, "instance-1", 2);
         assertEquals(FireStatus.FAILED.name(), failed.status(), "a real failure must retry and dead-letter");
         assertTrue(failed.errorMessage().contains("No workspace"), failed.errorMessage());
+    }
+
+    /**
+     * The fire log is a record of what happened, not a precondition for it. A store
+     * that cannot write it must not turn a cadence pull that already ran into a
+     * FAILED fire — the poller would then re-fire it, pulling the same backlog
+     * tasks into a second discussion. The outcome the caller sees is still the
+     * cadence's own.
+     */
+    @Test
+    @Timeout(10)
+    void fire_teamCadence_fireLogFailure_doesNotChangeTheOutcome() throws Exception {
+        var schedule = makeTeamCadenceSchedule("sched-cadence-4");
+        when(teamCadenceService.processScheduledFire(any()))
+                .thenReturn(new TeamCadenceService.CadenceResult("group-1", "cadence-1", "gc-9", 2, null, null));
+        doThrow(new RuntimeException("db down")).when(scheduleStore).logFire(any());
+
+        ScheduleFireLog result = assertDoesNotThrow(() -> executor.fire(schedule, "instance-1", 1));
+
+        assertEquals(FireStatus.COMPLETED.name(), result.status());
+        assertEquals("gc-9", result.conversationId());
+        verify(scheduleStore).logFire(any());
     }
 
     private static ScheduleConfiguration makeDreamSchedule(String id, String userId) {

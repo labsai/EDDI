@@ -28,6 +28,7 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
 import ai.labs.eddi.engine.runtime.IAgent;
+import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
@@ -513,6 +514,86 @@ class GroupConversationServiceTaskForceTest {
             // i.e. it described how the test called the code, not what the code does.
             assertInstanceOf(QuotaExceededException.class, ex.getCause());
             // Verify say() was called exactly once (no retries)
+            verify(conversationService, times(1)).say(any(), eq("agent-1"), eq("existing-conv"),
+                    any(), any(), any(), any(), anyBoolean(), any());
+        }
+
+        /**
+         * A quota-store OUTAGE must abort exactly like an over-limit denial.
+         * <p>
+         * {@code QuotaAccountingUnavailableException} extends
+         * {@code RejectedExecutionException} rather than {@code QuotaExceededException}
+         * — so the moment {@code ConversationService} started throwing it for
+         * {@code accountingUnavailable} denials, every
+         * {@code instanceof QuotaExceededException} guard in the group engines stopped
+         * matching and the outage arrived here as an ordinary member failure: a SKIPPED
+         * transcript entry under the default policy, with the discussion reported
+         * complete. The guards match {@link ai.labs.eddi.engine.tenancy.QuotaRefusal}
+         * now, so a new refusal type is covered the day it is added.
+         */
+        @Test
+        @DisplayName("a quota-store outage on startConversation aborts, it does not become a SKIPPED entry")
+        void startConversation_accountingUnavailable_throwsGroupDiscussionException() throws Exception {
+
+            var member = new GroupMember("agent-1", "Agent One", 0, "MEMBER");
+            var gc = new GroupConversation();
+            gc.setTranscript(new ArrayList<>());
+            gc.setMemberConversationIds(new ConcurrentHashMap<>());
+
+            // SKIP is the DEFAULT failure policy — the one that silently swallowed it.
+            var protocol = new AgentGroupConfiguration.ProtocolConfig(
+                    60, AgentGroupConfiguration.ProtocolConfig.MemberFailurePolicy.SKIP, 2,
+                    AgentGroupConfiguration.ProtocolConfig.MemberUnavailablePolicy.SKIP);
+            var phase = new DiscussionPhase("Execute", PhaseType.EXECUTE, "ALL",
+                    AgentGroupConfiguration.TurnOrder.PARALLEL, AgentGroupConfiguration.ContextScope.TASK_ONLY,
+                    false, null, 1);
+
+            when(agentFactory.getLatestReadyAgent(any(), eq("agent-1"))).thenReturn(mock(IAgent.class));
+            when(conversationService.startConversation(any(), eq("agent-1"), any(), any()))
+                    .thenThrow(new QuotaAccountingUnavailableException(
+                            "Quota accounting unavailable — denying request for safety"));
+
+            var ex = assertThrows(GroupDiscussionException.class,
+                    () -> memberTurnExecutor.executeAgentTurn(member, gc, "test input", protocol, 0, phase, null, null));
+
+            assertInstanceOf(QuotaAccountingUnavailableException.class, ex.getCause());
+            assertTrue(ex.getMessage().contains("accounting unavailable"),
+                    "the abort must name the outage, not report the tenant as over quota: " + ex.getMessage());
+            assertFalse(ex.getMessage().contains("Tenant quota exceeded"),
+                    "'Tenant quota exceeded: Quota accounting unavailable' is false in its first half");
+        }
+
+        /**
+         * The retry half of the same regression: with RETRY policy each member was
+         * re-attempted {@code maxRetries} times against a store that cannot answer,
+         * paying a connection-acquisition timeout per attempt on the phase thread.
+         */
+        @Test
+        @DisplayName("a quota-store outage on say() is not retried either")
+        void say_accountingUnavailable_notRetried() throws Exception {
+
+            var member = new GroupMember("agent-1", "Agent One", 0, "MEMBER");
+            var gc = new GroupConversation();
+            gc.setTranscript(new ArrayList<>());
+            gc.setMemberConversationIds(new ConcurrentHashMap<>(
+                    Map.of("agent-1", "existing-conv")));
+
+            var protocol = new AgentGroupConfiguration.ProtocolConfig(
+                    60, AgentGroupConfiguration.ProtocolConfig.MemberFailurePolicy.RETRY, 5,
+                    AgentGroupConfiguration.ProtocolConfig.MemberUnavailablePolicy.SKIP);
+            var phase = new DiscussionPhase("Execute", PhaseType.EXECUTE, "ALL",
+                    AgentGroupConfiguration.TurnOrder.PARALLEL, AgentGroupConfiguration.ContextScope.TASK_ONLY,
+                    false, null, 1);
+
+            when(agentFactory.getLatestReadyAgent(any(), eq("agent-1"))).thenReturn(mock(IAgent.class));
+            doThrow(new QuotaAccountingUnavailableException("Quota accounting unavailable — denying request for safety"))
+                    .when(conversationService).say(any(), eq("agent-1"), eq("existing-conv"),
+                            any(), any(), any(), any(), anyBoolean(), any());
+
+            var ex = assertThrows(GroupDiscussionException.class,
+                    () -> memberTurnExecutor.executeAgentTurn(member, gc, "test input", protocol, 0, phase, null, null));
+
+            assertInstanceOf(QuotaAccountingUnavailableException.class, ex.getCause());
             verify(conversationService, times(1)).say(any(), eq("agent-1"), eq("existing-conv"),
                     any(), any(), any(), any(), anyBoolean(), any());
         }

@@ -37,7 +37,10 @@ public interface IRestOrphanAdmin {
             + "(workflows, behavior sets, HTTP calls, output sets, LLMs, "
             + "property setters, dictionaries, parsers) and returns resources not referenced by any Agent or workflow. "
             + "includeDeleted=true additionally includes soft-deleted resources; false (the default) reports live resources only.")
-    @APIResponse(responseCode = "200", description = "Orphan report with list of unreferenced resources.")
+    @APIResponse(responseCode = "200", description = "Orphan report with list of unreferenced resources. "
+            + "Check scanComplete before acting on the list: when it is false the reference scan failed part-way "
+            + "(scanWarning says why) and resources that are still in use may appear as orphans. "
+            + "A resource counts as referenced when ANY version of it is referenced, not only the pinned one.")
     // @formatter:off
     OrphanReport scanOrphans(
             @Parameter(description = "Also include soft-deleted resources. Default: false (live resources only).")

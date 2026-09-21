@@ -519,4 +519,82 @@ class ConversationLogGeneratorTest {
             assertEquals("valid", log.getMessages().get(1).getContent().getFirst().getValue());
         }
     }
+
+    // ─── D3: HITL-gated turns must survive into the log ─────────
+
+    @Nested
+    @DisplayName("heterogeneous output lists (HITL turns)")
+    class HeterogeneousOutput {
+
+        private IConversationMemory memoryWith(ConversationOutput output) {
+            var memory = mock(IConversationMemory.class);
+            when(memory.getConversationOutputs()).thenReturn(new ArrayList<>(List.of(output)));
+            return memory;
+        }
+
+        /**
+         * The stored shape of a HITL-gated turn: two announcements written via
+         * {@code addConversationOutputString(...)} followed by the ordinary output map.
+         * Reading the list's shape from element zero dropped the assistant turn
+         * entirely, so {@code GET /agents/&#123;id&#125;/log} returned
+         * {@code user, assistant, user, user} and the agent's own history lost every
+         * turn a human had approved.
+         */
+        @Test
+        @DisplayName("String, String, Map → assistant turn is present with all three texts")
+        void hitlShapedOutputIsKept() {
+            var output = new ConversationOutput();
+            output.put("input", "create the group");
+            output.put("output", List.of(
+                    "I'll create that group for you.",
+                    "Waiting for your approval.",
+                    Map.of("text", "Group created.")));
+
+            var log = new ConversationLogGenerator(memoryWith(output)).generate();
+
+            assertEquals(2, log.getMessages().size());
+            assertEquals("assistant", log.getMessages().get(1).getRole());
+            assertEquals("I'll create that group for you. Waiting for your approval. Group created.",
+                    log.getMessages().get(1).getContent().getFirst().getValue());
+        }
+
+        @Test
+        @DisplayName("a list of plain Strings still produces an assistant turn")
+        void plainStringListIsKept() {
+            var output = new ConversationOutput();
+            output.put("input", "hi");
+            output.put("output", List.of("Paused for approval."));
+
+            var log = new ConversationLogGenerator(memoryWith(output)).generate();
+
+            assertEquals(2, log.getMessages().size());
+            assertEquals("Paused for approval.", log.getMessages().get(1).getContent().getFirst().getValue());
+        }
+
+        @Test
+        @DisplayName("TextOutputItem entries keep working")
+        void textOutputItemsStillWork() {
+            var output = new ConversationOutput();
+            output.put("input", "hi");
+            output.put("output", List.of(new TextOutputItem("hello", 0)));
+
+            var log = new ConversationLogGenerator(memoryWith(output)).generate();
+
+            assertEquals(2, log.getMessages().size());
+            assertEquals("hello", log.getMessages().get(1).getContent().getFirst().getValue());
+        }
+
+        @Test
+        @DisplayName("an emptied output adds no assistant turn")
+        void emptiedOutputAddsNothing() {
+            var output = new ConversationOutput();
+            output.put("input", "hi");
+            output.put("output", List.of());
+
+            var log = new ConversationLogGenerator(memoryWith(output)).generate();
+
+            assertEquals(1, log.getMessages().size());
+        }
+    }
+
 }

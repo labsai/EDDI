@@ -24,7 +24,7 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag;
  * @author ginccc
  */
 @Path("/groupstore/groups/{groupId}/workspace")
-@Tag(name = "13. Agent Groups", description = "Standing team workspace — backlog, cadences, metrics")
+@Tag(name = "Agents / Groups", description = "Standing team workspace — backlog, cadences, metrics")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed({"eddi-admin", "eddi-editor"})

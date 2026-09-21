@@ -37,6 +37,10 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeoutException;
 
+import org.jboss.logging.Logger;
+import java.net.UnknownHostException;
+import java.net.SocketTimeoutException;
+import java.net.ConnectException;
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_CASCADE_MODEL;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_COMPILED_PROMPT;
@@ -52,8 +56,6 @@ import static ai.labs.eddi.utils.LifecycleUtilities.createComponentKey;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
-
-import org.jboss.logging.Logger;
 
 /**
  * Executes the Lifecycle Workflow - EDDI's core processing engine.
@@ -980,12 +982,12 @@ public class LifecycleManager implements ILifecycleManager {
      */
     static String classifyError(Throwable e) {
         for (Throwable current = e; current != null; current = current.getCause()) {
-            if (current instanceof java.net.SocketTimeoutException
+            if (current instanceof SocketTimeoutException
                     || current instanceof TimeoutException) {
                 return "timeout";
             }
-            if (current instanceof java.net.ConnectException
-                    || current instanceof java.net.UnknownHostException) {
+            if (current instanceof ConnectException
+                    || current instanceof UnknownHostException) {
                 return "transport";
             }
         }

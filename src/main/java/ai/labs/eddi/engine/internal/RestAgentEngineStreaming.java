@@ -5,8 +5,22 @@
 package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.api.IConversationService.AgentMismatchException;
+import ai.labs.eddi.engine.api.IConversationService.AgentNotReadyException;
+import ai.labs.eddi.engine.api.IConversationService.ConversationAwaitingApprovalException;
+import ai.labs.eddi.engine.api.IConversationService.ConversationEndedException;
+import ai.labs.eddi.engine.api.IConversationService.ConversationNotFoundException;
+import ai.labs.eddi.engine.api.IConversationService.InputTooLargeException;
+import ai.labs.eddi.engine.api.IConversationService.StreamingResponseHandler;
 import ai.labs.eddi.engine.api.IRestAgentEngineStreaming;
+import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
+import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableException;
+import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableExceptionMapper;
+import ai.labs.eddi.engine.exception.InputTooLargeExceptionMapper;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
+import ai.labs.eddi.engine.tenancy.QuotaExceededException;
+import ai.labs.eddi.engine.tenancy.rest.QuotaAccountingUnavailableExceptionMapper;
 
 import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
@@ -19,12 +33,12 @@ import jakarta.ws.rs.sse.SseEventSink;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
-import static ai.labs.eddi.utils.LogSanitizer.sanitize;
-
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * SSE streaming implementation — maps ConversationService streaming events to
@@ -49,7 +63,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
 
     private static final Logger LOGGER = Logger.getLogger(RestAgentEngineStreaming.class);
-    private static final com.fasterxml.jackson.databind.ObjectMapper MAPPER = new com.fasterxml.jackson.databind.ObjectMapper();
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     /**
      * Audit actor recorded when a turn is cancelled because the SSE client went
@@ -127,13 +141,18 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         // ConversationService re-checks: this layer is defence in depth.
         conversationAccessGuard.requireConversationOwner(conversationId);
 
+        // The input cap, before the sink for the same reason: an oversized input is the
+        // 413 InputTooLargeExceptionMapper answers, not an SSE 'error' event on a 200
+        // stream. ConversationService re-checks, and the catch below still maps it.
+        conversationService.requireInputWithinLimit(inputData);
+
         // Every outbound frame goes through this stream, which doubles as the
         // client-disconnect detector — see SseStream.
         final SseStream stream = new SseStream(conversationId, safeConversationId, eventSink, sse);
 
         try {
             conversationService.sayStreaming(conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData,
-                    new IConversationService.StreamingResponseHandler() {
+                    new StreamingResponseHandler() {
                         @Override
                         public void onTaskStart(TaskId taskId, String taskType, int index) {
                             stream.send("task_start",
@@ -220,9 +239,98 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
                     });
         } catch (Exception e) {
             stream.markTerminal();
-            stream.send("error", logAndBuildOpaqueErrorEvent("Failed to start streaming for conversation " + safeConversationId, e));
+            stream.send("error", buildKnownConditionOrOpaqueErrorEvent(
+                    "Failed to start streaming for conversation " + safeConversationId, e));
             stream.close();
         }
+    }
+
+    /**
+     * Maps the known client conditions {@code sayStreaming} rejects synchronously
+     * to a typed {@code error} event — {@code {"message":…,"code":…}} — instead of
+     * the opaque internal-error shape.
+     * <p>
+     * These are not internal errors: the non-streaming twin
+     * ({@code RestAgentEngine}) gives each a proper status
+     * (409/410/404/429/403/503) with a client-safe body, and before this method the
+     * SAME condition on the streaming path surfaced as {@code {"message":"Internal
+     * server error"}} — observed live when a message was sent into an
+     * AWAITING_HUMAN conversation: the backend refused correctly and the client
+     * rendered an opaque 500-style blob with no way to react.
+     * <p>
+     * Per exception, the message mirrors exactly what the twin already discloses —
+     * echoed for the conditions whose message is a fixed safe template
+     * (awaiting-approval, quota, GDPR restriction), replaced by the twin's fixed
+     * text for those whose message names deployment internals (agent-not-ready
+     * carries environment and agentId; mismatch carries ids). No new disclosure
+     * either way. Everything else stays opaque via
+     * {@link #logAndBuildOpaqueErrorEvent}: those paths' messages can name
+     * collections, hosts and replica-set members.
+     * <p>
+     * The {@code code} field is the machine-readable part clients key on —
+     * {@code awaiting_approval} is what lets the Manager re-render the approval
+     * banner instead of an error blob when input races an undecided pause.
+     */
+    private String buildKnownConditionOrOpaqueErrorEvent(String context, Exception e) {
+        String code;
+        String message;
+        if (e instanceof ConversationAwaitingApprovalException) {
+            code = "awaiting_approval";
+            message = e.getMessage();
+        } else if (e instanceof ConversationNotFoundException) {
+            // The twin answers 404 here. This message is a fixed template carrying
+            // only the caller's own (sanitized) conversationId, so it is echoed
+            // rather than replaced — no new disclosure.
+            code = "conversation_not_found";
+            message = e.getMessage();
+        } else if (e instanceof InputTooLargeException) {
+            // The twin answers 413. The message names only the length and the
+            // documented limit, so it is echoed.
+            code = InputTooLargeExceptionMapper.ERROR_CODE;
+            message = e.getMessage();
+        } else if (e instanceof ConversationEndedException) {
+            code = "conversation_ended";
+            message = "Conversation has ended";
+        } else if (e instanceof AgentNotReadyException) {
+            code = "agent_not_ready";
+            message = "Agent is not deployed or not ready";
+        } else if (e instanceof AgentMismatchException) {
+            code = "agent_mismatch";
+            message = "Agent version mismatch";
+        } else if (e instanceof QuotaAccountingUnavailableException quotaUnavailable) {
+            // Before QuotaExceededException is irrelevant (they are unrelated types),
+            // but the distinction is the same one RestAgentEngine draws: the store
+            // could not answer, so this is not the tenant being over a limit. The
+            // message is this class's own fixed text and names nothing internal, so
+            // it is echoed rather than replaced — through the mapper's accessor, so a
+            // thrower that supplies no message produces the same sentence here as on
+            // the other two surfaces instead of "message":"".
+            code = "quota_accounting_unavailable";
+            message = QuotaAccountingUnavailableExceptionMapper.messageOf(quotaUnavailable);
+        } else if (e instanceof QuotaExceededException) {
+            code = "quota_exceeded";
+            message = e.getMessage();
+        } else if (e instanceof ProcessingRestrictedException) {
+            code = "processing_restricted";
+            message = e.getMessage();
+        } else if (e instanceof ProcessingRestrictionUnavailableException restrictionUnavailable) {
+            // The twin answers 503 restriction_status_unavailable. Without this
+            // branch a store failover reached the client as
+            // {"message":"Internal server error"} on every streamed turn, with an
+            // ERROR stack trace per turn behind it — the honest-503 fix had landed on
+            // the synchronous start endpoint only. The message is a fixed template
+            // naming no deployment internals, so it is echoed rather than replaced —
+            // through the mapper's accessor, so a thrower that supplies no message
+            // produces the same sentence here as on the other two surfaces instead of
+            // an empty one.
+            code = "restriction_status_unavailable";
+            message = ProcessingRestrictionUnavailableExceptionMapper.messageOf(restrictionUnavailable);
+        } else {
+            return logAndBuildOpaqueErrorEvent(context, e);
+        }
+        // WARN, not ERROR with stack trace: the request was rejected by design.
+        LOGGER.warnf("%s: %s", context, e.getMessage());
+        return String.format("{\"message\":\"%s\",\"code\":\"%s\"}", escapeJson(message), code);
     }
 
     /**
@@ -300,7 +408,13 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         if (data == null || data.isEmpty()) {
             return data;
         }
-        return " " + data.replace("\n", "\n ");
+        // \r is a line break to RESTEasy's SSE serializer too (SseUtil starts a
+        // new data: line on either), so a payload with a bare \r would get an
+        // UNPADDED continuation line. Normalise \r\n and \r to \n first; the
+        // consumer reassembles data lines with \n regardless, so the
+        // normalisation is invisible to it.
+        String normalised = data.replace("\r\n", "\n").replace('\r', '\n');
+        return " " + normalised.replace("\n", "\n ");
     }
 
     private final class SseStream {
@@ -425,10 +539,44 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         return Double.isFinite(v) ? v : 0.0;
     }
 
+    /**
+     * Escapes a string for embedding in the hand-built JSON of an SSE event.
+     *
+     * <p>
+     * The replace-chain this grew from covered {@code \ " \n \r \t} and left every
+     * other control character raw, which is invalid inside a JSON string (RFC 8259
+     * §7) and makes the event unparseable for a strict client. The values reaching
+     * here are not all ours: a tool name comes from an LLM, an error summary from
+     * an exception message, and a conversation id straight off the request path.
+     * U+2028 and U+2029 are legal JSON but terminate a line in JavaScript, so they
+     * are escaped too rather than shipped to a browser.
+     * </p>
+     */
     private String escapeJson(String text) {
-        if (text == null)
+        if (text == null) {
             return "";
-        return text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
+        }
+        var sb = new StringBuilder(text.length() + 16);
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            switch (c) {
+                case '\\' -> sb.append("\\\\");
+                case '"' -> sb.append("\\\"");
+                case '\n' -> sb.append("\\n");
+                case '\r' -> sb.append("\\r");
+                case '\t' -> sb.append("\\t");
+                case '\b' -> sb.append("\\b");
+                case '\f' -> sb.append("\\f");
+                default -> {
+                    if (c < 0x20 || c == '\u2028' || c == '\u2029') {
+                        sb.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        sb.append(c);
+                    }
+                }
+            }
+        }
+        return sb.toString();
     }
 
     private String toJsonArray(Object obj) {
@@ -451,6 +599,20 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         try {
             var sb = new StringBuilder("{");
             sb.append("\"conversationState\":\"").append(snapshot.getConversationState()).append("\"");
+            // The pause's IDENTITY, not just its existence. A turn may pause up
+            // to maxPausesPerTurn times, and hitlPausedAt is the only field
+            // that distinguishes one pause from the next — clients compare it
+            // to decide whether a decision has been acted on and to key their
+            // approval-detail caches. Omitting it here (while the REST snapshot
+            // carried it) left streamed pauses identityless: the Manager's
+            // settle-poll then read every re-pause as the pause it had already
+            // decided and spun to its timeout with the Approve button dead.
+            // Instant.toString() is ISO_INSTANT — the same formatter Jackson's
+            // JavaTimeModule uses for the REST snapshot, so the two channels
+            // stay byte-identical and string comparison across them is sound.
+            if (snapshot.getHitlPausedAt() != null) {
+                sb.append(",\"hitlPausedAt\":\"").append(snapshot.getHitlPausedAt()).append("\"");
+            }
             if (snapshot.getConversationOutputs() != null) {
                 sb.append(",\"conversationOutputs\":")
                         .append(MAPPER.writeValueAsString(snapshot.getConversationOutputs()));

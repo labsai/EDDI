@@ -280,7 +280,7 @@ public class GroupConversationService implements IGroupConversationService {
     /**
      * I1: lifetime dollars attributed across all discussions this instance ran.
      * Cumulative, not a live in-flight sum — mirrors {@code ToolCostTracker}'s
-     * {@code eddi.tool.costs.total} gauge, which is the closest existing pattern.
+     * {@code eddi.tool.costs.accrued} gauge, which is the closest existing pattern.
      */
     private final DoubleAdder groupCostDollars = new DoubleAdder();
 
@@ -449,7 +449,15 @@ public class GroupConversationService implements IGroupConversationService {
         GroupConversation gc = createGroupConversation(groupId, question, userId, depth);
         materializeAttachments(gc, attachments);
         gc.setInheritedCostCeiling(inheritedCostCeiling);
-        return executeDiscussion(gc, config, phases, question, listener, 0);
+        // Artifacts live in their own collection and are attached at read time; the
+        // discuss response is a read of the finished discussion too, and without this
+        // it reported "artifacts": [] for a discussion that had created some.
+        return withArtifacts(executeDiscussion(gc, config, phases, question, listener, 0));
+    }
+
+    private GroupConversation withArtifacts(GroupConversation gc) {
+        populateArtifacts(gc);
+        return gc;
     }
 
     /**
@@ -769,7 +777,7 @@ public class GroupConversationService implements IGroupConversationService {
                     gc.setState(GroupConversationState.CANCELLED);
                     gc.setLastModified(Instant.now());
                     conversationStore.update(gc);
-                    LOGGER.infof("Group discussion %s cancelled via control token at phase %d", gc.getId(), phaseIdx);
+                    LOGGER.infof("Group discussion %s cancelled via control token at phase %d", LogSanitizer.sanitize(gc.getId()), phaseIdx);
                     notifyCancelled(gc, listener);
                     return gc;
                 }
@@ -817,7 +825,7 @@ public class GroupConversationService implements IGroupConversationService {
                     // --- maxTurns safety cap ---
                     if (turnCounter.get() >= maxTurns) {
                         LOGGER.warnf("Max turns (%d) exceeded for group %s — skipping remaining phases",
-                                maxTurns, gc.getGroupId());
+                                maxTurns, LogSanitizer.sanitize(gc.getGroupId()));
                         gc.getTranscript().add(new TranscriptEntry(
                                 null, "System", null, phaseIdx, phase.name(),
                                 TranscriptEntryType.SKIPPED, Instant.now(),
@@ -948,7 +956,7 @@ public class GroupConversationService implements IGroupConversationService {
                         // differently across a fleet (same reason GroupCostLedger's
                         // transcript message pins Locale.ROOT).
                         LOGGER.warnf("Cost ceiling reached for group %s at phase %d (spend $%s) — policy %s",
-                                gc.getGroupId(), phaseIdx, gc.getTotalCost(), costPolicy);
+                                LogSanitizer.sanitize(gc.getGroupId()), phaseIdx, gc.getTotalCost(), costPolicy);
                         if (costPolicy == ProtocolConfig.CostPolicy.ABORT) {
                             failConversation(gc);
                             if (listener != null) {
@@ -1192,7 +1200,7 @@ public class GroupConversationService implements IGroupConversationService {
                                             phaseIdx, phase.name(), TranscriptEntryType.FACILITATION, Instant.now(),
                                             null, null));
                                     LOGGER.infof("Facilitator escalation for group %s suppressed at phase %d — the "
-                                            + "phase's own approval gate takes precedence", gc.getGroupId(), phaseIdx);
+                                            + "phase's own approval gate takes precedence", LogSanitizer.sanitize(gc.getGroupId()), phaseIdx);
                                     // fall through to the HITL gate below
                                 } else {
                                     int resumePhaseIdx = facilitatorMidPhaseResume ? phaseIdx : phaseIdx + 1;
@@ -1212,7 +1220,8 @@ public class GroupConversationService implements IGroupConversationService {
 
                     if (!outcome.isContinue()) {
                         LOGGER.infof("Phase '%s' of group %s ended early after repeat %d: %s",
-                                phase.name(), gc.getGroupId(), repeat, outcome.reason());
+                                LogSanitizer.sanitize(phase.name()), LogSanitizer.sanitize(gc.getGroupId()), repeat,
+                                LogSanitizer.sanitize(outcome.reason()));
                         if (outcome.signal() == PhaseOutcome.PhaseExitSignal.END_DISCUSSION) {
                             // Nothing produces this yet (I12's facilitator will). Handled
                             // rather than ignored so the signal cannot be added later and
@@ -1234,7 +1243,7 @@ public class GroupConversationService implements IGroupConversationService {
                         gc.setState(GroupConversationState.CANCELLED);
                         gc.setLastModified(Instant.now());
                         conversationStore.update(gc);
-                        LOGGER.infof("Group discussion %s cancelled before HITL gate at phase %d", gc.getId(), phaseIdx);
+                        LOGGER.infof("Group discussion %s cancelled before HITL gate at phase %d", LogSanitizer.sanitize(gc.getId()), phaseIdx);
                         notifyCancelled(gc, listener);
                         return gc;
                     }
@@ -1280,7 +1289,7 @@ public class GroupConversationService implements IGroupConversationService {
                             if (!awaiting) {
                                 LOGGER.warnf("EXECUTE phase %d of GC %s ended with executable task(s) left "
                                         + "(aborted wave) — pausing for human review instead of skipping them",
-                                        phaseIdx, gc.getId());
+                                        phaseIdx, LogSanitizer.sanitize(gc.getId()));
                             }
                             commitPause(gc, phaseIdx, phase, "TASK", turnCounter.get(), listener, config);
                             convertPauseToCancelIfSignalled(gc, listener);
@@ -1336,7 +1345,8 @@ public class GroupConversationService implements IGroupConversationService {
                 // which only ended the repeat loop above. Placed after the HITL gate so
                 // an approval that was already due is still honored.
                 if (endDiscussionEarly) {
-                    LOGGER.infof("Group discussion %s ending early after phase %d on an END_DISCUSSION signal", gc.getId(), phaseIdx);
+                    LOGGER.infof("Group discussion %s ending early after phase %d on an END_DISCUSSION signal", LogSanitizer.sanitize(gc.getId()),
+                            phaseIdx);
                     break;
                 }
             }
@@ -1370,7 +1380,8 @@ public class GroupConversationService implements IGroupConversationService {
             // with a null answer would look like an ordinary success to every caller;
             // say so explicitly instead.
             if (costCeilingSynthesizeNow && gc.getSynthesizedAnswer() == null) {
-                LOGGER.warnf("Group %s hit its cost ceiling with no remaining SYNTHESIS phase — completing without an answer", gc.getGroupId());
+                LOGGER.warnf("Group %s hit its cost ceiling with no remaining SYNTHESIS phase — completing without an answer",
+                        LogSanitizer.sanitize(gc.getGroupId()));
                 gc.getTranscript().add(new TranscriptEntry(
                         null, "System", null, gc.getCurrentPhaseIndex(), gc.getCurrentPhaseName(),
                         TranscriptEntryType.ERROR, Instant.now(),
@@ -1406,7 +1417,7 @@ public class GroupConversationService implements IGroupConversationService {
                 conversationStore.updateIfState(gc, expectedRunningState);
             } catch (IResourceStore.ResourceModifiedException e) {
                 LOGGER.infof("Group discussion %s was terminated elsewhere (expected %s) — not overwriting with COMPLETED",
-                        gc.getId(), expectedRunningState);
+                        LogSanitizer.sanitize(gc.getId()), expectedRunningState);
                 var persisted = conversationStore.read(gc.getId());
                 // This leg optimistically set COMPLETED before the CAS; align the
                 // in-memory state with the terminal value the racing writer committed so
@@ -1418,7 +1429,7 @@ public class GroupConversationService implements IGroupConversationService {
                 return persisted;
             } catch (IGroupConversationStore.GroupConversationGoneException e) {
                 // deleted while the leg was running — nothing to persist into
-                LOGGER.infof("Group discussion %s was deleted while running — discarding its result", gc.getId());
+                LOGGER.infof("Group discussion %s was deleted while running — discarding its result", LogSanitizer.sanitize(gc.getId()));
                 return gc;
             }
 
@@ -1639,7 +1650,7 @@ public class GroupConversationService implements IGroupConversationService {
                                                 GroupDiscussionEventListener listener)
             throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
         rejectIfShuttingDown();
-        return lifecycleOps().continueDiscussion(groupConversationId, question, listener);
+        return withArtifacts(lifecycleOps().continueDiscussion(groupConversationId, question, listener));
     }
 
     @Override
@@ -2274,7 +2285,7 @@ public class GroupConversationService implements IGroupConversationService {
             throws GroupDiscussionException, IResourceStore.ResourceStoreException,
             IResourceStore.ResourceNotFoundException, IResourceStore.ResourceModifiedException {
         rejectIfShuttingDown();
-        return hitlCoordinator.submitHumanInput(groupConversationId, memberId, content, submittedBy, null);
+        return withArtifacts(hitlCoordinator.submitHumanInput(groupConversationId, memberId, content, submittedBy, null));
     }
 
     @Override

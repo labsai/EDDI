@@ -12,6 +12,7 @@ import io.quarkus.security.identity.SecurityIdentity;
 
 import java.util.Collection;
 import java.util.Map;
+import jakarta.ws.rs.ClientErrorException;
 
 /**
  * Shared utility methods for MCP tool implementations.
@@ -156,6 +157,54 @@ final class McpToolUtils {
      */
     static String errorJson(String message) {
         return "{\"error\":\"" + escapeJsonString(message) + "\"}";
+    }
+
+    /**
+     * Build an error JSON response describing a failure, from a caller-supplied
+     * prefix and the exception that caused it.
+     * <p>
+     * Prefer this over {@code errorJson(prefix + ": " + e.getMessage())}: plenty of
+     * exceptions carry no message, and the concatenation then renders literally as
+     * {@code "Failed to chat with agent: null"} — an error that says a call failed
+     * and nothing whatsoever about why. The class name is not a diagnosis either,
+     * but it is the difference between "something threw" and "a
+     * ResourceNotFoundException threw".
+     */
+    static String errorJson(String prefix, Throwable cause) {
+        return errorJson(prefix + ": " + describe(cause));
+    }
+
+    /**
+     * A throwable's message, or its class's simple name when it has none.
+     * <p>
+     * A <strong>client error</strong> ({@link ClientErrorException}, i.e. 4xx) is
+     * unwrapped to its response entity first. These tools call EDDI's own REST
+     * stores in-process, and a JAX-RS exception built from a {@code Response}
+     * carries the useful text in that entity while {@code getMessage()} returns
+     * only the status line — so a precise "Unknown field 'setProperties' … Known
+     * fields: [setOnActions]" would otherwise reach the MCP client as "HTTP 400 Bad
+     * Request", which is exactly the MCP/REST parity this exists to preserve.
+     * <p>
+     * Only 4xx. A 4xx entity is a message this codebase authored <em>for</em> the
+     * caller, describing what the caller got wrong. A 5xx entity is not written to
+     * that contract and can carry endpoint, datastore or configuration detail, so
+     * it falls through to the message below and is never lifted verbatim. Every MCP
+     * tool that reaches this point is already behind {@code requireRole}, but "the
+     * caller is an admin" is a reason to answer usefully, not a reason to stop
+     * distinguishing the two.
+     */
+    static String describe(Throwable cause) {
+        if (cause == null) {
+            return "unknown cause";
+        }
+        if (cause instanceof ClientErrorException clientError) {
+            var response = clientError.getResponse();
+            if (response != null && response.hasEntity() && response.getEntity() instanceof String entity && !entity.isBlank()) {
+                return entity;
+            }
+        }
+        String message = cause.getLocalizedMessage();
+        return message == null || message.isBlank() ? cause.getClass().getSimpleName() : message;
     }
 
     /**

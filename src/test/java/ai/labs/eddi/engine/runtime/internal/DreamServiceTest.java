@@ -22,6 +22,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import java.net.UnknownHostException;
+import java.net.SocketTimeoutException;
+import java.net.ConnectException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -42,7 +46,7 @@ class DreamServiceTest {
         agentStore = mock(IAgentStore.class);
         summarizationService = mock(SummarizationService.class);
         dreamService = new DreamService(store, agentStore, summarizationService, new SimpleMeterRegistry(),
-                new com.fasterxml.jackson.databind.ObjectMapper());
+                new ObjectMapper());
         dreamService.initMetrics();
 
         dreamConfig = new AgentConfiguration.DreamConfig();
@@ -796,7 +800,7 @@ class DreamServiceTest {
         assertTrue(DreamService.isTransientLlmFailure(new RuntimeException("status 503")));
         assertTrue(DreamService.isTransientLlmFailure(new RuntimeException("Overloaded")));
         assertTrue(DreamService.isTransientLlmFailure(
-                new RuntimeException("llm call failed", new java.net.SocketTimeoutException("read timed out"))));
+                new RuntimeException("llm call failed", new SocketTimeoutException("read timed out"))));
 
         assertFalse(DreamService.isTransientLlmFailure(new RuntimeException("401 Unauthorized")));
         assertFalse(DreamService.isTransientLlmFailure(new RuntimeException("model 'nope' does not exist")));
@@ -817,15 +821,15 @@ class DreamServiceTest {
      */
     @Test
     void isTransientLlmFailure_treatsAnUnresolvableHostAsPermanent() {
-        assertFalse(DreamService.isTransientLlmFailure(new java.net.UnknownHostException("api.wrong-endpoint.invalid")),
+        assertFalse(DreamService.isTransientLlmFailure(new UnknownHostException("api.wrong-endpoint.invalid")),
                 "an unresolvable host is a misconfiguration; reporting success forever hides it");
         assertFalse(DreamService.isTransientLlmFailure(
-                new RuntimeException("llm call failed", new java.net.UnknownHostException("api.wrong-endpoint.invalid"))),
+                new RuntimeException("llm call failed", new UnknownHostException("api.wrong-endpoint.invalid"))),
                 "also when wrapped — the classifier walks the cause chain");
 
         // Still transient: resolved but refused, i.e. a service that may come back.
         assertTrue(DreamService.isTransientLlmFailure(
-                new RuntimeException("llm call failed", new java.net.ConnectException("connection refused"))));
+                new RuntimeException("llm call failed", new ConnectException("connection refused"))));
     }
 
     /** Exception whose cause is itself — guards the cause-chain walk. */
@@ -1144,18 +1148,27 @@ class DreamServiceTest {
         verify(store, times(1)).deleteEntry(anyString());
     }
 
+    /**
+     * These two used to assert that the SETTER throws, and so pinned a defect:
+     * Jackson calls it on every MongoDB read, ZIP import and instance sync, so an
+     * agent already stored with {@code summarizeTargetEntries: 0} — legal when it
+     * was written — could no longer be read, deployed, exported, or even repaired
+     * by PUT, because the read comes first.
+     * {@code AbstractResourceStore.validate}'s Javadoc states the rule outright: "a
+     * document already in the database must keep loading even if the rules
+     * tightened". The bound is a WRITE-path rule and now lives in
+     * {@code AgentStore.create}/{@code update} next to {@code HitlConfigValidation}
+     * — see {@code AgentStoreTest.UserMemoryConfigValidation}.
+     */
     @Test
-    void setSummarizeTargetEntries_rejectsZero() {
+    void setSummarizeTargetEntries_acceptsStoredOutOfRangeValuesSoTheAgentStillLoads() {
         var config = new AgentConfiguration.DreamConfig();
-        assertThrows(IllegalArgumentException.class,
-                () -> config.setSummarizeTargetEntries(0));
-    }
 
-    @Test
-    void setSummarizeTargetEntries_rejectsNegative() {
-        var config = new AgentConfiguration.DreamConfig();
-        assertThrows(IllegalArgumentException.class,
-                () -> config.setSummarizeTargetEntries(-1));
+        assertDoesNotThrow(() -> config.setSummarizeTargetEntries(0));
+        assertEquals(0, config.getSummarizeTargetEntries());
+
+        assertDoesNotThrow(() -> config.setSummarizeTargetEntries(-1));
+        assertEquals(-1, config.getSummarizeTargetEntries());
     }
 
     // === Agent ownership: a cycle configured by one agent must not act on another

@@ -5,10 +5,10 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
-import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
-import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.hitl.tools.ChatTranscriptCodec;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
@@ -57,6 +57,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.*;
@@ -93,9 +94,9 @@ class AgentOrchestratorResumeToolLoopTest {
     @Mock
     private A2AToolProviderManager a2aToolProviderManager;
     @Mock
-    private IRestAgentStore restAgentStore;
+    private IAgentStore restAgentStore;
     @Mock
-    private IRestWorkflowStore restWorkflowStore;
+    private IWorkflowStore restWorkflowStore;
     @Mock
     private IResourceClientLibrary resourceClientLibrary;
     @Mock
@@ -132,7 +133,7 @@ class AgentOrchestratorResumeToolLoopTest {
                 webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
                 fetchToolResponsePageTool,
                 toolExecutionService, mcpToolProviderManager, a2aToolProviderManager,
-                restAgentStore, restWorkflowStore, resourceClientLibrary,
+                restWorkflowStore, resourceClientLibrary,
                 apiCallExecutor, jsonSerialization, memoryItemConverter,
                 userMemoryStore, toolResponseTruncator, tenantQuotaService,
                 memorySnapshotService,
@@ -273,8 +274,12 @@ class AgentOrchestratorResumeToolLoopTest {
         verify(calculatorTool, times(1)).calculate("2+2");
         verify(journalStore).tryClaim("conv-1", "epoch-1", "c1", "calculate", "reviewer-1");
         verify(journalStore).tryClaim("conv-1", "epoch-1", "c2", "calculate", "reviewer-1");
-        verify(journalStore).markExecuted("conv-1", "epoch-1", "c1", "42");
-        verify(journalStore).markExecuted("conv-1", "epoch-1", "c2", "4");
+        // The journal records what the MODEL was given, provenance envelope and all —
+        // not the tool's raw output. On a duplicate claim the journalled string is
+        // replayed straight into the transcript, so journalling the raw result would
+        // make a crash-and-retry the one path where a tool result arrives ungoverned.
+        verify(journalStore).markExecuted(eq("conv-1"), eq("epoch-1"), eq("c1"), contains("42"));
+        verify(journalStore).markExecuted(eq("conv-1"), eq("epoch-1"), eq("c2"), contains("4"));
         verify(chatModel, times(1)).chat(any(ChatRequest.class));
     }
 

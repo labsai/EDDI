@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
@@ -101,7 +102,7 @@ class McpConversationToolsOwnershipTest {
         var guard = new ConversationAccessGuard(identity, new OwnershipValidator(true), descriptorStore);
         return new McpConversationTools(conversationService, mock(IRestAgentAdministration.class), mock(IRestAgentStore.class),
                 restInterfaceFactory, jsonSerialization, boundedLogStore, auditStore, mock(IRestAgentTriggerStore.class),
-                userConversationStore, mock(IRestAgentEngine.class), identity, guard, true);
+                userConversationStore, mock(IRestAgentEngine.class), identity, guard, mock(ResourceAccessGuard.class), true);
     }
 
     private McpConversationTools asIntruder() {

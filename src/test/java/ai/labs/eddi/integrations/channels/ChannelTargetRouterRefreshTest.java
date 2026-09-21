@@ -4,7 +4,7 @@
  */
 package ai.labs.eddi.integrations.channels;
 
-import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration.ChannelConnector;
 import ai.labs.eddi.configs.channels.IChannelIntegrationStore;
@@ -19,16 +19,20 @@ import ai.labs.eddi.engine.model.AgentDeploymentStatus;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter.ResolvedTarget;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.model.SecretReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -51,7 +55,7 @@ class ChannelTargetRouterRefreshTest {
     private IChannelIntegrationStore channelStore;
     private IDocumentDescriptorStore descriptorStore;
     private IRestAgentAdministration agentAdmin;
-    private IRestAgentStore agentStore;
+    private IAgentStore agentStore;
     private SecretResolver secretResolver;
     private ChannelTargetRouter router;
 
@@ -63,7 +67,7 @@ class ChannelTargetRouterRefreshTest {
         channelStore = mock(IChannelIntegrationStore.class);
         descriptorStore = mock(IDocumentDescriptorStore.class);
         agentAdmin = mock(IRestAgentAdministration.class);
-        agentStore = mock(IRestAgentStore.class);
+        agentStore = mock(IAgentStore.class);
         secretResolver = mock(SecretResolver.class);
 
         ICacheFactory cacheFactory = mock(ICacheFactory.class);
@@ -77,6 +81,35 @@ class ChannelTargetRouterRefreshTest {
 
         // Default: no legacy agents
         when(agentAdmin.getDeploymentStatuses(any())).thenReturn(List.of());
+    }
+
+    @Test
+    @DisplayName("a secret rotation landing DURING a refresh is not stamped away")
+    void invalidationDuringRefreshIsNotLost() throws Exception {
+        setupNewStyleConfig(CHANNEL_ID, "xoxb-original", "signing-original");
+
+        router.registerSecretInvalidation();
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Consumer<SecretReference>> listener = ArgumentCaptor.forClass(Consumer.class);
+        verify(secretResolver).registerInvalidationListener(listener.capture());
+
+        // The rotation lands while the refresh is still reading the store, so the
+        // maps it is building already hold the revoked credential. The listener
+        // zeroes the timestamp; the refresh must not then stamp it fresh again, or
+        // the router serves the revoked token for a whole interval — the exact
+        // window the listener exists to close.
+        var rotatedMidRefresh = new AtomicBoolean();
+        doAnswer(invocation -> {
+            if (rotatedMidRefresh.compareAndSet(false, true)) {
+                listener.getValue().accept(null);
+            }
+            return accumulatedDescriptors;
+        }).when(descriptorStore).readDescriptors(eq("ai.labs.channel"), anyString(), anyInt(), anyInt(), anyBoolean());
+
+        router.resolveTarget("slack", CHANNEL_ID, "hello");
+        router.resolveTarget("slack", CHANNEL_ID, "hello");
+
+        verify(descriptorStore, times(2)).readDescriptors(eq("ai.labs.channel"), anyString(), anyInt(), anyInt(), anyBoolean());
     }
 
     // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -178,7 +211,7 @@ class ChannelTargetRouterRefreshTest {
 
         when(agentAdmin.getDeploymentStatuses(Deployment.Environment.production))
                 .thenReturn(List.of(status));
-        when(agentStore.readAgent(eq(agentId), eq(1))).thenReturn(agentConfig);
+        when(agentStore.read(eq(agentId), eq(1))).thenReturn(agentConfig);
     }
 
     // ─── Public API — resolveTarget ────────────────────────────────────────────
@@ -854,7 +887,7 @@ class ChannelTargetRouterRefreshTest {
                     Deployment.Status.READY, desc);
             when(agentAdmin.getDeploymentStatuses(Deployment.Environment.production))
                     .thenReturn(List.of(status));
-            when(agentStore.readAgent(eq(AGENT_ID), eq(1))).thenReturn(agentConfig);
+            when(agentStore.read(eq(AGENT_ID), eq(1))).thenReturn(agentConfig);
 
             assertNull(router.resolveTarget("slack", CHANNEL_ID, "hello"));
             assertFalse(router.hasAnyChannels("slack"));
@@ -880,7 +913,7 @@ class ChannelTargetRouterRefreshTest {
                     Deployment.Status.READY, desc);
             when(agentAdmin.getDeploymentStatuses(Deployment.Environment.production))
                     .thenReturn(List.of(status));
-            when(agentStore.readAgent(eq(AGENT_ID), eq(1))).thenReturn(agentConfig);
+            when(agentStore.read(eq(AGENT_ID), eq(1))).thenReturn(agentConfig);
 
             assertNull(router.resolveTarget("slack", CHANNEL_ID, "hello"));
         }
@@ -912,7 +945,7 @@ class ChannelTargetRouterRefreshTest {
                     Deployment.Status.READY, desc);
             when(agentAdmin.getDeploymentStatuses(Deployment.Environment.production))
                     .thenReturn(List.of(status));
-            when(agentStore.readAgent(eq(AGENT_ID), eq(1))).thenReturn(agentConfig);
+            when(agentStore.read(eq(AGENT_ID), eq(1))).thenReturn(agentConfig);
             when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
 
             ResolvedTarget result = router.resolveTarget("slack", CHANNEL_ID, "hello");
@@ -1058,4 +1091,115 @@ class ChannelTargetRouterRefreshTest {
             return putIfAbsent(key, value);
         }
     }
+
+    // ==================== observeCandidates ====================
+
+    /**
+     * Observers are deliberately reachable only through their own accessor:
+     * {@code resolveTarget} answers "who was this addressed to", and an observer is
+     * addressed to nobody.
+     */
+    @Nested
+    @DisplayName("observeCandidates Tests")
+    class ObserveCandidatesTests {
+
+        @Test
+        @DisplayName("returns the observe-mode targets, in configuration order")
+        void returnsObserversInOrder() throws Exception {
+            var config = setupNewStyleConfig(CHANNEL_ID, "xoxb-token", "secret");
+            config.setTargets(List.of(
+                    target("plain", false),
+                    target("watch-a", true),
+                    target("watch-b", true)));
+
+            var observers = router.observeCandidates("slack", CHANNEL_ID);
+
+            assertEquals(List.of("watch-a", "watch-b"),
+                    observers.stream().map(ChannelTarget::getName).toList());
+        }
+
+        @Test
+        @DisplayName("an unknown channel yields an empty list, never null")
+        void unknownChannelIsEmpty() {
+            assertTrue(router.observeCandidates("slack", "C-nope").isEmpty());
+        }
+
+        @Test
+        @DisplayName("a channel with no observers yields an empty list")
+        void noObserversIsEmpty() throws Exception {
+            // The whole point: a channel that never configured one must behave
+            // exactly as it did before observe mode existed.
+            setupNewStyleConfig(CHANNEL_ID, "xoxb-token", "secret");
+            assertTrue(router.observeCandidates("slack", CHANNEL_ID).isEmpty());
+        }
+
+        @Test
+        @DisplayName("the channel type is matched case-insensitively, as elsewhere")
+        void channelTypeIsCaseInsensitive() throws Exception {
+            var config = setupNewStyleConfig(CHANNEL_ID, "xoxb-token", "secret");
+            config.setTargets(List.of(target("watch", true)));
+
+            assertEquals(1, router.observeCandidates("SLACK", CHANNEL_ID).size());
+        }
+
+        @Test
+        @DisplayName("an unmatched mention goes to the plain default, not to an observer")
+        void observerIsNotTheDefault() throws Exception {
+            var config = setupNewStyleConfig(CHANNEL_ID, "xoxb-token", "secret");
+            var observer = target("watch", true);
+            observer.setTriggers(List.of("watch"));
+            config.setTargets(List.of(target("plain", false), observer));
+            config.setDefaultTargetName("plain");
+
+            var resolved = router.resolveFromIntegration(config, "hello there");
+            assertEquals("plain", resolved.target().getName());
+        }
+
+        @Test
+        @DisplayName("an observer is not reachable through its own trigger keyword")
+        void observerIsNotReachableByTrigger() throws Exception {
+            // `observerIsNotTheDefault` covers the no-colon case only. Reaching an
+            // observer by trigger ran its agent on the addressed path, where none
+            // of the cooldown, the daily count or the cost ceiling applies — and
+            // it is repeatable, because nothing books anything there.
+            var config = setupNewStyleConfig(CHANNEL_ID, "xoxb-token", "secret");
+            var observer = target("watch", true);
+            observer.setTriggers(List.of("watch"));
+            var plain = target("plain", false);
+            config.setTargets(List.of(plain, observer));
+            config.setDefaultTargetName("plain");
+
+            var resolved = router.resolveFromIntegration(config, "watch: hello");
+
+            assertEquals("plain", resolved.target().getName());
+            // Not stripped: the keyword was never a trigger, so the default target
+            // gets the sentence as typed.
+            assertEquals("watch: hello", resolved.strippedMessage());
+        }
+
+        @Test
+        @DisplayName("an observer named as the default resolves to nothing, not to itself")
+        void observerNamedAsDefaultIsRefused() throws Exception {
+            // The store refuses to save this pairing, so it can only arrive from a
+            // document written straight to the datastore. Resolving it would make
+            // one target answer both addressed and unaddressed messages, with the
+            // observer's cooldown and caps applying to only half of what it said.
+            var config = setupNewStyleConfig(CHANNEL_ID, "xoxb-token", "secret");
+            var observer = target("watch", true);
+            config.setTargets(List.of(observer));
+            config.setDefaultTargetName("watch");
+
+            assertNull(router.resolveFromIntegration(config, "hello there"));
+        }
+
+        private ChannelTarget target(String name, boolean observing) {
+            var target = new ChannelTarget();
+            target.setName(name);
+            target.setType(ChannelTarget.TargetType.AGENT);
+            target.setTargetId("agent-" + name);
+            target.setObserveMode(observing);
+            return target;
+        }
+    }
+
 }

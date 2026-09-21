@@ -14,6 +14,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.PhaseType;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig.MemberFailurePolicy;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig.MemberUnavailablePolicy;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TaskDefinition;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TurnOrder;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
@@ -86,6 +87,33 @@ class TaskForceEngineTest {
         assertEquals(AGENT_A, engine.resolveTaskAssignment("ALL", members, MODERATOR, 0));
         assertEquals(AGENT_B, engine.resolveTaskAssignment("ALL", members, MODERATOR, 1));
         assertEquals(AGENT_A, engine.resolveTaskAssignment("ALL", members, MODERATOR, 2)); // wraps around
+    }
+
+    /**
+     * W8: configured tasks used to become a task list only inside the PLAN phase,
+     * so a CUSTOM group with an EXECUTE phase and no PLAN silently executed
+     * nothing. PLAN and EXECUTE now share this materialization.
+     */
+    @Test
+    void materializeConfiguredTasks_buildsListWithDependenciesAndAssignments() {
+        var config = new AgentGroupConfiguration();
+        config.setModeratorAgentId(MODERATOR);
+        config.setMembers(List.of(member(MODERATOR), member(AGENT_A), member(AGENT_B)));
+        config.setTasks(List.of(new TaskDefinition("Research", "gather facts", "ALL", List.of(), 1),
+                new TaskDefinition("Write", "write it up", "ALL", List.of("Research"), 2)));
+        var gc = new GroupConversation();
+        var phase = new DiscussionPhase("Execute", PhaseType.EXECUTE, "ALL", TurnOrder.PARALLEL, ContextScope.TASK_ONLY, false, null, 1, false);
+
+        engine().materializeConfiguredTasks(gc, config, 0, phase);
+
+        List<TaskItem> tasks = gc.getTaskList().all();
+        assertEquals(2, tasks.size());
+        TaskItem research = tasks.stream().filter(t -> t.subject().equals("Research")).findFirst().orElseThrow();
+        TaskItem write = tasks.stream().filter(t -> t.subject().equals("Write")).findFirst().orElseThrow();
+        assertEquals(List.of(research.id()), write.dependsOnIds());
+        assertEquals(AGENT_A, research.assignedAgentId());
+        assertEquals(AGENT_B, write.assignedAgentId());
+        assertTrue(gc.getTranscript().stream().anyMatch(e -> e.type() == TranscriptEntryType.PLAN));
     }
 
     @Test

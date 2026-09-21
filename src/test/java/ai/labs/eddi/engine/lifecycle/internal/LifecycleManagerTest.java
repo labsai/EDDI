@@ -1858,6 +1858,40 @@ class LifecycleManagerTest {
             verify(output).execute(memory, OUTPUT_COMPONENT);
         }
 
+        /**
+         * The rerun restart list is {@code [langchain, output, quickReplies]}. On an
+         * LLM agent the langchain task sits BEFORE the output task and is the one that
+         * writes the answer — restarting at output alone is what destroyed the reply
+         * without regenerating it (D11). This pins that a task typed "langchain" wins
+         * the start-index race over "output" when both are present.
+         */
+        @Test
+        @DisplayName("the rerun list restarts at langchain when the workflow has one")
+        void rerunListRestartsAtTheLangchainTask() throws Exception {
+            var langchain = mock(ILifecycleTask.class);
+            when(langchain.getId()).thenReturn(new TaskId("ai.labs.llm"));
+            when(langchain.getType()).thenReturn("langchain");
+
+            // A fresh manager wired as the standard LLM layout: parser, behavior,
+            // langchain, output — the langchain task BEFORE the output task.
+            var llmPipeline = new LifecycleManager(componentCache, workflowId);
+            llmPipeline.addLifecycleTask(parser);
+            llmPipeline.addLifecycleTask(behavior);
+            llmPipeline.addLifecycleTask(langchain);
+            llmPipeline.addLifecycleTask(output);
+            when(componentCache.getComponentMap("ai.labs.llm"))
+                    .thenReturn(new HashMap<>(Map.of("wf1:1:2", BEHAVIOR_COMPONENT)));
+            when(componentCache.getComponentMap("ai.labs.output"))
+                    .thenReturn(new HashMap<>(Map.of("wf1:1:3", OUTPUT_COMPONENT)));
+
+            llmPipeline.executeLifecycle(memory, List.of("langchain", "output", "quickReplies"));
+
+            verify(parser, never()).execute(any(), any());
+            verify(behavior, never()).execute(any(), any());
+            verify(langchain).execute(memory, BEHAVIOR_COMPONENT);
+            verify(output).execute(memory, OUTPUT_COMPONENT);
+        }
+
         @Test
         @DisplayName("HITL resume from an absolute index resolves the component at that index")
         void resumeFromIndexResolvesComponent() throws Exception {

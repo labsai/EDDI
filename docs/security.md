@@ -48,8 +48,9 @@ This starts Keycloak alongside EDDI with pre-configured realm, clients, and test
 
 | User | Password | Role | Notes |
 |------|----------|------|-------|
-| `eddi` | `eddi` | admin | Full access, forced password change on first login |
-| `viewer` | `viewer` | viewer | Read-only access, forced password change on first login |
+| `eddi` | *none* | `eddi-admin`, `eddi-editor` | Full access. Ships without a password: set one at `http://localhost:8180/admin` (`admin`/`admin`) → Users → eddi → Credentials |
+| `viewer` | `viewer` | `eddi-viewer` | Read-only access. Development only: no password change is forced |
+| `user` | `user` | `eddi-user` | Standard user access. Development only: no password change is forced |
 
 ### Configuration Properties
 
@@ -74,17 +75,24 @@ docker run -e QUARKUS_OIDC_TENANT_ENABLED=true \
            labsai/eddi:latest
 ```
 
+> **Roles are deployment-wide.** `eddi-editor` grants authoring rights over
+> *every* configuration in the deployment. To scope agents, workflows and the
+> rest to the user or team that created them — and to share them deliberately —
+> see [Workspaces](workspaces.md).
+
 ### Auth Permissions
 
 When OIDC is enabled, the following permission rules apply (see `application.properties`):
 
 | Path Pattern | Policy |
 | --- | --- |
-| `/q/metrics/*`, `/q/health/*` | **Permit** — Infrastructure endpoints |
+| `/q/health/*` | **Permit** (GET only) — required for k8s probes |
+| `/q/metrics/*` | **Authenticated** — deliberately not permitted (metrics leak deployment shape); a Prometheus scraper must present a Bearer token |
 | `/`, `/manage`, `/manage/*`, `/chat`, `/chat/*` | **Permit** — SPA entry points (the SPA loads and handles Keycloak login via keycloak-js) |
-| `/agents/production/*` | **Permit** — Production conversation endpoints (public-facing) |
 | `/scripts/*`, `/fonts/*`, `/css/*`, `/js/*`, `/img/*` | **Permit** — Static assets for Manager SPA |
 | `/*` (catch-all) | **Authenticated** — All other API endpoints require a valid Bearer token |
+
+> **Note:** there is no HTTP-layer permit for conversation endpoints — `/agents/production/*` is caught by the catch-all `authenticated` policy and answers `401` before any resource method runs. The production exemption in `RestAgentManagement.checkUserAuthIfApplicable` (below) is an inner check only; to expose a production conversation surface anonymously you must add your own `quarkus.http.auth.permission.*` permit rule.
 
 ### RestAgentManagement Gate
 
@@ -99,12 +107,12 @@ if (checkForUserAuthentication &&
 ```
 
 - When `quarkus.oidc.tenant-enabled=false` → `checkForUserAuthentication=false` → all requests pass
-- When `quarkus.oidc.tenant-enabled=true` → only authenticated users can access production endpoints
+- When `quarkus.oidc.tenant-enabled=true` → a request against a non-production environment (`unrestricted`, `test`) must be authenticated; `production` conversations are exempt from this particular gate
 - Requests to `/production/` environments always pass regardless of auth status
 
 ### Local Development Keycloak
 
-The EDDI-Manager repo provides a docker-compose for local Keycloak:
+The Manager (`ui/manager` in this repository) provides a docker-compose for local Keycloak — run it from that directory:
 
 ```bash
 docker compose -f docker-compose.keycloak.yml up
@@ -113,9 +121,105 @@ docker compose -f docker-compose.keycloak.yml up
 This starts Keycloak 26 on port 8180 with:
 
 - **Realm**: `eddi`
-- **Clients**: `eddi-manager` (SPA, public), `eddi-backend` (bearer-only)
-- **Roles**: `admin`, `editor`, `viewer`
-- **Test users**: `eddi`/`eddi` (admin), `viewer`/`viewer` (read-only)
+- **Clients**: `eddi-frontend` (SPA, public), `eddi-backend` (bearer-only)
+- **Roles**: `eddi-admin`, `eddi-editor`, `eddi-user`, `eddi-viewer` (plus `eddi-approver`, used by the HITL approval endpoints)
+- **Test users**: `viewer`/`viewer` (`eddi-viewer`), `user`/`user` (`eddi-user`), and `eddi` (`eddi-admin` + `eddi-editor`), which ships **without a password** — set one in the admin console at http://localhost:8180 (`admin`/`admin`)
+
+> `keycloak/eddi-realm.json` is the source of truth for client ids. Provisioning a
+> realm by hand from a doc that names a different one gets you `invalid_client`
+> at login: `RestManagerResource` hardcodes `eddi-frontend` as the id the Manager
+> SPA requests tokens for, so that is the client that has to exist.
+
+### Identity claims, and realms imported from EDDI 6.1.0–6.4.0
+
+EDDI identifies a caller by the principal Quarkus OIDC reads from the access
+token: `upn`, then `preferred_username`, then `sub`. Conversation ownership,
+long-term user memory, HITL attribution and workspaces all key on that name. So
+the `eddi-frontend` client has to put identity claims in its tokens, which takes
+three client scopes: `basic` (`sub`), `profile` (`preferred_username`, `name`)
+and `email`. The `openid` scope the realm also defines is there for a different
+reason: it puts `openid` in the token's `scope` claim even when a client did not
+ask for it, and Keycloak's userinfo endpoint — which the backend calls on every
+request — refuses a token without it.
+
+**The realm shipped with EDDI 6.1.0 through 6.4.0 had none of the three** (for
+Helm and Kustomize, which first shipped a realm in 6.4.0, that release only). It
+defined a single client scope, and a realm file that defines any client scopes
+gets only those: Keycloak creates its built-in ones only for realms that define
+none. The import logs `Referenced client scope 'profile' doesn't exist. Ignoring`
+and carries on. Tokens still authenticated and still carried their roles, so
+logins worked and role checks passed, but every caller's principal had no name:
+
+- Every conversation was stamped with a random `anonymous-<hex>` owner instead of
+  the user, and long-term user memories were filed under that same per-conversation
+  id, so nothing a user saved was recalled in their next conversation.
+- A user without `eddi-admin` who opened or continued their own conversation got
+  **HTTP 500**.
+- `GET /workspaces` reported no principal, so workspaces had nothing to scope to.
+- The Manager showed "?" in place of the user's initials and no name in the user
+  menu.
+
+Realm import only runs on first boot, so a fixed realm file does not reach a
+Keycloak that already has the `eddi` realm:
+
+- **`install.sh`** repairs it whenever it runs, including when EDDI is already up:
+  run the installer again while EDDI is running — with EDDI running, it only
+  refreshes the `eddi` command and checks Keycloak. If you installed on a port
+  other than 7070, pass the same one (`EDDI_PORT=7071 bash install.sh`): the
+  installer recognises a running EDDI only on the port it is given, and would
+  otherwise set up a new installation. Look for
+  `Checking Keycloak identity scopes ✅ (repaired: …)`, then sign out and in again.
+  `eddi update` does **not** run this check.
+- **`install.ps1`, Helm, Kustomize, or a realm provisioned by hand**: run the
+  repair below once, against the Keycloak admin API — on Windows from Git Bash or
+  WSL. It creates only the scopes that are missing, using the definitions in the
+  realm file, attaches them to `eddi-frontend`, and removes nothing, so running it
+  twice is harmless. It needs `curl` and `jq`, and a checkout of this repository
+  for the realm file (the three copies define the same scopes); run it from the
+  checkout's root. Set `KC`, `KC_ADMIN_USER` and `KC_ADMIN_PASSWORD` for your
+  Keycloak: `http://localhost:8180`, `admin` and `admin` for the docker-compose
+  setup the installers create, or the port-forward, `keycloak.adminUsername` and
+  the admin Secret on Kubernetes. It runs in a subshell, so pasting it into a
+  terminal cannot close that terminal when a step fails.
+
+  ```bash
+  ( set -eu
+  KC=${KC:-http://localhost:8180}   # kubectl -n eddi port-forward svc/keycloak 8080:8080 → http://localhost:8080
+  : "${KC_ADMIN_PASSWORD:?set KC_ADMIN_PASSWORD to the Keycloak admin password}"
+  REALM_FILE=keycloak/eddi-realm.json
+  # tr -d '\r': a native Windows jq.exe ends its output with CRLF under Git Bash
+  j() { jq "$@" | tr -d '\r'; }
+  TOKEN=$(curl -sSf -d client_id=admin-cli -d grant_type=password -d "username=${KC_ADMIN_USER:-admin}" \
+    --data-urlencode "password=$KC_ADMIN_PASSWORD" \
+    "$KC/realms/master/protocol/openid-connect/token" | j -r .access_token)
+  [ -n "$TOKEN" ] || { echo "could not log in to $KC as ${KC_ADMIN_USER:-admin}" >&2; exit 1; }
+  AUTH="Authorization: Bearer $TOKEN"
+  SPA=$(curl -sSf -H "$AUTH" "$KC/admin/realms/eddi/clients?clientId=eddi-frontend" | j -r '.[0].id // empty')
+  [ -n "$SPA" ] || { echo "no eddi-frontend client in realm eddi" >&2; exit 1; }
+  scope_id() {
+    curl -sSf -H "$AUTH" "$KC/admin/realms/eddi/client-scopes" \
+      | j -r --arg n "$1" '.[] | select(.name == $n) | .id'
+  }
+  for scope in basic profile email web-origins acr; do
+    if [ -z "$(scope_id "$scope")" ]; then
+      j -c --arg n "$scope" '.clientScopes[] | select(.name == $n)' "$REALM_FILE" \
+        | curl -sSf -X POST -H "$AUTH" -H "Content-Type: application/json" -d @- \
+            "$KC/admin/realms/eddi/client-scopes"
+      echo "created $scope"
+    fi
+    id=$(scope_id "$scope")
+    [ -n "$id" ] || { echo "client scope $scope is still missing" >&2; exit 1; }
+    curl -sSf -X PUT -H "$AUTH" "$KC/admin/realms/eddi/clients/$SPA/default-client-scopes/$id"
+    echo "attached $scope"
+  done )
+  ```
+
+Users pick the claims up at their next sign-in. The principal then becomes each
+user's username, so conversations and memories created **after** the repair
+belong to the user who created them. Anything written before it keeps its
+`anonymous-<hex>` owner: an `eddi-admin` can still open those conversations, but
+neither they nor the memories filed with them can be attributed to a person, so
+a data-subject request by username will not find them.
 
 ---
 
@@ -148,7 +252,7 @@ fails the call loudly rather than degrading quietly:
 | **Headers only** | A token reference in a query parameter, request body or request path is rejected — only a header is ever substituted. `${caller:userId}` is permitted in headers and query parameters. |
 | **Authenticated turns only** | The identity is captured from the request driving the turn. Scheduled jobs and triggers have no caller and cannot satisfy the reference. |
 | **Fails closed** | An unsatisfiable reference throws rather than resolving to an empty string, which would send `Bearer ` and surface downstream as a confusing `401`. |
-| **Never persisted** | Resolution happens while building the request; `scrubSensitiveHeaders` strips authorization headers before the request is written to conversation memory. |
+| **Never persisted** | Resolution happens while building the request; `RequestRedactor.redactRequestMap` redacts the URI, headers, query parameters and body before the request is written to conversation memory. |
 
 **Thread safety.** A conversation turn is built on the request thread but
 executed on pool threads, where request-scoped beans no longer resolve. The
@@ -163,9 +267,48 @@ Set `eddi.caller-identity.enabled=false` to forbid the feature outright.
 
 ## SSRF Protection — `UrlValidationUtils`
 
-**Applies to:** PDF Reader, Web Scraper, and any future tool that fetches remote resources.
+**Applies to:** PDF Reader, Web Scraper, and any future tool that fetches remote
+resources — **always**, with no configuration.
 
 Server-Side Request Forgery (SSRF) occurs when an attacker tricks a server-side application into making requests to internal services. EDDI prevents this with `UrlValidationUtils.validateUrl(url)`:
+
+> ### ⚠️ Configured outbound calls are a separate, opt-in case
+>
+> The validation described in this section is unconditional for **tool** URLs,
+> because those are chosen by the LLM and therefore attacker-influenceable. It is
+> **not** applied by default to outbound calls whose target comes from *your own
+> configuration* — httpCalls, MCP servers and A2A peers — because those routinely
+> and legitimately address internal hosts (`http://billing.internal/api`), which
+> the validator would reject.
+>
+> Turn it on with:
+>
+> ```properties
+> eddi.security.ssrf-protection.enabled=true   # default: false
+> ```
+>
+> When enabled, `ApiCallExecutor`, `McpToolProviderManager` and
+> `A2AToolProviderManager` validate the **fully resolved** target — after
+> templating, global variables and vault references have been substituted — and
+> stop following redirects, so a `3xx` cannot bounce a permitted request onto an
+> internal host.
+>
+> **Enable it whenever any part of an httpCall URL can be influenced by
+> conversation input** (`{properties.x}`, `{memory.current.input}`, a context
+> variable). Leave it off only if every outbound target is a fixed literal and you
+> genuinely need to reach private addresses.
+>
+> **The cloud instance-metadata service is blocked either way.** With protection
+> off, httpCalls, MCP servers and A2A peers still refuse
+> `169.254.169.254`, `fd00:ec2::254`, `100.100.100.200`,
+> `metadata.google.internal` and the whole link-local range (`169.254.0.0/16`,
+> `fe80::/10`) — including a hostname that resolves there
+> (`UrlValidationUtils.rejectCloudMetadataTarget`). The metadata service hands out
+> the instance's cloud credentials; nobody configures it as an API. With protection
+> off redirects are still followed, so the httpCalls client checks every redirect
+> hop too: a public URL answering `302 Location: http://169.254.169.254/…` fails
+> instead of being followed. For MCP servers and A2A peers only the configured
+> target is checked while protection is off; turn it on to stop a redirect there.
 
 ### Scheme Allowlist
 
@@ -189,9 +332,14 @@ DNS resolution is performed and the resolved address is checked before any conne
 | `172.16.0.0/12`  | Private network (Class B)     |
 | `192.168.0.0/16` | Private network (Class C)     |
 | `169.254.0.0/16` | Link-local (AWS/GCP metadata) |
-| `fd00::/8`       | IPv6 unique-local             |
+| `100.64.0.0/10`  | CGNAT (RFC 6598)              |
+| `224.0.0.0/4`    | IPv4 multicast                |
+| `0.0.0.0/8`      | Unspecified / "this network"  |
+| `fc00::/7`       | IPv6 unique-local (RFC 4193 — covers `fc00::/8` and `fd00::/8`) |
 | `fe80::/10`      | IPv6 link-local               |
 | `::1`            | IPv6 loopback                 |
+
+IPv4-mapped IPv6 addresses (`::ffff:x.x.x.x`) are unwrapped and re-checked against every IPv4 rule above.
 
 ### Cloud Metadata Endpoint Blocking
 
@@ -211,7 +359,7 @@ Hostnames that indicate internal services are rejected:
 ### Usage
 
 ```java
-import static ai.labs.eddi.modules.langchain.tools.UrlValidationUtils.validateUrl;
+import static ai.labs.eddi.modules.llm.tools.UrlValidationUtils.validateUrl;
 
 // In any tool method that accepts a URL:
 validateUrl(url); // throws IllegalArgumentException if blocked
@@ -334,7 +482,7 @@ Different conversations are processed **concurrently** — only same-conversatio
 
 ## HTTP Call Content-Type Handling
 
-The `HttpCallExecutor` uses strict equality (`equals`) rather than prefix matching (`startsWith`) when checking the `Content-Type` header against `application/json`. This prevents content types like `application/json-patch+json` from being incorrectly deserialised as standard JSON.
+The `ApiCallExecutor` uses strict equality (`equals`) rather than prefix matching (`startsWith`) when checking the `Content-Type` header against `application/json`. This prevents content types like `application/json-patch+json` from being incorrectly deserialised as standard JSON.
 
 ---
 
@@ -368,9 +516,12 @@ on `localhost:7070`. This is the standard production pattern.
 ### Option 2: TLS Directly in Quarkus
 
 ```properties
-quarkus.http.ssl.certificate.file=/path/to/cert.pem
-quarkus.http.ssl.certificate.key-file=/path/to/key.pem
+quarkus.http.ssl.certificate.files=/path/to/cert.pem
+quarkus.http.ssl.certificate.key-files=/path/to/key.pem
 quarkus.http.ssl-port=8443
+# Required. Configuring TLS does not switch plaintext off: quarkus.http.insecure-requests
+# defaults to `enabled`, so port 7070 keeps serving cleartext alongside 8443.
+quarkus.http.insecure-requests=disabled
 ```
 
 ### Internal Traffic
@@ -389,12 +540,13 @@ EDDI's CI/CD pipeline enforces multiple automated security gates before any code
 
 | Tool | Type | Scope | Mode | Override |
 |------|------|-------|------|----------|
-| **CodeQL** | SAST | Java source code | Blocking (PR) + weekly deep scan | N/A |
+| **CodeQL** | SAST | Java source code; the shipped UI sources (`.github/codeql/codeql-ui.yml`) | Blocking (PR) + weekly deep scan | N/A |
 | **Trivy** | CVE scanning | Filesystem deps + Docker image | Blocking (CRITICAL/HIGH) | `.trivyignore` |
 | **Gitleaks** | Secret scanning | Full git history | Blocking | `.gitleaksignore` |
-| **ZAP** | DAST | Live API (OpenAPI spec) | Report-only | `fail_action` in workflow |
-| **CycloneDX** | SBOM | Maven dependency tree | Artifact generation | N/A |
+| **CycloneDX** | SBOM | Maven dependency tree + both UIs’ npm production dependencies | Artifact generation | N/A |
 | **Jazzer** | Fuzz testing | PathNavigator, MatchingUtilities | JUnit integration | N/A |
+
+> **DAST is intentionally absent.** A ZAP API scan used to live in `ci.yml` and was removed rather than kept as decorative coverage: it ran *after* the image was pushed, it scanned an instance started with `EDDI_SECURITY_ALLOW_UNAUTHENTICATED` (so the authorization layer under test was switched off), and it ran passive-only with `fail_action: false`. Re-adding it means fixing all three at once — build the image in a job that does not push, stand up Keycloak, drive an authenticated OpenAPI scan against it, and gate the publish job on the result.
 
 ### Override Files
 

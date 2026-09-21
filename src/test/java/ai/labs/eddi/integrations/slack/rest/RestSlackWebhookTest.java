@@ -119,7 +119,43 @@ class RestSlackWebhookTest {
             Response response = webhook.handleEvents(body, "sig", "ts");
 
             assertEquals(200, response.getStatus());
-            verify(eventHandler).handleEventAsync(eq("evt-1"), any());
+            // No `authorizations` on this envelope, so the bot id is unknown and
+            // the handler is told so rather than being given a guess.
+            verify(eventHandler).handleEventAsync(eq("evt-1"), any(), isNull());
+        }
+
+        @Test
+        @DisplayName("passes this app's own user id from the envelope's authorizations")
+        void passesBotUserId() {
+            // Slack sends it on every event_callback, so the handler can tell a
+            // message addressed to THIS bot from one that mentions somebody else
+            // — without an auth.test round trip or a cache to invalidate.
+            when(channelTargetRouter.getSigningSecrets("slack")).thenReturn(Set.of("secret"));
+            when(signatureVerifier.verify(any(), any(), any(), any())).thenReturn(true);
+
+            String body = "{\"type\":\"event_callback\",\"event_id\":\"evt-2\","
+                    + "\"authorizations\":[{\"is_bot\":false,\"user_id\":\"U-human\"},"
+                    + "{\"is_bot\":true,\"user_id\":\"U-bot\"}],"
+                    + "\"event\":{\"type\":\"message\",\"text\":\"hello\"}}";
+
+            webhook.handleEvents(body, "sig", "ts");
+
+            verify(eventHandler).handleEventAsync(eq("evt-2"), any(), eq("U-bot"));
+        }
+
+        @Test
+        @DisplayName("a user-token authorization yields no bot id")
+        void nonBotAuthorizationIsNotABotId() {
+            when(channelTargetRouter.getSigningSecrets("slack")).thenReturn(Set.of("secret"));
+            when(signatureVerifier.verify(any(), any(), any(), any())).thenReturn(true);
+
+            String body = "{\"type\":\"event_callback\",\"event_id\":\"evt-3\","
+                    + "\"authorizations\":[{\"is_bot\":false,\"user_id\":\"U-human\"}],"
+                    + "\"event\":{\"type\":\"message\",\"text\":\"hello\"}}";
+
+            webhook.handleEvents(body, "sig", "ts");
+
+            verify(eventHandler).handleEventAsync(eq("evt-3"), any(), isNull());
         }
 
         @Test

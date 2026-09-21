@@ -47,6 +47,8 @@ import java.net.URI;
 import java.time.Instant;
 import java.util.*;
 
+import ai.labs.eddi.configs.rest.StrictConfigurationParser;
+import io.quarkus.security.identity.SecurityIdentity;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -117,11 +119,16 @@ class McpAdminToolsExtendedTest {
 
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
         lenient().when(schedulePollerService.getInstanceId()).thenReturn("test-instance");
+        // fire_schedule_now claims the schedule first, exactly as the poller and the
+        // REST endpoint do. Default the claim to "won" so tests about anything else
+        // still reach the fire.
+        lenient().when(schedulePollerService.claimForManualFire(any())).thenReturn(true);
 
-        var mockIdentity = mock(io.quarkus.security.identity.SecurityIdentity.class);
+        var mockIdentity = mock(SecurityIdentity.class);
         lenient().when(mockIdentity.isAnonymous()).thenReturn(true);
 
         tools = new McpAdminTools(restInterfaceFactory, agentAdmin, jsonSerialization,
+                strictConfigurationParser(),
                 scheduleStore, scheduleFireExecutor, schedulePollerService,
                 mockIdentity, false);
     }
@@ -1510,5 +1517,23 @@ class McpAdminToolsExtendedTest {
         String result = tools.deleteAgentTrigger("support");
 
         assertTrue(result.contains("error"));
+    }
+
+    /**
+     * A parser that defers to this test's {@code jsonSerialization} mock, so the
+     * existing {@code when(jsonSerialization.deserialize(...))} stubs keep
+     * describing what these dispatch tests are actually about. Strictness itself is
+     * covered by {@code StrictConfigurationParserTest}; here the only thing that
+     * matters is that each resource type reaches the right store.
+     */
+    private StrictConfigurationParser strictConfigurationParser() {
+        var parser = mock(StrictConfigurationParser.class);
+        try {
+            lenient().when(parser.parse(anyString(), any()))
+                    .thenAnswer(invocation -> jsonSerialization.deserialize(invocation.getArgument(0), invocation.getArgument(1)));
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+        return parser;
     }
 }

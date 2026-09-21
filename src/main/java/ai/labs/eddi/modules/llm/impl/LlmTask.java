@@ -4,12 +4,12 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
-import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
-import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.engine.hitl.tools.TaskToolApprovalsResolver;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
@@ -43,12 +43,12 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
-import static ai.labs.eddi.utils.LogSanitizer.sanitize;
-
 import java.io.IOException;
 import java.net.URI;
 import java.util.*;
 import java.util.regex.Pattern;
+import dev.langchain4j.data.message.SystemMessage;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 import static ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.ConfigValue;
 import static ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.FieldType;
@@ -126,8 +126,8 @@ public class LlmTask implements ILifecycleTask {
 
     // Retained for httpCall RAG discovery + execution (Phase 8c-0)
     private final IApiCallExecutor apiCallExecutor;
-    private final IRestAgentStore restAgentStore;
-    private final IRestWorkflowStore restWorkflowStore;
+    private final IAgentStore agentStore;
+    private final IWorkflowStore workflowStore;
 
     /**
      * Tool-level HITL kill-switch. When false the tool-approval gate is inert
@@ -165,7 +165,7 @@ public class LlmTask implements ILifecycleTask {
     @Inject
     public LlmTask(IResourceClientLibrary resourceClientLibrary, IDataFactory dataFactory, IMemoryItemConverter memoryItemConverter,
             ITemplatingEngine templatingEngine, IJsonSerialization jsonSerialization, PrePostUtils prePostUtils, ChatModelRegistry chatModelRegistry,
-            IApiCallExecutor apiCallExecutor, IRestAgentStore restAgentStore, IRestWorkflowStore restWorkflowStore,
+            IApiCallExecutor apiCallExecutor, IAgentStore agentStore, IWorkflowStore workflowStore,
             RagContextProvider ragContextProvider, TokenCounterFactory tokenCounterFactory,
             ConversationSummarizer conversationSummarizer,
             PromptSnippetService promptSnippetService,
@@ -190,8 +190,8 @@ public class LlmTask implements ILifecycleTask {
         this.ragContextProvider = ragContextProvider;
         this.tokenCounterFactory = tokenCounterFactory;
         this.apiCallExecutor = apiCallExecutor;
-        this.restAgentStore = restAgentStore;
-        this.restWorkflowStore = restWorkflowStore;
+        this.agentStore = agentStore;
+        this.workflowStore = workflowStore;
         this.conversationSummarizer = conversationSummarizer;
         this.promptSnippetService = promptSnippetService;
         this.globalVariableResolver = globalVariableResolver;
@@ -494,7 +494,7 @@ public class LlmTask implements ILifecycleTask {
 
         // Build chat messages without system message for agent mode
         // (agent orchestrator adds system message internally)
-        List<ChatMessage> chatMessagesWithoutSystem = messages.stream().filter(m -> !(m instanceof dev.langchain4j.data.message.SystemMessage))
+        List<ChatMessage> chatMessagesWithoutSystem = messages.stream().filter(m -> !(m instanceof SystemMessage))
                 .toList();
 
         // === Multi-Model Cascade Branch ===
@@ -692,7 +692,11 @@ public class LlmTask implements ILifecycleTask {
             // Under cascade, record the actual winning model (provider/model), not the
             // task-level default — an auditor must be able to reconstruct which model
             // produced the answer (#5).
-            String modelName = cascadeAuditModel != null ? cascadeAuditModel : processedParams.getOrDefault("model", task.getType());
+            // resolveModelName, not params["model"]: most providers take "modelName", so
+            // the
+            // ledger recorded the provider type ("anthropic") instead of the model id.
+            String resolvedModelName = resolveModelName(processedParams);
+            String modelName = cascadeAuditModel != null ? cascadeAuditModel : resolvedModelName != null ? resolvedModelName : task.getType();
             var modelNameData = dataFactory.createData(MemoryKeys.AUDIT_MODEL_NAME, modelName);
             currentStep.storeData(modelNameData);
 
@@ -918,17 +922,40 @@ public class LlmTask implements ILifecycleTask {
                     "Streaming response timed out", responseContent, task, currentStep);
         }
 
-        // 5. Refusal heuristic — simple check for common refusal patterns
-        if (!isNullOrEmpty(responseContent)) {
-            String lower = responseContent.trim().toLowerCase();
-            if (lower.startsWith("i'm sorry, i can't") || lower.startsWith("i cannot")
-                    || lower.startsWith("i'm not able to") || lower.startsWith("as an ai")) {
-                responseContent = applyValidationAction(validation.getOnRefusal(), "refusal_detected",
-                        "LLM response appears to be a refusal", responseContent, task, currentStep);
-            }
+        // 5. Refusal heuristic — configured prefixes, defaulting to the four that were
+        // hard-coded here.
+        if (!isNullOrEmpty(responseContent) && looksLikeRefusal(responseContent, validation.getRefusalPatterns())) {
+            responseContent = applyValidationAction(validation.getOnRefusal(), "refusal_detected",
+                    "LLM response appears to be a refusal", responseContent, task, currentStep);
         }
 
         return responseContent;
+    }
+
+    /**
+     * Whether a completion opens with one of the configured refusal prefixes.
+     * <p>
+     * Blank patterns are dropped rather than matched.
+     * {@code "".startsWith(anything)} is true for every response, so one stray
+     * empty entry would apply {@code onRefusal} to every completion — and under
+     * {@code onRefusal: "error"}, fail every turn.
+     * <p>
+     * {@code Locale.ROOT} because the bare {@code toLowerCase()} mangles the
+     * dotted/dotless I on a Turkish-locale JVM, which would silently stop "I
+     * cannot" matching on exactly the deployments least likely to notice.
+     *
+     * @param responseContent
+     *            the model's completion; leading and trailing space is ignored
+     * @param patterns
+     *            the configured prefixes, or {@code null} to detect nothing
+     */
+    static boolean looksLikeRefusal(String responseContent, List<String> patterns) {
+        if (patterns == null || responseContent == null) {
+            return false;
+        }
+        String lower = responseContent.trim().toLowerCase(Locale.ROOT);
+        return patterns.stream().filter(Objects::nonNull).map(String::trim).filter(p -> !p.isEmpty()).map(p -> p.toLowerCase(Locale.ROOT))
+                .anyMatch(lower::startsWith);
     }
 
     /**
@@ -1096,7 +1123,8 @@ public class LlmTask implements ILifecycleTask {
                 var modelResponse = dataFactory.createData(MemoryKeys.AUDIT_MODEL_RESPONSE, responseContent);
                 currentStep.storeData(modelResponse);
             }
-            String modelName = processedParams.getOrDefault("model", task.getType());
+            String resolvedModelName = resolveModelName(processedParams);
+            String modelName = resolvedModelName != null ? resolvedModelName : task.getType();
             var modelNameData = dataFactory.createData(MemoryKeys.AUDIT_MODEL_NAME, modelName);
             currentStep.storeData(modelNameData);
 
@@ -1532,7 +1560,7 @@ public class LlmTask implements ILifecycleTask {
     private String executeHttpCallRag(IConversationMemory memory, String httpCallName, String userInput, Map<String, Object> templateDataObjects) {
 
         // Discover all httpCall configs from the workflow
-        var stepConfigs = WorkflowTraversal.discoverConfigs(memory, HTTPCALLS_TYPE, ApiCallsConfiguration.class, restAgentStore, restWorkflowStore,
+        var stepConfigs = WorkflowTraversal.discoverConfigs(memory, HTTPCALLS_TYPE, ApiCallsConfiguration.class, agentStore, workflowStore,
                 resourceClientLibrary);
 
         // Search for the named ApiCall across all httpCall configurations
@@ -1548,6 +1576,20 @@ public class LlmTask implements ILifecycleTask {
                         templateDataObjects.put("userInput", userInput);
 
                         Map<String, Object> result = apiCallExecutor.execute(apiCall, memory, templateDataObjects, targetServerUrl);
+
+                        // A FAILED retrieval contributes nothing. Its result now
+                        // carries the error body (so LLM TOOLS can report
+                        // failures), but this path pastes the serialized result
+                        // into the SYSTEM prompt as "## Search Results" — where
+                        // up to 2KB of proxy/WAF error page, attacker-influenced
+                        // in some architectures, would masquerade as retrieved
+                        // knowledge. Pre-contract, a failed call contributed an
+                        // empty map here; keep that meaning.
+                        if (result.get("httpCode") instanceof Integer code && (code < 200 || code >= 300)) {
+                            LOGGER.warnf("httpCall RAG '%s' returned %d — omitting from context", httpCallName, code);
+                            return null;
+                        }
+
                         String serialized = jsonSerialization.serialize(result);
 
                         LOGGER.infof("httpCall RAG '%s' executed: keys=%s, size=%d", httpCallName, result.keySet(), serialized.length());

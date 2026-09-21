@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.mcpcalls.rest;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
@@ -47,7 +48,7 @@ class RestMcpCallsStoreWriteValidationTest {
     void setUp() throws Exception {
         mcpCallsStore = mock(IMcpCallsStore.class);
         restMcpCallsStore = new RestMcpCallsStore(mcpCallsStore, mock(IDocumentDescriptorStore.class), mock(IJsonSchemaCreator.class),
-                mock(McpToolProviderManager.class));
+                mock(McpToolProviderManager.class), mock(ResourceAccessGuard.class));
 
         when(mcpCallsStore.create(any())).thenReturn(resourceId(MCP_ID, 1));
         when(mcpCallsStore.update(anyString(), anyInt(), any())).thenReturn(2);

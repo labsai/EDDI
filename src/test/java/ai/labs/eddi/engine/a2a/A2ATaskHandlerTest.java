@@ -25,6 +25,7 @@ import java.security.Principal;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
@@ -45,19 +46,27 @@ class A2ATaskHandlerTest {
 
     private IConversationService conversationService;
     private ICacheFactory cacheFactory;
+    private AgentCardService agentCardService;
     private A2ATaskHandler handler;
     private MapCache<String, String> taskCache;
     private MapCache<String, String> contextCache;
+    private MapCache<String, String> stateCache;
 
     @BeforeEach
     void setUp() {
         conversationService = mock(IConversationService.class);
         taskCache = new MapCache<>();
         contextCache = new MapCache<>();
+        stateCache = new MapCache<>();
 
         cacheFactory = mock(ICacheFactory.class);
         when(cacheFactory.<String, String>getCache("a2aTaskMapping")).thenReturn(taskCache);
         when(cacheFactory.<String, String>getCache("a2aTaskMapping:context")).thenReturn(contextCache);
+        when(cacheFactory.<String, String>getCache("a2aTaskMapping:state")).thenReturn(stateCache);
+
+        // A2A-enabled by default here; the refusal path has its own test.
+        agentCardService = mock(AgentCardService.class);
+        when(agentCardService.getAgentCard(anyString())).thenReturn(mock(A2AModels.AgentCard.class));
 
         handler = handlerFor(PEER_A);
     }
@@ -72,13 +81,13 @@ class A2ATaskHandlerTest {
         when(identity.isAnonymous()).thenReturn(false);
         Principal principal = () -> principalName;
         when(identity.getPrincipal()).thenReturn(principal);
-        return new A2ATaskHandler(conversationService, cacheFactory, identity);
+        return new A2ATaskHandler(conversationService, cacheFactory, identity, agentCardService, 60, Optional.empty());
     }
 
     private A2ATaskHandler anonymousHandler() {
         SecurityIdentity identity = mock(SecurityIdentity.class);
         when(identity.isAnonymous()).thenReturn(true);
-        return new A2ATaskHandler(conversationService, cacheFactory, identity);
+        return new A2ATaskHandler(conversationService, cacheFactory, identity, agentCardService, 60, Optional.empty());
     }
 
     private static Map<String, Object> sendParams(String taskId, String contextId, String text) {
@@ -149,6 +158,37 @@ class A2ATaskHandlerTest {
             // Cached under the calling peer, not under the bare taskId
             assertEquals("conv-abc", taskCache.get(scopedKey(PEER_A, "task-1")));
             assertNull(taskCache.get("task-1"));
+        }
+
+        @Test
+        @DisplayName("refuses an agent that was never opted into A2A, and starts no conversation")
+        void refusesAgentNotExposedOverA2A() throws Exception {
+            // Discovery already enforced this — listA2AAgents and getAgentCard both hide
+            // an agent with a2aEnabled=false. Conversing did not, so a peer that knew an
+            // id could talk to an agent nobody had exposed, private ones included.
+            // getAgentCard returns null for both "no such agent" and "not enabled", which
+            // is the same answer discovery gives.
+            when(agentCardService.getAgentCard("not-exposed")).thenReturn(null);
+
+            assertThrows(InvalidA2ARequestException.class,
+                    () -> handler.handleTaskSend("not-exposed", sendParams("task-1", null, "Hi!")));
+
+            verify(conversationService, never())
+                    .startConversation(any(), anyString(), anyString(), anyMap());
+        }
+
+        @Test
+        @DisplayName("input above eddi.conversations.max-input-chars is invalid params and never reaches the agent")
+        void oversizedInputIsRejectedBeforeTheTurn() throws Exception {
+            doThrow(new IConversationService.InputTooLargeException(5_000_000, 200_000))
+                    .when(conversationService).requireInputWithinLimit(any());
+
+            InvalidA2ARequestException e = assertThrows(InvalidA2ARequestException.class,
+                    () -> handler.handleTaskSend("agent-1", sendParams("task-big", null, "too long")));
+
+            assertTrue(e.getMessage().contains("200000"), e.getMessage());
+            verify(conversationService, never()).say(any(Environment.class), anyString(), anyString(), anyBoolean(), anyBoolean(), any(),
+                    any(), anyBoolean(), any(ConversationResponseHandler.class));
         }
 
         @Test
@@ -262,15 +302,15 @@ class A2ATaskHandlerTest {
             A2ATaskHandler peerB = handlerFor(PEER_B);
             peerA.handleTaskSend("agent-1", sendParams("task-shared", null, "Hello"));
 
-            // Control: the creating peer still resolves its own task
+            // Control: the creating peer still resolves its own task — completed, from the
+            // task's own record, although its conversation is READY again
             A2ATask ownView = peerA.handleTaskGet("task-shared");
             assertNotNull(ownView);
-            assertEquals(TaskState.submitted, ownView.status());
+            assertEquals(TaskState.completed, ownView.status());
 
             assertNull(peerB.handleTaskGet("task-shared"),
                     "peer B must not resolve a task created by peer A");
-            // Peer A's lookup is the only one that reached the conversation
-            verify(conversationService, times(1)).getConversationState("conv-a");
+            assertNull(stateCache.get(scopedKey(PEER_B, "task-shared")), "the recorded state is peer-scoped too");
         }
 
         @Test
@@ -288,8 +328,11 @@ class A2ATaskHandlerTest {
                     "peer B must not cancel a task created by peer A");
             verify(conversationService, never()).endConversation(anyString());
 
-            // Control: the creating peer can still cancel
-            assertTrue(peerA.handleTaskCancel("task-shared"));
+            // Control: the creating peer can cancel a task of its own that is still running
+            taskCache.put(scopedKey(PEER_A, "task-running"), "conv-a");
+            when(conversationService.getConversationState("conv-a")).thenReturn(ConversationState.IN_PROGRESS);
+            assertFalse(peerB.handleTaskCancel("task-running"));
+            assertTrue(peerA.handleTaskCancel("task-running"));
             verify(conversationService).endConversation("conv-a");
         }
 
@@ -431,6 +474,72 @@ class A2ATaskHandlerTest {
 
             assertFalse(handler.handleTaskCancel("t-fail"));
         }
+
+        @Test
+        @DisplayName("a task that already completed or failed is not cancelable and is left untouched")
+        void terminalTaskIsNotCancelable() {
+            taskCache.put(scopedKey(PEER_A, "t-done"), "conv-done");
+            taskCache.put(scopedKey(PEER_A, "t-failed"), "conv-failed");
+            when(conversationService.getConversationState("conv-done")).thenReturn(ConversationState.ENDED);
+            when(conversationService.getConversationState("conv-failed")).thenReturn(ConversationState.ERROR);
+
+            assertFalse(handler.handleTaskCancel("t-done"));
+            assertFalse(handler.handleTaskCancel("t-failed"));
+            verify(conversationService, never()).endConversation(anyString());
+        }
+
+        @Test
+        @DisplayName("a task still in flight is cancelled")
+        void inFlightTaskIsCancelled() {
+            taskCache.put(scopedKey(PEER_A, "t-live"), "conv-live");
+            when(conversationService.getConversationState("conv-live")).thenReturn(ConversationState.IN_PROGRESS);
+
+            assertTrue(handler.handleTaskCancel("t-live"));
+            verify(conversationService).endConversation("conv-live");
+        }
+
+        @Test
+        @DisplayName("a completed task reads back as completed and is not cancelable, although its conversation is READY again")
+        void completedTaskIsTerminalEvenWhenItsConversationIsReady() throws Exception {
+            when(conversationService.startConversation(any(), anyString(), anyString(), anyMap()))
+                    .thenReturn(conversation("conv-reused"));
+            // What Conversation leaves behind after a successful turn: ready for the next.
+            when(conversationService.getConversationState("conv-reused")).thenReturn(ConversationState.READY);
+            stubSay();
+
+            handler.handleTaskSend("agent-1", sendParams("t-finished", "ctx-1", "Hi"));
+
+            assertEquals(TaskState.completed, handler.handleTaskGet("t-finished").status());
+            assertFalse(handler.handleTaskCancel("t-finished"), "a completed task is not cancelable");
+            verify(conversationService, never()).endConversation(anyString());
+        }
+
+        @Test
+        @DisplayName("a cancelled task reads back as canceled and cannot be cancelled twice")
+        void cancelledTaskReadsBackAsCanceled() {
+            taskCache.put(scopedKey(PEER_A, "t-stop"), "conv-stop");
+            when(conversationService.getConversationState("conv-stop")).thenReturn(ConversationState.IN_PROGRESS);
+
+            assertTrue(handler.handleTaskCancel("t-stop"));
+
+            assertEquals(TaskState.canceled, handler.handleTaskGet("t-stop").status());
+            assertFalse(handler.handleTaskCancel("t-stop"));
+            verify(conversationService, times(1)).endConversation("conv-stop");
+        }
+
+        @Test
+        @DisplayName("a turn that fails to start records the task as failed")
+        void failedSendRecordsFailed() throws Exception {
+            when(conversationService.startConversation(any(), anyString(), anyString(), anyMap()))
+                    .thenReturn(conversation("conv-broken"));
+            doThrow(new IllegalStateException("agent not ready")).when(conversationService)
+                    .say(any(), anyString(), anyString(), any(), any(), any(), any(), anyBoolean(), any());
+
+            assertThrows(IllegalStateException.class, () -> handler.handleTaskSend("agent-1", sendParams("t-broken", null, "Hi")));
+
+            assertEquals(TaskState.failed, handler.handleTaskGet("t-broken").status());
+            assertFalse(handler.handleTaskCancel("t-broken"));
+        }
     }
 
     // ─── A2AModels helper tests ──────────────────────────────────
@@ -461,6 +570,80 @@ class A2ATaskHandlerTest {
     }
 
     // ─── Test helper: simple ConcurrentHashMap-based ICache ─────
+
+    /**
+     * The turn budget was a hard-coded 60 seconds, so an agent with a tool loop or
+     * a model cascade timed out on the A2A surface only: the peer got "Internal
+     * error" while the conversation carried on running server-side, and a retry on
+     * the same contextId then landed on the still-running conversation. The REST
+     * surface has always used the operator's own
+     * {@code systemRuntime.agentTimeoutInSeconds}, so inheriting it here is the
+     * smaller of the two possible defaults.
+     */
+    @Nested
+    @DisplayName("turn timeout")
+    class TaskTimeoutTests {
+
+        private A2ATaskHandler handlerWith(int agentTimeout, Optional<Integer> override) {
+            SecurityIdentity identity = mock(SecurityIdentity.class);
+            when(identity.isAnonymous()).thenReturn(false);
+            when(identity.getPrincipal()).thenReturn((Principal) () -> PEER_A);
+            return new A2ATaskHandler(conversationService, cacheFactory, identity, agentCardService, agentTimeout, override);
+        }
+
+        private int configuredTimeoutOf(A2ATaskHandler h) throws Exception {
+            var field = A2ATaskHandler.class.getDeclaredField("taskTimeoutSeconds");
+            field.setAccessible(true);
+            return field.getInt(h);
+        }
+
+        @Test
+        @DisplayName("inherits the REST surface's agent timeout when no override is set")
+        void inheritsTheAgentTimeout() throws Exception {
+            assertEquals(600, configuredTimeoutOf(handlerWith(600, Optional.empty())),
+                    "an operator who raised systemRuntime.agentTimeoutInSeconds has already decided how long a turn may take");
+        }
+
+        @Test
+        @DisplayName("a dedicated override wins over the agent timeout")
+        void theOverrideWins() throws Exception {
+            assertEquals(45, configuredTimeoutOf(handlerWith(600, Optional.of(45))),
+                    "eddi.a2a.task-timeout-seconds exists for a deployment whose peers cannot wait the full turn budget");
+        }
+
+        /**
+         * A non-positive budget would make {@code Future.get} return immediately and
+         * fail every peer request, so it falls back rather than shipping a surface that
+         * can never answer.
+         */
+        @Test
+        @DisplayName("a non-positive override falls back rather than failing every request")
+        void nonPositiveOverrideFallsBack() throws Exception {
+            assertEquals(120, configuredTimeoutOf(handlerWith(120, Optional.of(0))));
+            assertEquals(120, configuredTimeoutOf(handlerWith(120, Optional.of(-5))));
+        }
+
+        /**
+         * {@code systemRuntime.agentTimeoutInSeconds} carries no positive-value
+         * validation of its own, so falling back to it is not enough: a deployment that
+         * sets it to zero would hand {@code Future.get} a zero budget and time out
+         * every peer request the moment it arrives.
+         */
+        @Test
+        @DisplayName("a non-positive inherited timeout falls back too")
+        void nonPositiveInheritedTimeoutFallsBack() throws Exception {
+            for (int bad : new int[]{0, -1, Integer.MIN_VALUE}) {
+                assertEquals(A2ATaskHandler.DEFAULT_TASK_TIMEOUT_SECONDS, configuredTimeoutOf(handlerWith(bad, Optional.empty())),
+                        "an inherited budget of " + bad + " would fail every tasks/send immediately");
+            }
+        }
+
+        @Test
+        @DisplayName("a positive override still wins over a broken inherited value")
+        void overrideWinsOverABrokenInheritedValue() throws Exception {
+            assertEquals(45, configuredTimeoutOf(handlerWith(0, Optional.of(45))));
+        }
+    }
 
     private static class MapCache<K, V> extends ConcurrentHashMap<K, V> implements ICache<K, V> {
 

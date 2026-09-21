@@ -89,12 +89,12 @@ jobs:
           done
 
           if [ "$DRIFT" -ne 0 ]; then
-            echo "### ❌ Vendored fuzz sources out of sync" >> $GITHUB_STEP_SUMMARY
-            echo "The ClusterFuzzLite build compiles the copies in \`.clusterfuzzlite/\`, not \`src/main/java\`. Re-vendor them so the fuzzers test the shipping code." >> $GITHUB_STEP_SUMMARY
+            echo "### ❌ Vendored fuzz sources out of sync" >> "$GITHUB_STEP_SUMMARY"
+            echo "The ClusterFuzzLite build compiles the copies in \`.clusterfuzzlite/\`, not \`src/main/java\`. Re-vendor them so the fuzzers test the shipping code." >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
 
-          echo "### ✅ Vendored fuzz sources in sync" >> $GITHUB_STEP_SUMMARY
+          echo "### ✅ Vendored fuzz sources in sync" >> "$GITHUB_STEP_SUMMARY"
 
   # ─── PR mode: fuzz only changed code paths ─────────────────────
   pr-fuzzing:

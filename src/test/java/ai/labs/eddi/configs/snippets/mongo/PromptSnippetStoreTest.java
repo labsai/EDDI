@@ -5,6 +5,11 @@
 package ai.labs.eddi.configs.snippets.mongo;
 
 import ai.labs.eddi.configs.snippets.model.PromptSnippet;
+import ai.labs.eddi.datastore.IResourceStorage;
+import ai.labs.eddi.datastore.IResourceStorageFactory;
+import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -14,6 +19,11 @@ import java.util.List;
 import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 /**
  * Unit tests for {@link PromptSnippetStore} name validation.
@@ -30,6 +40,48 @@ class PromptSnippetStoreTest {
      * production, the store enforces this on create/update.
      */
     private static final Pattern NAME_PATTERN = Pattern.compile("[a-z0-9_]+");
+
+    // ==================== Store boundary ====================
+
+    @Nested
+    @DisplayName("store rejects an invalid name as a caller error")
+    class StoreBoundary {
+
+        private PromptSnippetStore store;
+        private IResourceStorage<PromptSnippet> resourceStorage;
+
+        @BeforeEach
+        @SuppressWarnings("unchecked")
+        void setUp() {
+            IResourceStorageFactory storageFactory = mock(IResourceStorageFactory.class);
+            resourceStorage = mock(IResourceStorage.class);
+            when(storageFactory.create(eq("promptsnippets"), any(), eq(PromptSnippet.class))).thenReturn(resourceStorage);
+            store = new PromptSnippetStore(storageFactory, mock(IDocumentBuilder.class));
+        }
+
+        /**
+         * IllegalArgumentException maps to 400. The ResourceStoreException it used to
+         * be maps to 500, which is what the E2E run observed for "Bad Name With
+         * Spaces!".
+         */
+        @Test
+        void createWithInvalidNameIsIllegalArgument() {
+            var snippet = new PromptSnippet("Bad Name With Spaces!", null, null, "content", null, true);
+
+            var e = assertThrows(IllegalArgumentException.class, () -> store.create(snippet));
+
+            assertTrue(e.getMessage().contains("Bad Name With Spaces!"), e.getMessage());
+            verifyNoInteractions(resourceStorage);
+        }
+
+        @Test
+        void updateWithInvalidNameIsIllegalArgument() {
+            var snippet = new PromptSnippet(null, null, null, "content", null, true);
+
+            assertThrows(IllegalArgumentException.class, () -> store.update("aabbccddeeff00112233", 1, snippet));
+            verifyNoInteractions(resourceStorage);
+        }
+    }
 
     // ==================== Name Validation ====================
 

@@ -301,4 +301,5 @@ class PostgresAuditStoreTest extends PostgresTestBase {
                 null, null, null, null, null, 0.0,
                 Instant.now(), null, null);
     }
+
 }

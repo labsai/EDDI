@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.rules.rest;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.rules.IRuleSetStore;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
@@ -31,7 +32,7 @@ class RestRuleSetStoreTest {
         ruleSetStore = mock(IRuleSetStore.class);
         var descriptorStore = mock(IDocumentDescriptorStore.class);
         jsonSchemaCreator = mock(IJsonSchemaCreator.class);
-        restStore = new RestRuleSetStore(ruleSetStore, descriptorStore, jsonSchemaCreator);
+        restStore = new RestRuleSetStore(ruleSetStore, descriptorStore, jsonSchemaCreator, mock(ResourceAccessGuard.class));
     }
 
     @Test

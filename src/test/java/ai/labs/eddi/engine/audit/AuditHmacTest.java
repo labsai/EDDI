@@ -91,11 +91,11 @@ class AuditHmacTest {
         void producesHex() {
             String hmac = AuditHmac.computeHmac(createTestEntry(), hmacKey);
             assertNotNull(hmac);
-            assertTrue(hmac.startsWith("v3:"),
+            assertTrue(hmac.startsWith("v4:"),
                     "the stored value must name its canonical form, or verification cannot pick a canonicalizer");
             // Hex string should be 64 chars (32 bytes) after the version tag
-            assertEquals(64, hmac.substring("v3:".length()).length());
-            assertTrue(hmac.substring("v3:".length()).matches("[0-9a-f]{64}"));
+            assertEquals(64, hmac.substring("v4:".length()).length());
+            assertTrue(hmac.substring("v4:".length()).matches("[0-9a-f]{64}"));
         }
 
         @Test
@@ -174,25 +174,28 @@ class AuditHmacTest {
          * string; a v2 row carries {@code v2:} + a digest over the v2 form.
          */
         @Test
-        @DisplayName("v1, v2 and v3 rows all verify, and any of them tampered is rejected")
+        @DisplayName("v1 through v4 rows all verify, and any of them tampered is rejected")
         void allVersionsVerifyAndAllRejectTampering() {
             AuditEntry entry = createTestEntry();
 
             String v1Hmac = legacySignV1(AuditHmac.buildCanonicalString(entry));
             String v2Hmac = "v2:" + legacySignV1(AuditHmac.buildCanonicalStringV2(entry));
-            String v3Hmac = AuditHmac.computeHmac(entry, hmacKey);
+            String v3Hmac = "v3:" + legacySignV1(AuditHmac.buildCanonicalStringV3(entry));
+            String v4Hmac = AuditHmac.computeHmac(entry, hmacKey);
 
             assertFalse(v1Hmac.startsWith("v"), "precondition: the v1 row carries no version tag");
-            assertTrue(v3Hmac.startsWith("v3:"), "precondition: the current row names its canonical form");
+            assertTrue(v4Hmac.startsWith("v4:"), "precondition: the current row names its canonical form");
 
             assertTrue(AuditHmac.verifyHmac(entry.withHmac(v1Hmac), hmacKey), "a pre-v2 ledger row must still verify");
             assertTrue(AuditHmac.verifyHmac(entry.withHmac(v2Hmac), hmacKey), "a v2 ledger row must verify");
             assertTrue(AuditHmac.verifyHmac(entry.withHmac(v3Hmac), hmacKey), "a v3 ledger row must verify");
+            assertTrue(AuditHmac.verifyHmac(entry.withHmac(v4Hmac), hmacKey), "a v4 ledger row must verify");
 
             AuditEntry tampered = entry.withEnvironment("TAMPERED");
             assertFalse(AuditHmac.verifyHmac(tampered.withHmac(v1Hmac), hmacKey), "a tampered v1 row must be rejected");
             assertFalse(AuditHmac.verifyHmac(tampered.withHmac(v2Hmac), hmacKey), "a tampered v2 row must be rejected");
             assertFalse(AuditHmac.verifyHmac(tampered.withHmac(v3Hmac), hmacKey), "a tampered v3 row must be rejected");
+            assertFalse(AuditHmac.verifyHmac(tampered.withHmac(v4Hmac), hmacKey), "a tampered v4 row must be rejected");
         }
 
         /**

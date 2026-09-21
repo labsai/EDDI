@@ -87,9 +87,72 @@ test-output.txt
 # Event/marketing material — kept locally, not part of the product
 waic-2026/
 
-eddi-audit-deadletter.jsonl
+# (eddi-audit-deadletter.jsonl was listed here, and the entry was load-bearing:
+# the audit ledger's unit-test factory passed a RELATIVE dead-letter path, which
+# resolves against the process CWD — the repository root — so `mvn test` dropped
+# a JSONL file into the source tree that `mvn clean` did not remove and git had
+# to be taught to hide. That factory now writes under java.io.tmpdir, so nothing
+# produces THAT name any more. See AuditLedgerService#defaultTestDeadLetterPath,
+# pinned by AuditLedgerServiceTest#testDeadLetterPathIsOutsideTheSourceTree.
+#
+# Not a blanket guarantee about dead-letter files in general:
+# AuditLedgerServiceBranchTest still constructs the service directly with a
+# relative "deadletter.jsonl" — a different name, never covered by this entry.
+# Those cases exercise the NATS and serialization branches and never reach the
+# file write, so nothing lands. If you add a case that DOES drop a batch to
+# disk, give it an absolute path instead of re-adding an ignore rule here.
+#
+# And NOT a claim that nothing else writes into the checkout. `/tmp/` further up
+# is still load-bearing and is kept deliberately: RestExportService and
+# RestImportService build their staging roots from System.getProperty("user.dir")
+# — `tmp/export` and `tmp/import`, i.e. the repository root under Maven and in
+# dev mode — which is the same CWD-relative mechanism described above, one class
+# of file further out. Fixing that half means giving export/import a configurable
+# staging directory (the image already has /deployments/tmp; the Dockerfile
+# creates it), which changes runtime behaviour of the backup API and does not
+# belong in a build-gate change. Deferred on purpose — `/tmp/` is not an
+# oversight, and removing it will need that work first.)
 
 # Auto-generated license files (rebuilt during Maven build)
 licenses/third-party/
 licenses/licenses.xml
 licenses/THIRD-PARTY.txt
+
+# Jazzer working corpus, written next to the repo root while a @FuzzTest runs in
+# fuzzing mode (JAZZER_FUZZ=1). Thousands of small files, regenerated every run.
+# The inputs worth keeping are checked in under src/test/resources/**/*Inputs/.
+.cifuzz-corpus/
+
+# Python bytecode from scripts/ (e.g. rotate-changelog.py)
+__pycache__/
+*.py[cod]
+
+# ui/manager/.claude holds the Manager's tracked Claude Code skills and launch.json.
+# The `.claude/` rule above would ignore any new file there; re-include the directory
+# and keep only the machine-local settings file out.
+!ui/manager/.claude/
+ui/manager/.claude/settings.local.json
+
+# === Generated frontend output (ui/manager and ui/chat, built by Maven) ===
+# frontend-maven-plugin installs Node into ui/node (installDirectory is ui/, so
+# ui/*/node would NOT match it).
+ui/node/
+ui/*/node_modules/
+ui/*/dist/
+# Protective: nothing writes these any more. A stale local copy of the old
+# deploy-to-local-eddi-repo script would silently re-create them — including the
+# MSW worker, which it copies from dist/ wholesale. Keep this list identical to
+# the default-resource excludes and the maven-clean-plugin fileset in pom.xml.
+src/main/resources/META-INF/resources/assets/
+src/main/resources/META-INF/resources/manage.html
+src/main/resources/META-INF/resources/welcome.html
+src/main/resources/META-INF/resources/workforce.html
+src/main/resources/META-INF/resources/chat.html
+src/main/resources/META-INF/resources/scripts/js/chat-ui*.js
+src/main/resources/META-INF/resources/scripts/css/chat-ui*.css
+src/main/resources/META-INF/resources/mockServiceWorker.js
+src/main/resources/META-INF/resources/eddi-icon.ico
+src/main/resources/META-INF/resources/eddi-icon.svg
+src/main/resources/META-INF/resources/logo_eddi.png
+src/main/resources/META-INF/resources/fonts/
+src/main/resources/META-INF/resources/img/

@@ -203,6 +203,7 @@ class ConversationMemoryUtilitiesHitlTest {
         private static final String CANARY_TRANSCRIPT = "[{\"type\":\"AI\",\"text\":\"" + CANARY_SECRET + "\"}]";
         private static final String CANARY_FINGERPRINT = "sha256-request-fingerprint-CANARY";
         private static final String CANARY_PREVIEW_URI = "https://eddi.internal/CANARY-should-not-leak/{id}";
+        private static final String CANARY_INTERIM = "CANARY-interim-narration-not-in-projection";
 
         private ConversationMemorySnapshot toolPausedSnapshot() {
             var snapshot = buildMinimalSnapshot();
@@ -230,6 +231,7 @@ class ConversationMemoryUtilitiesHitlTest {
             batch.setLlmTaskId("task-a");
             batch.setChatTranscriptJson(CANARY_TRANSCRIPT);
             batch.setTraceSoFar(List.of(Map.of("args", CANARY_ARGS)));
+            batch.setInterimText(CANARY_INTERIM);
             batch.setFingerprint("sha256-" + CANARY_SECRET);
             batch.setCalls(List.of(call));
             // Fix #1: the batch carries the effective tool-approval config — it must NOT
@@ -266,6 +268,13 @@ class ConversationMemoryUtilitiesHitlTest {
                     "trace must be projected to null in generic simple-snapshot JSON");
             assertTrue(json.contains("\"fingerprint\":null"),
                     "fingerprint must be projected to null in generic simple-snapshot JSON");
+            // The narration is deliberately NOT carried by the projected batch — it is
+            // already in the step's public output where it belongs, and the projection
+            // is names-only by contract.
+            assertTrue(json.contains("\"interimText\":null"),
+                    "interimText must be projected to null in generic simple-snapshot JSON");
+            assertFalse(json.contains(CANARY_INTERIM),
+                    "interim narration leaked through the names-only projection: " + json);
             // And per-call argument fields must never carry a value.
             assertFalse(json.contains("\"argumentsRaw\":\""),
                     "argumentsRaw value leaked into generic simple-snapshot JSON");

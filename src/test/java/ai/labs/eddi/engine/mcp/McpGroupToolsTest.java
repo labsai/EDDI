@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.configs.rest.StrictConfigurationParser;
 import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
 import ai.labs.eddi.configs.groups.IRestAgentGroupStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
@@ -23,10 +24,15 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.io.IOException;
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
 
+import java.security.Principal;
+import io.smallrye.common.annotation.NonBlocking;
+import io.smallrye.common.annotation.Blocking;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -45,7 +51,7 @@ class McpGroupToolsTest {
 
     private static GroupTemplateService templateService() {
         var service = new GroupTemplateService(
-                new com.fasterxml.jackson.databind.ObjectMapper());
+                new ObjectMapper());
         service.loadTemplates();
         return service;
     }
@@ -58,12 +64,12 @@ class McpGroupToolsTest {
         workspaceStore = mock(IGroupWorkspaceStore.class);
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
 
-        var mockIdentity = mock(io.quarkus.security.identity.SecurityIdentity.class);
+        var mockIdentity = mock(SecurityIdentity.class);
         lenient().when(mockIdentity.isAnonymous()).thenReturn(true);
         // authorization disabled — OwnershipValidator's checks are no-ops, matching the
         // pre-existing tests. Ownership enforcement is covered separately below.
-        tools = new McpGroupTools(groupStore, groupConversationService, jsonSerialization, mockIdentity,
-                new OwnershipValidator(false), workspaceStore, templateService(), false);
+        tools = new McpGroupTools(groupStore, groupConversationService, jsonSerialization, strictConfigurationParser(),
+                mockIdentity, new OwnershipValidator(false), workspaceStore, templateService(), false);
     }
 
     // --- describe_discussion_styles ---
@@ -487,7 +493,7 @@ class McpGroupToolsTest {
         assertEquals(String.class, method.getReturnType(),
                 "discuss_with_group must keep a non-reactive return type; returning Uni/Multi would make "
                         + "quarkus-mcp-server schedule this blocking work on the Vert.x event loop");
-        assertNull(method.getAnnotation(io.smallrye.common.annotation.NonBlocking.class),
+        assertNull(method.getAnnotation(NonBlocking.class),
                 "discuss_with_group does blocking work and must never be marked @NonBlocking");
     }
 
@@ -496,7 +502,7 @@ class McpGroupToolsTest {
         var method = McpGroupTools.class.getMethod("start_group_discussion", String.class, String.class, String.class);
         assertEquals(String.class, method.getReturnType(),
                 "start_group_discussion must keep a non-reactive return type for the same reason");
-        assertNull(method.getAnnotation(io.smallrye.common.annotation.NonBlocking.class),
+        assertNull(method.getAnnotation(NonBlocking.class),
                 "start_group_discussion must never be marked @NonBlocking");
     }
 
@@ -515,7 +521,7 @@ class McpGroupToolsTest {
         for (Class<?> toolClass : List.of(McpGroupTools.class, McpHitlTools.class, McpConversationTools.class,
                 McpAdminTools.class, McpSetupTools.class, McpMemoryTools.class, McpDocTools.class, McpGdprTools.class)) {
             for (var method : toolClass.getDeclaredMethods()) {
-                assertNull(method.getAnnotation(io.smallrye.common.annotation.Blocking.class),
+                assertNull(method.getAnnotation(Blocking.class),
                         toolClass.getSimpleName() + "." + method.getName() + " carries @Blocking. It is redundant "
                                 + "(a non-reactive return type already resolves to WORKER_THREAD) and Quarkus 3.38's "
                                 + "ExecutionModelAnnotationsProcessor rejects it, breaking quarkus:dev.");
@@ -532,12 +538,12 @@ class McpGroupToolsTest {
     private McpGroupTools toolsAsUser(String callerId, String role) {
         var identity = mock(SecurityIdentity.class);
         lenient().when(identity.isAnonymous()).thenReturn(false);
-        var principal = mock(java.security.Principal.class);
+        var principal = mock(Principal.class);
         lenient().when(principal.getName()).thenReturn(callerId);
         lenient().when(identity.getPrincipal()).thenReturn(principal);
         lenient().when(identity.hasRole(role)).thenReturn(true);
-        return new McpGroupTools(groupStore, groupConversationService, jsonSerialization, identity,
-                new OwnershipValidator(true), workspaceStore, templateService(), true);
+        return new McpGroupTools(groupStore, groupConversationService, jsonSerialization, strictConfigurationParser(),
+                identity, new OwnershipValidator(true), workspaceStore, templateService(), true);
     }
 
     /**
@@ -547,12 +553,12 @@ class McpGroupToolsTest {
     private McpGroupTools toolsAsAdmin(String callerId) {
         var identity = mock(SecurityIdentity.class);
         lenient().when(identity.isAnonymous()).thenReturn(false);
-        var principal = mock(java.security.Principal.class);
+        var principal = mock(Principal.class);
         lenient().when(principal.getName()).thenReturn(callerId);
         lenient().when(identity.getPrincipal()).thenReturn(principal);
         lenient().when(identity.hasRole(anyString())).thenReturn(true);
-        return new McpGroupTools(groupStore, groupConversationService, jsonSerialization, identity,
-                new OwnershipValidator(true), workspaceStore, templateService(), true);
+        return new McpGroupTools(groupStore, groupConversationService, jsonSerialization, strictConfigurationParser(),
+                identity, new OwnershipValidator(true), workspaceStore, templateService(), true);
     }
 
     @Test
@@ -874,5 +880,22 @@ class McpGroupToolsTest {
         when(workspaceStore.find("g1")).thenReturn(null);
         String result = tools.list_team_backlog("g1");
         assertFalse(result.contains("error"), "no workspace is an empty backlog, not an error: " + result);
+    }
+
+    /**
+     * A parser that defers to this test's {@code jsonSerialization} mock, so the
+     * existing {@code when(jsonSerialization.deserialize(...))} stubs keep
+     * describing what these dispatch tests are about. Strictness itself is covered
+     * by {@code StrictConfigurationParserTest}.
+     */
+    private StrictConfigurationParser strictConfigurationParser() {
+        var parser = mock(StrictConfigurationParser.class);
+        try {
+            lenient().when(parser.parse(anyString(), any()))
+                    .thenAnswer(invocation -> jsonSerialization.deserialize(invocation.getArgument(0), invocation.getArgument(1)));
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+        return parser;
     }
 }

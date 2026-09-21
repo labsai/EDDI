@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.configs.groups.templates;
 
+import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.groups.ArtifactValidators;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionStyle;
@@ -27,6 +29,9 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * I10 — {@link GroupTemplateService}. The instantiation-with-validation test is
@@ -37,6 +42,37 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class GroupTemplateServiceTest {
 
     private GroupTemplateService service;
+
+    /**
+     * B15: the negotiation-table manifest says the arbiter must be a deployed
+     * agent; a non-existent id used to instantiate and save, failing only at
+     * arbitration.
+     */
+    @Test
+    @DisplayName("instantiate rejects an assigned agent that does not exist, naming it")
+    void instantiateRejectsUnknownAgents() throws Exception {
+        IAgentStore agentStore = mock(IAgentStore.class);
+        when(agentStore.getCurrentResourceId(anyString())).thenReturn(mock(IResourceStore.IResourceId.class));
+        when(agentStore.getCurrentResourceId("ghost-arbiter")).thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+        service.agentStore = agentStore;
+        Map<String, String> assignments = new HashMap<>(dummyAssignments("negotiation-table"));
+        assignments.put("arbiter", "ghost-arbiter");
+
+        var e = assertThrows(IllegalArgumentException.class, () -> service.instantiate("negotiation-table", null, assignments));
+
+        assertTrue(e.getMessage().contains("ghost-arbiter"), e.getMessage());
+        assertFalse(e.getMessage().contains(assignments.get("partyA")), e.getMessage());
+    }
+
+    @Test
+    @DisplayName("instantiate accepts a roster whose agents all exist")
+    void instantiateAcceptsExistingAgents() throws Exception {
+        IAgentStore agentStore = mock(IAgentStore.class);
+        when(agentStore.getCurrentResourceId(anyString())).thenReturn(mock(IResourceStore.IResourceId.class));
+        service.agentStore = agentStore;
+
+        assertDoesNotThrow(() -> service.instantiate("negotiation-table", null, dummyAssignments("negotiation-table")));
+    }
 
     @BeforeEach
     void setUp() {
@@ -90,6 +126,8 @@ class GroupTemplateServiceTest {
             assertTrue(AgentGroupStore.humanMemberProblems(config).isEmpty(),
                     id + ": " + AgentGroupStore.humanMemberProblems(config));
             assertDoesNotThrow(() -> AgentGroupStore.validateFacilitator(config), id);
+            assertTrue(AgentGroupStore.memberAndLimitProblems(config).isEmpty(),
+                    id + ": " + AgentGroupStore.memberAndLimitProblems(config));
             assertDoesNotThrow(() -> ArtifactValidators.requireValidSpecs(config.getArtifactConfig()), id);
 
             // Every template must resolve to a non-empty phase list.

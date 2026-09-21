@@ -8,6 +8,7 @@ import ai.labs.eddi.datastore.serialization.Id;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.properties.model.Property;
+import ai.labs.eddi.engine.security.ResolutionPrincipal;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -50,6 +51,15 @@ public class ConversationMemorySnapshot {
     private String agentId;
     private Integer agentVersion;
     private String userId;
+    /**
+     * How {@link #userId} came to be, fixed at creation. Absent in documents
+     * written before 6.2.0, which deserialize to {@code null} — read as NOT
+     * verified, so a legacy conversation must be restarted once before it can
+     * resolve a {@code PER_USER} connection. That polarity is the point: the
+     * conversations this field exists to distrust are exactly the ones that predate
+     * it.
+     */
+    private ResolutionPrincipal.Provenance resolutionProvenance;
     private Deployment.Environment environment;
     private ConversationState conversationState;
     private String hitlPausedWorkflowId;
@@ -127,6 +137,25 @@ public class ConversationMemorySnapshot {
     public static class ConversationStepSnapshot {
         private List<WorkflowRunSnapshot> packages = new LinkedList<>();
 
+        /**
+         * The step's rendered output — populated only for redo-cache entries, and
+         * {@code null} for the ordinary {@code conversationSteps}, whose outputs are
+         * stored once in {@link ConversationMemorySnapshot#conversationOutputs}.
+         * <p>
+         * Undo/redo in live memory always kept the output, because the step object
+         * carries it. Serialisation did not: a redo entry rehydrated as
+         * {@code new ConversationStep(new ConversationOutput())}, so
+         * {@code redoLastStep()} pushed an <em>empty</em> output over the answer it was
+         * supposed to restore. Since every request reloads memory from the store, that
+         * always fired in practice — redo returned 200 while destroying the turn, and
+         * the model lost it too, because {@code conversationOutputs} is what
+         * {@code ConversationHistoryBuilder} reads.
+         * <p>
+         * Absent in documents written before this field existed; those deserialize to
+         * {@code null} and load exactly as they did before.
+         */
+        private ConversationOutput conversationOutput;
+
         @Override
         public boolean equals(Object o) {
             if (this == o)
@@ -136,12 +165,13 @@ public class ConversationMemorySnapshot {
 
             ConversationStepSnapshot that = (ConversationStepSnapshot) o;
 
-            return Objects.equals(packages, that.packages);
+            return Objects.equals(packages, that.packages)
+                    && Objects.equals(conversationOutput, that.conversationOutput);
         }
 
         @Override
         public int hashCode() {
-            return packages != null ? packages.hashCode() : 0;
+            return Objects.hash(packages, conversationOutput);
         }
 
         public List<WorkflowRunSnapshot> getWorkflows() {
@@ -150,6 +180,14 @@ public class ConversationMemorySnapshot {
 
         public void setWorkflows(List<WorkflowRunSnapshot> packages) {
             this.packages = packages;
+        }
+
+        public ConversationOutput getConversationOutput() {
+            return conversationOutput;
+        }
+
+        public void setConversationOutput(ConversationOutput conversationOutput) {
+            this.conversationOutput = conversationOutput;
         }
 
     }
@@ -318,6 +356,14 @@ public class ConversationMemorySnapshot {
 
     public void setUserId(String userId) {
         this.userId = userId;
+    }
+
+    public ResolutionPrincipal.Provenance getResolutionProvenance() {
+        return resolutionProvenance;
+    }
+
+    public void setResolutionProvenance(ResolutionPrincipal.Provenance resolutionProvenance) {
+        this.resolutionProvenance = resolutionProvenance;
     }
 
     public Deployment.Environment getEnvironment() {

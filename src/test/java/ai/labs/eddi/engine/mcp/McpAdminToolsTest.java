@@ -22,12 +22,17 @@ import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 
 import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
 
+import ai.labs.eddi.configs.rest.StrictConfigurationParser;
+import java.net.URI;
+import io.quarkus.security.identity.SecurityIdentity;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -64,9 +69,10 @@ class McpAdminToolsTest {
         var schedulePollerService = mock(SchedulePollerService.class);
 
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
-        var mockIdentity = mock(io.quarkus.security.identity.SecurityIdentity.class);
+        var mockIdentity = mock(SecurityIdentity.class);
         lenient().when(mockIdentity.isAnonymous()).thenReturn(true);
-        tools = new McpAdminTools(restInterfaceFactory, agentAdmin, jsonSerialization, scheduleStore, scheduleFireExecutor, schedulePollerService,
+        tools = new McpAdminTools(restInterfaceFactory, agentAdmin, jsonSerialization, strictConfigurationParser(), scheduleStore,
+                scheduleFireExecutor, schedulePollerService,
                 mockIdentity, false);
     }
 
@@ -101,6 +107,18 @@ class McpAdminToolsTest {
 
         assertTrue(result.contains("error"));
         assertTrue(result.contains("Failed to deploy agent"));
+    }
+
+    // --- uriToResourceType ---
+
+    @ParameterizedTest
+    @CsvSource({"eddi://ai.labs.rules, behavior", "eddi://ai.labs.behavior, behavior", "eddi://ai.labs.llm, langchain",
+            "eddi://ai.labs.langchain, langchain", "eddi://ai.labs.apicalls, httpcalls", "eddi://ai.labs.httpcalls, httpcalls",
+            "eddi://ai.labs.mcpcalls, mcpcalls", "eddi://ai.labs.output, output", "eddi://ai.labs.property, propertysetter",
+            "eddi://ai.labs.parser, dictionaries", "eddi://ai.labs.dictionary, dictionaries", "eddi://ai.labs.templating, unknown",
+            "eddi://ai.labs.rag, unknown", "eddi://ai.labs.outputsomething, unknown"})
+    void uriToResourceType_mapsEveryStepTypeExactly(String stepType, String expected) {
+        assertEquals(expected, McpAdminTools.uriToResourceType(stepType));
     }
 
     // --- undeployAgent ---
@@ -179,7 +197,7 @@ class McpAdminToolsTest {
     @Test
     void createAgent_createsAndPatchesDescriptor() throws IOException {
         when(AgentStore.createAgent(any(AgentConfiguration.class)))
-                .thenReturn(Response.created(java.net.URI.create("/agentstore/agents/" + AGENT_ID + "?version=1")).build());
+                .thenReturn(Response.created(URI.create("/agentstore/agents/" + AGENT_ID + "?version=1")).build());
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"created\",\"agentId\":\"test-agent-id\",\"name\":\"My Agent\"}");
 
         String result = tools.createAgent("My Agent", "Test description", null);
@@ -202,7 +220,7 @@ class McpAdminToolsTest {
     @Test
     void createAgent_withWorkflowUris() throws IOException {
         when(AgentStore.createAgent(any(AgentConfiguration.class)))
-                .thenReturn(Response.created(java.net.URI.create("/agentstore/agents/" + AGENT_ID + "?version=1")).build());
+                .thenReturn(Response.created(URI.create("/agentstore/agents/" + AGENT_ID + "?version=1")).build());
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"created\"}");
 
         tools.createAgent("Agent", null, "eddi://ai.labs.workflow/workflowstore/workflows/pkg1?version=1");
@@ -215,7 +233,7 @@ class McpAdminToolsTest {
     @Test
     void createAgent_descriptorPatchFailure_stillReturnsSuccess() throws IOException {
         when(AgentStore.createAgent(any(AgentConfiguration.class)))
-                .thenReturn(Response.created(java.net.URI.create("/agentstore/agents/" + AGENT_ID + "?version=1")).build());
+                .thenReturn(Response.created(URI.create("/agentstore/agents/" + AGENT_ID + "?version=1")).build());
         doThrow(new RuntimeException("Patch failed")).when(descriptorStore).patchDescriptor(any(), anyInt(), any());
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"created\"}");
 
@@ -589,5 +607,23 @@ class McpAdminToolsTest {
     void createSchedule_blankName_returnsError() {
         String result = tools.createSchedule(AGENT_ID, null, null, null, null, null, null, null, null, null);
         assertTrue(result.contains("error"));
+    }
+
+    /**
+     * A parser that defers to this test's {@code jsonSerialization} mock, so the
+     * existing {@code when(jsonSerialization.deserialize(...))} stubs keep
+     * describing what these dispatch tests are actually about. Strictness itself is
+     * covered by {@code StrictConfigurationParserTest}; here the only thing that
+     * matters is that each resource type reaches the right store.
+     */
+    private StrictConfigurationParser strictConfigurationParser() {
+        var parser = mock(StrictConfigurationParser.class);
+        try {
+            lenient().when(parser.parse(anyString(), any()))
+                    .thenAnswer(invocation -> jsonSerialization.deserialize(invocation.getArgument(0), invocation.getArgument(1)));
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+        return parser;
     }
 }

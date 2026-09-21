@@ -30,7 +30,8 @@ import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
-import ai.labs.eddi.engine.tenancy.QuotaExceededException;
+import ai.labs.eddi.engine.tenancy.QuotaRefusal;
+import ai.labs.eddi.utils.LogSanitizer;
 import io.micrometer.core.instrument.Counter;
 import org.jboss.logging.Logger;
 
@@ -275,9 +276,16 @@ public class MemberTurnExecutor {
                 var result = conversationService.startConversation(DEFAULT_ENV, member.agentId(), gc.getUserId(), groupContext);
                 privateConvId = result.conversationId();
                 gc.getMemberConversationIds().put(convKey, privateConvId);
-            } catch (QuotaExceededException qe) {
-                throw new GroupDiscussionException("Tenant quota exceeded: " + qe.getMessage(), qe);
             } catch (Exception e) {
+                // Any quota refusal — over a limit OR the store unable to answer —
+                // affects every member, so it aborts the discussion instead of
+                // becoming this member's SKIPPED entry. Matched on the marker rather
+                // than on QuotaExceededException: the accounting-outage type extends
+                // RejectedExecutionException, so a type-by-type guard silently stopped
+                // covering it and an outage degraded into a discussion that "completed".
+                if (e instanceof QuotaRefusal refusal) {
+                    throw new GroupDiscussionException(refusal.refusalSummary() + ": " + e.getMessage(), e);
+                }
                 return handleAgentFailure(member, phaseIdx, phase, protocol, e, "Failed to start conversation", targetAgentId);
             }
         }
@@ -514,9 +522,12 @@ public class MemberTurnExecutor {
                     throw new GroupConversationService.MemberTurnCancelledException();
                 }
                 Throwable cause = e instanceof ExecutionException ? e.getCause() : e;
-                // Quota errors are non-retryable and affect all agents — abort immediately
-                if (cause instanceof QuotaExceededException) {
-                    throw new GroupDiscussionException("Tenant quota exceeded: " + cause.getMessage(), cause);
+                // Quota errors are non-retryable and affect all agents — abort
+                // immediately. QuotaRefusal covers the accounting outage too: retrying a
+                // member maxRetries times against a store that cannot answer pays a
+                // connection-acquisition timeout per attempt on the phase thread.
+                if (cause instanceof QuotaRefusal refusal) {
+                    throw new GroupDiscussionException(refusal.refusalSummary() + ": " + cause.getMessage(), cause);
                 }
                 if (protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.RETRY && retries < maxRetries) {
                     retries++;
@@ -558,7 +569,7 @@ public class MemberTurnExecutor {
                                                      String targetAgentId) {
         LOGGER.infof("Member agent '%s' TOOL_CALL-paused during group discussion %s (phase %d) — "
                 + "auto-rejecting the gated tool call(s) (system:group) and resuming for a tool-less answer",
-                member.agentId(), gc.getId(), phaseIdx);
+                LogSanitizer.sanitize(member.agentId()), LogSanitizer.sanitize(gc.getId()), phaseIdx);
 
         var decision = new HitlDecision();
         decision.setVerdict(HitlVerdict.REJECTED);
@@ -674,7 +685,7 @@ public class MemberTurnExecutor {
                                              GroupDiscussionEventListener listener) {
         LOGGER.warnf("Member agent '%s' paused for human approval during group discussion %s (phase %d) — "
                 + "member-level HITL is unsupported inside a group; skipping the turn and cancelling the pause",
-                member.agentId(), gc.getId(), phaseIdx);
+                LogSanitizer.sanitize(member.agentId()), LogSanitizer.sanitize(gc.getId()), phaseIdx);
         try {
             conversationService.cancelConversation(convId, ControlSignal.CANCEL_GRACEFUL, "system:group");
         } catch (Exception e) {
@@ -703,7 +714,8 @@ public class MemberTurnExecutor {
             String subGroupId = member.agentId();
             int nextDepth = gc.getDepth() + 1;
 
-            LOGGER.infof("Executing sub-group '%s' (depth %d) as member of parent group '%s'", subGroupId, nextDepth, gc.getGroupId());
+            LOGGER.infof("Executing sub-group '%s' (depth %d) as member of parent group '%s'", LogSanitizer.sanitize(subGroupId), nextDepth,
+                    LogSanitizer.sanitize(gc.getGroupId()));
 
             // Propagate the parent's attachments to the nested group so its members
             // receive them too (each nested member conversation is granted in turn).

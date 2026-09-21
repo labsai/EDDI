@@ -87,7 +87,7 @@ class AgentSetupServiceBranchCoverageTest {
         @DisplayName("setupAgent with an unknown environment creates nothing")
         void setupAgentRejectsUnknownEnvironment() {
             var request = new SetupAgentRequest("MyAgent", "You are helpful.", "anthropic", "claude-sonnet-4-6", "sk-test", null, null, false, null,
-                    false, false, null, true, "staging", null);
+                    false, false, null, true, "staging", null, null);
 
             var exception = assertThrows(AgentSetupService.AgentSetupException.class, () -> service.setupAgent(request));
 
@@ -327,7 +327,7 @@ class AgentSetupServiceBranchCoverageTest {
         @DisplayName("null agent name throws")
         void nullAgentName() {
             var req = new SetupAgentRequest(null, "prompt", "anthropic", "model",
-                    "key", null, null, null, null, null, null, null, null, null, null);
+                    "key", null, null, null, null, null, null, null, null, null, null, null);
             assertThrows(AgentSetupService.AgentSetupException.class, () -> service.setupAgent(req));
         }
 
@@ -335,7 +335,7 @@ class AgentSetupServiceBranchCoverageTest {
         @DisplayName("blank agent name throws")
         void blankAgentName() {
             var req = new SetupAgentRequest("  ", "prompt", "anthropic", "model",
-                    "key", null, null, null, null, null, null, null, null, null, null);
+                    "key", null, null, null, null, null, null, null, null, null, null, null);
             assertThrows(AgentSetupService.AgentSetupException.class, () -> service.setupAgent(req));
         }
 
@@ -343,7 +343,7 @@ class AgentSetupServiceBranchCoverageTest {
         @DisplayName("null system prompt throws")
         void nullSystemPrompt() {
             var req = new SetupAgentRequest("Agent", null, "anthropic", "model",
-                    "key", null, null, null, null, null, null, null, null, null, null);
+                    "key", null, null, null, null, null, null, null, null, null, null, null);
             assertThrows(AgentSetupService.AgentSetupException.class, () -> service.setupAgent(req));
         }
 
@@ -351,7 +351,7 @@ class AgentSetupServiceBranchCoverageTest {
         @DisplayName("blank system prompt throws")
         void blankSystemPrompt() {
             var req = new SetupAgentRequest("Agent", "  ", "anthropic", "model",
-                    "key", null, null, null, null, null, null, null, null, null, null);
+                    "key", null, null, null, null, null, null, null, null, null, null, null);
             assertThrows(AgentSetupService.AgentSetupException.class, () -> service.setupAgent(req));
         }
 
@@ -359,7 +359,7 @@ class AgentSetupServiceBranchCoverageTest {
         @DisplayName("cloud provider without API key throws")
         void cloudProviderNoApiKey() {
             var req = new SetupAgentRequest("Agent", "prompt", "openai", "gpt-4",
-                    null, null, null, null, null, null, null, null, null, null, null);
+                    null, null, null, null, null, null, null, null, null, null, null, null);
             assertThrows(AgentSetupService.AgentSetupException.class, () -> service.setupAgent(req));
         }
 
@@ -367,7 +367,7 @@ class AgentSetupServiceBranchCoverageTest {
         @DisplayName("cloud provider with blank API key throws")
         void cloudProviderBlankApiKey() {
             var req = new SetupAgentRequest("Agent", "prompt", "anthropic", "model",
-                    "  ", null, null, null, null, null, null, null, null, null, null);
+                    "  ", null, null, null, null, null, null, null, null, null, null, null);
             assertThrows(AgentSetupService.AgentSetupException.class, () -> service.setupAgent(req));
         }
 
@@ -375,7 +375,7 @@ class AgentSetupServiceBranchCoverageTest {
         @DisplayName("local provider (ollama) without API key does NOT throw for validation")
         void localProviderNoApiKeyOk() throws Exception {
             var req = new SetupAgentRequest("Agent", "prompt", "ollama", "llama3",
-                    null, null, null, null, null, null, null, null, false, null, null);
+                    null, null, null, null, null, null, null, null, false, null, null, null);
             // Will fail at REST call, but validation should pass
             when(restInterfaceFactory.get(any())).thenThrow(new RestInterfaceFactory.RestInterfaceFactoryException("mock", new RuntimeException()));
             assertThrows(AgentSetupService.AgentSetupException.class, () -> service.setupAgent(req));
@@ -702,9 +702,9 @@ class AgentSetupServiceBranchCoverageTest {
     class VaultApiKey {
 
         private String invokeVaultApiKey(String apiKey, String agentName) throws Exception {
-            var method = AgentSetupService.class.getDeclaredMethod("vaultApiKey", String.class, String.class);
+            var method = AgentSetupService.class.getDeclaredMethod("vaultApiKey", String.class, String.class, String.class, Map.class);
             method.setAccessible(true);
-            return (String) method.invoke(service, apiKey, agentName);
+            return (String) method.invoke(service, apiKey, agentName, null, null);
         }
 
         @Test
@@ -715,8 +715,8 @@ class AgentSetupServiceBranchCoverageTest {
             String result = invokeVaultApiKey(vaultRef, "MyAgent");
 
             assertEquals(vaultRef, result, "Already-vaulted reference should be returned unchanged");
-            // Should NOT attempt to store anything
-            verifyNoInteractions(secretProvider);
+            // Looked up (so a dangling reference is logged) but never re-vaulted
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), anyList());
         }
 
         @Test
@@ -745,7 +745,8 @@ class AgentSetupServiceBranchCoverageTest {
             String result = invokeVaultApiKey(legacyRef, "LegacyAgent");
 
             assertEquals(legacyRef, result, "Legacy eddivault reference should be returned unchanged");
-            verifyNoInteractions(secretProvider);
+            // Looked up (so a dangling reference is logged) but never re-vaulted
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), anyList());
         }
 
         @Test
@@ -756,7 +757,8 @@ class AgentSetupServiceBranchCoverageTest {
             String result = invokeVaultApiKey(fullRef, "MultiTenantAgent");
 
             assertEquals(fullRef, result, "Full-form vault reference should be returned unchanged");
-            verifyNoInteractions(secretProvider);
+            // Looked up (so a dangling reference is logged) but never re-vaulted
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), anyList());
         }
     }
 }

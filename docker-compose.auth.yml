@@ -4,7 +4,6 @@
 # Usage: docker compose -f docker-compose.yml -f docker-compose.auth.yml up -d
 #
 # Pre-configured test users, seeded by keycloak/eddi-realm.json — DEV ONLY:
-#   eddi   / eddi    (eddi-admin + eddi-editor)
 #   viewer / viewer  (eddi-viewer — read-only)
 #   user   / user    (eddi-user — end-user access)
 #
@@ -13,6 +12,18 @@
 # turn that into an UPDATE_PASSWORD required action on realm import — after
 # import the users' requiredActions are empty. Change them through the admin
 # console if you need the prompt.
+#
+# The privileged `eddi` account (eddi-admin + eddi-editor) is seeded with NO
+# password and cannot be logged into until you give it one. It used to ship as
+# eddi/eddi — and the same realm file is imported into Kubernetes by
+# k8s/overlays/auth and by the Helm chart, where the Keycloak Service is
+# reachable from every pod in the cluster, so a guessable password on a full
+# EDDI administrator was not confined to a laptop. Set one after first boot:
+#
+#   http://localhost:${KEYCLOAK_PORT:-8180}/admin → Users → eddi
+#     → Credentials → Set password
+#
+# (log in there as the KC_BOOTSTRAP_ADMIN_USERNAME/PASSWORD pair below).
 
 services:
   eddi:

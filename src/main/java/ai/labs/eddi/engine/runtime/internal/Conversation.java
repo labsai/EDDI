@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.audit.TurnAuditBuffer;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.ILifecycleManager;
 import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException;
@@ -17,6 +18,7 @@ import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.*;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationProperties;
 import ai.labs.eddi.engine.memory.model.Data;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -27,6 +29,7 @@ import org.jboss.logging.Logger;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.regex.Pattern;
 import java.util.ArrayList;
 
 import static ai.labs.eddi.engine.memory.ContextUtilities.storeContextLanguageInLongTermMemory;
@@ -46,13 +49,9 @@ public class Conversation implements IConversation {
     private static final String KEY_CONTEXT = "context";
     private static final String KEY_PROPERTIES = "properties";
     private static final String KEY_SECRET_INPUT = "secretInput";
-    private static final String SECRET_INPUT_PLACEHOLDER = "<secret input>";
+    private static final String SECRET_INPUT_PLACEHOLDER = MemoryKeys.SECRET_INPUT_PLACEHOLDER;
     private static final String CONVERSATION_START = "CONVERSATION_START";
     private static final String CONVERSATION_END = "CONVERSATION_END";
-
-    // Default recall settings for agents without UserMemoryConfig
-    private static final String DEFAULT_RECALL_ORDER = "most_recent";
-    private static final int DEFAULT_MAX_RECALL_ENTRIES = 1000;
 
     private final List<IExecutableWorkflow> executableWorkflows;
     private final IConversationMemory conversationMemory;
@@ -76,13 +75,58 @@ public class Conversation implements IConversation {
      */
     private final Map<String, Property> longTermBaseline = new HashMap<>();
 
+    /**
+     * Keys of the context entries this turn's client marked {@code "secret": true}.
+     * Their stored copy is replaced wholesale when the turn ends.
+     */
+    private final Set<String> secretContextKeys = new LinkedHashSet<>();
+
+    /**
+     * Every string form found in those entries — what is searched for in the rest
+     * of the step, the properties and the audit entries, because a template may
+     * have copied the value anywhere.
+     */
+    private final Set<String> secretContextValues = new LinkedHashSet<>();
+
+    /**
+     * Shorter secret values are only removed from their own context entry, not
+     * searched for elsewhere: replacing every "12" in a turn's output would destroy
+     * it, and a value that short is not a credential.
+     */
+    static final int MIN_SCRUBBED_SECRET_CONTEXT_LENGTH = 8;
+
     Conversation(List<IExecutableWorkflow> executableWorkflows, IConversationMemory conversationMemory, IPropertiesHandler propertiesHandler,
             IConversationOutputRenderer outputProvider) {
         this.executableWorkflows = executableWorkflows;
         this.conversationMemory = conversationMemory;
         this.propertiesHandler = propertiesHandler;
         this.outputProvider = outputProvider;
+        applyUserMemoryConfig();
         captureRestoredLongTermBaseline();
+    }
+
+    /**
+     * Carries the agent's user-memory configuration onto this turn's memory object.
+     * <p>
+     * This has to happen per turn, not per conversation. The field is not part of
+     * the persisted snapshot, and every request rebuilds memory from the store — so
+     * setting it only in {@link #init()} meant it was present for the
+     * CONVERSATION_START turn and null for every turn after it. The gate in
+     * {@code ContextualToolsProvider.addUserMemoryToolIfEnabled} reads exactly that
+     * field, so the {@code UserMemoryTool} was never assembled on a turn a user
+     * could actually talk to. An agent with memory fully enabled could not write a
+     * single memory, silently: no error, no log line, the store simply stayed at
+     * zero — and the model, handed no tool, went on to state that it had saved
+     * things it had not, once leaking raw tool-call syntax into user-visible
+     * output. The constructor is the one point every path goes through
+     * ({@code Agent#continueConversation} builds a Conversation for say, resume and
+     * rerun alike).
+     */
+    private void applyUserMemoryConfig() {
+        AgentConfiguration.UserMemoryConfig memoryConfig = propertiesHandler.getUserMemoryConfig();
+        if (memoryConfig != null) {
+            conversationMemory.setUserMemoryConfig(memoryConfig);
+        }
     }
 
     /**
@@ -169,11 +213,8 @@ public class Conversation implements IConversation {
 
         addConversationStartAction(conversationMemory.getCurrentStep());
 
-        // Set UserMemoryConfig on the memory (if advanced tools are enabled)
-        AgentConfiguration.UserMemoryConfig memoryConfig = propertiesHandler.getUserMemoryConfig();
-        if (memoryConfig != null) {
-            conversationMemory.setUserMemoryConfig(memoryConfig);
-        }
+        // The config is applied in the constructor, which every turn goes through —
+        // init() is only the first of them. Re-applying is harmless but pointless.
 
         // Load all user properties from usermemories (always, regardless of
         // enableMemoryTools)
@@ -217,10 +258,21 @@ public class Conversation implements IConversation {
             String agentId = memory.getAgentId();
             List<String> groupIds = extractGroupIds(context);
 
-            // Use config-specific recall settings if available, else defaults
+            // One authority for the defaults: the field initialisers on
+            // UserMemoryConfig. There used to be a second set of constants here for the
+            // absent-config case, and they disagreed — 1000 recalled entries with no
+            // block, 50 with an empty one. So adding "userMemoryConfig": {...} for an
+            // unrelated reason (say, to set defaultVisibility) cut recall twentyfold,
+            // in a diff that does not mention maxRecallEntries. Nothing above DEBUG
+            // said so, and templates for the dropped keys render empty rather than
+            // failing. Constructing the defaults instead makes "no block" and "empty
+            // block" provably identical.
             AgentConfiguration.UserMemoryConfig config = memory.getUserMemoryConfig();
-            String recallOrder = config != null ? config.getRecallOrder() : DEFAULT_RECALL_ORDER;
-            int maxEntries = config != null ? config.getMaxRecallEntries() : DEFAULT_MAX_RECALL_ENTRIES;
+            if (config == null) {
+                config = new AgentConfiguration.UserMemoryConfig();
+            }
+            String recallOrder = config.getRecallOrder();
+            int maxEntries = config.getMaxRecallEntries();
 
             List<UserMemoryEntry> entries = store.getVisibleEntries(userId, agentId, groupIds, recallOrder, maxEntries);
 
@@ -253,17 +305,60 @@ public class Conversation implements IConversation {
         return this.conversationMemory.getConversationState();
     }
 
+    /**
+     * The step results a rerun discards before re-executing: the rendered answer
+     * and its quick replies.
+     */
+    private static final List<String> RERUN_CLEARED_RESULT_TYPES = List.of("output", "quickReplies");
+
+    /**
+     * Where a rerun restarts the pipeline — the earliest task type that can
+     * <em>produce</em> what {@link #RERUN_CLEARED_RESULT_TYPES} discards.
+     * <p>
+     * Selective execution runs the suffix of the pipeline from the first task
+     * matching any of these types, so this set and the cleared set have to agree: a
+     * rerun must never clear a result it will not regenerate. Restarting at
+     * {@code output} alone did exactly that on any LLM agent. The model's answer is
+     * stored under {@code output} but is written by the {@code langchain} task,
+     * which sits <em>before</em> the output task — so the answer was wiped,
+     * {@code ai.labs.llm} never re-ran, and the output task alone had nothing left
+     * to render. The turn came back 200 with {@code conversationOutputs[n].output}
+     * an empty array, destroying the reply instead of retrying it — and taking it
+     * out of the model's own history with it.
+     * <p>
+     * Restarting at {@code langchain} re-runs the model and every task after it.
+     * Whatever precedes it keeps its results — in the standard workflow layout
+     * ({@code AgentSetupService#createWorkflowConfig}) that is parser, behavior
+     * rules, property setters and HTTP/MCP calls, so a retry does not re-fire those
+     * external side effects. That is the layout, not an invariant: a workflow that
+     * deliberately places {@code httpcalls} <em>after</em> its LLM step will re-run
+     * those calls on a rerun, which is the same thing "re-execute the last step"
+     * has always meant for whatever follows the restart point.
+     * <p>
+     * A rule-based agent has no {@code langchain} task, so it still restarts at
+     * {@code output} and behaves exactly as before.
+     */
+    private static final List<String> RERUN_RESTART_TASK_TYPES = List.of("langchain", "output", "quickReplies");
+
     @Override
     public void rerun(final Map<String, Context> contexts) throws ConversationNotReadyException, LifecycleException {
-        runStep("", contexts, false, Arrays.asList("output", "quickReplies"));
+        runStep("", contexts, false, RERUN_CLEARED_RESULT_TYPES, RERUN_RESTART_TASK_TYPES);
     }
 
     @Override
     public void say(final String message, final Map<String, Context> contexts) throws LifecycleException, ConversationNotReadyException {
-        runStep(message, contexts, true, new LinkedList<>());
+        runStep(message, contexts, true, new LinkedList<>(), new LinkedList<>());
     }
 
-    private void runStep(String message, Map<String, Context> contexts, boolean startNewStep, List<String> lifecycleTaskTypes)
+    /**
+     * @param clearedResultTypes
+     *            task-type results to drop from the current step before executing
+     * @param restartTaskTypes
+     *            the pipeline restarts at the first task matching one of these;
+     *            empty means "run every task"
+     */
+    private void runStep(String message, Map<String, Context> contexts, boolean startNewStep,
+                         List<String> clearedResultTypes, List<String> restartTaskTypes)
             throws ConversationNotReadyException, LifecycleException {
 
         // Auto-recover from transient interrupted state
@@ -282,8 +377,8 @@ public class Conversation implements IConversation {
                 startNextStep();
             }
 
-            var lifecycleData = prepareLifecycleData(message, contexts, lifecycleTaskTypes);
-            executeConversationStep(lifecycleData, lifecycleTaskTypes);
+            var lifecycleData = prepareLifecycleData(message, contexts, clearedResultTypes);
+            executeConversationStep(lifecycleData, restartTaskTypes);
 
         } catch (LifecycleException.LifecycleInterruptedException e) {
             setConversationState(ConversationState.EXECUTION_INTERRUPTED);
@@ -395,7 +490,15 @@ public class Conversation implements IConversation {
     private void addContextToConversationOutput(IWritableConversationStep currentStep, List<IData<Context>> contextData) {
 
         if (!contextData.isEmpty()) {
-            var context = ConversationMemoryUtilities.prepareContext(contextData);
+            // The output is returned to the client and may be streamed before the turn
+            // ends, so a secret entry never enters it — unlike the step datum, which
+            // must hold the live value until the pipeline has run.
+            List<IData<Context>> visible = contextData.stream()
+                    .map(datum -> isSecretContextKey(datum.getKey())
+                            ? new Data<>(datum.getKey(), secretContextPlaceholder())
+                            : datum)
+                    .toList();
+            var context = ConversationMemoryUtilities.prepareContext(visible);
             currentStep.addConversationOutputMap(KEY_CONTEXT, context);
         }
     }
@@ -432,6 +535,9 @@ public class Conversation implements IConversation {
     private void executeConversationStep(List<IData<?>> lifecycleData, List<String> lifecycleTaskTypes)
             throws LifecycleException {
         boolean paused = false;
+        // Audit entries are held until the whole turn has run: only then is it known
+        // whether a later task vaulted the input as a secret (see TurnAuditBuffer).
+        TurnAuditBuffer auditBuffer = TurnAuditBuffer.install(conversationMemory);
         try {
             executeWorkflows(lifecycleData, lifecycleTaskTypes);
         } catch (ConversationStopException unused) {
@@ -447,6 +553,12 @@ public class Conversation implements IConversation {
                 paused = true;
             }
         } finally {
+            // First, so nothing below — the audit flush, the longTerm write, the
+            // stored snapshot, the rendered output — sees a secret context value.
+            scrubSecretContextValues();
+            if (auditBuffer != null) {
+                auditBuffer.flush(conversationMemory, searchableSecretContextValues());
+            }
             // BEFORE the persist decision below, and on every exit including the
             // exception path: note which longTerm properties this turn changed. If the
             // turn does not reach storePropertiesPermanently (pause / error / cancel)
@@ -714,10 +826,139 @@ public class Conversation implements IConversation {
         return prop;
     }
 
+    private boolean isSecretContextKey(String dataKey) {
+        return dataKey.startsWith(KEY_CONTEXT + ":") && secretContextKeys.contains(dataKey.substring(KEY_CONTEXT.length() + 1));
+    }
+
+    private static Context secretContextPlaceholder() {
+        var placeholder = new Context(Context.ContextType.string, MemoryKeys.SECRET_CONTEXT_PLACEHOLDER);
+        placeholder.setSecret(true);
+        return placeholder;
+    }
+
+    /** The secret values worth searching for, longest first. */
+    private List<String> searchableSecretContextValues() {
+        return secretContextValues.stream()
+                .filter(value -> value.length() >= MIN_SCRUBBED_SECRET_CONTEXT_LENGTH)
+                .sorted(Comparator.comparingInt(String::length).reversed())
+                .toList();
+    }
+
+    /**
+     * Removes this turn's secret context values from everything that outlives the
+     * turn: the context entries themselves (replaced wholesale), the conversation
+     * properties (a property instruction may have stored the value;
+     * {@code longTerm} ones would otherwise be written to the user memory store),
+     * and every other datum of the step and its conversation output (a template may
+     * have copied the value there).
+     * <p>
+     * Runs when the pipeline stops for any reason — completed, stopped, paused or
+     * failed. A tool-call pause persists its pending batch (the model's arguments,
+     * the transcript, the request previews), so that is scrubbed too. Tasks that
+     * run after a HITL resume therefore see the placeholder — including a resumed
+     * tool call whose arguments carried the value: a secret context value lives for
+     * the request that carried it, not longer.
+     * <p>
+     * Objects the plain walk cannot enter (output items, records) are scrubbed
+     * through their JSON form and replaced by the scrubbed tree, which is stored
+     * and returned exactly as the object would have been — see
+     * {@link SecretValueScrubber#scrubDeep}.
+     */
+    private void scrubSecretContextValues() {
+        if (secretContextKeys.isEmpty()) {
+            return;
+        }
+        var step = conversationMemory.getCurrentStep();
+        if (step == null) {
+            return;
+        }
+        List<String> needles = searchableSecretContextValues();
+
+        // Properties first: their step mirrors hold the same Property objects, which
+        // must be clean before those mirrors are checked below.
+        IConversationProperties properties = conversationMemory.getConversationProperties();
+        if (properties != null && !needles.isEmpty()) {
+            properties.values().stream().filter(Objects::nonNull).forEach(property -> scrubProperty(property, needles));
+        }
+
+        PendingToolCallBatch pendingToolCalls = conversationMemory.getHitlPendingToolCalls();
+        if (pendingToolCalls != null && !needles.isEmpty()) {
+            PendingToolCallBatch cleaned = SecretValueScrubber.scrubTyped(pendingToolCalls, PendingToolCallBatch.class, needles,
+                    MemoryKeys.SECRET_CONTEXT_PLACEHOLDER);
+            if (cleaned != null) {
+                conversationMemory.setHitlPendingToolCalls(cleaned);
+            }
+        }
+
+        for (IData<?> datum : step.getAllElements()) {
+            @SuppressWarnings("unchecked")
+            var writable = (IData<Object>) datum;
+            if (isSecretContextKey(datum.getKey())) {
+                writable.setResult(secretContextPlaceholder());
+                writable.setPossibleResults(null);
+                continue;
+            }
+            Object cleaned = scrubSecretsFrom(datum.getResult(), needles);
+            if (cleaned != null) {
+                writable.setResult(cleaned);
+            }
+            if (scrubSecretsFrom(writable.getPossibleResults(), needles) instanceof List<?> cleanedPossible) {
+                writable.setPossibleResults(castList(cleanedPossible));
+            }
+        }
+
+        var conversationOutput = step.getConversationOutput();
+        if (conversationOutput != null) {
+            for (var entry : conversationOutput.entrySet()) {
+                Object cleaned = scrubSecretsFrom(entry.getValue(), needles);
+                if (cleaned != null) {
+                    entry.setValue(cleaned);
+                }
+            }
+        }
+    }
+
+    /**
+     * {@code value} with the secrets replaced, or {@code null} when it carries
+     * none.
+     */
+    private static Object scrubSecretsFrom(Object value, List<String> needles) {
+        return SecretValueScrubber.scrubDeep(value, needles, MemoryKeys.SECRET_CONTEXT_PLACEHOLDER);
+    }
+
+    private static void scrubProperty(Property property, List<String> needles) {
+        if (scrubSecretsFrom(property.getValueString(), needles) instanceof String cleaned) {
+            property.setValueString(cleaned);
+        }
+        if (scrubSecretsFrom(property.getValueObject(), needles) instanceof Map<?, ?> cleaned) {
+            property.setValueObject(castMap(cleaned));
+        }
+        if (scrubSecretsFrom(property.getValueList(), needles) instanceof List<?> cleaned) {
+            property.setValueList(castList(cleaned));
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Object> castList(List<?> list) {
+        return (List<Object>) list;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> castMap(Map<?, ?> map) {
+        return (Map<String, Object>) map;
+    }
+
     private List<IData<Context>> createContextData(Map<String, Context> context) {
         List<IData<Context>> contextData = new LinkedList<>();
+        secretContextKeys.clear();
+        secretContextValues.clear();
         if (context != null) {
             for (String key : context.keySet()) {
+                Context entry = context.get(key);
+                if (entry != null && Boolean.TRUE.equals(entry.getSecret())) {
+                    secretContextKeys.add(key);
+                    SecretValueScrubber.collectPlaintexts(entry.getValue(), secretContextValues);
+                }
                 // Persisted copy is scrubbed of inline base64 payloads; the live payload
                 // has already been captured into ATTACHMENTS memory for this turn.
                 Context persistedCopy = AttachmentContextExtractor.scrubInlinePayload(key, context.get(key));
@@ -767,14 +1008,44 @@ public class Conversation implements IConversation {
             // templating tasks run, so without this the chat client renders NOTHING
             // for the paused turn. Mirror the REJECTED path's Data/output pattern.
             String pending = resolvePendingMessage(conversationMemory);
-            var pendingData = new Data<>(MemoryKeys.OUTPUT_PREFIX, List.of(pending));
+            // The model's own narration of what it is about to do goes AHEAD of the
+            // placeholder — see PendingToolCallBatch#interimText. Without it a resumed
+            // (non-streamed) turn's second approval arrived with no explanation at all,
+            // and even a streamed one lost the explanation on reload.
+            var outputs = new ArrayList<String>(2);
+            var batch = conversationMemory.getHitlPendingToolCalls();
+            String interim = batch != null ? batch.getInterimText() : null;
+            if (interim != null && !interim.isBlank() && !interim.equals(pending)) {
+                outputs.add(interim);
+            }
+            outputs.add(pending);
+            var step = conversationMemory.getCurrentStep();
+            // The Data twin must ACCUMULATE, exactly as the output list does: a turn
+            // may pause several times, and each pause's explanation is a permanent
+            // part of the record — retrospectively, the admin must be able to see
+            // everything the model said it was doing. Replacing the twin (as a bare
+            // storeData would) kept only the latest pause's text in the detailed
+            // step view while the output list kept them all, and two channels that
+            // disagree is exactly the class of bug the surgical placeholder drop
+            // exists to prevent.
+            var accumulated = new ArrayList<Object>();
+            IData<?> previous = step.getData(MemoryKeys.OUTPUT_PREFIX);
+            if (previous != null && previous.getResult() instanceof List<?> prior) {
+                accumulated.addAll(prior);
+            }
+            accumulated.addAll(outputs);
+            var pendingData = new Data<>(MemoryKeys.OUTPUT_PREFIX, accumulated);
             pendingData.setPublic(true);
-            conversationMemory.getCurrentStep().storeData(pendingData);
-            conversationMemory.getCurrentStep().addConversationOutputList(MemoryKeys.OUTPUT_PREFIX, List.of(pending));
+            step.storeData(pendingData);
+            step.addConversationOutputList(MemoryKeys.OUTPUT_PREFIX, List.copyOf(outputs));
         } else {
             // A RULE pause must never carry a stale tool batch (e.g. the gate tripped
             // earlier in the same turn on a path that recovered) — belt and braces.
             clearToolPauseState();
+            // clearToolPauseState() also nulls the pause type stamped a few lines up, which
+            // left every rule pause reporting hitlPauseType=null while tool pauses said
+            // TOOL_CALL — clients branching on the type could not recognise a rule pause.
+            conversationMemory.setHitlPauseType(e.getPauseOrigin().name());
             // A RULE pause aborts the turn BEFORE the output/templating tasks run, so
             // the paused step would otherwise commit an EMPTY conversationOutput and a
             // client that renders turns from the output list shows a blank bubble.
@@ -796,6 +1067,10 @@ public class Conversation implements IConversation {
      */
     private static final String DEFAULT_PENDING_MESSAGE = "This action requires human approval before it can proceed. "
             + "You will receive the result once a reviewer decides.";
+
+    /** Matches a rendered default carrying the repeat-pause ordinal suffix. */
+    private static final Pattern ORDINAL_SUFFIX = Pattern.compile(
+            "^(.*) \\(approval \\d+ this turn\\)$", Pattern.DOTALL);
 
     /**
      * Default pending message when the gated call names ARE known — the normal
@@ -879,38 +1154,116 @@ public class Conversation implements IConversation {
     }
 
     /**
+     * Every string {@link #pauseConversation} may have written as the pending
+     * placeholder for the CURRENT batch — under this build or a previous one. First
+     * entry is what this build writes; the rest are legacy renderings.
+     * <p>
+     * Exists because the determinism argument ("recompute the exact string on
+     * resume") silently assumed pause and resume run the same build. Two releases
+     * changed the DEFAULT wording — the tool-named default, then the repeat-pause
+     * ordinal — so a conversation paused under the previous build recomputes a
+     * string that is not in its output list, the removal no-ops, and the resolved
+     * turn renders [stale placeholder, answer]: the exact artifact those changes
+     * exist to kill, once per in-flight pause on the first post-upgrade resume.
+     * There is no schema migration for conversation output, so the resume path
+     * itself must recognise its predecessors' wording.
+     * <p>
+     * Only DEFAULT renderings accumulate variants — a configured
+     * {@code pendingMessage} has never been rewritten by a release, so it stays a
+     * single candidate. (An operator editing their template between pause and
+     * resume strands the placeholder exactly as before; that is config drift, not a
+     * version boundary, and predates all of this.)
+     */
+    private List<String> pendingPlaceholderCandidates(IConversationMemory memory) {
+        String current = resolvePendingMessage(memory);
+        var candidates = new ArrayList<String>();
+        candidates.add(current);
+
+        var batch = memory.getHitlPendingToolCalls();
+        var cfg = batch != null && batch.getEffectiveToolApprovals() != null
+                ? batch.getEffectiveToolApprovals()
+                : memory.getAgentToolApprovalsConfig();
+        var rule = batch != null ? batch.getEffectiveRule() : null;
+        boolean configured = (rule != null && rule.getPendingMessage() != null && !rule.getPendingMessage().isBlank())
+                || (cfg != null && !isNullOrEmpty(cfg.getPendingMessage()));
+        if (!configured) {
+            // Pre-ordinal build: the tool-named default without the suffix. The
+            // ordinal itself predates the suffix (it was persisted for cap
+            // enforcement), so a repeat pause persisted by that build re-reads
+            // its ordinal today and gains a suffix the stored text never had.
+            var suffix = ORDINAL_SUFFIX.matcher(current);
+            if (suffix.matches()) {
+                candidates.add(suffix.group(1));
+            }
+            // Pre-tool-named build: the constant, regardless of names.
+            if (!candidates.contains(DEFAULT_PENDING_MESSAGE)) {
+                candidates.add(DEFAULT_PENDING_MESSAGE);
+            }
+        }
+        return candidates;
+    }
+
+    /**
      * Removes the pending-approval placeholder that {@link #pauseConversation}
-     * added to the current step on a TOOL_CALL pause, so the resumed step renders
-     * ONLY the final answer.
+     * added to the current step on a TOOL_CALL pause — and ONLY the placeholder, so
+     * the resumed step keeps everything the model said it was doing (the interim
+     * narration written ahead of the placeholder, and every earlier pause's
+     * narration in a multi-pause turn) and gains the final answer.
      * <p>
-     * Robust identification without dropping legitimate earlier output: the
-     * placeholder is the exact string produced by {@link #resolvePendingMessage},
-     * which is deterministic from the still-present pending batch (its effective
-     * tool-approvals config and gated call names survive on memory until LlmTask
-     * consumes them). We recompute that string and remove ONLY that value from the
-     * {@code "output"} conversation-output list — an earlier task's output in a
-     * multi-task step (e.g. {@code [earlierOutput, placeholder]}) keeps its entry.
-     * <p>
-     * We also blank the mirror public step-{@code Data<>} that pauseConversation
-     * stored under the bare {@code "output"} key (surfaced in detailed step-data
-     * snapshots via {@code startsWith("output")}) when it still holds exactly the
-     * placeholder — otherwise a client reading the detailed view would see the
-     * stale placeholder a second time. We overwrite that EXACT key with an empty
-     * list (not {@code removeData}, whose {@code startsWith} semantics would also
-     * wipe an earlier task's {@code output:text:*} data in a multi-task step) and
-     * only when it is untouched (equals {@code [placeholder]}); if some other
-     * writer replaced it we leave it alone.
+     * Identification: the placeholder is the exact string produced by
+     * {@link #resolvePendingMessage} (or a previous build's rendering — see
+     * {@link #pendingPlaceholderCandidates}), deterministic from the still-present
+     * pending batch. It is always the TRAILING element the latest pause appended,
+     * so the LAST occurrence of a candidate is the one removed — never the first,
+     * which on a mixed list could be an earlier output or a piece of narration that
+     * happens to equal a candidate string. Applied identically to both channels:
+     * the {@code "output"} conversation-output list and its mirror public
+     * step-{@code Data<>} under the bare {@code "output"} key (surfaced in detailed
+     * step-data snapshots via {@code startsWith("output")}). The Data twin is
+     * overwritten with the stripped list on that EXACT key — not
+     * {@code removeData}, whose {@code startsWith} semantics would also wipe an
+     * earlier task's {@code output:text:*} data in a multi-task step.
      */
     private void dropPendingApprovalPlaceholder(IWritableConversationStep currentStep) {
-        String pending = resolvePendingMessage(conversationMemory);
-        currentStep.removeConversationOutputListItem(MemoryKeys.OUTPUT_PREFIX, pending);
+        List<String> candidates = pendingPlaceholderCandidates(conversationMemory);
 
-        IData<?> outputData = currentStep.getData(MemoryKeys.OUTPUT_PREFIX);
-        if (outputData != null && List.of(pending).equals(outputData.getResult())) {
-            var blanked = new Data<>(MemoryKeys.OUTPUT_PREFIX, new ArrayList<>());
-            blanked.setPublic(true);
-            currentStep.storeData(blanked);
+        // Output list: drop the LAST candidate occurrence only.
+        Object rawList = currentStep.getConversationOutput().get(MemoryKeys.OUTPUT_PREFIX);
+        if (rawList instanceof List<?> outputList) {
+            int idx = lastCandidateIndex(outputList, candidates);
+            if (idx >= 0) {
+                outputList.remove(idx);
+            }
         }
+
+        // Data twin: same rule, written back on the exact key.
+        IData<?> outputData = currentStep.getData(MemoryKeys.OUTPUT_PREFIX);
+        if (outputData != null && outputData.getResult() instanceof List<?> stored) {
+            int idx = lastCandidateIndex(stored, candidates);
+            if (idx >= 0) {
+                var kept = new ArrayList<Object>(stored);
+                kept.remove(idx);
+                var stripped = new Data<>(MemoryKeys.OUTPUT_PREFIX, kept);
+                stripped.setPublic(true);
+                currentStep.storeData(stripped);
+            }
+        }
+    }
+
+    /**
+     * Index of the last element that IS one of the candidate strings, or -1. Object
+     * equality on purpose: the placeholder is stored as a plain String, and a
+     * rendered {@code TextOutputItem} whose text merely reads the same must not be
+     * mistaken for it.
+     */
+    private static int lastCandidateIndex(List<?> items, List<String> candidates) {
+        for (int i = items.size() - 1; i >= 0; i--) {
+            Object item = items.get(i);
+            if (item instanceof String text && candidates.contains(text)) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     /**
@@ -930,6 +1283,7 @@ public class Conversation implements IConversation {
         if (getConversationState() != ConversationState.AWAITING_HUMAN) {
             throw new ConversationNotReadyException("Not in AWAITING_HUMAN state");
         }
+        TurnAuditBuffer auditBuffer = TurnAuditBuffer.install(conversationMemory);
         try {
             setConversationState(ConversationState.IN_PROGRESS);
 
@@ -1049,6 +1403,9 @@ public class Conversation implements IConversation {
             setConversationState(ConversationState.ERROR);
             throw new LifecycleException(e.getLocalizedMessage(), e);
         } finally {
+            if (auditBuffer != null) {
+                auditBuffer.flush(conversationMemory);
+            }
             checkActionsForConversationEnd();
             ConversationState finalState = getConversationState();
             if (finalState == ConversationState.IN_PROGRESS)
@@ -1060,7 +1417,12 @@ public class Conversation implements IConversation {
             // linger on memory and poison the next turn's resume-mode detection. If the
             // batch is still present and this was NOT a fresh re-pause (AWAITING_HUMAN),
             // clear it. A fresh re-pause legitimately re-arms the batch, so leave it.
-            if (conversationMemory.getHitlPendingToolCalls() != null && finalState != ConversationState.AWAITING_HUMAN) {
+            // The pause type too: a RULE pause carries no batch but does carry
+            // hitlPauseType=RULE, and leaving it on a READY conversation made the next
+            // turn log "clearing stale HITL tool-pause state" for every conversation
+            // that ever passed a rule gate.
+            if ((conversationMemory.getHitlPendingToolCalls() != null || conversationMemory.getHitlPauseType() != null)
+                    && finalState != ConversationState.AWAITING_HUMAN) {
                 clearToolPauseState();
             }
             // Same contract as the say path: note the owed writes BEFORE deciding

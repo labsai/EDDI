@@ -43,6 +43,9 @@ public class ConversationMemoryUtilities {
 
         for (var redoStep : conversationMemory.getRedoCache()) {
             var redoStepSnapshot = iterateConversationStep(redoStep);
+            // A redo entry's output is not in snapshot.conversationOutputs — undo popped
+            // it. Carry it on the step itself, or redo restores an empty turn.
+            redoStepSnapshot.setConversationOutput(redoStep.getConversationOutput());
             snapshot.getRedoCache().push(redoStepSnapshot);
         }
 
@@ -73,6 +76,11 @@ public class ConversationMemoryUtilities {
         if (conversationMemory.getUserId() != null) {
             snapshot.setUserId(conversationMemory.getUserId());
         }
+
+        // Unconditional, unlike the userId above: a null here is a meaningful value
+        // (not verified) and skipping the write would let a re-store silently keep a
+        // provenance the live memory no longer claims.
+        snapshot.setResolutionProvenance(conversationMemory.getResolutionProvenance());
 
         if (conversationMemory.getConversationId() != null) {
             snapshot.setConversationId(conversationMemory.getConversationId());
@@ -111,7 +119,10 @@ public class ConversationMemoryUtilities {
     private static List<IConversationStep> iterateRedoCache(List<ConversationStepSnapshot> redoSteps) {
         List<IConversationStep> conversationSteps = new LinkedList<>();
         for (var redoStep : redoSteps) {
-            IWritableConversationStep conversationStep = new ConversationStep(new ConversationOutput());
+            // Null for documents written before the output was carried here; an empty
+            // output then behaves exactly as it did before.
+            var storedOutput = redoStep.getConversationOutput();
+            IWritableConversationStep conversationStep = new ConversationStep(storedOutput != null ? storedOutput : new ConversationOutput());
             conversationSteps.add(conversationStep);
             for (var packageRunSnapshot : redoStep.getWorkflows()) {
                 for (var resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {
@@ -132,6 +143,7 @@ public class ConversationMemoryUtilities {
                 snapshot.getUserId());
 
         conversationMemory.setConversationState(snapshot.getConversationState());
+        conversationMemory.setResolutionProvenance(snapshot.getResolutionProvenance());
         conversationMemory.setHitlPausedWorkflowId(snapshot.getHitlPausedWorkflowId());
         conversationMemory.setHitlPausedAbsoluteTaskIndex(snapshot.getHitlPausedAbsoluteTaskIndex());
         conversationMemory.setHitlPausedAt(snapshot.getHitlPausedAt());
@@ -491,6 +503,18 @@ public class ConversationMemoryUtilities {
                                                                                            List<String> returningFields) {
 
         var memorySnapshot = convertSimpleConversationMemory(conversationMemorySnapshot, returnDetailed, returnCurrentStepOnly);
+
+        // Blank entries mean NO filter, not "select nothing". A present-but-empty
+        // query parameter (?returningFields=) binds as [""], and LLM-generated
+        // tools make that shape routine: every generated parameter is required,
+        // so a model with no filter to express sends the empty string — and the
+        // branches below would then null out steps, outputs AND properties,
+        // leaving the operator's test-drive read-back with nothing to quote.
+        // "" selects no field under any reading, so dropping blanks recovers the
+        // caller's intent on every interpretation.
+        if (returningFields != null) {
+            returningFields = returningFields.stream().filter(f -> f != null && !f.isBlank()).toList();
+        }
 
         if (returnCurrentStepOnly) {
             if (isNullOrEmpty(returningFields) || returningFields.contains(KEY_CONVERSATION_STEPS)) {

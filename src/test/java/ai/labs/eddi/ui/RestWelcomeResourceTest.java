@@ -17,7 +17,8 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Unit tests for {@link RestWelcomeResource}. welcome.html is on the test
- * classpath via src/main/resources.
+ * classpath via the stand-in under src/test/resources — the real shell is built
+ * from ui/manager, and the unit-test job does not build the UI.
  */
 class RestWelcomeResourceTest {
 

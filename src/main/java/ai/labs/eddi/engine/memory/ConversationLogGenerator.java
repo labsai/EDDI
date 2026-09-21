@@ -9,14 +9,11 @@ import ai.labs.eddi.engine.memory.model.ConversationLog.ConversationPart;
 import ai.labs.eddi.engine.memory.model.ConversationLog.ConversationPart.Content;
 import ai.labs.eddi.engine.memory.model.ConversationLog.ConversationPart.ContentType;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
-import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 
 import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
-import java.util.stream.Collectors;
 
 import static ai.labs.eddi.engine.memory.model.ConversationLog.ConversationPart.ContentType.*;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
@@ -26,9 +23,7 @@ public class ConversationLogGenerator {
     private static final String KEY_ROLE_ASSISTANT = "assistant";
     private static final Object OUTPUT_KEY_CONTEXT = "context";
     private static final String OUTPUT_KEY_INPUT = "input";
-    private static final String OUTPUT_KEY_OUTPUT = "output";
     private static final String KEY_INPUT_FILES = "inputFiles";
-    private static final String KEY_TEXT = "text";
     private static final String KEY_TYPE = "type";
     private static final String KEY_URL = "url";
 
@@ -112,33 +107,18 @@ public class ConversationLogGenerator {
                     conversationLog.getMessages().add(new ConversationPart(KEY_ROLE_USER, inputs));
                 }
 
-                var output = conversationOutput.get(OUTPUT_KEY_OUTPUT);
-                if (output instanceof List<?> outputList) {
-                    if (!outputList.isEmpty()) {
-                        var outputContentList = new LinkedList<Content>();
-                        var content = new Content();
-                        outputContentList.add(content);
-                        if (outputList.getFirst() instanceof Map) {
-                            @SuppressWarnings("unchecked")
-                            var mapList = (List<Map<String, Object>>) outputList;
-                            var joinedOutput = mapList.stream()
-                                    .map(item -> item.get(KEY_TEXT))
-                                    .filter(Objects::nonNull)
-                                    .map(Object::toString)
-                                    .collect(Collectors.joining(" "));
-                            content.setType(text);
-                            content.setValue(joinedOutput);
-                            conversationLog.getMessages().add(new ConversationPart(KEY_ROLE_ASSISTANT, outputContentList));
-
-                        } else if (outputList.getFirst() instanceof TextOutputItem) {
-                            @SuppressWarnings("unchecked")
-                            var textOutputList = (List<TextOutputItem>) outputList;
-                            var joinedOutput = textOutputList.stream().map(TextOutputItem::getText).collect(Collectors.joining(" "));
-                            content.setType(text);
-                            content.setValue(joinedOutput);
-                            conversationLog.getMessages().add(new ConversationPart(KEY_ROLE_ASSISTANT, outputContentList));
-                        }
-                    }
+                // Every item is inspected, whatever its type. Deciding the list's shape
+                // from element zero dropped the assistant turn entirely whenever the list
+                // began with a String — which is what a HITL-gated turn writes via
+                // addConversationOutputString, so approved turns went missing from the log.
+                var joinedOutput = ConversationOutputExtractor.extractText(conversationOutput, " ");
+                if (joinedOutput != null) {
+                    var content = new Content();
+                    content.setType(text);
+                    content.setValue(joinedOutput);
+                    var outputContentList = new LinkedList<Content>();
+                    outputContentList.add(content);
+                    conversationLog.getMessages().add(new ConversationPart(KEY_ROLE_ASSISTANT, outputContentList));
                 }
             }
 

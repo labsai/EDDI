@@ -15,6 +15,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import java.net.URLEncoder;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
@@ -105,6 +106,34 @@ class RequestRedactorTest {
             assertNull(redactor.redactHeaderValue("X-Custom", null));
             assertEquals("42", redactor.redactHeaderValue("X-Custom", 42));
         }
+
+        @Test
+        @DisplayName("Authentication is a credential header by NAME, not merely a secret-shaped value")
+        void anAuthenticationHeaderIsRedactedByNameAlone() {
+            // The exact-name lists the two detectors were reconciled against had no
+            // entry for "Authentication". Asserting on the exact marker is what
+            // separates the name rule from the value-shape fallback: the fallback
+            // leaves the scheme in place and yields "Bearer <REDACTED>", so a mere
+            // "does not contain the token" assertion would pass without the fix.
+            assertEquals(RequestRedactor.REDACTED, redactor.redactHeaderValue("Authentication", BEARER));
+            // A value with no recognisable shape at all isolates the name rule
+            // completely — nothing else in this class can catch "hunter2".
+            assertEquals(RequestRedactor.REDACTED, redactor.redactHeaderValue("Authentication", "hunter2"));
+        }
+
+        @Test
+        @DisplayName("a header whose name merely contains 'auth' stays readable")
+        void benignAuthSubstringHeadersAreNotRedacted() {
+            // contains("auth") was one of the two readings the detectors disagreed
+            // over, and over-redaction is its own failure: an approver who cannot
+            // read the request cannot meaningfully approve it.
+            assertEquals("jane-the-author", redactor.redactHeaderValue("Author", "jane-the-author"));
+            assertEquals("eu-west-1", redactor.redactHeaderValue("Authority", "eu-west-1"));
+            assertEquals("jane", redactor.redactHeaderValue("X-Authored-By", "jane"));
+            // In the same test, so the negatives above cannot pass by header
+            // redaction having been switched off wholesale.
+            assertEquals(RequestRedactor.REDACTED, redactor.redactHeaderValue("Authentication", "hunter2"));
+        }
     }
 
     @Nested
@@ -180,7 +209,7 @@ class RequestRedactorTest {
             // matches Bearer\s+. That produced a value redacted in queryParams and
             // plaintext one field away in uri.
             var map = new HashMap<String, Object>();
-            map.put(IRequest.KEY_URI, "https://x/y?auth=" + java.net.URLEncoder.encode(BEARER, java.nio.charset.StandardCharsets.UTF_8));
+            map.put(IRequest.KEY_URI, "https://x/y?auth=" + URLEncoder.encode(BEARER, java.nio.charset.StandardCharsets.UTF_8));
             redactor.redactRequestMap(map);
             String redacted = map.get(IRequest.KEY_URI).toString();
             assertFalse(redacted.contains("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), redacted);
@@ -189,7 +218,7 @@ class RequestRedactorTest {
         @Test
         void anEncodedVaultReferenceIsStillRedacted() {
             var map = new HashMap<String, Object>();
-            map.put(IRequest.KEY_URI, "https://x/y?k=" + java.net.URLEncoder.encode("${vault:billing}", java.nio.charset.StandardCharsets.UTF_8));
+            map.put(IRequest.KEY_URI, "https://x/y?k=" + URLEncoder.encode("${vault:billing}", java.nio.charset.StandardCharsets.UTF_8));
             redactor.redactRequestMap(map);
             assertFalse(map.get(IRequest.KEY_URI).toString().contains("billing"), map.get(IRequest.KEY_URI).toString());
         }

@@ -38,17 +38,12 @@
 
   📡 Access EDDI:
 
-    kubectl port-forward svc/{{ include "eddi.fullname" . }} 7070:7070 -n {{ .Release.Namespace }}
-    open http://localhost:7070
+    kubectl port-forward svc/{{ include "eddi.fullname" . }} {{ .Values.eddi.service.port }}:{{ .Values.eddi.service.port }} -n {{ .Release.Namespace }}
+    open http://localhost:{{ .Values.eddi.service.port }}
 
-{{- if .Values.manager.enabled }}
+  🖥️  The Manager UI is served by EDDI itself:
 
-  🖥️  Access Manager UI:
-
-    kubectl port-forward svc/{{ include "eddi.fullname" . }}-manager 7071:7071 -n {{ .Release.Namespace }}
-    open http://localhost:7071
-
-{{- end }}
+    open http://localhost:{{ .Values.eddi.service.port }}/manage
 
 {{- if .Values.keycloak.enabled }}
 
@@ -61,11 +56,23 @@
               echoed here, since install output lands in shell history, CI logs
               and terminal scrollback.
 
+  👤 Give the EDDI administrator a password — it ships without one:
+
+    The realm seeds `eddi` with the eddi-admin and eddi-editor roles and NO
+    credential, so nobody can log in to /manage until you set one. It used to
+    ship as eddi/eddi, which the Keycloak Service made a guessable EDDI
+    administrator for every pod in the cluster.
+
+      Keycloak admin console → Users → eddi → Credentials → Set password
+
+    Or grant those two realm roles to an account of your own. The unprivileged
+    fixtures (viewer/viewer, user/user) still log straight in.
+
 {{- end }}
 
   📊 Components:
-    Database:      {{ if .Values.mongodb.enabled }}MongoDB{{ else if .Values.postgres.enabled }}PostgreSQL{{ else }}None (external){{ end }}
-    Messaging:     {{ .Values.eddi.messagingType }}
+    Database:      {{ if .Values.mongodb.enabled }}MongoDB (in-chart){{ else if .Values.postgres.enabled }}PostgreSQL (in-chart){{ else if .Values.eddi.datastore.externalConnectionString }}MongoDB (external){{ else }}PostgreSQL (external){{ end }}
+    Messaging:     {{ include "eddi.messagingType" . }}
     Auth (OIDC):   {{ if .Values.eddi.oidc.enabled }}Enabled{{ else }}Disabled{{ end }}
     Replicas:      {{ .Values.eddi.replicas }} (fixed — EDDI is single-writer per
                    conversation; see eddi.replicas in values.yaml)

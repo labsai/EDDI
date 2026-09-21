@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
 
+import dev.langchain4j.agent.tool.Tool;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -83,7 +84,7 @@ class McpToolSchemaValidationTest {
         for (Class<?> toolClass : TOOL_CLASSES) {
             for (Method method : toolClass.getDeclaredMethods()) {
                 // Check methods with langchain4j @Tool annotation
-                if (!method.isAnnotationPresent(dev.langchain4j.agent.tool.Tool.class)) {
+                if (!method.isAnnotationPresent(Tool.class)) {
                     continue;
                 }
 

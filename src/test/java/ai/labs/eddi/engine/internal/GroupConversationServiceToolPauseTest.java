@@ -43,6 +43,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
+import io.micrometer.core.instrument.Counter;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -153,7 +154,7 @@ class GroupConversationServiceToolPauseTest {
     private double skippedCount() throws Exception {
         var field = GroupConversationService.class.getDeclaredField("counterGroupMemberPauseSkipped");
         field.setAccessible(true);
-        var counter = (io.micrometer.core.instrument.Counter) field.get(service);
+        var counter = (Counter) field.get(service);
         return counter.count();
     }
 

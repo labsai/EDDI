@@ -14,6 +14,15 @@ public class Context {
 
     private ContextType type;
     private Object value;
+    /**
+     * Set by the client for a value that must never be persisted or returned — a
+     * per-request credential such as the caller's token for a downstream API. It is
+     * usable in templates and behavior rules for the turn it arrives with, and
+     * replaced by {@code MemoryKeys.SECRET_CONTEXT_PLACEHOLDER} before the step is
+     * stored, returned or audited. {@code null} (not sent) means not secret; kept
+     * nullable so ordinary context entries serialize unchanged.
+     */
+    private Boolean secret;
 
     public Context() {
     }
@@ -37,5 +46,13 @@ public class Context {
 
     public void setValue(Object value) {
         this.value = value;
+    }
+
+    public Boolean getSecret() {
+        return secret;
+    }
+
+    public void setSecret(Boolean secret) {
+        this.secret = secret;
     }
 }

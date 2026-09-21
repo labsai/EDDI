@@ -8,7 +8,6 @@ import ai.labs.eddi.datastore.IResourceStore;
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
-import org.jboss.resteasy.reactive.server.jaxrs.ResponseBuilderImpl;
 
 import java.net.URI;
 import java.util.HashMap;
@@ -20,17 +19,23 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * @author ginccc
  */
 public class RestUtilities {
+    private static final String EDDI_SCHEME = "eddi://";
+
     private static final String versionQueryParam = "?version=";
 
     public static WebApplicationException createConflictException(String containerUri, IResourceStore.IResourceId currentId) {
         URI resourceUri = RestUtilities.createURI(containerUri, currentId.getId(), versionQueryParam, currentId.getVersion());
 
-        Response.ResponseBuilder builder = new ResponseBuilderImpl();
-        builder.status(Response.Status.CONFLICT);
-        builder.entity(resourceUri.toString());
-        builder.type(MediaType.TEXT_PLAIN);
+        // Response.status(...) is the portable JAX-RS API. This built the response by
+        // instantiating RESTEasy Reactive's internal ResponseBuilderImpl directly,
+        // which couples a general-purpose utility to a non-API package that a
+        // framework upgrade is free to move or rename.
+        Response response = Response.status(Response.Status.CONFLICT)
+                .entity(resourceUri.toString())
+                .type(MediaType.TEXT_PLAIN)
+                .build();
 
-        return new WebApplicationException(builder.build());
+        return new WebApplicationException(response);
     }
 
     public static URI createURI(Object... uriParts) {
@@ -150,6 +155,40 @@ public class RestUtilities {
         }
 
         return true;
+    }
+
+    /**
+     * The descriptor {@code type} that matches the resources a store emits, derived
+     * from that store's own {@code resourceURI} constant.
+     * <p>
+     * {@link ai.labs.eddi.datastore.serialization.IDescriptorStore#readDescriptors}
+     * filters descriptors by regex-matching the stored resource URI against
+     * {@code "eddi://" + type + ".*"}, so {@code type} must be the URI's namespace
+     * segment and nothing else. Hard-coding it at each call site is what let three
+     * stores (rules, apicalls, dictionary) ship a legacy name —
+     * {@code ai.labs.behavior} against {@code eddi://ai.labs.rules/…} — which can
+     * never match, so their listings always returned an empty list while the
+     * resources existed and read back fine individually. Derive it here instead of
+     * restating it.
+     *
+     * @param resourceURI
+     *            a store's resource URI, e.g.
+     *            {@code eddi://ai.labs.rules/rulestore/rulesets/}
+     * @return the namespace segment, e.g. {@code ai.labs.rules}
+     */
+    public static String extractDescriptorType(String resourceURI) {
+        RuntimeUtilities.checkNotNull(resourceURI, "resourceURI");
+
+        String remainder = resourceURI.startsWith(EDDI_SCHEME)
+                ? resourceURI.substring(EDDI_SCHEME.length())
+                : resourceURI;
+        int pathStart = remainder.indexOf('/');
+        String type = pathStart < 0 ? remainder : remainder.substring(0, pathStart);
+        if (type.isBlank()) {
+            throw new IllegalArgumentException(
+                    "resourceURI '" + resourceURI + "' carries no namespace segment to derive a descriptor type from.");
+        }
+        return type;
     }
 
     /**

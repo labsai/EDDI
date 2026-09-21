@@ -12,6 +12,7 @@ import io.restassured.response.Response;
 import org.junit.jupiter.api.*;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.*;
+import static io.restassured.RestAssured.given;
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.options;
 import static org.hamcrest.Matchers.*;
 
@@ -92,6 +93,69 @@ public class LlmAgentEngineIT extends BaseIntegrationIT {
                 "finish_reason": "stop"
               }],
               "usage": {"prompt_tokens": 80, "completion_tokens": 10, "total_tokens": 90}
+            }
+            """;
+
+    private static final String RERUN_FIRST_RESPONSE = """
+            {
+              "id": "chatcmpl-rerun-1",
+              "object": "chat.completion",
+              "choices": [{
+                "index": 0,
+                "message": {"role": "assistant", "content": "ALPHA."},
+                "finish_reason": "stop"
+              }],
+              "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}
+            }
+            """;
+
+    private static final String RERUN_SECOND_RESPONSE = """
+            {
+              "id": "chatcmpl-rerun-2",
+              "object": "chat.completion",
+              "choices": [{
+                "index": 0,
+                "message": {"role": "assistant", "content": "BRAVO."},
+                "finish_reason": "stop"
+              }],
+              "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}
+            }
+            """;
+
+    private static final String MEMORY_TOOL_CALL_RESPONSE = """
+            {
+              "id": "chatcmpl-mem-tool",
+              "object": "chat.completion",
+              "choices": [{
+                "index": 0,
+                "message": {
+                  "role": "assistant",
+                  "content": null,
+                  "tool_calls": [{
+                    "id": "call_mem1",
+                    "type": "function",
+                    "function": {
+                      "name": "rememberFact",
+                      "arguments": "{\\"key\\":\\"favorite_color\\",\\"value\\":\\"blue\\",\\"category\\":\\"preference\\",\\"visibility\\":\\"self\\"}"
+                    }
+                  }]
+                },
+                "finish_reason": "tool_calls"
+              }],
+              "usage": {"prompt_tokens": 40, "completion_tokens": 20, "total_tokens": 60}
+            }
+            """;
+
+    private static final String MEMORY_FINAL_RESPONSE = """
+            {
+              "id": "chatcmpl-mem-final",
+              "object": "chat.completion",
+              "choices": [{
+                "index": 0,
+                "message": {"role": "assistant", "content": "Noted — your favorite color is blue."},
+                "finish_reason": "stop"
+              }],
+              "usage": {"prompt_tokens": 70, "completion_tokens": 10, "total_tokens": 80}
             }
             """;
 
@@ -192,6 +256,226 @@ public class LlmAgentEngineIT extends BaseIntegrationIT {
 
         // Verify WireMock received exactly 2 requests (tool call + final)
         wireMock.verify(2, postRequestedFor(urlPathEqualTo("/v1/chat/completions")));
+    }
+
+    // ==================== Test 3: D11 — rerun re-executes the model
+    // ====================
+
+    /**
+     * The D11 acceptance criterion, end to end with a real (stubbed) model. A rerun
+     * used to restart the pipeline at the output task, so the model never
+     * re-executed: the answer was cleared and never regenerated, and the API
+     * returned 200 for its own destruction. Two DISTINCT scripted responses prove
+     * re-execution — a cached or surviving answer would still read ALPHA.
+     * <p>
+     * The rerun call deliberately sends no {@code ?language=}, pinning live that
+     * the previously undocumented mandatory parameter is now optional.
+     */
+    @Test
+    @Order(3)
+    @DisplayName("rerun re-executes the LLM and replaces the answer")
+    void testRerunReExecutesTheModel() throws Exception {
+        wireMock.resetAll();
+        wireMock.stubFor(post(urlPathEqualTo("/v1/chat/completions"))
+                .inScenario("Rerun")
+                .whenScenarioStateIs(Scenario.STARTED)
+                .willReturn(okJson(RERUN_FIRST_RESPONSE).withHeader("Content-Type", "application/json"))
+                .willSetStateTo("FirstAnswered"));
+        wireMock.stubFor(post(urlPathEqualTo("/v1/chat/completions"))
+                .inScenario("Rerun")
+                .whenScenarioStateIs("FirstAnswered")
+                .willReturn(okJson(RERUN_SECOND_RESPONSE).withHeader("Content-Type", "application/json")));
+
+        ResourceId conversationId = createConversation(legacyAgentId.id(), TEST_USER_ID);
+        waitForConversationReady(legacyAgentId.id(), conversationId.id());
+
+        String firstBody = sendUserInput(legacyAgentId.id(), conversationId.id(), "ask", false, false)
+                .then().statusCode(200).extract().asString();
+        Assertions.assertTrue(firstBody.contains("ALPHA."),
+                "precondition: the first turn carries the first scripted answer");
+
+        String rerunBody = given()
+                .post("agents/" + conversationId.id() + "/rerun?returnDetailed=false&returnCurrentStepOnly=false")
+                .then().statusCode(200).extract().asString();
+
+        Assertions.assertTrue(rerunBody.contains("BRAVO."),
+                "the model must have re-executed — this is the answer only the second call produces");
+        Assertions.assertFalse(rerunBody.contains("ALPHA."),
+                "the cleared answer must be replaced, not left beside the new one");
+        wireMock.verify(2, postRequestedFor(urlPathEqualTo("/v1/chat/completions")));
+    }
+
+    // ==================== Test 4: D10 — the agent writes a memory
+    // ====================
+
+    /**
+     * The D10 acceptance criterion, end to end with a real (stubbed) model: an
+     * agent with {@code enableMemoryTools: true} — and deliberately NO
+     * {@code userMemoryConfig}, pinning the defaults fallback — receives a scripted
+     * {@code rememberFact} tool call, and the memory must actually land in the
+     * store. Before the fix this failed silently at the third leg of the
+     * conjunction: {@code userMemoryConfig} was assigned only in {@code init()} and
+     * never persisted, so on every say-turn the tool was absent and the live model
+     * confabulated saves it never made.
+     */
+    @Test
+    @Order(4)
+    @DisplayName("an agent with memory enabled writes a memory the store can read back")
+    void testAgentWritesUserMemory() throws Exception {
+        wireMock.resetAll();
+        wireMock.stubFor(post(urlPathEqualTo("/v1/chat/completions"))
+                .inScenario("MemoryWrite")
+                .whenScenarioStateIs(Scenario.STARTED)
+                .willReturn(okJson(MEMORY_TOOL_CALL_RESPONSE).withHeader("Content-Type", "application/json"))
+                .willSetStateTo("Remembered"));
+        wireMock.stubFor(post(urlPathEqualTo("/v1/chat/completions"))
+                .inScenario("MemoryWrite")
+                .whenScenarioStateIs("Remembered")
+                .willReturn(okJson(MEMORY_FINAL_RESPONSE).withHeader("Content-Type", "application/json")));
+
+        ResourceId memoryAgentId = setupMemoryLlmAgent();
+        String memoryUserId = "memoryWriteUser";
+        try {
+            ResourceId conversationId = createConversation(memoryAgentId.id(), memoryUserId);
+            waitForConversationReady(memoryAgentId.id(), conversationId.id());
+
+            String sayBody = sendUserInput(memoryAgentId.id(), conversationId.id(), "remember", false, false)
+                    .then().statusCode(200).extract().asString();
+
+            // Discriminators, most-specific first, each carrying the evidence a CI-only
+            // failure needs: two upstream calls prove the tool-call loop executed the
+            // tool and went back for the final answer; the final scripted text proves
+            // the loop completed into output; only then is the store consulted.
+            wireMock.verify(2, postRequestedFor(urlPathEqualTo("/v1/chat/completions")));
+            Assertions.assertTrue(sayBody.contains("Noted"),
+                    "the final scripted answer must reach the turn's output; say body was: " + sayBody);
+
+            // The second upstream request carries the tool's OWN return message back
+            // to the model — the one place the tool says in its own words whether it
+            // wrote, refused, or errored. rememberFact returns "✅ Remembered: …" on
+            // success and a named refusal on every guardrail path, so this assertion
+            // either passes or puts the exact cause verbatim into the CI log.
+            var upstreamRequests = wireMock.getAllServeEvents();
+            String toolResultRequest = upstreamRequests.get(0).getRequest().getBodyAsString();
+            Assertions.assertTrue(toolResultRequest.contains("Remembered"),
+                    "the tool result sent back upstream was: " + toolResultRequest);
+
+            String memories = given().get("/usermemorystore/memories/" + memoryUserId)
+                    .then().statusCode(200).extract().asString();
+            Assertions.assertTrue(memories.contains("favorite_color"),
+                    "the rememberFact write must land in the store for user '" + memoryUserId
+                            + "'; store returned: " + memories);
+        } finally {
+            undeployAgentQuietly(memoryAgentId.id(), memoryAgentId.version());
+        }
+    }
+
+    /**
+     * An LLM agent with the memory tool enabled the way an agent designer would:
+     * {@code enableMemoryTools: true} on the AGENT, {@code enableBuiltInTools} on
+     * the task, and no {@code userMemoryConfig} — the defaults must carry it.
+     */
+    private ResourceId setupMemoryLlmAgent() throws Exception {
+        String dictionary = """
+                {
+                  "words": [
+                    {"word": "remember", "expressions": "do_remember(remember)", "frequency": 0}
+                  ],
+                  "phrases": []
+                }
+                """;
+        String rules = """
+                {
+                  "behaviorGroups": [{
+                    "name": "MemoryGroup",
+                    "behaviorRules": [
+                      {
+                        "name": "Welcome",
+                        "actions": ["welcome"],
+                        "conditions": [{
+                          "type": "occurrence",
+                          "configs": {"maxTimesOccurred": "0", "behaviorRuleName": "Welcome"}
+                        }]
+                      },
+                      {
+                        "name": "DoRemember",
+                        "actions": ["call_memory_llm"],
+                        "conditions": [{
+                          "type": "inputmatcher",
+                          "configs": {"expressions": "do_remember(*)", "occurrence": "currentStep"}
+                        }]
+                      }
+                    ]
+                  }]
+                }
+                """;
+        String output = """
+                {
+                  "outputSet": [{
+                    "action": "welcome",
+                    "timesOccurred": 0,
+                    "outputs": [{"valueAlternatives": [{"type": "text", "text": "Welcome to memory test"}]}]
+                  }]
+                }
+                """;
+        String llmConfig = String.format("""
+                {
+                  "tasks": [{
+                    "id": "test-memory",
+                    "type": "openai",
+                    "actions": ["call_memory_llm"],
+                    "parameters": {
+                      "baseUrl": "http://localhost:%d/v1",
+                      "apiKey": "sk-test-fake-key",
+                      "modelName": "gpt-4o-test",
+                      "systemMessage": "You remember things about the user.",
+                      "addToOutput": "true",
+                      "timeout": "30000"
+                    },
+                    "enableBuiltInTools": true,
+                    "builtInToolsWhitelist": ["usermemory"],
+                    "enableHttpCallTools": false,
+                    "enableMcpCallTools": false,
+                    "conversationHistoryLimit": 5,
+                    "maxToolIterations": 3
+                  }]
+                }
+                """, wireMock.port());
+
+        String locationDictionary = createResource(dictionary, "/dictionarystore/dictionaries");
+        String locationRules = createResource(rules, "/rulestore/rulesets");
+        String locationOutput = createResource(output, "/outputstore/outputsets");
+        String locationLlm = createResource(llmConfig, "/llmstore/llms");
+
+        String workflowBody = String.format("""
+                {
+                  "workflowSteps": [
+                    {
+                      "type": "eddi://ai.labs.parser",
+                      "config": {},
+                      "extensions": {
+                        "dictionaries": [
+                          {"type": "eddi://ai.labs.parser.dictionaries.regular", "config": {"uri": "%s"}}
+                        ],
+                        "corrections": []
+                      }
+                    },
+                    {"type": "eddi://ai.labs.rules", "config": {"uri": "%s"}},
+                    {"type": "eddi://ai.labs.llm", "config": {"uri": "%s"}},
+                    {"type": "eddi://ai.labs.output", "config": {"uri": "%s"}},
+                    {"type": "eddi://ai.labs.templating", "config": {}},
+                    {"type": "eddi://ai.labs.property", "config": {}}
+                  ]
+                }
+                """, locationDictionary, locationRules, locationLlm, locationOutput);
+        String locationWorkflow = createResource(workflowBody, "/workflowstore/workflows");
+
+        // enableMemoryTools on the AGENT; no userMemoryConfig — defaults carry it.
+        String agentBody = String.format("""
+                {"packages": ["%s"], "enableMemoryTools": true}""", locationWorkflow);
+        ResourceId agentId = extractResourceId(createResource(agentBody, "/agentstore/agents"));
+        deployAgent(agentId.id(), agentId.version());
+        return agentId;
     }
 
     // ==================== Agent Setup Helpers ====================

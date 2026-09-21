@@ -323,26 +323,50 @@ class MongoScheduleStoreTest extends MongoTestBase {
         @Test
         @DisplayName("logFire + readFireLogs")
         void logAndRead() throws Exception {
-            var log = new ScheduleFireLog("fire-1", "sched-1", "fire-key-1",
+            // The log is written only while its schedule exists — see
+            // IScheduleStore#logFire — so the schedule has to be created first.
+            String scheduleId = store.createSchedule(newSchedule("Logged", "agent-1"));
+            var log = new ScheduleFireLog("fire-1", scheduleId, "fire-key-1",
                     Instant.now(), Instant.now(), Instant.now(),
                     "COMPLETED", "node-1", "conv-1", null, 1, 0.0);
             store.logFire(log);
 
-            List<ScheduleFireLog> logs = store.readFireLogs("sched-1", 10);
+            List<ScheduleFireLog> logs = store.readFireLogs(scheduleId, 10);
             assertEquals(1, logs.size());
             assertEquals("fire-1", logs.getFirst().id());
+        }
+
+        /**
+         * The other half of the same guard: a fire that commits its log after its
+         * schedule has been erased must leave nothing behind — the log carries a
+         * conversationId and is findable only by its scheduleId, so an orphan is
+         * personal data no erasure path can reach again.
+         */
+        @Test
+        @DisplayName("logFire — writes nothing once the schedule is gone")
+        void logFireAfterScheduleDeleted() throws Exception {
+            String scheduleId = store.createSchedule(newSchedule("Erased", "agent-1"));
+            store.deleteSchedule(scheduleId);
+
+            store.logFire(new ScheduleFireLog("fire-late", scheduleId, "fire-key-late",
+                    Instant.now(), Instant.now(), Instant.now(),
+                    "COMPLETED", "node-1", "conv-erased", null, 1, 0.0));
+
+            assertTrue(store.readFireLogs(scheduleId, 10).isEmpty(),
+                    "a fire log must not outlive the schedule it belongs to");
         }
 
         @Test
         @DisplayName("readFailedFireLogs — filters FAILED + DEAD_LETTERED")
         void readFailed() throws Exception {
-            store.logFire(new ScheduleFireLog("f1", "s1", "fk1",
+            String scheduleId = store.createSchedule(newSchedule("Failing", "agent-1"));
+            store.logFire(new ScheduleFireLog("f1", scheduleId, "fk1",
                     Instant.now(), Instant.now(), Instant.now(),
                     "COMPLETED", "n1", "c1", null, 1, 0.0));
-            store.logFire(new ScheduleFireLog("f2", "s1", "fk2",
+            store.logFire(new ScheduleFireLog("f2", scheduleId, "fk2",
                     Instant.now(), Instant.now(), Instant.now(),
                     "FAILED", "n1", "c2", "error msg", 1, 0.0));
-            store.logFire(new ScheduleFireLog("f3", "s1", "fk3",
+            store.logFire(new ScheduleFireLog("f3", scheduleId, "fk3",
                     Instant.now(), Instant.now(), Instant.now(),
                     "DEAD_LETTERED", "n1", "c3", "max retries", 3, 0.0));
 

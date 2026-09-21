@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.properties.mongo;
 
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
+import ai.labs.eddi.configs.properties.MemorySearchTerms;
 import ai.labs.eddi.configs.properties.model.Properties;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
@@ -28,6 +29,7 @@ import org.jboss.logging.Logger;
 import java.time.Instant;
 import java.util.*;
 import java.util.regex.Pattern;
+import ai.labs.eddi.engine.audit.AuditHmac;
 
 import static com.mongodb.client.model.Filters.*;
 import static com.mongodb.client.model.Sorts.descending;
@@ -325,8 +327,16 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
             return getAllEntries(userId);
         }
 
-        Pattern pattern = Pattern.compile(Pattern.quote(query), Pattern.CASE_INSENSITIVE);
-        Bson filter = and(eq(FIELD_USER_ID, userId), or(Filters.regex(FIELD_KEY, pattern), Filters.regex(FIELD_VALUE, pattern)));
+        // Every term must appear in the key or the value — see MemorySearchTerms.
+        List<String> terms = MemorySearchTerms.tokenize(query);
+        if (terms.isEmpty()) {
+            return new ArrayList<>();
+        }
+        List<Bson> termFilters = terms.stream().map(term -> {
+            Pattern pattern = Pattern.compile(Pattern.quote(term), Pattern.CASE_INSENSITIVE);
+            return or(Filters.regex(FIELD_KEY, pattern), Filters.regex(FIELD_VALUE, pattern));
+        }).toList();
+        Bson filter = and(eq(FIELD_USER_ID, userId), and(termFilters));
 
         List<UserMemoryEntry> entries = new ArrayList<>();
         for (Document doc : memoriesCollection.find(filter).sort(descending(FIELD_UPDATED_AT))) {
@@ -371,7 +381,11 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
     public void deleteAllForUser(String userId) throws IResourceStore.ResourceStoreException {
         RuntimeUtilities.checkNotNull(userId, FIELD_USER_ID);
         DeleteResult result = memoriesCollection.deleteMany(eq(FIELD_USER_ID, userId));
-        LOGGER.infof("[MEMORY] GDPR delete-all for user '%s': %d entries removed", userId, result.getDeletedCount());
+        // The pseudonym, not the identifier - see PostgresUserMemoryStore for the
+        // reasoning. Both stores must agree, or an operator reading one log and not
+        // the other draws a different conclusion about what was erased.
+        LOGGER.infof("[MEMORY] GDPR delete-all for user '%s': %d entries removed",
+                AuditHmac.pseudonymFor(userId), result.getDeletedCount());
     }
 
     @Override

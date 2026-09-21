@@ -1,0 +1,341 @@
+/**
+ * The one definition of what a secret *reference* looks like.
+ *
+ * A reference is a pointer EDDI resolves at use time — `${vault:jira-token}`,
+ * `${vars:tenant-key}` — as opposed to the secret itself. Three places need to
+ * agree about the grammar, and before this module existed they did not:
+ *
+ *  - `connection-validation.ts` decides whether a document will be accepted;
+ *  - `secret-key-picker.tsx` decides whether to render a chip or a text box,
+ *    and canonicalises what the user typed;
+ *  - `header-value-field.tsx` decides whether a template can be shown as two
+ *    guided fields.
+ *
+ * Each spelled the scheme list out for itself, and the picker's copy was missing
+ * `vars` — so a `${vars:…}` reference the backend accepts was refused by the one
+ * component whose job is to help you write one. A fourth scheme would have had
+ * to be added in three files with nothing tying them together.
+ *
+ * ## Two levels of strictness, deliberately
+ *
+ * `isSecretReference` is what the **backend** accepts: anchored, braced, exactly
+ * one reference and nothing else. `hasReferencePrefix` is what a **person
+ * typing** looks like: it also admits the unbraced legacy spellings and
+ * half-finished input, so the UI can recognise intent before the value is
+ * valid. Conflating them is how a field either rejects legal documents or
+ * promises that an invalid one will save.
+ *
+ * ## What is deliberately NOT here
+ *
+ * `src/lib/operator/vault-ref.ts` keeps its own parser. It answers a different
+ * question — "what key *name* should the operator config store?" — deliberately
+ * tolerates sloppy input, and returns null for anything else. It is also under
+ * the mutation-testing gate. Merging the two would trade a clear, separately
+ * guaranteed contract for one shared regex serving two different callers.
+ */
+
+import { CONNECTION_NAME_SOURCE, isValidConnectionName } from "./connection-name";
+
+/**
+ * Schemes EDDI resolves. `eddivault` is the legacy spelling of `vault`; both
+ * are accepted by the backend's own pattern, so both are accepted here.
+ */
+export const REFERENCE_SCHEMES = ["vault", "eddivault", "vars"] as const;
+export type ReferenceScheme = (typeof REFERENCE_SCHEMES)[number];
+
+const SCHEME_ALTERNATION = REFERENCE_SCHEMES.join("|");
+
+/**
+ * A value that is exactly one braced reference.
+ *
+ * Anchored, mirroring the backend's `REFERENCE_ONLY.matcher(value).matches()`:
+ * a value that merely *contains* a reference is not one, or
+ * `sk-live-x${vault:unused}` would pass while carrying a literal key. The
+ * `{1,256}` body bound is the backend's too.
+ */
+const CANONICAL = new RegExp(`^\\$\\{(${SCHEME_ALTERNATION}):([^}]{1,256})\\}$`);
+
+/**
+ * The unbraced spellings a person pastes or half-remembers — `vault:key`.
+ *
+ * The backend refuses these, so they exist here only to be recognised and
+ * corrected, never to be stored.
+ *
+ * The body excludes `}` for the same reason the canonical pattern does: with
+ * `.` there, `vault:key}` parsed as a body of `key}` and canonicalised to
+ * `${vault:key}}` — a value this module's own `isSecretReference` rejects, so
+ * the correction produced something no less broken than the input.
+ */
+const UNBRACED = new RegExp(`^(${SCHEME_ALTERNATION}):([^}]{1,256})$`, "i");
+
+/**
+ * The connection scheme — a pointer to a *connection document*, never to a
+ * secret.
+ *
+ * Deliberately not in {@link REFERENCE_SCHEMES}. `isSecretReference` is what
+ * the backend accepts in `clientSecret` and `passwordRef`, and a
+ * `${connection:…}` there is refused — so widening that list would have the
+ * one component meant to help write a reference-only field accept a value the
+ * save then rejects. The picker recognises the scheme for *rendering*
+ * (unmasked, with no offer to store it in the vault, which would vault the
+ * literal string), and the editors whose fields may carry one wire it in.
+ *
+ * Only the braced spelling exists. The backend has no unbraced `connection:x`
+ * to canonicalise towards, so recognising one here would render a chip for a
+ * value that never resolves.
+ *
+ * The name inside the braces follows the backend's connection-name grammar,
+ * shared with `connection-validation.ts` through `connection-name.ts`. A body
+ * of "anything but a brace, up to 256" made `${connection:bad name}` look
+ * valid — a chip, no warning — for a name no connection can ever be saved under.
+ */
+export const CONNECTION_SCHEME = "connection";
+const CONNECTION_PREFIX = `\${${CONNECTION_SCHEME}:`;
+const CONNECTION_CANONICAL = new RegExp(
+  `^\\$\\{${CONNECTION_SCHEME}:(${CONNECTION_NAME_SOURCE})\\}$`,
+);
+const CONNECTION_ANYWHERE = new RegExp(`\\$\\{${CONNECTION_SCHEME}:`);
+
+/**
+ * Anything heading *towards* a reference, including input that is not one yet.
+ *
+ * Prefix-based on purpose: `${vault:` is not a valid reference but is
+ * unmistakably someone typing one, and a field that flips to "plaintext secret"
+ * halfway through the word is worse than one that waits.
+ */
+const PREFIXES = [
+  ...REFERENCE_SCHEMES.flatMap((scheme) => [`${scheme}:`, `\${${scheme}:`]),
+  CONNECTION_PREFIX,
+];
+
+/** Whether `value` is exactly one `${connection:name}` — the only shape the backend resolves. */
+export function isConnectionReference(value: string | null | undefined): boolean {
+  return typeof value === "string" && CONNECTION_CANONICAL.test(value.trim());
+}
+
+/** The connection a canonical reference names, or null if it is not one. */
+export function parseConnectionReference(
+  value: string | null | undefined,
+): { name: string } | null {
+  if (typeof value !== "string") return null;
+  const match = CONNECTION_CANONICAL.exec(value.trim());
+  return match ? { name: match[1]! } : null;
+}
+
+/**
+ * Build a `${connection:name}` reference, or null when the name is not one the
+ * backend's grammar admits — so this can never produce a value
+ * {@link isConnectionReference} rejects.
+ */
+export function toConnectionReference(name: string): string | null {
+  return isValidConnectionName(name) ? `${CONNECTION_PREFIX}${name}}` : null;
+}
+
+/** Whether a `${connection:` appears anywhere in the value — the placement check. */
+export function containsConnectionReference(value: string | null | undefined): boolean {
+  return typeof value === "string" && CONNECTION_ANYWHERE.test(value);
+}
+
+/**
+ * Whether the value carries a connection reference with text around it —
+ * `Bearer ${connection:jira}`, or two references.
+ *
+ * The backend refuses this shape: a connection supplies the *whole* header
+ * value, scheme included, so anything wrapped around the reference is either
+ * doubled or silently dropped. The scheme belongs in the connection's own
+ * `valueTemplate`, where one connection's answer is the same on every path.
+ */
+export function wrapsConnectionReference(value: string | null | undefined): boolean {
+  return containsConnectionReference(value) && !isConnectionReference(value);
+}
+
+/** Whether `value` starts as a connection reference, finished or not. */
+export function hasConnectionPrefix(value: string | null | undefined): boolean {
+  return typeof value === "string" && value.trim().startsWith(CONNECTION_PREFIX);
+}
+
+/**
+ * Every interpolated `${…}` segment in a template, in order.
+ *
+ * A function rather than an exported global regex: a `/g` pattern carries
+ * mutable `lastIndex`, so sharing one across modules means one caller's `.test()`
+ * silently changes where another caller's next scan starts. Handing back an
+ * array costs nothing here and removes the whole class of bug.
+ */
+export function interpolatedSegments(value: string): string[] {
+  return [...value.matchAll(/\$\{[^}]{0,256}\}/g)].map((match) => match[0]);
+}
+
+export interface ParsedReference {
+  scheme: ReferenceScheme;
+  /** What follows the colon — a vault key, or a variable name. */
+  body: string;
+}
+
+/** Whether `value` is exactly one braced reference — the backend's rule. */
+export function isSecretReference(value: string | null | undefined): boolean {
+  return typeof value === "string" && CANONICAL.test(value.trim());
+}
+
+/** The scheme and body of a braced reference, or null if it is not one. */
+export function parseSecretReference(
+  value: string | null | undefined,
+): ParsedReference | null {
+  if (typeof value !== "string") return null;
+  const match = CANONICAL.exec(value.trim());
+  if (!match) return null;
+  return { scheme: match[1] as ReferenceScheme, body: match[2]! };
+}
+
+/**
+ * Whether the value looks like somebody meant a reference — braced or not,
+ * finished or not. Use for "should this render as a reference?", never for
+ * "will the backend accept this?".
+ */
+export function hasReferencePrefix(value: string | null | undefined): boolean {
+  if (typeof value !== "string") return false;
+  const trimmed = value.trim().toLowerCase();
+  return PREFIXES.some((prefix) => trimmed.startsWith(prefix));
+}
+
+/** Build a braced reference. */
+export function toReference(scheme: ReferenceScheme, body: string): string {
+  return `\${${scheme}:${body}}`;
+}
+
+/** Build a `${vault:…}` reference — the common case. */
+export function toVaultReference(keyName: string): string {
+  return toReference("vault", keyName);
+}
+
+/**
+ * Put an unbraced reference into the braced form, preserving its scheme.
+ *
+ * Returns null when there is nothing to do — the value is already canonical,
+ * is not reference-shaped, or is still being typed (an unclosed `${vault:`).
+ * Rewriting a half-typed value is what turns `${vault:` into `${vault:}` and
+ * strands the rest of the word past the closing brace, so an unclosed braced
+ * value is deliberately left alone.
+ *
+ * The scheme is carried across rather than normalised to `vault`: `eddivault`
+ * and `vars` resolve differently, and silently rewriting one into another would
+ * change which secret a connection reads.
+ */
+export function canonicalizeReference(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed || CANONICAL.test(trimmed)) return null;
+  if (trimmed.startsWith("${")) return null;
+
+  const match = UNBRACED.exec(trimmed);
+  if (!match) return null;
+  return toReference(match[1]!.toLowerCase() as ReferenceScheme, match[2]!.trim());
+}
+
+/**
+ * What to show for a reference.
+ *
+ * A vault key renders bare, as it always has. `${vars:…}` keeps its scheme,
+ * because "which global variable" is the whole content of the value and
+ * dropping the prefix would make it indistinguishable from a vault key that
+ * does not exist.
+ */
+export function referenceLabel(value: string): string {
+  const parsed = parseSecretReference(value);
+  if (parsed) {
+    return parsed.scheme === "vars" ? `vars:${parsed.body}` : parsed.body;
+  }
+  // A connection keeps its scheme for the same reason `vars` does: the chip
+  // must not read as a vault key that happens not to exist.
+  const connection = parseConnectionReference(value);
+  if (connection) return `${CONNECTION_SCHEME}:${connection.name}`;
+  // Not canonical — an unbraced or half-typed value. Show whatever follows the
+  // scheme so the chip is still readable while it is being corrected.
+  const trimmed = value.trim();
+  const unbraced = UNBRACED.exec(trimmed);
+  if (unbraced) {
+    return unbraced[1]!.toLowerCase() === "vars"
+      ? `vars:${unbraced[2]}`
+      : unbraced[2]!;
+  }
+  const opened = trimmed.replace(/^\$\{/, "").replace(/\}$/, "");
+  const colon = opened.indexOf(":");
+  return colon >= 0 ? opened.slice(colon + 1) : opened;
+}
+
+/**
+ * Schemes EDDI accepts where a config field may name a credential *source*
+ * rather than hold one — today, OpenAPI discovery's `authHeaderRef`.
+ *
+ * `caller` is here and deliberately absent from {@link REFERENCE_SCHEMES}.
+ * `${caller:token}` is not a stored secret: it resolves to the identity of
+ * whoever is making the request, so it has no vault key to look up, nothing for
+ * `secret-key-picker` to offer and nothing for `connection-validation` to check
+ * against the key list. Widening the shared list would have made every one of
+ * those surfaces offer a pointer to a secret that does not exist.
+ */
+const AUTH_REFERENCE_PREFIXES = [
+  "${vault:",
+  "${eddivault:",
+  "${vars:",
+  "${caller:",
+] as const;
+
+/** Human-readable list of the accepted forms, for a validation message. */
+export const AUTH_REFERENCE_EXAMPLES = "${vault:…}, ${vars:…} or ${caller:…}";
+
+/**
+ * Whether a value is acceptable where EDDI wants a credential reference.
+ *
+ * Prefix-based rather than anchored, mirroring EDDI's own
+ * `ALLOWED_AUTH_REFERENCE_PREFIXES.stream().anyMatch(value::startsWith)`. The
+ * difference from {@link isSecretReference} is load-bearing in one direction
+ * that surprises people: the reference must come FIRST, so `${vault:key}` is
+ * accepted and `Bearer ${vault:key}` is not. The referenced secret therefore has
+ * to hold the complete header value, `Bearer ` included — which is why the field
+ * using this says so.
+ */
+export function isAuthReference(value: string | null | undefined): boolean {
+  if (typeof value !== "string") return false;
+  const trimmed = value.trim();
+  return AUTH_REFERENCE_PREFIXES.some((prefix) => trimmed.startsWith(prefix));
+}
+
+/**
+ * Whether a reference points into the vault, as opposed to the variable store.
+ *
+ * The picker checks a vault key against the key list it can see; a `${vars:…}`
+ * reference resolves somewhere it cannot, so checking it there would flag every
+ * one of them as missing.
+ */
+export function isVaultScheme(value: string): boolean {
+  const parsed = parseSecretReference(value);
+  if (parsed) return parsed.scheme !== "vars";
+  // A connection resolves against the connection store, not the vault.
+  if (hasConnectionPrefix(value)) return false;
+  const unbraced = UNBRACED.exec(value.trim());
+  return unbraced ? unbraced[1]!.toLowerCase() !== "vars" : true;
+}
+
+/**
+ * Split a template into its literal prefix and its single trailing reference.
+ *
+ * `"Bearer ${vault:jira-token}"` → `{ prefix: "Bearer ", reference: "${vault:jira-token}" }`.
+ * Returns null for anything else — two references, a reference in the middle,
+ * or a bare literal — which are all legal templates that simply cannot be shown
+ * as two fields.
+ */
+export function splitTemplate(
+  value: string,
+): { prefix: string; reference: string } | null {
+  const trimmed = value.trim();
+  const braceAt = trimmed.indexOf("${");
+  if (braceAt < 0) return null;
+
+  const prefix = trimmed.slice(0, braceAt);
+  const reference = trimmed.slice(braceAt);
+  // A `$` in the literal half would round-trip into a different string, and a
+  // second reference means the tail is not one reference.
+  if (prefix.includes("$")) return null;
+  if (!CANONICAL.test(reference)) return null;
+  return { prefix, reference };
+}

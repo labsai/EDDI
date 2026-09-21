@@ -71,6 +71,7 @@ class PendingToolCallBatchSnapshotTest {
         batch.setFingerprint("sha256-xyz");
         batch.setAutoApproveCount(1);
         batch.setPauseCountThisTurn(2);
+        batch.setInterimText("Config checks out — deleting the record next, which needs your approval.");
 
         var effective = new ToolApprovalsConfig();
         effective.setRequireApproval(List.of("delete_*", "mcp:*"));
@@ -138,6 +139,14 @@ class PendingToolCallBatchSnapshotTest {
         assertEquals("Deleting a record — check the id", batch.getEffectiveRule().getPauseReason());
         assertEquals("Waiting on a reviewer for {toolNames}", batch.getEffectiveRule().getPendingMessage());
         assertEquals("mcp:delete_*", batch.getCalls().get(1).getMatchedRule());
+
+        // The model's narration must survive persistence:
+        // Conversation.pauseConversation
+        // reads it back from the STORED batch, and a reload of a paused conversation
+        // rebuilds the transcript from the persisted step — both would show only the
+        // placeholder if this field did not round-trip.
+        assertEquals("Config checks out — deleting the record next, which needs your approval.",
+                batch.getInterimText());
     }
 
     @Test

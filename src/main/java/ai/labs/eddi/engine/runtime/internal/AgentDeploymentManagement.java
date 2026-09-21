@@ -13,6 +13,7 @@ import ai.labs.eddi.configs.migration.ChannelConnectorMigration;
 import ai.labs.eddi.configs.migration.IMigrationManager;
 import ai.labs.eddi.configs.migration.V6QuteMigration;
 import ai.labs.eddi.configs.migration.V6RenameMigration;
+import ai.labs.eddi.configs.migration.WorkspaceAccessIndexMigration;
 import ai.labs.eddi.configs.rules.IRuleSetStore;
 import ai.labs.eddi.configs.rules.model.RuleConfiguration;
 import ai.labs.eddi.configs.rules.model.RuleGroupConfiguration;
@@ -76,6 +77,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     private final V6RenameMigration v6RenameMigration;
     private final V6QuteMigration v6QuteMigration;
     private final ChannelConnectorMigration channelConnectorMigration;
+    private final WorkspaceAccessIndexMigration workspaceAccessIndexMigration;
     private final IAgentsReadiness agentsReadiness;
     private final IRuntime runtime;
     private final IWorkflowStore workflowStore;
@@ -89,7 +91,8 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     public AgentDeploymentManagement(IDeploymentStore deploymentStore, IAgentFactory agentFactory, IAgentStore agentStore,
             IAgentsReadiness agentsReadiness, IConversationMemoryStore conversationMemoryStore, IDocumentDescriptorStore documentDescriptorStore,
             IMigrationManager migrationManager, V6RenameMigration v6RenameMigration, V6QuteMigration v6QuteMigration,
-            ChannelConnectorMigration channelConnectorMigration, IRuntime runtime, IWorkflowStore workflowStore, IRuleSetStore ruleSetStore,
+            ChannelConnectorMigration channelConnectorMigration, WorkspaceAccessIndexMigration workspaceAccessIndexMigration,
+            IRuntime runtime, IWorkflowStore workflowStore, IRuleSetStore ruleSetStore,
             @ConfigProperty(name = "eddi.conversations.maximumLifeTimeOfIdleConversationsInDays") int maximumLifeTimeOfIdleConversationsInDays) {
         this.deploymentStore = deploymentStore;
         this.agentFactory = agentFactory;
@@ -101,6 +104,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         this.v6RenameMigration = v6RenameMigration;
         this.v6QuteMigration = v6QuteMigration;
         this.channelConnectorMigration = channelConnectorMigration;
+        this.workspaceAccessIndexMigration = workspaceAccessIndexMigration;
         this.runtime = runtime;
         this.workflowStore = workflowStore;
         this.ruleSetStore = ruleSetStore;
@@ -138,6 +142,13 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         } catch (Exception e) {
             LOGGER.error("Channel connector migration failed — will retry on next startup", e);
         }
+        try {
+            // Last of the migrations: it re-derives the access index from whatever the
+            // earlier ones left behind, so running it before them would index stale state.
+            workspaceAccessIndexMigration.runIfNeeded();
+        } catch (Exception e) {
+            LOGGER.error("Workspace access-index migration failed — will retry on next startup", e);
+        }
 
         migrationManager.startMigrationIfFirstTimeRun(() -> {
             checkDeployments();
@@ -148,7 +159,10 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         LOGGER.info("E.D.D.I is ready!");
     }
 
-    @Scheduled(every = "10s", delay = 10)
+    // delayed, not delay: Scheduled#delayUnit defaults to MINUTES, so the numeric
+    // form meant this first ran ten minutes after boot rather than ten seconds.
+    // SKIP because a slow pass must not overlap the next tick and double-deploy.
+    @Scheduled(every = "10s", delayed = "10s", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     public void checkDeployments() {
         try {
             deploymentStore.readDeploymentInfos(deployed).stream()
@@ -316,7 +330,11 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         return false;
     }
 
-    @Scheduled(every = "24h", delay = 300)
+    // delayed, not delay: the numeric form is MINUTES, so 300 meant five hours
+    // after
+    // boot. A pod restarted more often than that never ran this at all, leaving
+    // superseded agent versions deployed and idle conversations never ended.
+    @Scheduled(every = "24h", delayed = "5m", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     public void manageAgentDeployments() {
         try {
             var oneHourAgo = Instant.now().minus(1, ChronoUnit.HOURS);

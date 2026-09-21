@@ -78,7 +78,7 @@ class ApiCallExecutorTest {
         when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
 
         executor = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver, secretResolver,
-                callerIdentityResolver, callerIdentityContext, new RequestRedactor(callerIdentityResolver), false, DEFAULT_TIMEOUT_MILLIS,
+                callerIdentityResolver, callerIdentityContext, new RequestRedactor(callerIdentityResolver), null, false, DEFAULT_TIMEOUT_MILLIS,
                 DEFAULT_MAX_RESPONSE_SIZE);
 
         memory = mock(IConversationMemory.class);
@@ -334,6 +334,29 @@ class ApiCallExecutorTest {
         assertFalse(result.containsKey("body"), "the failed attempt's error body must not survive the retry");
     }
 
+    /**
+     * An error body is server-authored text, and a 401 routinely echoes the
+     * credential that failed. The body flows into the LLM transcript (and from
+     * there into pause batches and traces), so it is redacted on the way into the
+     * tool result. The memory-side *Error entry keeps the raw text, as it always
+     * has, for operators debugging via the store.
+     */
+    @Test
+    void execute_non2xx_errorBodyIsRedactedInTheToolResult() throws Exception {
+        ApiCall call = createSimpleApiCall("auth-call", true);
+        when(mockResponse.getHttpCode()).thenReturn(401);
+        when(mockResponse.getContentAsString())
+                .thenReturn("invalid api key sk-ant-api03-verySecretValue1234567890abcdefghij provided");
+        when(mockResponse.getHttpCodeMessage()).thenReturn("Unauthorized");
+        when(mockResponse.getHttpHeader()).thenReturn(new HashMap<>());
+
+        Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        String body = (String) result.get("body");
+        assertFalse(body.contains("verySecretValue"), "the echoed credential must not reach the model: " + body);
+        assertTrue(body.contains("invalid api key"), "the failure REASON must survive redaction: " + body);
+    }
+
     @Test
     void execute_successWithoutSaveResponse_resultStillCarriesHttpCode() throws Exception {
         // The body stays out (that is what saveResponse=false means), but a model
@@ -427,7 +450,7 @@ class ApiCallExecutorTest {
         realContext.bind(new CallerIdentity("caller-jwt-value", "alice", "https://eddi.example:443"));
         var realResolver = new CallerIdentityResolver(realContext, true);
         var executorWithRealResolver = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver,
-                secretResolver, realResolver, realContext, new RequestRedactor(realResolver), false, DEFAULT_TIMEOUT_MILLIS,
+                secretResolver, realResolver, realContext, new RequestRedactor(realResolver), null, false, DEFAULT_TIMEOUT_MILLIS,
                 DEFAULT_MAX_RESPONSE_SIZE);
         try {
             ApiCall call = createSimpleApiCall("redact-call", false);
@@ -737,7 +760,7 @@ class ApiCallExecutorTest {
         realContext.bind(new CallerIdentity("caller-jwt-value", "alice", "https://eddi.example:443"));
         var realResolver = new CallerIdentityResolver(realContext, true);
         var executorWithRealResolver = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver,
-                secretResolver, realResolver, realContext, new RequestRedactor(realResolver), false, DEFAULT_TIMEOUT_MILLIS,
+                secretResolver, realResolver, realContext, new RequestRedactor(realResolver), null, false, DEFAULT_TIMEOUT_MILLIS,
                 DEFAULT_MAX_RESPONSE_SIZE);
         try {
             ApiCall call = createSimpleApiCall("path-ref-call", false);
@@ -942,7 +965,7 @@ class ApiCallExecutorTest {
     @Test
     void execute_ssrfProtectionEnabled_blocksInternalUrl() {
         ApiCallExecutor protectedExecutor = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver,
-                secretResolver, callerIdentityResolver, callerIdentityContext, new RequestRedactor(callerIdentityResolver), true,
+                secretResolver, callerIdentityResolver, callerIdentityContext, new RequestRedactor(callerIdentityResolver), null, true,
                 DEFAULT_TIMEOUT_MILLIS, DEFAULT_MAX_RESPONSE_SIZE);
         ApiCall call = createSimpleApiCall("ssrf-call", false);
         // 169.254.169.254 is a literal IP (no DNS) blocked by UrlValidationUtils.
@@ -952,7 +975,7 @@ class ApiCallExecutorTest {
     @Test
     void execute_ssrfProtectionEnabled_disablesRedirectsOnPublicUrl() throws Exception {
         ApiCallExecutor protectedExecutor = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver,
-                secretResolver, callerIdentityResolver, callerIdentityContext, new RequestRedactor(callerIdentityResolver), true,
+                secretResolver, callerIdentityResolver, callerIdentityContext, new RequestRedactor(callerIdentityResolver), null, true,
                 DEFAULT_TIMEOUT_MILLIS, DEFAULT_MAX_RESPONSE_SIZE);
         ApiCall call = createSimpleApiCall("redir-call", false);
         setupSuccessResponse(200, "ok", "text/plain");
@@ -963,11 +986,22 @@ class ApiCallExecutorTest {
 
     @Test
     void execute_ssrfProtectionDisabled_allowsInternalUrlAndKeepsRedirects() throws Exception {
-        // Default executor (protection off): no validation, no redirect override.
+        // Default executor (protection off): private targets pass, no redirect
+        // override.
         ApiCall call = createSimpleApiCall("internal-call", false);
         setupSuccessResponse(200, "ok", "text/plain");
-        executor.execute(call, memory, new HashMap<>(), "http://169.254.169.254");
+        executor.execute(call, memory, new HashMap<>(), "http://10.0.0.5");
         verify(mockRequest, never()).setFollowRedirects(anyBoolean());
+    }
+
+    @Test
+    void execute_ssrfProtectionDisabled_stillBlocksCloudMetadata() {
+        // Protection off keeps configured internal APIs reachable — never the
+        // instance-metadata service, which hands out the VM's cloud credentials.
+        ApiCall call = createSimpleApiCall("metadata-call", false);
+        assertThrows(LifecycleException.class,
+                () -> executor.execute(call, memory, new HashMap<>(), "http://169.254.169.254/latest/meta-data/"));
+        verify(httpClient, never()).newRequest(any(), any());
     }
 
     // ==================== Exponential Backoff Curve ====================

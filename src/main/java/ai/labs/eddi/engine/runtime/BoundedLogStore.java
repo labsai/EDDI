@@ -5,7 +5,6 @@
 package ai.labs.eddi.engine.runtime;
 
 import ai.labs.eddi.engine.model.LogEntry;
-import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -18,6 +17,7 @@ import java.util.concurrent.*;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Consumer;
 import java.util.logging.LogRecord;
+import org.jboss.logmanager.ExtLogRecord;
 
 /**
  * In-memory ring buffer that captures log records with MDC context. Provides:
@@ -137,17 +137,40 @@ public class BoundedLogStore {
      *            the JUL LogRecord (actually a JBoss ExtLogRecord at runtime)
      */
     public void capture(LogRecord record) {
+        capture(record, null);
+    }
+
+    /**
+     * Capture a record whose message has already been formatted and redacted by
+     * {@link LogCaptureFilter}.
+     *
+     * @param record
+     *            the JUL LogRecord (actually a JBoss ExtLogRecord at runtime)
+     * @param preRedactedMessage
+     *            the record's redacted message, or {@code null} to format and
+     *            redact it here — which is what happens when redaction upstream
+     *            threw, so the ring buffer is never fed an unscanned message
+     */
+    public void capture(LogRecord record, String preRedactedMessage) {
         if (record == null)
             return;
 
-        // Format the message using a Formatter (avoids deprecated
-        // getFormattedMessage())
-        String message = formatRecord(record);
-        if (message == null || message.isEmpty())
-            return;
+        String message = preRedactedMessage;
+        if (message == null) {
+            // Format the message using a Formatter (avoids deprecated
+            // getFormattedMessage())
+            message = formatRecord(record);
+            if (message == null || message.isEmpty())
+                return;
 
-        // Redact potential secrets from log messages (defense-in-depth)
-        message = SecretRedactionFilter.redact(message);
+            // Redact potential secrets from log messages, and escape anything that
+            // could end a record, exactly as LogRecordRedactor would have. The ring
+            // buffer is read back through the admin log API and the SSE live tail,
+            // so a forged boundary kept here forges an entry there too.
+            message = LogRecordRedactor.rewrite(message);
+        }
+        if (message.isEmpty())
+            return;
 
         // Don't capture our own log messages to avoid infinite recursion
         String loggerName = record.getLoggerName();
@@ -162,7 +185,7 @@ public class BoundedLogStore {
         String userId = null;
         Integer agentVersion = null;
 
-        if (record instanceof org.jboss.logmanager.ExtLogRecord extRecord) {
+        if (record instanceof ExtLogRecord extRecord) {
             environment = extRecord.getMdc("environment");
             agentId = extRecord.getMdc("agentId");
             conversationId = extRecord.getMdc("conversationId");
@@ -336,7 +359,7 @@ public class BoundedLogStore {
         Object[] params = record.getParameters();
 
         // 1. Try ExtLogRecord's built-in getFormattedMessage() first
-        if (record instanceof org.jboss.logmanager.ExtLogRecord extRecord) {
+        if (record instanceof ExtLogRecord extRecord) {
             try {
                 String formatted = extRecord.getFormattedMessage();
                 if (formatted != null && !formatted.equals(msg)) {

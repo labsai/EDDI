@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
@@ -88,7 +89,7 @@ class RestAgentEngineHitlTest {
                 identity, ownershipValidator, conversationDescriptorStore);
         restAgentEngine = new RestAgentEngine(
                 conversationService, mock(IConversationMemoryStore.class), identity, ownershipValidator,
-                conversationAccessGuard, hitlAccessGuard, hitlToolJournalStore, AGENT_TIMEOUT);
+                conversationAccessGuard, mock(ResourceAccessGuard.class), hitlAccessGuard, hitlToolJournalStore, AGENT_TIMEOUT);
     }
 
     // =========================================================================

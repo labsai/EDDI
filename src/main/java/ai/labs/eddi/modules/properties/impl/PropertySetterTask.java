@@ -19,6 +19,8 @@ import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IDataFactory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
+import ai.labs.eddi.engine.memory.MemoryKeys;
+import ai.labs.eddi.engine.memory.SecretValueScrubber;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.configs.properties.model.Property.Scope;
@@ -56,6 +58,13 @@ public class PropertySetterTask implements ILifecycleTask {
 
     private static final Logger LOGGER = Logger.getLogger(PropertySetterTask.class);
     private static final String EXPRESSIONS_PARSED_IDENTIFIER = "expressions:parsed";
+    private static final String EXPRESSIONS_MATCHES_IDENTIFIER = MemoryKeys.EXPRESSIONS_MATCHES.key();
+    private static final String INTENTS_IDENTIFIER = MemoryKeys.INTENTS.key();
+    /**
+     * The conversation-output key InputParserTask echoes the parsed expressions
+     * under.
+     */
+    private static final String EXPRESSIONS_OUTPUT_KEY = "expressions";
     private static final String ACTIONS_IDENTIFIER = "actions";
     private static final String CATCH_ANY_INPUT_AS_PROPERTY_ACTION = "CATCH_ANY_INPUT_AS_PROPERTY";
     private static final String INPUT_INITIAL_IDENTIFIER = "input:initial";
@@ -89,7 +98,7 @@ public class PropertySetterTask implements ILifecycleTask {
     private static final String SCOPE = "scope";
     private static final String OVERRIDE = "override";
     private static final String KEY_URI = "uri";
-    private static final String SECRET_INPUT_PLACEHOLDER = "<secret input>";
+    private static final String SECRET_INPUT_PLACEHOLDER = MemoryKeys.SECRET_INPUT_PLACEHOLDER;
     private final IExpressionProvider expressionProvider;
     private final IMemoryItemConverter memoryItemConverter;
     private final ITemplatingEngine templatingEngine;
@@ -527,10 +536,7 @@ public class PropertySetterTask implements ILifecycleTask {
             if (INPUT_INITIAL_IDENTIFIER.equals(key) || INPUT_NORMALIZED_IDENTIFIER.equals(key)) {
                 continue;
             }
-            Object result = data.getResult();
-            Object cleaned = result instanceof Context context
-                    ? scrubContext(context, plaintext)
-                    : scrubValue(result, plaintext);
+            Object cleaned = SecretValueScrubber.scrubValue(data.getResult(), plaintext, SECRET_INPUT_PLACEHOLDER);
             if (cleaned != null) {
                 storeScrubbed(currentStep, key, cleaned);
                 anythingScrubbed = true;
@@ -542,7 +548,7 @@ public class PropertySetterTask implements ILifecycleTask {
         var conversationOutput = currentStep.getConversationOutput();
         if (conversationOutput != null) {
             for (var outputEntry : conversationOutput.entrySet()) {
-                Object cleaned = scrubValue(outputEntry.getValue(), plaintext);
+                Object cleaned = SecretValueScrubber.scrubValue(outputEntry.getValue(), plaintext, SECRET_INPUT_PLACEHOLDER);
                 if (cleaned != null) {
                     outputEntry.setValue(cleaned);
                     anythingScrubbed = true;
@@ -555,6 +561,7 @@ public class PropertySetterTask implements ILifecycleTask {
             // normalizer the echoed form need not contain the resolved secret verbatim.
             currentStep.resetConversationOutput(INPUT_OUTPUT_KEY);
             currentStep.addConversationOutputString(INPUT_OUTPUT_KEY, SECRET_INPUT_PLACEHOLDER);
+            dropParsedForms(currentStep);
         }
 
         if (!anythingScrubbed) {
@@ -562,6 +569,33 @@ public class PropertySetterTask implements ILifecycleTask {
                     + "conversation step — nothing was scrubbed. If the value came from user input, the raw input may "
                     + "still be persisted in the conversation document.", keyName);
         }
+    }
+
+    /**
+     * Replace everything the parser DERIVED from a scrubbed input — the parsed
+     * expressions, the per-token match details, the intents, and any properties
+     * extracted from them — and drop their echoes from the conversation output.
+     * <p>
+     * Patching these by containment does not work: the parser tokenizes the input
+     * and wraps the pieces ({@code unknown(sk-live_abc)}, {@code "sk-live_abc" →
+     * unknown(...)}), so the resolved secret is never a substring of them and the
+     * verbatim scrub left the key in the stored step. The behavior rules of this
+     * workflow that consume them have already run by the time a property setter
+     * executes. A LATER workflow of a multi-workflow agent sees them empty for this
+     * turn — deliberate: its input matchers would otherwise be matching against a
+     * vaulted secret.
+     */
+    private void dropParsedForms(IWritableConversationStep currentStep) {
+        if (currentStep.getLatestData(EXPRESSIONS_PARSED_IDENTIFIER) != null) {
+            storeScrubbed(currentStep, EXPRESSIONS_PARSED_IDENTIFIER, "");
+        }
+        for (String derivedListKey : List.of(EXPRESSIONS_MATCHES_IDENTIFIER, INTENTS_IDENTIFIER, PROPERTIES_EXTRACTED_IDENTIFIER)) {
+            if (currentStep.getLatestData(derivedListKey) != null) {
+                storeScrubbed(currentStep, derivedListKey, List.of());
+            }
+        }
+        currentStep.removeConversationOutput(EXPRESSIONS_OUTPUT_KEY);
+        currentStep.removeConversationOutput(INTENTS_IDENTIFIER);
     }
 
     /**
@@ -590,52 +624,6 @@ public class PropertySetterTask implements ILifecycleTask {
         var builder = new StringBuilder(value.length());
         value.codePoints().filter(Character::isLetterOrDigit).forEach(builder::appendCodePoint);
         return builder.toString();
-    }
-
-    /**
-     * A copy of {@code context} with the plaintext removed from its value, or
-     * {@code null} when it does not carry it. A client-supplied secret arrives this
-     * way ({@code valueString: "{context.apiKey}"}) and {@code Conversation} stores
-     * every context entry as a step datum, so it lands in the conversation document
-     * just like the input does.
-     */
-    private static Object scrubContext(Context context, String plaintext) {
-        Object cleaned = scrubValue(context.getValue(), plaintext);
-        return cleaned != null ? new Context(context.getType(), cleaned) : null;
-    }
-
-    /**
-     * Returns a copy of {@code value} with every occurrence of {@code plaintext}
-     * replaced, or {@code null} when it does not carry the plaintext at all (so the
-     * caller can tell "nothing to do" from "replaced").
-     */
-    private static Object scrubValue(Object value, String plaintext) {
-        if (value instanceof String text) {
-            return text.contains(plaintext) ? text.replace(plaintext, SECRET_INPUT_PLACEHOLDER) : null;
-        }
-        if (value instanceof List<?> list) {
-            List<Object> copy = new ArrayList<>(list);
-            boolean changed = false;
-            for (int i = 0; i < copy.size(); i++) {
-                Object cleaned = scrubValue(copy.get(i), plaintext);
-                if (cleaned != null) {
-                    copy.set(i, cleaned);
-                    changed = true;
-                }
-            }
-            return changed ? copy : null;
-        }
-        if (value instanceof Map<?, ?> map) {
-            Map<String, Object> copy = new LinkedHashMap<>();
-            boolean changed = false;
-            for (var entry : map.entrySet()) {
-                Object cleaned = scrubValue(entry.getValue(), plaintext);
-                copy.put(String.valueOf(entry.getKey()), cleaned != null ? cleaned : entry.getValue());
-                changed |= cleaned != null;
-            }
-            return changed ? copy : null;
-        }
-        return null;
     }
 
     /**

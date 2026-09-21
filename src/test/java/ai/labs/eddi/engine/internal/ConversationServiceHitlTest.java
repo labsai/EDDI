@@ -47,6 +47,7 @@ import java.time.Instant;
 import java.util.Date;
 import java.util.List;
 
+import jakarta.enterprise.event.Event;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -98,14 +99,14 @@ class ConversationServiceHitlTest {
     private ConversationService conversationService;
     // Held reference (not the shared no-op fixture) so the cancel-path HITL event
     // firing (G5) can be verified.
-    private jakarta.enterprise.event.Event<HitlResumeCompletedEvent> hitlResumeCompletedEvent;
+    private Event<HitlResumeCompletedEvent> hitlResumeCompletedEvent;
 
     @BeforeEach
     @SuppressWarnings("unchecked")
     void setUp() {
         MockitoAnnotations.openMocks(this);
         doReturn(conversationStateCache).when(cacheFactory).getCache("conversationState");
-        hitlResumeCompletedEvent = mock(jakarta.enterprise.event.Event.class);
+        hitlResumeCompletedEvent = mock(Event.class);
         conversationService = new ConversationService(
                 agentFactory, conversationMemoryStore, conversationDescriptorStore,
                 userMemoryStore, conversationCoordinator, conversationSetup,

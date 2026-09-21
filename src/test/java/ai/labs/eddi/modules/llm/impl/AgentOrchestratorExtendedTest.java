@@ -4,12 +4,12 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
-import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
-import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
@@ -95,7 +95,7 @@ class AgentOrchestratorExtendedTest {
                 webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
                 fetchToolResponsePageTool, toolExecutionService,
                 mcpToolProviderManager, a2aToolProviderManager,
-                mock(IRestAgentStore.class), mock(IRestWorkflowStore.class),
+                mock(IWorkflowStore.class),
                 mock(IResourceClientLibrary.class), mock(IApiCallExecutor.class),
                 mock(IJsonSerialization.class), mock(IMemoryItemConverter.class),
                 userMemoryStore, mock(ToolResponseTruncator.class),

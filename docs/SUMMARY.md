@@ -51,16 +51,20 @@
 ## Protocols & Integration
 
 - [MCP Server](mcp-server.md)
+- [MCP Client](mcp-client.md)
 - [A2A Protocol](a2a-protocol.md)
+- [Connections](connections.md)
 - [Slack Integration](slack-integration.md)
 - [OpenAI-Compatible API (Open WebUI)](open-webui-integration.md)
 
 ## Security & Compliance
 
 - [Security](security.md)
+- [Workspaces (per-user isolation & sharing)](workspaces.md)
 - [Secrets Vault](secrets-vault.md)
 - [Global Variables](global-variables.md)
 - [Audit Ledger](audit-ledger.md)
+- [Tenant Quotas](tenant-quotas.md)
 - [GDPR / CCPA Compliance](gdpr-compliance.md)
 - [HIPAA Compliance](hipaa-compliance.md)
 - [Business Associate Agreement (BAA) Template](templates/baa-template.md)
@@ -72,6 +76,7 @@
 
 ## Deployment & Infrastructure
 
+- [Configuration Reference](configuration-reference.md)
 - [Docker](docker.md)
 - [Kubernetes](kubernetes.md)
 - [RedHat OpenShift](redhat-openshift.md)
@@ -82,6 +87,7 @@
 - [Metrics & Monitoring](metrics.md)
 - [Monitoring & Tracing Guide](monitoring/monitoring-guide.md)
 - [Log Administration](log-administration.md)
+- [Coordinator & Dead Letters](coordinator-admin.md)
 
 ## Reference
 
@@ -89,4 +95,18 @@
 - [Code Review Standards](code-review-standards.md)
 - [Build Reproducibility](build-reproducibility.md)
 - [Changelog](changelog.md)
+  - [September 2026](changelog/2026-09.md)
+  - [August 2026](changelog/2026-08.md)
+  - [July 2026](changelog/2026-07.md)
+  - [June 2026](changelog/2026-06.md)
+  - [May 2026](changelog/2026-05.md)
+  - [April 2026](changelog/2026-04.md)
+  - [March 2026](changelog/2026-03.md)
+  - [Pending entries](changelog.d/README.md)
 - [FAQs](how-to....md)
+
+## Archive
+
+Historical material, kept for provenance. Nothing here describes current behaviour.
+
+- [v6.0 Development Snapshot (archived)](archive/handoff-v6.0-snapshot.md)

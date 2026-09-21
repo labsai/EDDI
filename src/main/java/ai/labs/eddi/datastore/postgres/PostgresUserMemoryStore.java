@@ -5,6 +5,7 @@
 package ai.labs.eddi.datastore.postgres;
 
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
+import ai.labs.eddi.configs.properties.MemorySearchTerms;
 import ai.labs.eddi.configs.properties.model.Properties;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
@@ -20,6 +21,8 @@ import jakarta.enterprise.inject.Instance;
 import javax.sql.DataSource;
 import java.sql.*;
 import java.util.*;
+import ai.labs.eddi.engine.audit.AuditHmac;
+import ai.labs.eddi.utils.RuntimeUtilities;
 
 /**
  * PostgreSQL implementation of {@link IUserMemoryStore}. All data lives in a
@@ -455,12 +458,25 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
         if (query == null || query.isBlank()) {
             return getAllEntries(userId);
         }
-        String sql = "SELECT * FROM usermemories WHERE user_id = ? AND (key ILIKE ? OR value::text ILIKE ?) ORDER BY updated_at DESC";
-        String pattern = "%" + query + "%";
+        // Every term must appear in the key or the value — see MemorySearchTerms. The
+        // raw query used to be the LIKE pattern, so "dog name" missed "dog_name" and a
+        // "%" or "_" typed by the model acted as a wildcard. Terms are letters and
+        // digits only, so nothing in them needs escaping.
+        List<String> terms = MemorySearchTerms.tokenize(query);
+        if (terms.isEmpty()) {
+            return new ArrayList<>();
+        }
+        String sql = "SELECT * FROM usermemories WHERE user_id = ?"
+                + " AND (key ILIKE ? OR value::text ILIKE ?)".repeat(terms.size())
+                + " ORDER BY updated_at DESC";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, userId);
-            ps.setString(2, pattern);
-            ps.setString(3, pattern);
+            int parameterIndex = 2;
+            for (String term : terms) {
+                String pattern = "%" + term + "%";
+                ps.setString(parameterIndex++, pattern);
+                ps.setString(parameterIndex++, pattern);
+            }
             List<UserMemoryEntry> entries = new ArrayList<>();
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
@@ -532,15 +548,37 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
 
     @Override
     public void deleteAllForUser(String userId) throws IResourceStore.ResourceStoreException {
+        // Parity with MongoUserMemoryStore, which has always guarded this. Erasing
+        // "all entries for user null" is not a request anyone means, and the pseudonym
+        // derived below refuses a null identifier rather than hashing one.
+        RuntimeUtilities.checkNotNull(userId, "userId");
         ensureSchema();
         try (Connection conn = dataSourceInstance.get().getConnection()) {
             try (PreparedStatement ps = conn.prepareStatement("DELETE FROM usermemories WHERE user_id = ?")) {
                 ps.setString(1, userId);
                 int count = ps.executeUpdate();
-                LOGGER.infof("[MEMORY] GDPR delete-all for user '%s': %d entries removed", userId, count);
+                // The pseudonym, not the identifier. This line records an ERASURE, so
+                // writing the raw userId would leave in the log exactly the identifier
+                // the erasure exists to remove (CWE-532) - and logs outlive the database
+                // and travel further. AuditHmac.pseudonymFor is the same deterministic
+                // SHA-256 the erasure cascade substitutes into the audit ledger, so an
+                // operator can still correlate the two without either holding the id.
+                LOGGER.infof("[MEMORY] GDPR delete-all for user '%s': %d entries removed",
+                        AuditHmac.pseudonymFor(userId), count);
             }
         } catch (SQLException e) {
-            throw new IResourceStore.ResourceStoreException("Failed to delete all data for userId=" + userId, e);
+            // Pseudonymised for the same reason as the success log above: a caller that
+            // logs or serialises this exception would otherwise persist the identifier
+            // the erasure exists to remove (CWE-532).
+            //
+            // The sibling methods above deliberately keep the raw userId in their
+            // messages. On a read, merge or property delete the user's data legitimately
+            // exists and their identifier appears throughout the system, so the
+            // identifier is diagnostics rather than a leak. Erasure is the one path where
+            // the whole point is that the identifier stops existing - do not "even these
+            // up" without that distinction in mind.
+            throw new IResourceStore.ResourceStoreException(
+                    "Failed to delete all data for user=" + AuditHmac.pseudonymFor(userId), e);
         }
     }
 

@@ -16,6 +16,8 @@ import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.events.HitlResumeCompletedEvent;
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
+import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableException;
+import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
@@ -44,7 +46,10 @@ import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.runtime.IDiscardableTask;
 import ai.labs.eddi.engine.runtime.IRuntime;
+import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.engine.security.ResolutionPrincipal;
+import ai.labs.eddi.engine.security.ResolutionPrincipalContext;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.runtime.IConversationSetup;
 import ai.labs.eddi.engine.runtime.internal.GracefulShutdownService;
@@ -118,6 +123,17 @@ public class ConversationService implements IConversationService {
     int maxAttachmentsPerTurn;
 
     /**
+     * Longest turn input, in characters, accepted from a caller. {@code <= 0}
+     * disables the limit (which is also what a directly constructed instance in a
+     * unit test gets). Enforced on the conversationId entry points — REST,
+     * streaming, managed conversations, MCP, the OpenAI adapter, Slack — and on
+     * A2A, but not on the agent-id overloads the engine itself drives for group
+     * members and sub-agents, whose input legitimately carries whole transcripts.
+     */
+    @ConfigProperty(name = "eddi.conversations.max-input-chars", defaultValue = "200000")
+    int maxInputChars;
+
+    /**
      * Conversation-ownership gate for the conversationId-only entry points — the
      * ones every external adapter (REST, streaming SSE, MCP) funnels through.
      * <p>
@@ -144,6 +160,21 @@ public class ConversationService implements IConversationService {
      */
     @Inject
     GracefulShutdownService gracefulShutdownService;
+
+    /**
+     * Binds {@link ResolutionPrincipal} — the conversation's owner plus how that
+     * owner was established — around every turn, so that a credential decision
+     * taken deep inside the pipeline reads the CONVERSATION's identity rather than
+     * whoever happens to be driving the current HTTP request. On a HITL resume
+     * those are different people by design.
+     * <p>
+     * Field-injected for the same reason as {@link #attachmentStore}: the numerous
+     * direct-construction unit tests need no change. A {@code null} context means
+     * no principal is ever bound, and every {@code PER_USER} resolution then fails
+     * closed — which is the safe direction for a bean built outside CDI.
+     */
+    @Inject
+    ResolutionPrincipalContext resolutionPrincipalContext;
 
     /**
      * Fires {@link HitlResumeCompletedEvent} when a resume settles to a non-paused
@@ -342,13 +373,53 @@ public class ConversationService implements IConversationService {
             // (avoids burning quota on GDPR-restricted or agent-not-ready failures)
             QuotaCheckResult quotaCheck = tenantQuotaService.acquireConversationSlot();
             if (!quotaCheck.allowed()) {
-                throw new QuotaExceededException(quotaCheck.reason());
+                throw quotaCheck.accountingUnavailable()
+                        // A store that could not answer is a 503, not a 429: the
+                        // tenant is not over anything, and a client that backs off
+                        // for a minute on the strength of a Retry-After is reacting
+                        // to the wrong signal.
+                        ? new QuotaAccountingUnavailableException(quotaCheck.reason())
+                        : new QuotaExceededException(quotaCheck.reason());
             }
 
-            IConversation conversation = latestAgent.startConversation(userId, context,
-                    createPropertiesHandler(userId, latestAgent.getUserMemoryConfig()), null);
+            // Decided here, at the only moment it CAN be decided: this is still the
+            // request thread, so there is an authenticated caller to compare the
+            // conversation's userId against. Every later turn — a say tomorrow, a HITL
+            // resume next week — runs on a request that proves nothing about this
+            // conversation's owner, which is why the answer is persisted below rather
+            // than re-derived.
+            // Captured once, here, while this is still the request thread: the same
+            // identity decides the principal's provenance below AND runs the start
+            // turn. Every later turn is dispatched to a pool thread through
+            // ConversationStepRunner, which captures and binds the caller itself; the
+            // CONVERSATION_START turn is the one that runs inline, and it used to run
+            // with no caller bound at all — so ${caller:token} and every
+            // CALLER_SUPPLIED connection failed closed on turn 0 with a message
+            // blaming a "scheduled run".
+            CallerIdentity startCaller = callerIdentityContext == null ? null : callerIdentityContext.captureOrCurrent();
+            ResolutionPrincipal resolutionPrincipal = deriveResolutionPrincipal(userId, startCaller);
+
+            IConversation conversation;
+            // Bound around the call, not merely recorded after it: a behavior rule can
+            // fire tool calls on the CONVERSATION_START turn, and that turn executes
+            // inside startConversation before there is a memory to read anything from.
+            ResolutionPrincipal previousPrincipal = currentResolutionPrincipal();
+            CallerIdentity previousCaller = callerIdentityContext == null ? null : callerIdentityContext.current();
+            bindResolutionPrincipal(resolutionPrincipal);
+            bindCallerIdentity(startCaller);
+            try {
+                conversation = latestAgent.startConversation(userId, context,
+                        createPropertiesHandler(userId, latestAgent.getUserMemoryConfig()), null);
+            } finally {
+                // Restore rather than clear — this can be a sub-agent conversation
+                // started from inside a parent's pipeline turn, whose bindings must
+                // survive.
+                bindResolutionPrincipal(previousPrincipal);
+                bindCallerIdentity(previousCaller);
+            }
 
             var conversationMemory = conversation.getConversationMemory();
+            conversationMemory.setResolutionProvenance(resolutionPrincipal.provenance());
             // A behavior rule may pause on the CONVERSATION_START turn — this path
             // needs the same HITL bookkeeping as the say path (bookmark BEFORE the
             // store, then counter + timeout schedule) or a finite timeout policy
@@ -461,7 +532,7 @@ public class ConversationService implements IConversationService {
         contextLogger.setLoggingContext(loggingContext);
 
         try {
-            var conversationMemorySnapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            var conversationMemorySnapshot = requireSnapshot(conversationId);
             loggingContext.put(USER_ID, conversationMemorySnapshot.getUserId());
             contextLogger.setLoggingContext(loggingContext);
 
@@ -482,7 +553,7 @@ public class ConversationService implements IConversationService {
     public ConversationLogResult readConversationLog(String conversationId, String outputType, Integer logSize)
             throws ResourceStoreException, ResourceNotFoundException {
 
-        var memorySnapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+        var memorySnapshot = requireSnapshot(conversationId);
         var conversationLog = new ConversationLogGenerator(memorySnapshot).generate(logSize != null ? logSize : -1);
         outputType = outputType.toLowerCase();
 
@@ -547,7 +618,13 @@ public class ConversationService implements IConversationService {
             // agent-not-ready failures)
             QuotaCheckResult quotaCheck = tenantQuotaService.acquireApiCallSlot();
             if (!quotaCheck.allowed()) {
-                throw new QuotaExceededException(quotaCheck.reason());
+                throw quotaCheck.accountingUnavailable()
+                        // A store that could not answer is a 503, not a 429: the
+                        // tenant is not over anything, and a client that backs off
+                        // for a minute on the strength of a Retry-After is reacting
+                        // to the wrong signal.
+                        ? new QuotaAccountingUnavailableException(quotaCheck.reason())
+                        : new QuotaExceededException(quotaCheck.reason());
             }
 
             admittedTurn = new ProcessingTurn(processingConversationCount);
@@ -611,11 +688,25 @@ public class ConversationService implements IConversationService {
             }
 
             Callable<Void> processUserInput = processConversationStep(environment, conversationMemory, conversationId, loggingContext,
-                    executeConversation, notifySkipped, processingTurn);
+                    withResolutionPrincipal(conversationMemory, executeConversation), notifySkipped, processingTurn);
 
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
-        } catch (ProcessingRestrictedException | QuotaExceededException | ConversationAwaitingApprovalException e) {
-            releaseTurn(admittedTurn); // all three are thrown before the turn is admitted
+        } catch (ProcessingRestrictedException | ProcessingRestrictionUnavailableException | QuotaExceededException
+                | QuotaAccountingUnavailableException | ConversationAwaitingApprovalException e) {
+            // All five are thrown before the turn is admitted, and none is an internal
+            // fault of this class: the generic handler below logs a full ERROR stack
+            // trace, which for the restriction-unavailable case meant every turn of
+            // every user wrote two of them (here and again in RestAgentEngine) for the
+            // duration of a store failover. The REST layer reports each one with its
+            // own status.
+            //
+            // QuotaAccountingUnavailableException is listed even though it extends
+            // RejectedExecutionException: it is thrown two lines after the
+            // QuotaExceededException it replaces on the same denial, so leaving it out
+            // put exactly the log flood this multi-catch removes back on the
+            // quota-store outage path — one ERROR stack trace per turn, on top of
+            // TenantQuotaService.recordDenial's own.
+            releaseTurn(admittedTurn);
             throw e;
         } catch (AgentMismatchException | AgentNotReadyException | ConversationEndedException e) {
             releaseTurn(admittedTurn);
@@ -684,7 +775,13 @@ public class ConversationService implements IConversationService {
             // agent-not-ready failures)
             QuotaCheckResult quotaCheck = tenantQuotaService.acquireApiCallSlot();
             if (!quotaCheck.allowed()) {
-                throw new QuotaExceededException(quotaCheck.reason());
+                throw quotaCheck.accountingUnavailable()
+                        // A store that could not answer is a 503, not a 429: the
+                        // tenant is not over anything, and a client that backs off
+                        // for a minute on the strength of a Retry-After is reacting
+                        // to the wrong signal.
+                        ? new QuotaAccountingUnavailableException(quotaCheck.reason())
+                        : new QuotaExceededException(quotaCheck.reason());
             }
 
             admittedTurn = new ProcessingTurn(processingConversationCount);
@@ -787,11 +884,25 @@ public class ConversationService implements IConversationService {
             };
 
             Callable<Void> processUserInput = processConversationStep(environment, conversationMemory, conversationId, loggingContext,
-                    executeConversation, notifySkipped, processingTurn);
+                    withResolutionPrincipal(conversationMemory, executeConversation), notifySkipped, processingTurn);
 
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
-        } catch (ProcessingRestrictedException | QuotaExceededException | ConversationAwaitingApprovalException e) {
-            releaseTurn(admittedTurn); // all three are thrown before the turn is admitted
+        } catch (ProcessingRestrictedException | ProcessingRestrictionUnavailableException | QuotaExceededException
+                | QuotaAccountingUnavailableException | ConversationAwaitingApprovalException e) {
+            // All five are thrown before the turn is admitted, and none is an internal
+            // fault of this class: the generic handler below logs a full ERROR stack
+            // trace, which for the restriction-unavailable case meant every turn of
+            // every user wrote two of them (here and again in RestAgentEngine) for the
+            // duration of a store failover. The REST layer reports each one with its
+            // own status.
+            //
+            // QuotaAccountingUnavailableException is listed even though it extends
+            // RejectedExecutionException: it is thrown two lines after the
+            // QuotaExceededException it replaces on the same denial, so leaving it out
+            // put exactly the log flood this multi-catch removes back on the
+            // quota-store outage path — one ERROR stack trace per turn, on top of
+            // TenantQuotaService.recordDenial's own.
+            releaseTurn(admittedTurn);
             throw e;
         } catch (AgentMismatchException | AgentNotReadyException | ConversationEndedException e) {
             releaseTurn(admittedTurn);
@@ -915,7 +1026,7 @@ public class ConversationService implements IConversationService {
         checkNotNull(conversationId, "conversationId");
 
         try {
-            var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            var snapshot = requireSnapshot(conversationId);
             var loggingContext = contextLogger.createLoggingContext(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId,
                     snapshot.getUserId());
             contextLogger.setLoggingContext(loggingContext);
@@ -924,6 +1035,36 @@ public class ConversationService implements IConversationService {
         } finally {
             recordMetrics(timerConversationLoad, counterConversationLoad, startTime);
         }
+    }
+
+    /**
+     * The snapshot, or a 404 — never a {@code null} for the caller to dereference.
+     *
+     * <p>
+     * {@code loadConversationMemorySnapshot} answers {@code null} for a
+     * conversation that is not there, and the read paths went straight on to call
+     * {@code getEnvironment()} on it. So a deleted or mistyped conversation id
+     * produced a {@link NullPointerException}, which reached the client as
+     * {@code 500 Internal Server Error} plus an error id — from endpoints whose own
+     * {@code @APIResponse} promised a 404, and which the troubleshooting
+     * documentation tells people to call precisely when something has already gone
+     * wrong.
+     * </p>
+     *
+     * <p>
+     * Throws {@link ConversationNotFoundException} rather than the checked
+     * {@code ResourceNotFoundException} that {@code RestConversationStore}'s twin
+     * uses: this is the exception {@link #getConversationState} already raises for
+     * the same condition, and it needs no signature change on {@code say} /
+     * {@code sayStreaming}. Both map to 404.
+     * </p>
+     */
+    private ConversationMemorySnapshot requireSnapshot(String conversationId) throws ResourceStoreException, ResourceNotFoundException {
+        var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+        if (snapshot == null) {
+            throw new ConversationNotFoundException(String.format("No conversation found! (conversationId=%s)", sanitize(conversationId)));
+        }
+        return snapshot;
     }
 
     @Override
@@ -951,9 +1092,21 @@ public class ConversationService implements IConversationService {
             throws Exception {
 
         requireConversationAccess(conversationId);
-        var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+        requireInputWithinLimit(inputData);
+        var snapshot = requireSnapshot(conversationId);
         say(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData,
                 rerunOnly, responseHandler);
+    }
+
+    @Override
+    public void requireInputWithinLimit(InputData inputData) {
+        if (maxInputChars <= 0 || inputData == null || inputData.getInput() == null) {
+            return;
+        }
+        int length = inputData.getInput().length();
+        if (length > maxInputChars) {
+            throw new InputTooLargeException(length, maxInputChars);
+        }
     }
 
     @Override
@@ -962,7 +1115,8 @@ public class ConversationService implements IConversationService {
             throws Exception {
 
         requireConversationAccess(conversationId);
-        var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+        requireInputWithinLimit(inputData);
+        var snapshot = requireSnapshot(conversationId);
         sayStreaming(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId, returnDetailed, returnCurrentStepOnly, returningFields,
                 inputData, streamingHandler);
     }
@@ -1058,6 +1212,85 @@ public class ConversationService implements IConversationService {
                 return maxAttachmentsPerTurn;
             }
         };
+    }
+
+    /**
+     * Works out how much this conversation's user id is worth, without changing
+     * {@link #startConversation}'s signature — a dozen call sites would otherwise
+     * have to answer a question only two of them could.
+     * <p>
+     * Two sources, in order:
+     * <ul>
+     * <li><b>A principal already bound to this thread</b> means the conversation is
+     * being spawned from inside a running pipeline turn (a sub-agent, a delegate, a
+     * group member). Such a thread has no request to judge by, so deriving would
+     * wrongly downgrade every child; the child inherits the parent's provenance
+     * instead. Only for the SAME user — a child opened under a different id is a
+     * different subject, and inheriting a verification that was never about them is
+     * how one user's grant would be reachable from another's conversation.</li>
+     * <li><b>Otherwise the authenticated caller</b>, and only when their principal
+     * name IS this conversation's user id. A caller who opens a conversation on
+     * behalf of some other id has asserted that id, not proved it — which is
+     * exactly what the {@code /v1} adapter does with {@code X-OpenWebUI-User-Id},
+     * since that surface authenticates a shared key rather than a person.</li>
+     * </ul>
+     */
+    private ResolutionPrincipal deriveResolutionPrincipal(String conversationUserId, CallerIdentity caller) {
+        ResolutionPrincipal inherited = currentResolutionPrincipal();
+        if (inherited != null) {
+            boolean sameSubject = conversationUserId != null && conversationUserId.equals(inherited.userId());
+            return new ResolutionPrincipal(conversationUserId,
+                    sameSubject ? inherited.provenance() : ResolutionPrincipal.Provenance.SELF_ASSERTED);
+        }
+        boolean verified = caller != null && caller.userId() != null && !caller.userId().isBlank()
+                && caller.userId().equals(conversationUserId);
+        return new ResolutionPrincipal(conversationUserId,
+                verified ? ResolutionPrincipal.Provenance.VERIFIED : ResolutionPrincipal.Provenance.SELF_ASSERTED);
+    }
+
+    private ResolutionPrincipal currentResolutionPrincipal() {
+        return resolutionPrincipalContext == null ? null : resolutionPrincipalContext.current();
+    }
+
+    private void bindResolutionPrincipal(ResolutionPrincipal principal) {
+        if (resolutionPrincipalContext != null) {
+            resolutionPrincipalContext.bind(principal);
+        }
+    }
+
+    /**
+     * Binds (or, with {@code null}, unbinds) the caller for the synchronous
+     * CONVERSATION_START turn. The counterpart of {@link #bindResolutionPrincipal}:
+     * the two bindings answer different questions — who is driving the request,
+     * whose conversation this is — and both have to be live while that turn's tools
+     * resolve credentials.
+     */
+    private void bindCallerIdentity(CallerIdentity caller) {
+        if (callerIdentityContext != null) {
+            callerIdentityContext.bind(caller);
+        }
+    }
+
+    /**
+     * Wraps a turn so the conversation's own principal is bound while it executes,
+     * and unbound the moment it stops.
+     * <p>
+     * The pipeline runs on a pooled thread, so this is the only thing standing
+     * between one conversation's owner and the next turn to land on that thread.
+     * {@code ResolutionPrincipalContext} restores the previous binding in a
+     * {@code finally} for exactly that reason.
+     * <p>
+     * Both halves come from the STORED memory rather than from the request that
+     * triggered the turn. A request tells you who is driving; only the conversation
+     * tells you whose credentials the turn may spend, and the two are different
+     * people whenever somebody acts on another user's conversation.
+     */
+    private Callable<Void> withResolutionPrincipal(IConversationMemory conversationMemory, Callable<Void> executeConversation) {
+        if (resolutionPrincipalContext == null) {
+            return executeConversation;
+        }
+        var principal = new ResolutionPrincipal(conversationMemory.getUserId(), conversationMemory.getResolutionProvenance());
+        return resolutionPrincipalContext.withPrincipal(principal, executeConversation);
     }
 
     IAgent getAgent(Environment environment, String agentId, Integer agentVersion) throws ServiceException, IllegalAccessException {

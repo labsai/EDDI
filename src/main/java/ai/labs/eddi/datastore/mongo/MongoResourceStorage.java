@@ -40,6 +40,15 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     private static final String DELETED_FIELD = "_deleted";
 
     private static final String HISTORY_POSTFIX = ".history";
+
+    /**
+     * A history row's {@code _id} is the embedded document
+     * <code>{_id: ObjectId, _version: int}</code>, so its parts are addressed by
+     * these dotted paths. Named once because both the filter and the index that has
+     * to serve it must agree.
+     */
+    static final String HISTORY_NESTED_ID_FIELD = ID_FIELD + "." + ID_FIELD;
+    static final String HISTORY_NESTED_VERSION_FIELD = ID_FIELD + "." + VERSION_FIELD;
     private final Class<T> documentType;
 
     protected MongoCollection<Document> currentCollection;
@@ -60,6 +69,14 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         this.documentBuilder = documentBuilder;
 
         ensureIndex(currentCollection, Indexes.ascending(ID_FIELD, VERSION_FIELD), true);
+        // History rows are addressed by the NESTED id, not by a range over the
+        // composite _id (see historyRowsOf). MongoDB's built-in _id index covers the
+        // whole embedded subdocument and cannot serve a dotted path into it, so
+        // without this index removeAllPermanently and readHistoryLatest are a
+        // COLLSCAN of the history collection. That is not academic: descriptors.history
+        // holds one row per conversation, and GdprComplianceService's erasure loop
+        // calls deleteAllDescriptor once per conversation.
+        ensureIndex(historyCollection, Indexes.ascending(HISTORY_NESTED_ID_FIELD, HISTORY_NESTED_VERSION_FIELD), false);
 
         Arrays.stream(indexes).forEach(index -> {
             ensureIndex(currentCollection, Indexes.ascending(index), false);
@@ -272,24 +289,32 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         }
     }
 
+    /**
+     * Every history row of a resource, addressed by the nested id rather than by a
+     * range over the composite {@code _id}.
+     * <p>
+     * A history row's {@code _id} is the embedded document {@code {_id: ObjectId,
+     * _version: int}} (see {@link #newHistoryResourceFor(IResource, boolean)}), and
+     * BSON compares embedded documents field by field. The previous {@code $gt
+     * {_id, _version: 0}} bound therefore compared EQUAL to — and so excluded —
+     * every row archived at version 0, which is exactly the version conversation
+     * descriptors are created at. Those tombstones (carrying {@code userId})
+     * survived both permanent delete and GDPR erasure, and nothing else in the
+     * codebase deletes history rows. Matching the nested field covers every
+     * version, including 0 and negative ones, and matches
+     * {@code PostgresResourceStorage}, which deletes by id alone.
+     * <p>
+     * The dotted path needs its own index — the built-in {@code _id} index is on
+     * the whole subdocument and cannot serve it — which the constructor creates.
+     */
+    private static Document historyRowsOf(String id) {
+        return new Document(HISTORY_NESTED_ID_FIELD, new ObjectId(id));
+    }
+
     @Override
     public void removeAllPermanently(String id) {
         remove(id);
-
-        Document beginId = new Document();
-        beginId.put(ID_FIELD, new ObjectId(id));
-        beginId.put(VERSION_FIELD, 0);
-
-        Document endId = new Document();
-        endId.put(ID_FIELD, new ObjectId(id));
-        endId.put(VERSION_FIELD, Integer.MAX_VALUE);
-
-        Document query = new Document();
-        query.put("$gt", beginId);
-        query.put("$lt", endId);
-        Document idQuery = new Document();
-        idQuery.put(ID_FIELD, query);
-        historyCollection.deleteMany(idQuery);
+        historyCollection.deleteMany(historyRowsOf(id));
     }
 
     @Override
@@ -304,27 +329,16 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         return new HistoryResource(doc);
     }
 
+    /** @see #historyRowsOf(String) for why this is a nested-field match. */
     @Override
     public IHistoryResource<T> readHistoryLatest(String id) {
-        Document beginId = new Document();
-        beginId.put(ID_FIELD, new ObjectId(id));
-        beginId.put(VERSION_FIELD, 0);
+        Document query = historyRowsOf(id);
 
-        Document endId = new Document();
-        endId.put(ID_FIELD, new ObjectId(id));
-        endId.put(VERSION_FIELD, Integer.MAX_VALUE);
-
-        Document query = new Document();
-        query.put("$gt", beginId);
-        query.put("$lt", endId);
-        Document object = new Document();
-        object.put(ID_FIELD, query);
-
-        if (historyCollection.countDocuments(object) == 0) {
+        if (historyCollection.countDocuments(query) == 0) {
             return null;
         }
 
-        Document doc = historyCollection.find(object).sort(new Document(ID_FIELD, -1)).limit(1).first();
+        Document doc = historyCollection.find(query).sort(new Document(HISTORY_NESTED_VERSION_FIELD, -1)).limit(1).first();
         if (doc == null) {
             return null;
         }

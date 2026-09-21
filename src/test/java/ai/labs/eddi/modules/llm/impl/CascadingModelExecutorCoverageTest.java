@@ -35,6 +35,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import java.net.ConnectException;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -659,7 +660,7 @@ class CascadingModelExecutorCoverageTest {
 
         ChatModel down = mock(ChatModel.class);
         // Wrap the checked ConnectException as a cause (message itself does not match).
-        when(down.chat(anyList())).thenThrow(new RuntimeException("network fault", new java.net.ConnectException("refused")));
+        when(down.chat(anyList())).thenThrow(new RuntimeException("network fault", new ConnectException("refused")));
         ChatModel up = modelReturning("recovered");
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
         when(registry.getOrCreate(eq("down"), anyMap())).thenReturn(down);

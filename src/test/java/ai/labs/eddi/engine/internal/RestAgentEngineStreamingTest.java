@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableException;
+import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
@@ -26,6 +29,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Method;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
@@ -77,6 +81,39 @@ class RestAgentEngineStreamingTest {
             assertEquals("hello", method.invoke(streaming, "hello"));
             assertEquals("say \\\"hi\\\"", method.invoke(streaming, "say \"hi\""));
             assertEquals("line1\\nline2", method.invoke(streaming, "line1\nline2"));
+        }
+
+        /**
+         * The replace-chain this grew from covered five characters and left every other
+         * control character raw inside a JSON string, which is invalid per RFC 8259 §7
+         * — so a strict client cannot parse the event at all. None of the values
+         * reaching {@code escapeJson} are ours: a tool name comes from an LLM, an error
+         * summary from an exception message, a conversation id straight off the request
+         * path.
+         */
+        @Test
+        @DisplayName("escapes every control character, so the event stays parseable JSON")
+        void escapesAllControlCharacters() throws Exception {
+            Method method = RestAgentEngineStreaming.class.getDeclaredMethod("escapeJson", String.class);
+            method.setAccessible(true);
+
+            assertEquals("a\\u0000b", method.invoke(streaming, "a\u0000b"));
+            // Backspace and form-feed have their own two-character JSON escapes;
+            // the six-character form is only for the control characters that do
+            // not. (Spelling it out here on purpose: a literal backslash-u in a
+            // Java comment is processed by the lexer and fails to compile.)
+            assertEquals("a\\bb", method.invoke(streaming, "a\bb"));
+            assertEquals("a\\fb", method.invoke(streaming, "a\fb"));
+            assertEquals("a\\u001fb", method.invoke(streaming, "a\u001fb"));
+            // Legal JSON, but a line terminator in JavaScript — and this goes to a
+            // browser.
+            assertEquals("a\\u2028b", method.invoke(streaming, "a\u2028b"));
+            assertEquals("a\\u2029b", method.invoke(streaming, "a\u2029b"));
+
+            // The whole point: what comes out has to survive a real JSON parser.
+            String hostile = "conv\u0000\u0008\u001f\u2028\"x\\y";
+            String event = String.format("{\"message\":\"%s\"}", method.invoke(streaming, hostile));
+            assertEquals(hostile, new ObjectMapper().readTree(event).get("message").asText());
             assertEquals("col1\\tcol2", method.invoke(streaming, "col1\tcol2"));
             assertEquals("path\\\\file", method.invoke(streaming, "path\\file"));
         }
@@ -139,6 +176,42 @@ class RestAgentEngineStreamingTest {
             String json = (String) method.invoke(streaming, snapshot);
 
             assertTrue(json.contains("conversationOutputs"));
+        }
+
+        @Test
+        @DisplayName("carries the pause identity: hitlPausedAt as the ISO instant, verbatim")
+        void includesPauseIdentity() throws Exception {
+            // hitlPausedAt is the only field distinguishing one pause of a turn
+            // from the next. The done event omitting it left streamed pauses
+            // identityless: the Manager's settle-poll read every re-pause as
+            // the pause it had already decided and spun to its timeout with
+            // the Approve button dead. The value must be the same ISO_INSTANT
+            // string the REST snapshot serializes, so cross-channel string
+            // comparison stays sound.
+            Method method = RestAgentEngineStreaming.class.getDeclaredMethod("toJson", SimpleConversationMemorySnapshot.class);
+            method.setAccessible(true);
+
+            var snapshot = new SimpleConversationMemorySnapshot();
+            snapshot.setConversationState(ConversationState.AWAITING_HUMAN);
+            snapshot.setHitlPausedAt(Instant.parse("2026-08-16T00:05:41.984599700Z"));
+
+            String json = (String) method.invoke(streaming, snapshot);
+
+            assertTrue(json.contains("\"hitlPausedAt\":\"2026-08-16T00:05:41.984599700Z\""), json);
+        }
+
+        @Test
+        @DisplayName("omits hitlPausedAt when the conversation is not paused")
+        void omitsPauseIdentityWhenAbsent() throws Exception {
+            Method method = RestAgentEngineStreaming.class.getDeclaredMethod("toJson", SimpleConversationMemorySnapshot.class);
+            method.setAccessible(true);
+
+            var snapshot = new SimpleConversationMemorySnapshot();
+            snapshot.setConversationState(ConversationState.READY);
+
+            String json = (String) method.invoke(streaming, snapshot);
+
+            assertFalse(json.contains("hitlPausedAt"), json);
         }
     }
 
@@ -238,6 +311,26 @@ class RestAgentEngineStreamingTest {
 
             // The turn must not have been started, and the denial must NOT be
             // downgraded into an SSE 'error' event on an otherwise 200 stream.
+            verify(conversationService, never()).sayStreaming(anyString(), any(), any(), any(), any(), any());
+            verify(eventSink, never()).send(any(OutboundSseEvent.class));
+        }
+
+        @Test
+        @DisplayName("W17: oversized input is refused (413) before the stream is opened")
+        void refusesOversizedInputBeforeTheStream() throws Exception {
+            var eventSink = mock(SseEventSink.class);
+            var sse = mock(Sse.class);
+            var inputData = new InputData();
+            inputData.setInput("x".repeat(11));
+
+            doThrow(new IConversationService.InputTooLargeException(11, 10))
+                    .when(conversationService).requireInputWithinLimit(inputData);
+
+            // Thrown, so InputTooLargeExceptionMapper answers 413 — not an SSE 'error'
+            // event on an already-committed 200 stream.
+            assertThrows(IConversationService.InputTooLargeException.class,
+                    () -> streaming.sayStreaming("conv-1", false, false, List.of(), inputData, eventSink, sse));
+
             verify(conversationService, never()).sayStreaming(anyString(), any(), any(), any(), any(), any());
             verify(eventSink, never()).send(any(OutboundSseEvent.class));
         }
@@ -538,6 +631,16 @@ class RestAgentEngineStreamingTest {
     @org.junit.jupiter.api.DisplayName("SSE data lines are padded so a leading space survives")
     class DataLinePadding {
 
+        @Test
+        @DisplayName("a bare carriage return is normalised so its continuation line stays padded")
+        void carriageReturnContinuationIsPadded() {
+            // RESTEasy's SSE serializer starts a new data: line on \r as well
+            // as \n - an unnormalised \r would produce an UNPADDED continuation
+            // whose first character the consumer then eats.
+            String padded = RestAgentEngineStreaming.padDataLines("a\rb\r\nc");
+            assertEquals(" a\n b\n c", padded);
+        }
+
         @org.junit.jupiter.api.Test
         void aLeadingSpaceSurvivesTheConsumersStrip() {
             String padded = RestAgentEngineStreaming.padDataLines(" alpha");
@@ -579,6 +682,181 @@ class RestAgentEngineStreamingTest {
                 out.append(line.startsWith(" ") ? line.substring(1) : line);
             }
             return out.toString();
+        }
+    }
+
+    /**
+     * The known client conditions {@code ConversationService.sayStreaming} rejects
+     * synchronously must surface as TYPED error events —
+     * {@code {"message":…,"code":…}} — not the opaque internal-error shape.
+     * Observed live: input sent into an AWAITING_HUMAN conversation was refused
+     * correctly by the backend but reached the client as
+     * {@code {"message":"Internal server error"}}, which the Manager rendered as a
+     * dead error blob instead of re-showing the approval banner.
+     */
+    @Nested
+    @DisplayName("sayStreaming known client conditions (typed error events)")
+    class KnownConditionErrorEvents {
+
+        private SseEventSink eventSink;
+        private Sse sse;
+        private OutboundSseEvent.Builder eventBuilder;
+        private ArgumentCaptor<String> payloads;
+
+        @BeforeEach
+        void wireSse() {
+            eventSink = mock(SseEventSink.class);
+            sse = mock(Sse.class);
+            eventBuilder = mock(OutboundSseEvent.Builder.class);
+            var sseEvent = mock(OutboundSseEvent.class);
+            payloads = ArgumentCaptor.forClass(String.class);
+            when(eventSink.isClosed()).thenReturn(false);
+            when(sse.newEventBuilder()).thenReturn(eventBuilder);
+            when(eventBuilder.name(anyString())).thenReturn(eventBuilder);
+            when(eventBuilder.data(any(Class.class), payloads.capture())).thenReturn(eventBuilder);
+            when(eventBuilder.build()).thenReturn(sseEvent);
+        }
+
+        private String errorPayloadFor(Exception thrown) throws Exception {
+            doThrow(thrown).when(conversationService)
+                    .sayStreaming(anyString(), any(), any(), any(), any(), any());
+            var inputData = new InputData();
+            inputData.setInput("Hello");
+            streaming.sayStreaming("conv-1", false, false, List.of(), inputData, eventSink, sse);
+            verify(eventBuilder, atLeastOnce()).name("error");
+            return payloads.getValue();
+        }
+
+        @Test
+        @DisplayName("awaiting approval → code=awaiting_approval with the twin's 409 message")
+        void awaitingApprovalIsTyped() throws Exception {
+            String message = "Conversation is awaiting human approval — a reviewer must resolve it via"
+                    + " POST /agents/conv-1/resume (or cancel) before new input is accepted";
+            String payload = errorPayloadFor(
+                    new IConversationService.ConversationAwaitingApprovalException(message));
+
+            assertTrue(payload.contains("\"code\":\"awaiting_approval\""), payload);
+            assertTrue(payload.contains("awaiting human approval"), payload);
+            assertFalse(payload.contains("Internal server error"), payload);
+        }
+
+        @Test
+        @DisplayName("conversation ended → code=conversation_ended")
+        void conversationEndedIsTyped() throws Exception {
+            String payload = errorPayloadFor(
+                    new IConversationService.ConversationEndedException("Conversation has ended!"));
+
+            assertTrue(payload.contains("\"code\":\"conversation_ended\""), payload);
+            assertFalse(payload.contains("Internal server error"), payload);
+        }
+
+        @Test
+        @DisplayName("agent not ready → fixed text, NOT the message naming environment and agentId")
+        void agentNotReadyDisclosesNothing() throws Exception {
+            String payload = errorPayloadFor(new IConversationService.AgentNotReadyException(
+                    "Agent not deployed (environment=restricted, conversationId=conv-1, version=7)"));
+
+            assertTrue(payload.contains("\"code\":\"agent_not_ready\""), payload);
+            assertTrue(payload.contains("Agent is not deployed or not ready"), payload);
+            // The exception's own message mirrors what the non-streaming twin
+            // withholds behind a bare 404 — it must not leak here either.
+            assertFalse(payload.contains("environment=restricted"), payload);
+        }
+
+        @Test
+        @DisplayName("agent mismatch → the twin's fixed 409 text, not the id-bearing message")
+        void agentMismatchUsesFixedText() throws Exception {
+            String payload = errorPayloadFor(new IConversationService.AgentMismatchException(
+                    "Supplied agentId (agent-7) is incompatible with conversationId (conv-1)"));
+
+            assertTrue(payload.contains("\"code\":\"agent_mismatch\""), payload);
+            assertTrue(payload.contains("Agent version mismatch"), payload);
+            assertFalse(payload.contains("agent-7"), payload);
+        }
+
+        /**
+         * The honest-503 fix reached the synchronous start endpoint only. On this path
+         * a store failover surfaced as {@code {"message":"Internal server error"}} on
+         * every streamed turn, with an ERROR stack trace and a fresh correlation id
+         * behind each one — the twin answers 503
+         * {@code restriction_status_unavailable}.
+         */
+        @Test
+        @DisplayName("restriction status unreadable → code=restriction_status_unavailable, not an opaque internal error")
+        void restrictionStatusUnavailableIsTyped() throws Exception {
+            String payload = errorPayloadFor(new ProcessingRestrictionUnavailableException(
+                    "Cannot determine processing-restriction status right now; the request was not processed",
+                    new RuntimeException("connection refused")));
+
+            assertTrue(payload.contains("\"code\":\"restriction_status_unavailable\""), payload);
+            assertFalse(payload.contains("Internal server error"), payload);
+            // The cause's message can name replica-set members; only the fixed
+            // template above is echoed.
+            assertFalse(payload.contains("connection refused"), payload);
+        }
+
+        /**
+         * The third surface of the same body. Echoing {@code getMessage()} here is
+         * null-safe (it goes through {@code escapeJson}), but it produced
+         * {@code "message":""} for a thrower with no message while the mapper and the
+         * synchronous twin now answer a fixed sentence — three surfaces the mapper's
+         * Javadoc says to change together must not disagree about what an SSE client is
+         * shown.
+         */
+        @Test
+        @DisplayName("a restriction failure carrying no message streams the shared fallback text, not an empty one")
+        void restrictionStatusUnavailableWithoutAMessageUsesTheSharedFallback() throws Exception {
+            String payload = errorPayloadFor(
+                    new ProcessingRestrictionUnavailableException(null, new RuntimeException("connection refused")));
+
+            assertTrue(payload.contains("\"code\":\"restriction_status_unavailable\""), payload);
+            assertTrue(payload.contains("Processing-restriction status unavailable"), payload);
+            assertFalse(payload.contains("\"message\":\"\""), payload);
+        }
+
+        /**
+         * Same distinction the twin draws with a 503 instead of a 429: a quota store
+         * that cannot answer is not a tenant over its allowance.
+         */
+        @Test
+        @DisplayName("quota accounting unavailable → code=quota_accounting_unavailable")
+        void quotaAccountingUnavailableIsTyped() throws Exception {
+            String payload = errorPayloadFor(new QuotaAccountingUnavailableException(
+                    "Quota accounting unavailable — denying request for safety"));
+
+            assertTrue(payload.contains("\"code\":\"quota_accounting_unavailable\""), payload);
+            assertFalse(payload.contains("Internal server error"), payload);
+        }
+
+        /**
+         * The quota twin of
+         * {@code restrictionStatusUnavailableWithoutAMessageUsesTheSharedFallback}.
+         * Echoing {@code getMessage()} raw is null-safe here — it goes through
+         * {@code escapeJson} — but it emitted {@code "message":""} for a thrower with
+         * no message, while {@code QuotaAccountingUnavailableExceptionMapper} and the
+         * synchronous twin both answer "Quota accounting unavailable". One outage, two
+         * error contracts, decided by nothing but whether the client asked for SSE.
+         */
+        @Test
+        @DisplayName("a quota outage carrying no message streams the shared fallback text, not an empty one")
+        void quotaAccountingUnavailableWithoutAMessageUsesTheSharedFallback() throws Exception {
+            String payload = errorPayloadFor(new QuotaAccountingUnavailableException(null));
+
+            assertTrue(payload.contains("\"code\":\"quota_accounting_unavailable\""), payload);
+            assertTrue(payload.contains("Quota accounting unavailable"), payload);
+            assertFalse(payload.contains("\"message\":\"\""), payload);
+        }
+
+        @Test
+        @DisplayName("anything else stays opaque: fixed message + correlationId, no code")
+        void unknownExceptionsStayOpaque() throws Exception {
+            String payload = errorPayloadFor(
+                    new RuntimeException("mongodb://replica-set-member:27017 unreachable"));
+
+            assertTrue(payload.contains("Internal server error"), payload);
+            assertTrue(payload.contains("correlationId"), payload);
+            assertFalse(payload.contains("\"code\""), payload);
+            assertFalse(payload.contains("mongodb://"), payload);
         }
     }
 }

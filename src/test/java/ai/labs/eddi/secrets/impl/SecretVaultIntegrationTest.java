@@ -21,6 +21,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -55,7 +56,9 @@ class SecretVaultIntegrationTest {
     private VaultSecretProvider provider;
     private SecretResolver resolver;
 
-    // In-memory stores to simulate real persistence
+    // In-memory stores to simulate real persistence. The DEK store is keyed by
+    // dekId — tenant AND generation — because a tenant holds one row per
+    // generation and rotation adds to that set rather than replacing it.
     private final Map<String, EncryptedDek> dekStore = new HashMap<>();
     private final Map<String, EncryptedSecret> secretStore = new HashMap<>();
 
@@ -86,42 +89,74 @@ class SecretVaultIntegrationTest {
     }
 
     /**
-     * Set up mock persistence to simulate a working DEK store.
+     * Set up mock persistence to simulate a working DEK store — one row per
+     * (tenant, generation), with {@code insertDek} refusing a generation that is
+     * already taken, exactly as the unique key does in both real stores.
      */
     private void setupDekMocking() {
         doAnswer(inv -> {
             EncryptedDek dek = inv.getArgument(0);
-            dekStore.put(dek.getTenantId(), dek);
+            dekStore.put(dek.dekId(), dek);
             return null;
         }).when(persistence).upsertDek(any());
 
-        when(persistence.findDek(anyString())).thenAnswer(inv -> {
-            String tenantId = inv.getArgument(0);
-            return Optional.ofNullable(dekStore.get(tenantId));
+        lenient().when(persistence.insertDek(any())).thenAnswer(inv -> {
+            EncryptedDek dek = inv.getArgument(0);
+            return dekStore.putIfAbsent(dek.dekId(), dek) == null;
         });
 
+        // The tenant's ACTIVE generation is the highest one it holds, not "the row".
+        when(persistence.findDek(anyString()))
+                .thenAnswer(inv -> generationsOf(inv.getArgument(0)).max(Comparator.comparingInt(EncryptedDek::getGeneration)));
+
+        // The generation a stored row names, so ciphertext is opened with the key
+        // that sealed it rather than with whichever is newest.
+        lenient().when(persistence.findDek(anyString(), anyInt())).thenAnswer(inv -> {
+            String tenantId = inv.getArgument(0);
+            int generation = inv.getArgument(1);
+            return Optional.ofNullable(dekStore.get(EncryptedDek.dekId(tenantId, generation)));
+        });
+
+        lenient().when(persistence.listDeks(anyString()))
+                .thenAnswer(inv -> generationsOf(inv.getArgument(0)).sorted(Comparator.comparingInt(EncryptedDek::getGeneration)).toList());
+
         lenient().when(persistence.listAllDeks()).thenAnswer(inv -> new ArrayList<>(dekStore.values()));
+
+        lenient().doAnswer(inv -> {
+            String tenantId = inv.getArgument(0);
+            dekStore.values().removeIf(dek -> tenantId.equals(dek.getTenantId()));
+            return null;
+        }).when(persistence).deleteDek(anyString());
+    }
+
+    private Stream<EncryptedDek> generationsOf(String tenantId) {
+        return dekStore.values().stream().filter(dek -> tenantId.equals(dek.getTenantId()));
     }
 
     /**
      * Set up mock persistence to simulate a working secret store.
+     * <p>
+     * Reads hand back a detached copy, as both real stores do. Handing back the
+     * live instance would let the rotation sweep mutate the row it is about to
+     * guard on, and {@code updateSecretSealing} would then compare the new dekId
+     * with itself.
      */
     private void setupSecretMocking() {
         doAnswer(inv -> {
             EncryptedSecret secret = inv.getArgument(0);
-            secretStore.put(secret.getTenantId() + "/" + secret.getKeyName(), secret);
+            secretStore.put(secret.getTenantId() + "/" + secret.getKeyName(), copyOf(secret));
             return null;
         }).when(persistence).upsertSecret(any());
 
         when(persistence.findSecret(anyString(), anyString())).thenAnswer(inv -> {
             String tid = inv.getArgument(0);
             String kn = inv.getArgument(1);
-            return Optional.ofNullable(secretStore.get(tid + "/" + kn));
+            return Optional.ofNullable(secretStore.get(tid + "/" + kn)).map(SecretVaultIntegrationTest::copyOf);
         });
 
         when(persistence.listSecretsByTenant(anyString())).thenAnswer(inv -> {
             String tid = inv.getArgument(0);
-            return secretStore.values().stream().filter(s -> s.getTenantId().equals(tid)).toList();
+            return secretStore.values().stream().filter(s -> s.getTenantId().equals(tid)).map(SecretVaultIntegrationTest::copyOf).toList();
         });
 
         when(persistence.deleteSecret(anyString(), anyString())).thenAnswer(inv -> {
@@ -129,6 +164,26 @@ class SecretVaultIntegrationTest {
             String kn = inv.getArgument(1);
             return secretStore.remove(tid + "/" + kn) != null;
         });
+
+        lenient().when(persistence.updateSecretSealing(any(), any())).thenAnswer(inv -> {
+            EncryptedSecret secret = inv.getArgument(0);
+            String expectedDekId = inv.getArgument(1);
+            String key = secret.getTenantId() + "/" + secret.getKeyName();
+            EncryptedSecret current = secretStore.get(key);
+            // The guard: a store() that landed in between has already sealed with the
+            // active key and must not be overwritten by a re-seal of what it replaced.
+            if (current == null || !Objects.equals(current.getDekId(), expectedDekId)) {
+                return false;
+            }
+            secretStore.put(key, copyOf(secret));
+            return true;
+        });
+    }
+
+    private static EncryptedSecret copyOf(EncryptedSecret secret) {
+        return new EncryptedSecret(secret.getId(), secret.getTenantId(), secret.getKeyName(), secret.getEncryptedValue(), secret.getIv(),
+                secret.getDekId(), secret.getChecksum(), secret.getDescription(), secret.getAllowedAgents(), secret.getCreatedAt(),
+                secret.getLastAccessedAt(), secret.getLastRotatedAt());
     }
 
     // ─── Full Round-Trip ───
@@ -268,6 +323,28 @@ class SecretVaultIntegrationTest {
             EncryptedSecret stored = secretStore.get(TENANT + "/" + KEY_NAME);
             assertNotNull(stored.getLastRotatedAt());
             assertTrue(stored.getLastRotatedAt().isAfter(before) || stored.getLastRotatedAt().equals(before));
+        }
+
+        @Test
+        @DisplayName("a row the sweep could not move still resolves, because the old generation is kept")
+        void olderGenerationKeepsWorking() throws Exception {
+            setupDekMocking();
+            setupSecretMocking();
+
+            provider.store(new SecretReference(TENANT, KEY_NAME), SECRET_VALUE, null, null);
+            // The sweep loses this row's guard on both attempts, so it stays on
+            // generation 1 — the state an interrupted rotation leaves behind.
+            // doReturn, not when(...): when() CALLS the mock, and setupSecretMocking's
+            // answer dereferences its argument, so this line would throw before it
+            // ever re-stubbed anything.
+            doReturn(false).when(persistence).updateSecretSealing(any(), any());
+
+            var ex = assertThrows(ISecretProvider.SecretProviderException.class, () -> provider.rotateDek(TENANT));
+            assertTrue(ex.getMessage().contains("safe to re-run"), "nothing is lost, and the message must say so: " + ex.getMessage());
+
+            resolver.invalidateAll();
+            assertEquals(SECRET_VALUE, resolver.resolveValue("${vault:" + KEY_NAME + "}"),
+                    "deleting the generation a row still names is what made a partly swept tenant unreadable");
         }
 
         @Test

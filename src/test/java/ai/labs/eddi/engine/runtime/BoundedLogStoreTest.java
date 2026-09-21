@@ -17,6 +17,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
 
+import org.jboss.logmanager.ExtLogRecord;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -414,7 +415,7 @@ class BoundedLogStoreTest {
 
         @Test
         void captureWithExtLogRecordAndMdc_shouldExtractMdcFields() {
-            var extRecord = new org.jboss.logmanager.ExtLogRecord(
+            var extRecord = new ExtLogRecord(
                     Level.SEVERE, "ExtLogRecord test",
                     "com.example.ExtService");
             extRecord.setLoggerName("com.example.ExtService");
@@ -443,7 +444,7 @@ class BoundedLogStoreTest {
 
         @Test
         void captureWithExtLogRecord_invalidAgentVersion_shouldHandleGracefully() {
-            var extRecord = new org.jboss.logmanager.ExtLogRecord(
+            var extRecord = new ExtLogRecord(
                     Level.INFO, "Invalid ext version",
                     "com.example.ExtService");
             extRecord.setLoggerName("com.example.ExtService");
@@ -471,7 +472,7 @@ class BoundedLogStoreTest {
 
         @Test
         void captureWithExtLogRecordPrintfPattern_shouldFormatCorrectly() {
-            var extRecord = new org.jboss.logmanager.ExtLogRecord(
+            var extRecord = new ExtLogRecord(
                     Level.WARNING, "%s, line %d in %s",
                     "com.example.ScriptEngine");
             extRecord.setLoggerName("com.example.ScriptEngine");

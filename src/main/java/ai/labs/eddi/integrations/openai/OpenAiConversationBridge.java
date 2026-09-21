@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.integrations.openai;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.lifecycle.TaskId;
@@ -92,12 +93,16 @@ public class OpenAiConversationBridge {
     private Counter conversationsCreated;
     private Timer turnTimer;
 
+    private final ResourceAccessGuard resourceAccessGuard;
+
     @Inject
     public OpenAiConversationBridge(IConversationService conversationService,
             IUserConversationStore userConversationStore,
             OpenAiMessageMapper messageMapper,
             OpenAiCompatConfig config,
-            MeterRegistry meterRegistry) {
+            MeterRegistry meterRegistry,
+            ResourceAccessGuard resourceAccessGuard) {
+        this.resourceAccessGuard = resourceAccessGuard;
         this.conversationService = conversationService;
         this.userConversationStore = userConversationStore;
         this.messageMapper = messageMapper;
@@ -240,6 +245,13 @@ public class OpenAiConversationBridge {
 
     private String startConversation(AgentModelResolver.ResolvedModel model, String userId, String intent) {
         try {
+            // The same USE gate the REST and MCP surfaces apply. There is no verified
+            // principal on /v1 — one shared API key, a user id taken from a trusted
+            // header — so this admits only published agents once workspaces are enforced,
+            // and everything as before when they are not. Deliberately NOT scoped to the
+            // header-supplied userId: that id is self-asserted, and honouring it would let
+            // one leaked key reach any user's private agents.
+            resourceAccessGuard.requireAgentUseAccess(model.agentId());
             var result = conversationService.startConversation(model.environment(), model.agentId(), userId,
                     Map.of(CONTEXT_CHANNEL_INTENT, new Context(Context.ContextType.string, intent)));
             conversationsCreated.increment();
@@ -534,6 +546,9 @@ public class OpenAiConversationBridge {
                 : message;
     }
 
+    /** Error code for input over {@code eddi.conversations.max-input-chars}. */
+    static final String INPUT_TOO_LARGE_CODE = "input_too_large";
+
     /** Translate a turn failure into the OpenAI error envelope. */
     OpenAiApiException asApiException(Exception e) {
         if (e instanceof OpenAiApiException apiException) {
@@ -548,6 +563,14 @@ public class OpenAiConversationBridge {
         }
         if (e instanceof IResourceStore.ResourceNotFoundException) {
             return OpenAiApiException.notFound(null, "The conversation no longer exists.");
+        }
+        // A caller error, not a server one: the input cap refused the turn before any
+        // model call. 400 is what OpenAI itself answers for an over-long prompt.
+        IConversationService.InputTooLargeException tooLarge = e instanceof IConversationService.InputTooLargeException direct
+                ? direct
+                : e.getCause() instanceof IConversationService.InputTooLargeException cause ? cause : null;
+        if (tooLarge != null) {
+            return OpenAiApiException.badRequest(INPUT_TOO_LARGE_CODE, tooLarge.getMessage());
         }
         if (e.getCause() instanceof OpenAiApiException causeException) {
             return causeException;

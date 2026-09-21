@@ -58,12 +58,16 @@ curl -X POST /groupstore/groups \
 # Start discussion
 curl -X POST /groups/<groupId>/conversations \
   -H "Content-Type: application/json" \
-  -d '{"input": "What is the best architecture for our new service?"}'
+  -d '{"question": "What is the best architecture for our new service?"}'
 ```
 
 ## Member Roles
 
-Some styles require specific roles:
+Some styles require specific roles. A preset `DEBATE` group without at least one
+`PRO` and one `CON` member, or a preset `DEVIL_ADVOCATE` group without a
+`DEVIL_ADVOCATE` member, is rejected at save time — the engine would otherwise
+fall back to ALL members and the style would silently become something else.
+(Groups with explicit `phases` route roles themselves and are not checked.)
 
 | Role | Used By | Purpose |
 |---|---|---|
@@ -145,9 +149,10 @@ tools.
   silently filing a task without its dependency schedules it immediately, which
   is the opposite of what was asked.
 - **`assignToRole`** takes `"ROLE:Reviewer"` or a member's exact name, and files
-  the task already assigned. Omitting it (or passing `"ALL"`) leaves the task
-  for the wave loop to assign, as it does any other. An unmatched role is
-  refused with the available roles named.
+  the task already assigned. Omitting it (or passing `"ALL"`) round-robins the
+  task to the next member through the same resolver the PLAN phase uses — every
+  filed task gets an owner, and filing is refused outright if the team has
+  nobody to own it. An unmatched role is refused with the available roles named.
 - Refusals are sentences aimed at the model: duplicate subject, unknown
   dependency, circular dependency, subject over 200 chars, description over
   4,000, and either cap being reached.
@@ -235,7 +240,9 @@ peer-hidden until their phase completes (commit-reveal).
   abstentions; a mostly-silent team has not reached quorum, and that is signal.
 - **Options:** `EXPLICIT` is the reliable path. `LAST_SYNTHESIS` extracts
   `Option A: …` lines from the newest synthesis — instruct that synthesis to
-  emit them.
+  emit them (the default synthesis prompt does not). The line may be written the
+  way models write it: `**Option A:** …`, `- Option B: …`, `1. Option C) …`,
+  `Option D. …`, in any letter case.
 - **Ties and quorum failures** go to `tiePolicy`: `MODERATOR_DECIDES` runs one
   moderator turn choosing among the unresolved options (method
   `vote+moderator-tiebreak`); `NO_DECISION` (default) records an honest
@@ -420,6 +427,10 @@ POST /groupstore/groups/{groupId}/workspace/cadences  {"cronExpression": "0 9 * 
 GET  /groupstore/groups/{groupId}/workspace
 ```
 
+`cronExpression` is a **5-field Unix cron** (`min hour day month weekday`), not
+6-field Quartz — `"0 0 3 * * ?"` is rejected. The error message says so, but the
+example above is the one to copy.
+
 MCP: `add_team_task`, `list_team_backlog`. The backlog caps at 200 with an
 actionable error — it is a working set, not an archive.
 
@@ -432,16 +443,21 @@ claim/lease/retry/dead-letter; the executor branches on
    holds the claim — but only up to a TTL (see **Stale claims** below).
 2. **Pull** — top-N *executable* backlog tasks by priority; an empty pull
    skips, logged.
-3. **Claim** — a conditional store write on `runningDiscussionId`; two pods
-   firing concurrently cannot both start, without any in-JVM lock.
-4. **Run** — pulled tasks are injected as a runtime copy of `config.tasks`
+3. **Run** — the discussion is started first, so the claim can carry its real
+   id. Pulled tasks are injected as a runtime copy of `config.tasks`
    (the stored config is never written) and the cadence's `maxCostPerRun`
    rides the inherited-ceiling slot: dollar-primary, per the Dream precedent.
    The discussion runs under the cadence *creator's* identity.
+4. **Claim** — a conditional store write on `runningDiscussionId`, taken before
+   any task turn can complete and without any in-JVM lock. Two pods firing
+   concurrently both start a discussion; the one that loses the CAS cancels its
+   just-started discussion before its first turn, so only one fire does work.
 
 **Writeback** happens at the next fire (or on a workspace read — read-repair),
 never from inside the discussion thread, so a pod crash mid-discussion loses
-nothing. VERIFIED outcomes stay VERIFIED on the backlog and credit the
+nothing. It also means a fire's `COMPLETED` status says the discussion was
+*started*, not that its tasks are done: backlog statuses change only once that
+writeback has run. VERIFIED outcomes stay VERIFIED on the backlog and credit the
 assignee's `perMemberStats`; anything else returns to PENDING with the
 reviewer's feedback appended to the description — **the cross-run retry
 loop**. A FAILED/CANCELLED discussion returns every pulled task untouched.
@@ -502,7 +518,12 @@ artifact.
 
 Off by default with the same absence discipline as the task tools: no opt-in
 means the tools are never assembled. The member agent's own
-`enableBuiltInTools` switch still applies. `markFinal: true` freezes an
+`enableBuiltInTools` switch still applies — a member whose LLM task does not
+set it takes part **without** the tools, and saving a group that enables
+artifacts, agent task creation or dynamic agents logs that prerequisite. Artifact,
+task and dynamic-agent tool results are never served from the tool cache: every
+member runs as the same user, so a cached `listArtifacts()` would hide a peer's
+new artifact. `markFinal: true` freezes an
 artifact — FINAL artifacts accept no further updates. Artifacts are deleted
 with their discussion (close/delete cascade) and by GDPR erasure; the durable
 trace of the work is the transcript.
@@ -534,20 +555,19 @@ roles fail loudly, naming the template's real roles.
 
 ## Attachments
 
-A discussion can carry shared files. `POST /groups/{groupId}/conversations` (and the `/stream` variant) accepts an `attachments` array alongside `question`, in the same three shapes the single-agent API takes:
+A discussion can carry shared files. `POST /groups/{groupId}/conversations` (and the `/stream` variant) accepts an `attachments` array alongside `question`, in two shapes — hosted (`mimeType` + `url`) and inline (`mimeType` + `data`, optionally `fileName`):
 
 ```json
 {
   "question": "Review the attached architecture proposal.",
   "attachments": [
-    { "storageRef": "att_01J..." },
     { "mimeType": "application/pdf", "url": "https://example.com/proposal.pdf" },
-    { "mimeType": "image/png", "fileName": "diagram.png", "base64Data": "iVBOR..." }
+    { "mimeType": "image/png", "fileName": "diagram.png", "data": "iVBOR..." }
   ]
 }
 ```
 
-Inline `base64Data` is stored in the blob store owned by the group conversation, so it is granted to members and reaped with the conversation. Hosted `url` references and pre-uploaded `storageRef`s pass through as-is.
+Inline `data` is stored in the blob store owned by the group conversation, so it is granted to members and reaped with the conversation. Hosted `url` references pass through as-is. A ref carrying neither is skipped, as is a `url` ref with no `mimeType`.
 
 **How members receive them.** On a member's **first** turn the orchestrator grants that member's private conversation access to the group's blobs and injects them as `attachment_*` context — from there the ordinary single-agent attachment path applies (multimodal forwarding for vision models, PDF/text extraction otherwise). On **later** turns the member's own conversation history carries them: `AttachmentForwarder` notes the earlier attachments and the `readAttachment` tool is auto-enabled for any conversation that has them, independently of `builtInToolsWhitelist`. A recruited member gets the same grant on its own first turn, and a nested `GROUP` member propagates the whole set down.
 
@@ -576,6 +596,8 @@ create_group(
 ```
 
 Depth tracking prevents infinite recursion (`eddi.groups.max-depth`, default: 3).
+A group that would contain itself through its GROUP members (directly or via
+other groups) is rejected when it is saved.
 
 ## Custom Phases
 
@@ -609,6 +631,10 @@ For full control, define phases directly:
   ]
 }
 ```
+
+A `CRITIQUE` phase with `targetEachPeer: true` has every member critique each
+peer in turn. Without it, each member reviews all peers' latest responses in one
+turn.
 
 ### Per-phase controls
 
@@ -743,6 +769,9 @@ Pass a `tasks` array to skip the PLAN phase entirely — useful for deterministi
 ```
 
 When `tasks` is provided, the system posts `[System] "Pre-configured task plan: N tasks"` instead of invoking the moderator's LLM.
+A `CUSTOM` group whose phases include `EXECUTE` but no `PLAN` gets the same
+materialization at the start of `EXECUTE`. A `requiresApproval` gate on a PLAN
+phase does not apply there, because there is no plan phase to pause after.
 
 #### Task Dependencies
 
@@ -963,7 +992,7 @@ summarizer's.
 | `POST` | `/groups/{groupId}/conversations` | Start discussion |
 | `GET` | `/groups/{groupId}/conversations/{id}` | Read transcript |
 | `GET` | `/groups/{groupId}/conversations` | List conversations |
-| `DELETE` | `/groups/{groupId}/conversations/{id}` | Delete + cascade |
+| `DELETE` | `/groups/{groupId}/conversations/{id}` | Delete (artifacts + ephemeral agents; members **ended**) |
 | `GET` | `/groupstore/groups/jsonSchema` | JSON schema for the group config |
 | `POST` | `/groups/{groupId}/conversations/stream` | Start discussion, stream events over SSE |
 | `POST` | `/groups/{groupId}/conversations/{id}/followup` | Ask one member a follow-up |
@@ -971,9 +1000,9 @@ summarizer's.
 | `POST` | `/groups/{groupId}/conversations/{id}/continue/stream` | Continue, streaming |
 | `POST` | `/groups/{groupId}/conversations/{id}/close` | Close the conversation to further rounds |
 | `POST` | `/groups/{groupId}/conversations/{id}/cancel` | Cancel a running discussion |
-| `POST` | `/groups/{groupId}/conversations/{id}/approve` | Approve/reject a HITL pause |
+| `POST` | `/groups/{groupId}/conversations/{id}/approve` | Approve/reject a HITL pause. Returns as soon as the decision is recorded — the resumed run continues asynchronously, so the response typically shows `IN_PROGRESS`; poll the conversation or use `/approve/stream` |
 | `POST` | `/groups/{groupId}/conversations/{id}/approve/stream` | Approve and stream the resumed run |
-| `POST` | `/groups/{groupId}/conversations/{id}/human-input` | Submit a HUMAN member's turn (I6) |
+| `POST` | `/groups/{groupId}/conversations/{id}/human-input` | Submit a HUMAN member's turn (I6). Asynchronous like `/approve`: the discussion resumes in the background (`IN_PROGRESS`) |
 | `GET` | `/groups/{groupId}/conversations/{id}/approval-status` | Pause coordinates (`detail=full` for approvers) |
 | `GET` | `/groups/{groupId}/conversations/pending-approvals` | This group's discussions awaiting a decision |
 | `GET` | `/groups/pending-approvals` | Every group discussion awaiting a decision, across all groups |
@@ -1032,7 +1061,7 @@ split is internal.
 | `read_group_conversation` | Read conversation transcript |
 | `list_group_conversations`  | List past discussions for a group, with state and timestamps                                                                         |
 | `start_group_discussion`    | Start a discussion asynchronously (returns immediately). Poll with `read_group_conversation`                                         |
-| `delete_group_conversation` | Delete a group conversation and cascade-delete all member conversations                                                              |
+| `delete_group_conversation` | Delete a group conversation. Artifacts and ephemeral agents are deleted; member conversations are **ended**, not deleted |
 | `followup_with_member` | Ask a single member a follow-up on a finished discussion |
 | `continue_group_discussion` | Continue a discussion with a new question |
 | `close_group_conversation` | Close a conversation to further rounds |

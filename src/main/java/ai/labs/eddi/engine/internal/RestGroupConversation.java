@@ -38,6 +38,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
+import jakarta.ws.rs.NotFoundException;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static jakarta.ws.rs.core.MediaType.TEXT_PLAIN;
@@ -649,7 +650,7 @@ public class RestGroupConversation implements IRestGroupConversation {
         }
         try {
             validateGroupConversationOwnership(groupId, gcId, true);
-        } catch (jakarta.ws.rs.NotFoundException e) {
+        } catch (NotFoundException e) {
             // Streaming endpoint has no Response to return — surface the mismatch as
             // a terminal SSE error instead of letting a WebApplicationException abort
             // the stream opaquely.
@@ -836,7 +837,7 @@ public class RestGroupConversation implements IRestGroupConversation {
         // never leak the conversation's existence or owner via an authz error.
         if (groupId != null && !groupId.equals(gc.getGroupId())) {
             LOGGER.infof("Group conversation %s does not belong to group %s", sanitize(gcId), sanitize(groupId));
-            throw new jakarta.ws.rs.NotFoundException("Group conversation not found.");
+            throw new NotFoundException("Group conversation not found.");
         }
         ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
     }

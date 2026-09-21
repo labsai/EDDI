@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.apicalls.model.PostResponse;
 import ai.labs.eddi.configs.apicalls.model.PreRequest;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
+import ai.labs.eddi.modules.llm.guardrails.ToolResultGuardrailConfig;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.ArrayList;
@@ -441,6 +442,16 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          * window. Reduces context bloat from verbose tool outputs.
          */
         private ToolResponseLimits toolResponseLimits;
+
+        /**
+         * What happens to a tool result on its way back to the model: whether it is
+         * wrapped in a provenance delimiter, and what to do when it carries
+         * directive-shaped content. Null means the defaults — provenance marking on,
+         * directives redacted — which is what an existing config gets.
+         *
+         * @since 6.3.0
+         */
+        private ToolResultGuardrailConfig toolResultGuardrails;
 
         // === Behavioral Counterweight & Identity Masking (Wave 1) ===
 
@@ -900,6 +911,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
             return toolResponseLimits;
         }
 
+        public ToolResultGuardrailConfig getToolResultGuardrails() {
+            return toolResultGuardrails;
+        }
+
+        public void setToolResultGuardrails(ToolResultGuardrailConfig toolResultGuardrails) {
+            this.toolResultGuardrails = toolResultGuardrails;
+        }
+
         public void setToolResponseLimits(ToolResponseLimits toolResponseLimits) {
             this.toolResponseLimits = toolResponseLimits;
         }
@@ -971,6 +990,13 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
      */
     public static class ResponseValidation {
 
+        /**
+         * The prefixes refusal detection used before it was configurable. Kept as the
+         * default so behaviour is unchanged for a config that does not set
+         * {@link #refusalPatterns}.
+         */
+        public static final List<String> DEFAULT_REFUSAL_PATTERNS = List.of("i'm sorry, i can't", "i cannot", "i'm not able to", "as an ai");
+
         /** Master switch — validation is only applied when enabled. */
         private boolean enabled = false;
 
@@ -994,6 +1020,25 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         /** Action when a streaming response timed out. Default: "warn". */
         private String onStreamingTimeout = "warn";
+
+        /**
+         * Case-insensitive prefixes that mark a completion as a refusal, matched
+         * against the trimmed response.
+         * <p>
+         * The other four triggers are provider-signalled or structural — empty text,
+         * {@code finishReason=LENGTH}, a content-filter flag, a streaming timeout — so
+         * they work for any language and any provider. This one is a language guess,
+         * and it used to be a guess in English only, hard-coded. A German- or
+         * Japanese-language agent that set {@code onRefusal} got a guardrail that could
+         * never fire: no retry, no warning, no metric. In the other direction the
+         * prefixes over-match, so a legitimate answer opening "I cannot confirm that
+         * from the data provided" was classified as a refusal and, under
+         * {@code onRefusal: "error"}, failed the turn.
+         * <p>
+         * Defaults to the four prefixes that were hard-coded, so existing configs are
+         * unaffected. Set it to an empty list to disable refusal detection outright.
+         */
+        private List<String> refusalPatterns = new ArrayList<>(DEFAULT_REFUSAL_PATTERNS);
 
         public boolean isEnabled() {
             return enabled;
@@ -1041,6 +1086,16 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setOnStreamingTimeout(String onStreamingTimeout) {
             this.onStreamingTimeout = onStreamingTimeout;
+        }
+
+        public List<String> getRefusalPatterns() {
+            return refusalPatterns;
+        }
+
+        public void setRefusalPatterns(List<String> refusalPatterns) {
+            // An explicit empty list means "do not detect refusals" and must survive;
+            // only null falls back to the defaults.
+            this.refusalPatterns = refusalPatterns != null ? new ArrayList<>(refusalPatterns) : new ArrayList<>(DEFAULT_REFUSAL_PATTERNS);
         }
     }
 

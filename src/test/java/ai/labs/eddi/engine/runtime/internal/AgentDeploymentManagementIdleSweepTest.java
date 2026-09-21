@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.runtime.internal;
 
+import ai.labs.eddi.configs.migration.WorkspaceAccessIndexMigration;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
@@ -85,7 +86,8 @@ class AgentDeploymentManagementIdleSweepTest {
 
         management = new AgentDeploymentManagement(deploymentStore, agentFactory, agentStore, agentsReadiness, conversationMemoryStore,
                 documentDescriptorStore, migrationManager, mock(V6RenameMigration.class), mock(V6QuteMigration.class),
-                mock(ChannelConnectorMigration.class), runtime, mock(IWorkflowStore.class), mock(IRuleSetStore.class), MAX_IDLE_DAYS);
+                mock(ChannelConnectorMigration.class), mock(WorkspaceAccessIndexMigration.class), runtime,
+                mock(IWorkflowStore.class), mock(IRuleSetStore.class), MAX_IDLE_DAYS);
     }
 
     @Nested

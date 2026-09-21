@@ -36,7 +36,7 @@ Cascading is configured per-task in a `langchain.json` resource:
         "steps": [
           {
             "type": "openai",
-            "parameters": { "model": "gpt-4o-mini" },
+            "parameters": { "modelName": "gpt-4o-mini" },
             "confidenceThreshold": 0.7,
             "timeoutMs": 10000,
             "inputPricePer1M": 0.15,
@@ -44,7 +44,7 @@ Cascading is configured per-task in a `langchain.json` resource:
           },
           {
             "type": "openai",
-            "parameters": { "model": "gpt-4o" },
+            "parameters": { "modelName": "gpt-4o" },
             "confidenceThreshold": null,
             "timeoutMs": 30000,
             "inputPricePer1M": 2.50,
@@ -78,7 +78,7 @@ Cascading is configured per-task in a `langchain.json` resource:
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `type` | string | task `type` | Provider type (e.g., `openai`, `anthropic`, `ollama`). Resolved through global variables, like the task type. |
-| `parameters` | object | `{}` | Provider-specific params. Merged over the base task parameters (step wins). Values are resolved for `${vault:...}` secrets, global variables, and Qute templates — parity with task params. |
+| `parameters` | object | `{}` | Provider-specific params. Merged over the base task parameters (step wins). Values are resolved for `${vault:...}` secrets, global variables, and Qute templates — parity with task params. The key naming the model is provider-specific: `modelName` for `openai`, `anthropic`, `gemini`, `mistral`, `jlama` and `oracle-genai`; `model` for `ollama`; `modelId` for `bedrock`, `gemini-vertex` and `huggingface`; `deploymentName` for `azure-openai`. An unrecognised key is logged as having no effect and the step falls back to the provider default. |
 | `confidenceThreshold` | Double | `null` | Minimum confidence to accept this step. Below it, escalate. **A non-last step should set a threshold** (a null threshold there is always-accepted, making later steps unreachable — flagged with a deploy-time warning). The last step's threshold is ignored (always accepted). |
 | `timeoutMs` | long | `30000` | Per-step timeout in milliseconds, for **buffered** (non-streamed) steps — also bounded by the remaining `maxTotalDurationMs` budget. A step streamed live ignores this and instead runs under an internal ~120 s bound (see [Streaming the Final Step](#streaming-the-final-step)). |
 | `inputPricePer1M` / `outputPricePer1M` | double | cascade default | Per-step token pricing (overrides the cascade-level default). |
@@ -120,7 +120,7 @@ Analyzes the response text for uncertainty signals. Phrases and thresholds are *
 A separate (typically cheap) model rates the response's confidence. Requires a `judgeModel` config block; the judge is built once via the model registry (with vault + global-variable resolution). If the judge cannot be built or the call fails, it falls back to `heuristic`.
 
 ```json
-"judgeModel": { "type": "openai", "parameters": { "model": "gpt-4o-mini", "apiKey": "${vault:openai-key}" } }
+"judgeModel": { "type": "openai", "parameters": { "modelName": "gpt-4o-mini", "apiKey": "${vault:openai-key}" } }
 ```
 
 ### `none`
@@ -178,9 +178,9 @@ When the audit collector is active, the cascade writes:
 |---|---|
 | `audit:model_name` | The **actual** winning model, `provider/model` |
 | `audit:cascade_model` | `provider/model (step N)` |
-| `audit:cascade_confidence` | Confidence of the accepted response |
-| `audit:cascade_cost` | Aggregate run cost in dollars |
-| `audit:cascade_token_usage` | Token usage of the accepted step |
+| `audit:confidence` | Confidence of the accepted step, as a `Double` |
+| `audit:cost` | Turn-total dollar cost — configured cascade LLM pricing plus tracked tool cost (not cascade-exclusive) |
+| `audit:token_usage` | Turn-total `{inputTokens, outputTokens, totalTokens}`, accumulated across every LLM call of the step (not cascade-exclusive) |
 
 ## Agent Mode
 
@@ -223,7 +223,7 @@ A 3-tier cascade for a customer support agent, with pricing so savings are measu
       },
       {
         "type": "openai",
-        "parameters": { "model": "gpt-4o-mini" },
+        "parameters": { "modelName": "gpt-4o-mini" },
         "confidenceThreshold": 0.8,
         "timeoutMs": 15000,
         "inputPricePer1M": 0.15,
@@ -231,7 +231,7 @@ A 3-tier cascade for a customer support agent, with pricing so savings are measu
       },
       {
         "type": "anthropic",
-        "parameters": { "model": "claude-sonnet-4-20250514" },
+        "parameters": { "modelName": "claude-sonnet-4-20250514" },
         "confidenceThreshold": null,
         "timeoutMs": 30000,
         "inputPricePer1M": 3.00,

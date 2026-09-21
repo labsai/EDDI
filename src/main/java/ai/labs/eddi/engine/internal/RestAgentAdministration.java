@@ -4,9 +4,12 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
@@ -22,8 +25,10 @@ import ai.labs.eddi.engine.runtime.ThreadContext;
 import ai.labs.eddi.engine.runtime.internal.IDeploymentListener;
 import ai.labs.eddi.engine.runtime.model.DeploymentEvent;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
+import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
+import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -46,6 +51,7 @@ import static ai.labs.eddi.engine.model.Deployment.Status.*;
 @ApplicationScoped
 public class RestAgentAdministration implements IRestAgentAdministration {
     private final IAgentFactory agentFactory;
+    private final IAgentStore agentStore;
     private final IDeploymentStore deploymentStore;
     private final IConversationMemoryStore conversationMemoryStore;
     private final IRestConversationStore restConversationStore;
@@ -57,13 +63,17 @@ public class RestAgentAdministration implements IRestAgentAdministration {
 
     private static final Logger log = Logger.getLogger(RestAgentAdministration.class);
 
+    private final ResourceAccessGuard resourceAccessGuard;
+
     @Inject
-    public RestAgentAdministration(IRuntime runtime, IAgentFactory agentFactory, IDeploymentStore deploymentStore,
+    public RestAgentAdministration(IRuntime runtime, IAgentFactory agentFactory, IAgentStore agentStore, IDeploymentStore deploymentStore,
             IConversationMemoryStore conversationMemoryStore, IRestConversationStore restConversationStore,
             IDocumentDescriptorStore documentDescriptorStore, IDeploymentListener deploymentListener, IScheduleStore scheduleStore,
-            TenantQuotaService tenantQuotaService) {
+            TenantQuotaService tenantQuotaService, ResourceAccessGuard resourceAccessGuard) {
+        this.resourceAccessGuard = resourceAccessGuard;
         this.runtime = runtime;
         this.agentFactory = agentFactory;
+        this.agentStore = agentStore;
         this.tenantQuotaService = tenantQuotaService;
         this.deploymentStore = deploymentStore;
         this.conversationMemoryStore = conversationMemoryStore;
@@ -80,6 +90,16 @@ public class RestAgentAdministration implements IRestAgentAdministration {
         RuntimeUtilities.checkNotNull(agentId, "agentId");
         RuntimeUtilities.checkNotNull(version, "version");
         RuntimeUtilities.checkNotNull(autoDeploy, "autoDeploy");
+
+        // Deploying is a change to the agent's live behaviour, so it takes EDIT — the
+        // same level as editing it. Before the quota gate below, because refusing an
+        // unauthorised deploy must not first consume the tenant's agent allowance.
+        resourceAccessGuard.requireAccess(agentId, AccessLevel.EDIT, "agent");
+
+        // MUST sit before the try below, for the same reason as the quota gate: the
+        // catch(Exception) there rethrows as InternalServerErrorException, which
+        // would turn this 404 into a 500.
+        requireAgentExists(agentId, version);
 
         // MUST sit before the try below: the catch(Exception) there rethrows as
         // InternalServerErrorException, which would turn the mapper's 429 into a 500.
@@ -126,6 +146,46 @@ public class RestAgentAdministration implements IRestAgentAdministration {
         } catch (Exception e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
+        }
+    }
+
+    /**
+     * Rejects a deploy of an agent that does not exist, with the 404 the endpoint
+     * has always advertised.
+     * <p>
+     * Without this the asynchronous path answers {@code 202 Accepted} for any id at
+     * all — a typo'd or already-deleted agent included. The deployment then fails
+     * on the runtime executor, where no status code can reach the caller, so the
+     * only signal is a line in the server log. Everything about the response says
+     * the deploy was taken: a CI pipeline, the Manager and the setup API alike read
+     * 202 as success and move on to start a conversation that can never exist.
+     * <p>
+     * Checked against the agent store rather than the deployment status, because
+     * {@code checkDeploymentStatus} answers {@code NOT_FOUND} for a perfectly valid
+     * agent that simply has not been deployed yet — which is the normal case here.
+     *
+     * @throws IResourceStore.ResourceNotFoundException
+     *             mapped to 404 by {@code ResourceNotFoundExceptionMapper}
+     */
+    private void requireAgentExists(String agentId, Integer version) {
+        try {
+            agentStore.read(agentId, version);
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            throw sneakyThrow(e);
+        } catch (IllegalArgumentException e) {
+            // An id the datastore cannot even parse — the MongoDB driver rejects a
+            // non-hex or wrong-length id with "state should be: hexString has 24
+            // characters" before any lookup happens. That is still "there is no such
+            // agent", and answering with the driver's sentence would both mislead
+            // (the caller's mistake was the id, not its hex-ness) and leak which
+            // datastore is behind the API.
+            throw sneakyThrow(new IResourceStore.ResourceNotFoundException(
+                    String.format("Resource not found. (id=%s, version=%s)", LogSanitizer.sanitize(agentId), version)));
+        } catch (IResourceStore.ResourceStoreException e) {
+            // A store outage is not "agent missing" — let the deploy proceed and fail
+            // (or succeed) on its own terms rather than reporting a false 404.
+            log.warnf("Could not verify that Agent %s v%s exists before deploying: %s",
+                    LogSanitizer.sanitize(agentId), version, e.getMessage());
         }
     }
 
@@ -210,7 +270,15 @@ public class RestAgentAdministration implements IRestAgentAdministration {
         var result = tenantQuotaService.checkAgentQuota(tenantQuotaService.getDefaultTenantId(), deployedAgentIds.size());
         if (!result.allowed()) {
             log.warnf("Denying deployment of Agent %s to %s: %s", agentId, environment, result.reason());
-            throw new QuotaExceededException(result.reason());
+            // A store that could not answer is a 503, not a 429 — same split as the
+            // conversation and API-call gates in ConversationService. This one is
+            // synchronous, so QuotaAccountingUnavailableExceptionMapper runs and
+            // gives it the honest code; without the branch the deploy answered 429
+            // quota_exceeded with Retry-After: 60 for an outage the dashboard was
+            // already counting on eddi.tenant.quota.unavailable{type=agent}.
+            throw result.accountingUnavailable()
+                    ? new QuotaAccountingUnavailableException(result.reason())
+                    : new QuotaExceededException(result.reason());
         }
     }
 
@@ -270,6 +338,11 @@ public class RestAgentAdministration implements IRestAgentAdministration {
         RuntimeUtilities.checkNotNull(environment, "environment");
         RuntimeUtilities.checkNotNull(agentId, "agentId");
         RuntimeUtilities.checkNotNull(version, "version");
+
+        // Undeploying takes an agent offline for everyone using it, which is a change
+        // to the agent — EDIT, matching deploy. Without this any editor could take down
+        // any colleague's live agent.
+        resourceAccessGuard.requireAccess(agentId, AccessLevel.EDIT, "agent");
 
         try {
             do {

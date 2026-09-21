@@ -9,6 +9,7 @@ import ai.labs.eddi.utils.CharacterUtilities;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Objects;
+import org.jboss.logging.Logger;
 
 /**
  * @author ginccc
@@ -237,5 +238,5 @@ public class Expression implements Cloneable {
         return ret.toString();
     }
 
-    private static final org.jboss.logging.Logger log = org.jboss.logging.Logger.getLogger(Expression.class);
+    private static final Logger log = Logger.getLogger(Expression.class);
 }

@@ -172,6 +172,67 @@ public class AuditAndSecurityIT extends BaseIntegrationIT {
                 .statusCode(200);
     }
 
+    // ==================== D7 end-to-end: verify must say VALID for real turns
+    // ====================
+
+    /**
+     * The regression net the run-0820a sweep prescribed as its definition of done.
+     * <p>
+     * Every earlier test in this class reads an EMPTY conversation's trail — which
+     * is exactly why the ledger could ship reporting {@code valid=0 invalid=78} on
+     * every real conversation: writes were exercised, verification never was, and
+     * no test ever drove entries through the full pipeline (sign → queue → flush →
+     * store → read → verify) against a real backend. This one does. It would have
+     * failed on every EDDI version before the v4 canonical form, on either storage
+     * backend, and it fails again if any layer of the timestamp handling regresses.
+     */
+    @Test
+    @Order(12)
+    @DisplayName("a real conversation's audit entries all verify VALID with an INTACT chain")
+    void auditVerify_realConversationIsFullyValid() throws Exception {
+        ResourceId agentId = setupAndDeployMinimalAgent();
+        try {
+            ResourceId conversationId = createConversation(agentId.id(), "audit-verify-user");
+
+            // A user TURN, not just conversation creation: the audit collector is
+            // attached in ConversationService.say(), so a conversation that has only
+            // been started produces no entries at all.
+            sendUserInput(agentId.id(), conversationId.id(), "hello", false, false)
+                    .then().statusCode(200);
+
+            // Entries are queued and flushed on an interval — poll until they land.
+            int entryCount = 0;
+            for (int i = 0; i < 30 && entryCount == 0; i++) {
+                Thread.sleep(500);
+                entryCount = given().get(AUDIT_BASE + conversationId.id())
+                        .then().statusCode(200)
+                        .extract().jsonPath().getList("$").size();
+            }
+            Assertions.assertTrue(entryCount > 0, "the conversation's turn must produce audit entries");
+
+            // Assert the INVARIANT (every checked entry is valid), not a count captured
+            // a moment earlier — the flush is asynchronous, so more entries may land
+            // between the poll above and this call. "valid == entriesChecked" is both
+            // the stronger claim and the race-free one.
+            var report = given().get(AUDIT_BASE + "verify/" + conversationId.id())
+                    .then().statusCode(200).extract().jsonPath();
+
+            int checked = report.getInt("entriesChecked");
+            Assertions.assertTrue(checked > 0, "the sweep must actually have checked something");
+            Assertions.assertTrue(report.getBoolean("signingEnabled"), "the vault key is configured in this profile");
+            Assertions.assertEquals(checked, report.getInt("valid"),
+                    "every entry the sweep checked must verify — this is what reported valid=0 invalid=78 in the wild");
+            Assertions.assertEquals(0, report.getInt("invalid"));
+            Assertions.assertEquals(0, report.getInt("unsigned"));
+            Assertions.assertEquals(0, report.getInt("recovered"),
+                    "freshly written entries are v4 and verify directly, with no legacy recovery");
+            Assertions.assertEquals(0, report.getInt("recoverySkipped"));
+            Assertions.assertEquals("INTACT", report.getString("chainStatus"));
+        } finally {
+            undeployAgentQuietly(agentId.id(), agentId.version());
+        }
+    }
+
     // ==================== Helpers ====================
 
     private boolean isVaultAvailable() {

@@ -10,6 +10,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.io.IOException;
 import java.net.URI;
@@ -44,6 +45,50 @@ class RemoteApiResourceSourceDeepCoverageTest {
         doReturn(200).when(mockResponse).statusCode();
         doReturn("{}").when(mockResponse).body();
         doReturn(mockResponse).when(httpClient).send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
+    }
+
+    // ==================== redirects ====================
+
+    @Nested
+    @DisplayName("redirects")
+    class Redirects {
+
+        @Test
+        @DisplayName("a 3xx is refused, not followed with the caller's bearer token attached")
+        void redirectIsRefused() throws Exception {
+            // The remote answers "go to the cloud metadata endpoint instead".
+            doReturn(302).when(mockResponse).statusCode();
+            doReturn("").when(mockResponse).body();
+
+            RemoteApiResourceSource source = new RemoteApiResourceSource(
+                    "http://127.0.0.1:1", "aaaaaaaaaaaaaaaaaaaaaaaa", 1,
+                    "Bearer secret-token", jsonSerialization, httpClient);
+
+            // The remote instance is user-supplied, so a compromised or hostile one
+            // could answer a read with a redirect to an internal address. The client
+            // never follows one: the hop surfaces as a non-200 status and the read
+            // fails, so the X-Source-Authorization bearer is never re-sent anywhere.
+            var ex = assertThrows(RuntimeException.class, source::readAgent);
+            assertTrue(ex.getMessage().contains("302"),
+                    "a redirect must surface as its status, got: " + ex.getMessage());
+
+            var sent = ArgumentCaptor.forClass(HttpRequest.class);
+            verify(httpClient, atLeastOnce()).send(sent.capture(), any(HttpResponse.BodyHandler.class));
+            assertTrue(sent.getAllValues().stream()
+                    .noneMatch(request -> "169.254.169.254".equals(request.uri().getHost())),
+                    "the redirect target must never be requested, requests were: " + sent.getAllValues());
+
+            // Everything above runs on a client this test handed in, and a mock
+            // follows nothing whatever the production code asks for — so on its own it
+            // pins the non-200 handling and says nothing about redirects. The actual
+            // guarantee is the policy the clients this class OWNS are built with, and
+            // that is what the assertion below reads. It cannot build one to look at:
+            // HttpClient.build() opens a selector, and a sandboxed build has no
+            // loopback socket for it.
+            HttpClient.Builder ownBuilder = mock(HttpClient.Builder.class, RETURNS_SELF);
+            RemoteApiResourceSource.configure(ownBuilder);
+            verify(ownBuilder).followRedirects(HttpClient.Redirect.NEVER);
+        }
     }
 
     // ==================== normalizeBaseUrl ====================
@@ -227,7 +272,7 @@ class RemoteApiResourceSourceDeepCoverageTest {
     @DisplayName("readExtensionsFromWorkflow — null stepType skipped; unknown stepType skipped")
     void readExtensionsFromWorkflowSkips() throws Exception {
         AgentConfiguration agentConfig = new AgentConfiguration();
-        URI wfUri = URI.create("eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=1");
+        URI wfUri = URI.create("eddi://ai.labs.workflow/workflowstore/workflows/aaaaaaaaaaaaaaaaaaaaaaaa?version=1");
         agentConfig.setWorkflows(List.of(wfUri));
         doReturn(agentConfig).when(jsonSerialization).deserialize(anyString(), eq(AgentConfiguration.class));
 
@@ -260,8 +305,12 @@ class RemoteApiResourceSourceDeepCoverageTest {
     @DisplayName("resolveLatestAgentVersion")
     class ResolveVersion {
 
+        // A version that cannot be resolved is an error, not a reason to guess:
+        // "fall back to 1" silently synced an arbitrarily old configuration into the
+        // target and left only a DEBUG line behind.
+
         @Test
-        @DisplayName("null descriptors → defaults to version 1")
+        @DisplayName("null descriptors → error, not a guess at version 1")
         void nullDescriptors() throws Exception {
             doReturn(null).when(jsonSerialization).deserialize(anyString(), eq(DocumentDescriptor[].class));
 
@@ -273,16 +322,15 @@ class RemoteApiResourceSourceDeepCoverageTest {
             RemoteApiResourceSource source = new RemoteApiResourceSource(
                     "http://127.0.0.1:1", "agent1", null, null, jsonSerialization, httpClient);
 
-            // readAgent triggers resolveLatestAgentVersion which falls back to 1
-            var agentData = source.readAgent();
-            assertNotNull(agentData);
+            var ex = assertThrows(RuntimeException.class, source::readAgent);
+            assertTrue(ex.getMessage().contains("latest version"), ex.getMessage());
         }
 
         @Test
-        @DisplayName("no matching descriptor → defaults to version 1")
+        @DisplayName("no matching descriptor → error, not a guess at version 1")
         void noMatchingDescriptor() throws Exception {
             DocumentDescriptor desc = new DocumentDescriptor();
-            desc.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/other?version=3"));
+            desc.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/bbbbbbbbbbbbbbbbbbbbbbbb?version=3"));
             DocumentDescriptor[] descs = new DocumentDescriptor[]{desc};
 
             // First call: resolve version (descriptors), second call: read agent
@@ -294,10 +342,41 @@ class RemoteApiResourceSourceDeepCoverageTest {
             doReturn(config).when(jsonSerialization).deserialize(eq("{}"), eq(AgentConfiguration.class));
 
             RemoteApiResourceSource source = new RemoteApiResourceSource(
-                    "http://127.0.0.1:1", "agent1", null, null, jsonSerialization, httpClient);
+                    "http://127.0.0.1:1", "aaaaaaaaaaaaaaaaaaaaaaaa", null, null, jsonSerialization, httpClient);
 
-            var agentData = source.readAgent();
-            assertNotNull(agentData);
+            var ex = assertThrows(RuntimeException.class, source::readAgent);
+            assertTrue(ex.getMessage().contains("latest version"), ex.getMessage());
+        }
+
+        @Test
+        @DisplayName("matching descriptor → its version is used")
+        void matchingDescriptorResolvesVersion() throws Exception {
+            String agentId = "aaaaaaaaaaaaaaaaaaaaaaaa";
+            DocumentDescriptor desc = new DocumentDescriptor();
+            desc.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/" + agentId + "?version=7"));
+
+            doReturn("[]").doReturn("{}").doReturn("[]").when(mockResponse).body();
+            doReturn(new DocumentDescriptor[]{desc}).when(jsonSerialization)
+                    .deserialize(eq("[]"), eq(DocumentDescriptor[].class));
+
+            AgentConfiguration config = new AgentConfiguration();
+            config.setWorkflows(List.of());
+            doReturn(config).when(jsonSerialization).deserialize(eq("{}"), eq(AgentConfiguration.class));
+
+            RemoteApiResourceSource source = new RemoteApiResourceSource(
+                    "http://127.0.0.1:1", agentId, null, null, jsonSerialization, httpClient);
+
+            assertNotNull(source.readAgent());
+
+            // assertNotNull alone cannot tell the resolved version from the
+            // version-1 fallback this branch removed — both answer non-null. The
+            // requested URI is what actually distinguishes them.
+            var sent = ArgumentCaptor.forClass(HttpRequest.class);
+            verify(httpClient, atLeastOnce()).send(sent.capture(), any(HttpResponse.BodyHandler.class));
+            assertTrue(sent.getAllValues().stream()
+                    .anyMatch(request -> request.uri().toString().endsWith("/" + agentId + "?version=7")),
+                    "the agent must be read at the version its descriptor names, requests were: "
+                            + sent.getAllValues());
         }
     }
 
@@ -310,14 +389,14 @@ class RemoteApiResourceSourceDeepCoverageTest {
         // The STEP_TYPE_TO_REST_PATH values end with "/" which tryReadDescriptorName
         // trims
         AgentConfiguration agentConfig = new AgentConfiguration();
-        URI wfUri = URI.create("eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=1");
+        URI wfUri = URI.create("eddi://ai.labs.workflow/workflowstore/workflows/aaaaaaaaaaaaaaaaaaaaaaaa?version=1");
         agentConfig.setWorkflows(List.of(wfUri));
         doReturn(agentConfig).when(jsonSerialization).deserialize(anyString(), eq(AgentConfiguration.class));
 
         WorkflowConfiguration wfConfig = new WorkflowConfiguration();
         WorkflowConfiguration.WorkflowStep step = new WorkflowConfiguration.WorkflowStep();
-        step.setType(URI.create("ai.labs.llm"));
-        step.setExtensions(new HashMap<>(Map.<String, Object>of("uri", "eddi://ai.labs.llm/llmstore/llms/llm1?version=1")));
+        step.setType(URI.create("eddi://ai.labs.llm"));
+        step.setExtensions(new HashMap<>(Map.<String, Object>of("uri", "eddi://ai.labs.llm/llmstore/llms/bbbbbbbbbbbbbbbbbbbbbbbb?version=1")));
         wfConfig.setWorkflowSteps(List.of(step));
         doReturn(wfConfig).when(jsonSerialization).deserialize(anyString(), eq(WorkflowConfiguration.class));
         doReturn(null).when(jsonSerialization).deserialize(anyString(), eq(DocumentDescriptor[].class));

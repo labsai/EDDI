@@ -14,6 +14,9 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 import java.util.concurrent.atomic.AtomicInteger;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
@@ -47,12 +50,28 @@ class TenantQuotaStoreParityTest extends MongoTestBase {
      * Store factories, invoked lazily inside each test so that container startup
      * never happens during argument resolution.
      */
+    /** Mid-window on every axis, so nothing passes by sitting on a boundary. */
+    private static final Clock FIXED_CLOCK = Clock.fixed(Instant.parse("2026-06-15T12:30:30Z"), ZoneOffset.UTC);
+
     static Stream<Arguments> stores() {
+        // Pinned, for the reason MongoTenantQuotaStoreContainerTest pins it: the
+        // counter assertions below increment N times and expect N, which only holds
+        // if every call landed in the same wall-clock window. That now applies to the
+        // in-memory store too — its windows used to run from the first hit, so N
+        // rapid increments could never straddle one; they are calendar-aligned like
+        // the DB-backed stores', so on the real clock a minute (or a day) ticking
+        // over mid-loop resets the counter and fails the assertion intermittently.
+        //
+        // Residue: a FIXED clock cannot be advanced, so these cases prove parity
+        // *within* one window only. Window ROLLOVER parity — that all three reset the
+        // counter at the same boundary, the behaviour that diverged in the first place
+        // — needs a mutable test clock the stores read per call, which is a change to
+        // their constructors rather than to this fixture.
         Supplier<ITenantQuotaStore> inMemory = () -> new InMemoryTenantQuotaStore(
-                new TenantQuota("unused", -1, -1, -1, -1.0, true));
-        Supplier<ITenantQuotaStore> mongo = () -> new MongoTenantQuotaStore(getDatabase());
+                new TenantQuota("unused", -1, -1, -1, -1.0, true), FIXED_CLOCK);
+        Supplier<ITenantQuotaStore> mongo = () -> new MongoTenantQuotaStore(getDatabase(), FIXED_CLOCK);
         Supplier<ITenantQuotaStore> postgres = () -> new PostgresTenantQuotaStore(
-                PostgresTestBase.createDataSourceInstance());
+                PostgresTestBase.createDataSourceInstance(), FIXED_CLOCK);
 
         return Stream.of(
                 Arguments.of("in-memory", inMemory),

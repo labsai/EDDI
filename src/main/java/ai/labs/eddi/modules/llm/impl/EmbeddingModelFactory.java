@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.connections.ConnectionParameterGuard;
 import ai.labs.eddi.secrets.SecretResolver;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -28,6 +29,7 @@ import java.time.Duration;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.TreeMap;
+import dev.langchain4j.model.azure.AzureOpenAiEmbeddingModel;
 
 /**
  * Creates and caches {@link EmbeddingModel} instances based on
@@ -90,8 +92,11 @@ public class EmbeddingModelFactory {
     private EmbeddingModel build(RagConfiguration config) {
         Map<String, String> rawParams = config.getEmbeddingParameters() != null ? config.getEmbeddingParameters() : Map.of();
         Map<String, String> params = globalVariableResolver.resolveAll(rawParams);
-        params = secretResolver.resolveSecrets(params);
-        String provider = config.getEmbeddingProvider();
+        ConnectionParameterGuard.rejectConnectionReferences(params);
+        // Trimmed, as RagConfiguration validates it: " openai" must not save and then
+        // fail here as an unsupported provider.
+        String provider = config.getEmbeddingProvider() != null ? config.getEmbeddingProvider().trim() : null;
+        params = SecretResolver.requireResolved(secretResolver.resolveSecrets(params), "embedding model '" + provider + "'");
         LOGGER.infof("Building embedding model for provider: %s", provider);
 
         return switch (provider) {
@@ -145,7 +150,7 @@ public class EmbeddingModelFactory {
      * </ul>
      */
     private EmbeddingModel buildAzureOpenAi(Map<String, String> params) {
-        var builder = dev.langchain4j.model.azure.AzureOpenAiEmbeddingModel.builder()
+        var builder = AzureOpenAiEmbeddingModel.builder()
                 .deploymentName(params.getOrDefault("deploymentName", "text-embedding-3-small")).apiKey(params.get("apiKey"));
 
         if (params.containsKey("endpoint")) {

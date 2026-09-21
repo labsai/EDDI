@@ -4,10 +4,10 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
-import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.utils.LogSanitizer;
-import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IDataFactory;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
@@ -45,18 +45,18 @@ public class RagContextProvider {
     private static final Logger LOGGER = Logger.getLogger(RagContextProvider.class);
     private static final String RAG_TYPE = "eddi://ai.labs.rag";
 
-    private final IRestAgentStore restAgentStore;
-    private final IRestWorkflowStore restWorkflowStore;
+    private final IAgentStore agentStore;
+    private final IWorkflowStore workflowStore;
     private final IResourceClientLibrary resourceClientLibrary;
     private final EmbeddingModelFactory embeddingModelFactory;
     private final EmbeddingStoreFactory embeddingStoreFactory;
     private final IDataFactory dataFactory;
 
     @Inject
-    public RagContextProvider(IRestAgentStore restAgentStore, IRestWorkflowStore restWorkflowStore, IResourceClientLibrary resourceClientLibrary,
+    public RagContextProvider(IAgentStore agentStore, IWorkflowStore workflowStore, IResourceClientLibrary resourceClientLibrary,
             EmbeddingModelFactory embeddingModelFactory, EmbeddingStoreFactory embeddingStoreFactory, IDataFactory dataFactory) {
-        this.restAgentStore = restAgentStore;
-        this.restWorkflowStore = restWorkflowStore;
+        this.agentStore = agentStore;
+        this.workflowStore = workflowStore;
         this.resourceClientLibrary = resourceClientLibrary;
         this.embeddingModelFactory = embeddingModelFactory;
         this.embeddingStoreFactory = embeddingStoreFactory;
@@ -94,7 +94,7 @@ public class RagContextProvider {
         }
 
         // Step 2: Discover all RAG configs from workflow
-        var ragSteps = WorkflowTraversal.discoverConfigs(memory, RAG_TYPE, RagConfiguration.class, restAgentStore, restWorkflowStore,
+        var ragSteps = WorkflowTraversal.discoverConfigs(memory, RAG_TYPE, RagConfiguration.class, agentStore, workflowStore,
                 resourceClientLibrary);
 
         if (ragSteps.isEmpty()) {

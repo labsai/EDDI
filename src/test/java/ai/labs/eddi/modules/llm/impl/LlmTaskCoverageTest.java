@@ -5,10 +5,10 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.security.CallerIdentityContext;
-import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
-import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
@@ -120,7 +120,7 @@ class LlmTaskCoverageTest {
 
         llmTask = new LlmTask(resourceClientLibrary, dataFactory, memoryItemConverter,
                 templatingEngine, jsonSerialization, prePostUtils, chatModelRegistry,
-                mock(IApiCallExecutor.class), mock(IRestAgentStore.class), mock(IRestWorkflowStore.class),
+                mock(IApiCallExecutor.class), mock(IAgentStore.class), mock(IWorkflowStore.class),
                 ragContextProvider, new TokenCounterFactory(), mock(ConversationSummarizer.class),
                 promptSnippetService, globalVariableResolver, counterweightService,
                 identityMaskingService, agentOrchestrator, new ConversationHistoryBuilder(),

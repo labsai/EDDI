@@ -36,6 +36,23 @@ public final class MemoryKeys {
     /** Normalized user input (after normalizers). Written by InputParserTask. */
     public static final MemoryKey<String> INPUT_NORMALIZED = MemoryKey.of("input:normalized");
 
+    /**
+     * What replaces user input that must not be persisted: a client-flagged secret
+     * input in the echoed output, and the raw input once a {@code scope: "secret"}
+     * property has vaulted it. {@code input:initial} holding exactly this value is
+     * how later stages (the audit ledger) know the turn's input was a secret.
+     */
+    public static final String SECRET_INPUT_PLACEHOLDER = "<secret input>";
+
+    /**
+     * What replaces a context value the client marked {@code "secret": true} once
+     * its turn has run — in the stored context entry, and wherever the value was
+     * copied to during the turn (step data, conversation output, properties, audit
+     * entries). Distinct from {@link #SECRET_INPUT_PLACEHOLDER} because that one on
+     * {@code input:initial} tells the audit ledger the INPUT was a secret.
+     */
+    public static final String SECRET_CONTEXT_PLACEHOLDER = "<secret context>";
+
     // ---- Parser ----
 
     /**

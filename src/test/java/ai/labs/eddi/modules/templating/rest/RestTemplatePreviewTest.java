@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.modules.templating.rest;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
@@ -42,6 +44,8 @@ class RestTemplatePreviewTest {
     private IMemoryItemConverter memoryItemConverter;
     private PromptSnippetService promptSnippetService;
     private ConversationAccessGuard conversationAccessGuard;
+    private ResourceAccessGuard resourceAccessGuard;
+    private GlobalVariableResolver globalVariableResolver;
     private RestTemplatePreview restTemplatePreview;
 
     @BeforeEach
@@ -51,11 +55,52 @@ class RestTemplatePreviewTest {
         memoryItemConverter = mock(IMemoryItemConverter.class);
         promptSnippetService = mock(PromptSnippetService.class);
         conversationAccessGuard = mock(ConversationAccessGuard.class);
+        resourceAccessGuard = mock(ResourceAccessGuard.class);
         when(promptSnippetService.getAll()).thenReturn(Map.of());
+        globalVariableResolver = mock(GlobalVariableResolver.class);
+        when(globalVariableResolver.getTemplateData()).thenReturn(Map.of());
 
         restTemplatePreview = new RestTemplatePreview(
                 templatingEngine, conversationMemoryStore,
-                memoryItemConverter, promptSnippetService, conversationAccessGuard);
+                memoryItemConverter, promptSnippetService, conversationAccessGuard, resourceAccessGuard, globalVariableResolver);
+    }
+
+    // ==================== Global variables ====================
+
+    @Nested
+    class GlobalVariables {
+
+        @Test
+        @DisplayName("sample-data preview resolves {vars.*} from the deployment's global variables")
+        @SuppressWarnings("unchecked")
+        void sampleDataIncludesGlobalVariables() throws Exception {
+            when(globalVariableResolver.getTemplateData()).thenReturn(Map.of("default-model", "claude-sonnet-5"));
+            when(templatingEngine.processTemplate(anyString(), anyMap())).thenReturn("resolved");
+
+            var response = restTemplatePreview.previewTemplate(new TemplatePreviewRequest("{vars.default-model}", null));
+
+            assertNull(response.error());
+            assertTrue(response.availableVariables().contains("vars.default-model"), String.valueOf(response.availableVariables()));
+            verify(templatingEngine).processTemplate(eq("{vars.default-model}"),
+                    argThat(data -> Map.of("default-model", "claude-sonnet-5").equals(((Map<String, Object>) data).get("vars"))));
+        }
+
+        @Test
+        @DisplayName("vars already present in conversation data are not overwritten")
+        void conversationVarsWin() throws Exception {
+            var conversationData = new LinkedHashMap<String, Object>();
+            conversationData.put("vars", Map.of("default-model", "from-conversation"));
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setConversationId("conv-1");
+            when(conversationMemoryStore.loadConversationMemorySnapshot("conv-1")).thenReturn(snapshot);
+            when(memoryItemConverter.convert(any(IConversationMemory.class))).thenReturn(conversationData);
+            when(globalVariableResolver.getTemplateData()).thenReturn(Map.of("default-model", "global"));
+            when(templatingEngine.processTemplate(anyString(), anyMap())).thenReturn("resolved");
+
+            restTemplatePreview.previewTemplate(new TemplatePreviewRequest("{vars.default-model}", "conv-1"));
+
+            assertEquals(Map.of("default-model", "from-conversation"), conversationData.get("vars"));
+        }
     }
 
     // ==================== Null / Blank Input ====================
@@ -275,6 +320,8 @@ class RestTemplatePreviewTest {
         void shouldInjectSnippetsIntoTemplateData() throws Exception {
             Map<String, Object> snippets = Map.of("safety", "Always verify facts.");
             when(promptSnippetService.getAll()).thenReturn(snippets);
+            // A caller who sees everything anyway gets the real contents.
+            when(resourceAccessGuard.seesEverything()).thenReturn(true);
             when(templatingEngine.processTemplate(eq("{{snippets.safety}}"), anyMap()))
                     .thenAnswer(inv -> {
                         Map<String, Object> data = inv.getArgument(1);
@@ -302,6 +349,36 @@ class RestTemplatePreviewTest {
             List<String> vars = response.availableVariables();
             assertTrue(vars.contains("snippets.greeting"), "Should list snippets.greeting");
             assertTrue(vars.contains("snippets.farewell"), "Should list snippets.farewell");
+        }
+
+        @Test
+        @DisplayName("a restricted caller cannot read snippet contents back through their own template")
+        void shouldNotLeakSnippetContentsThroughTheRenderedTemplate() throws Exception {
+            // The exfiltration this guards against: the reference panel redacts snippet
+            // contents but hands out the NAMES, and the caller supplies the template. So
+            // redacting only the panel is no protection — one call lists the names, a
+            // second renders "{snippets.<name>}". The contents must be gone from the map
+            // the engine renders against, not just from the panel.
+            Map<String, Object> snippets = Map.of("victimSecret", "Bob's proprietary prompt.");
+            when(promptSnippetService.getAll()).thenReturn(snippets);
+            when(resourceAccessGuard.seesEverything()).thenReturn(false);
+
+            Map<String, Object> rendered = new LinkedHashMap<>();
+            when(templatingEngine.processTemplate(eq("{snippets.victimSecret}"), anyMap()))
+                    .thenAnswer(inv -> {
+                        rendered.putAll(inv.getArgument(1));
+                        return "irrelevant";
+                    });
+
+            TemplatePreviewResponse response = restTemplatePreview.previewTemplate(
+                    new TemplatePreviewRequest("{snippets.victimSecret}", null));
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> renderedSnippets = (Map<String, Object>) rendered.get("snippets");
+            assertNotNull(renderedSnippets, "the key stays, so the preview can still say which references resolve");
+            assertTrue(renderedSnippets.containsKey("victimSecret"), "names are not the secret");
+            assertEquals("<redacted>", renderedSnippets.get("victimSecret"), "contents must not reach the engine");
+            assertEquals("<redacted>", response.variableValues().get("snippets.victimSecret"));
         }
 
         @Test

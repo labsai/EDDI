@@ -186,6 +186,36 @@ class ConversationHitlTest {
         }
 
         @Test
+        @DisplayName("TOOL_CALL pause writes the model's interim narration AHEAD of the placeholder")
+        void toolPauseKeepsInterimText() throws Exception {
+            // A tool pause aborts the turn before the output tasks run, so the only
+            // text the paused step used to carry was the placeholder — the model's
+            // own "the config checks out, I'll now start a test conversation" was
+            // dropped. On a resumed (non-streamed) turn that meant the second
+            // approval arrived with no explanation at all.
+            memory.setConversationState(ConversationState.READY);
+            doAnswer(inv -> {
+                var call = new PendingToolCallBatch.PendingToolCall();
+                call.setToolName("startConversation");
+                var batch = new PendingToolCallBatch();
+                batch.setCalls(List.of(call));
+                batch.setInterimText("Config checks out — starting a test conversation next, which needs your approval.");
+                memory.setHitlPendingToolCalls(batch);
+                throw new ConversationPauseException("wf1", 2, "gated tool call",
+                        ConversationPauseException.PauseOrigin.TOOL_CALL);
+            }).when(lifecycleManager).executeLifecycle(any(), any());
+
+            var conv = createConversation();
+            conv.say("create the agent and test it", Map.of());
+
+            @SuppressWarnings("unchecked")
+            var rendered = (List<String>) memory.getCurrentStep().getConversationOutput().get(MemoryKeys.OUTPUT_PREFIX);
+            assertEquals(2, rendered.size(), "narration + placeholder, in that order; got: " + rendered);
+            assertEquals("Config checks out — starting a test conversation next, which needs your approval.", rendered.get(0));
+            assertTrue(rendered.get(1).contains("startConversation"), "placeholder names the gated tool; got: " + rendered.get(1));
+        }
+
+        @Test
         @DisplayName("TOOL_CALL pause with legacy batch (null effective config) falls back to the agent-level pendingMessage")
         void toolPauseLegacyBatchFallsBackToAgentLevel() throws Exception {
             memory.setConversationState(ConversationState.READY);

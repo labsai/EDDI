@@ -118,4 +118,29 @@ public abstract class AbstractResourceStore<T> implements IResourceStore<T> {
     public IResourceId getCurrentResourceId(String id) throws ResourceNotFoundException {
         return resourceStore.getCurrentResourceId(id);
     }
+
+    /**
+     * Whether a hit from a reverse-reference lookup should be ignored because it
+     * does not describe the resource as it stands today.
+     * <p>
+     * Reverse lookups union the current collection with history, so they return two
+     * kinds of stale hit: an older version of a resource that still exists, and a
+     * version of a resource that has since been soft-deleted (the current row is
+     * gone, the history row still matches). Only the first is a comparison —
+     * {@link #getCurrentResourceId(String)} <em>throws</em> for the second, and an
+     * unguarded call turns one soft-deleted referrer into a 404 for the whole
+     * listing and a permanently swallowed cascade-delete.
+     *
+     * @return true when {@code id} has no current version, or when {@code version}
+     *         is older than it
+     */
+    protected boolean isStaleReference(String id, Integer version) {
+        try {
+            return version < getCurrentResourceId(id).getVersion();
+        } catch (ResourceNotFoundException e) {
+            // No current row: the resource was soft-deleted, so every history hit
+            // for it is stale by definition.
+            return true;
+        }
+    }
 }

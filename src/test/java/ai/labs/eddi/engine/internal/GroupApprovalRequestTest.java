@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import java.util.HashMap;
 import java.util.Map;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import static org.junit.jupiter.api.Assertions.*;
 
 @DisplayName("GroupApprovalRequest")
@@ -122,7 +123,7 @@ class GroupApprovalRequestTest {
     @DisplayName("verdict casing (#39)")
     class VerdictCasing {
 
-        private final com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        private final ObjectMapper mapper = new ObjectMapper();
 
         @Test
         @DisplayName("lowercase verdict deserializes to APPROVED (matches case-insensitive taskApprovals)")

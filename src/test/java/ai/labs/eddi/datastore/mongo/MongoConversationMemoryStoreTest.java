@@ -35,6 +35,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.util.List;
 import java.util.Map;
 
+import com.mongodb.ConnectionString;
 import static org.bson.codecs.configuration.CodecRegistries.*;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -82,7 +83,7 @@ class MongoConversationMemoryStoreTest {
                         new JacksonProvider(bsonMapper)));
 
         var settings = MongoClientSettings.builder()
-                .applyConnectionString(new com.mongodb.ConnectionString(MONGO.getConnectionString()))
+                .applyConnectionString(new ConnectionString(MONGO.getConnectionString()))
                 .codecRegistry(codecRegistry)
                 .build();
 
@@ -460,6 +461,18 @@ class MongoConversationMemoryStoreTest {
             assertEquals("RULE", ruleSummary.getPauseType());
             assertTrue(ruleSummary.getToolNames() == null || ruleSummary.getToolNames().isEmpty(),
                     "a RULE pause carries no tool names");
+        }
+
+        @Test
+        @DisplayName("a pause stored without a pause type (rule pauses before the fix) is reported as RULE")
+        void findPendingApprovalSummariesDefaultsMissingPauseTypeToRule() throws IResourceStore.ResourceStoreException {
+            var legacyRulePause = createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN);
+            String id = store.storeConversationMemorySnapshot(legacyRulePause);
+
+            var summary = store.findPendingApprovalSummaries(10).stream()
+                    .filter(s -> id.equals(s.getConversationId())).findFirst().orElseThrow();
+
+            assertEquals("RULE", summary.getPauseType());
         }
 
         @Test

@@ -52,6 +52,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import io.micrometer.core.instrument.Timer;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Counter;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -102,11 +105,11 @@ class GroupConversationServiceUncoveredBranchTest {
     @Mock
     private NonceCacheService nonceCacheService;
     @Mock
-    private io.micrometer.core.instrument.MeterRegistry meterRegistry;
+    private MeterRegistry meterRegistry;
     @Mock
-    private io.micrometer.core.instrument.Timer timer;
+    private Timer timer;
     @Mock
-    private io.micrometer.core.instrument.Counter counter;
+    private Counter counter;
 
     private GroupConversationService service;
 

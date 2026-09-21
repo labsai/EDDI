@@ -124,6 +124,54 @@ public class SafeHttpClient {
     }
 
     /**
+     * Sends an HTTP request with SSRF validation on the initial URL and <em>without
+     * following any redirect</em>: a 3xx is returned to the caller as the response,
+     * {@code Location} and all, and no second request is ever made.
+     * <p>
+     * For requests that carry a credential the caller has vouched for one specific
+     * origin — an OAuth token request, whose client secret sits in the
+     * {@code Authorization} header or the form body and whose refresh token or
+     * authorization code is in the body. {@link #sendValidated} would honour a
+     * 307/308 with the method and body preserved and re-send all of that to
+     * whatever host the redirect named, after checking only that the host is not
+     * private; the caller's own allowlist is never consulted for the second hop.
+     * Here the caller decides what a 3xx means, and for a token endpoint the answer
+     * is "refuse".
+     *
+     * @throws IllegalArgumentException
+     *             if the URL is unsafe
+     */
+    public <T> HttpResponse<T> sendValidatedNoRedirect(HttpRequest request, HttpResponse.BodyHandler<T> bodyHandler)
+            throws IOException, InterruptedException {
+        validateInitialTarget(request.uri().toString());
+        return sendNoRedirect(request, bodyHandler);
+    }
+
+    /**
+     * Sends an HTTP request exactly once, following no redirect, and without
+     * validating the URL.
+     * <p>
+     * For callers that have already decided the target is acceptable by a rule
+     * stricter than the SSRF check — an operator-maintained allowlist, for example,
+     * which is allowed to name a host on a private network that the SSRF rules
+     * would refuse. Callers that fetch anything user- or config-controlled without
+     * such a rule must use {@link #sendValidatedNoRedirect} instead.
+     */
+    public <T> HttpResponse<T> sendNoRedirect(HttpRequest request, HttpResponse.BodyHandler<T> bodyHandler)
+            throws IOException, InterruptedException {
+        return httpClient.send(withDefaultTimeout(request), bodyHandler);
+    }
+
+    /**
+     * Validates the initial request URL against SSRF rules. Package-private for the
+     * same reason as {@link #validateRedirectTarget(String)}: an embedded test
+     * server lives on loopback.
+     */
+    void validateInitialTarget(String url) {
+        UrlValidationUtils.validateUrl(url);
+    }
+
+    /**
      * Returns {@code request} unchanged when it already carries a timeout, else a
      * copy bounded by {@link #DEFAULT_REQUEST_TIMEOUT}. {@link HttpRequest} is
      * immutable, so the bound can only be applied by rebuilding.
@@ -194,8 +242,18 @@ public class SafeHttpClient {
 
         LOGGER.debugf("Following redirect %d/%d: %s → %s", redirectCount, MAX_REDIRECTS, request.uri(), resolvedUri);
 
-        // Build redirect request — preserve method for 307/308 per RFC 7538
-        boolean methodPreserved = (statusCode == 307 || statusCode == 308) && !"GET".equals(request.method());
+        // Build the redirect request. RFC 9110 sanctions exactly one method rewrite,
+        // and it is narrower than "everything becomes GET":
+        // • 307/308 (§15.4.8/§15.4.9): method AND body preserved, always.
+        // • 303 See Other (§15.4.4): rewrite to GET — that is what the code means.
+        // • 301/302 (§15.4.2/§15.4.3): only the historical POST→GET rewrite is
+        // permitted. PUT, PATCH and DELETE keep their method and body, or a
+        // redirected write silently becomes a read: the caller is told the write
+        // succeeded (200 from the GET) while nothing was written, and a DELETE
+        // that "worked" leaves the resource in place.
+        // • HEAD survives every one of them (an existence or size probe must not
+        // turn into a full body download).
+        boolean methodPreserved = methodSurvivesRedirect(request.method(), statusCode);
         HttpRequest.Builder builder = HttpRequest.newBuilder()
                 .uri(resolvedUri)
                 .timeout(request.timeout().orElse(DEFAULT_REQUEST_TIMEOUT));
@@ -205,17 +263,42 @@ public class SafeHttpClient {
         copyHeaders(request, builder, sameOrigin, methodPreserved);
 
         if (methodPreserved) {
-            // 307/308: preserve original HTTP method and body
             builder.method(request.method(),
                     request.bodyPublisher().orElse(HttpRequest.BodyPublishers.noBody()));
+        } else if ("HEAD".equals(request.method())) {
+            builder.method("HEAD", HttpRequest.BodyPublishers.noBody());
         } else {
-            // 301/302/303: always downgrade to GET per RFC 7231
             builder.GET();
         }
 
         HttpRequest redirectRequest = builder.build();
 
         return sendWithRedirects(redirectRequest, bodyHandler, redirectCount, startTime);
+    }
+
+    /**
+     * Whether this request's method (and its body) carries across a redirect of
+     * this status code — see the rules quoted at the call site.
+     * <p>
+     * GET and HEAD answer {@code false} because they have no body to carry and are
+     * rebuilt explicitly by the caller; every other method answers whether the
+     * status code leaves it alone.
+     * <p>
+     * Package-private so the rule can be pinned per method/code pair without a
+     * server on every combination.
+     */
+    static boolean methodSurvivesRedirect(String method, int statusCode) {
+        if ("GET".equals(method) || "HEAD".equals(method)) {
+            return false;
+        }
+        if (statusCode == 307 || statusCode == 308) {
+            return true;
+        }
+        if (statusCode == 303) {
+            return false;
+        }
+        // 301/302: POST is the only method the historical rewrite covers.
+        return !"POST".equals(method);
     }
 
     /**

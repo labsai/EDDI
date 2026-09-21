@@ -4,11 +4,8 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.engine.memory.ConversationOutputExtractor;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
-
-import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
 
 /**
  * Shared utility for extracting text from conversation outputs.
@@ -22,6 +19,13 @@ import java.util.stream.Collectors;
  */
 public final class ConversationOutputUtils {
 
+    /**
+     * Multiple output items become one line of history, so they are joined with a
+     * space rather than the newline {@link ConversationOutputExtractor} uses for
+     * its own callers.
+     */
+    private static final String ITEM_DELIMITER = " ";
+
     private ConversationOutputUtils() {
         // utility class
     }
@@ -29,24 +33,17 @@ public final class ConversationOutputUtils {
     /**
      * Extract the agent's output text from a ConversationOutput map.
      * <p>
-     * Handles the standard output format: a List of Maps with "text" keys. Multiple
-     * text entries are joined with a single space.
+     * Every item in the output list is inspected, not just the first: a turn gated
+     * by HITL starts its list with a plain String, and reading the list's shape
+     * from element zero used to discard such turns wholesale — removing them from
+     * the agent's own chat history, the rolling summary, the recall tool and the
+     * REST log. Multiple text entries are joined with a single space.
      *
      * @param output
      *            the conversation output to extract from
      * @return the joined text, or null if no output is present
      */
-    @SuppressWarnings("unchecked")
     public static String extractOutputText(ConversationOutput output) {
-        Object outputObj = output.get("output");
-        if (outputObj instanceof List<?> outputList && !outputList.isEmpty()) {
-            if (outputList.getFirst() instanceof Map) {
-                var mapList = (List<Map<String, Object>>) outputList;
-                String result = mapList.stream().filter(m -> m.get("text") != null).map(m -> m.get("text").toString())
-                        .collect(Collectors.joining(" "));
-                return result.isEmpty() ? null : result;
-            }
-        }
-        return null;
+        return ConversationOutputExtractor.extractText(output, ITEM_DELIMITER);
     }
 }

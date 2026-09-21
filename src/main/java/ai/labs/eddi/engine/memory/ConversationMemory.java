@@ -14,6 +14,7 @@ import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationProperties;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
+import ai.labs.eddi.engine.security.ResolutionPrincipal;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -37,6 +38,7 @@ public class ConversationMemory implements IConversationMemory {
     private final Stack<ConversationOutput> conversationOutputs = new Stack<>();
     private final IConversationProperties conversationProperties = new ConversationProperties(this);
     private ConversationState conversationState;
+    private ResolutionPrincipal.Provenance resolutionProvenance;
     private volatile boolean cancelled;
 
     /** Transient — never serialized to MongoDB. Set per-turn for SSE streaming. */
@@ -161,6 +163,16 @@ public class ConversationMemory implements IConversationMemory {
     @Override
     public String getUserId() {
         return this.userId;
+    }
+
+    @Override
+    public ResolutionPrincipal.Provenance getResolutionProvenance() {
+        return this.resolutionProvenance;
+    }
+
+    @Override
+    public void setResolutionProvenance(ResolutionPrincipal.Provenance provenance) {
+        this.resolutionProvenance = provenance;
     }
 
     @Override

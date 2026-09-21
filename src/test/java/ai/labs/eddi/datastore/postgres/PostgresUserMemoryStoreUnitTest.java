@@ -20,6 +20,13 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
+import java.util.ArrayList;
+import java.util.List;
+import ai.labs.eddi.engine.audit.AuditHmac;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -634,6 +641,95 @@ class PostgresUserMemoryStoreUnitTest {
         // when/then
         assertThrows(IResourceStore.ResourceStoreException.class,
                 () -> sut.deleteAllForUser("user1"));
+    }
+
+    /**
+     * The failure path must not undo what the success path pseudonymised. A caller
+     * that logs or serialises this exception would otherwise persist the identifier
+     * the erasure exists to remove, and a failed erasure is exactly when someone
+     * reads the exception.
+     */
+    @Test
+    void deleteAllForUser_failureMessageCarriesThePseudonymNotTheUserId() throws Exception {
+        when(preparedStatement.executeUpdate()).thenThrow(new SQLException("DB error"));
+
+        var thrown = assertThrows(IResourceStore.ResourceStoreException.class,
+                () -> sut.deleteAllForUser("user1"));
+
+        assertFalse(thrown.getMessage().contains("user1"),
+                "the raw userId reached the erasure failure message: " + thrown.getMessage());
+        assertTrue(thrown.getMessage().contains(AuditHmac.pseudonymFor("user1")),
+                "the failure must name the same pseudonym the success path logs, or the two cannot be "
+                        + "correlated: " + thrown.getMessage());
+    }
+
+    /**
+     * A userId is whatever the erasure caller supplied, and it reaches this INFO
+     * line directly. Without sanitising, a CR/LF in it writes forged lines into the
+     * operator's log (CWE-117) - on the GDPR erasure path, which is exactly where a
+     * log has to be trustworthy.
+     */
+    @Test
+    void deleteAllForUser_cannotForgeALogRecordThroughTheUserId() throws Exception {
+        String poisoned = "user1\r\n2026-01-01 00:00:00,000 INFO  [io.quarkus] Forged admin login succeeded";
+        when(preparedStatement.executeUpdate()).thenReturn(3);
+
+        List<String> captured = new ArrayList<>();
+        Handler handler = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                captured.add(String.valueOf(record.getMessage()));
+                if (record.getParameters() != null) {
+                    for (Object parameter : record.getParameters()) {
+                        captured.add(String.valueOf(parameter));
+                    }
+                }
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        // logging.properties turns ai.labs.eddi OFF for plain unit tests, so the
+        // logger has to be opened or nothing is captured and this passes vacuously.
+        Logger julLogger = Logger.getLogger(PostgresUserMemoryStore.class.getName());
+        Level previous = julLogger.getLevel();
+        julLogger.setLevel(Level.ALL);
+        julLogger.addHandler(handler);
+        try {
+            sut.deleteAllForUser(poisoned);
+        } finally {
+            julLogger.removeHandler(handler);
+            julLogger.setLevel(previous);
+        }
+
+        assertFalse(captured.isEmpty(), "nothing was captured, so this proves nothing - the logger was not open");
+        assertTrue(captured.stream().anyMatch(value -> value.contains("GDPR delete-all")),
+                "the line under test did not fire; captured: " + captured);
+        // The stronger contract (CWE-532): this line records an ERASURE, so the raw
+        // identifier must not survive in the log at all - not merely survive with its
+        // newlines stripped. Logs outlive the database and travel further than it does.
+        for (String value : captured) {
+            assertFalse(value.contains("user1"),
+                    "the raw userId reached an erasure log line, so the log now holds the identifier the "
+                            + "erasure existed to remove; offending value: " + value);
+        }
+        // The whole value, not merely the prefix. A prefix match proves only that
+        // something pseudonym-shaped was logged: a digest taken over a sanitised or
+        // truncated userId would satisfy it while failing the contract this
+        // assertion states, because it would not equal what the erasure cascade
+        // writes into the audit ledger and the two could not be correlated.
+        assertTrue(captured.stream().anyMatch(value -> value.contains(AuditHmac.pseudonymFor(poisoned))),
+                "the erasure log must carry the same pseudonym the cascade writes into the audit ledger, so "
+                        + "an operator can still correlate the two; captured: " + captured);
+        for (String value : captured) {
+            assertFalse(value.contains("\n") || value.contains("\r"),
+                    "a CR/LF reached the log, so a caller can forge records (CWE-117); offending value: " + value);
+        }
     }
 
     // ─── countEntries SQL exception ─────────────────────────────

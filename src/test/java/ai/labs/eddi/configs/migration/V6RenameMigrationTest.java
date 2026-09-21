@@ -24,6 +24,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
+import org.bson.types.ObjectId;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -668,13 +669,13 @@ class V6RenameMigrationTest {
             var envDoc = new Document("botId", "agent-1")
                     .append("botVersion", 2)
                     .append("environment", "unrestricted")
-                    .append("_id", new org.bson.types.ObjectId());
+                    .append("_id", new ObjectId());
 
             MongoCollection<Document> envCol = mock(MongoCollection.class);
             when(envCol.estimatedDocumentCount()).thenReturn(1L);
 
-            com.mongodb.client.FindIterable<Document> envIterable = mock(com.mongodb.client.FindIterable.class);
-            com.mongodb.client.MongoCursor<Document> envCursor = mock(com.mongodb.client.MongoCursor.class);
+            FindIterable<Document> envIterable = mock(FindIterable.class);
+            MongoCursor<Document> envCursor = mock(MongoCursor.class);
             when(envCursor.hasNext()).thenReturn(true, false);
             when(envCursor.next()).thenReturn(envDoc);
             when(envIterable.iterator()).thenReturn(envCursor);
@@ -787,13 +788,13 @@ class V6RenameMigrationTest {
 
             // Agent document with old field name 'packages'
             var agentDoc = new Document("packages", List.of("workflow-ref"))
-                    .append("_id", new org.bson.types.ObjectId());
+                    .append("_id", new ObjectId());
 
             MongoCollection<Document> agentCol = mock(MongoCollection.class);
             when(agentCol.estimatedDocumentCount()).thenReturn(1L);
 
-            com.mongodb.client.FindIterable<Document> agentIterable = mock(com.mongodb.client.FindIterable.class);
-            com.mongodb.client.MongoCursor<Document> agentCursor = mock(com.mongodb.client.MongoCursor.class);
+            FindIterable<Document> agentIterable = mock(FindIterable.class);
+            MongoCursor<Document> agentCursor = mock(MongoCursor.class);
             when(agentCursor.hasNext()).thenReturn(true, false);
             when(agentCursor.next()).thenReturn(agentDoc);
             when(agentIterable.iterator()).thenReturn(agentCursor);
@@ -837,13 +838,13 @@ class V6RenameMigrationTest {
             // Workflow document with old URI
             var workflowDoc = new Document(
                     "extension", "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/h1?version=1")
-                    .append("_id", new org.bson.types.ObjectId());
+                    .append("_id", new ObjectId());
 
             MongoCollection<Document> workflowCol = mock(MongoCollection.class);
             when(workflowCol.estimatedDocumentCount()).thenReturn(1L);
 
-            com.mongodb.client.FindIterable<Document> iterable = mock(com.mongodb.client.FindIterable.class);
-            com.mongodb.client.MongoCursor<Document> cursor = mock(com.mongodb.client.MongoCursor.class);
+            FindIterable<Document> iterable = mock(FindIterable.class);
+            MongoCursor<Document> cursor = mock(MongoCursor.class);
             when(cursor.hasNext()).thenReturn(true, false);
             when(cursor.next()).thenReturn(workflowDoc);
             doReturn(cursor).when(iterable).iterator();
@@ -884,13 +885,13 @@ class V6RenameMigrationTest {
             when(migrationLogStore.readMigrationLog(anyString())).thenReturn(null);
 
             var envDoc = new Document("environment", "restricted")
-                    .append("_id", new org.bson.types.ObjectId());
+                    .append("_id", new ObjectId());
 
             MongoCollection<Document> envCol = mock(MongoCollection.class);
             when(envCol.estimatedDocumentCount()).thenReturn(1L);
 
-            com.mongodb.client.FindIterable<Document> envIterable = mock(com.mongodb.client.FindIterable.class);
-            com.mongodb.client.MongoCursor<Document> envCursor = mock(com.mongodb.client.MongoCursor.class);
+            FindIterable<Document> envIterable = mock(FindIterable.class);
+            MongoCursor<Document> envCursor = mock(MongoCursor.class);
             when(envCursor.hasNext()).thenReturn(true, false);
             when(envCursor.next()).thenReturn(envDoc);
             when(envIterable.iterator()).thenReturn(envCursor);

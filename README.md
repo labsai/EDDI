@@ -4,7 +4,7 @@
 
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/12355/badge?v=2)](https://www.bestpractices.dev/projects/12355) [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/labsai/EDDI/badge)](https://securityscorecards.dev/viewer/?uri=github.com/labsai/EDDI) [![Codacy Badge](https://app.codacy.com/project/badge/Grade/2c5d183d4bd24dbaa77427cfbf5d4074)](https://app.codacy.com/organizations/gh/labsai/dashboard?utm_source=github.com&utm_medium=referral&utm_content=labsai/EDDI&utm_campaign=Badge_Grade)
 
-[![CI](https://github.com/labsai/EDDI/actions/workflows/ci.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/ci.yml) [![CodeQL](https://github.com/labsai/EDDI/actions/workflows/codeql.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/codeql.yml) ![Tests](https://img.shields.io/badge/tests-14%2C000%2B-brightgreen) ![Coverage](https://img.shields.io/badge/coverage-%3E90%25-brightgreen)
+[![CI](https://github.com/labsai/EDDI/actions/workflows/ci.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/ci.yml) [![CodeQL](https://github.com/labsai/EDDI/actions/workflows/codeql.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/codeql.yml) ![Tests](https://img.shields.io/badge/tests-21%2C000%2B-brightgreen) ![Coverage](https://img.shields.io/badge/coverage-%3E90%25%20instr%20%2F%20%3E80%25%20branch-brightgreen)
 
 [![Docker Pulls](https://img.shields.io/docker/pulls/labsai/eddi)](https://hub.docker.com/r/labsai/eddi) [![Latest Release](https://img.shields.io/github/v/release/labsai/EDDI?label=latest&color=blue)](https://github.com/labsai/EDDI/releases) [![Repository: AI Ready](https://img.shields.io/badge/Repository-AI_Ready-blueviolet?logo=robot)](AGENTS.md)
 
@@ -118,8 +118,9 @@ If you prefer manual control over Docker Compose:
 # Default (EDDI + MongoDB)
 docker compose up
 
-# PostgreSQL instead of MongoDB
-EDDI_DATASTORE_TYPE=postgres docker compose -f docker-compose.yml -f docker-compose.postgres.yml up
+# PostgreSQL instead of MongoDB — a complete stack, so it is NOT layered on
+# docker-compose.yml (an overlay cannot un-declare the base's mongodb service)
+docker compose -f docker-compose.postgres-only.yml up
 
 # With Keycloak authentication
 docker compose -f docker-compose.yml -f docker-compose.auth.yml up
@@ -127,12 +128,18 @@ docker compose -f docker-compose.yml -f docker-compose.auth.yml up
 # With Prometheus + Grafana monitoring
 docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up
 
-# Full stack (all overlays)
+# With a local LLM — Ollama on the same Docker network, reachable as
+# http://ollama:11434 (no host.docker.internal needed)
+docker compose -f docker-compose.yml -f docker-compose.ollama.yml up -d
+
+# Auth + monitoring + NATS together (overlays stack in any combination)
 docker compose -f docker-compose.yml -f docker-compose.auth.yml \
   -f docker-compose.monitoring.yml -f docker-compose.nats.yml up
 ```
 
-Available compose overlays: `docker-compose.auth.yml` (Keycloak), `docker-compose.monitoring.yml` (Prometheus+Grafana), `docker-compose.nats.yml` (NATS JetStream), `docker-compose.postgres.yml` / `docker-compose.postgres-only.yml`, `docker-compose.local.yml` (build from source).
+Available compose overlays: `docker-compose.auth.yml` (Keycloak), `docker-compose.monitoring.yml` (Prometheus+Grafana), `docker-compose.nats.yml` (NATS JetStream), `docker-compose.ollama.yml` (local LLM), `docker-compose.chroma.yml` (vector store), `docker-compose.local.yml` (build from source). `docker-compose.postgres-only.yml` is a complete standalone stack rather than an overlay — use it on its own, not with `-f docker-compose.yml`.
+
+The Ollama overlay pulls `llama3.2:3b` on first start and keeps models in a named volume; override with `OLLAMA_PULL_MODEL=qwen3:4b`, or set it empty to skip the pull. It also sets `EDDI_OLLAMA_DEFAULT_BASE_URL`, so the agent wizard and the setup API pre-fill a base URL that resolves from inside the container — the one thing that trips up every first local-LLM agent, because `localhost` there is the container, not the host.
 
 ```bash
 docker pull labsai/eddi    # Pull latest from Docker Hub
@@ -290,7 +297,7 @@ EDDI implements open standards — not proprietary APIs:
 | **[A2A](https://google.github.io/A2A/)** (Agent-to-Agent Protocol)   | Full implementation             | Cross-platform agent communication, Agent Cards, and skill discovery                                     |
 | **[OpenAPI](https://www.openapis.org/)** 3.1                         | Native generation + consumption | Auto-generated spec. Paste any OpenAPI spec → get a fully deployed API-calling agent                     |
 | **OAuth 2.0 / OIDC**                                                 | Keycloak integration            | Authentication, authorization, and multi-tenant isolation                                                |
-| **SSE** (Server-Sent Events)                                         | Streaming transport             | Real-time chat responses, group discussion feeds, and live log streaming                                 |
+| **SSE** (Server-Sent Events)                                         | Streaming transport             | Token-by-token chat responses, including most tool-enabled turns, which stream over the provider's streaming transport instead of going silent until the tool loop finishes (a single-chunk fallback still applies to cascade agents, providers without a streaming builder, and a few other configurations) — plus a live `tool_call` event for "Using {tool}…" status, group discussion feeds, and live log streaming |
 
 ### 💭 Memory & Context Management
 
@@ -411,9 +418,9 @@ EDDI implements open standards — not proprietary APIs:
 ### 🚀 Cloud-Native & Observable
 
 - 🐳 **One-Command Install** — Interactive wizard sets up EDDI + database via Docker
-- ☸️ **Kubernetes / OpenShift** — Kustomize overlays, Helm charts, HPA, PDB, NetworkPolicy
+- ☸️ **Kubernetes / OpenShift** — Kustomize overlays, Helm charts, PDB, NetworkPolicy (no HPA: EDDI is single-writer per conversation, so both delivery paths pin one replica)
 - 📊 **Prometheus & Grafana** — 50+ Micrometer metrics at `/q/metrics` (tools, vault, memory, scheduling, conversations). Pre-built [Grafana dashboard](docs/monitoring/eddi-grafana-dashboard.json) included
-- 🔭 **OpenTelemetry Tracing** — Per-task distributed traces via OTLP (Jaeger, Tempo, Datadog). Every pipeline task emits spans with `task.id`, `task.type`, `conversation.id`, and `agent.id`
+- 🔭 **OpenTelemetry Tracing** — Per-task distributed traces via OTLP (Jaeger, Tempo, Datadog). Every pipeline task emits a span named `eddi.pipeline.task` carrying `eddi.task.id`, `eddi.task.type`, `eddi.task.index`, `eddi.conversation.id` and `eddi.agent.id`. The equivalent *metric* tags are un-prefixed (`task.id`, `task.type`)
 - 🩺 **Health Checks** — Liveness & readiness probes at `/q/health/live` and `/q/health/ready`
 - 🔄 **NATS JetStream** — Async event bus for distributed processing
 - 🛟 **Error Handling & Recovery** — Automatic retry with exponential backoff, MCP circuit breakers (3 failures / 60s cooldown), LLM response validation (`onEmpty` / `onTruncation` / `onRefusal`), streaming timeout retry, and admin endpoint to reset stuck conversations
@@ -495,6 +502,7 @@ EDDI provides built-in infrastructure for regulatory compliance:
 | **Maven**      | 3.9+    | Bundled via `mvnw` / `mvnw.cmd` wrapper — no install needed       |
 | **MongoDB**    | 6.0+    | Local instance or Docker (`docker run -d -p 27017:27017 mongo:7`) |
 | **Docker**     | Latest  | For integration tests and container builds                        |
+| **Node.js**    | —       | Not required: Maven downloads Node 22 into `ui/node/` to build the Manager and Chat UIs. Install it only to run `npm run dev` in `ui/manager` or `ui/chat` |
 
 > **Windows users:** Replace `./mvnw` with `.\mvnw.cmd` in all commands below.
 
@@ -511,6 +519,8 @@ Dev mode starts the application with **live reload** — code changes are picked
 ```
 
 Then open [http://localhost:7070](http://localhost:7070). The Quarkus Dev UI is available at [http://localhost:7070/q/dev](http://localhost:7070/q/dev).
+
+> **💡 The Manager and Chat UI build with Maven, at packaging time.** Their sources live in `ui/manager` and `ui/chat`. `./mvnw package` (and `verify`, `install`) builds them into the jar, about two minutes; `compile`, `test` and dev mode never touch npm, so dev mode serves `/manage` only after a `package`. For frontend work run `npm run dev` in `ui/manager` (port 3000, proxying to the backend on 7070). Upgrading an older checkout? Run `./mvnw clean` once.
 
 Dev mode also enables:
 
@@ -538,13 +548,14 @@ Dev mode also enables:
 | Command                                                       | What It Does                                                                |
 | ------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | `./mvnw compile quarkus:dev`                                  | **Start dev mode** with live reload (port 7070)                             |
-| `./mvnw compile`                                              | Compile sources only (fast feedback)                                        |
+| `./mvnw compile`                                              | Compile sources only (fast feedback). Also runs the two `validate`-phase style gates, so it **fails** on an unused import (Checkstyle) or an unformatted file (`formatter:validate`) — neither edits your sources; run `./mvnw formatter:format` to fix formatting |
 | `./mvnw clean compile`                                        | Clean build — delete `target/` and recompile from scratch                   |
 | `./mvnw test`                                                 | Run **unit tests** (excludes `*IT.java` integration tests)                  |
-| `./mvnw verify -DskipITs`                                     | Compile + unit tests + package (no integration tests)                       |
-| `./mvnw verify`                                               | **Full build** — compile + unit tests + integration tests (requires Docker) |
-| `./mvnw validate`                                             | Run **Checkstyle** code style checks                                        |
-| `./mvnw formatter:format`                                     | **Auto-format** Java sources using the project Eclipse formatter            |
+| `./mvnw package -DskipTests -DskipUi=true` | Build the jar **without** the Manager and Chat UIs (`compile` and `test` never build them) |
+| `./mvnw verify`                                               | Compile + unit tests + package. **Integration tests are skipped** — `skipITs` defaults to `true` in `pom.xml` |
+| `./mvnw verify -DskipITs=false`                               | **Full build** — adds the `*IT.java` integration tests (requires Docker). This is what CI runs |
+| `./mvnw validate`                                             | Run the **blocking style gates** — Checkstyle (`UnusedImports`/`RedundantImport` fail the build; `FileLength`/`LineLength` stay advisory) and `formatter:validate`, which reports unformatted files without touching them |
+| `./mvnw formatter:format`                                     | **Auto-format** Java sources using the project Eclipse formatter — the fix for a `formatter:validate` failure |
 | `./mvnw package -DskipTests`                                  | Build the JAR without running tests (for `install.sh --local`)              |
 | `./mvnw clean package '-Dquarkus.container-image.build=true'` | Build the app **+ Docker image**                                            |
 | `./mvnw package -Plicense-gen -DskipTests`                    | Generate **third-party licenses** (Red Hat certification)                   |
@@ -568,10 +579,12 @@ target/site/jacoco/index.html
 | Property                                    | Default                     | Description                                    |
 | ------------------------------------------- | --------------------------- | ---------------------------------------------- |
 | `-Dquarkus.http.port=<port>`                | `7070`                      | Override the HTTP port                         |
-| `-Dquarkus.mongodb.connection-string=<uri>` | `mongodb://localhost:27017` | MongoDB connection                             |
+| `-Dmongodb.connectionString=<uri>`          | dev: `mongodb://localhost:27017/eddi`  | MongoDB connection, read by `PersistenceModule`. `quarkus.mongodb.connection-string` is a different key that only the health check reads |
+| `-Dmongodb.database=<name>`                 | `eddi`                      | MongoDB database name                          |
 | `-Dquarkus.profile=<profile>`               | `dev`                       | Active Quarkus profile (`dev`, `test`, `prod`) |
 | `-DskipTests`                               | `false`                     | Skip all tests                                 |
 | `-DskipITs`                                 | `true`                      | Skip integration tests only                    |
+| `-DskipUi` | `false` | Skip the npm build of `ui/manager` and `ui/chat` (the jar then serves no UI) |
 
 </details>
 
@@ -590,20 +603,30 @@ target/site/jacoco/index.html
 
 ### ☸️ Kubernetes
 
-```bash
-# Quickstart (one-file deployment)
-kubectl apply -f https://raw.githubusercontent.com/labsai/EDDI/main/k8s/quickstart.yaml
+No shipped manifest creates the `eddi-secrets` Secret that holds the vault master
+key — a Secret in the manifests would be reconciled on every `kubectl apply` and
+overwrite a live key, making everything already encrypted with it undecryptable.
+So the Secret is created out-of-band, **before** the first apply. Without it the
+EDDI pod sits in `ContainerCreating` (`MountVolume.SetUp failed: secret
+"eddi-secrets" not found`) and never starts.
 
-# Kustomize overlays
+```bash
+# Kustomize overlays — create the vault Secret first, then apply
+bash k8s/create-secrets.sh                 # PowerShell 7: pwsh -File .\k8s\create-secrets.ps1
 kubectl apply -k k8s/overlays/mongodb/     # MongoDB backend
 kubectl apply -k k8s/overlays/postgres/    # PostgreSQL backend
 
-# Helm
-helm install eddi ./helm/eddi --namespace eddi --create-namespace
+# Quickstart (one-file manifest; same Secret step, see the Kubernetes Guide)
+kubectl apply -f https://raw.githubusercontent.com/labsai/EDDI/main/k8s/quickstart.yaml
+
+# Helm (renders the Secret itself, so the key is a required value)
+helm install eddi ./helm/eddi \
+  --set eddi.vaultMasterKey="$(openssl rand -base64 24)" \
+  --namespace eddi --create-namespace
 ```
 
-Includes overlays for auth (Keycloak), monitoring (Prometheus/Grafana), NATS messaging, Ingress, and production hardening (HPA, PDB, NetworkPolicy).
-See the [Kubernetes Guide](docs/kubernetes.md) for details.
+Includes overlays for auth (Keycloak), monitoring (Prometheus/Grafana), NATS messaging, Ingress, and production hardening (PDB, NetworkPolicy — deliberately no HPA).
+See the [Kubernetes Guide](docs/kubernetes.md) for details, including the Keycloak upgrade note for existing installs.
 
 ---
 

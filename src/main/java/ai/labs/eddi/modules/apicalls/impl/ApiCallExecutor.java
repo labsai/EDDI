@@ -8,6 +8,9 @@ import ai.labs.eddi.configs.apicalls.model.*;
 import ai.labs.eddi.configs.apicalls.model.HttpPostResponse;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.connections.ConnectionException;
+import ai.labs.eddi.connections.ConnectionResolver;
+import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.engine.security.CallerIdentityResolver;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.httpclient.IHttpClient;
@@ -16,34 +19,41 @@ import ai.labs.eddi.engine.httpclient.IResponse;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
+import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.TreeMap;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
+import java.io.IOException;
 import static ai.labs.eddi.utils.MatchingUtilities.executeValuePath;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 import static jakarta.ws.rs.core.MediaType.TEXT_PLAIN;
 import static java.lang.String.format;
 import static java.lang.System.currentTimeMillis;
-import static java.util.Objects.requireNonNullElse;
 
 /**
  * Reusable HTTP call executor that can be used by different lifecycle tasks.
@@ -78,6 +88,37 @@ public class ApiCallExecutor implements IApiCallExecutor {
      */
     static final int MAX_TRANSPORT_RESPONSE_SIZE_BYTES = 8 * 1024 * 1024;
 
+    /**
+     * Response headers that are credentials, and are dropped before the header map
+     * reaches conversation memory, the template data or an LLM tool result.
+     * <p>
+     * Choosing which headers to BIND is not the same control as choosing which to
+     * STORE, and only the second one closes this. An operation can qualify for
+     * header capture on its documented 201 and still answer some other call with a
+     * {@code Set-Cookie} — the error path especially — so gating on the declared
+     * status alone leaves the live session cookie flowing into persisted memory and
+     * the model's context.
+     * <p>
+     * {@code Set-Cookie} is the case that matters: {@code HttpClientModule} builds
+     * a cookie-aware, application-scoped {@code WebClientSession}, so that value is
+     * a session credential EDDI is actively replaying, and {@code HttpOnly} exists
+     * precisely to keep such values out of scriptable — here, prompt-injectable —
+     * context. The authenticate headers carry challenge material with the same
+     * property.
+     * <p>
+     * A deny-list rather than an allow-list, deliberately: the useful header on any
+     * given API is not knowable here ({@code Location}, {@code ETag}, a pagination
+     * cursor, a rate-limit budget, some vendor {@code X-*}), and an allow-list
+     * would silently break every hand-authored config templating one of those. What
+     * IS knowable is the small closed set that is never data.
+     */
+    private static final Set<String> CREDENTIAL_RESPONSE_HEADERS = Set.of(
+            "set-cookie", "set-cookie2", "authorization", "proxy-authorization",
+            "www-authenticate", "proxy-authenticate",
+            // RFC 7615: server-authentication material (rspauth, nextnonce) —
+            // challenge-response state, never data.
+            "authentication-info", "proxy-authentication-info");
+
     private final IHttpClient httpClient;
     private final IJsonSerialization jsonSerialization;
     private final IRuntime runtime;
@@ -87,6 +128,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
     private final CallerIdentityResolver callerIdentityResolver;
     private final CallerIdentityContext callerIdentityContext;
     private final RequestRedactor requestRedactor;
+    private final ConnectionResolver connectionResolver;
     private final boolean ssrfProtectionEnabled;
     private final long defaultTimeoutInMillis;
     private final int defaultMaxResponseSizeInBytes;
@@ -94,7 +136,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
     @Inject
     public ApiCallExecutor(IHttpClient httpClient, IJsonSerialization jsonSerialization, IRuntime runtime, PrePostUtils prePostUtils,
             GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver, CallerIdentityResolver callerIdentityResolver,
-            CallerIdentityContext callerIdentityContext, RequestRedactor requestRedactor,
+            CallerIdentityContext callerIdentityContext, RequestRedactor requestRedactor, ConnectionResolver connectionResolver,
             @ConfigProperty(name = "eddi.security.ssrf-protection.enabled", defaultValue = "false") boolean ssrfProtectionEnabled,
             @ConfigProperty(name = "eddi.httpcalls.default-timeout-millis", defaultValue = "30000") long defaultTimeoutInMillis,
             @ConfigProperty(name = "eddi.httpcalls.default-max-response-size-bytes", defaultValue = "2000000") int defaultMaxResponseSizeInBytes) {
@@ -107,9 +149,31 @@ public class ApiCallExecutor implements IApiCallExecutor {
         this.callerIdentityResolver = callerIdentityResolver;
         this.callerIdentityContext = callerIdentityContext;
         this.requestRedactor = requestRedactor;
+        this.connectionResolver = connectionResolver;
         this.ssrfProtectionEnabled = ssrfProtectionEnabled;
         this.defaultTimeoutInMillis = defaultTimeoutInMillis;
         this.defaultMaxResponseSizeInBytes = defaultMaxResponseSizeInBytes;
+    }
+
+    /**
+     * The response headers, minus {@link #CREDENTIAL_RESPONSE_HEADERS}.
+     * <p>
+     * Case-insensitive, because {@code HttpClientWrapper.convertHeaderToMap}
+     * preserves whatever casing the wire used and HTTP/2 mandates lowercase — a
+     * filter keyed on {@code "Set-Cookie"} would miss {@code set-cookie} and defend
+     * nothing over h2.
+     */
+    static Map<String, String> withoutCredentialHeaders(Map<String, String> headers) {
+        var filtered = new TreeMap<String, String>(String.CASE_INSENSITIVE_ORDER);
+        if (headers == null) {
+            return filtered;
+        }
+        headers.forEach((name, value) -> {
+            if (name != null && !CREDENTIAL_RESPONSE_HEADERS.contains(name.toLowerCase(Locale.ROOT))) {
+                filtered.put(name, value);
+            }
+        });
+        return filtered;
     }
 
     @Override
@@ -142,7 +206,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 IResponse response = null;
                 boolean retryCall = false;
                 int amountOfExecutions = 0;
-                Map<String, Object> result = new HashMap<>();
+                // LinkedHashMap, not HashMap: this map is serialized verbatim as the
+                // LLM tool result and truncated from the front, so key order decides
+                // what survives a cap. See the ordered "headers" insert below.
+                Map<String, Object> result = new LinkedHashMap<>();
 
                 do {
                     // Final attempt wins, entirely: a retried failure populated
@@ -151,7 +218,8 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     // otherwise inherit the failed attempt's error body next to
                     // its own 2xx code — a self-contradictory tool result.
                     result.clear();
-                    request = buildRequest(targetServerUrl, call, templateDataObjects);
+                    BuiltRequest built = buildRequest(targetServerUrl, call, templateDataObjects);
+                    request = built.request();
                     var objectName = call.getName() + "Request";
                     var requestMap = request.toMap();
                     // Scrub resolved secrets — headers, query parameters and body — from
@@ -159,8 +227,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     // actual request was already built and still carries them; each entry
                     // here is REPLACED with a redacted copy, so this only affects the debug
                     // record. Shares RequestRedactor with the approval preview so the two
-                    // cannot disagree about what counts as a credential.
-                    requestRedactor.redactRequestMap(requestMap);
+                    // cannot disagree about what counts as a credential — including which
+                    // headers a connection filled, which no name or value heuristic can
+                    // recognise on its own.
+                    requestRedactor.redactRequestMap(requestMap, built.connectionOwnedHeaders());
                     prePostUtils.createMemoryEntry(currentStep, requestMap, objectName, KEY_HTTP_CALLS);
                     response = executeAndMeasureRequest(call, request, retryCall, amountOfExecutions);
 
@@ -185,9 +255,21 @@ public class ApiCallExecutor implements IApiCallExecutor {
                         // namespace: ApiCallsTask merges this map into template data,
                         // where that vocabulary is already established.
                         result.put("httpCode", response.getHttpCode());
-                        result.put("body", truncatedError != null && !truncatedError.isBlank()
-                                ? truncatedError
-                                : response.getHttpCodeMessage());
+                        // REDACTED before it reaches the model: an error body is
+                        // server-authored text, and a 401/403 routinely echoes the
+                        // credential that failed ("invalid api key sk-…"). The
+                        // success path stays untouched — response bodies are the
+                        // data the call exists to fetch — but an error body's
+                        // value to the model is the failure REASON, which survives
+                        // redaction. The memory-side {name}Error entry keeps the
+                        // raw text, as it always has, for operators debugging via
+                        // the store.
+                        // The status-message fallback is server-authored text of the
+                        // same trust class as the body — redacted for the same reason.
+                        String toolErrorBody = truncatedError != null && !truncatedError.isBlank()
+                                ? SecretRedactionFilter.redact(truncatedError)
+                                : SecretRedactionFilter.redact(response.getHttpCodeMessage());
+                        result.put("body", toolErrorBody);
 
                         // Store error body in memory so downstream templates / rules can inspect it
                         if (call.getSaveResponse()) {
@@ -203,11 +285,12 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     }
 
                     var responseHeaderObjectName = call.getResponseHeaderObjectName();
+                    Object responseObjectHeader = null;
                     if (!isNullOrEmpty(responseHeaderObjectName)) {
-                        var responseObjectHeader = requireNonNullElse(response.getHttpHeader(), new HashMap<>());
+                        responseObjectHeader = withoutCredentialHeaders(response.getHttpHeader());
                         templateDataObjects.put(responseHeaderObjectName, responseObjectHeader);
                         prePostUtils.createMemoryEntry(currentStep, responseObjectHeader, responseHeaderObjectName, KEY_HTTP_CALLS);
-                        result.put("headers", responseObjectHeader);
+                        // NOT put into `result` here — see the ordered insert below.
                     }
 
                     if (isResponseSuccessful && call.getSaveResponse()) {
@@ -226,7 +309,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                         if (CONTENT_TYPE_APPLICATION_JSON.equals(actualContentType)) {
                             try {
                                 responseObject = jsonSerialization.deserialize(responseBody, Object.class);
-                            } catch (java.io.IOException jsonEx) {
+                            } catch (IOException jsonEx) {
                                 LOGGER.warnf("ApiCall (%s) returned application/json but body is not valid JSON, falling back to raw string: %s",
                                         call.getName(), jsonEx.getMessage());
                                 responseObject = responseBody;
@@ -251,6 +334,22 @@ public class ApiCallExecutor implements IApiCallExecutor {
                         // model whose tool returned "{}" cannot tell a 204 from a crash,
                         // and honestly reporting "it worked" requires knowing that it did.
                         result.put("httpCode", response.getHttpCode());
+                    }
+
+                    // Headers go in LAST, on purpose, and `result` is a LinkedHashMap
+                    // so that ordering survives serialization.
+                    //
+                    // The tool result is truncated from the FRONT
+                    // (ToolResponseTruncator cuts `result.substring(0, maxChars)`),
+                    // so whatever serializes first is what survives. With a plain
+                    // HashMap "headers" hashed ahead of "body" on both the success and
+                    // the error path regardless of insertion order — so a per-tool
+                    // limit, or the always-on tool-context budget, would spend the
+                    // allowance on a header block and cut away the response body the
+                    // model actually asked for. Headers are the disposable half of
+                    // this map; the body is not.
+                    if (responseObjectHeader != null) {
+                        result.put("headers", responseObjectHeader);
                     }
 
                     amountOfExecutions++;
@@ -303,7 +402,8 @@ public class ApiCallExecutor implements IApiCallExecutor {
             // Note the absence of executePreRequestPropertyInstructions: it writes
             // to conversation memory, and previewing a call must not change the
             // conversation. See IApiCallExecutor#resolve for what that costs.
-            var requestMap = buildRequest(targetServerUrl, call, templateDataObjects).toMap();
+            BuiltRequest built = buildRequest(targetServerUrl, call, templateDataObjects);
+            var requestMap = built.request().toMap();
             var headers = requestMap.get(IRequest.KEY_HEADERS) instanceof Map<?, ?> h ? (Map<String, ?>) h : Map.<String, Object>of();
             var queryParams = normalizeQueryParams(requestMap.get(IRequest.KEY_QUERY_PARAMS));
             Object body = requestMap.get(IRequest.KEY_BODY);
@@ -316,7 +416,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     String.valueOf(requestMap.get(IRequest.KEY_METHOD)),
                     String.valueOf(requestMap.get(IRequest.KEY_URI)),
                     queryParams,
-                    requestRedactor.redactHeaders(headers),
+                    requestRedactor.redactHeaders(headers, built.connectionOwnedHeaders()),
                     body == null ? null : body.toString(),
                     !canExecuteDivergeFromResolve(call));
         } catch (Exception e) {
@@ -455,17 +555,28 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 batchRequest.setExecuteCallsSequentially(false);
             }
 
-            // A batch runs on a thread of its own, where the caller binding does not
-            // follow, so ${caller:...} in these requests would fail closed without
-            // propagate() carrying it across.
-            runtime.submitCallable(callerIdentityContext.propagate(() -> {
-                List<Object> batchIterationList = prePostUtils.buildIterationValues(batchRequest.getIterationObjectName(),
-                        batchRequest.getPathToTargetArray(), batchRequest.getTemplateFilterExpression(), templateDataObjects);
+            // Every request is built here, on the turn's own thread, and only the sending
+            // goes to the background. A request that cannot be built — an unsatisfiable
+            // ${caller:...} or ${connection:...} reference, an expired secret context
+            // value — then fails the turn exactly as a single fire-and-forget call does,
+            // instead of being logged by a worker nobody reads while the turn reports
+            // success. It also means the request sees the turn's template data as it is
+            // now, not as it is when a worker gets to it. Each request gets its own copy of
+            // the template data, so the iteration variable never leaks into the calls that
+            // run after this one.
+            List<Object> batchIterationList = prePostUtils.buildIterationValues(batchRequest.getIterationObjectName(),
+                    batchRequest.getPathToTargetArray(), batchRequest.getTemplateFilterExpression(), templateDataObjects);
+            List<IRequest> requests = new ArrayList<>(batchIterationList.size());
+            for (Object iterationObject : batchIterationList) {
+                Map<String, Object> iterationData = new LinkedHashMap<>(templateDataObjects);
+                iterationData.put(batchRequest.getIterationObjectName(), iterationObject);
+                requests.add(buildRequest(targetServerUrl, call, iterationData).request());
+            }
 
-                IRequest request;
-                for (Object iterationObject : batchIterationList) {
-                    templateDataObjects.put(batchRequest.getIterationObjectName(), iterationObject);
-                    request = buildRequest(targetServerUrl, call, templateDataObjects);
+            // The sending runs on a thread of its own; propagate() keeps the turn's
+            // bindings available there for anything the send itself resolves.
+            runtime.submitCallable(callerIdentityContext.propagate(() -> {
+                for (IRequest request : requests) {
                     if (batchRequest.getExecuteCallsSequentially()) {
                         long executionStart = currentTimeMillis();
                         LOGGER.info(callName + " Batch Request: " + request);
@@ -478,7 +589,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 return null;
             }), null);
         } else {
-            IRequest request = buildRequest(targetServerUrl, call, templateDataObjects);
+            IRequest request = buildRequest(targetServerUrl, call, templateDataObjects).request();
             executeFireAndForgetCall(request, callName);
         }
     }
@@ -495,7 +606,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
 
         long duration = executionEnd - executionStart;
         LOGGER.info(httpCallsName + " Response " + (fireAndForget ? "(f'n'f)" : "") + ": " + response.toString());
-        LOGGER.info(httpCallsName + format(" Execution time: %sms\n", duration));
+        // No trailing "\n": the console pattern ends in %n, and a newline in a log
+        // MESSAGE is now escaped rather than printed (CWE-117), so this one would
+        // render as a literal "\n" at the end of the line.
+        LOGGER.info(httpCallsName + format(" Execution time: %sms", duration));
     }
 
     // Package-private for unit testing of the backoff curve.
@@ -629,7 +743,29 @@ public class ApiCallExecutor implements IApiCallExecutor {
         return false;
     }
 
-    private IRequest buildRequest(String targetServerUrl, ApiCall call, Map<String, Object> templateDataObjects)
+    /**
+     * A request ready to send, together with the names of the headers a connection
+     * filled.
+     * <p>
+     * The names travel with the request because the request itself cannot say: by
+     * the time {@link IRequest#toMap()} is read back, a connection-supplied
+     * {@code X-Amp-Id} is indistinguishable from a plain one, and neither its name
+     * nor its value need match any credential heuristic. Both consumers of the
+     * built request — the debug record persisted to memory and the HITL approval
+     * preview — hand this set to {@link RequestRedactor}, so a credential is
+     * redacted because the executor <em>knows</em> it is one rather than because it
+     * happens to look like one.
+     *
+     * @param request
+     *            the request, still carrying every live credential
+     * @param connectionOwnedHeaders
+     *            header names written from a {@code ${connection:…}} reference;
+     *            never null, empty when none was
+     */
+    record BuiltRequest(IRequest request, Set<String> connectionOwnedHeaders) {
+    }
+
+    private BuiltRequest buildRequest(String targetServerUrl, ApiCall call, Map<String, Object> templateDataObjects)
             throws ITemplatingEngine.TemplateEngineException {
 
         Request requestConfig = call.getRequest();
@@ -646,6 +782,8 @@ public class ApiCallExecutor implements IApiCallExecutor {
         // reach URI.create() to fail as "Illegal character in path" — an error that
         // names the symptom and not the cause.
         callerIdentityResolver.rejectAnyReference(targetUriStr, "the request path");
+        rejectConnectionReference(targetUriStr, "the request path");
+        rejectExpiredSecretContext(targetUriStr, "the request path");
         var targetUri = URI.create(targetUriStr);
         var requestBody = prePostUtils.templateValues(requestConfig.getBody(), templateDataObjects);
         // Resolve global variable references, then vault references in request body
@@ -657,6 +795,13 @@ public class ApiCallExecutor implements IApiCallExecutor {
         // Off by default to preserve calls to internal/private APIs.
         if (ssrfProtectionEnabled) {
             UrlValidationUtils.validateUrl(targetUri.toString());
+        } else {
+            // Opting out of SSRF protection keeps private and loopback targets
+            // reachable (configured internal APIs), but never the cloud instance-
+            // metadata service: that is a credential endpoint, not an API anyone
+            // configures on purpose. Redirects stay followed here; the client itself
+            // refuses any hop onto the metadata service (HttpClientModule).
+            UrlValidationUtils.rejectCloudMetadataTarget(targetUri.toString());
         }
 
         // Locale.ROOT is defensive rather than a live fix: no current Method
@@ -683,8 +828,18 @@ public class ApiCallExecutor implements IApiCallExecutor {
         // a literal placeholder — not just a token one. Reject the lot instead of
         // shipping nonsense to the API.
         callerIdentityResolver.rejectAnyReference(requestBody, "a request body");
+        rejectConnectionReference(requestBody, "a request body");
+        rejectExpiredSecretContext(requestBody, "a request body");
 
         Map<String, String> headers = requestConfig.getHeaders();
+        // Header names already written to this request, lower-cased because HTTP
+        // header names are case-insensitive and setHttpHeader REPLACES rather than
+        // appends — two entries differing only in case displace each other, and
+        // whichever iterates last wins with no signal. The flag records whether a
+        // CONNECTION owns the name: that is the collision iteration order must
+        // never decide, because one side of it is a credential.
+        var claimedHeaders = new HashMap<String, Boolean>();
+        var connectionOwnedHeaders = new HashSet<String>();
         for (String headerName : headers.keySet()) {
             String headerValue = prePostUtils.templateValues(headers.get(headerName), templateDataObjects);
             // Resolve global variable references, then vault references in headers
@@ -693,6 +848,47 @@ public class ApiCallExecutor implements IApiCallExecutor {
             // Caller identity resolves last and needs the target URI: the token is
             // only released when the call goes back to the caller's own origin.
             headerValue = callerIdentityResolver.resolveValue(headerValue, targetUri);
+            // Connections resolve last, and only in a header. A ${connection:name}
+            // resolves to a credential bound to THIS caller and THIS moment, so
+            // unlike a vault reference it cannot be substituted into a cached
+            // string — which is also why it replaces the whole header rather than
+            // being interpolated into one.
+            if (ConnectionResolver.containsReference(headerValue)) {
+                ConnectionReference.requireSole(headerValue, "Header '" + headerName + "'");
+                var credential = connectionResolver.resolve(headerValue, targetUri, principalFrom(templateDataObjects));
+                // The connection owns the header NAME — that is the point of storing
+                // one, since Authorization and X-Api-Key are the same connection model
+                // — but a silent displacement is not acceptable in either direction.
+                // Two references resolving to one header name used to overwrite each
+                // other with no signal, and the request went out carrying whichever
+                // won.
+                if (!headerName.equalsIgnoreCase(credential.headerName())) {
+                    throw new IllegalArgumentException("Header '" + headerName + "' references a connection whose header is '"
+                            + credential.headerName() + "'. Name the header the same as the connection's, so what the config says and what "
+                            + "is sent cannot disagree.");
+                }
+                Boolean claimedByConnection = claimedHeaders.putIfAbsent(credential.headerName().toLowerCase(Locale.ROOT), Boolean.TRUE);
+                if (Boolean.TRUE.equals(claimedByConnection)) {
+                    throw new IllegalArgumentException("More than one header resolves to '" + credential.headerName()
+                            + "' through a connection. Only one credential can occupy a header; the others would be silently dropped.");
+                }
+                if (claimedByConnection != null) {
+                    throw connectionHeaderCollision(credential.headerName());
+                }
+                request.setHttpHeader(credential.headerName(), credential.headerValue());
+                connectionOwnedHeaders.add(credential.headerName());
+                continue;
+            }
+            // The same map, read from the other side. A plain header sharing a name
+            // with a connection-owned one used to slip past every guard here, because
+            // the collision set was only ever consulted inside the branch above — and
+            // then the two silently overwrote each other by iteration order. Two
+            // genuinely different names, and even two plain headers differing only in
+            // case, keep behaving exactly as before.
+            if (Boolean.TRUE.equals(claimedHeaders.putIfAbsent(headerName.toLowerCase(Locale.ROOT), Boolean.FALSE))) {
+                throw connectionHeaderCollision(headerName);
+            }
+            rejectExpiredSecretContext(headerValue, "header '" + headerName + "'");
             request.setHttpHeader(headerName, headerValue);
         }
 
@@ -704,10 +900,101 @@ public class ApiCallExecutor implements IApiCallExecutor {
             qpValue = secretResolver.resolveValue(qpValue);
             // A token in a query string leaks via access logs and proxies.
             callerIdentityResolver.rejectTokenReference(qpValue, "a query parameter");
+            rejectConnectionReference(qpValue, "a query parameter");
             qpValue = callerIdentityResolver.resolveValue(qpValue, targetUri);
+            rejectExpiredSecretContext(qpValue, "query parameter '" + queryParam + "'");
             request.setQueryParam(queryParam, qpValue);
         }
-        return request;
+        return new BuiltRequest(request, Set.copyOf(connectionOwnedHeaders));
+    }
+
+    /**
+     * Refuse a request that would carry
+     * {@link MemoryKeys#SECRET_CONTEXT_PLACEHOLDER}.
+     * <p>
+     * A context value the client marked {@code "secret": true} is replaced by the
+     * placeholder when its turn stops, so a template that reads it afterwards — a
+     * call that runs after a HITL approval resumed the turn, or one in a later turn
+     * — resolves to the placeholder. Sending that would authenticate as nobody and
+     * surface as a 401 from the API with nothing naming the cause; failing here
+     * names it.
+     */
+    static void rejectExpiredSecretContext(String value, String location) {
+        if (value == null) {
+            return;
+        }
+        if (value.contains(MemoryKeys.SECRET_CONTEXT_PLACEHOLDER) || urlDecodedContainsSecretContextPlaceholder(value)) {
+            throw new IllegalArgumentException("This API call would send " + MemoryKeys.SECRET_CONTEXT_PLACEHOLDER + " in " + location
+                    + ": it references a context value marked secret, and those only exist during the request that carried "
+                    + "them. This turn no longer has it — it resumed after a human approval, or a later turn referenced it. "
+                    + "Send the value again in the context of the request that makes this call.");
+        }
+    }
+
+    /**
+     * The path is templated URL-encoded, so the placeholder arrives encoded there.
+     */
+    private static boolean urlDecodedContainsSecretContextPlaceholder(String value) {
+        if (value.indexOf('%') < 0) {
+            return false;
+        }
+        try {
+            return URLDecoder.decode(value, StandardCharsets.UTF_8).contains(MemoryKeys.SECRET_CONTEXT_PLACEHOLDER);
+        } catch (IllegalArgumentException malformedEscape) {
+            return false;
+        }
+    }
+
+    /**
+     * The conversation's user id, from the same template data every other value in
+     * this method is built from.
+     * <p>
+     * A cross-check, not a source. {@code ConnectionResolver} takes its authority
+     * from the {@code ResolutionPrincipal} bound to the turn, which carries a
+     * provenance a bare id cannot — whether anything actually authenticated that
+     * user. Passing the id here only lets the resolver refuse when the call was
+     * built for one user while the turn is running as another; it can never grant
+     * anything on its own.
+     */
+    private static String principalFrom(Map<String, Object> templateDataObjects) {
+        if (templateDataObjects != null && templateDataObjects.get("userInfo") instanceof Map<?, ?> userInfo) {
+            Object userId = userInfo.get("userId");
+            return userId == null ? null : userId.toString();
+        }
+        return null;
+    }
+
+    /**
+     * Refuses a {@code ${connection:…}} anywhere other than a header.
+     * <p>
+     * Same restriction set as {@code ${caller:token}}, for the same reasons. A
+     * credential in a URL or a query string is written to ingress logs, proxy logs
+     * and browser history before it reaches the provider; a credential in a body is
+     * not a credential the provider will read. Rejecting at build time turns all
+     * three into an actionable configuration error rather than a placeholder sent
+     * as literal text and a 401 with no explanation.
+     */
+    private static void rejectConnectionReference(String value, String where) {
+        if (ConnectionResolver.containsReference(value)) {
+            // A ConnectionException, not an IllegalArgumentException: UNSUPPORTED_PLACEMENT
+            // is the reason ConnectionExceptionMapper maps to 400, and it was the one
+            // reason nothing ever threw. execute() and resolve() wrap it in a
+            // LifecycleException either way, so the pipeline reports it as the same
+            // configuration error; only the type — and with it the REST status when it
+            // escapes a resource — changes.
+            throw new ConnectionException(ConnectionException.Reason.UNSUPPORTED_PLACEMENT,
+                    "A ${connection:…} reference may only appear in a header, not in " + where
+                            + ". A credential in a URL or query string is recorded by every hop before the provider sees it.");
+        }
+    }
+
+    /**
+     * The refusal for a header that a connection owns and a plain entry also sets.
+     */
+    private static IllegalArgumentException connectionHeaderCollision(String headerName) {
+        return new IllegalArgumentException("Header '" + headerName + "' is set both directly and by a connection. HTTP header names are "
+                + "case-insensitive and the last write wins, so which of the two is sent would depend on config order alone. Remove the "
+                + "plain header, or give it a name the connection does not claim.");
     }
 
     /**

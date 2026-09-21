@@ -26,8 +26,12 @@ import org.jboss.logging.Logger;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+import com.github.benmanes.caffeine.cache.Caffeine;
+import java.time.Duration;
+import java.util.Collections;
 
 /**
  * The three conversation-context-dependent tool sources — persistent user
@@ -61,6 +65,22 @@ class ContextualToolsProvider implements ToolSourceProvider {
     private final IAttachmentStore attachmentStore;
     private final AttachmentTextExtractor attachmentTextExtractor;
 
+    /**
+     * Agents already warned about the memory/built-ins conflict — see
+     * {@link #warnIfMemoryEnabledButBuiltInsAreOff}. Static because
+     * {@code AgentOrchestrator} constructs this provider per call, so an instance
+     * field would debounce nothing. Bounded and expiring rather than a plain set:
+     * "the number of distinct agents" is not a fixed bound on this platform —
+     * dynamic and ephemeral agents are created at runtime with fresh ids, so a
+     * long-lived deployment with churn would otherwise accumulate entries for the
+     * JVM lifetime. Expiry means a standing misconfiguration re-announces itself
+     * periodically instead of exactly once per process; suppression is therefore
+     * best-effort, holding only while the entry remains cached.
+     */
+    private static final Set<String> MEMORY_MISCONFIGURATION_WARNED = Collections.newSetFromMap(
+            Caffeine.newBuilder().maximumSize(10_000).expireAfterWrite(Duration.ofHours(24))
+                    .<String, Boolean>build().asMap());
+
     ContextualToolsProvider(IUserMemoryStore userMemoryStore, IAttachmentStore attachmentStore,
             AttachmentTextExtractor attachmentTextExtractor) {
         this.userMemoryStore = userMemoryStore;
@@ -85,7 +105,9 @@ class ContextualToolsProvider implements ToolSourceProvider {
      * {@code readAttachment}. Null means disabled, and null is the default. User
      * memory is a persistent cross-conversation <em>write</em> capability, so
      * handing it to an agent with built-ins off would be a real privilege
-     * escalation, not a cosmetic difference.</li>
+     * escalation, not a cosmetic difference. An agent that enabled memory and lands
+     * here is warned about rather than skipped silently — see
+     * {@link #warnIfMemoryEnabledButBuiltInsAreOff}.</li>
      * <li>a whitelist is configured ⇒ user memory only on {@code "usermemory"},
      * recall only on {@code "conversationRecall"}.</li>
      * <li>no whitelist ⇒ both, as today.</li>
@@ -105,6 +127,8 @@ class ContextualToolsProvider implements ToolSourceProvider {
             if (ctx.hasNoWhitelist() || ctx.isWhitelisted("conversationRecall")) {
                 addConversationRecallToolIfEnabled(tools, ctx.task(), ctx.memory());
             }
+        } else {
+            warnIfMemoryEnabledButBuiltInsAreOff(ctx);
         }
         // readAttachment is NOT contributed here — see AttachmentToolsProvider. It
         // has to be assembled after the dynamic-agent tools to keep the pre-SPI spec
@@ -116,6 +140,54 @@ class ContextualToolsProvider implements ToolSourceProvider {
         var reflected = ToolObjectReflector.reflect(tools);
         return new ToolContribution(reflected.specs(), reflected.executors(), reflected.toolSources(), Map.of(),
                 List.of(), reflected.toolCanonicalNames());
+    }
+
+    /**
+     * Says out loud that an agent asked for persistent memory and this task will
+     * not give it any.
+     * <p>
+     * Attaching {@code UserMemoryTool} is a three-way conjunction across two
+     * configuration files — the agent's {@code enableMemoryTools}, its
+     * {@code userMemoryConfig}, and this task's {@code enableBuiltInTools} — and
+     * failing any part produced no output at all. An agent designer who enabled
+     * memory and got none had nothing to read: no error, no log line, and a model
+     * that cheerfully claimed to have saved things it had not. The conflict is
+     * resolved the restrictive way on purpose ({@code enableBuiltInTools: false} is
+     * a task-level statement that this task gets no built-in capability, and user
+     * memory is a cross-conversation write), but it must be visible.
+     */
+    /**
+     * Whether the memory-misconfiguration warning should be emitted for this agent.
+     * <p>
+     * A missing agent id maps to a stable fallback key rather than bypassing
+     * deduplication — the bypass meant the defensive null path was the one case
+     * that logged on every turn, the exact flood the cache exists to prevent.
+     * Suppression holds while the cache entry remains present (size- and
+     * TTL-bounded), so a repeat is possible after expiry or under heavy churn; that
+     * is the right trade for a log-hygiene cache, and it means a standing
+     * misconfiguration re-announces itself rather than going silent forever.
+     */
+    static boolean shouldWarnAboutMemoryMisconfiguration(String agentId) {
+        return MEMORY_MISCONFIGURATION_WARNED.add(agentId != null ? agentId : "<no-agent-id>");
+    }
+
+    private void warnIfMemoryEnabledButBuiltInsAreOff(ToolAssemblyContext ctx) {
+        if (ctx.memory().getUserMemoryConfig() == null || userMemoryStore == null) {
+            return;
+        }
+        // Suppressed per agent, not per turn: this fires on every turn of a
+        // misconfigured agent, and a busy production agent would otherwise flood the
+        // log with the same sentence thousands of times — which trains operators to
+        // ignore it.
+        String agentId = ctx.memory().getAgentId();
+        if (!shouldWarnAboutMemoryMisconfiguration(agentId)) {
+            return;
+        }
+        LOGGER.warnf("[MEMORY] Agent '%s' has persistent user memory enabled, but this LLM task has "
+                + "enableBuiltInTools=%s — UserMemoryTool is NOT attached and the agent cannot write memories. "
+                + "Set enableBuiltInTools: true on the task (conversation='%s'). Repeats of this warning are suppressed.",
+                sanitize(agentId), ctx.task().getEnableBuiltInTools(),
+                sanitize(ctx.memory().getConversationId()));
     }
 
     /**

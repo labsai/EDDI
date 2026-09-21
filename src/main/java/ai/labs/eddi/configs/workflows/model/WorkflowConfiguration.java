@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.configs.workflows.model;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
+
 import java.net.URI;
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -54,11 +56,27 @@ public class WorkflowConfiguration {
         return workflowSteps;
     }
 
-    // Note: Alias required for backward compatibility with v5 exported agent
-    // schemas (ZIP files / MongoDB)
-    // where the property was natively named "workflowExtensions" instead of
-    // "workflowSteps".
-    @com.fasterxml.jackson.annotation.JsonAlias("workflowExtensions")
+    /**
+     * Retired names for this property, kept readable so stored documents and
+     * exported ZIPs keep loading. Jackson still writes {@code workflowSteps}.
+     * <ul>
+     * <li>{@code packageExtensions} — what EDDI 5.x actually persisted
+     * ({@code PackageConfiguration.packageExtensions}, up to and including 5.6.0)
+     * and what a 5.x export ZIP carries in its {@code .package.json} entries, which
+     * {@code RestImportService} deliberately still accepts. Neither
+     * {@code V6RenameMigration} (it renames the {@code packages} collection and the
+     * agent's {@code packages} field, not this document's payload key) nor any
+     * other migration rewrites it.</li>
+     * <li>{@code workflowExtensions} / {@code pipelineSteps} — intermediate names
+     * that existed only between v6 development commits. Harmless to keep, and
+     * cheaper than being wrong about which of them ever reached a database.</li>
+     * </ul>
+     * Without these, {@code FAIL_ON_UNKNOWN_PROPERTIES=false} (the deliberate
+     * setting in {@code SerializationCustomizer}) drops the key in silence and the
+     * workflow loads with ZERO steps: the agent deploys, runs no lifecycle task at
+     * all and answers nothing, with no error anywhere.
+     */
+    @JsonAlias({"packageExtensions", "workflowExtensions", "pipelineSteps"})
     public void setWorkflowSteps(List<WorkflowStep> workflowSteps) {
         this.workflowSteps = workflowSteps;
     }

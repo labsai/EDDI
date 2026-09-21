@@ -4,11 +4,11 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
-import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property;
-import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -68,9 +68,9 @@ class AgentOrchestratorExtendedBranchTest {
     @Mock
     private A2AToolProviderManager a2aToolProviderManager;
     @Mock
-    private IRestAgentStore restAgentStore;
+    private IAgentStore restAgentStore;
     @Mock
-    private IRestWorkflowStore restWorkflowStore;
+    private IWorkflowStore restWorkflowStore;
     @Mock
     private IResourceClientLibrary resourceClientLibrary;
     @Mock
@@ -100,7 +100,7 @@ class AgentOrchestratorExtendedBranchTest {
                 webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
                 fetchToolResponsePageTool, toolExecutionService,
                 mcpToolProviderManager, a2aToolProviderManager,
-                restAgentStore, restWorkflowStore, resourceClientLibrary,
+                restWorkflowStore, resourceClientLibrary,
                 apiCallExecutor, jsonSerialization, memoryItemConverter,
                 userMemoryStore, toolResponseTruncator, tenantQuotaService,
                 memorySnapshotService,
@@ -221,7 +221,7 @@ class AgentOrchestratorExtendedBranchTest {
                     webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
                     fetchToolResponsePageTool, toolExecutionService,
                     mcpToolProviderManager, a2aToolProviderManager,
-                    restAgentStore, restWorkflowStore, resourceClientLibrary,
+                    restWorkflowStore, resourceClientLibrary,
                     apiCallExecutor, jsonSerialization, memoryItemConverter,
                     null, // null userMemoryStore
                     toolResponseTruncator, tenantQuotaService, memorySnapshotService,
