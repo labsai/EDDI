@@ -179,6 +179,17 @@ All logging configuration lives in `application.properties`:
 
 The `LogCaptureFilter` captures **every** log record (all levels) into the ring buffer for instant query. Only entries meeting the `db-persist-min-level` threshold are enqueued for async batch persistence to the database.
 
+### What the filter rewrites on the way out
+
+The filter is not only a tap. Before the console handler formats a record, it rewrites that record **in place**, so every destination — container stdout, the ring buffer, the database, the SSE live tail — sees the same text:
+
+1. **Secret redaction.** Credential-shaped material in the message, and in every message in the throwable's cause and suppressed graph, is replaced (`sk-ant-<REDACTED>` and similar). A failed outbound call routinely names the resolved URL in its exception message, and a templated credential in that URL *is* the credential.
+2. **Record-boundary escaping (CWE-117).** Anything that could end a log record is escaped rather than printed: CR becomes `\r`, LF becomes `\n`, and U+2028, U+2029 and other control characters become `\uXXXX`. TAB is left alone, because it cannot end a record and it is what indents stack frames.
+
+So a log line whose text contains a newline shows a literal `\n` instead of wrapping. **That is deliberate**: the console pattern ends in `%s%e`, `%e` prints a stack trace whose first line is the throwable's own `ClassName: message`, and without this an attacker who can get their text into an exception message could end the record and write a convincing follow-on line of their own. Stack traces are unaffected — the escaping is applied to each throwable's *message* before the trace is rendered, so frames, `Caused by:` and `... N more` come out exactly as the JVM produced them.
+
+> **Adding a log handler?** The filter is attached to the console handler only, via `quarkus.log.console.filter=eddi-log-capture`. A file or syslog handler needs the same filter, or records reaching it are neither redacted nor escaped.
+
 ---
 
 ## Related APIs
