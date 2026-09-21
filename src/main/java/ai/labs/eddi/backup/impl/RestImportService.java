@@ -52,6 +52,8 @@ import ai.labs.eddi.configs.migration.TemplateSyntaxMigrator;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
 import ai.labs.eddi.configs.rag.IRestRagStore;
+import ai.labs.eddi.engine.runtime.internal.CronParser;
+import ai.labs.eddi.configs.rag.model.IngestionSource;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.snippets.IPromptSnippetStore;
 import ai.labs.eddi.configs.snippets.IRestPromptSnippetStore;
@@ -1200,11 +1202,35 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             if (source != null && (source.getId() == null || source.getId().isBlank())) {
                 source.setId(UUID.randomUUID().toString());
             }
+            requireValidCron(source);
         }
         // Throws on a source the engine cannot honour. Importing it instead would
         // produce a knowledge base whose runs fail for ever, and the failure would
         // only be visible in a run history nobody is watching yet.
         config.validate();
+    }
+
+    /**
+     * The cron check the REST write path makes, which {@code config.validate()}
+     * does not.
+     *
+     * <p>
+     * This path writes through {@code createResourceDirect} and never reaches
+     * {@code RestRagStore}, so without this an archive carrying a six-field Quartz
+     * expression imports cleanly and stores a cron that every later save through
+     * the API will reject with a 400 — while the source reads as scheduled and
+     * never runs.
+     */
+    private static void requireValidCron(IngestionSource source) {
+        if (source == null || source.getCron() == null || source.getCron().isBlank()) {
+            return;
+        }
+        try {
+            CronParser.validate(source.getCron());
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(
+                    "Ingestion source '" + source.getName() + "' has an invalid cron: " + e.getMessage(), e);
+        }
     }
 
     private void syncImportedRagSchedules(URI created, RagConfiguration config) {

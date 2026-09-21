@@ -213,7 +213,9 @@ one table while retrieval read another.
 }
 ```
 
-Every field has a default; omitting `settings` entirely means "all defaults". `excludePatterns` are
+`startUrl` is the one required field. Everything in `settings` has a default except
+`costPerThousandSegments`, which is unset — leave it out and the run history reports no cost —
+so omitting `settings` entirely means "all defaults". `excludePatterns` are
 globs matched against the URL **path** (`*` stays inside one segment, `**` crosses them).
 
 **`cron` is a standard five-field expression** — `min hour dom month dow` — the same form the schedule

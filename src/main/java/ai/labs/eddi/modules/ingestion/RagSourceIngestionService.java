@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.rag.IRagStore;
 import ai.labs.eddi.configs.rag.model.IngestionSource;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.runtime.internal.CronParser;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.modules.ingestion.IIngestionStateStore.IngestionRun;
@@ -16,8 +17,11 @@ import ai.labs.eddi.modules.ingestion.IngestionPipeline.Mode;
 import ai.labs.eddi.utils.LogSanitizer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import java.time.Instant;
+import java.time.ZoneId;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
@@ -48,14 +52,17 @@ public class RagSourceIngestionService {
     private final IIngestionStateStore stateStore;
     private final IScheduleStore scheduleStore;
     private final IRagStore ragStore;
+    private final String defaultTimeZone;
 
     @Inject
     public RagSourceIngestionService(IngestionPipeline pipeline, IIngestionStateStore stateStore,
-            IScheduleStore scheduleStore, IRagStore ragStore) {
+            IScheduleStore scheduleStore, IRagStore ragStore,
+            @ConfigProperty(name = "eddi.schedule.default-timezone", defaultValue = "UTC") String defaultTimeZone) {
         this.pipeline = pipeline;
         this.stateStore = stateStore;
         this.scheduleStore = scheduleStore;
         this.ragStore = ragStore;
+        this.defaultTimeZone = defaultTimeZone;
     }
 
     /**
@@ -251,7 +258,11 @@ public class RagSourceIngestionService {
                 if (source.getCron() == null || source.getCron().isBlank() || !source.isEnabled()) {
                     continue;
                 }
-                scheduleStore.createSchedule(buildSchedule(ragConfigId, version, sourceId, name, source));
+                ScheduleConfiguration schedule = buildSchedule(ragConfigId, version, sourceId, name, source);
+                if (schedule == null) {
+                    continue;
+                }
+                scheduleStore.createSchedule(schedule);
             } catch (IResourceStore.ResourceStoreException e) {
                 // Surfaced, never swallowed: the draft returned 201 on create while its
                 // schedule creation had failed, leaving a source that looked scheduled
@@ -286,8 +297,21 @@ public class RagSourceIngestionService {
         }
     }
 
-    private static ScheduleConfiguration buildSchedule(String ragConfigId, Integer version, String sourceId,
-                                                       String name, IngestionSource source) {
+    /**
+     * The schedule for one source, armed, or {@code null} when its cron can never
+     * fire.
+     *
+     * <p>
+     * {@code nextFire} is computed here because this path writes to
+     * {@link IScheduleStore} directly rather than through
+     * {@code RestScheduleStore}, which is where {@code computeInitialNextFire}
+     * lives. Without it the row is stored with a null {@code nextFire}, and both
+     * backends select due work with {@code nextFire <= now} — a comparison that no
+     * null satisfies, in SQL or in Mongo's {@code $lte}. The schedule would read as
+     * enabled in the Manager and never once run.
+     */
+    private ScheduleConfiguration buildSchedule(String ragConfigId, Integer version, String sourceId,
+                                                String name, IngestionSource source) {
 
         var schedule = new ScheduleConfiguration();
         schedule.setName(name);
@@ -295,7 +319,22 @@ public class RagSourceIngestionService {
         schedule.setCronExpression(source.getCron());
         schedule.setEnabled(true);
         schedule.setUserId(SCHEDULE_USER_ID);
+        schedule.setTimeZone(defaultTimeZone);
         schedule.setMetadata(RagIngestionSchedules.metadata(ragConfigId, version, sourceId));
+
+        try {
+            schedule.setNextFire(CronParser.computeNextFire(source.getCron(), Instant.now(), ZoneId.of(defaultTimeZone)));
+        } catch (RuntimeException e) {
+            // Syntax is already rejected on the REST write path; what reaches here is
+            // the expression that parses and matches no instant (0 0 30 2 * — February
+            // 30th). Creating it would be the very state this method exists to avoid,
+            // so the source keeps its cron in the configuration and gets no schedule.
+            LOGGER.errorf(e, "Ingestion source '%s' of knowledge base %s has cron '%s', which never fires. "
+                    + "No schedule was created for it; correct the expression and save again.",
+                    LogSanitizer.sanitize(source.getName()), LogSanitizer.sanitize(ragConfigId),
+                    LogSanitizer.sanitize(source.getCron()));
+            return null;
+        }
         return schedule;
     }
 }

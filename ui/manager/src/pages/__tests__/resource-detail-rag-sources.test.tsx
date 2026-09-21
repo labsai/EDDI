@@ -239,11 +239,34 @@ describe("RAG ingestion sources", () => {
   });
 
   it("does not offer Run for a disabled source", async () => {
+    // The source arrives already disabled rather than being unticked here: the
+    // click would mark the editor dirty, and the unsaved-changes guard disables
+    // Run on its own — so the assertion below would hold even with the
+    // source.enabled check removed entirely.
+    server.use(
+      http.get("*/ragstore/rags/:id", () =>
+        HttpResponse.json({
+          name: "product-docs",
+          embeddingProvider: "openai",
+          embeddingParameters: { model: "text-embedding-3-small", apiKey: "${vault:openai-key}" },
+          storeType: "in-memory",
+          storeParameters: {},
+          sources: [
+            {
+              id: "src-1",
+              name: "public-docs",
+              type: "web",
+              enabled: false,
+              cron: "0 2 * * *",
+              web: { startUrl: "https://example.com/docs/", respectRobots: true },
+            },
+          ],
+        }),
+      ),
+    );
     const user = userEvent.setup();
     renderRagPage();
     await openFirstSource(user);
-
-    await user.click(screen.getByTestId("ingestion-source-0-enabled"));
 
     await waitFor(() => expect(screen.getByTestId("ingestion-source-0-run")).toBeDisabled());
     expect(await screen.findByTestId("ingestion-source-0-disabled-hint")).toBeInTheDocument();

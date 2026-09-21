@@ -162,7 +162,7 @@ public class IngestionPipeline {
      */
     public void abandonReservation(String ragConfigId, IngestionSource source, String runId, String reason) {
         finish(Mode.INGEST, runId, stateKey(ragConfigId, source),
-                IngestionReport.failed(runId, source.getId(), reason), IngestionRun.Status.FAILED);
+                IngestionReport.failed(runId, source.effectiveId(), reason), IngestionRun.Status.FAILED);
     }
 
     /**
@@ -180,10 +180,10 @@ public class IngestionPipeline {
             source.validate();
             String name = knowledgeBase.getName();
             if (name == null || name.isBlank()) {
-                early = IngestionReport.failed(reservedRunId, source.getId(),
+                early = IngestionReport.failed(reservedRunId, source.effectiveId(),
                         "The knowledge base has no name, and its name is what the vector store is keyed by");
             } else if (!source.isEnabled() && mode == Mode.INGEST) {
-                early = IngestionReport.skipped(source.getId(), "Source is disabled");
+                early = IngestionReport.skipped(source.effectiveId(), "Source is disabled");
             } else {
                 early = null;
             }
@@ -210,7 +210,7 @@ public class IngestionPipeline {
                     // Not an error: an operator clicking "run now" while a scheduled run
                     // is in flight should be told, not start a second crawl into one
                     // store.
-                    return IngestionReport.alreadyRunning(source.getId());
+                    return IngestionReport.alreadyRunning(source.effectiveId());
                 }
                 runId = claimed.get();
             }
@@ -340,7 +340,7 @@ public class IngestionPipeline {
         if (mode != Mode.INGEST || reservedRunId == null) {
             return;
         }
-        finish(mode, reservedRunId, sourceKey, IngestionReport.failed(reservedRunId, source.getId(), reason),
+        finish(mode, reservedRunId, sourceKey, IngestionReport.failed(reservedRunId, source.effectiveId(), reason),
                 IngestionRun.Status.FAILED);
     }
 
@@ -627,7 +627,7 @@ public class IngestionPipeline {
             }
             return new IngestionReport(
                     runId,
-                    source.getId(),
+                    source.effectiveId(),
                     error != null
                             ? IngestionReport.Outcome.FAILED
                             : mode == Mode.PREVIEW

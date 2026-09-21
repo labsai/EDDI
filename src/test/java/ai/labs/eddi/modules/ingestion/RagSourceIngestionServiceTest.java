@@ -18,10 +18,12 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -55,7 +57,7 @@ class RagSourceIngestionServiceTest {
         stateStore = new InMemoryIngestionStateStore();
         scheduleStore = mock(IScheduleStore.class);
         ragStore = mock(IRagStore.class);
-        service = new RagSourceIngestionService(pipeline, stateStore, scheduleStore, ragStore);
+        service = new RagSourceIngestionService(pipeline, stateStore, scheduleStore, ragStore, "UTC");
         // The reservation is the real one, against the real store: with a bare mock it
         // returns an empty Optional and every runAsync assertion below passes for the
         // wrong reason.
@@ -101,6 +103,40 @@ class RagSourceIngestionServiceTest {
             assertTrue(RagIngestionSchedules.isIngestionSchedule(schedule.getMetadata()));
             assertEquals(KB_ID, RagIngestionSchedules.ragConfigId(schedule.getMetadata()));
             assertEquals(SOURCE_ID, RagIngestionSchedules.sourceId(schedule.getMetadata()));
+        }
+
+        @Test
+        @DisplayName("arms the schedule with a first fire, or it is enabled and never due")
+        void armsTheScheduleWithANextFire() throws Exception {
+            // This path writes to IScheduleStore directly, so nothing else computes the
+            // first fire. Both backends select due work with nextFire <= now, which no
+            // null satisfies in SQL or in Mongo's $lte, so a null here is a schedule
+            // that reads as enabled in the Manager and never runs once.
+            var source = source("0 2 * * *");
+            Instant before = Instant.now();
+
+            service.syncSchedules(KB_ID, 1, knowledgeBase(source), Set.of());
+
+            ArgumentCaptor<ScheduleConfiguration> captor = ArgumentCaptor.forClass(ScheduleConfiguration.class);
+            verify(scheduleStore).createSchedule(captor.capture());
+            ScheduleConfiguration schedule = captor.getValue();
+            assertNotNull(schedule.getNextFire(), "schedule was stored without a nextFire and can never become due");
+            assertTrue(schedule.getNextFire().isAfter(before), "the first fire must be in the future");
+            assertEquals("UTC", schedule.getTimeZone(), "the fire time is meaningless without the zone it was computed in");
+        }
+
+        @Test
+        @DisplayName("creates no schedule for a cron that parses but matches no instant")
+        void skipsACronThatCanNeverFire() throws Exception {
+            // 'February 30th' is syntactically valid, so CronParser.validate on the REST
+            // write path accepts it. Storing it would produce exactly the enabled-but-
+            // never-due row the arming above exists to prevent.
+            var source = source("0 0 30 2 *");
+
+            service.syncSchedules(KB_ID, 1, knowledgeBase(source), Set.of());
+
+            verify(scheduleStore).deleteSchedulesByName(RagIngestionSchedules.scheduleName(KB_ID, SOURCE_ID));
+            verify(scheduleStore, never()).createSchedule(any());
         }
 
         @Test
