@@ -126,6 +126,24 @@ class RagSourceIngestionServiceTest {
         }
 
         @Test
+        @DisplayName("falls back to UTC on a misconfigured default time zone, and still schedules")
+        void survivesAMisconfiguredDefaultTimeZone() throws Exception {
+            // ZoneId.of used to run inside buildSchedule, inside the catch that exists
+            // for an unfireable cron — so one misspelt deployment property reported
+            // every enabled source as having a bad cron and left all of them with no
+            // schedule at all.
+            var misconfigured = new RagSourceIngestionService(pipeline, stateStore, scheduleStore, ragStore,
+                    "Not/AZone");
+
+            misconfigured.syncSchedules(KB_ID, 1, knowledgeBase(source("0 2 * * *")), Set.of());
+
+            ArgumentCaptor<ScheduleConfiguration> captor = ArgumentCaptor.forClass(ScheduleConfiguration.class);
+            verify(scheduleStore).createSchedule(captor.capture());
+            assertNotNull(captor.getValue().getNextFire(), "a bad time zone must not cost the source its schedule");
+            assertEquals("Z", captor.getValue().getTimeZone(), "the fallback zone must be recorded, not the bad value");
+        }
+
+        @Test
         @DisplayName("creates no schedule for a cron that parses but matches no instant")
         void skipsACronThatCanNeverFire() throws Exception {
             // 'February 30th' is syntactically valid, so CronParser.validate on the REST

@@ -22,6 +22,7 @@ import org.jboss.logging.Logger;
 
 import java.time.Instant;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
@@ -53,6 +54,7 @@ public class RagSourceIngestionService {
     private final IScheduleStore scheduleStore;
     private final IRagStore ragStore;
     private final String defaultTimeZone;
+    private final ZoneId defaultZone;
 
     @Inject
     public RagSourceIngestionService(IngestionPipeline pipeline, IIngestionStateStore stateStore,
@@ -62,7 +64,34 @@ public class RagSourceIngestionService {
         this.stateStore = stateStore;
         this.scheduleStore = scheduleStore;
         this.ragStore = ragStore;
-        this.defaultTimeZone = defaultTimeZone;
+        this.defaultZone = parseZone(defaultTimeZone);
+        this.defaultTimeZone = this.defaultZone.getId();
+    }
+
+    /**
+     * The configured zone, resolved once here rather than per schedule.
+     *
+     * <p>
+     * Deliberately not left to {@code ZoneId.of} at schedule-build time: a misspelt
+     * {@code eddi.schedule.default-timezone} would throw there, inside the catch
+     * that exists for an unfireable cron, and every enabled source would be
+     * reported as having a bad cron and left with no schedule at all — a deployment
+     * typo presenting as broken configuration on every knowledge base.
+     *
+     * <p>
+     * A bad value falls back to UTC with an ERROR rather than refusing to start:
+     * this bean also runs ingestion, and taking that down over a scheduling setting
+     * would be the larger outage. Schedules then fire on UTC, which is wrong by an
+     * offset and visible in the log, rather than not firing at all.
+     */
+    private static ZoneId parseZone(String configured) {
+        try {
+            return ZoneId.of(configured);
+        } catch (RuntimeException e) {
+            LOGGER.errorf(e, "eddi.schedule.default-timezone is '%s', which is not a known zone. Ingestion "
+                    + "schedules will be computed in UTC until it is corrected.", LogSanitizer.sanitize(configured));
+            return ZoneOffset.UTC;
+        }
     }
 
     /**
@@ -323,8 +352,8 @@ public class RagSourceIngestionService {
         schedule.setMetadata(RagIngestionSchedules.metadata(ragConfigId, version, sourceId));
 
         try {
-            schedule.setNextFire(CronParser.computeNextFire(source.getCron(), Instant.now(), ZoneId.of(defaultTimeZone)));
-        } catch (RuntimeException e) {
+            schedule.setNextFire(CronParser.computeNextFire(source.getCron(), Instant.now(), defaultZone));
+        } catch (IllegalArgumentException | IllegalStateException e) {
             // Syntax is already rejected on the REST write path; what reaches here is
             // the expression that parses and matches no instant (0 0 30 2 * — February
             // 30th). Creating it would be the very state this method exists to avoid,
