@@ -15,6 +15,8 @@ import {
   resetOperator,
   assertProvisioned,
   runOperatorCanary,
+  fetchPlatformSelfUrl,
+  resolveOperatorApiBaseUrl,
   verifyGateInstalled,
   gateLooksInstalled,
   OPERATOR_VARIABLE_KEY,
@@ -33,8 +35,14 @@ import type { Agent } from "../agents";
 
 const BASE = "*/variablestore/variables/default";
 
+/**
+ * `apiBaseUrl` is pre-resolved here because provisioning now REFUSES to run
+ * without one (see "refuses to provision without a resolved base URL"). Tests
+ * about other fields should not have to re-state the resolution; the ones that
+ * are about the address set it explicitly.
+ */
 function config(overrides: Partial<OperatorConfig> = {}): OperatorConfig {
-  return { ...defaultOperatorConfig("Do the thing."), ...overrides };
+  return { ...defaultOperatorConfig("Do the thing."), apiBaseUrl: "http://127.0.0.1:7070", ...overrides };
 }
 
 describe("operator config persistence", () => {
@@ -316,10 +324,50 @@ describe("provisionOperator", () => {
     expect(captured?.apiAuth).toBe(CALLER_TOKEN_API_AUTH);
   });
 
-  it("targets the current origin and deploys", async () => {
-    await provisionOperator({ agentName: "Op", config: config(), apiKey: "sk-test", spec: fetchedSpec() });
-    expect(captured?.apiBaseUrl).toBe("https://eddi.example");
+  /**
+   * THE regression test for the self-URL defect. The caller's origin
+   * (`https://eddi.example`) is not EDDI's own address, exactly as on a
+   * tunnelled or proxied deployment — and the tools must be provisioned with
+   * the address EDDI can reach itself at, which only the server knows.
+   *
+   * Revert `provisionOperator` to `currentOrigin()` and this fails.
+   */
+  it("targets the address EDDI can reach ITSELF at, not the browser's origin", async () => {
+    // apiBaseUrl: null, so the address really comes from the backend's answer
+    // rather than from the helper's pre-resolved default.
+    const resolved = await resolveOperatorApiBaseUrl(config({ apiBaseUrl: null }));
+    await provisionOperator({
+      agentName: "Op",
+      config: config({ apiBaseUrl: resolved }),
+      apiKey: "sk-test",
+      spec: fetchedSpec(),
+    });
+    expect(captured?.apiBaseUrl).toBe("http://127.0.0.1:7070");
+    expect(captured?.apiBaseUrl).not.toBe("https://eddi.example");
     expect(captured?.deploy).toBe(true);
+  });
+
+  /** An admin override is used verbatim — they know something the server does not. */
+  it("uses an explicit base URL from the config verbatim", async () => {
+    await provisionOperator({
+      agentName: "Op",
+      config: config({ apiBaseUrl: "https://eddi.svc.internal:8443" }),
+      apiKey: "sk-test",
+      spec: fetchedSpec(),
+    });
+    expect(captured?.apiBaseUrl).toBe("https://eddi.svc.internal:8443");
+  });
+
+  /**
+   * Failing loudly rather than falling back to the browser's origin: the silent
+   * fallback IS the defect, so the only caller allowed to make that guess is the
+   * resolver, which says so when it does.
+   */
+  it("refuses to provision without a resolved base URL", async () => {
+    await expect(
+      provisionOperator({ agentName: "Op", config: config({ apiBaseUrl: null }), apiKey: "sk-test", spec: fetchedSpec() }),
+    ).rejects.toThrow(/platform base URL/i);
+    expect(captured).toBeUndefined();
   });
 
   it("sends a local provider's URL as the LLM base URL, not as the tool target", async () => {
@@ -333,12 +381,12 @@ describe("provisionOperator", () => {
       spec: fetchedSpec(),
     });
     expect(captured?.llmBaseUrl).toBe("http://localhost:11434");
-    expect(captured?.apiBaseUrl).toBe("https://eddi.example");
+    expect(captured?.apiBaseUrl).toBe("http://127.0.0.1:7070");
   });
 
   it("always targets this deployment, whatever the provider", async () => {
     await provisionOperator({ agentName: "Op", config: config(), apiKey: "sk-test", spec: fetchedSpec() });
-    expect(captured?.apiBaseUrl).toBe("https://eddi.example");
+    expect(captured?.apiBaseUrl).toBe("http://127.0.0.1:7070");
     expect(captured?.llmBaseUrl).toBeUndefined();
   });
 
@@ -718,7 +766,8 @@ describe("assertProvisioned", () => {
 });
 
 describe("runOperatorCanary", () => {
-  const cfg = () => config({ enabled: true, agentId: "op-1", version: 1 });
+  const cfg = (overrides: Partial<OperatorConfig> = {}) =>
+    config({ enabled: true, agentId: "op-1", version: 1, ...overrides });
 
   /** Serve a start + a stream made of the given SSE frames. */
   function serveTurn(frames: string[]) {
@@ -765,6 +814,83 @@ describe("runOperatorCanary", () => {
     expect(result.ok).toBe(false);
     expect(result.toolCalls).toBe(0);
     expect(result.error).toMatch(/without calling any tool/i);
+  });
+
+  /**
+   * The shape a wrong base URL produces. The message has to name the address and
+   * say the platform is NOT the thing at fault — that misdirection ("a problem
+   * with the platform's internal services") is what cost an afternoon on a
+   * perfectly healthy server.
+   */
+  it("fails with the configured base URL named when the tools could not connect", async () => {
+    serveTurn([
+      taskComplete([
+        { type: "tool_call", tool: "getAgents" },
+        { type: "tool_result", tool: "getAgents", result: '{"error": "Connection refused"}' },
+      ]),
+      "event: done\ndata: \n\n",
+    ]);
+    const result = await runOperatorCanary(cfg({ apiBaseUrl: "http://localhost:7080" }));
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("http://localhost:7080");
+    expect(result.error).toMatch(/not an outage of EDDI/i);
+    expect(result.error).toMatch(/address EDDI can reach itself at/i);
+  });
+
+  it("recognises the backend's own connect-failure wording too", async () => {
+    serveTurn([
+      taskComplete([
+        { type: "tool_call", tool: "getAgents" },
+        {
+          type: "tool_result",
+          tool: "getAgents",
+          result: '{"error": "The connection was refused while trying to reach GET http://localhost:7080/agentstore/agents"}',
+        },
+      ]),
+      "event: done\ndata: \n\n",
+    ]);
+    const result = await runOperatorCanary(cfg({ apiBaseUrl: "http://localhost:7080" }));
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/could not connect to the platform API/i);
+  });
+
+  /**
+   * A connect failure beats an auth failure when both look present: the
+   * unreachable address is the more actionable diagnosis, and a 401 cannot even
+   * have happened if nothing connected.
+   */
+  it("prefers the connection diagnosis over the auth one", async () => {
+    serveTurn([
+      taskComplete([
+        { type: "tool_call", tool: "getAgents" },
+        {
+          type: "tool_result",
+          tool: "getAgents",
+          result: '{"error": "HTTP 401 Unauthorized error: Connection refused"}',
+        },
+      ]),
+      "event: done\ndata: \n\n",
+    ]);
+    const result = await runOperatorCanary(cfg({ apiBaseUrl: "http://localhost:7080" }));
+    expect(result.error).toMatch(/could not connect/i);
+  });
+
+  it("does not mistake an agent description mentioning a refused connection for a failure", async () => {
+    serveTurn([
+      taskComplete([
+        { type: "tool_call", tool: "getAgents" },
+        {
+          type: "tool_result",
+          tool: "getAgents",
+          // Contains the exact phrases the detector looks for — so this only passes
+          // because the match is anchored to the {"error": ...} failure shape.
+          result:
+            '[{"id":"a1","description":"Troubleshoots \\"Connection refused\\" and \\"no route to host\\" for customers"}]',
+        },
+      ]),
+      "event: done\ndata: \n\n",
+    ]);
+    await expect(runOperatorCanary(cfg())).resolves.toMatchObject({ ok: true });
   });
 
   // This is the exact shape a wrong authMode produces: deployed, responsive,
@@ -853,5 +979,106 @@ describe("readOperatorConfig — malformed blob shapes", () => {
       ),
     );
     await expect(readOperatorConfig()).resolves.toBeNull();
+  });
+});
+
+describe("resolveOperatorApiBaseUrl", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("asks the backend when the config has no explicit value", async () => {
+    await expect(resolveOperatorApiBaseUrl(config({ apiBaseUrl: null }))).resolves.toBe("http://127.0.0.1:7070");
+  });
+
+  it("prefers an explicit value, and trims it", async () => {
+    await expect(resolveOperatorApiBaseUrl(config({ apiBaseUrl: "  https://eddi.internal:8443 " }))).resolves.toBe(
+      "https://eddi.internal:8443",
+    );
+  });
+
+  it("treats whitespace as no value and asks the backend", async () => {
+    await expect(resolveOperatorApiBaseUrl(config({ apiBaseUrl: "   " }))).resolves.toBe("http://127.0.0.1:7070");
+  });
+
+  it("treats a legacy config with the field absent as no value", async () => {
+    const legacy = config();
+    delete (legacy as { apiBaseUrl?: unknown }).apiBaseUrl;
+    await expect(resolveOperatorApiBaseUrl(legacy)).resolves.toBe("http://127.0.0.1:7070");
+  });
+
+  /**
+   * The browser's origin remains the last resort, but ONLY for a backend too old
+   * to answer, and never silently — the silence is what made the original defect
+   * survive to production.
+   */
+  it("falls back to the browser origin with a warning when the backend is too old", async () => {
+    server.use(
+      http.get("*/administration/operator/self-url", () =>
+        HttpResponse.json({ message: "not found" }, { status: 404 }),
+      ),
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubGlobal("location", { ...globalThis.location, origin: "https://eddi.example" });
+    await expect(resolveOperatorApiBaseUrl(config({ apiBaseUrl: null }))).resolves.toBe("https://eddi.example");
+    expect(warn).toHaveBeenCalled();
+    expect(String(warn.mock.calls[0]?.[0])).toMatch(/browser's origin/i);
+    warn.mockRestore();
+  });
+
+  /** A transport failure is not "this backend is old" — it must not be guessed past. */
+  it("propagates a non-404 failure instead of guessing", async () => {
+    server.use(
+      http.get("*/administration/operator/self-url", () =>
+        HttpResponse.json({ message: "boom" }, { status: 500 }),
+      ),
+    );
+    await expect(resolveOperatorApiBaseUrl(config({ apiBaseUrl: null }))).rejects.toThrow();
+  });
+});
+
+describe("fetchPlatformSelfUrl", () => {
+  it("reports the address and its source", async () => {
+    await expect(fetchPlatformSelfUrl()).resolves.toEqual({
+      baseUrl: "http://127.0.0.1:7070",
+      source: "loopback",
+    });
+  });
+
+  it("answers null on a backend that predates the endpoint", async () => {
+    server.use(
+      http.get("*/administration/operator/self-url", () =>
+        HttpResponse.json({ message: "not found" }, { status: 404 }),
+      ),
+    );
+    await expect(fetchPlatformSelfUrl()).resolves.toBeNull();
+  });
+});
+
+describe("normalizeBaseUrl and trailing slashes", () => {
+  /**
+   * setup-api concatenates base URL and path verbatim; a trailing slash on an
+   * admin-typed value would become `//agentstore/...` in every generated tool.
+   */
+  it("strips trailing slashes from an explicit value before it is provisioned", async () => {
+    await expect(resolveOperatorApiBaseUrl(config({ apiBaseUrl: " http://eddi:7070/// " }))).resolves.toBe(
+      "http://eddi:7070",
+    );
+  });
+
+  /**
+   * The server answered that it CANNOT know (random port, no override). Falling
+   * back to the browser's origin would provision exactly the value the original
+   * defect provisioned; only a 404 (an old backend) earns that fallback.
+   */
+  it("refuses to guess when the server says it cannot determine its own address", async () => {
+    server.use(
+      http.get("*/administration/operator/self-url", () =>
+        HttpResponse.json({ baseUrl: null, source: "unresolved" }),
+      ),
+    );
+    vi.stubGlobal("location", { ...globalThis.location, origin: "https://eddi.example" });
+    await expect(resolveOperatorApiBaseUrl(config({ apiBaseUrl: null }))).rejects.toThrow(/cannot determine its own address/i);
+    vi.unstubAllGlobals();
   });
 });
