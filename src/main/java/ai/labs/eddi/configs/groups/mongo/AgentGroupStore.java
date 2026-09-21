@@ -399,7 +399,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         moderatorlessPhaseNames(groupConfiguration).forEach(name -> LOGGER.warnf(
                 "Group '%s' phase '%s' is restricted to MODERATOR but the group names no moderatorAgentId — "
                         + "the first member by speakingOrder will stand in",
-                groupConfiguration.getName(), name));
+                LogSanitizer.sanitize(groupConfiguration.getName()), LogSanitizer.sanitize(name)));
     }
 
     /**
