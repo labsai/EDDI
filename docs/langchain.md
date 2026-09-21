@@ -259,7 +259,77 @@ Both stored shapes therefore keep working: a config that sets only `streamingTim
 >
 > **maxTokens**: Anthropic requires `max_tokens` in every request. If omitted, EDDI defaults to **16384**. For models with **extended thinking** (e.g. `claude-sonnet-5`), thinking tokens count toward this budget — set it higher (e.g. `"32768"` or `"65536"`) for complex analysis tasks.
 
+#### Google Gemini (AI Studio)
+
+```json
+{
+  "tasks": [
+    {
+      "actions": ["send_message"],
+      "id": "geminiChat",
+      "type": "gemini",
+      "description": "Google Gemini chat",
+      "parameters": {
+        "apiKey": "your-gemini-api-key",
+        "modelName": "gemini-3.8-flash",
+        "temperature": "0.7",
+        "maxOutputTokens": "8192",
+        "timeout": "60000",
+        "systemMessage": "You are a helpful assistant",
+        "addToOutput": "true"
+      }
+    }
+  ]
+}
+```
+
+##### Thought signatures — required for tool calling on Gemini 3.x
+
+Gemini 3.x attaches an opaque **`thoughtSignature`** to every `functionCall` part
+it emits, and requires it echoed back verbatim when that model turn is replayed on
+the follow-up request carrying the `functionResponse`. Without it the API answers:
+
+```
+400 INVALID_ARGUMENT — Function call is missing a thought_signature in functionCall parts.
+```
+
+Measured against `generativelanguage.googleapis.com`:
+
+| Model | Emits `thoughtSignature` | Replay without it |
+| --- | --- | --- |
+| `gemini-3.8-flash` | yes | **400** |
+| `gemini-3.5-flash` | yes | **400** |
+| `gemini-2.5-flash` | yes | 200 (tolerated) |
+
+There is **no `thinkingConfig` setting that avoids this** — Gemini 3.x emits the
+signature and rejects its absence even with `thinkingBudget: 0`.
+
+EDDI handles it for you: the `gemini` builder sets langchain4j's `returnThinking`
+(capture the signature) and `sendThinking` (echo it back) to **`true` by default**.
+Both are exposed as parameters:
+
+| Parameter | Default | Effect |
+| --- | --- | --- |
+| `returnThinking` | `true` | Captures `thoughtSignature` off the response. Also routes any thought text to a separate field rather than into the user-visible reply. |
+| `sendThinking` | `true` | Echoes the captured signature back on follow-up requests. |
+
+> **Setting either to `false` breaks tool calling on every Gemini 3.x model.** There is
+> little reason to: Gemini 2.x tolerates the echoed signature. Note that `false` is not
+> the state before thought signatures were handled — EDDI used to leave `returnThinking` unset, which prepends any thought
+> text to the reply, whereas `false` drops it. EDDI exposes no `thinkingConfig`, so Gemini
+> returns no thought text today and the two are indistinguishable in practice.
+
 #### Google Gemini (Vertex AI)
+
+> **Gemini 3.x with tools is not supported on `gemini-vertex` — use `gemini`
+> instead.** The thought-signature requirement above applies to Gemini 3.x on
+> Vertex AI as well, but the field cannot be carried on this path: neither
+> `langchain4j-vertex-ai-gemini` nor the `com.google.cloud.vertexai.api.Part`
+> protobuf it depends on models `thought_signature`, so there is nothing for EDDI
+> to configure. Fixing it needs an upstream langchain4j change plus a
+> `google-cloud-vertexai` bump. `gemini-vertex` remains correct for Gemini 2.x, and
+> for Gemini 3.x **without** tools. Configuring a Gemini 3.x model id here logs a
+> warning at model-build time naming the alternative.
 
 ```json
 {

@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import java.net.URLEncoder;
 import static org.junit.jupiter.api.Assertions.*;
@@ -246,6 +247,75 @@ class RequestRedactorTest {
             redactor.redactRequestMap(map);
             assertEquals("https://x/y", map.get(IRequest.KEY_URI));
             assertFalse(map.containsKey(IRequest.KEY_BODY));
+        }
+    }
+
+    @Nested
+    @DisplayName("a request log line is redacted before it is formatted")
+    class SafeRequestLog {
+
+        /**
+         * A request whose {@code toString()} normalises and truncates its body the way
+         * {@code HttpClientWrapper.RequestWrapper} does — the transformation that makes
+         * redact-after-format unsound.
+         */
+        private IRequest requestWith(String body) {
+            var request = mock(IRequest.class);
+            var map = new HashMap<String, Object>();
+            map.put(IRequest.KEY_URI, "https://api.example.com/v1/items");
+            map.put(IRequest.KEY_METHOD, "POST");
+            map.put(IRequest.KEY_BODY, body);
+            map.put(IRequest.KEY_QUERY_PARAMS, Map.of());
+            when(request.toMap()).thenReturn(map);
+            String formatted = body.replaceAll("\\r?\\n", " ");
+            when(request.toString())
+                    .thenReturn(
+                            "RequestWrapper{requestBody=\"" + (formatted.length() > 150 ? formatted.substring(0, 150) + "..." : formatted) + "\"}");
+            return request;
+        }
+
+        @Test
+        @DisplayName("a secret containing a newline is still removed")
+        void multiLineSecret() {
+            // toString() folds the newline to a space, so the plaintext no longer matches
+            // itself and an exact-value replacement on the FORMATTED string misses it.
+            String secret = "-----BEGIN KEY-----\naaaaaaaaaaaaaaaa\n-----END KEY-----";
+            String line = RequestRedactor.safeRequestLog(requestWith("{\"pem\":\"" + secret + "\"}"), Set.of(secret));
+            assertFalse(line.contains("aaaaaaaaaaaaaaaa"), line);
+            assertTrue(line.contains(RequestRedactor.REDACTED), line);
+        }
+
+        @Test
+        @DisplayName("a secret straddling the truncation boundary is still removed")
+        void secretAcrossTheTruncationBoundary() {
+            String secret = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+            // Places the secret so that the 150-character cut falls inside it.
+            String line = RequestRedactor.safeRequestLog(requestWith("x".repeat(140) + secret + "y".repeat(40)), Set.of(secret));
+            assertFalse(line.contains("aaaaaaaaaa"), line);
+        }
+
+        @Test
+        @DisplayName("the line is still one line and still bounded")
+        void stillBoundedAndSingleLine() {
+            String line = RequestRedactor.safeRequestLog(requestWith("{\"a\":\"" + "z".repeat(500) + "\"}\nsecond line"), Set.of());
+            assertFalse(line.contains("\n"), line);
+            assertTrue(line.contains("..."), line);
+            assertTrue(line.contains("https://api.example.com/v1/items"), line);
+        }
+
+        @Test
+        @DisplayName("a request with no raw view falls back to redacting its formatted form")
+        void noRawView() {
+            var request = mock(IRequest.class);
+            when(request.toMap()).thenReturn(null);
+            when(request.toString()).thenReturn("RequestWrapper{requestBody=\"" + KEY + "\"}");
+            String line = RequestRedactor.safeRequestLog(request, Set.of(KEY));
+            assertFalse(line.contains(KEY), line);
+        }
+
+        @Test
+        void aNullRequestDoesNotThrow() {
+            assertEquals("null", RequestRedactor.safeRequestLog(null, Set.of(KEY)));
         }
     }
 }
