@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.runtime;
 
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
+import ai.labs.eddi.utils.LogSanitizer;
 import org.jboss.logmanager.ExtLogRecord;
 
 import java.text.MessageFormat;
@@ -13,8 +14,23 @@ import java.util.IdentityHashMap;
 import java.util.logging.LogRecord;
 
 /**
- * Redacts a {@link LogRecord} in place, so what reaches container stdout is
+ * Rewrites a {@link LogRecord} in place, so what reaches container stdout is
  * what reaches the ring buffer.
+ * <p>
+ * Two rules are applied, in one pass over the record and one walk of its
+ * throwable graph. First {@link SecretRedactionFilter} replaces credential
+ * material. Then {@link LogSanitizer#escapeRecordBoundaries} escapes every
+ * character that could end a log record, which is what stops an
+ * attacker-controlled CR/LF from forging one (CWE-117).
+ * <p>
+ * The boundary rule belongs HERE rather than at the 400-odd call sites that
+ * pass a throwable, because those call sites cannot reach it: a call site can
+ * sanitize the text it passes, but {@code quarkus.log.console.format} ends in
+ * {@code %s%e} and {@code %e} renders the throwable's own {@code toString()} —
+ * whose message half the call site never touched. And it is applied to the
+ * throwable's MESSAGE, before the trace is rendered, rather than to the
+ * rendered trace afterwards; {@link LogSanitizer#escapeRecordBoundaries} states
+ * why at length.
  * <p>
  * Redaction used to happen on a <em>copy</em> inside
  * {@link BoundedLogStore#capture(LogRecord)}: the ring buffer, the database and
@@ -44,8 +60,26 @@ final class LogRecordRedactor {
     }
 
     /**
-     * What one pass produced: the record's formatted message after redaction — the
-     * text a console handler will print — and whether the record was changed.
+     * The whole output rule, as one function over a piece of log text: strip
+     * credential material, then escape anything that could end the record.
+     * <p>
+     * Redaction runs first. Its patterns match credential shapes — none of which
+     * span a line break — so the two are independent in principle, but escaping
+     * first would insert backslashes into the very text redaction is trying to
+     * match, and the order that cannot surprise anyone is the one where each rule
+     * sees text of the shape it was written against.
+     */
+    static String rewrite(String text) {
+        if (text == null || text.isEmpty()) {
+            return text;
+        }
+        return LogSanitizer.escapeRecordBoundaries(SecretRedactionFilter.redact(text));
+    }
+
+    /**
+     * What one pass produced: the record's formatted message after redaction and
+     * boundary escaping — the text a console handler will print — and whether the
+     * record was changed.
      * <p>
      * The message is handed back so {@link BoundedLogStore#capture} need not format
      * and redact the same record all over again. That second pass could never
@@ -53,7 +87,7 @@ final class LogRecordRedactor {
      * second time on the thread emitting the log line.
      *
      * @param message
-     *            the redacted message, or {@code null} when this class cannot
+     *            the rewritten message, or {@code null} when this class cannot
      *            resolve the record's parameters as faithfully as {@code capture}
      *            would — see {@link #reusableMessage}
      * @param modified
@@ -73,29 +107,31 @@ final class LogRecordRedactor {
     }
 
     /**
-     * Redacts the record in place and reports what a downstream consumer needs in
+     * Rewrites the record in place and reports what a downstream consumer needs in
      * order not to repeat the work.
      * <p>
-     * Parameters are resolved first, then redacted. A secret is far more often a
+     * Parameters are resolved first, then rewritten. A secret is far more often a
      * {@code %s} argument than part of the format string —
      * {@code LOGGER.warnf("connecting to %s", url)} — so redacting
-     * {@link LogRecord#getMessage()} alone would miss the case that matters.
-     * Formatting is therefore collapsed into the message and the parameters are
-     * dropped, which also stops a downstream formatter from re-applying them.
+     * {@link LogRecord#getMessage()} alone would miss the case that matters, and
+     * the same is true of a forged record boundary, which arrives in an argument
+     * and never in the format string a developer wrote. Formatting is therefore
+     * collapsed into the message and the parameters are dropped, which also stops a
+     * downstream formatter from re-applying them.
      */
     static Redaction redact(LogRecord record) {
         if (record == null) {
             return new Redaction(null, false);
         }
         String formatted = formatMessage(record);
-        String redacted = formatted == null || formatted.isEmpty() ? formatted : SecretRedactionFilter.redact(formatted);
-        boolean messageModified = redacted != null && !redacted.equals(formatted);
+        String rewritten = rewrite(formatted);
+        boolean messageModified = rewritten != null && !rewritten.equals(formatted);
         if (messageModified) {
-            setMessage(record, redacted);
+            setMessage(record, rewritten);
             record.setParameters(null);
         }
-        boolean modified = redactThrown(record) || messageModified;
-        return new Redaction(reusableMessage(record, redacted, messageModified), modified);
+        boolean modified = rewriteThrown(record) || messageModified;
+        return new Redaction(reusableMessage(record, rewritten, messageModified), modified);
     }
 
     /**
@@ -111,8 +147,8 @@ final class LogRecordRedactor {
      * The line is worth keeping and the credential is not. The message is scanned
      * in its RAW form (its parameters unresolved — resolving them is the step most
      * likely to have thrown), the parameters are dropped so no formatter can
-     * substitute them back in, and the throwable is replaced by a redacted copy, or
-     * removed outright when even that cannot be produced.
+     * substitute them back in, and the throwable is replaced by a rewritten copy,
+     * or removed outright when even that cannot be produced.
      */
     static void failClosed(LogRecord record) {
         if (record == null) {
@@ -127,13 +163,13 @@ final class LogRecordRedactor {
     }
 
     /**
-     * What a failed record may still say: its raw message, redacted, or a marker
+     * What a failed record may still say: its raw message, rewritten, or a marker
      * when that scan fails too.
      */
     private static String safeMessage(LogRecord record) {
         try {
             String raw = record.getMessage();
-            return raw == null ? null : SecretRedactionFilter.redact(raw);
+            return raw == null ? null : rewrite(raw);
         } catch (Exception _) {
             return REDACTION_FAILED;
         }
@@ -145,7 +181,7 @@ final class LogRecordRedactor {
             return null;
         }
         try {
-            return RedactedThrowable.of(thrown);
+            return RedactedThrowable.of(thrown, LogRecordRedactor::rewrite);
         } catch (Exception _) {
             // No copy could be produced, so nothing about this throwable is known
             // to be safe to print. A dropped stack trace costs diagnostics; a
@@ -178,12 +214,12 @@ final class LogRecordRedactor {
      * emitted to report. A record whose message WAS redacted has had its parameters
      * collapsed already, so it is never that shape.
      */
-    private static String reusableMessage(LogRecord record, String redacted, boolean messageModified) {
+    private static String reusableMessage(LogRecord record, String rewritten, boolean messageModified) {
         if (messageModified || record instanceof ExtLogRecord) {
-            return redacted;
+            return rewritten;
         }
         Object[] parameters = record.getParameters();
-        return parameters == null || parameters.length == 0 ? redacted : null;
+        return parameters == null || parameters.length == 0 ? rewritten : null;
     }
 
     /** The record's message with its parameters applied, or null. */
@@ -205,33 +241,37 @@ final class LogRecordRedactor {
     }
 
     /**
-     * Replaces a throwable whose message chain carries a secret.
+     * Replaces a throwable whose message graph carries a secret or a record
+     * boundary.
      * <p>
-     * A {@link Throwable}'s message is final, so the only way to redact it is to
+     * A {@link Throwable}'s message is final, so the only way to rewrite it is to
      * substitute an object. {@link RedactedThrowable} keeps the original type name
      * and stack trace so the substitution costs no diagnostic value — the printed
      * line still reads {@code java.net.ConnectException: …}, just without the
-     * credential the URL in it carried.
+     * credential the URL in it carried and without the CR/LF that would have ended
+     * the record two characters into an attacker's payload.
      */
-    private static boolean redactThrown(LogRecord record) {
+    private static boolean rewriteThrown(LogRecord record) {
         Throwable thrown = record.getThrown();
-        if (thrown == null || !carriesSecret(thrown)) {
+        if (thrown == null || !needsRewrite(thrown)) {
             return false;
         }
-        record.setThrown(RedactedThrowable.of(thrown));
+        record.setThrown(RedactedThrowable.of(thrown, LogRecordRedactor::rewrite));
         return true;
     }
 
     /**
-     * Whether any message in the throwable's graph changes under redaction.
+     * Whether any message in the throwable's graph changes under
+     * {@link #rewrite(String)}.
      * <p>
      * The graph, not the cause chain: {@link Throwable#getSuppressed()} is printed
-     * by {@code printStackTrace} exactly like a cause, so a secret in a suppressed
-     * exception reached the console whenever the chain itself happened to be clean
-     * — and try-with-resources on a failed outbound call is precisely where a
-     * suppressed exception carrying the resolved URL comes from.
+     * by {@code printStackTrace} exactly like a cause, so a secret — or a forged
+     * record — in a suppressed exception reached the console whenever the chain
+     * itself happened to be clean, and try-with-resources on a failed outbound call
+     * is precisely where a suppressed exception carrying the resolved URL comes
+     * from.
      */
-    private static boolean carriesSecret(Throwable thrown) {
+    private static boolean needsRewrite(Throwable thrown) {
         // Bounded: a self-referential or pathologically deep graph must not turn a
         // log line into a hang. Java's own printStackTrace bounds itself the same
         // way, by tracking what it has already seen.
@@ -245,7 +285,7 @@ final class LogRecordRedactor {
                 continue;
             }
             String message = current.getMessage();
-            if (message != null && !SecretRedactionFilter.redact(message).equals(message)) {
+            if (message != null && !rewrite(message).equals(message)) {
                 return true;
             }
             if (current.getCause() != null) {
