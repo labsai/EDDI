@@ -606,7 +606,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
 
         long duration = executionEnd - executionStart;
         LOGGER.info(httpCallsName + " Response " + (fireAndForget ? "(f'n'f)" : "") + ": " + response.toString());
-        LOGGER.info(httpCallsName + format(" Execution time: %sms\n", duration));
+        // No trailing "\n": the console pattern ends in %n, and a newline in a log
+        // MESSAGE is now escaped rather than printed (CWE-117), so this one would
+        // render as a literal "\n" at the end of the line.
+        LOGGER.info(httpCallsName + format(" Execution time: %sms", duration));
     }
 
     // Package-private for unit testing of the backoff curve.
