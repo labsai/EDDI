@@ -68,165 +68,6 @@ bottom of this file and are never archived.
 
 ---
 
-## 📝 docs(mcp): how to reach an authenticated `/mcp`, and the plan to stop needing this (2026-09-20)
-
-**Repo:** EDDI (`docs/mcp-oauth-plan`)
-
-A local MCP client — Claude Desktop, Claude Code, Cursor, LM Studio — cannot practically
-manage an EDDI instance that has OIDC enabled. `/mcp` carries an `authenticated` policy
-(its own `quarkus.http.auth.permission.mcp` rule), EDDI is bearer-only (`application-type=service`), and it
-advertises no OAuth metadata, so a client that would log in by itself gets a bare 401 with
-nothing to discover. The only way in is a hand-pasted token that the shipped realm lets
-expire after Keycloak's default five minutes, and there is no long-lived key for `/mcp`
-(the only api-key surface is the `/v1` adapter).
-
-The Quick Start in `docs/mcp-server.md` only ever showed the unauthenticated
-`localhost:7070` case, so nothing said any of that.
-
-### What changed
-
-- **`docs/mcp-server.md`** — new *Connecting to an authenticated instance* section under
-  Authentication & Authorization: get a token from the public `eddi-frontend` client, pass
-  it either as a header on a Streamable-HTTP client or through `mcp-remote` (whose argument
-  splitting means the value belongs in an env var), and four caveats in the order they
-  bite — expiry, no api key, roles decide which tools work, and `/mcp` cannot be opened
-  selectively. The Quick Start now points at it.
-- **`docs/mcp-server.md`** — the Configuration block documented `quarkus.mcp-server.http.root-path`.
-  That hyphenated form is not a key the extension knows; `application.properties`
-  already says so. Corrected to `quarkus.mcp.server.http.root-path` with the warning kept.
-- **`planning/mcp-oauth-protected-resource-plan.md`** (new) — the fix: advertise `/mcp` as an
-  RFC 9728 protected resource so the client runs the OAuth flow and refreshes its own token,
-  removing the shared long-lived credential rather than automating its rotation.
-
-### Decisions
-
-- **Rotation is the wrong problem to solve.** The instinct is to reuse **Connections**, which
-  already does lazy OAuth refresh with a single-flight claim. It cannot apply: a connection
-  resolves to a header on a request *EDDI originates*, and here EDDI is the callee. Connections
-  exists because EDDI holds a credential it must refresh; inbound, the client holds it.
-- **Serving the metadata is configuration, not code.** Quarkus OIDC 3.39.3 already ships
-  `ResourceMetadataHandler` and appends `resource_metadata="…"` to the 401 challenge. The
-  plan's Increment 1 is four properties, a permit rule and a Keycloak client.
-- **A permit rule is mandatory, not a precaution.** That handler registers as
-  `FilterBuildItem(handler, 50)`, and `SecurityHandlerPriorities.AUTHORIZATION` is 100 — it
-  runs *after* authorization, so the catch-all at `/*` would 401 the discovery document and
-  the flow could never start.
-- **Pre-registered client over dynamic registration.** The realm defines no `roles` client
-  scope; `eddi-frontend` gets `realm_access.roles` only from its own protocol mapper. A
-  dynamically registered client cannot carry mappers, so its tokens authenticate and then
-  fail every tool with "requires role" — the worst failure shape available.
-- **Review follow-up (2026-09-21).** The §3.2 configuration block quoted a hardcoded `/mcp`
-  in both `resource-metadata.resource` and the permit rule's second path. What ships derives
-  both from `${quarkus.mcp.server.http.root-path}`, so an operator who moves the MCP root
-  moves the metadata document and its permit rule with it; a hardcoded permit path would
-  leave the relocated document behind the `authenticated` policy and 401 the discovery
-  request before it starts. The snippet now matches `application.properties`.
-
-- **The EDDI → client direction is deliberately out of scope** and recorded as such in the
-  plan, so it is not re-derived: it needs Claude Code channels rather than MCP, and two
-  design answers first — attribution (nothing reads the token's `azp`, so a model answering
-  a HUMAN member's turn is recorded as the person) and keeping HITL decisions out of an
-  AI client's reach.
-
-### Files
-
-- `docs/mcp-server.md`
-- `planning/mcp-oauth-protected-resource-plan.md` (new)
-
----
-
-## ⏱️ fix(schedule): close the review round and pin the guards by mutation (2026-09-04)
-
-**Repo:** EDDI (`fix/review-schedules`)
-
-Follow-up on the same branch, from three independent review rounds plus a diff-coverage pass.
-
-**Two CI failures this branch caused are fixed.** `ImportStyleTest` was red because the branch
-introduced two inline fully-qualified names — the exact convention that test enforces — in
-`RestScheduleStoreTest` and `MongoScheduleStoreTest`. And the vendored fuzz sources drifted
-because a Javadoc reformat of `PathNavigator` diverged from the copy `.clusterfuzzlite`
-vendors; the cosmetic edit is reverted rather than re-syncing the vendored file, keeping the
-diff to what the findings required.
-
-**Tests that could not fail were replaced.** Five were proven vacuous by mutation, not by
-inspection. Two `WordSplitter` cases never reached the bounds guard they claimed to pin — one
-used an input whose index made the new `i > 0 &&` term unreachable. A `MongoScheduleStore` test
-asserted `!rendered.contains("triggerType=CRON")` on a `Bson.toString()` where that string can
-never appear, so it was unconditionally true; it now encodes through the real codec registry
-and asserts BSON null for an absent trigger type and the value for a present one, catching both
-an invented default and a hardcoded null.
-
-Two further claims were **disputed with evidence and left alone**: their "changed" line was a
-rename from an inline FQN to an import, mandated by AGENTS.md 4.7. No test can fail on the
-revert of a rename, so the correct remedy is to drop the line from the coverage claim, not the
-test from the suite — and both were shown to kill real mutants first.
-
-**Diff coverage** of changed lines: 94.4% to 99.2% line, 89.3% to 98.2% branch.
-
----
-
-## ⏰ fix(schedule): correct fire bookkeeping, persistence and manual-fire claiming (2026-09-04)
-
-**Repo:** EDDI (`fix/review-schedules`)
-
-From the whole-repository code review. Scheduled fires were reporting success they had
-not earned, and losing state they had been given.
-
-**PostgreSQL lost the payload entirely.** `eddi_schedules` had no column for `message` —
-the text a CRON schedule sends to the agent, which `RestScheduleStore` makes mandatory on
-save — nor for `time_zone`, `one_time_at`, `environment`, `agent_version`, `created_by` or
-`persistent_conversation_id`. The value was written, silently dropped, read back null, and
-the scheduled turn ran with **null input**. Scheduling is enabled by default and PostgreSQL
-is a documented, supported backend. The columns are added with
-`ADD COLUMN IF NOT EXISTS` statements so existing databases upgrade in place, and the
-dropped `persistent_conversation_id` was separately re-opening the CAS claim on every
-heartbeat fire, breaking the single-owner CAS claim that keeps a fire from running twice.
-(The delivery contract is at-least-once, not exactly-once — `IScheduleStore`,
-`docs/scheduling.md` and `docs/hitl.md` all say so. An earlier draft of this entry claimed
-otherwise.)
-
-**Failures were recorded as successes.** The executor read its outcome from a latch that
-counts down on the failure branch too, so an error inside the pipeline looked like a green
-fire: retry, backoff and dead-lettering never engaged, and `docs/scheduling.md` documents a
-state machine that could not be reached.
-
-**Persistent fires un-claimed themselves mid-flight.** The strategy wrote the pre-claim
-schedule back with `replaceOne`, so the poller re-claimed and re-fired a schedule that was
-still running, routing both turns into the *same* persistent conversation — two interleaved
-turns, two cost charges, one memory.
-
-**Heartbeats drifted.** The next fire re-anchored on the moment a turn *finished* rather
-than when it was *due*, so a 40-second turn on a 60-second cadence actually fired every 100
-seconds.
-
-**A manual "fire now" took no cluster claim at all**, so it could run concurrently with the
-poller's own fire of the same schedule.
-
-Also: `PUT /schedulestore/schedules/{id}` silently erased `createdAt`, `createdBy`,
-`lastFired` and the claim state on MongoDB (PostgreSQL preserved them — a parity gap in the
-same feature), and `CronDescriber` rejected day-of-week `7`, which `CronParser.validate`
-accepts, so a valid stored schedule 400'd on read.
-
-### Regression coverage
-
-Every behavioural change is pinned by a test proven to fail with its fix reverted. Four
-tests that the auditor found could pass with the fix removed were rewritten to assert the
-corrected value precisely rather than a property the buggy code also satisfied — one had
-asserted only that the next fire time lies in the future, which the drifting formula did too.
-
-Three of this repository's own guard tests were failing and are now satisfied properly
-rather than relaxed: the three new `eddi.schedule.*` properties are documented in
-`docs/configuration-reference.md`, and the new `eddi.schedule.firelog.pruned` counter is
-both documented in `docs/metrics.md` and charted in the Grafana dashboard, because
-`MetricsDashboardCoverageTest` requires both.
-
-Recorded honestly as unverifiable locally: the `SafeHttpClient` redirect tests need a
-loopback socket, and the new DDL and Mongo codec paths are only exercised against real
-backends in CI.
-
----
-
-
 ## 🔒 fix(security): close the CWE-117 gap in the half of a log line no call site can reach (2026-09-20)
 
 **Repo:** EDDI (`fix/log-injection-record-boundary-handler`)
@@ -362,6 +203,10 @@ than the fix.
   `RestScheduleStore`, `RestUserMemoryStore`, `VaultSecretProvider`, the REST stores and others.
   `RestAgentAdministration` and `AgentFactory` among them are PR #799's scope and were left to it.
   None of them can forge a record at runtime now, so they are alert hygiene rather than exposure.
+
+---
+
+---
 
 ---
 
@@ -1025,6 +870,8 @@ so concurrent users overwrite each other's value. `secretInput` only hides the t
 
 ---
 
+---
+
 ## 🔒 fix(ui): clear the 30 npm advisories Scorecard reports (2026-09-17)
 
 **Repo:** EDDI (`fix/ui-npm-vulnerabilities`)
@@ -1235,6 +1082,8 @@ The shipped realm (6.1.0 through 6.4.0) defines only the `openid` client scope, 
 That is fixed at the source, with the backend consequences it had, on `fix/keycloak-realm-client-scopes`.
 This change stays useful after it: realms provisioned by hand, other identity providers, and users
 without a name or email still reach the fallback.
+
+---
 
 ---
 
@@ -3109,6 +2958,8 @@ and the tightest gap across days scanned over a full 28-year Gregorian cycle.
 **Correction.** An earlier entry on this branch described scheduling as "exactly-once". Delivery is
 at-least-once — `IScheduleStore`, `docs/scheduling.md` and `docs/hitl.md` all say so — and that
 line has been corrected in place.
+
+---
 
 ---
 
