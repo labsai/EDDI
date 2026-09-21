@@ -137,6 +137,8 @@ Full narrative and metrics: [scheduling.md → Deployment Configuration](schedul
 | `eddi.mcp.allow-unauthenticated` | `false` | Exposes the MCP server without auth. Needs its own opt-in on top of `eddi.security.allow-unauthenticated` — inheriting one flag must not be enough to open agent CRUD |
 | `eddi.secretstore.allow-unauthenticated` | `false` | Same, for the secrets vault REST surface |
 | `eddi.caller-identity.enabled` | `true` | Enables `${caller:token}` / `${caller:userId}` in httpCall headers. See [httpcalls.md](httpcalls.md) |
+| `eddi.caller-identity.self-release.enabled` | `true` | Also releases `${caller:token}` to this deployment's own address (`eddi.self.base-url`), not only to the caller's origin — how the Platform Operator's tools call EDDI as the chatting user. The self address bypasses any reverse proxy in front of EDDI, so set `false` if that proxy enforces restrictions EDDI's own authorization does not. See [httpcalls.md](httpcalls.md) |
+| `eddi.self.base-url` | *(derived: `http://127.0.0.1:${quarkus.http.port}`)* | The address EDDI can reach **itself** at — what the Platform Operator's generated tools target. A bare `scheme://host[:port]`; a path, query, fragment or credentials make it ignored. Set it only when loopback is wrong (TLS terminated in-process, a mesh-required service name) or when SSRF protection is on — the value must then pass the full SSRF target policy. Required with `quarkus.http.port=0`, where nothing can be derived. Served at `GET /administration/operator/self-url` |
 | `eddi.keycloak.public.url` | *(empty)* | Browser-facing Keycloak URL when it differs from the in-cluster one |
 
 ### Workspaces & resource sharing

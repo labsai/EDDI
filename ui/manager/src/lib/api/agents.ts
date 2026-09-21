@@ -229,6 +229,18 @@ export async function getAgentDescriptorsWithVersions(
   return flat;
 }
 
+/**
+ * The agent's current version number — `GET /agentstore/agents/{id}/currentversion`.
+ *
+ * Also the reliable way to ask whether an agent exists at all: it answers 200
+ * for an existing agent and 404 once the agent is deleted. `getAgent` without a
+ * version is NOT: the version-less `GET /agentstore/agents/{id}` answers 400 for
+ * an existing agent and an unknown id alike.
+ */
+export function getAgentCurrentVersion(id: string): Promise<number> {
+  return api.get<number>(`/agentstore/agents/${id}/currentversion`);
+}
+
 export function getAgent(id: string, version?: number): Promise<Agent> {
   const versionSuffix = version != null && version > 0 ? `?version=${version}` : "";
   return api.get<Agent>(`/agentstore/agents/${id}${versionSuffix}`);
