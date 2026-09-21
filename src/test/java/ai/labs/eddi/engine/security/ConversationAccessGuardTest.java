@@ -51,6 +51,17 @@ class ConversationAccessGuardTest {
         return identity;
     }
 
+    /** Authenticated, not anonymous, but the token named nobody. */
+    private SecurityIdentity namelessIdentity() {
+        var identity = mock(SecurityIdentity.class);
+        var principal = mock(Principal.class);
+        lenient().when(principal.getName()).thenReturn(null);
+        lenient().when(identity.getPrincipal()).thenReturn(principal);
+        lenient().when(identity.isAnonymous()).thenReturn(false);
+        lenient().when(identity.hasRole("eddi-viewer")).thenReturn(true);
+        return identity;
+    }
+
     private ConversationAccessGuard guardFor(SecurityIdentity identity, boolean authEnabled) {
         return new ConversationAccessGuard(identity, new OwnershipValidator(authEnabled), descriptorStore);
     }
@@ -177,6 +188,19 @@ class ConversationAccessGuardTest {
 
             assertTrue(guard.canAccessConversation(null));
             assertTrue(guard.canAccessConversation("  "));
+        }
+
+        @Test
+        @DisplayName("a caller with no principal name sees no unowned conversation — same rule as the read gate")
+        void unownedHiddenFromNamelessCaller() throws Exception {
+            var guard = guardFor(namelessIdentity(), true);
+
+            assertFalse(guard.canAccessConversation(null));
+            assertFalse(guard.canAccessConversation("  "));
+            assertFalse(guard.canAccessConversation(OWNER));
+
+            descriptorOwnedBy(null);
+            assertThrows(ForbiddenException.class, () -> guard.requireConversationOwner(CONVERSATION_ID));
         }
 
         @Test
