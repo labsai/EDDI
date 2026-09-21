@@ -1,53 +1,29 @@
-# EDDI + PostgreSQL + NATS (multi-replica) — combined example
+# EDDI + PostgreSQL + production hardening — combined example
 #
-# Production-ready: PostgreSQL backend with NATS JetStream for
-# durable messaging across multiple EDDI replicas.
+# ⚠️  This is NOT a horizontally scaled deployment. EDDI runs at exactly ONE
+# replica: the per-conversation lock is JVM-local, so a second replica silently
+# drops turns. See the comment on spec.replicas in k8s/base/eddi-deployment.yaml.
 #
-# Usage: kubectl apply -k k8s/examples/postgres-ha/
+# NATS is deliberately no longer part of this example. The published
+# labsai/eddi image is built without the `nats` Quarkus build profile, so the
+# NATS coordinator bean does not exist in it and EDDI_MESSAGING_TYPE is read by
+# no code — the component provisioned a JetStream StatefulSet with a 5Gi PVC
+# that EDDI never connected to. If you build your own image with
+# `-Dquarkus.profile=nats`, add `- ../../overlays/nats` under `components:`.
+#
+# Usage:
+#   bash k8s/create-secrets.sh              # once, before the first apply
+#   kubectl apply -k k8s/examples/postgres-ha/
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 namespace: eddi
 
 resources:
-  # PostgreSQL overlay (includes base + PostgreSQL)
+  # Standalone overlay — includes the base plus PostgreSQL
   - ../../overlays/postgres
 
-  # NATS for multi-replica messaging
-  - ../../overlays/nats/nats-statefulset.yaml
-  - ../../overlays/nats/nats-service.yaml
-
-  # Production hardening
-  - ../../overlays/production/eddi-hpa.yaml
-  - ../../overlays/production/eddi-pdb.yaml
-  - ../../overlays/production/network-policy.yaml
-
-patches:
-  # Enable NATS messaging
-  - target:
-      kind: ConfigMap
-      name: eddi-config
-    patch: |
-      - op: replace
-        path: /data/EDDI_MESSAGING_TYPE
-        value: "nats"
-      - op: add
-        path: /data/EDDI_NATS_URL
-        value: "nats://nats:4222"
-  # Production resource limits + replicas
-  - target:
-      kind: Deployment
-      name: eddi
-    patch: |
-      - op: replace
-        path: /spec/template/spec/containers/0/resources
-        value:
-          requests:
-            cpu: 500m
-            memory: 512Mi
-          limits:
-            cpu: "4"
-            memory: 2Gi
-      - op: replace
-        path: /spec/replicas
-        value: 2
+components:
+  # PDB, NetworkPolicy and the production resource limits.
+  # NOTE: eddi-hpa.yaml is deliberately absent — see that file's header.
+  - ../../overlays/production

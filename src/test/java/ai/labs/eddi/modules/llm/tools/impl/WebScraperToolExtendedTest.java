@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.tools.impl;
 
 import ai.labs.eddi.engine.httpclient.SafeHttpClient;
+import ai.labs.eddi.modules.ingestion.HtmlToMarkdownConverter;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -30,7 +31,7 @@ class WebScraperToolExtendedTest {
     @BeforeEach
     void setUp() {
         mockHttpClient = mock(SafeHttpClient.class);
-        webScraperTool = new WebScraperTool(mockHttpClient);
+        webScraperTool = new WebScraperTool(mockHttpClient, new HtmlToMarkdownConverter());
     }
 
     @SuppressWarnings("unchecked")
@@ -54,8 +55,26 @@ class WebScraperToolExtendedTest {
 
             String result = webScraperTool.extractWebPageText("https://example.com");
 
-            assertTrue(result.contains("Title: Test Page"));
-            assertTrue(result.contains("Hello world"));
+            // The tool now returns Markdown from HtmlToMarkdownConverter instead of a
+            // flat text dump prefixed with "Title: ", so the page title arrives as a
+            // level-1 heading. Structure is worth keeping: it tells the model what is
+            // a heading, a list or a table rather than running them all together.
+            assertTrue(result.contains("# Test Page"), "title should be a Markdown heading, was: " + result);
+            assertTrue(result.contains("Hello world"), result);
+        }
+
+        @Test
+        @DisplayName("should keep document structure rather than flattening it")
+        void keepsStructure() throws Exception {
+            mockResponse(200, "<html><body><main><h2>Setup</h2><ul><li>First</li><li>Second</li></ul>"
+                    + "<div>Alpha</div><div>Beta</div></main></body></html>");
+
+            String result = webScraperTool.extractWebPageText("https://example.com");
+
+            assertTrue(result.contains("## Setup"), "heading should survive, was: " + result);
+            assertTrue(result.contains("- First"), "list should survive, was: " + result);
+            // The previous flat text() dump merged adjacent blocks into "AlphaBeta".
+            assertFalse(result.contains("AlphaBeta"), "adjacent blocks must not merge, was: " + result);
         }
 
         @Test

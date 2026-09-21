@@ -36,21 +36,20 @@ public class PunctuationNormalizer implements INormalizer {
     }
 
     private boolean isOrdinalNumber(String part) {
-        return LanguageUtilities.isOrdinalNumber(part) != null;
+        return LanguageUtilities.extractOrdinalValue(part).isPresent();
     }
 
     private boolean isTimeExpression(String part) {
         return LanguageUtilities.isTimeExpression(part) != null;
     }
 
-    private boolean containsPunctuation(String part) {
-        for (int i = 0; i < part.length(); i++) {
-            String punctuationChar = part.substring(i, i + 1);
-            if (part.contains(punctuationChar)) {
-                return true;
-            }
-        }
-        return false;
+    /**
+     * Whether the given token contains at least one character matching the
+     * configured punctuation pattern (defaults to {@link #PUNCTUATION}).
+     * Package-private so it can be asserted on directly in tests.
+     */
+    boolean containsPunctuation(String part) {
+        return punctuationPattern.matcher(part).find();
     }
 
     public PunctuationNormalizer() {

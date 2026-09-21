@@ -27,6 +27,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
+import ai.labs.eddi.configs.rest.StrictConfigurationParser;
 
 /**
  * Unit tests for MCP schedule tools (create, list, read, fire, delete, retry).
@@ -57,7 +58,8 @@ class McpScheduleToolsTest {
         });
         when(pollerService.getInstanceId()).thenReturn("test-instance");
 
-        tools = new McpAdminTools(restInterfaceFactory, mock(IRestAgentAdministration.class), jsonSerialization, scheduleStore, fireExecutor,
+        tools = new McpAdminTools(restInterfaceFactory, mock(IRestAgentAdministration.class), jsonSerialization,
+                mock(StrictConfigurationParser.class), scheduleStore, fireExecutor,
                 pollerService, mock(SecurityIdentity.class), false);
     }
 
@@ -188,15 +190,27 @@ class McpScheduleToolsTest {
 
     // --- fireScheduleNow ---
 
+    /**
+     * A manual fire through MCP must claim the schedule on the poller's terms
+     * BEFORE firing and record the outcome AFTERWARDS. Firing unclaimed raced the
+     * poller — with {@code conversationStrategy=persistent} both pushed a turn into
+     * the same conversation — and skipping the outcome left the fire outside the
+     * retry/backoff/one-shot state machine entirely.
+     */
     @Test
-    void fireNow_callsFireWithAttempt1() throws Exception {
+    void fireNow_claimsFirstFiresThenRecordsTheOutcome() throws Exception {
         var schedule = makeSchedule("sched-1");
+        var fireLog = makeFireLog("sched-1");
         when(scheduleStore.readSchedule("sched-1")).thenReturn(schedule);
-        when(fireExecutor.fire(eq(schedule), eq("test-instance"), eq(1))).thenReturn(makeFireLog("sched-1"));
+        when(pollerService.claimForManualFire(schedule)).thenReturn(true);
+        when(fireExecutor.fire(eq(schedule), eq("test-instance"), eq(1))).thenReturn(fireLog);
 
         tools.fireScheduleNow("sched-1");
 
-        verify(fireExecutor).fire(schedule, "test-instance", 1);
+        var inOrder = inOrder(pollerService, fireExecutor);
+        inOrder.verify(pollerService).claimForManualFire(schedule);
+        inOrder.verify(fireExecutor).fire(schedule, "test-instance", 1);
+        inOrder.verify(pollerService).recordManualFireOutcome(schedule, fireLog);
     }
 
     @Test

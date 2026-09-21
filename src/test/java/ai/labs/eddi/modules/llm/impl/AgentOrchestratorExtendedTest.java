@@ -4,12 +4,14 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
-import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property;
-import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.shared.RetryConfiguration;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
@@ -29,7 +31,10 @@ import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
+import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.response.ChatResponseMetadata;
+import dev.langchain4j.model.output.TokenUsage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -90,11 +95,13 @@ class AgentOrchestratorExtendedTest {
                 webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
                 fetchToolResponsePageTool, toolExecutionService,
                 mcpToolProviderManager, a2aToolProviderManager,
-                mock(IRestAgentStore.class), mock(IRestWorkflowStore.class),
+                mock(IWorkflowStore.class),
                 mock(IResourceClientLibrary.class), mock(IApiCallExecutor.class),
                 mock(IJsonSerialization.class), mock(IMemoryItemConverter.class),
                 userMemoryStore, mock(ToolResponseTruncator.class),
-                mock(TenantQuotaService.class), memorySnapshotService);
+                mock(TenantQuotaService.class), memorySnapshotService,
+                null, null, null, null, null,
+                mock(IHitlToolJournalStore.class), new ConversationHistoryBuilder(), new TokenCounterFactory());
 
         mockMemory = mock(IConversationMemory.class);
         when(mockMemory.getUserMemoryConfig()).thenReturn(null);
@@ -633,7 +640,7 @@ class AgentOrchestratorExtendedTest {
         void testRecordFields() {
             var spec = ToolSpecification.builder().name("test").description("test").build();
             var result = new AgentOrchestrator.HttpCallToolsResult(
-                    List.of(spec), Map.of());
+                    List.of(spec), Map.of(), Map.of(), Map.of());
 
             assertEquals(1, result.toolSpecs().size());
             assertEquals("test", result.toolSpecs().get(0).name());
@@ -797,6 +804,45 @@ class AgentOrchestratorExtendedTest {
             assertNotNull(result, "Should return ExecutionResult when built-in tools are enabled");
             assertEquals("The answer is 42", result.response());
             assertTrue(result.trace().isEmpty(), "Trace should be empty when no tool calls made");
+        }
+
+        @Test
+        @DisplayName("Cooperative cancellation — interrupted thread stops the tool loop (plan #9)")
+        void cooperativeCancellation_interruptedThreadThrows() {
+            var task = new LlmConfiguration.Task();
+            task.setEnableBuiltInTools(true);
+            task.setBuiltInToolsWhitelist(List.of("calculator"));
+            task.setEnableHttpCallTools(false);
+            task.setEnableMcpCallTools(false);
+            var retry = new RetryConfiguration();
+            retry.setMaxAttempts(1);
+            task.setRetry(retry);
+
+            when(mockMemory.getAgentId()).thenReturn(null);
+            when(mockMemory.getAgentVersion()).thenReturn(null);
+            when(mockMemory.getConversationId()).thenReturn("conv-1");
+
+            // chatModel would return tool calls, but the interrupt check fires first.
+            ChatModel chatModel = mock(ChatModel.class);
+
+            Thread.currentThread().interrupt(); // simulate a cascade per-step timeout cancel
+            try {
+                var ex = assertThrows(LifecycleException.class, () -> orchestrator.executeIfToolsEnabled(
+                        chatModel, "sys", List.of(UserMessage.from("hi")), task, mockMemory));
+                // The retry helper wraps the cancellation message — search the cause chain.
+                boolean mentionsCancel = false;
+                for (Throwable t = ex; t != null; t = t.getCause()) {
+                    if (t.getMessage() != null && t.getMessage().toLowerCase().contains("cancel")) {
+                        mentionsCancel = true;
+                        break;
+                    }
+                }
+                assertTrue(mentionsCancel, "expected a cancellation message in the chain, got: " + ex.getMessage());
+                // Cancellation must stop before the model is ever called.
+                verify(chatModel, never()).chat(any(ChatRequest.class));
+            } finally {
+                Thread.interrupted(); // clear the flag so it does not leak to other tests
+            }
         }
 
         @Test
@@ -1045,6 +1091,111 @@ class AgentOrchestratorExtendedTest {
 
             assertNotNull(result);
             assertEquals("Not capped", result.response());
+        }
+    }
+
+    @Nested
+    @DisplayName("Token usage accumulation (cascade cost evidence)")
+    class TokenUsageAccumulation {
+
+        @Test
+        @DisplayName("a response carrying tokenUsage surfaces it in ExecutionResult.responseMetadata")
+        void tokenUsage_singleResponse_populatesResponseMetadata() throws LifecycleException {
+            var task = new LlmConfiguration.Task();
+            task.setEnableBuiltInTools(true);
+            task.setBuiltInToolsWhitelist(List.of("calculator"));
+            task.setEnableHttpCallTools(false);
+            task.setEnableMcpCallTools(false);
+
+            when(mockMemory.getAgentId()).thenReturn(null);
+            when(mockMemory.getAgentVersion()).thenReturn(null);
+            when(mockMemory.getConversationId()).thenReturn("conv-1");
+
+            ChatModel chatModel = mock(ChatModel.class);
+            ChatResponse chatResponse = ChatResponse.builder()
+                    .aiMessage(AiMessage.from("done"))
+                    .metadata(ChatResponseMetadata.builder().tokenUsage(new TokenUsage(10, 20, 30)).build())
+                    .build();
+            doReturn(chatResponse).when(chatModel).chat(any(ChatRequest.class));
+
+            var result = orchestrator.executeIfToolsEnabled(
+                    chatModel, "sys", List.of(UserMessage.from("hi")), task, mockMemory);
+
+            assertNotNull(result);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> usage = (Map<String, Object>) result.responseMetadata().get("tokenUsage");
+            assertNotNull(usage, "tokenUsage must be surfaced in responseMetadata (feeds cascade cost)");
+            assertEquals(10, usage.get("inputTokens"));
+            assertEquals(20, usage.get("outputTokens"));
+            assertEquals(30, usage.get("totalTokens"));
+        }
+
+        @Test
+        @DisplayName("sumTokens sums field-by-field and tolerates nulls; tokenUsageMap maps null fields to 0")
+        void sumTokens_and_tokenUsageMap_units() {
+            var summed = AgentOrchestrator.sumTokens(new TokenUsage(10, 20, 30), new TokenUsage(5, 7, 12));
+            assertEquals(15, summed.inputTokenCount());
+            assertEquals(27, summed.outputTokenCount());
+            assertEquals(42, summed.totalTokenCount());
+
+            var b = new TokenUsage(1, 2, 3);
+            assertSame(b, AgentOrchestrator.sumTokens(null, b), "null first operand returns the second unchanged");
+            assertSame(b, AgentOrchestrator.sumTokens(b, null), "null second operand returns the first unchanged");
+
+            var zeroMap = AgentOrchestrator.tokenUsageMap(new TokenUsage(null, null, null));
+            assertEquals(0, zeroMap.get("inputTokens"));
+            assertEquals(0, zeroMap.get("outputTokens"));
+            assertEquals(0, zeroMap.get("totalTokens"));
+
+            var map = AgentOrchestrator.tokenUsageMap(new TokenUsage(3, 4, 7));
+            assertEquals(3, map.get("inputTokens"));
+            assertEquals(4, map.get("outputTokens"));
+            assertEquals(7, map.get("totalTokens"));
+        }
+
+        @Test
+        @DisplayName("cooperative cancellation before a tool call — an interrupt during the model call aborts before the tool runs")
+        void cooperativeCancellation_beforeToolExecution() {
+            var task = new LlmConfiguration.Task();
+            task.setEnableBuiltInTools(true);
+            task.setBuiltInToolsWhitelist(List.of("calculator"));
+            task.setEnableHttpCallTools(false);
+            task.setEnableMcpCallTools(false);
+            var retry = new RetryConfiguration();
+            retry.setMaxAttempts(1);
+            task.setRetry(retry);
+
+            when(mockMemory.getAgentId()).thenReturn(null);
+            when(mockMemory.getAgentVersion()).thenReturn(null);
+            when(mockMemory.getConversationId()).thenReturn("conv-1");
+
+            // The model returns a tool call but sets the interrupt flag as it returns, so
+            // the
+            // flag is pending when the loop reaches the before-tool cancellation check (the
+            // top-of-loop check already ran, before this model call).
+            ChatModel chatModel = mock(ChatModel.class);
+            var toolCall = ToolExecutionRequest.builder().id("1").name("calculator").arguments("{}").build();
+            ChatResponse chatResponse = ChatResponse.builder().aiMessage(AiMessage.from(toolCall)).build();
+            doAnswer(inv -> {
+                Thread.currentThread().interrupt();
+                return chatResponse;
+            }).when(chatModel).chat(any(ChatRequest.class));
+
+            try {
+                var ex = assertThrows(LifecycleException.class, () -> orchestrator.executeIfToolsEnabled(
+                        chatModel, "sys", List.of(UserMessage.from("hi")), task, mockMemory));
+                boolean mentionsCancelAndTool = false;
+                for (Throwable t = ex; t != null; t = t.getCause()) {
+                    String m = t.getMessage();
+                    if (m != null && m.toLowerCase().contains("cancel") && m.contains("calculator")) {
+                        mentionsCancelAndTool = true;
+                        break;
+                    }
+                }
+                assertTrue(mentionsCancelAndTool, "expected 'cancelled ... before tool: calculator' in the chain, got: " + ex.getMessage());
+            } finally {
+                Thread.interrupted(); // clear the flag so it does not leak to other tests
+            }
         }
     }
 }

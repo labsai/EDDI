@@ -72,4 +72,23 @@ abstract class BaseMatcherTest {
         // assert
         Assertions.assertEquals(expectedOccurrence, matcher.getOccurrence());
     }
+
+    /**
+     * A typo'd occurrence used to silently degrade to currentStep, which turns a
+     * lastStep guard into a globally firing rule.
+     */
+    @Test
+    public void setValues_unknownOccurrence_isRejected() {
+        // setup
+        Map<String, String> values = new HashMap<>();
+        values.put(KEY_OCCURRENCE, "lastSteps");
+
+        // test
+        IllegalArgumentException exception = Assertions.assertThrows(IllegalArgumentException.class, () -> matcher.setConfigs(values));
+
+        // assert
+        Assertions.assertTrue(exception.getMessage().contains("lastSteps"), exception.getMessage());
+        Assertions.assertTrue(exception.getMessage().contains(BaseMatcher.ConversationStepOccurrence.lastStep.name()), exception.getMessage());
+        Assertions.assertTrue(exception.getMessage().contains(BaseMatcher.ConversationStepOccurrence.anyStep.name()), exception.getMessage());
+    }
 }

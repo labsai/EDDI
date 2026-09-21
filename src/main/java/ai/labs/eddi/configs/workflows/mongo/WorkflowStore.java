@@ -17,6 +17,7 @@ import ai.labs.eddi.utils.RuntimeUtilities;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import java.net.URI;
 import java.util.Comparator;
 import java.util.LinkedList;
 import java.util.List;
@@ -27,9 +28,22 @@ import java.util.stream.Collectors;
  */
 @ApplicationScoped
 public class WorkflowStore extends AbstractResourceStore<WorkflowConfiguration> implements IWorkflowStore {
-    public static final String WORKFLOW_EXTENSIONS_FIELD = "WorkflowSteps";
-    public static final String WORKFLOW_EXTENSIONS_CONFIG_URI_FIELD = "WorkflowSteps.config.uri";
-    public static final String WORKFLOW_EXTENSIONS_DICTIONARIES_CONFIG_URI_FIELD = "WorkflowSteps.extensions.dictionaries.config.uri";
+    public static final String WORKFLOW_EXTENSIONS_FIELD = "workflowSteps";
+    /**
+     * Query paths into the PERSISTED document, so they must match what
+     * {@link WorkflowConfiguration} actually serializes: {@code workflowSteps},
+     * lower-case w.
+     * <p>
+     * They were spelled {@code WorkflowSteps} — and both MongoDB paths and
+     * PostgreSQL JSON keys are case-sensitive, so every reverse lookup built on
+     * them matched nothing, silently. That is what made
+     * {@code RestWorkflowStore.deleteResourceSafely}'s "is anyone else still using
+     * this?" guard a no-op: it always saw zero referencing workflows and
+     * cascade-deleted configs that other workflows were still pointing at.
+     */
+    public static final String WORKFLOW_EXTENSIONS_CONFIG_URI_FIELD = "workflowSteps.config.uri";
+    public static final String WORKFLOW_EXTENSIONS_DICTIONARIES_CONFIG_URI_FIELD = "workflowSteps.extensions.dictionaries.config.uri";
+    private static final String VERSION_QUERY_PARAM = "?version=";
 
     private final IDocumentDescriptorStore documentDescriptorStore;
 
@@ -60,9 +74,20 @@ public class WorkflowStore extends AbstractResourceStore<WorkflowConfiguration> 
 
         List<DocumentDescriptor> ret = new LinkedList<>();
 
-        int startIndexVersion = resourceURI.lastIndexOf("=") + 1;
-        var version = Integer.parseInt(resourceURI.substring(startIndexVersion));
-        var resourceURIPart = resourceURI.substring(0, startIndexVersion);
+        // Parsed, not scraped. The previous "everything after the last '='" split
+        // threw NumberFormatException — undeclared by this interface — for any URI
+        // without a version query or with a second query parameter, and callers such
+        // as RestWorkflowStore.deleteResourceSafely feed step config.uri values in
+        // verbatim. There the throw is caught and logged as "reference check failed",
+        // so one unversioned reference turned cascade cleanup into a permanent no-op.
+        URI parsedResourceUri = parseResourceUri(resourceURI);
+        String resourceURIPart = RestUtilities.pathWithoutVersionQuery(parsedResourceUri);
+        Integer version = resourceURIPart == null ? null : RestUtilities.extractResourceId(parsedResourceUri).getVersion();
+        if (resourceURIPart == null || version == null || version < 1) {
+            throw new IResourceStore.ResourceStoreException(
+                    "Reverse lookup requires a versioned resource URI ('...?version=<n>' with n >= 1), got: " + resourceURI);
+        }
+        resourceURIPart = resourceURIPart + VERSION_QUERY_PARAM;
 
         do {
             resourceURI = resourceURIPart + version;
@@ -84,7 +109,7 @@ public class WorkflowStore extends AbstractResourceStore<WorkflowConfiguration> 
             allIds = allIds.stream().sorted(comparator).collect(Collectors.toList());
 
             for (IResourceStore.IResourceId workflowId : allIds) {
-                if (workflowId.getVersion() < getCurrentResourceId(workflowId.getId()).getVersion()) {
+                if (isStaleReference(workflowId.getId(), workflowId.getVersion())) {
                     continue;
                 }
 
@@ -108,5 +133,21 @@ public class WorkflowStore extends AbstractResourceStore<WorkflowConfiguration> 
         } while (includePreviousVersions && version >= 1);
 
         return ret;
+    }
+
+    /**
+     * {@code URI.create} on a caller-supplied string, with its unchecked
+     * {@link IllegalArgumentException} turned into {@code null} so the single
+     * validation branch above reports every malformed input the same way.
+     */
+    private static URI parseResourceUri(String resourceURI) {
+        if (resourceURI == null || resourceURI.isBlank()) {
+            return null;
+        }
+        try {
+            return URI.create(resourceURI);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 }

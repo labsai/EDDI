@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.output.model.types;
 import ai.labs.eddi.modules.output.model.OutputItem;
 
 import java.util.Objects;
+import java.util.function.UnaryOperator;
 
 public class ApplicationLinkOutputItem extends OutputItem {
     private String path;
@@ -25,6 +26,14 @@ public class ApplicationLinkOutputItem extends OutputItem {
     @Override
     protected void initType() {
         super.type = "applicationLink";
+    }
+
+    @Override
+    protected OutputItem templatedCopy(UnaryOperator<String> templating) {
+        var copy = new ApplicationLinkOutputItem(templating.apply(path));
+        copy.setLabel(templating.apply(label));
+        copy.setDelay(delay);
+        return copy;
     }
 
     @Override

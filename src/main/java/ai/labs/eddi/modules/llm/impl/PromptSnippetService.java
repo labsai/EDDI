@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.snippets.IPromptSnippetStore;
 import ai.labs.eddi.configs.snippets.model.PromptSnippet;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import io.micrometer.core.instrument.Counter;
@@ -30,13 +31,30 @@ import java.util.Map;
  * Cached service that loads all prompt snippets and provides them as a template
  * data map for LLM task system prompts.
  * <p>
- * All snippets are auto-available via {@code {{snippets.<name>}}} in system
+ * All snippets are auto-available via {@code {snippets.<name>}} in system
  * prompt templates. The cache auto-expires after 5 minutes (TTL) and can be
  * explicitly invalidated via {@link #invalidateCache()}.
  * <p>
- * For snippets with {@code templateEnabled=false}, the content has its template
- * markers ({@code {{}} }) escaped so the Jinja2 engine outputs them as
- * literals.
+ * <b>Content is stored raw.</b> A snippet is never concatenated into a
+ * template's SOURCE — it is put into the template DATA map and pulled in by an
+ * expression, and Qute does not re-parse what an expression resolved to. Any
+ * {@code {...}} inside a snippet therefore reaches the model literally already,
+ * which is exactly the {@code templateEnabled=false} guarantee, for free and
+ * for every snippet.
+ * <p>
+ * This used to wrap {@code templateEnabled=false} content in a Qute unparsed
+ * block. That protected nothing it was not already protected from, and since
+ * the wrapper is itself a resolved value it was likewise never re-parsed: the
+ * {@code {|…|}} delimiters travelled into the system prompt verbatim. Escaping
+ * belongs only where generated text is concatenated into template source — see
+ * {@link ai.labs.eddi.modules.templating.TemplateEscaping}.
+ * <p>
+ * The corollary is that {@code templateEnabled=true} does not make a snippet's
+ * markers resolve either; the flag currently has no effect on this path.
+ * Honouring it would mean rendering snippet content in a second pass, which is
+ * a design decision with an injection surface attached — snippet text is
+ * admin-authored, but a second evaluation pass over data is precisely the shape
+ * EDDI avoids elsewhere. Left as-is deliberately rather than by oversight.
  *
  * @author ginccc
  * @since 6.0.0
@@ -46,7 +64,6 @@ public class PromptSnippetService {
 
     private static final Logger LOGGER = Logger.getLogger(PromptSnippetService.class);
     private static final String CACHE_KEY = "all_snippets";
-    private static final String TEMPLATE_MARKER = "{{";
 
     private final IPromptSnippetStore snippetStore;
     private final IDocumentDescriptorStore descriptorStore;
@@ -86,10 +103,10 @@ public class PromptSnippetService {
 
     /**
      * Get all snippets as a map suitable for injection into the template data. The
-     * map keys are snippet names, values are snippet content strings.
+     * map keys are snippet names, values are snippet content strings, verbatim.
      * <p>
-     * For snippets with {@code templateEnabled=false}, template markers are escaped
-     * to prevent Jinja2 resolution.
+     * Nothing is escaped on the way in, and nothing needs to be — see the class
+     * javadoc for why a value reached through this map is never re-parsed.
      *
      * @return unmodifiable map of snippet name → content
      */
@@ -119,7 +136,7 @@ public class PromptSnippetService {
         try {
             // Use descriptor store to enumerate all snippet resources
             List<DocumentDescriptor> descriptors = descriptorStore.readDescriptors(
-                    "ai.labs.snippet", "", 0, 0, false);
+                    "ai.labs.snippet", "", 0, IDescriptorStore.NO_LIMIT, false);
 
             if (descriptors == null || descriptors.isEmpty()) {
                 return Collections.emptyMap();
@@ -130,14 +147,18 @@ public class PromptSnippetService {
                 try {
                     URI resourceUri = descriptor.getResource();
                     String id = extractIdFromUri(resourceUri);
-                    Integer version = extractVersionFromUri(resourceUri);
+                    // Read the CURRENT version. The descriptor's resource URI keeps the
+                    // version the snippet was created with, so after an update agents kept
+                    // rendering the old content even though the cache had been invalidated.
+                    IResourceStore.IResourceId current = snippetStore.getCurrentResourceId(id);
+                    Integer version = current != null ? current.getVersion() : extractVersionFromUri(resourceUri);
                     PromptSnippet snippet = snippetStore.read(id, version);
                     if (snippet != null && snippet.getName() != null && snippet.getContent() != null) {
-                        String content = snippet.getContent();
-                        if (!snippet.isTemplateEnabled() && content.contains(TEMPLATE_MARKER)) {
-                            content = escapeTemplateMarkers(content);
-                        }
-                        result.put(snippet.getName(), content);
+                        // Stored RAW — see the class javadoc. A snippet reaches a prompt as a
+                        // template DATA VALUE, and Qute does not re-parse what an expression
+                        // resolved to, so its markers are already literal. Wrapping it in an
+                        // unparsed block only added the block's own delimiters to the prompt.
+                        result.put(snippet.getName(), snippet.getContent());
                     }
                 } catch (IResourceStore.ResourceNotFoundException e) {
                     LOGGER.debugv("Snippet descriptor references missing resource: {0}", descriptor.getResource());
@@ -151,15 +172,6 @@ public class PromptSnippetService {
             LOGGER.errorv("Failed to load prompt snippets: {0}", e.getMessage());
             return Collections.emptyMap();
         }
-    }
-
-    /**
-     * Escape Jinja2 template markers so the content is output literally. Uses
-     * Jinja2's built-in raw block syntax.
-     */
-    private static String escapeTemplateMarkers(String content) {
-        // Wrap the entire content in a Jinja2 raw block
-        return "{% raw %}" + content + "{% endraw %}";
     }
 
     /**

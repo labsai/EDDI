@@ -9,6 +9,8 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.Map;
+
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -25,6 +27,45 @@ class SecretResolverTest {
         when(secretProvider.isAvailable()).thenReturn(true);
         resolver = new SecretResolver(secretProvider, meterRegistry, 5, 100);
         resolver.init(); // Initialize the Caffeine cache (@PostConstruct)
+    }
+
+    @Test
+    void requireResolved_unresolvableReferenceFailsClosedNamingTheReferenceOnly() throws Exception {
+        var ref = new SecretReference("default", "missing-key");
+        when(secretProvider.resolve(ref)).thenThrow(new ISecretProvider.SecretNotFoundException("not found"));
+
+        var resolved = resolver.resolveSecrets(Map.of("apiKey", "${vault:missing-key}", "modelName", "text-embedding-3-small"));
+        var e = assertThrows(SecretResolver.UnresolvedSecretReferenceException.class,
+                () -> SecretResolver.requireResolved(resolved, "embedding model 'openai'"));
+
+        assertTrue(e.getMessage().contains("apiKey"), e.getMessage());
+        assertTrue(e.getMessage().contains("${vault:missing-key}"), e.getMessage());
+        assertTrue(e.getMessage().contains("embedding model 'openai'"), e.getMessage());
+    }
+
+    @Test
+    void requireResolved_vaultNotConfiguredFailsClosed() {
+        ISecretProvider unavailable = mock(ISecretProvider.class);
+        when(unavailable.isAvailable()).thenReturn(false);
+        SecretResolver passthroughResolver = new SecretResolver(unavailable, meterRegistry, 5, 100);
+        passthroughResolver.init();
+
+        var passedThrough = passthroughResolver.resolveSecrets(Map.of("apiKey", "${vault:anthropic-key}"));
+
+        assertThrows(SecretResolver.UnresolvedSecretReferenceException.class,
+                () -> SecretResolver.requireResolved(passedThrough, "LLM provider 'anthropic'"));
+    }
+
+    @Test
+    void requireResolved_resolvedAndPlainValuesPass() throws Exception {
+        var ref = new SecretReference("default", "openaiKey");
+        when(secretProvider.resolve(ref)).thenReturn("sk-actual");
+
+        var resolved = resolver.resolveSecrets(Map.of("apiKey", "${vault:openaiKey}", "baseUrl", "https://api.openai.com"));
+
+        assertSame(resolved, SecretResolver.requireResolved(resolved, "LLM provider 'openai'"));
+        assertNull(SecretResolver.requireResolved(null, "x"));
+        assertTrue(SecretResolver.requireResolved(Map.of(), "x").isEmpty());
     }
 
     @Test

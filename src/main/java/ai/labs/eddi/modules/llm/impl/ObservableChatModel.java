@@ -20,11 +20,27 @@ import java.util.concurrent.*;
  */
 public class ObservableChatModel implements ChatModel {
     private static final Logger LOGGER = Logger.getLogger(ObservableChatModel.class);
-    private static final ExecutorService EXECUTOR = Executors.newCachedThreadPool(r -> {
-        var t = new Thread(r, "eddi-chat-timeout");
-        t.setDaemon(true);
-        return t;
-    });
+
+    /**
+     * Carrier for the timed provider call.
+     * <p>
+     * {@link #chatWithTimeout} abandons the worker on timeout —
+     * {@code future.cancel(true)} interrupts it, but an interrupt does not abort a
+     * socket read, so the thread stays alive until the provider answers or its own
+     * HTTP timeout fires. On the previous {@code newCachedThreadPool} that was one
+     * leaked <em>platform</em> thread per timeout with no ceiling: a provider that
+     * stalls under load grows the pool without limit while every caller has already
+     * given up.
+     * <p>
+     * A fixed pool would cap the threads but reintroduce the failure as
+     * head-of-line blocking — once N workers are stuck, the next chat call sits in
+     * the queue and times out without ever having been sent. Virtual threads remove
+     * the resource that was leaking instead: an abandoned worker parked on a socket
+     * read holds no platform thread, so the residue of a timeout burst is heap that
+     * the GC reclaims once the call finally returns, and no request is ever blocked
+     * behind one.
+     */
+    private static final ExecutorService EXECUTOR = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("eddi-chat-timeout-", 0).factory());
 
     private final ChatModel delegate;
     private final Duration timeout;

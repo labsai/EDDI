@@ -90,7 +90,10 @@ public class ChannelTarget {
      * If {@code true}, this target passively observes all channel messages and
      * selectively responds based on {@link #observeConfig} filters.
      * <p>
-     * <b>Note:</b> Observe mode is schema-ready but implementation is deferred.
+     * An observer is never addressable: {@code ChannelTargetRouter} excludes it
+     * both from trigger matching and from the default target, so the only route to
+     * it is the observe path, under the cooldown and daily caps {@code ObserveGate}
+     * enforces.
      */
     public boolean isObserveMode() {
         return observeMode;

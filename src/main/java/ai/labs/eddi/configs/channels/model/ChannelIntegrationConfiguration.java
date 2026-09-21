@@ -74,6 +74,20 @@ public class ChannelIntegrationConfiguration {
      * {@code publicKey}</li>
      * </ul>
      * Secret values should use vault references: {@code ${vault:key-name}}.
+     * <p>
+     * <b>Optional HITL (human-in-the-loop) keys — slack only:</b>
+     * <ul>
+     * <li>{@code hitlApprovalChannel} — the Slack channel id where HITL approval
+     * notifications are posted when a conversation in this integration pauses
+     * ({@code AWAITING_HUMAN}). If unset, no approval notification is sent (the
+     * pause notice still appears in the originating thread).</li>
+     * <li>{@code hitlApproverUserIds} — comma-separated Slack user ids permitted to
+     * approve/reject via the interactive buttons. <b>Fail-closed:</b> if this is
+     * unset, the approval notification is posted <i>without</i> buttons
+     * (notification-only) — nobody can decide from Slack. A Slack user not in this
+     * list who clicks a button is rejected. The interactivity endpoint is
+     * {@code POST /integrations/slack/interactive}.</li>
+     * </ul>
      */
     public Map<String, String> getPlatformConfig() {
         return new HashMap<>(platformConfig);

@@ -4,19 +4,36 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
+import ai.labs.eddi.configs.shared.RetryConfiguration;
+import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
+import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
+import ai.labs.eddi.modules.llm.model.CascadingStrategy;
+import ai.labs.eddi.modules.llm.model.EvaluationStrategy;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.CascadeStep;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration.HeuristicConfig;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration.JudgeModelConfig;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ModelCascadeConfig;
+import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.StreamingChatModel;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.jboss.logging.Logger;
 
+import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.TimeoutException;
+import java.util.stream.Collectors;
 
 /**
  * Executes a multi-model cascade: tries a cheap/fast model first, evaluates
@@ -24,16 +41,21 @@ import java.util.concurrent.*;
  * below the configured threshold.
  * <p>
  * Emits SSE events via {@link ConversationEventSink} so the frontend can
- * display real-time cascade status.
+ * display real-time cascade status, records per-step token usage / cost in the
+ * trace, and publishes Micrometer metrics under {@code eddi.llm.cascade.*}.
  * <p>
  * Edge-case handling:
  * <ul>
- * <li>Timeouts → treated as confidence 0.0, escalates to next step</li>
+ * <li>Timeouts → treated as escalation to the next step (best response
+ * kept)</li>
  * <li>Retryable errors (rate limits, 503) → retried per task config, then
  * escalates</li>
  * <li>Non-retryable errors (auth failure) → escalates immediately</li>
- * <li>All steps fail → throws aggregated {@link LifecycleException}</li>
- * <li>Budget exhausted → returns best response seen so far</li>
+ * <li>All steps fail → returns best response seen so far, or throws an
+ * aggregated {@link LifecycleException} if none produced a result</li>
+ * <li>Duration ceiling ({@code maxTotalDurationMs}) or cost ceiling
+ * ({@code maxCostPerRun}) reached → stops escalating and returns the best
+ * response so far</li>
  * </ul>
  */
 class CascadingModelExecutor {
@@ -41,6 +63,37 @@ class CascadingModelExecutor {
     // Virtual threads — lightweight, no pool sizing, no leak risk, ideal for
     // I/O-bound model calls
     private static final ExecutorService TIMEOUT_EXECUTOR = Executors.newVirtualThreadPerTaskExecutor();
+
+    // Margin added on top of StreamingLegacyChatExecutor's own bound when timing a
+    // live-streamed step's future, so the streaming executor always returns its
+    // (possibly partial) result before this backstop could cancel it mid-stream.
+    private static final long STREAMING_STEP_TIMEOUT_MARGIN_MS = 5_000L;
+
+    /**
+     * Parameter keys that must NOT be run through the template engine
+     * (credentials).
+     */
+    private static final Set<String> TEMPLATE_SKIP_PARAMS = Set.of("apiKey", "signingSecret", "appPassword", "botToken");
+
+    private final ChatModelRegistry registry;
+    private final GlobalVariableResolver globalVariableResolver;
+    private final ITemplatingEngine templatingEngine;
+    private final LegacyChatExecutor legacyChatExecutor;
+    private final StreamingLegacyChatExecutor streamingLegacyChatExecutor;
+    private final MeterRegistry meterRegistry;
+    private final CallerIdentityContext callerIdentityContext;
+
+    CascadingModelExecutor(ChatModelRegistry registry, GlobalVariableResolver globalVariableResolver, ITemplatingEngine templatingEngine,
+            LegacyChatExecutor legacyChatExecutor, StreamingLegacyChatExecutor streamingLegacyChatExecutor, MeterRegistry meterRegistry,
+            CallerIdentityContext callerIdentityContext) {
+        this.registry = registry;
+        this.globalVariableResolver = globalVariableResolver;
+        this.templatingEngine = templatingEngine;
+        this.legacyChatExecutor = legacyChatExecutor;
+        this.streamingLegacyChatExecutor = streamingLegacyChatExecutor;
+        this.meterRegistry = meterRegistry;
+        this.callerIdentityContext = callerIdentityContext;
+    }
 
     /**
      * Result of a cascade execution.
@@ -53,27 +106,59 @@ class CascadingModelExecutor {
      *            0-based index of the cascade step that produced the response
      * @param modelType
      *            the model provider type that produced the response
+     * @param modelName
+     *            the specific model name that produced the response
+     * @param tokenUsage
+     *            aggregate token usage across <em>all attempted steps</em>
+     *            ({@code inputTokens}, {@code outputTokens}, {@code totalTokens});
+     *            may be null when no step reported any. A run total rather than the
+     *            accepted step's own usage, so it agrees with {@code runCostUsd} —
+     *            an escalating cascade really did spend the tokens of every model
+     *            it tried. Per-step usage stays available in {@code trace}.
+     * @param runCostUsd
+     *            aggregate dollar cost across all attempted steps (0 when no
+     *            pricing is configured)
+     * @param runToolCostUsd
+     *            aggregate tool-execution dollar cost across all attempted steps (0
+     *            when no step ran tools or none were priced). A run total for the
+     *            same reason {@code runCostUsd} is one: an agent-mode step really
+     *            does spend its tools' money even when the cascade escalates past
+     *            it and returns a different step's answer.
      * @param trace
      *            list of per-step trace entries for audit
      * @param agentResult
      *            if agent mode was used, the agent execution result
+     * @param streamedLive
+     *            true if this response was already streamed to the client
+     *            token-by-token (so the caller must not re-emit it)
+     * @param responseMetadata
+     *            the winning step's raw response metadata (finishReason, warning,
+     *            streamingTimeout). Carried so the caller can apply response
+     *            validation — without it, policies like {@code onTruncation} and
+     *            {@code onContentFilter} are unreachable whenever the cascade runs.
      */
-    record CascadeResult(String response, double confidence, int stepUsed, String modelType, List<Map<String, Object>> trace,
-            AgentOrchestrator.ExecutionResult agentResult) {
+    record CascadeResult(String response, double confidence, int stepUsed, String modelType, String modelName, Map<String, Object> tokenUsage,
+            double runCostUsd, double runToolCostUsd, List<Map<String, Object>> trace, AgentOrchestrator.ExecutionResult agentResult,
+            boolean streamedLive, Map<String, Object> responseMetadata) {
     }
 
-    private CascadingModelExecutor() {
-        // utility class — all methods are static
+    /**
+     * Mutable run-total accumulator threaded through the step loop: LLM token cost,
+     * tool-execution cost, and token usage summed over EVERY attempted step. Local
+     * to a single {@code doExecute} call — the executor itself stays stateless.
+     */
+    private static final class RunTotals {
+        double llmCostUsd;
+        double toolCostUsd;
+        final Map<String, Object> tokenUsage = new LinkedHashMap<>();
     }
 
     /**
      * Execute the cascade. Tries each step in order until one meets its confidence
-     * threshold (or the last step is reached).
+     * threshold (or the last step is reached / a ceiling is hit).
      *
-     * @param registry
-     *            model registry for creating chat models per step
      * @param cascade
-     *            cascade configuration (steps, strategy, evaluation)
+     *            cascade configuration (steps, strategy, evaluation, ceilings)
      * @param messages
      *            conversation messages (without confidence instruction)
      * @param systemMessage
@@ -86,13 +171,50 @@ class CascadingModelExecutor {
      *            conversation memory (for event sink + agent mode)
      * @param agentOrchestrator
      *            agent orchestrator (for agent-mode cascade)
+     * @param templateDataObjects
+     *            template data for resolving step / judge parameters
+     * @param jsonMode
+     *            whether native JSON response format should be requested. Whether
+     *            it is actually sent is decided per step against that step's own
+     *            provider — a cascade routinely escalates across providers, so one
+     *            step may take API-level JSON while the next may not.
+     * @param convertToObject
+     *            whether the task expects a raw JSON object as output (affects the
+     *            effective confidence strategy)
+     * @param allowLiveStreaming
+     *            whether the always-accepted final step may be streamed live to the
+     *            client (legacy mode, non-wrapper strategies, streaming-capable
+     *            provider)
      * @return the cascade result
      * @throws LifecycleException
-     *             if all steps fail
+     *             if all steps fail without producing any usable response
      */
-    static CascadeResult execute(ChatModelRegistry registry, ModelCascadeConfig cascade, List<ChatMessage> messages, String systemMessage,
-                                 Map<String, String> baseParams, LlmConfiguration.Task task, IConversationMemory memory,
-                                 AgentOrchestrator agentOrchestrator)
+    CascadeResult execute(ModelCascadeConfig cascade, List<ChatMessage> messages, String systemMessage, Map<String, String> baseParams,
+                          LlmConfiguration.Task task, IConversationMemory memory, IAgentOrchestrator agentOrchestrator,
+                          Map<String, Object> templateDataObjects, boolean jsonMode, boolean convertToObject, boolean allowLiveStreaming,
+                          ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes)
+            throws LifecycleException {
+        return doExecute(cascade, messages, systemMessage, baseParams, task, memory, agentOrchestrator, templateDataObjects, jsonMode,
+                convertToObject, allowLiveStreaming, effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes);
+    }
+
+    /**
+     * Backward-compatible overload without tool-level HITL: no approvals config,
+     * sentinel task index, default transcript cap. An agent-mode step under this
+     * overload never gates a tool call.
+     */
+    CascadeResult execute(ModelCascadeConfig cascade, List<ChatMessage> messages, String systemMessage, Map<String, String> baseParams,
+                          LlmConfiguration.Task task, IConversationMemory memory, IAgentOrchestrator agentOrchestrator,
+                          Map<String, Object> templateDataObjects, boolean jsonMode, boolean convertToObject, boolean allowLiveStreaming)
+            throws LifecycleException {
+        return doExecute(cascade, messages, systemMessage, baseParams, task, memory, agentOrchestrator, templateDataObjects, jsonMode,
+                convertToObject, allowLiveStreaming, null, -1, PendingToolCallBatch.TRANSCRIPT_MAX_BYTES_DEFAULT);
+    }
+
+    private CascadeResult doExecute(ModelCascadeConfig cascade, List<ChatMessage> messages, String systemMessage, Map<String, String> baseParams,
+                                    LlmConfiguration.Task task, IConversationMemory memory, IAgentOrchestrator agentOrchestrator,
+                                    Map<String, Object> templateDataObjects, boolean jsonMode, boolean convertToObject, boolean allowLiveStreaming,
+                                    ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes)
             throws LifecycleException {
 
         List<CascadeStep> steps = cascade.getSteps();
@@ -100,24 +222,69 @@ class CascadingModelExecutor {
             throw new LifecycleException("Model cascade enabled but no steps configured");
         }
 
-        String evaluationStrategy = cascade.getEvaluationStrategy();
+        String strategy = cascade.getStrategy();
+        if (strategy != null && CascadingStrategy.fromConfig(strategy) != CascadingStrategy.CASCADE) {
+            // Only sequential 'cascade' is implemented. 'parallel' is reserved.
+            // A deploy-time validation warning is emitted in LlmTask.configure — keep
+            // runtime quiet to avoid per-turn log spam.
+            LOGGER.debugf("Cascade strategy '%s' is not implemented; running sequentially", strategy);
+        }
+
         boolean useAgentMode = cascade.isEnableInAgentMode() && task.isAgentMode();
+        String effectiveStrategy = resolveEffectiveStrategy(cascade.getEvaluationStrategy(), convertToObject, useAgentMode, cascade);
+        HeuristicConfig heuristicConfig = cascade.getHeuristic();
+
+        // Build the judge model once if the effective strategy needs it.
+        ChatModel judgeModel = null;
+        if (EvaluationStrategy.fromConfig(effectiveStrategy) == EvaluationStrategy.JUDGE_MODEL && cascade.getJudgeModel() != null) {
+            judgeModel = buildJudgeModel(cascade.getJudgeModel(), templateDataObjects);
+        }
+
         ConversationEventSink eventSink = memory.getEventSink();
+        increment("eddi.llm.cascade.executions", "agentMode", String.valueOf(useAgentMode));
 
         List<Map<String, Object>> trace = new ArrayList<>();
         List<String> errors = new ArrayList<>();
         CascadeResult bestSoFar = null;
 
+        Long maxTotalDurationMs = cascade.getMaxTotalDurationMs();
+        Double maxCostPerRun = cascade.getMaxCostPerRun();
+        long cascadeStart = System.currentTimeMillis();
+        // Run totals, accumulated across every attempted step: a 3-model escalation
+        // spends three models' tokens (and three steps' tool budgets), and reporting
+        // only the accepted step's usage made the ledger's tokens contradict its own
+        // dollar figure.
+        var totals = new RunTotals();
+
         for (int i = 0; i < steps.size(); i++) {
             CascadeStep step = steps.get(i);
             boolean isLastStep = (i == steps.size() - 1);
 
-            // Resolve model type and merge params
-            String modelType = step.getType() != null ? step.getType() : task.getType();
-            Map<String, String> mergedParams = mergeParams(baseParams, step.getParameters());
-            String modelName = mergedParams.getOrDefault("model", modelType);
+            // Ceiling checks before starting a step (step 0 always runs).
+            if (i > 0) {
+                long elapsed = System.currentTimeMillis() - cascadeStart;
+                if (maxTotalDurationMs != null && elapsed >= maxTotalDurationMs) {
+                    LOGGER.warnf("Cascade duration ceiling reached (%dms >= %dms) before step %d; returning best so far", elapsed, maxTotalDurationMs,
+                            i);
+                    increment("eddi.llm.cascade.ceiling.exceeded", "kind", "duration");
+                    return finalizeBest(bestSoFar, totals, trace, errors);
+                }
+                if (maxCostPerRun != null && totals.llmCostUsd >= maxCostPerRun) {
+                    LOGGER.warnf("Cascade cost ceiling reached ($%.4f >= $%.4f) before step %d; returning best so far", totals.llmCostUsd,
+                            maxCostPerRun, i);
+                    increment("eddi.llm.cascade.ceiling.exceeded", "kind", "cost");
+                    return finalizeBest(bestSoFar, totals, trace, errors);
+                }
+            }
 
-            // Emit SSE: cascade step start
+            // #8: resolve step type through global variables (parity with the standard
+            // path).
+            String rawType = step.getType() != null ? step.getType() : task.getType();
+            String modelType = globalVariableResolver.resolveValue(rawType);
+            // #8: template step param values (parity with task params), then merge.
+            Map<String, String> mergedParams = mergeParams(baseParams, templateParams(step.getParameters(), templateDataObjects));
+            String modelName = resolveModelName(mergedParams, modelType);
+
             if (eventSink != null) {
                 eventSink.onCascadeStepStart(i, modelType, modelName, steps.size());
             }
@@ -130,39 +297,155 @@ class CascadingModelExecutor {
             stepTrace.put("model", modelName);
             stepTrace.put("modelType", modelType);
 
+            // Tracks whether THIS step engaged live token streaming — read in the catch so
+            // a
+            // mid-stream failure of a live-streamed final step does not trigger a duplicate
+            // (garbled) re-emit of the buffered best response.
+            boolean stepStreamedLive = false;
+
             try {
                 ChatModel chatModel = registry.getOrCreate(modelType, mergedParams);
 
-                // Execute the model call with per-step timeout
-                StepResult stepResult = executeStepWithTimeout(chatModel, messages, systemMessage, evaluationStrategy, mergedParams, task, step,
-                        memory, agentOrchestrator, useAgentMode);
+                // Live-stream a step only when it is GUARANTEED to be accepted regardless of
+                // the confidence value — otherwise tokens could be sent for a step that then
+                // escalates. That is: the last step (always accepted), a null-threshold step
+                // (always accepted), or a 'none'-strategy step whose threshold ≤ 1.0 (its
+                // confidence is always 1.0). Non-wrapper strategies only, so the raw tokens are
+                // the actual answer; and only when the provider supports streaming.
+                boolean guaranteedAccept = isLastStep || step.getConfidenceThreshold() == null
+                        || (EvaluationStrategy.fromConfig(effectiveStrategy) == EvaluationStrategy.NONE && step.getConfidenceThreshold() <= 1.0);
+                // Finding F9: "guaranteed accept" only holds while the step SUCCEEDS. A
+                // non-final step that dies mid-stream has already pushed N tokens into the
+                // sink, and the next step then streams its own full answer into the SAME
+                // sink — the client renders step N's fragment glued to step N+1's answer.
+                // The last-step failure path is handled explicitly (it marks the fallback
+                // streamedLive so LlmTask does not re-emit); there is no equivalent
+                // recovery for a mid-cascade step, and this executor cannot un-send tokens.
+                // So only the last step streams live; every earlier step is buffered.
+                boolean streamLiveCandidate = allowLiveStreaming && !useAgentMode
+                        && EvaluationStrategy.fromConfig(effectiveStrategy) != EvaluationStrategy.STRUCTURED_OUTPUT
+                        && guaranteedAccept && isLastStep;
+                StreamingChatModel streamingModel = streamLiveCandidate ? registry.getOrCreateStreaming(modelType, mergedParams) : null;
+                stepStreamedLive = streamingModel != null;
 
-                long durationMs = System.currentTimeMillis() - stepStart;
-                stepTrace.put("confidence", stepResult.confidence);
-                stepTrace.put("durationMs", durationMs);
-
-                // Track best response for budget-exhaustion fallback
-                if (bestSoFar == null || stepResult.confidence > bestSoFar.confidence()) {
-                    bestSoFar = new CascadeResult(stepResult.response, stepResult.confidence, i, modelType, trace, stepResult.agentResult);
+                // A live stream is terminal and MUST NOT be cancelled mid-flight: cancelling
+                // the awaiting virtual thread does not stop the provider's callback thread, so
+                // it would keep emitting tokens to the SSE client while the cascade moves on
+                // and
+                // re-emits a different response. A streamed step therefore runs under the
+                // streaming executor's own internal bound (plus a small backstop) and is NOT
+                // subject to the per-step / remaining-duration cap. Buffered steps use the
+                // configured timeout, capped by the remaining duration budget (the loop's
+                // pre-step ceiling check already bails out when the budget is fully spent).
+                long stepTimeout;
+                if (streamingModel != null) {
+                    stepTimeout = resolveStreamingStepTimeoutMs(task);
+                } else {
+                    stepTimeout = step.getTimeoutMs() != null ? step.getTimeoutMs() : 30000L;
+                    if (maxTotalDurationMs != null) {
+                        long remaining = maxTotalDurationMs - (System.currentTimeMillis() - cascadeStart);
+                        stepTimeout = Math.max(1L, Math.min(stepTimeout, remaining));
+                    }
                 }
 
-                // Check if this step meets the threshold
-                if (isLastStep || step.getConfidenceThreshold() == null || stepResult.confidence >= step.getConfidenceThreshold()) {
+                // Per-step policy: the provider is the STEP's provider, not the task
+                // default, so an escalation from e.g. mistral to gemini stops sending the
+                // JSON format the moment it would be paired with tools.
+                var stepJsonPolicy = JsonResponseFormatPolicy.of(jsonMode, modelType, task.getJsonResponseFormat());
 
-                    stepTrace.put("status", "accepted");
+                StepResult stepResult = executeStepWithTimeout(chatModel, streamingModel, eventSink, messages, systemMessage, effectiveStrategy, task,
+                        memory, agentOrchestrator, useAgentMode, judgeModel, heuristicConfig, stepJsonPolicy, stepTimeout,
+                        effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes);
+
+                long durationMs = System.currentTimeMillis() - stepStart;
+                double stepCost = computeCost(step, cascade, stepResult.tokenUsage);
+                totals.llmCostUsd += stepCost;
+                // Tool spend of THIS step (agent mode only; AgentOrchestrator reports its own
+                // per-call delta). Summed rather than taken from the winning step: an
+                // escalating cascade charges the conversation for every step's tool calls.
+                totals.toolCostUsd += stepToolCost(stepResult.responseMetadata);
+                mergeTokenUsage(totals.tokenUsage, stepResult.tokenUsage);
+
+                stepTrace.put("confidence", stepResult.confidence);
+                stepTrace.put("durationMs", durationMs);
+                if (stepResult.tokenUsage != null) {
+                    stepTrace.put("tokenUsage", stepResult.tokenUsage);
+                }
+                stepTrace.put("costUsd", stepCost);
+
+                recordStepMetrics(modelType, durationMs, stepResult.confidence, stepResult.tokenUsage, stepCost);
+
+                // A live-streamed step that hit its timeout is a failed step, not a
+                // candidate. executeCapturing returns the (possibly empty) partial text
+                // rather than throwing, so without this it competes on equal footing with
+                // a real answer — and being the last step it would be accepted outright,
+                // beating a good earlier response.
+                boolean stepTimedOut = stepResult.responseMetadata != null
+                        && Boolean.TRUE.equals(stepResult.responseMetadata.get("streamingTimeout"));
+
+                if (!stepTimedOut && (bestSoFar == null || stepResult.confidence > bestSoFar.confidence())) {
+                    bestSoFar = new CascadeResult(stepResult.response, stepResult.confidence, i, modelType, modelName, stepResult.tokenUsage, 0.0,
+                            0.0, trace, stepResult.agentResult, stepResult.streamedLive, stepResult.responseMetadata);
+                }
+
+                if (stepTimedOut && bestSoFar != null) {
+                    stepTrace.put("status", "timeout");
                     trace.add(stepTrace);
+                    increment("eddi.llm.cascade.escalations", "reason", "timeout");
+                    increment("eddi.llm.cascade.step.errors", "provider", modelType, "type", "timeout");
 
+                    if (isLastStep) {
+                        LOGGER.warnf("Cascade step %d timed out mid-stream (last step), returning best response", i);
+                        // The client may already have seen partial tokens from the timed-out
+                        // stream — mark the fallback streamedLive so LlmTask does not re-emit
+                        // best's (different) text as a duplicate token stream.
+                        return withRun(bestSoFar, totals, trace, bestSoFar.streamedLive() || stepResult.streamedLive);
+                    }
+
+                    LOGGER.warnf("Cascade step %d timed out mid-stream, escalating", i);
+                    if (eventSink != null) {
+                        eventSink.onCascadeEscalation(i, i + 1, 0.0, step.getConfidenceThreshold() != null ? step.getConfidenceThreshold() : 0.0,
+                                "timeout", durationMs);
+                    }
+                    continue;
+                }
+
+                if (isLastStep || step.getConfidenceThreshold() == null || stepResult.confidence >= step.getConfidenceThreshold()) {
+                    trace.add(stepTrace);
                     LOGGER.infof("Cascade step %d accepted: confidence=%.2f, model=%s, durationMs=%d", i, stepResult.confidence, modelName,
                             durationMs);
 
-                    return new CascadeResult(stepResult.response, stepResult.confidence, i, modelType, trace, stepResult.agentResult);
+                    // returnBestAcrossSteps: an earlier escalated step may have scored higher.
+                    // Do NOT swap when the accepted step was already streamed live — the client
+                    // has already received its tokens, so returning a different step's text would
+                    // mismatch the stream. Resolve the winner BEFORE recording the accepted-step
+                    // status/metric, so both name the step actually returned.
+                    if (cascade.isReturnBestAcrossSteps() && !stepResult.streamedLive && bestSoFar != null && bestSoFar.stepUsed() != i
+                            && bestSoFar.confidence() > stepResult.confidence) {
+                        LOGGER.infof("returnBestAcrossSteps: returning step %d (confidence=%.2f) over accepted step %d (confidence=%.2f)",
+                                bestSoFar.stepUsed(), bestSoFar.confidence(), i, stepResult.confidence);
+                        stepTrace.put("status", "superseded_by_best");
+                        for (Map<String, Object> entry : trace) {
+                            if (Integer.valueOf(bestSoFar.stepUsed()).equals(entry.get("step"))) {
+                                entry.put("status", "accepted_as_best");
+                            }
+                        }
+                        increment("eddi.llm.cascade.accepted.step", "step", String.valueOf(bestSoFar.stepUsed()));
+                        return withRun(bestSoFar, totals, trace);
+                    }
+
+                    stepTrace.put("status", "accepted");
+                    increment("eddi.llm.cascade.accepted.step", "step", String.valueOf(i));
+                    return new CascadeResult(stepResult.response, stepResult.confidence, i, modelType, modelName, runTotal(totals.tokenUsage),
+                            totals.llmCostUsd, totals.toolCostUsd, trace, stepResult.agentResult, stepResult.streamedLive,
+                            stepResult.responseMetadata);
                 }
 
-                // Escalate
+                // Escalate.
                 stepTrace.put("status", "escalated");
                 trace.add(stepTrace);
+                increment("eddi.llm.cascade.escalations", "reason", "low_confidence");
 
-                // Emit SSE: cascade escalation
                 if (eventSink != null) {
                     eventSink.onCascadeEscalation(i, i + 1, stepResult.confidence, step.getConfidenceThreshold(), "low_confidence", durationMs);
                 }
@@ -176,6 +459,8 @@ class CascadingModelExecutor {
                 stepTrace.put("durationMs", durationMs);
                 trace.add(stepTrace);
                 errors.add(String.format("Step %d (%s): timeout after %dms", i, modelName, durationMs));
+                increment("eddi.llm.cascade.escalations", "reason", "timeout");
+                increment("eddi.llm.cascade.step.errors", "provider", modelType, "type", "timeout");
 
                 LOGGER.warnf("Cascade step %d timed out after %dms, escalating", i, durationMs);
 
@@ -185,22 +470,31 @@ class CascadingModelExecutor {
                 }
 
                 if (isLastStep) {
-                    // Last step timed out — return best so far if available
                     if (bestSoFar != null) {
                         LOGGER.warn("All cascade steps exhausted (last timed out), returning best response");
-                        return bestSoFar;
+                        return withRun(bestSoFar, totals, trace);
                     }
                     throw new LifecycleException("Model cascade failed: all steps exhausted. Errors: " + String.join("; ", errors));
                 }
 
             } catch (Exception e) {
+                // HITL tool pause: the agent-mode step invoked a gated tool. This is
+                // not a cascade failure to escalate/aggregate — rethrow immediately so
+                // the pause signal reaches LifecycleManager (never demoted to
+                // confidence 0 or swallowed into "best so far").
+                if (e instanceof ToolApprovalRequiredException tare) {
+                    throw tare;
+                }
                 long durationMs = System.currentTimeMillis() - stepStart;
                 String errorType = isRetryableError(e) ? "retryable_error" : "error";
+                String failureDescription = describeFailure(e);
                 stepTrace.put("status", errorType);
-                stepTrace.put("error", e.getMessage());
+                stepTrace.put("error", failureDescription);
                 stepTrace.put("durationMs", durationMs);
                 trace.add(stepTrace);
-                errors.add(String.format("Step %d (%s): %s", i, modelName, e.getMessage()));
+                errors.add(String.format("Step %d (%s): %s", i, modelName, failureDescription));
+                increment("eddi.llm.cascade.escalations", "reason", errorType);
+                increment("eddi.llm.cascade.step.errors", "provider", modelType, "type", errorType);
 
                 LOGGER.warnf("Cascade step %d failed (%s): %s, escalating", i, errorType, e.getMessage());
 
@@ -212,38 +506,101 @@ class CascadingModelExecutor {
                 if (isLastStep) {
                     if (bestSoFar != null) {
                         LOGGER.warn("All cascade steps exhausted (last failed), returning best response");
-                        return bestSoFar;
+                        // If the failed last step was streamed live, the client may already
+                        // have received partial tokens — mark the fallback streamedLive so
+                        // LlmTask does not re-emit best's (different) text as a duplicate token
+                        // stream. The correct full response still reaches the client via the
+                        // final snapshot ("done") event.
+                        return withRun(bestSoFar, totals, trace, bestSoFar.streamedLive() || stepStreamedLive);
                     }
                     throw new LifecycleException("Model cascade failed: all steps exhausted. Errors: " + String.join("; ", errors), e);
                 }
             }
         }
 
-        // Should be unreachable — last step always accepted or throws
-        if (bestSoFar != null) {
-            return bestSoFar;
+        // Should be unreachable — last step always accepted or throws.
+        return finalizeBest(bestSoFar, totals, trace, errors);
+    }
+
+    /**
+     * Compute the effective confidence strategy. The {@code structured_output}
+     * wrapper cannot be used when the task expects a raw JSON object
+     * ({@code convertToObject}) or when running in agent mode (the wrapper cannot
+     * be injected around the tool-calling loop). In those cases the strategy is
+     * downgraded to {@code judge_model} (if a judge is configured) or
+     * {@code heuristic}. A single deploy-time warning is emitted in
+     * {@code LlmTask.configure}; runtime logs at debug to avoid per-turn spam.
+     */
+    private String resolveEffectiveStrategy(String configured, boolean convertToObject, boolean useAgentMode, ModelCascadeConfig cascade) {
+        // Normalize an unknown/absent strategy to the default — matches the deploy-time
+        // validator warning and the evaluator's own fallback, so streaming/wrapper
+        // gating and confidence evaluation stay consistent.
+        EvaluationStrategy strategy = EvaluationStrategy.fromConfigOrDefault(configured);
+        boolean wrapperUnusable = convertToObject || useAgentMode;
+        if (strategy == EvaluationStrategy.STRUCTURED_OUTPUT && wrapperUnusable) {
+            EvaluationStrategy downgraded = cascade.getJudgeModel() != null ? EvaluationStrategy.JUDGE_MODEL : EvaluationStrategy.HEURISTIC;
+            LOGGER.debugf("structured_output confidence not usable with %s; using '%s'", convertToObject ? "convertToObject" : "agent mode",
+                    downgraded.configValue());
+            return downgraded.configValue();
         }
-        throw new LifecycleException("Model cascade failed: no steps produced a result");
+        return strategy.configValue();
+    }
+
+    /** Build the judge model from its config, resolving type + templated params. */
+    private ChatModel buildJudgeModel(JudgeModelConfig judgeConfig, Map<String, Object> templateDataObjects) {
+        try {
+            if (isBlank(judgeConfig.getType())) {
+                LOGGER.warn("judge_model configured without a type; falling back to heuristic");
+                return null;
+            }
+            String type = globalVariableResolver.resolveValue(judgeConfig.getType());
+            Map<String, String> params = templateParams(judgeConfig.getParameters(), templateDataObjects);
+            return registry.getOrCreate(type, params != null ? params : new HashMap<>());
+        } catch (Exception e) {
+            LOGGER.warnf("Failed to build judge model: %s; falling back to heuristic", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Backstop for a live-streamed step's future.
+     * <p>
+     * A live stream must never be cancelled mid-flight, so this bound has to sit
+     * <em>above</em> the bound {@link StreamingLegacyChatExecutor} applies to the
+     * stream itself — otherwise the future is cancelled while the provider keeps
+     * emitting tokens to the SSE client. It is therefore derived from the same
+     * resolution the streaming executor uses (which honours both
+     * {@code streamingTimeoutSeconds} and the {@code timeout} parameter) plus a
+     * margin, rather than assuming the 120s default.
+     */
+    static long resolveStreamingStepTimeoutMs(LlmConfiguration.Task task) {
+        return TimeUnit.SECONDS.toMillis(StreamingLegacyChatExecutor.resolveTimeoutSeconds(task)) + STREAMING_STEP_TIMEOUT_MARGIN_MS;
     }
 
     /**
      * Execute a single cascade step with timeout.
      */
-    private static StepResult executeStepWithTimeout(ChatModel chatModel, List<ChatMessage> messages, String systemMessage, String evaluationStrategy,
-                                                     Map<String, String> mergedParams, LlmConfiguration.Task task, CascadeStep step,
-                                                     IConversationMemory memory,
-                                                     AgentOrchestrator agentOrchestrator, boolean useAgentMode)
+    private StepResult executeStepWithTimeout(ChatModel chatModel, StreamingChatModel streamingModel, ConversationEventSink eventSink,
+                                              List<ChatMessage> messages, String systemMessage, String evaluationStrategy,
+                                              LlmConfiguration.Task task, IConversationMemory memory,
+                                              IAgentOrchestrator agentOrchestrator, boolean useAgentMode, ChatModel judgeModel,
+                                              HeuristicConfig heuristicConfig, JsonResponseFormatPolicy jsonPolicy, long timeoutMs,
+                                              ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes)
             throws Exception {
 
-        long timeoutMs = step.getTimeoutMs() != null ? step.getTimeoutMs() : 30000L;
-
-        Future<StepResult> future = TIMEOUT_EXECUTOR.submit(() -> {
+        // A cascade step runs on a virtual thread, so the caller binding on the
+        // pipeline thread does not reach the tools this step invokes — an apicall
+        // tool using ${caller:token} would fail closed for no reason the agent
+        // designer could see, and only when a cascade is configured.
+        Future<StepResult> future = TIMEOUT_EXECUTOR.submit(callerIdentityContext.propagate(() -> {
             if (useAgentMode) {
-                return executeAgentModeStep(chatModel, messages, systemMessage, evaluationStrategy, task, memory, agentOrchestrator);
+                return executeAgentModeStep(chatModel, messages, systemMessage, evaluationStrategy, task, memory, agentOrchestrator, judgeModel,
+                        heuristicConfig, jsonPolicy, effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes);
             } else {
-                return executeLegacyModeStep(chatModel, messages, systemMessage, evaluationStrategy, task);
+                return executeLegacyModeStep(chatModel, streamingModel, eventSink, messages, systemMessage, evaluationStrategy, task, judgeModel,
+                        heuristicConfig, jsonPolicy);
             }
-        });
+        }));
 
         try {
             return future.get(timeoutMs, TimeUnit.MILLISECONDS);
@@ -265,11 +622,14 @@ class CascadingModelExecutor {
     /**
      * Execute a step in legacy (non-agent) mode.
      */
-    private static StepResult executeLegacyModeStep(ChatModel chatModel, List<ChatMessage> originalMessages, String systemMessage,
-                                                    String evaluationStrategy, LlmConfiguration.Task task)
+    private StepResult executeLegacyModeStep(ChatModel chatModel, StreamingChatModel streamingModel, ConversationEventSink eventSink,
+                                             List<ChatMessage> originalMessages, String systemMessage, String evaluationStrategy,
+                                             LlmConfiguration.Task task, ChatModel judgeModel, HeuristicConfig heuristicConfig,
+                                             JsonResponseFormatPolicy jsonPolicy)
             throws LifecycleException {
 
-        // If using structured_output strategy, augment the system message
+        // The structured_output wrapper only applies in legacy mode; it never co-occurs
+        // with jsonMode (resolveEffectiveStrategy downgrades it away in that case).
         List<ChatMessage> messages;
         if ("structured_output".equals(evaluationStrategy)) {
             messages = augmentMessagesForStructuredOutput(originalMessages, systemMessage);
@@ -277,35 +637,93 @@ class CascadingModelExecutor {
             messages = new ArrayList<>(originalMessages);
         }
 
-        var chatResponse = AgentExecutionHelper.executeChatWithRetry(chatModel, messages, task);
-        String responseText = chatResponse.aiMessage() != null ? chatResponse.aiMessage().text() : "";
+        String responseText;
+        Map<String, Object> tokenUsage;
+        Map<String, Object> responseMetadata;
+        boolean streamedLive = false;
+        if (streamingModel != null && eventSink != null) {
+            // Stream the always-accepted final step live — tokens emitted via the sink.
+            var streamResult = streamingLegacyChatExecutor.executeCapturing(streamingModel, messages, eventSink, task, jsonPolicy);
+            responseText = streamResult.response() != null ? streamResult.response() : "";
+            responseMetadata = streamResult.responseMetadata();
+            tokenUsage = extractTokenUsage(responseMetadata);
+            streamedLive = true;
+        } else {
+            var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonPolicy);
+            responseText = chatResult.response() != null ? chatResult.response() : "";
+            responseMetadata = chatResult.responseMetadata();
+            tokenUsage = extractTokenUsage(responseMetadata);
+        }
 
-        var evalResult = ConfidenceEvaluator.evaluate(evaluationStrategy, responseText, null);
-        return new StepResult(evalResult.response(), evalResult.confidence(), null);
+        var evalResult = ConfidenceEvaluator.evaluate(evaluationStrategy, responseText, judgeModel, heuristicConfig);
+        return new StepResult(evalResult.response(), evalResult.confidence(), null, tokenUsage, streamedLive, responseMetadata);
     }
 
     /**
-     * Execute a step in agent mode (with tool-calling loop).
+     * Execute a step in agent mode (with tool-calling loop). The structured_output
+     * wrapper is never used here — {@code evaluationStrategy} has already been
+     * downgraded to judge/heuristic by {@link #resolveEffectiveStrategy}.
      */
-    private static StepResult executeAgentModeStep(ChatModel chatModel, List<ChatMessage> originalMessages, String systemMessage,
-                                                   String evaluationStrategy, LlmConfiguration.Task task, IConversationMemory memory,
-                                                   AgentOrchestrator agentOrchestrator)
+    private StepResult executeAgentModeStep(ChatModel chatModel, List<ChatMessage> originalMessages, String systemMessage, String evaluationStrategy,
+                                            LlmConfiguration.Task task, IConversationMemory memory, IAgentOrchestrator agentOrchestrator,
+                                            ChatModel judgeModel, HeuristicConfig heuristicConfig, JsonResponseFormatPolicy jsonPolicy,
+                                            ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes)
             throws LifecycleException {
 
-        // For agent mode, filter out system messages (orchestrator adds its own)
         List<ChatMessage> chatMessagesWithoutSystem = originalMessages.stream().filter(m -> !(m instanceof SystemMessage))
-                .collect(java.util.stream.Collectors.toList());
+                .collect(Collectors.toList());
 
-        var agentResult = agentOrchestrator.executeIfToolsEnabled(chatModel, systemMessage, chatMessagesWithoutSystem, task, memory);
+        var agentResult = agentOrchestrator.executeIfToolsEnabled(chatModel, systemMessage, chatMessagesWithoutSystem, task, memory,
+                effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, jsonPolicy);
 
         if (agentResult != null) {
             String responseText = agentResult.response();
-            var evalResult = ConfidenceEvaluator.evaluate(evaluationStrategy, responseText, null);
-            return new StepResult(evalResult.response(), evalResult.confidence(), agentResult);
+            Map<String, Object> tokenUsage = extractTokenUsage(agentResult.responseMetadata());
+            var evalResult = ConfidenceEvaluator.evaluate(evaluationStrategy, responseText, judgeModel, heuristicConfig);
+            return new StepResult(evalResult.response(), evalResult.confidence(), agentResult, tokenUsage, false, agentResult.responseMetadata());
         }
 
-        // Agent mode returned null (no tools enabled) — fall back to legacy
-        return executeLegacyModeStep(chatModel, originalMessages, systemMessage, evaluationStrategy, task);
+        // Agent mode returned null (no tools enabled) — fall back to legacy (no live
+        // stream).
+        return executeLegacyModeStep(chatModel, null, null, originalMessages, systemMessage, evaluationStrategy, task, judgeModel, heuristicConfig,
+                jsonPolicy);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> extractTokenUsage(Map<String, Object> responseMetadata) {
+        if (responseMetadata == null) {
+            return null;
+        }
+        Object tu = responseMetadata.get("tokenUsage");
+        return tu instanceof Map ? (Map<String, Object>) tu : null;
+    }
+
+    /**
+     * The tool-execution dollar cost an agent-mode step reported, or 0 for a legacy
+     * step (which runs no tools) and for any step whose tools were unpriced.
+     * {@link AgentOrchestrator} writes it as {@code toolCostUsd}, measured as its
+     * own delta of the conversation's tracked tool cost, so the per-step values
+     * partition the run's spend and are safe to sum.
+     */
+    static double stepToolCost(Map<String, Object> responseMetadata) {
+        if (responseMetadata == null) {
+            return 0.0;
+        }
+        return responseMetadata.get("toolCostUsd") instanceof Number n ? n.doubleValue() : 0.0;
+    }
+
+    /**
+     * Compute the dollar cost of a step from its token usage and configured pricing
+     * (step price overrides cascade-level default). Returns 0 when no price is set.
+     */
+    static double computeCost(CascadeStep step, ModelCascadeConfig cascade, Map<String, Object> tokenUsage) {
+        Double inPrice = step.getInputPricePer1M() != null ? step.getInputPricePer1M() : cascade.getInputPricePer1M();
+        Double outPrice = step.getOutputPricePer1M() != null ? step.getOutputPricePer1M() : cascade.getOutputPricePer1M();
+        return TokenPricing.cost(inPrice, outPrice, tokenUsage);
+    }
+
+    private static long asLong(Object value) {
+        return value instanceof Number n ? n.longValue() : 0L;
     }
 
     /**
@@ -320,7 +738,6 @@ class CascadingModelExecutor {
 
         for (ChatMessage msg : originalMessages) {
             if (msg instanceof SystemMessage sm && !systemFound) {
-                // Augment existing system message
                 messages.add(SystemMessage.from(sm.text() + ConfidenceEvaluator.buildConfidenceInstruction()));
                 systemFound = true;
             } else {
@@ -350,30 +767,155 @@ class CascadingModelExecutor {
     }
 
     /**
-     * Check if an error is retryable (same logic as AgentExecutionHelper).
+     * Run the template engine over parameter values (parity with task params).
+     * Credential keys are skipped; template failures fall back to the raw value.
+     */
+    private Map<String, String> templateParams(Map<String, String> params, Map<String, Object> templateDataObjects) {
+        if (params == null || params.isEmpty() || templatingEngine == null || templateDataObjects == null) {
+            return params;
+        }
+        Map<String, String> result = new HashMap<>(params);
+        result.replaceAll((key, value) -> {
+            if (isBlank(value) || TEMPLATE_SKIP_PARAMS.contains(key)) {
+                return value;
+            }
+            try {
+                return templatingEngine.processTemplate(value, templateDataObjects);
+            } catch (ITemplatingEngine.TemplateEngineException e) {
+                LOGGER.errorf(e, "Template processing failed for cascade step parameter '%s': %s", key, e.getLocalizedMessage());
+                return value;
+            }
+        });
+        return result;
+    }
+
+    /**
+     * Resolve the specific model name from provider-specific parameter keys. Falls
+     * back to the provider type when no explicit model key is present.
+     */
+    private static String resolveModelName(Map<String, String> params, String fallbackType) {
+        for (String key : List.of("modelName", "model", "modelId", "deploymentName")) {
+            String v = params.get(key);
+            if (v != null && !v.isBlank()) {
+                return v;
+            }
+        }
+        return fallbackType;
+    }
+
+    /**
+     * Describe a step failure so it can actually be diagnosed.
+     * <p>
+     * The retry wrapper reports a generic "… failed after N attempts", which reads
+     * identically for a rate limit, an auth failure and a network outage — the
+     * provider's own message survives only on the cause chain. Both the audit trace
+     * and the aggregated cascade error use this, so append the root cause whenever
+     * it says something the wrapper message does not.
+     */
+    private static String describeFailure(Throwable e) {
+        String message = e.getMessage();
+        Throwable root = e;
+        // Bounded walk — a self-referential or cyclic cause chain must not hang the
+        // error path that exists to report a failure.
+        for (int depth = 0; depth < 10 && root.getCause() != null && root.getCause() != root; depth++) {
+            root = root.getCause();
+        }
+        String rootMessage = root.getMessage();
+        if (rootMessage != null && !rootMessage.equals(message)) {
+            return message == null ? rootMessage : message + " (cause: " + rootMessage + ")";
+        }
+        return message;
+    }
+
+    /** Rebuild the best-so-far result with the final aggregate run cost + trace. */
+    private static CascadeResult withRun(CascadeResult best, RunTotals totals, List<Map<String, Object>> trace) {
+        return withRun(best, totals, trace, best.streamedLive());
+    }
+
+    private static CascadeResult withRun(CascadeResult best, RunTotals totals, List<Map<String, Object>> trace, boolean streamedLive) {
+        return new CascadeResult(best.response(), best.confidence(), best.stepUsed(), best.modelType(), best.modelName(),
+                runTotal(totals.tokenUsage), totals.llmCostUsd, totals.toolCostUsd, trace, best.agentResult(), streamedLive,
+                best.responseMetadata());
+    }
+
+    /**
+     * Accumulate one step's token usage into the run total. Each of the three
+     * counts is added null-safely and only when the step actually reported it (or
+     * the total already carries it), so a provider that omits {@code totalTokens}
+     * never zeroes what earlier steps contributed.
+     */
+    static void mergeTokenUsage(Map<String, Object> runTokenUsage, Map<String, Object> stepTokenUsage) {
+        if (stepTokenUsage == null || stepTokenUsage.isEmpty()) {
+            return;
+        }
+        for (String field : AgentOrchestrator.TOKEN_USAGE_FIELDS) {
+            if (stepTokenUsage.containsKey(field) || runTokenUsage.containsKey(field)) {
+                runTokenUsage.put(field, asLong(runTokenUsage.get(field)) + asLong(stepTokenUsage.get(field)));
+            }
+        }
+    }
+
+    /**
+     * Null when no attempted step reported any token usage, the total otherwise.
+     */
+    private static Map<String, Object> runTotal(Map<String, Object> runTokenUsage) {
+        return runTokenUsage.isEmpty() ? null : runTokenUsage;
+    }
+
+    private static CascadeResult finalizeBest(CascadeResult bestSoFar, RunTotals totals, List<Map<String, Object>> trace, List<String> errors)
+            throws LifecycleException {
+        if (bestSoFar != null) {
+            return withRun(bestSoFar, totals, trace);
+        }
+        throw new LifecycleException("Model cascade failed: no steps produced a result. Errors: " + String.join("; ", errors));
+    }
+
+    private void recordStepMetrics(String modelType, long durationMs, double confidence, Map<String, Object> tokenUsage, double stepCost) {
+        if (meterRegistry == null) {
+            return;
+        }
+        meterRegistry.timer("eddi.llm.cascade.step.latency", "provider", modelType).record(Duration.ofMillis(durationMs));
+        meterRegistry.summary("eddi.llm.cascade.confidence").record(confidence);
+        if (tokenUsage != null) {
+            meterRegistry.counter("eddi.llm.cascade.tokens", "provider", modelType).increment(asLong(tokenUsage.get("totalTokens")));
+        }
+        if (stepCost > 0) {
+            meterRegistry.counter("eddi.llm.cascade.cost", "provider", modelType).increment(stepCost);
+        }
+    }
+
+    private void increment(String metric, String... tags) {
+        if (meterRegistry != null) {
+            meterRegistry.counter(metric, tags).increment();
+        }
+    }
+
+    private static boolean isBlank(String s) {
+        return s == null || s.isBlank();
+    }
+
+    /**
+     * Check if an error is retryable (transient network / throttling errors).
+     *
+     * <p>
+     * Delegates to {@link RetryConfiguration#isRetryableError} instead of keeping a
+     * second copy. The two had drifted: this one matched bare
+     * {@code 429}/{@code 50x} in a message but ignored
+     * {@code WebApplicationException} status codes, while the other did the
+     * opposite — and neither knew langchain4j's typed {@code RetriableException} /
+     * {@code NonRetriableException}, which is what {@code chatModel.chat()}
+     * actually throws. The same provider failure was therefore retried on one path
+     * and not the other, decided by the wording of a message.
+     * </p>
      */
     private static boolean isRetryableError(Exception e) {
-        Throwable current = e;
-        while (current != null) {
-            if (current instanceof java.net.SocketTimeoutException || current instanceof java.util.concurrent.TimeoutException
-                    || current instanceof java.net.ConnectException || current instanceof java.net.UnknownHostException) {
-                return true;
-            }
-
-            String message = current.getMessage() != null ? current.getMessage().toLowerCase() : "";
-            if (message.contains("timeout") || message.contains("rate limit") || message.contains("too many requests") || message.contains("503")
-                    || message.contains("502") || message.contains("504") || message.contains("429")) {
-                return true;
-            }
-
-            current = current.getCause();
-        }
-        return false;
+        return RetryConfiguration.isRetryableError(e);
     }
 
     /**
      * Internal result of a single cascade step execution.
      */
-    private record StepResult(String response, double confidence, AgentOrchestrator.ExecutionResult agentResult) {
+    private record StepResult(String response, double confidence, AgentOrchestrator.ExecutionResult agentResult, Map<String, Object> tokenUsage,
+            boolean streamedLive, Map<String, Object> responseMetadata) {
     }
 }

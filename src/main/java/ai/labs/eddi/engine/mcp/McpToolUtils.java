@@ -10,6 +10,10 @@ import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 
+import java.util.Collection;
+import java.util.Map;
+import jakarta.ws.rs.ClientErrorException;
+
 /**
  * Shared utility methods for MCP tool implementations.
  *
@@ -44,6 +48,32 @@ final class McpToolUtils {
     }
 
     /**
+     * As {@link #requireRole}, but satisfied by <em>any</em> of the given roles.
+     * <p>
+     * EDDI has no role hierarchy — {@code hasRole} is a literal check, so a
+     * single-role requirement of {@code eddi-viewer} would refuse an
+     * {@code eddi-admin}. A tool whose REST counterpart enumerates several roles
+     * (the docs endpoints, above all) needs the same enumeration here, or the two
+     * surfaces guard the same content differently.
+     *
+     * @throws ForbiddenException
+     *             if the caller holds none of the given roles
+     */
+    static void requireAnyRole(SecurityIdentity identity, boolean authEnabled, Collection<String> roles) {
+        if (!authEnabled) {
+            return;
+        }
+        if (identity != null && !identity.isAnonymous()) {
+            for (String role : roles) {
+                if (identity.hasRole(role)) {
+                    return;
+                }
+            }
+        }
+        throw new ForbiddenException("MCP operation requires one of roles: " + String.join(", ", roles));
+    }
+
+    /**
      * Get a REST interface proxy via IRestInterfaceFactory. These proxies make HTTP
      * calls that go through the full JAX-RS workflow, including
      * DocumentDescriptorFilter which auto-creates descriptors.
@@ -65,17 +95,35 @@ final class McpToolUtils {
     }
 
     /**
-     * Parse an environment string to the corresponding enum value. Defaults to
-     * {@link Environment#production} if null, blank, or unrecognized.
+     * Parse an environment string to the corresponding enum value. Delegates to
+     * {@link Environment#parseStrict(String)}, the single place that knows the
+     * mapping: only an absent (null/blank) environment defaults to
+     * {@link Environment#production} — an environment the platform does not know is
+     * rejected with an {@link UnknownEnvironmentException} rather than silently
+     * resolving to production. A typo such as {@code "staging"} must never deploy
+     * to, undeploy from, or talk to production.
+     *
+     * @throws UnknownEnvironmentException
+     *             if {@code environment} is neither blank nor a known environment
      */
     static Environment parseEnvironment(String environment) {
-        if (environment == null || environment.isBlank()) {
-            return Environment.production;
-        }
         try {
-            return Environment.valueOf(environment.trim().toLowerCase());
+            return Environment.parseStrict(environment);
         } catch (IllegalArgumentException e) {
-            return Environment.production;
+            throw new UnknownEnvironmentException(e.getMessage());
+        }
+    }
+
+    /**
+     * An MCP caller passed an environment EDDI does not know. Distinct type so a
+     * tool can tell bad caller input apart from a server-side failure; the message
+     * names both the rejected value and the valid ones, so an MCP client (and the
+     * model driving it) can self-correct instead of retrying the same call.
+     */
+    static final class UnknownEnvironmentException extends IllegalArgumentException {
+
+        UnknownEnvironmentException(String message) {
+            super(message);
         }
     }
 
@@ -109,6 +157,84 @@ final class McpToolUtils {
      */
     static String errorJson(String message) {
         return "{\"error\":\"" + escapeJsonString(message) + "\"}";
+    }
+
+    /**
+     * Build an error JSON response describing a failure, from a caller-supplied
+     * prefix and the exception that caused it.
+     * <p>
+     * Prefer this over {@code errorJson(prefix + ": " + e.getMessage())}: plenty of
+     * exceptions carry no message, and the concatenation then renders literally as
+     * {@code "Failed to chat with agent: null"} — an error that says a call failed
+     * and nothing whatsoever about why. The class name is not a diagnosis either,
+     * but it is the difference between "something threw" and "a
+     * ResourceNotFoundException threw".
+     */
+    static String errorJson(String prefix, Throwable cause) {
+        return errorJson(prefix + ": " + describe(cause));
+    }
+
+    /**
+     * A throwable's message, or its class's simple name when it has none.
+     * <p>
+     * A <strong>client error</strong> ({@link ClientErrorException}, i.e. 4xx) is
+     * unwrapped to its response entity first. These tools call EDDI's own REST
+     * stores in-process, and a JAX-RS exception built from a {@code Response}
+     * carries the useful text in that entity while {@code getMessage()} returns
+     * only the status line — so a precise "Unknown field 'setProperties' … Known
+     * fields: [setOnActions]" would otherwise reach the MCP client as "HTTP 400 Bad
+     * Request", which is exactly the MCP/REST parity this exists to preserve.
+     * <p>
+     * Only 4xx. A 4xx entity is a message this codebase authored <em>for</em> the
+     * caller, describing what the caller got wrong. A 5xx entity is not written to
+     * that contract and can carry endpoint, datastore or configuration detail, so
+     * it falls through to the message below and is never lifted verbatim. Every MCP
+     * tool that reaches this point is already behind {@code requireRole}, but "the
+     * caller is an admin" is a reason to answer usefully, not a reason to stop
+     * distinguishing the two.
+     */
+    static String describe(Throwable cause) {
+        if (cause == null) {
+            return "unknown cause";
+        }
+        if (cause instanceof ClientErrorException clientError) {
+            var response = clientError.getResponse();
+            if (response != null && response.hasEntity() && response.getEntity() instanceof String entity && !entity.isBlank()) {
+                return entity;
+            }
+        }
+        String message = cause.getLocalizedMessage();
+        return message == null || message.isBlank() ? cause.getClass().getSimpleName() : message;
+    }
+
+    /**
+     * Structured error JSON for tools whose callers need to branch on the failure
+     * kind (e.g. NOT_FOUND vs WRONG_STATE vs FORBIDDEN vs DISABLED vs BAD_REQUEST).
+     * Manual construction — like {@link #errorJson(String)} it can never throw on
+     * the error path. {@code errorCode} and {@code details} may be null/blank/empty
+     * (omitted when so).
+     */
+    static String errorJson(String message, String errorCode, Map<String, String> details) {
+        var sb = new StringBuilder();
+        sb.append("{\"error\":\"").append(escapeJsonString(message)).append("\"");
+        if (errorCode != null && !errorCode.isBlank()) {
+            sb.append(",\"errorCode\":\"").append(escapeJsonString(errorCode)).append("\"");
+        }
+        if (details != null && !details.isEmpty()) {
+            sb.append(",\"details\":{");
+            boolean first = true;
+            for (var entry : details.entrySet()) {
+                if (!first) {
+                    sb.append(",");
+                }
+                sb.append("\"").append(escapeJsonString(entry.getKey())).append("\":\"")
+                        .append(escapeJsonString(entry.getValue())).append("\"");
+                first = false;
+            }
+            sb.append("}");
+        }
+        sb.append("}");
+        return sb.toString();
     }
 
     /**

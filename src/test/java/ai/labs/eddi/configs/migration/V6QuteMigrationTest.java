@@ -9,6 +9,7 @@ import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
+import java.util.ArrayList;
 import org.bson.Document;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -132,12 +133,12 @@ class V6QuteMigrationTest {
         when(migrator.containsThymeleafSyntax("{deep}")).thenReturn(false);
 
         var innerDoc = new Document("deepKey", "[[${deep}]]");
-        var list = new java.util.ArrayList<Object>();
+        var list = new ArrayList<Object>();
         list.add("[[${item}]]");
         list.add("safe");
         list.add(innerDoc);
         // Add nested list
-        var nestedList = new java.util.ArrayList<Object>();
+        var nestedList = new ArrayList<Object>();
         nestedList.add("[[${item}]]");
         list.add(nestedList);
 

@@ -69,23 +69,90 @@ class MoreConditionsTest {
         }
 
         @Test
-        void setConditions_multipleElements_ignored() {
+        void setConditions_multipleElements_areKept() {
             var neg = new Negation();
             var c1 = mock(IRuleCondition.class);
             var c2 = mock(IRuleCondition.class);
             neg.setConditions(List.of(c1, c2));
-            // Should not set condition since size != 1
+
+            assertEquals(2, neg.getConditions().size());
+        }
+
+        /**
+         * The worked example from docs/behavior-rules.md: children are AND-combined,
+         * the combined result is inverted.
+         */
+        @Test
+        void execute_twoChildrenBothSucceed_returnsFail() throws Exception {
+            var neg = new Negation();
+            var c1 = mock(IRuleCondition.class);
+            var c2 = mock(IRuleCondition.class);
+            when(c1.execute(any(), any())).thenReturn(ExecutionState.SUCCESS);
+            when(c2.execute(any(), any())).thenReturn(ExecutionState.SUCCESS);
+            neg.setConditions(List.of(c1, c2));
+
+            assertEquals(ExecutionState.FAIL, neg.execute(mock(IConversationMemory.class), new ArrayList<>()));
         }
 
         @Test
-        void clone_preservesCondition() throws Exception {
+        void execute_twoChildrenFirstFails_returnsSuccess() throws Exception {
+            var neg = new Negation();
+            var c1 = mock(IRuleCondition.class);
+            var c2 = mock(IRuleCondition.class);
+            when(c1.execute(any(), any())).thenReturn(ExecutionState.FAIL);
+            neg.setConditions(List.of(c1, c2));
+
+            assertEquals(ExecutionState.SUCCESS, neg.execute(mock(IConversationMemory.class), new ArrayList<>()));
+            verify(c2, never()).execute(any(), any());
+        }
+
+        @Test
+        void execute_twoChildrenSecondFails_returnsSuccess() throws Exception {
+            var neg = new Negation();
+            var c1 = mock(IRuleCondition.class);
+            var c2 = mock(IRuleCondition.class);
+            when(c1.execute(any(), any())).thenReturn(ExecutionState.SUCCESS);
+            when(c2.execute(any(), any())).thenReturn(ExecutionState.FAIL);
+            neg.setConditions(List.of(c1, c2));
+
+            assertEquals(ExecutionState.SUCCESS, neg.execute(mock(IConversationMemory.class), new ArrayList<>()));
+        }
+
+        @Test
+        void execute_childErrors_propagatesError() throws Exception {
             var neg = new Negation();
             var inner = mock(IRuleCondition.class);
-            when(inner.clone()).thenReturn(inner);
+            when(inner.execute(any(), any())).thenReturn(ExecutionState.ERROR);
             neg.setCondition(inner);
+
+            assertEquals(ExecutionState.ERROR, neg.execute(mock(IConversationMemory.class), new ArrayList<>()));
+        }
+
+        @Test
+        void validateConfiguration_withoutChildren_isRejected() {
+            var e = assertThrows(IllegalArgumentException.class, () -> new Negation().validateConfiguration());
+            assertTrue(e.getMessage().contains("negation"));
+        }
+
+        @Test
+        void validateConfiguration_withChildren_passes() {
+            var neg = new Negation();
+            neg.setConditions(List.of(mock(IRuleCondition.class)));
+            neg.validateConfiguration();
+        }
+
+        @Test
+        void clone_preservesAllConditions() throws Exception {
+            var neg = new Negation();
+            var c1 = mock(IRuleCondition.class);
+            var c2 = mock(IRuleCondition.class);
+            when(c1.clone()).thenReturn(c1);
+            when(c2.clone()).thenReturn(c2);
+            neg.setConditions(List.of(c1, c2));
 
             var cloned = (Negation) neg.clone();
             assertNotSame(neg, cloned);
+            assertEquals(2, cloned.getConditions().size());
         }
     }
 
@@ -136,6 +203,48 @@ class MoreConditionsTest {
             var cloned = (ActionMatcher) matcher.clone();
             assertNotSame(matcher, cloned);
             assertEquals("test_action", cloned.getActions().get(0));
+        }
+
+        @Test
+        void setConfigs_blankActionsEntries_areDropped() {
+            var matcher = new ActionMatcher();
+            matcher.setConfigs(Map.of("actions", "greet, ,"));
+            assertEquals(List.of("greet"), matcher.getActions());
+        }
+
+        @Test
+        void validateConfiguration_missingActionsKey_isRejected() {
+            var matcher = new ActionMatcher();
+            matcher.setConfigs(Map.of("occurrence", "lastStep"));
+
+            var e = assertThrows(IllegalArgumentException.class, matcher::validateConfiguration);
+            assertTrue(e.getMessage().contains("actionmatcher"));
+            assertTrue(e.getMessage().contains("actions"));
+        }
+
+        @Test
+        void validateConfiguration_blankActionsValue_isRejected() {
+            var matcher = new ActionMatcher();
+            matcher.setConfigs(Map.of("actions", "  "));
+
+            assertThrows(IllegalArgumentException.class, matcher::validateConfiguration);
+        }
+
+        @Test
+        void validateConfiguration_withActions_passes() {
+            var matcher = new ActionMatcher();
+            matcher.setConfigs(Map.of("actions", "greet"));
+            matcher.validateConfiguration();
+        }
+
+        @Test
+        void setConfigs_unknownOccurrence_isRejectedNamingLegalValues() {
+            var matcher = new ActionMatcher();
+
+            var e = assertThrows(IllegalArgumentException.class, () -> matcher.setConfigs(Map.of("actions", "greet", "occurrence", "lastSteps")));
+            assertTrue(e.getMessage().contains("lastSteps"));
+            assertTrue(e.getMessage().contains("lastStep"));
+            assertTrue(e.getMessage().contains("currentStep"));
         }
     }
 

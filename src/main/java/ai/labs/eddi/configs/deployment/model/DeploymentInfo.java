@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.deployment.model;
 
 import ai.labs.eddi.engine.model.Deployment.Environment;
+import java.util.Objects;
 
 /**
  * @author ginccc
@@ -49,5 +50,21 @@ public class DeploymentInfo {
 
     public void setDeploymentStatus(DeploymentStatus deploymentStatus) {
         this.deploymentStatus = deploymentStatus;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o)
+            return true;
+        if (!(o instanceof DeploymentInfo that))
+            return false;
+        return Objects.equals(agentId, that.agentId)
+                && Objects.equals(agentVersion, that.agentVersion)
+                && environment == that.environment;
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(agentId, agentVersion, environment);
     }
 }

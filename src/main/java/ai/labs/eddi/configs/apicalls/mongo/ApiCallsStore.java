@@ -35,6 +35,6 @@ public class ApiCallsStore extends AbstractResourceStore<ApiCallsConfiguration> 
         List<String> actions = read(id, version).getHttpCalls().stream().map(ApiCall::getActions).flatMap(Collection::stream)
                 .collect(Collectors.toList());
 
-        return limit > 0 ? actions.subList(0, limit) : actions;
+        return limit > 0 ? actions.subList(0, Math.min(limit, actions.size())) : actions;
     }
 }

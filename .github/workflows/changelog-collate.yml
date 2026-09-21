@@ -1,0 +1,171 @@
+name: Collate Changelog
+
+# Folds the pending fragments in docs/changelog.d/ into docs/changelog.md and
+# opens a PR with the result.
+#
+# Every branch is required to add a changelog entry (AGENTS.md §2 rule 8). When
+# that entry went at the top of docs/changelog.md, every open PR inserted at the
+# same point in the same file, which git cannot merge — so with several PRs in
+# flight each one conflicted with every other over a document unrelated to the
+# code under review. Fragments are new files under names no other branch picks,
+# so they merge silently; this job does the one merge that is actually needed,
+# afterwards, on main, where nothing competes with it.
+#
+# It opens a PR rather than pushing: main requires one, and a bot pushing
+# directly would be a hole in that requirement even if the token allowed it.
+#
+# TOKEN: set the CHANGELOG_BOT_TOKEN secret — a GitHub App installation token
+# or a fine-grained PAT with contents + pull-requests write. GitHub
+# deliberately does NOT fire `pull_request` workflows for events created with
+# the default GITHUB_TOKEN (its anti-recursion rule), so a PR opened with that
+# token sits at "Expected — waiting for status" against the required
+# `Build & Test` and `CodeQL Analysis` checks and cannot be merged until a
+# human closes and reopens it. Without the secret this job still runs and still
+# opens the PR; it says in the run summary and in the PR body that the checks
+# need that nudge.
+
+on:
+  schedule:
+    # 02:00 UTC — clear of the 06:00 and 07:00 slots the other scheduled
+    # workflows already occupy.
+    - cron: "0 2 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: changelog-collate
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  BRANCH: chore/collate-changelog
+
+jobs:
+  collate:
+    name: Collate pending changelog fragments
+    runs-on: ubuntu-latest
+    # A fork's scheduled run would have neither the fragments nor anywhere to
+    # push them.
+    if: github.repository == 'labsai/EDDI'
+    permissions:
+      contents: write       # git push for the PR branch
+      pull-requests: write  # gh pr create
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: main
+          # Persisted for the push below, so the branch — and therefore the PR —
+          # is authored by whoever this token belongs to, which is what decides
+          # whether CI runs on it at all. See the TOKEN note in the header.
+          token: ${{ secrets.CHANGELOG_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Check for pending fragments
+        id: pending
+        run: |
+          set -euo pipefail
+          COUNT=$(find docs/changelog.d -maxdepth 1 -name '*.md' ! -name 'README.md' | wc -l)
+          echo "count=${COUNT}" >> "$GITHUB_OUTPUT"
+          if [ "$COUNT" -eq 0 ]; then
+            echo "### 💤 No pending changelog fragments" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### 📝 ${COUNT} pending changelog fragment(s)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # A collation PR that is still open has already claimed these fragments:
+      # they are gone on its branch and still present on main. Collating again
+      # would produce a second PR proposing the same entries, and whichever
+      # merged second would conflict — reintroducing, in the fix, the exact
+      # problem the fix exists to remove. Wait for the open one instead.
+      - name: Check for an open collation PR
+        id: open_pr
+        if: steps.pending.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Deliberately NOT `|| echo ""`. A failed lookup is indistinguishable
+          # from "no PR is open", and the next steps delete the branch — which
+          # would close the very PR this step exists to protect.
+          if ! EXISTING=$(gh pr list --head "$BRANCH" --state open --json number -q '.[0].number'); then
+            echo "::error::Could not list open PRs for ${BRANCH}. Refusing to collate: a failed lookup"
+            echo "::error::here is indistinguishable from 'no collation PR is open', and acting on that"
+            echo "::error::would delete the branch of an open PR and close it."
+            exit 1
+          fi
+          echo "number=${EXISTING}" >> "$GITHUB_OUTPUT"
+          if [ -n "$EXISTING" ]; then
+            {
+              echo ""
+              echo "PR #${EXISTING} is still open and already carries a collation."
+              echo "Merge it and the next run picks up everything that arrived since."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Collate and rotate
+        id: collate
+        if: steps.pending.outputs.count != '0' && steps.open_pr.outputs.number == ''
+        run: |
+          set -euo pipefail
+          python3 scripts/collate-changelog.py | tee collate.log
+          python3 scripts/rotate-changelog.py | tee rotate.log
+          {
+            echo ""
+            echo '```'
+            cat collate.log rotate.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          rm -f collate.log rotate.log
+
+      - name: Open the PR
+        if: steps.pending.outputs.count != '0' && steps.open_pr.outputs.number == ''
+        env:
+          GH_TOKEN: ${{ secrets.CHANGELOG_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+          COUNT: ${{ steps.pending.outputs.count }}
+          HAVE_BOT_TOKEN: ${{ secrets.CHANGELOG_BOT_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Named paths only: a bare `git add -A` here would sweep up anything
+          # else a step happened to leave in the tree.
+          git add docs/changelog.md docs/changelog.d docs/changelog docs/SUMMARY.md
+
+          if git diff --cached --quiet; then
+            echo "### ⚠️ Fragments found but nothing changed — check the log above" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          if [ "$HAVE_BOT_TOKEN" = "true" ]; then
+            CHECKS_NOTE="CI runs on this PR normally."
+          else
+            CHECKS_NOTE="**The required checks will not start on their own.** This PR was opened with the default \`GITHUB_TOKEN\`, and GitHub does not fire \`pull_request\` workflows for events that token creates. Close and reopen it (or push an empty commit) to start \`Build & Test\` and \`CodeQL Analysis\`. Setting a \`CHANGELOG_BOT_TOKEN\` secret removes this step — see the header of \`.github/workflows/changelog-collate.yml\`."
+            {
+              echo ""
+              echo "⚠️ No CHANGELOG_BOT_TOKEN secret: the PR's required checks need a manual"
+              echo "close/reopen before they start."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          # The lookup above fails the job rather than reporting "none", so this
+          # cannot run on a failed check — and with no open PR, deleting a
+          # leftover branch cannot auto-close anything.
+          git push origin --delete "$BRANCH" 2>/dev/null || true
+          git checkout -B "$BRANCH"
+          git commit -m "docs(changelog): collate ${COUNT} pending fragment(s)"
+          git push -u origin "$BRANCH"
+
+          PR_URL=$(gh pr create \
+            --title "docs(changelog): collate ${COUNT} pending fragment(s)" \
+            --body "Folds the fragments from \`docs/changelog.d/\` into \`docs/changelog.md\` by date, and trims the live file back under its rotation target if it has grown past it.
+
+          Generated by [\`changelog-collate.yml\`](.github/workflows/changelog-collate.yml) — see the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).
+
+          Nothing here needs reviewing line by line: the entries are the ones already reviewed on the PRs that wrote them, moved verbatim apart from one \`../\` dropped from each relative link. What is worth a glance is that no entry went missing and that \`docs/changelog.d/\` is empty again.
+
+          ${CHECKS_NOTE}")
+
+          echo "### ✅ Created ${PR_URL}" >> "$GITHUB_STEP_SUMMARY"

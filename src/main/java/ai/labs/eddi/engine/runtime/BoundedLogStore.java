@@ -5,7 +5,6 @@
 package ai.labs.eddi.engine.runtime;
 
 import ai.labs.eddi.engine.model.LogEntry;
-import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -17,6 +16,8 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Consumer;
+import java.util.logging.LogRecord;
+import org.jboss.logmanager.ExtLogRecord;
 
 /**
  * In-memory ring buffer that captures log records with MDC context. Provides:
@@ -135,18 +136,41 @@ public class BoundedLogStore {
      * @param record
      *            the JUL LogRecord (actually a JBoss ExtLogRecord at runtime)
      */
-    public void capture(java.util.logging.LogRecord record) {
+    public void capture(LogRecord record) {
+        capture(record, null);
+    }
+
+    /**
+     * Capture a record whose message has already been formatted and redacted by
+     * {@link LogCaptureFilter}.
+     *
+     * @param record
+     *            the JUL LogRecord (actually a JBoss ExtLogRecord at runtime)
+     * @param preRedactedMessage
+     *            the record's redacted message, or {@code null} to format and
+     *            redact it here — which is what happens when redaction upstream
+     *            threw, so the ring buffer is never fed an unscanned message
+     */
+    public void capture(LogRecord record, String preRedactedMessage) {
         if (record == null)
             return;
 
-        // Format the message using a Formatter (avoids deprecated
-        // getFormattedMessage())
-        String message = formatRecord(record);
-        if (message == null || message.isEmpty())
-            return;
+        String message = preRedactedMessage;
+        if (message == null) {
+            // Format the message using a Formatter (avoids deprecated
+            // getFormattedMessage())
+            message = formatRecord(record);
+            if (message == null || message.isEmpty())
+                return;
 
-        // Redact potential secrets from log messages (defense-in-depth)
-        message = SecretRedactionFilter.redact(message);
+            // Redact potential secrets from log messages, and escape anything that
+            // could end a record, exactly as LogRecordRedactor would have. The ring
+            // buffer is read back through the admin log API and the SSE live tail,
+            // so a forged boundary kept here forges an entry there too.
+            message = LogRecordRedactor.rewrite(message);
+        }
+        if (message.isEmpty())
+            return;
 
         // Don't capture our own log messages to avoid infinite recursion
         String loggerName = record.getLoggerName();
@@ -161,7 +185,7 @@ public class BoundedLogStore {
         String userId = null;
         Integer agentVersion = null;
 
-        if (record instanceof org.jboss.logmanager.ExtLogRecord extRecord) {
+        if (record instanceof ExtLogRecord extRecord) {
             environment = extRecord.getMdc("environment");
             agentId = extRecord.getMdc("agentId");
             conversationId = extRecord.getMdc("conversationId");
@@ -319,24 +343,67 @@ public class BoundedLogStore {
     // ==================== Private Helpers ====================
 
     /**
-     * Format a LogRecord's message, resolving {0},{1}... placeholders from the
-     * record's parameters array using a standard Formatter. Avoids deprecated
-     * ExtLogRecord.getFormattedMessage().
+     * Format a LogRecord's message, resolving placeholders from the record's
+     * parameters array.
+     *
+     * JBoss LogManager's ExtLogRecord supports both {@code {0},{1}...}
+     * (MessageFormat) and {@code %s,%d...} (printf) styles via
+     * {@link org.jboss.logmanager.ExtLogRecord#getFormattedMessage()}. For plain
+     * JUL LogRecords, we fall back to manual MessageFormat.
      */
-    private static String formatRecord(java.util.logging.LogRecord record) {
+    private static String formatRecord(LogRecord record) {
         String msg = record.getMessage();
         if (msg == null)
             return "";
 
-        // Resolve {0}, {1}, ... placeholders using MessageFormat
         Object[] params = record.getParameters();
+
+        // 1. Try ExtLogRecord's built-in getFormattedMessage() first
+        if (record instanceof ExtLogRecord extRecord) {
+            try {
+                String formatted = extRecord.getFormattedMessage();
+                if (formatted != null && !formatted.equals(msg)) {
+                    return formatted;
+                }
+            } catch (Exception _) {
+                // fall through to manual formatting
+            }
+        }
+
+        // 2. If getFormattedMessage() returned raw msg or wasn't ExtLogRecord, format
+        // manually
         if (params != null && params.length > 0) {
+            // Any '%' is enough to attempt printf — String.format throws on a
+            // malformed pattern and we fall through, so it can decide for itself.
+            //
+            // Enumerating specifiers missed every indexed, padded or grouped form:
+            // %1$s, %02d, %,d, %5.2f, %b, %e. Those matter because the MessageFormat
+            // attempt below does NOT throw on them — with no {0} placeholders it
+            // returns the pattern unchanged, so the String.format fallback further
+            // down is never reached and the raw "%1$s" is what reaches the viewer.
+            if (msg.indexOf('%') >= 0) {
+                try {
+                    return String.format(msg, params);
+                } catch (Exception _) {
+                    // ignore and try MessageFormat
+                }
+            }
+
+            // Try MessageFormat ({0}, {1}, etc.)
             try {
                 return java.text.MessageFormat.format(msg, params);
             } catch (Exception _) {
-                return msg; // fallback to raw pattern
+                // fall through to String.format fallback
+            }
+
+            // Fallback: try String.format
+            try {
+                return String.format(msg, params);
+            } catch (Exception _) {
+                return msg;
             }
         }
+
         return msg;
     }
 

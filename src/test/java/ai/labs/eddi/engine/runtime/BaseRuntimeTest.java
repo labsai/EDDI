@@ -175,9 +175,11 @@ class BaseRuntimeTest {
                 },
                 null);
 
-        // onFailure should be called with InterruptedException
+        // onFailure must be called with the dedicated abandonment type — a bare
+        // InterruptedException would be indistinguishable from a real interruption
+        // of the callable body, which callers must treat as a genuine failure.
         Throwable failure = onFailureCalled.get(5, TimeUnit.SECONDS);
-        assertInstanceOf(InterruptedException.class, failure);
+        assertInstanceOf(ExecutionAbandonedException.class, failure);
         assertTrue(failure.getMessage().contains("cancellation"));
 
         // onComplete should NOT have been called

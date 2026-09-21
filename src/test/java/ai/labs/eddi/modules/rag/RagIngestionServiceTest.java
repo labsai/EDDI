@@ -17,6 +17,7 @@ import org.mockito.Mock;
 
 import java.util.Map;
 
+import dev.langchain4j.data.embedding.Embedding;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -47,8 +48,8 @@ class RagIngestionServiceTest {
         when(embeddingModelFactory.getOrCreate(any())).thenReturn(embeddingModel);
         when(embeddingStoreFactory.getOrCreate(any(), anyString())).thenReturn(embeddingStore);
         when(embeddingModel.embed(any(TextSegment.class)))
-                .thenReturn(Response.from(dev.langchain4j.data.embedding.Embedding.from(new float[]{0.1f})));
-        when(embeddingModel.embed(anyString())).thenReturn(Response.from(dev.langchain4j.data.embedding.Embedding.from(new float[]{0.1f})));
+                .thenReturn(Response.from(Embedding.from(new float[]{0.1f})));
+        when(embeddingModel.embed(anyString())).thenReturn(Response.from(Embedding.from(new float[]{0.1f})));
 
         var config = createConfig();
 

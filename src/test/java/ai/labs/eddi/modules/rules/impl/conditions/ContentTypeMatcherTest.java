@@ -47,7 +47,7 @@ class ContentTypeMatcherTest {
      * arise with {@code when().thenReturn()} on generic methods.
      */
     private void stubAttachments(IData<List<Attachment>> data) {
-        doReturn(data).when(currentStep).getLatestData(ArgumentMatchers.<MemoryKey<?>>any());
+        doReturn(data).when(currentStep).getData(ArgumentMatchers.<MemoryKey<?>>any());
     }
 
     private void stubAttachmentList(Attachment... attachments) {
@@ -190,7 +190,7 @@ class ContentTypeMatcherTest {
         @DisplayName("should FAIL when no attachment data in memory")
         void failsWhenNoDataInMemory() {
             matcher.setConfigs(Map.of("mimeType", "image/png"));
-            doReturn(null).when(currentStep).getLatestData(ArgumentMatchers.<MemoryKey<?>>any());
+            doReturn(null).when(currentStep).getData(ArgumentMatchers.<MemoryKey<?>>any());
 
             assertEquals(FAIL, matcher.execute(memory, List.of()));
         }
@@ -452,7 +452,7 @@ class ContentTypeMatcherTest {
             att.setMimeType("image/png");
             List<?> mixed = List.of(att, "not-an-attachment", 42);
             doReturn(new Data<>("attachments", mixed)).when(currentStep)
-                    .getLatestData(ArgumentMatchers.<MemoryKey<?>>any());
+                    .getData(ArgumentMatchers.<MemoryKey<?>>any());
 
             assertEquals(SUCCESS, matcher.execute(memory, List.of()));
         }
@@ -463,7 +463,42 @@ class ContentTypeMatcherTest {
             matcher.setConfigs(Map.of("mimeType", "image/*"));
             List<?> nonAttachments = List.of("string", 123, Map.of("key", "val"));
             doReturn(new Data<>("attachments", nonAttachments)).when(currentStep)
-                    .getLatestData(ArgumentMatchers.<MemoryKey<?>>any());
+                    .getData(ArgumentMatchers.<MemoryKey<?>>any());
+
+            assertEquals(FAIL, matcher.execute(memory, List.of()));
+        }
+
+        /**
+         * A HITL resume re-enters the same step of a conversation reloaded from the
+         * store, where attachments come back as plain maps rather than Attachment
+         * instances. A cast-only filter silently stopped matching content-type rules on
+         * those turns.
+         */
+        @Test
+        @DisplayName("should match the map form that a reloaded step comes back as")
+        void matchesAttachmentsReloadedFromTheStore() {
+            matcher.setConfigs(Map.of("mimeType", "image/*"));
+            List<?> persisted = List.of(Map.of(
+                    "storageRef", "r1",
+                    "fileName", "a.png",
+                    "mimeType", "image/png",
+                    "sizeBytes", 100));
+            doReturn(new Data<>("attachments", persisted)).when(currentStep)
+                    .getData(ArgumentMatchers.<MemoryKey<?>>any());
+
+            assertEquals(SUCCESS, matcher.execute(memory, List.of()));
+        }
+
+        @Test
+        @DisplayName("should not match a reloaded attachment of another type")
+        void doesNotMatchReloadedAttachmentOfAnotherType() {
+            matcher.setConfigs(Map.of("mimeType", "image/*"));
+            List<?> persisted = List.of(Map.of(
+                    "storageRef", "r1",
+                    "fileName", "report.pdf",
+                    "mimeType", "application/pdf"));
+            doReturn(new Data<>("attachments", persisted)).when(currentStep)
+                    .getData(ArgumentMatchers.<MemoryKey<?>>any());
 
             assertEquals(FAIL, matcher.execute(memory, List.of()));
         }

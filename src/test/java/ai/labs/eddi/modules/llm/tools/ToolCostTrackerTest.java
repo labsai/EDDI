@@ -4,13 +4,20 @@
  */
 package ai.labs.eddi.modules.llm.tools;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.prometheus.PrometheusConfig;
+import io.micrometer.prometheus.PrometheusMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * Unit tests for {@link ToolCostTracker} covering cost tracking, budget checks,
@@ -27,15 +34,110 @@ class ToolCostTrackerTest {
         tracker.init();
     }
 
+    /**
+     * The invocation the production dispatch loop actually builds for a
+     * {@code WebSearchTool#searchWeb} call: dispatched as {@code searchWeb},
+     * configured (and priced) as {@code websearch}.
+     */
+    private static final ToolInvocation SEARCH_WEB = new ToolInvocation("searchWeb", "websearch", null);
+
+    /** Same, for {@code WebScraperTool#extractWebPageText}. */
+    private static final ToolInvocation SCRAPE = new ToolInvocation("extractWebPageText", "webscraper", null);
+
+    /**
+     * The gauge used to be {@code eddi.tool.costs.total}, which Prometheus renders
+     * as {@code eddi_tool_costs_total} — the same name as the tagged
+     * {@code eddi.tool.costs} counter. SimpleMeterRegistry tolerates that; the
+     * production registry threw on the first priced call, failing the tool. Only a
+     * real Prometheus registry reproduces it.
+     */
+    @Nested
+    @DisplayName("against a Prometheus registry")
+    class PrometheusRegistry {
+
+        @Test
+        @DisplayName("a priced call registers both meters and scrapes cleanly")
+        void pricedCallScrapesWithoutCollision() {
+            var prometheus = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
+            var prometheusTracker = new ToolCostTracker();
+            prometheusTracker.meterRegistry = prometheus;
+            prometheusTracker.init();
+
+            double cost = assertDoesNotThrow(() -> prometheusTracker.trackToolCall(SEARCH_WEB, "conv-prom"));
+            assertDoesNotThrow(() -> prometheusTracker.trackToolCall(SCRAPE, "conv-prom"));
+
+            assertTrue(cost > 0, "websearch is priced");
+            String scrape = prometheus.scrape();
+            assertTrue(scrape.contains("eddi_tool_costs_accrued"), "the accrued-cost gauge must be exported:\n" + scrape);
+            // Prefix match: this Prometheus client renders the label set as
+            // {tool="searchWeb",}.
+            assertTrue(scrape.contains("eddi_tool_costs_total{tool=\"searchWeb\""), "the per-tool counter must be exported:\n" + scrape);
+            assertEquals(0.003, prometheusTracker.getTotalCost(), 1e-9);
+        }
+    }
+
+    @Nested
+    @DisplayName("when the metrics backend fails")
+    class MetricsFailure {
+
+        @Test
+        @DisplayName("cost accounting and budget checks still work")
+        void accountingSurvivesMeterFailures() {
+            MeterRegistry failing = mock(MeterRegistry.class);
+            when(failing.counter(anyString(), any(String[].class))).thenThrow(new IllegalArgumentException("meter collision"));
+            var failingTracker = new ToolCostTracker();
+            failingTracker.meterRegistry = failing;
+            failingTracker.init();
+
+            double cost = assertDoesNotThrow(() -> failingTracker.trackToolCall(SEARCH_WEB, "conv-fail"));
+
+            assertEquals(0.001, cost, 1e-9);
+            assertEquals(0.001, failingTracker.getConversationCosts("conv-fail").getTotalCost(), 1e-9);
+            assertFalse(assertDoesNotThrow(() -> failingTracker.isWithinBudget("conv-fail", 0.0005)),
+                    "the over-budget verdict must not be lost with the budget-exceeded meter");
+        }
+    }
+
     @Nested
     @DisplayName("trackToolCall")
     class TrackToolCall {
 
+        /**
+         * The shipped defect in one assertion. Production has only ever passed the
+         * {@code @Tool} method name, and no built-in declares
+         * {@code @Tool(name = "websearch")} — so the price table, which is keyed on
+         * whitelist slugs, never matched a single live call. Asserting with the string
+         * {@code "websearch"} alone (as this test used to) proves the table's contents
+         * and nothing about the lookup that consumes it.
+         */
         @Test
-        @DisplayName("should return known cost for websearch")
-        void knownToolCost() {
-            double cost = tracker.trackToolCall("websearch", "conv-1");
-            assertEquals(0.001, cost, 0.0001);
+        @DisplayName("prices a real dispatch name via its canonical slug")
+        void dispatchNamePricedThroughSlug() {
+            double cost = tracker.trackToolCall(SEARCH_WEB, "conv-1");
+            assertEquals(0.001, cost, 0.0001,
+                    "searchWeb must be priced as websearch; $0.00 here means maxBudgetPerConversation can never bind");
+        }
+
+        @Test
+        @DisplayName("a dispatch name with no slug mapping prices at zero")
+        void unmappedDispatchNameIsFree() {
+            assertEquals(0.0, tracker.trackToolCall(ToolInvocation.of("searchWeb"), "conv-1"), 0.0001,
+                    "without the canonical mapping there is nothing to price against — this is the pre-fix behaviour");
+        }
+
+        @Test
+        @DisplayName("costs are found by slug too, aggregating every dispatch name priced under it")
+        void toolCostsBySlug() {
+            tracker.trackToolCall(SEARCH_WEB, "conv-1");
+            tracker.trackToolCall(new ToolInvocation("searchNews", "websearch", null), "conv-1");
+
+            assertEquals(2, tracker.getToolCosts("websearch").getCallCount());
+            assertEquals(0.002, tracker.getToolCosts("websearch").getTotalCost(), 1e-9);
+            assertEquals(1, tracker.getToolCosts("searchWeb").getCallCount());
+            assertNull(tracker.getToolCosts("never-called"));
+
+            tracker.resetAll();
+            assertNull(tracker.getToolCosts("websearch"));
         }
 
         @Test
@@ -48,18 +150,105 @@ class ToolCostTrackerTest {
         @Test
         @DisplayName("should return 0 for free tools like calculator")
         void freeToolCost() {
-            double cost = tracker.trackToolCall("calculator", "conv-1");
+            double cost = tracker.trackToolCall(new ToolInvocation("calculate", "calculator", null), "conv-1");
             assertEquals(0.0, cost, 0.0001);
         }
 
         @Test
         @DisplayName("should accumulate total cost")
         void accumulateTotalCost() {
-            tracker.trackToolCall("websearch", "conv-1");
-            tracker.trackToolCall("websearch", "conv-1");
-            tracker.trackToolCall("webscraper", "conv-1");
+            tracker.trackToolCall(SEARCH_WEB, "conv-1");
+            tracker.trackToolCall(SEARCH_WEB, "conv-1");
+            tracker.trackToolCall(SCRAPE, "conv-1");
             // 0.001 + 0.001 + 0.002 = 0.004
             assertEquals(0.004, tracker.getTotalCost(), 0.0001);
+        }
+
+        @Test
+        @DisplayName("the legacy String overload prices the name as its own slug")
+        void legacyOverloadDelegates() {
+            assertEquals(0.001, tracker.trackToolCall("websearch", "conv-legacy"), 0.0001);
+            assertEquals(0.001, tracker.getConversationCosts("conv-legacy").getTotalCost(), 0.0001);
+        }
+    }
+
+    @Nested
+    @DisplayName("operator price overrides")
+    class PriceOverrides {
+
+        @Test
+        @DisplayName("an override wins over the default price")
+        void overrideWins() {
+            var priced = new ToolInvocation("searchWeb", "websearch", 0.05);
+            assertEquals(0.05, tracker.trackToolCall(priced, "conv-1"), 0.0001);
+        }
+
+        @Test
+        @DisplayName("an override prices a tool the default table does not know")
+        void overridePricesUnknownTool() {
+            var priced = new ToolInvocation("myHttpTool", "myHttpTool", 0.25);
+            assertEquals(0.25, tracker.trackToolCall(priced, "conv-1"), 0.0001);
+        }
+
+        /**
+         * {@code toolPricing} values come straight from an agent JSON config. A
+         * negative price would <em>credit</em> the conversation, so a config could
+         * drive the running total downwards and make a maxBudgetPerConversation ceiling
+         * unreachable no matter how many paid calls it makes.
+         */
+        @Test
+        @DisplayName("a negative override is clamped to zero, never credited")
+        void negativeOverrideIsClamped() {
+            var negative = new ToolInvocation("searchWeb", "websearch", -10.0);
+
+            assertEquals(0.0, tracker.trackToolCall(negative, "conv-neg"), 0.0001);
+            assertEquals(0.0, tracker.getConversationCosts("conv-neg").getTotalCost(), 0.0001);
+            assertEquals(0.0, tracker.getTotalCost(), 0.0001);
+        }
+
+        @Test
+        @DisplayName("a zero override suppresses the default price")
+        void zeroOverrideSuppressesDefault() {
+            var free = new ToolInvocation("searchWeb", "websearch", 0.0);
+            assertEquals(0.0, tracker.trackToolCall(free, "conv-1"), 0.0001);
+        }
+    }
+
+    /**
+     * Accounting keys stay on the dispatch name even though the price comes from
+     * the slug. Every other {@code tool}-tagged meter in this package reports the
+     * dispatched method name, so flipping these two to slugs would split the tag
+     * vocabulary in half and break existing dashboards for no analytical gain.
+     */
+    @Nested
+    @DisplayName("metric tags and accounting keys")
+    class AccountingKeys {
+
+        @Test
+        @DisplayName("tags eddi.tool.calls and eddi.tool.costs with the dispatch name")
+        void metricsTaggedWithDispatchName() {
+            tracker.trackToolCall(SEARCH_WEB, "conv-1");
+
+            var registry = tracker.meterRegistry;
+            assertNotNull(registry.find("eddi.tool.calls").tag("tool", "searchWeb").counter());
+            assertNull(registry.find("eddi.tool.calls").tag("tool", "websearch").counter());
+
+            var costs = registry.find("eddi.tool.costs").tag("tool", "searchWeb").counter();
+            assertNotNull(costs, "a priced built-in must now produce a non-zero eddi.tool.costs series");
+            assertEquals(0.001, costs.count(), 0.0001);
+        }
+
+        @Test
+        @DisplayName("breaks per-tool and per-conversation usage down by dispatch name")
+        void usageKeyedByDispatchName() {
+            tracker.trackToolCall(SEARCH_WEB, "conv-keys");
+
+            assertNotNull(tracker.getToolCosts("searchWeb"));
+            // The accounting key stays the dispatch name; the slug is a lookup alias over
+            // it (the vocabulary /cache/ttl and toolPricing use), not a separate series.
+            assertEquals(tracker.getToolCosts("searchWeb").getCallCount(), tracker.getToolCosts("websearch").getCallCount());
+            assertNull(tracker.getConversationCosts("conv-keys").getToolUsage().get("websearch"));
+            assertEquals(1, tracker.getConversationCosts("conv-keys").getToolUsage().get("searchWeb"));
         }
     }
 
@@ -167,6 +356,60 @@ class ToolCostTrackerTest {
             tracker.trackToolCall("tool", "conv-1");
             tracker.evictIfNeeded();
             assertNotNull(tracker.getConversationCosts("conv-1"));
+        }
+
+        /**
+         * Eviction must take the least recently touched conversations and nothing else.
+         *
+         * <p>
+         * It used to iterate {@code ConcurrentHashMap.keySet()} and remove whatever
+         * came first, i.e. in hash-bucket order. Dropping an entry here is not a lost
+         * metric — it resets that conversation's accumulated spend to $0, so
+         * {@code isWithinBudget} lets a conversation that has already blown its budget
+         * spend the whole thing again. Asserting the survivor set exactly (rather than
+         * just "the active one lives") is what makes this fail under hash ordering: the
+         * chance that hash order happens to pick precisely the 1&nbsp;001
+         * least-recently-used entries is nil.
+         * </p>
+         */
+        @Test
+        @DisplayName("evicts the least recently used entries, never an active conversation")
+        void evictsLeastRecentlyUsed() throws InterruptedException {
+            int cap = ToolCostTracker.MAX_CONVERSATION_ENTRIES;
+            int idleCount = cap / 5;
+            int activeCount = cap - idleCount + 1; // one over the cap in total
+            int expectedRemovals = idleCount + activeCount - (int) (cap * 0.9);
+
+            for (int i = 0; i < idleCount; i++) {
+                tracker.trackToolCall("websearch", "idle-" + i);
+            }
+
+            // A measurable gap so that every "active" entry is unambiguously newer than
+            // every "idle" one; ordering *within* a cohort is not asserted.
+            Thread.sleep(5);
+
+            for (int i = 0; i < activeCount; i++) {
+                tracker.trackToolCall("websearch", "active-" + i);
+            }
+
+            int survivingIdle = countSurviving("idle-", idleCount);
+            int survivingActive = countSurviving("active-", activeCount);
+
+            assertEquals(activeCount, survivingActive,
+                    "every recently active conversation must survive — evicting one resets its accumulated "
+                            + "spend to $0 and hands it its whole budget again");
+            assertEquals(idleCount - expectedRemovals, survivingIdle,
+                    "the victims must be drawn exclusively from the idle cohort");
+        }
+
+        private int countSurviving(String prefix, int count) {
+            int surviving = 0;
+            for (int i = 0; i < count; i++) {
+                if (tracker.getConversationCosts(prefix + i) != null) {
+                    surviving++;
+                }
+            }
+            return surviving;
         }
     }
 

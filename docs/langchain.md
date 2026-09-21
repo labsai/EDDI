@@ -1,6 +1,6 @@
 # LLM Integration
 
-**Version: 6.0.0**
+[![Version](https://img.shields.io/github/v/release/labsai/EDDI?label=version&color=blue)](https://github.com/labsai/EDDI/releases)
 
 ## Overview
 
@@ -8,7 +8,7 @@ The **LLM Lifecycle Task** (formerly "Langchain") is EDDI's unified integration 
 
 By default, it provides **simple chat** with any LLM provider. Optionally, you can enable **agent mode** to give your LLM access to built-in tools (calculator, web search, weather, etc.).
 
-EDDI supports **12 LLM providers** out of the box: OpenAI, Anthropic, Google Gemini, Mistral AI, Azure OpenAI, Amazon Bedrock, Oracle GenAI, Ollama, Hugging Face, and Jlama — plus any OpenAI-compatible endpoint (DeepSeek, Cohere, etc.) via the `baseUrl` parameter.
+EDDI supports **12 LLM providers** out of the box — eleven registered model builders: OpenAI, Anthropic, Google Gemini (`gemini`), Google Vertex AI (`gemini-vertex`), Mistral AI, Azure OpenAI, Amazon Bedrock, Oracle GenAI, Ollama, Hugging Face, and Jlama — plus any OpenAI-compatible endpoint (DeepSeek, Cohere, etc.) via the `baseUrl` parameter.
 
 The task automatically detects which mode to use based on your configuration—no manual switching required.
 
@@ -56,7 +56,7 @@ The Langchain task integrates with multiple LLM providers via the langchain4j li
 - **Hugging Face** (Various models)
 - **Jlama** (Local Java-based inference)
 
-**Note**: Use the "Agent Father" agent to streamline setup and configuration of the Langchain task with guided assistance.
+**Note**: The Manager's agent wizard (`/manage/agents/wizard`) and the Platform Operator (`/manage/operator`) both generate a working LLM task for you, so you rarely need to hand-write this config from scratch.
 
 ---
 
@@ -115,18 +115,93 @@ This is the standard way to use the Langchain task - just connect to an LLM and 
 | `systemMessage`            | string  | System message for LLM context                        | ""                |
 | `prompt`                   | string  | Override user input (if not set, uses actual input)   | ""                |
 | **Context Control**        |         |                                                       |                   |
-| `logSizeLimit`             | int     | Conversation history limit                            | -1 (unlimited)    |
+| `logSizeLimit`             | int     | Conversation history limit (`-1` = unlimited, `0` = none) | falls back to `conversationHistoryLimit` (default 10) |
 | `includeFirstAgentMessage` | boolean | Include first agent message in context                | true              |
 | **Output Control**         |         |                                                       |                   |
-| `convertToObject`          | boolean | Parse response as JSON. Enables three-layer enforcement: system prompt reinforcement, native API JSON mode (OpenAI, Gemini, Mistral), and pre-parse validation | false             |
+| `convertToObject`          | boolean | Parse response as JSON. Enables three-layer enforcement: system prompt reinforcement, native API JSON mode (see the [provider matrix](#native-json-mode--provider-matrix)), and pre-parse validation | false             |
 | `responseSchema`           | string  | JSON schema for structured output. When set with `convertToObject=true`, the exact schema is injected into the system prompt so the LLM knows the expected format | ""                |
 | `addToOutput`              | boolean | Add response to conversation output                   | false             |
 | **Logging**                |         |                                                       |                   |
-| `logRequests`              | boolean | Log API requests                                      | false             |
-| `logResponses`             | boolean | Log API responses                                     | false             |
+| `logRequests`              | boolean | Log API requests (sync and streaming)                 | false             |
+| `logResponses`             | boolean | Log API responses (sync and streaming)                | false             |
 | **API Configuration**      |         |                                                       |                   |
 | `temperature`              | string  | Model temperature (0-1)                               | Provider-specific |
-| `timeout`                  | string  | Request timeout (milliseconds)                        | Provider-specific |
+| `maxTokens`                | string  | Maximum output tokens per response — see [Output Token Limits](#output-token-limits) | Provider-specific |
+| `timeout`                  | string  | Request timeout (milliseconds) — see [Timeouts](#timeouts-and-streaming) | Provider-specific |
+
+> **These three settings are part of a model's identity.** Two tasks that differ only in `timeout`, `logRequests` or `logResponses` get two separate cached model instances, so a task always runs with the settings it declares regardless of which task was constructed first.
+>
+> **Logging is EDDI's, not the provider's.** `logRequests`/`logResponses` are honoured by EDDI's own model decorators, which truncate the logged request to 200 and the logged response to 500 characters. They are deliberately **not** forwarded to the provider builders: langchain4j's client-level logging writes whole request and response bodies at INFO with no truncation, so switching it on would put full prompts, full conversation history and full model output into the application log. (`logRequestsAndResponses`, which only the Azure OpenAI and Gemini builders accept, is a provider-level escape hatch and *is* still forwarded — use it only where that exposure is acceptable.)
+>
+> **An unusable `timeout` is ignored, not fatal.** The value is normalised once before it reaches a provider builder: it is trimmed, and dropped entirely when it is blank, non-numeric (`"30s"`) or non-positive (`"0"`, historically "no timeout"), with a WARN naming the model type. Provider builders parse the value with an unguarded `Long.parseLong`, so without this a stored config carrying one of those values would fail on every turn. `" 5000 "` and `"5000"` are the same timeout and share one cached model.
+### Output Token Limits
+
+The `maxTokens` parameter controls the **maximum number of output tokens** the LLM can generate per response. This is a ceiling, not a target — the model generates only what it needs and stops. Setting it higher does not increase cost unless the model actually produces more tokens; the `timeout` parameter is the real cost safety net.
+
+> [!WARNING]
+> **Anthropic + Extended Thinking**: Models with extended thinking (e.g. `claude-sonnet-5`, `claude-sonnet-4`) count **thinking tokens** toward `maxTokens`. If the limit is too low, thinking can consume the entire budget, leaving **zero tokens for the actual response** — resulting in empty/null output. This is a silent failure: the API returns successfully, token usage shows consumption, but `text()` is `null`.
+
+#### Provider Limits and EDDI Defaults
+
+| Provider | Config Key | Max Output Capability | EDDI Default (if omitted) | Notes |
+|----------|------------|----------------------|--------------------------|-------|
+| **Anthropic** | `maxTokens` | 8,192 (standard) / 128,000 (with extended thinking) | **16,384** | Required by API. Set higher for thinking models |
+| **Gemini** | `maxOutputTokens` | 65,536 | Provider SDK default | Use `maxOutputTokens` (not `maxTokens`) |
+| **OpenAI** | `maxTokens` | 4,096–16,384 (model-dependent) | Provider SDK default | |
+| **Azure OpenAI** | `maxTokens` | Same as OpenAI | Provider SDK default | |
+| **Bedrock** | `maxTokens` | Model-dependent | Provider SDK default | |
+| **Mistral** | `maxTokens` | 32,768 | Provider SDK default | |
+| **Oracle GenAI** | `maxTokens` | Model-dependent | Provider SDK default | |
+
+#### Recommended Settings
+
+For most conversational use cases:
+```json
+"maxTokens": "16384"
+```
+
+For complex analysis, multi-step reasoning, or models with extended thinking:
+```json
+"maxTokens": "32768"
+```
+
+For maximum output (e.g. long-form document generation):
+```json
+"maxTokens": "65536"
+```
+
+### Timeouts and Streaming
+
+Two settings bound an LLM call, and they are deliberately distinct:
+
+| Setting                                | Where               | Unit | What it bounds                                                                                                                                       |
+| -------------------------------------- | ------------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `timeout` (`parameters`)               | model parameter     | ms   | The provider call. On a non-streaming task it bounds the whole request. On a **streaming** task it is the provider HTTP client's request/read timeout — for the JDK client, the time until the provider's first response, so it catches a provider that never answers without truncating one that answers slowly. |
+| `streamingTimeoutSeconds` (task field) | task-level, sibling of `parameters` | s    | The **overall** wall-clock backstop for the whole stream, for providers whose native timeout does not fire (or does not exist). Streaming only.       |
+
+How the backstop is resolved:
+
+1. An explicit positive `streamingTimeoutSeconds` always wins.
+2. Otherwise the backstop is **120s**, raised (never lowered) to cover a longer explicitly configured `timeout`. So `timeout: "300000"` with no `streamingTimeoutSeconds` yields a 300s backstop rather than being cut short at 120s; any `timeout` at or below 120s leaves the 120s default untouched.
+3. Otherwise 120s.
+
+Both stored shapes therefore keep working: a config that sets only `streamingTimeoutSeconds` behaves exactly as before, and a config that sets only `timeout` is now honoured on the streaming path instead of being discarded.
+
+```json
+{
+  "actions": ["send_message"],
+  "id": "longRunning",
+  "type": "openai",
+  "streamingTimeoutSeconds": 300,
+  "parameters": {
+    "apiKey": "your-openai-api-key",
+    "modelName": "gpt-4o",
+    "timeout": "300000"
+  }
+}
+```
+
+> `timeout` is read from the task's stored parameters when deriving the backstop. A Qute-templated value (e.g. `"{vars.llm-timeout}"`) cannot be resolved at that point and simply leaves the 120s default in place — it never produces a shorter bound.
 
 ### Provider-Specific Examples
 
@@ -167,9 +242,10 @@ This is the standard way to use the Langchain task - just connect to an LLM and 
       "description": "Anthropic Claude chat",
       "parameters": {
         "apiKey": "your-anthropic-api-key",
-        "modelName": "claude-3-opus-20240229",
+        "modelName": "claude-sonnet-4-20250514",
         "temperature": "0.7",
-        "timeout": "15000",
+        "maxTokens": "16384",
+        "timeout": "60000",
         "systemMessage": "You are a helpful assistant",
         "includeFirstAgentMessage": "false",
         "addToOutput": "true"
@@ -179,7 +255,9 @@ This is the standard way to use the Langchain task - just connect to an LLM and 
 }
 ```
 
-**Note**: Anthropic doesn't allow the first message to be from the agent, so `includeFirstAgentMessage` should be set to `false`.
+> **Important**: Anthropic doesn't allow the first message to be from the agent, so `includeFirstAgentMessage` should be set to `false`.
+>
+> **maxTokens**: Anthropic requires `max_tokens` in every request. If omitted, EDDI defaults to **16384**. For models with **extended thinking** (e.g. `claude-sonnet-5`), thinking tokens count toward this budget — set it higher (e.g. `"32768"` or `"65536"`) for complex analysis tasks.
 
 #### Google Gemini (Vertex AI)
 
@@ -189,11 +267,12 @@ This is the standard way to use the Langchain task - just connect to an LLM and 
     {
       "actions": ["send_message"],
       "id": "geminiChat",
-      "type": "gemini",
+      "type": "gemini-vertex",
       "description": "Google Gemini chat",
       "parameters": {
         "publisher": "vertex-ai",
         "projectId": "your-project-id",
+        "location": "us-central1",
         "modelId": "gemini-pro",
         "temperature": "0.7",
         "timeout": "15000",
@@ -216,8 +295,10 @@ This is the standard way to use the Langchain task - just connect to an LLM and 
       "type": "ollama",
       "description": "Ollama local model chat",
       "parameters": {
-        "model": "llama3",
-        "timeout": "15000",
+        "baseUrl": "http://ollama:11434",
+        "model": "llama3.2:3b",
+        "timeout": "120000",
+        "think": "false",
         "systemMessage": "You are a helpful assistant",
         "addToOutput": "true"
       }
@@ -225,6 +306,38 @@ This is the standard way to use the Langchain task - just connect to an LLM and 
   ]
 }
 ```
+
+**Ollama-specific parameters**
+
+| Parameter        | Effect                                                                                      |
+| ---------------- | ------------------------------------------------------------------------------------------- |
+| `baseUrl`        | Ollama's address. Default `http://localhost:11434`, overridable deployment-wide with `EDDI_OLLAMA_DEFAULT_BASE_URL`. |
+| `model`          | Model tag as `ollama list` reports it, e.g. `llama3.2:3b`.                                   |
+| `think`          | `"true"` / `"false"`. Unset leaves it to Ollama and the model — see below.                    |
+| `returnThinking` | `"true"` surfaces the separate `thinking` field instead of discarding it. Off by default.     |
+| `temperature`, `maxTokens`, `topP`, `topK` | Standard sampling controls. `maxTokens` maps to Ollama's `num_predict`. |
+
+> **Reaching Ollama from a container.** Inside the `eddi` container `localhost`
+> is the container. Use `http://host.docker.internal:11434` for an Ollama on the
+> host, or bring up the overlay —
+> `docker compose -f docker-compose.yml -f docker-compose.ollama.yml up -d` —
+> which puts Ollama on the same network as `http://ollama:11434` and pre-fills
+> that base URL for new agents.
+
+> **Reasoning models look like a hang.** gemma3n, deepseek-r1, qwen3 and friends
+> think before they answer, and where that reasoning goes depends on the model:
+>
+> - Reported in a separate `thinking` field — not part of the streamed content, so
+>   a streaming chat window shows nothing at all for as long as the model reasons,
+>   then the whole answer at once. `"returnThinking": "true"` surfaces it instead
+>   of discarding it.
+> - Prepended to the content itself as `<think>…</think>` — the tags stream into
+>   the reply, where the user sees them. `returnThinking` does not affect this
+>   case; there is no `thinking` field to parse.
+>
+> `"think": "false"` turns reasoning off entirely and is the quickest way to a
+> model that answers immediately. Give such a model a generous `timeout` either
+> way.
 
 #### Hugging Face
 
@@ -336,7 +449,7 @@ This is the standard way to use the Langchain task - just connect to an LLM and 
         "modelId": "anthropic.claude-v2",
         "region": "us-east-1",
         "temperature": "0.7",
-        "maxTokens": "1024",
+        "maxTokens": "16384",
         "timeout": "30000",
         "systemMessage": "You are a helpful assistant",
         "addToOutput": "true"
@@ -363,7 +476,7 @@ This is the standard way to use the Langchain task - just connect to an LLM and 
         "compartmentId": "ocid1.compartment.oc1..your-compartment-id",
         "configProfile": "DEFAULT",
         "temperature": "0.7",
-        "maxTokens": "1024",
+        "maxTokens": "16384",
         "systemMessage": "You are a helpful assistant",
         "addToOutput": "true"
       }
@@ -436,10 +549,23 @@ This is the standard way to use the Langchain task - just connect to an LLM and 
 | `tools`                    | string[] | Custom HTTP call tool URIs to enable             | (none)                 |
 | **Context Control**        |          |                                                  |                        |
 | `conversationHistoryLimit` | int      | Max conversation turns in context                | 10                     |
+| `maxToolContextTokens`     | int      | Aggregate token ceiling on the **in-turn** tool-call context (tool requests + tool results across all loop iterations). The oldest complete tool exchange is evicted when exceeded. `-1`/`0` disables. See [In-Turn Tool Context Budget](#in-turn-tool-context-budget). | 60000 |
 | **Cost & Performance**     |          |                                                  |                        |
-| `maxBudgetPerConversation` | number   | Limit total tool/LLM usage cost per conversation | (unlimited)            |
+| `maxBudgetPerConversation` | number   | Ceiling on accumulated **tool** cost per conversation, in USD. Records cost; only refuses calls when `enforceBudget` is on | (unlimited) |
+| `enforceBudget`            | boolean  | Refuse tool calls once `maxBudgetPerConversation` is passed. **Opt-in** — a ceiling without it is report-only, and is named in a startup WARN | false (`eddi.tools.budget.enforce-by-default`) |
+| `toolPricing`              | map      | Per-call tool prices in USD. Keyed on the built-in slug (`{"websearch": 0.005}`) or on a single dispatch name (`{"searchNews": 0.01}`), which takes precedence — so one operation can be priced apart from its siblings | (built-in defaults) |
+| `inputPricePer1M` / `outputPricePer1M` | number | Token prices in USD per 1M tokens for this task's **model calls**, feeding the conversation's tracked cost (and any group cost ceiling). Applies to non-cascade calls; a [model cascade](model-cascade.md) prices its steps via its own fields of the same name. Negative values fail deployment | (unpriced — $0) |
 | `enableToolCaching`        | boolean  | Cache tool results to reduce API calls           | true                   |
+| `toolCacheScopes`          | map      | Per-tool cache partition: `user`/`conversation`/`global` | (all `user`)   |
+| `defaultToolCacheScope`    | string   | Cache partition for tools without an override    | `user`                 |
 | `enableRateLimiting`       | boolean  | Limit tool/LLM usage rate                        | true                   |
+| `toolLoadingStrategy`      | string   | `EAGER` sends every tool spec on every request. `LAZY` sends only a `discover_tools` meta-tool, and injects the tools the model asks for from the next iteration on. Use `LAZY` when a large tool set is crowding the context window | `EAGER` |
+| `maxToolsInContext`        | int      | Maximum tool specifications returned per discovery call under `LAZY`. Ignored under `EAGER` | 20 |
+| `retry`                    | object   | Retry policy for LLM calls — see [Retry configuration](#retry-configuration) | (none) |
+| `responseValidation`       | object   | Validates the model's response and applies a remediation action. Policies: `onEmpty`, `onTruncation`, `onContentFilter`, `onRefusal`, `onStreamingTimeout` | (none) |
+| `maxRagContextChars`       | int      | Ceiling on the assembled RAG context, in characters. `-1` or `0` disables it and restores the older unbounded behaviour | 20000 |
+| `maxSystemPromptChars`     | int      | Hard ceiling on the whole assembled system prompt, applied after RAG context, counterweight, identity masking and response-format blocks are appended. `-1` leaves it untouched | -1 |
+| `conversationSummary`      | object   | Rolling conversation summary — see [Rolling Conversation Summary](#rolling-conversation-summary) | (none) |
 
 ### Behavioral Safety (Counterweight & Identity Masking)
 
@@ -537,6 +663,10 @@ When `enableBuiltInTools: true`, you can use these tools:
 | **Text Summarizer** | Summarize long text                             | `textsummarizer` |
 | **PDF Reader**      | Extract text from PDF URLs (SSRF-protected)     | `pdfreader`      |
 | **Weather**         | Get weather information                         | `weather`        |
+| **Tool Response Paging** | Fetch the next page of a tool response that was truncated by `toolResponseLimits` | `fetch_page` / `fetch_tool_response_page` |
+| **Conversation Recall** | Drill back into turns the [rolling summary](#rolling-conversation-summary) has compressed. Only assembled when `conversationSummary.enabled` is true | `conversationRecall` |
+
+> Because a non-empty `builtInToolsWhitelist` enables **only** the tools it names, a whitelist that includes verbose tools should also include `fetch_page` — otherwise truncated tool responses cannot be paged through.
 
 ### Tool Configuration (Server-Side)
 
@@ -599,11 +729,11 @@ Omitting `builtInToolsWhitelist` enables all available built-in tools.
 
 ## Custom HTTP Tools
 
-In addition to built-in tools, you can give your agent access to any configured EDDI HTTP call. This allows the agent to interact with your own APIs or third-party services.
+In addition to built-in tools, your agent gets access to the EDDI HTTP calls configured in its own workflow. This allows the agent to interact with your own APIs or third-party services.
 
 ### Configuration
 
-To enable custom tools, add the `tools` property to your task configuration with a list of HTTP call URIs.
+Exposure is controlled by `enableHttpCallTools` (default `true`). Every `eddi://ai.labs.httpcalls` step in the agent's workflow is discovered automatically — there is no per-call list to maintain. Set it to `false` to expose none of them.
 
 ```json
 {
@@ -616,21 +746,22 @@ To enable custom tools, add the `tools` property to your task configuration with
         "modelName": "gpt-4o"
       },
       "enableBuiltInTools": true,
-      "tools": [
-        "eddi://ai.labs.httpcalls/get_stock_price?version=1",
-        "eddi://ai.labs.httpcalls/create_jira_ticket?version=1"
-      ]
+      "enableHttpCallTools": true
     }
   ]
 }
 ```
 
+The same applies to MCP calls via `enableMcpCallTools` (also default `true`), which discovers the `mcpcalls` configs in the workflow.
+
+> **Legacy**: the `tools` property (a list of httpcall URIs) still exists, but its entries are **not** resolved — listing a URI there grants no access. Its only remaining effect is to switch the task into agent mode, which `enableBuiltInTools` or `a2aAgents` do as well.
+
 ### How it Works
 
-1.  **Configuration**: You provide the URIs of the HTTP calls you want the agent to use.
-2.  **Discovery**: The agent is automatically informed about these tools and how to use them.
-3.  **Execution**: When the agent decides to use a tool, it calls the `executeHttpCall` function with the tool's URI and necessary arguments.
-4.  **Security**: The agent can **only** execute the HTTP calls explicitly listed in the `tools` array. It cannot make arbitrary HTTP requests to the internet.
+1.  **Configuration**: You add httpcall steps to the agent's workflow, as you would for `ApiCallsTask`.
+2.  **Discovery**: Each `ApiCall` in those configurations becomes its own tool, named after the ApiCall's `name`, described by its `description`, and with one string parameter per entry in its `parameters` map. That name is also the key used by `toolPricing`, `toolRateLimits` and `toolCacheScopes`, and the name `toolApprovals` patterns match on (alongside the `http.method:path` form).
+3.  **Execution**: When the agent decides to use a tool, it calls that tool by name (e.g. `get_stock_price`) with the arguments the schema declares.
+4.  **Security**: The agent can **only** execute the HTTP calls present in its workflow. It cannot make arbitrary HTTP requests to the internet. To narrow the agent's reach, narrow the httpcalls configuration in its workflow — or set `enableHttpCallTools: false`.
 
 ---
 
@@ -666,8 +797,8 @@ The Langchain task supports advanced pre-request and post-response processing fo
       "postResponse": {
         "propertyInstructions": [
           {
-            "name": "lastResponseTime",
-            "valueString": "{{currentTimestamp}}",
+            "name": "lastRespondingAgent",
+            "valueString": "{conversationInfo.agentId}",
             "scope": "conversation"
           }
         ],
@@ -676,15 +807,15 @@ The Langchain task supports advanced pre-request and post-response processing fo
             "pathToTargetArray": "response.suggestions",
             "iterationObjectName": "item",
             "outputType": "text",
-            "outputValue": "{{item.text}}"
+            "outputValue": "{item.text}"
           }
         ],
         "qrBuildInstructions": [
           {
             "pathToTargetArray": "response.quickReplies",
             "iterationObjectName": "reply",
-            "quickReplyValue": "{{reply.text}}",
-            "quickReplyExpressions": "{{reply.action}}"
+            "quickReplyValue": "{reply.text}",
+            "quickReplyExpressions": "{reply.action}"
           }
         ]
       }
@@ -753,7 +884,7 @@ For production workloads where token costs matter, EDDI supports **token-budget 
 | Parameter          | Type    | Description                                                                                    | Default |
 | ------------------ | ------- | ---------------------------------------------------------------------------------------------- | ------- |
 | `maxContextTokens` | int     | Maximum token budget for conversation history (excluding system prompt). -1 = use step count. | -1      |
-| `anchorFirstSteps` | int     | Number of opening conversation steps to always include regardless of window position.          | 2       |
+| `anchorFirstSteps` | int     | Number of opening conversation steps to always include regardless of window position. **Token-aware windowing only** — it takes effect when `maxContextTokens > 0` and is ignored by the step-count window (`conversationHistoryLimit`). | 2       |
 
 #### Example
 
@@ -790,6 +921,122 @@ This agent:
 
 When `maxContextTokens` is -1 (default), the existing `conversationHistoryLimit` step-count behavior applies. **Full backward compatibility is guaranteed.**
 
+### Retry Configuration
+
+`retry` on an LLM task bounds how the engine re-attempts a failed model call. Only errors the
+engine classifies as retriable are retried — transport faults, rate limits and 5xx responses —
+never a malformed request or an authentication failure.
+
+```json
+{
+  "retry": {
+    "maxAttempts": 3,
+    "backoffDelayMs": 1000,
+    "backoffMultiplier": 2.0,
+    "maxBackoffDelayMs": 10000
+  }
+}
+```
+
+| Parameter            | Type   | Description                                          | Default |
+| -------------------- | ------ | ---------------------------------------------------- | ------- |
+| `maxAttempts`        | int    | Total attempts including the first                   | 3       |
+| `backoffDelayMs`     | long   | Delay before the second attempt                      | 1000    |
+| `backoffMultiplier`  | double | Multiplier applied to the delay after each failure   | 2.0     |
+| `maxBackoffDelayMs`  | long   | Ceiling on any single delay                          | 10000   |
+
+The engine clamps these so a config cannot pin a pipeline thread: at most 10 attempts, at most
+30 seconds for one backoff, and at most 60 seconds of backoff in total across the retry sequence.
+A clamped value is reported once in a WARN.
+
+### Rolling Conversation Summary
+
+The third windowing strategy compresses older turns into a running summary that is injected into
+the system message, and keeps only the most recent turns verbatim. Unlike token-aware windowing,
+nothing is dropped outright: the model still sees what happened, in condensed form, and can drill
+back into the full text through the `conversationRecall` built-in tool.
+
+```json
+{
+  "conversationSummary": {
+    "enabled": true,
+    "recentWindowSteps": 5,
+    "maxSummaryTokens": 800,
+    "excludePropertiesFromSummary": true,
+    "maxRecallTurns": 20
+  }
+}
+```
+
+| Parameter                      | Type    | Description                                                                                     | Default |
+| ------------------------------ | ------- | ----------------------------------------------------------------------------------------------- | ------- |
+| `enabled`                      | boolean | Master switch. Nothing is summarized while this is false                                         | false   |
+| `llmProvider`                  | string  | Provider for the summarization call. Inherits the parent task's provider when unset              | (inherit) |
+| `llmModel`                     | string  | Model for the summarization call. Inherits the parent task's model when unset                    | (inherit) |
+| `maxSummaryTokens`             | int     | Token ceiling on the generated summary                                                           | 800     |
+| `excludePropertiesFromSummary` | boolean | Tell the summarizer to skip facts already captured as persistent properties                      | true    |
+| `recentWindowSteps`            | int     | Conversation steps kept verbatim alongside the summary. Everything older is covered by it        | 5       |
+| `maxRecallTurns`               | int     | Maximum verbatim turns returned per `conversationRecall` invocation                              | 20      |
+
+> **Watch the whitelist.** A non-empty `builtInToolsWhitelist` enables only the tools it names, and
+> `conversationRecall` is one of them. Enabling the rolling summary on a task whose whitelist does
+> not include `conversationRecall` leaves the model unable to drill back into summarized turns — it
+> answers from the condensed view with no error and no log line.
+
+### In-Turn Tool Context Budget
+
+`maxContextTokens` and `conversationHistoryLimit` bound the **conversation history** — the
+turns already on the record. They do **not** bound the messages a single tool-using turn
+accumulates *while it runs*. Inside one turn the agent loop appends the model's tool-call
+request and every tool result, iteration after iteration, up to `maxToolIterations`. Verbose
+tools (web scrapes, full PDF dumps, raw API bodies) can push that in-turn context past the
+model's context window and hard-fail the whole turn with a provider `400` — mid-loop, after
+the tool side effects have already happened. Per-tool `toolResponseLimits` help only when they
+are configured; they have no default, so an ordinary agent runs unbounded.
+
+`maxToolContextTokens` puts an **aggregate** ceiling on that in-turn tool traffic:
+
+- It counts only tool traffic — every `AiMessage` that carries tool-call requests plus its
+  `ToolExecutionResultMessage`s, summed across all iterations of this turn (and across a HITL
+  pause, which replays the same transcript). System, user and assistant-prose messages are
+  never counted or touched here — that is what `maxContextTokens` governs.
+- When the ceiling is exceeded, the **oldest complete tool exchange** — a requesting
+  `AiMessage` **together with all of its results** — is dropped before the next model call,
+  repeatedly, until the traffic fits. Requests and their results are always evicted together:
+  dropping one without the other leaves a dangling `tool_call_id` that itself provokes the
+  `400` the budget exists to prevent.
+- The **most recent** exchange is never evicted. If it alone exceeds the ceiling the request
+  is sent unchanged (the model asked for those results and must see them) and the overrun is
+  logged — reach for `toolResponseLimits` or a lower `maxToolIterations` in that case.
+- The same token estimator used for conversation windowing is reused, so a budget expressed in
+  tokens means the same thing in both halves of the request (tiktoken for OpenAI/Azure,
+  characters ÷ 4 elsewhere).
+
+**Default: `60000`.** High enough that no ordinary tool-using turn is ever touched — the guard
+is byte-for-byte inert below the ceiling, so agents that work today are unaffected — and low
+enough to keep a runaway loop inside a 128k context window once the system prompt, the
+conversation history and the model's own completion are added. Set `-1` (or `0`) to disable the
+guard and restore the pre-6.1 unbounded behaviour.
+
+**Observability.** Eviction is never silent: it emits a `tool_context_evicted` entry in the
+execution trace (with token counts before/after, exchanges and messages dropped, and whether
+the result is within budget), increments the `eddi.llm.tool_context.evictions` counter (tagged
+`outcome=within_budget|still_over_budget`), and logs a `WARN` (`llm.tool_context.evicted`)
+carrying the conversation id and the remediation hint. Because eviction removes tool results the
+model can no longer see, treat a steady stream of these as a signal to lower `maxToolIterations`,
+set `toolResponseLimits`, or raise `maxToolContextTokens`.
+
+```json
+{
+  "type": "openai",
+  "parameters": { "modelName": "gpt-4o" },
+  "enableBuiltInTools": true,
+  "builtInToolsWhitelist": ["websearch", "webscraper"],
+  "maxToolIterations": 10,
+  "maxToolContextTokens": 60000
+}
+```
+
 ---
 
 ## API Endpoints
@@ -799,31 +1046,31 @@ The Langchain task configurations can be managed via REST API endpoints.
 ### Endpoints Overview
 
 1. **Read JSON Schema**
-   - **Endpoint:** `GET /langchainstore/langchains/jsonSchema`
+   - **Endpoint:** `GET /llmstore/llms/jsonSchema`
    - **Description:** Retrieves the JSON schema for validating Langchain configurations
 
 2. **List Langchain Descriptors**
-   - **Endpoint:** `GET /langchainstore/langchains/descriptors`
+   - **Endpoint:** `GET /llmstore/llms/descriptors`
    - **Description:** Returns a list of all Langchain configurations with optional filters
 
 3. **Read Langchain Configuration**
-   - **Endpoint:** `GET /langchainstore/langchains/{id}`
+   - **Endpoint:** `GET /llmstore/llms/{id}`
    - **Description:** Fetches a specific Langchain configuration by its ID
 
 4. **Update Langchain Configuration**
-   - **Endpoint:** `PUT /langchainstore/langchains/{id}`
+   - **Endpoint:** `PUT /llmstore/llms/{id}`
    - **Description:** Updates an existing Langchain configuration
 
 5. **Create Langchain Configuration**
-   - **Endpoint:** `POST /langchainstore/langchains`
+   - **Endpoint:** `POST /llmstore/llms`
    - **Description:** Creates a new Langchain configuration
 
 6. **Duplicate Langchain Configuration**
-   - **Endpoint:** `POST /langchainstore/langchains/{id}`
+   - **Endpoint:** `POST /llmstore/llms/{id}`
    - **Description:** Duplicates an existing Langchain configuration
 
 7. **Delete Langchain Configuration**
-   - **Endpoint:** `DELETE /langchainstore/langchains/{id}`
+   - **Endpoint:** `DELETE /llmstore/llms/{id}`
    - **Description:** Deletes a specific Langchain configuration
 
 ---
@@ -841,8 +1088,101 @@ Tool Call ──▶ Rate Limiter ──▶ Cache Check ──▶ Execute Tool �
 | Feature           | Description                                                            | Config Key                                                 |
 | ----------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------- |
 | **Rate Limiting** | Token-bucket per tool, configurable limits                             | `enableRateLimiting`, `defaultRateLimit`, `toolRateLimits` |
-| **Smart Caching** | Deduplicates identical tool calls by arguments hash                    | `enableToolCaching`                                        |
-| **Cost Tracking** | Per-conversation budget enforcement with automatic stale-data eviction | `enableCostTracking`, `maxBudgetPerConversation`           |
+| **Smart Caching** | Deduplicates identical tool calls, partitioned per identity            | `enableToolCaching`, `toolCacheScopes`, `defaultToolCacheScope` |
+| **Cost Tracking** | Per-conversation tool-cost accounting, with an opt-in ceiling and automatic stale-data eviction | `enableCostTracking`, `toolPricing`, `maxBudgetPerConversation`, `enforceBudget` |
+
+#### Tool names: dispatch name vs. configuration slug
+
+A built-in tool has **two** names, and knowing which one a setting expects is the
+difference between a rule that binds and one that is silently ignored:
+
+- the **slug** — the token you write in `builtInToolsWhitelist` (`websearch`,
+  `calculator`, `datetime`, …). This is a property of the *tool*.
+- the **dispatch name** — the `@Tool` method the model actually calls
+  (`searchWeb`, `searchNews`, `searchWikipedia` all belong to `websearch`). This
+  is a property of the individual *operation*.
+
+| Setting                      | Accepted keys                                        |
+| ---------------------------- | ---------------------------------------------------- |
+| `builtInToolsWhitelist`      | slug only                                            |
+| `toolRateLimits`             | slug **or** dispatch name — dispatch name wins       |
+| `toolPricing`                | slug **or** dispatch name — dispatch name wins       |
+| `toolCacheScopes`            | slug **or** dispatch name — dispatch name wins       |
+| `toolApprovals`              | dispatch name, optionally `source:name`-qualified    |
+| cache TTL, default price     | slug (resolved automatically)                        |
+| `eddi.tool.*` metric `tool` tag | dispatch name                                     |
+
+> **Rate-limit buckets are per dispatch name.** `{"websearch": 30}` sets the
+> *limit* for the whole tool but gives `searchWeb`, `searchNews` and
+> `searchWikipedia` 30 calls/minute **each**, not 30 between them. Pin a single
+> operation by using its dispatch name: `{"searchNews": 5}`.
+
+#### Budgets
+
+`maxBudgetPerConversation` bounds **tool** cost only — the accumulated per-call
+prices of the tools a conversation invokes. LLM token spend is a separate,
+run-scoped concern governed by the model cascade's `maxCostPerRun`; the two are
+not added together.
+
+Enforcement is **opt-in**: a configured ceiling records cost but refuses nothing
+until you add `enforceBudget: true`. Built-in tools priced at $0.00 until the
+canonical-slug fix in this release, so enforcing automatically would make those
+ceilings bind for the first time and start aborting tool calls mid-conversation
+on upgrade.
+
+That choice has a real cost, which is why the engine warns rather than staying
+quiet: http, MCP, A2A and dynamic tools dispatch under their configured name, so
+a tool called `websearch` **was** priced and refused before `enforceBudget`
+existed. If you relied on such a ceiling, add the flag — every task carrying a
+ceiling without it is named once in a startup WARN. Cost is tracked and reported
+(`GET /llm/tools/costs`, `eddi.tool.costs`) either way. The deployment-wide
+default comes from `eddi.tools.budget.enforce-by-default` (default `false`).
+
+The check runs *before* each call and uses `<=`, so the call that crosses the
+ceiling still completes and the next one is refused with
+`Error: Budget exceeded for conversation <id>`.
+
+Default per-call prices: `webscraper` $0.002, `websearch` $0.001, `pdfreader`
+$0.001, `weather` $0.0005; `calculator`, `datetime`, `dataformatter` and
+`textsummarizer` are free. Anything not in that table — http, mcp, a2a, dynamic
+and the remaining built-ins — costs $0.00 until you price it with `toolPricing`.
+Negative `toolPricing` values are clamped to 0.0.
+
+#### Tool cache scoping
+
+Cached tool results are partitioned by identity. The cache key is
+`scopeTag|toolName:arguments`, and the scope tag is resolved per tool call as
+`toolCacheScopes[<dispatch name>]` → `toolCacheScopes[<slug>]` →
+`defaultToolCacheScope` → `user`:
+
+| Scope          | Tag                                    | A cached result is reused…                     |
+| -------------- | -------------------------------------- | ---------------------------------------------- |
+| `user`         | `u:<32 hex chars of SHA-256(userId)>`  | only for the same authenticated user (default) |
+| `conversation` | `c:<conversationId>`                   | only inside the conversation that produced it  |
+| `global`       | `g`                                    | by everyone — opt-in only                      |
+
+Choose `global` **only** for tools whose result depends purely on their
+arguments and never on who is asking (pure computation, public reference data).
+It is the one setting that permits cross-user reuse.
+
+When `user` scope applies but there is no user id, the entry falls back to the
+narrower conversation partition. When neither identity is available the cache is
+bypassed entirely for that call — nothing is read and nothing is stored, and the
+`eddi.tool.cache.bypassed` counter is incremented.
+
+An unrecognized token never fails the agent load, and it never widens a tool's
+audience either. A `toolCacheScopes` entry whose value does not parse
+(`"usr"`, `""`, `null`) resolves to `user` — **not** to `defaultToolCacheScope`,
+which could be `global` — and is logged at WARN naming the tool and the bad
+token. An unrecognized `defaultToolCacheScope` likewise resolves to `user`.
+
+Per-tool TTLs are enforced per entry: a cached result is removed once its own
+TTL has elapsed since it was written, independently of the other entries in the
+cache. The TTL is resolved from the dispatch name first and the slug second, so
+`searchNews` gets the 10-minute `news` TTL while its `searchWeb` sibling
+inherits `websearch`'s 30 minutes. `GET /llm/tools/cache/ttl/{toolName}` reports
+the TTL that will be applied. Size eviction (10 000 entries) is the secondary
+bound.
 
 ### Configuration Example
 
@@ -858,7 +1198,9 @@ Tool Call ──▶ Rate Limiter ──▶ Cache Check ──▶ Execute Tool �
       "toolRateLimits": { "websearch": 30, "weather": 50 },
       "enableToolCaching": true,
       "enableCostTracking": true,
+      "toolPricing": { "websearch": 0.005 },
       "maxBudgetPerConversation": 5.0,
+      "enforceBudget": true,
       "parameters": { "apiKey": "...", "modelName": "gpt-4o" }
     }
   ]
@@ -940,18 +1282,24 @@ To trigger the Langchain task, configure Behavior Rules to emit the appropriate 
 
 ```json
 {
-  "name": "Send to LLM",
-  "rules": [
+  "behaviorGroups": [
     {
-      "name": "User asks question",
-      "conditions": [
+      "name": "Send to LLM",
+      "behaviorRules": [
         {
-          "type": "occurrence",
-          "occurrence": "currentstep",
-          "value": "input:initial"
+          "name": "User asks question",
+          "conditions": [
+            {
+              "type": "inputmatcher",
+              "configs": {
+                "expressions": "*",
+                "occurrence": "currentStep"
+              }
+            }
+          ],
+          "actions": ["send_message"]
         }
-      ],
-      "actions": ["send_message"]
+      ]
     }
   ]
 }
@@ -988,10 +1336,44 @@ EDDI uses three complementary mechanisms to ensure reliable JSON output:
 | Layer | Mechanism | Coverage |
 |---|---|---|
 | **1. System Prompt** | Appends `## RESPONSE FORMAT (MANDATORY)` section with schema to every request | All providers |
-| **2. Native API** | Sets `ResponseFormatType.JSON` on `ChatRequest` | OpenAI, Gemini, Mistral, Azure OpenAI |
+| **2. Native API** | Sets `ResponseFormatType.JSON` on the outgoing `ChatRequest` | See the matrix below |
 | **3. Validation** | Pre-parse `startsWith("{")` check before deserialization | All providers |
 
-If a provider doesn't support native JSON mode (e.g., Anthropic), EDDI gracefully falls back to prompt-only enforcement.
+If a provider doesn't support native JSON mode (e.g. Anthropic), EDDI gracefully falls back to prompt-only enforcement.
+
+#### Native JSON mode — provider matrix
+
+Layer 2 is applied **per request**, never baked into the model instance, and it is applied in **all three execution modes**: no-tools (legacy), agent mode (tool-calling) and streaming — including every step of a multi-model cascade, which is evaluated against that step's own provider.
+
+| Provider | No tools (legacy / streaming) | Agent mode (tools present) |
+|---|---|---|
+| `openai` | ✅ | ✅ |
+| `azure-openai` | ✅ | ✅ |
+| `mistral` | ✅ | ✅ |
+| `gemini`, `gemini-vertex` | ✅ | ❌ — the Gemini API rejects `responseMimeType: application/json` together with `tools` |
+| `anthropic`, `bedrock` | ❌ — both reject a JSON format without a schema | ❌ |
+| `ollama`, `jlama`, `huggingface`, `oracle-genai` | ❌ (not verified — opt in with `jsonResponseFormat: "on"`) | ❌ |
+
+#### Overriding the matrix per task
+
+Set `jsonResponseFormat` on the LLM **task** (not in `parameters`):
+
+| Value | Behaviour |
+|---|---|
+| `auto` (default) | Use the matrix above, including the tools-aware distinction |
+| `on` | Always send the JSON format when `convertToObject=true`, tools included. The escape hatch for a provider or OpenAI-compatible gateway the matrix does not know yet — it also bypasses the Gemini guard, so only use it where you have verified the provider accepts the combination |
+| `off` | Never send it; enforcement stays prompt-only |
+
+```json
+{
+  "id": "classifier",
+  "type": "mistral",
+  "jsonResponseFormat": "auto",
+  "parameters": { "convertToObject": "true" }
+}
+```
+
+> **Do not set a `responseFormat` model parameter.** It is only read by the OpenAI builder and it bakes JSON mode into a **cached** model that is then reused for tool-calling and streaming requests — the cause of the historical Gemini `400 Function calling with a response mime type: 'application/json' is unsupported`. `convertToObject` alone is enough.
 
 ### Basic JSON Mode
 
@@ -1047,8 +1429,8 @@ When `convertToObject=true`, the raw LLM response is **always** persisted in con
 
 ### Tips
 
-- **Streaming**: Not recommended with JSON mode — the UI would show raw JSON building up
-- **Provider compatibility**: OpenAI, Gemini, and Mistral support native JSON mode. Other providers rely on prompt-based enforcement
+- **Streaming**: Not recommended with JSON mode — the UI would show raw JSON building up. It does work (the streamed request carries the format for supported providers), but pair it with `addToOutput: "false"` and a `postResponse`
+- **Provider compatibility**: see the provider matrix above. Unsupported providers rely on prompt-based enforcement
 - **Schema specificity**: The more specific your `responseSchema`, the more reliable the output. Use type hints (`"string"`, `"number"`, `"boolean"`) and descriptions
 
 ---
@@ -1069,6 +1451,8 @@ When `convertToObject=true`, the raw LLM response is **always** persisted in con
 
 - **Problem**: Requests timing out
 - **Solution**: Increase the `timeout` parameter value (in milliseconds). Default is often 15000 (15 seconds).
+- **Problem**: A *streaming* turn is cut off after ~120s even though `timeout` is larger
+- **Solution**: This was the behaviour before the `timeout`/`streamingTimeoutSeconds` unification; the backstop now follows a longer `timeout` automatically. Set `streamingTimeoutSeconds` explicitly if you need a bound that differs from the derived one — see [Timeouts and Streaming](#timeouts-and-streaming).
 
 ### Anthropic First Message Error
 
@@ -1143,12 +1527,12 @@ This means:
 The LLM Lifecycle Task provides a flexible, unified interface for integrating LLMs into EDDI agents:
 
 1. ✅ **Simple by Default** - Start with basic chat, add tools when needed
-2. ✅ **12 Provider Support** - OpenAI, Anthropic, Google, Mistral, Azure, Bedrock, Oracle, Ollama, Hugging Face, Jlama + OpenAI-compatible (DeepSeek, Cohere)
-3. ✅ **Built-in Tools** - 8 tools available when you enable agent mode
+2. ✅ **12 Provider Support** - OpenAI, Anthropic, Google Gemini, Google Vertex AI, Mistral, Azure, Bedrock, Oracle, Ollama, Hugging Face, Jlama + OpenAI-compatible (DeepSeek, Cohere)
+3. ✅ **Built-in Tools** - 9 tools available when you enable agent mode
 4. ✅ **Tool Execution Pipeline** - Rate limiting, caching, cost tracking for every tool call
 5. ✅ **Security Hardened** - SSRF protection, sandboxed math evaluation, input validation
 6. ✅ **Fine-Grained Control** - Pre/post processing, context management, templating
 7. ✅ **Orchestration Layer** - Conditional invocation, hybrid workflows, state persistence
-8. ✅ **Easy Configuration** - Use Agent Father for guided setup
+8. ✅ **Easy Configuration** - Generated for you by the Manager's agent wizard or the Platform Operator
 
 Whether you need simple chat or advanced agent capabilities, the Langchain task provides the foundation for intelligent conversational experiences in EDDI.

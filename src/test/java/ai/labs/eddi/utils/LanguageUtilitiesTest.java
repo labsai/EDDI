@@ -12,6 +12,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Date;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -74,21 +75,50 @@ class LanguageUtilitiesTest {
     }
 
     @Nested
-    @DisplayName("isOrdinalNumber")
+    @DisplayName("extractOrdinalValue")
     class OrdinalNumberTests {
 
         @ParameterizedTest
         @CsvSource({"1st, 1", "2nd, 2", "3rd, 3", "4th, 4", "21st, 21", "100th, 100"})
         @DisplayName("extracts numeric value from ordinals")
-        void validOrdinals(String input, String expected) {
-            assertEquals(expected, LanguageUtilities.isOrdinalNumber(input));
+        void validOrdinals(String input, int expected) {
+            assertEquals(Optional.of(expected), LanguageUtilities.extractOrdinalValue(input));
         }
 
         @ParameterizedTest
-        @ValueSource(strings = {"hello", "abc", "1", "12"})
-        @DisplayName("returns null for non-ordinals")
-        void nonOrdinals(String input) {
-            assertNull(LanguageUtilities.isOrdinalNumber(input));
+        @CsvSource({"1., 1", "12., 12"})
+        @DisplayName("extracts numeric value from dot notation ordinals")
+        void dotNotationOrdinals(String input, int expected) {
+            assertEquals(Optional.of(expected), LanguageUtilities.extractOrdinalValue(input));
         }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"hello", "abc", "1", "12", "."})
+        @DisplayName("returns empty for non-ordinals")
+        void nonOrdinals(String input) {
+            assertEquals(Optional.empty(), LanguageUtilities.extractOrdinalValue(input));
+        }
+    }
+
+    /**
+     * The hour alternation read "[2]?2[0-3]" — an OPTIONAL '2' followed by a
+     * LITERAL '2' — so p1/p2 accepted "220h".."223h" as times. p2 matched, the 'h'
+     * was rewritten to ":00", and p3 then rejected the result, so the expression
+     * was silently dropped rather than never recognised. The intent was "[2][0-3]",
+     * which is what p3 already used.
+     */
+    @Test
+    void isTimeExpression_rejectsThreeDigitHours() {
+        assertNull(LanguageUtilities.isTimeExpression("220h"));
+        assertNull(LanguageUtilities.isTimeExpression("223h"));
+        assertNull(LanguageUtilities.isTimeExpression("2215h30"));
+    }
+
+    @Test
+    void isTimeExpression_stillAcceptsRealHours() {
+        assertNotNull(LanguageUtilities.isTimeExpression("15h"));
+        assertNotNull(LanguageUtilities.isTimeExpression("23h"));
+        assertNotNull(LanguageUtilities.isTimeExpression("12h10"));
+        assertNull(LanguageUtilities.isTimeExpression("24h"));
     }
 }

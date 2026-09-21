@@ -7,16 +7,19 @@ package ai.labs.eddi.engine.lifecycle.internal;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
 import ai.labs.eddi.engine.lifecycle.IComponentCache;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.ILifecycleManager;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
+import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException;
 import ai.labs.eddi.engine.lifecycle.exceptions.ConversationStopException;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.ConversationStep;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.model.Data;
+import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 
 import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.trace.Span;
@@ -27,17 +30,32 @@ import io.opentelemetry.context.Scope;
 import io.micrometer.core.instrument.Metrics;
 import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.Counter;
+import java.time.Duration;
 
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-
-import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
-import static ai.labs.eddi.utils.LifecycleUtilities.createComponentKey;
-import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
-import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
+import java.util.concurrent.TimeoutException;
 
 import org.jboss.logging.Logger;
+import java.net.UnknownHostException;
+import java.net.SocketTimeoutException;
+import java.net.ConnectException;
+import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
+import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_CASCADE_MODEL;
+import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_COMPILED_PROMPT;
+import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_CONFIDENCE;
+import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_COST;
+import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_MODEL_NAME;
+import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_MODEL_RESPONSE;
+import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_TOKEN_USAGE;
+import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_TOOL_CALLS;
+import static ai.labs.eddi.engine.memory.MemoryKeys.LANGCHAIN_TRACE_PREFIX;
+import static ai.labs.eddi.engine.memory.MemoryKeys.TASK_TYPE_LANGCHAIN;
+import static ai.labs.eddi.utils.LifecycleUtilities.createComponentKey;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
+import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 /**
  * Executes the Lifecycle Workflow - EDDI's core processing engine.
@@ -190,29 +208,88 @@ public class LifecycleManager implements ILifecycleManager {
     @SuppressWarnings("null") // Objects.requireNonNullElse guarantees non-null but Eclipse JDT doesn't track
                               // it
     public void executeLifecycle(final IConversationMemory conversationMemory, List<String> lifecycleTaskTypes)
-            throws LifecycleException, ConversationStopException {
+            throws LifecycleException, ConversationStopException, ConversationPauseException {
 
         checkNotNull(conversationMemory, "conversationMemory");
 
-        var eventSink = conversationMemory.getEventSink();
-
-        // Determine which tasks to execute
-        List<ILifecycleTask> lifecycleTasks;
         if (isNullOrEmpty(lifecycleTaskTypes)) {
-            // Execute all tasks
-            lifecycleTasks = this.lifecycleTasks;
+            // Execute all tasks — loop index is already absolute (offset 0).
+            executeTaskRange(conversationMemory, this.lifecycleTasks, 0, 0);
         } else {
-            // Execute only tasks starting from specified type
-            lifecycleTasks = getLifecycleTasks(lifecycleTaskTypes);
+            // Selective execution: run the suffix of the pipeline starting at the
+            // first task whose type matches. A SUBLIST is passed, so the loop index
+            // inside executeTaskRange is sublist-relative; the absolute offset is
+            // threaded through so every index-keyed lookup there (component cache,
+            // telemetry, audit, HITL bookmark) still resolves against the FULL task
+            // list.
+            int startAbsolute = getLifecycleStartIndex(lifecycleTaskTypes);
+            if (startAbsolute < 0) {
+                return; // no task matches the requested types — nothing to execute
+            }
+            List<ILifecycleTask> tasks = this.lifecycleTasks.subList(startAbsolute, this.lifecycleTasks.size());
+            executeTaskRange(conversationMemory, tasks, 0, startAbsolute);
         }
+    }
+
+    /**
+     * Resume lifecycle execution from an absolute task index. Used by the HITL
+     * framework to continue the pipeline from where it was paused.
+     */
+    @Override
+    public void executeLifecycleFromIndex(IConversationMemory conversationMemory, int startFromAbsoluteIndex)
+            throws LifecycleException, ConversationStopException, ConversationPauseException {
+
+        checkNotNull(conversationMemory, "conversationMemory");
+        // The index comes from a persisted HITL bookmark — validate it before use.
+        // A negative index is a corrupt bookmark; an index STRICTLY past the end
+        // means the workflow was redeployed with fewer tasks (a bookmark of exactly
+        // size() is valid: it means "pause was on the last task", zero remaining).
+        if (startFromAbsoluteIndex < 0) {
+            throw new LifecycleException("HITL resume index cannot be negative: " + startFromAbsoluteIndex);
+        }
+        if (startFromAbsoluteIndex > this.lifecycleTasks.size()) {
+            LOGGER.warnf("HITL resume index %d exceeds task count %d (workflow may have been redeployed) — "
+                    + "skipping remaining tasks of this workflow", startFromAbsoluteIndex, this.lifecycleTasks.size());
+            return;
+        }
+        executeTaskRange(conversationMemory, this.lifecycleTasks, startFromAbsoluteIndex, 0);
+    }
+
+    /**
+     * Shared task execution loop used by both executeLifecycle and
+     * executeLifecycleFromIndex. Iterates tasks from startIndex, applying
+     * cancel/interrupt checks, action snapshots, tracing, metrics, strict-write
+     * discipline, and HITL pause detection for each task.
+     */
+    private void executeTaskRange(IConversationMemory conversationMemory,
+                                  List<ILifecycleTask> tasks, int startIndex, int indexOffset)
+            throws LifecycleException, ConversationStopException, ConversationPauseException {
+
+        var eventSink = conversationMemory.getEventSink();
 
         // Resolve memory policy once (null-safe)
         var memoryPolicy = conversationMemory.getMemoryPolicy();
         boolean strictWriteEnabled = memoryPolicy != null && memoryPolicy.isEffectivelyEnabled();
 
         // Execute each task in sequence
-        for (int index = 0; index < lifecycleTasks.size(); index++) {
-            ILifecycleTask task = lifecycleTasks.get(index);
+        for (int index = startIndex; index < tasks.size(); index++) {
+            ILifecycleTask task = tasks.get(index);
+
+            // Position of this task in the workflow's FULL task list. On a selective
+            // (sublist) execution the loop index is sublist-relative, but every
+            // index-keyed lookup below is ABSOLUTE: WorkflowStoreClientLibrary caches
+            // each task's component under its position in THIS task list (which is why
+            // a workflow step that contributes no task can no longer shift the keys of
+            // later ones), and the HITL bookmark / telemetry / audit rows are read back
+            // against the full list.
+            // Using the relative index made a rerun look up a component key that was
+            // never written, so the task ran with component == null and no-opped.
+            final int absoluteIndex = indexOffset + index;
+
+            // Cancel check (Wave 0)
+            if (conversationMemory.isCancelled()) {
+                throw new ConversationStopException();
+            }
 
             // Fail-fast: every task must have a non-null TaskId
             if (task.getId() == null) {
@@ -224,26 +301,27 @@ public class LifecycleManager implements ILifecycleManager {
                 throw new LifecycleException.LifecycleInterruptedException("Execution was interrupted!");
             }
 
-            // Snapshot state before task execution (for rollback on failure)
+            // Snapshot actions before task execution — always captured for
+            // delta-based PAUSE_CONVERSATION detection (Blocker #1 fix).
+            // Also used by strict-write rollback when enabled.
             var currentStep = conversationMemory.getCurrentStep();
+            IData<List<String>> preActionData = currentStep.getLatestData(ACTIONS);
+            List<String> actionsBefore = (preActionData != null && preActionData.getResult() != null)
+                    ? List.copyOf(preActionData.getResult())
+                    : List.of();
+
             Map<String, IData<?>> dataIdentitiesBefore = Map.of();
             Set<String> outputKeysBefore = Set.of();
-            List<String> actionsBefore = List.of();
             if (strictWriteEnabled && currentStep instanceof ConversationStep cs) {
                 dataIdentitiesBefore = cs.snapshotDataIdentities();
                 outputKeysBefore = cs.snapshotOutputKeys();
-                // Capture pre-failure actions for Bug 3 fix
-                IData<List<String>> preActionData = currentStep.getLatestData(ACTIONS);
-                if (preActionData != null && preActionData.getResult() != null) {
-                    actionsBefore = List.copyOf(preActionData.getResult());
-                }
             }
 
             // === OpenTelemetry: create span per task ===
             Span taskSpan = getTracer().spanBuilder("eddi.pipeline.task")
                     .setAttribute("eddi.task.id", task.getId().name())
                     .setAttribute("eddi.task.type", Objects.requireNonNullElse(task.getType(), "unknown"))
-                    .setAttribute("eddi.task.index", (long) index)
+                    .setAttribute("eddi.task.index", (long) absoluteIndex)
                     .setAttribute("eddi.conversation.id",
                             Objects.requireNonNullElse(conversationMemory.getConversationId(), "unknown"))
                     .setAttribute("eddi.agent.id",
@@ -257,12 +335,12 @@ public class LifecycleManager implements ILifecycleManager {
                 // Component contains task-specific configuration loaded during agent
                 // initialization
                 var components = componentCache.getComponentMap(task.getId().name());
-                var componentKey = createComponentKey(workflowId.getId(), workflowId.getVersion(), index);
+                var componentKey = createComponentKey(workflowId.getId(), workflowId.getVersion(), absoluteIndex);
                 var component = components.getOrDefault(componentKey, null);
 
                 // Emit task_start event if streaming
                 if (eventSink != null) {
-                    eventSink.onTaskStart(task.getId(), task.getType(), index);
+                    eventSink.onTaskStart(task.getId(), task.getType(), absoluteIndex);
                 }
 
                 // Execute the task, transforming the conversation memory
@@ -279,32 +357,93 @@ public class LifecycleManager implements ILifecycleManager {
                 // Emit audit entry if audit collector is set
                 var auditCollector = conversationMemory.getAuditCollector();
                 if (auditCollector != null) {
-                    AuditEntry auditEntry = buildAuditEntry(conversationMemory, task, index, durationMs, summary);
+                    AuditEntry auditEntry = buildAuditEntry(conversationMemory, task, absoluteIndex, durationMs, summary);
                     auditCollector.collect(auditEntry);
                 }
 
                 // Check if task triggered a STOP_CONVERSATION action
                 checkIfStopConversationAction(conversationMemory);
+                // The pause bookmark must be ABSOLUTE so resume re-enters the full task
+                // list at the right place, even when this is a selective (sublist)
+                // execution where the loop index is offset-relative.
+                checkIfPauseConversationAction(conversationMemory, absoluteIndex, actionsBefore);
 
             } catch (LifecycleException | RuntimeException e) {
+                // HITL tool pause: a gated LLM tool call is NOT a task failure. Convert
+                // it to a ConversationPauseException(TOOL_CALL) BEFORE the error counter
+                // and strict-write rollback — the partially-executed step data (incl. the
+                // pending batch just written to memory) must survive into the pause
+                // snapshot, exactly like the rule-based PAUSE_CONVERSATION path.
+                if (e instanceof ToolApprovalRequiredException tare) {
+                    taskSpan.setAttribute("eddi.hitl.pause", "tool_call");
+                    throw new ConversationPauseException(workflowId.getId(), absoluteIndex,
+                            tare.getPauseReason(), ConversationPauseException.PauseOrigin.TOOL_CALL);
+                }
+
                 taskSpan.setStatus(StatusCode.ERROR, Objects.requireNonNullElse(e.getMessage(), e.getClass().getSimpleName()));
                 taskSpan.recordException(e);
 
-                // Record error counter for dashboards & alerting
+                // Classify error for metrics, audit, and admin dashboards
+                String errorType = classifyError(e);
+                String errorSummary = summarizeForAudit(e);
+                long failDurationMs = (System.nanoTime() - taskStartTime) / 1_000_000;
+
+                // Record error counter for dashboards & alerting (tagged by error.type)
                 String errTaskId = task.getId().name();
                 String errTaskType = task.getType() != null ? task.getType() : "unknown";
-                String errMeterKey = errTaskId + "|" + errTaskType;
+                String errMeterKey = errTaskId + "|" + errTaskType + "|" + errorType;
                 TASK_ERROR_COUNTERS.computeIfAbsent(errMeterKey, k -> Counter.builder("eddi.pipeline.task.errors")
                         .tag("task.id", errTaskId)
                         .tag("task.type", errTaskType)
+                        .tag("error.type", errorType)
                         .description("Pipeline task execution errors")
                         .register(Metrics.globalRegistry)).increment();
 
+                // Emit SSE task_failed event for real-time admin monitoring
+                var eventSinkRef = conversationMemory.getEventSink();
+                if (eventSinkRef != null) {
+                    try {
+                        eventSinkRef.onTaskFailed(task.getId(), task.getType(),
+                                failDurationMs, errorType, errorSummary);
+                    } catch (Exception sseEx) {
+                        LOGGER.warnf(sseEx, "SSE task_failed emission failed for conversation '%s', task '%s'",
+                                sanitize(conversationMemory.getConversationId()), errTaskId);
+                    }
+                }
+
+                // Strict-write recovery runs before reporting: it is integrity-critical
+                // and must not be skipped by an audit failure.
                 if (strictWriteEnabled && currentStep instanceof ConversationStep cs) {
                     // === Strict Write Discipline: handle task failure ===
                     String onFailureMode = resolveOnFailureMode(memoryPolicy);
                     handleTaskFailure(cs, task, e, dataIdentitiesBefore,
                             outputKeysBefore, actionsBefore, onFailureMode);
+                }
+
+                // Collect failure audit entry. Best-effort: an audit failure must not
+                // replace the original task exception, so it is attached as suppressed.
+                var auditCollector = conversationMemory.getAuditCollector();
+                if (auditCollector != null) {
+                    try {
+                        var failureOutput = new LinkedHashMap<String, Object>();
+                        failureOutput.put("status", "TASK_FAILED");
+                        failureOutput.put("errorType", errorType);
+                        failureOutput.put("errorMessage", errorSummary);
+                        failureOutput.put("strictWriteApplied", strictWriteEnabled);
+
+                        AuditEntry failureEntry = new AuditEntry(
+                                UUID.randomUUID().toString(), conversationMemory.getConversationId(),
+                                conversationMemory.getAgentId(), conversationMemory.getAgentVersion(),
+                                conversationMemory.getUserId(), null, conversationMemory.size() - 1,
+                                errTaskId, errTaskType, absoluteIndex, failDurationMs,
+                                null, failureOutput, null, null, null, 0.0,
+                                Instant.now(), null, null);
+                        auditCollector.collect(failureEntry);
+                    } catch (Exception auditEx) {
+                        LOGGER.warnf(auditEx, "Failure audit collection failed for conversation '%s', task '%s'",
+                                sanitize(conversationMemory.getConversationId()), errTaskId);
+                        e.addSuppressed(auditEx);
+                    }
                 }
 
                 // Re-throw — pipeline stops (current behavior preserved).
@@ -328,10 +467,32 @@ public class LifecycleManager implements ILifecycleManager {
                         .tag("task.type", taskType)
                         .description("Pipeline task execution duration")
                         .publishPercentileHistogram()
-                        .register(Metrics.globalRegistry)).record(java.time.Duration.ofMillis(durationMs));
+                        .register(Metrics.globalRegistry)).record(Duration.ofMillis(durationMs));
 
                 taskSpan.end();
             }
+        }
+
+        // Exit checks. The in-loop checks only guard the transition INTO a task, so an
+        // abort signal that lands while the LAST task runs was never observed: the loop
+        // simply ran out, the turn returned normally, and Conversation went on to
+        // commit the turn's side effects (long-term property upserts) for work whose
+        // outcome the runtime then discards. Re-checking here closes that window for
+        // the last task of every workflow, and for an empty/exhausted range.
+        //
+        // Both signals are re-checked, mirroring the in-loop pair, because the two
+        // abort paths are distinct: a cooperative cancel sets the memory flag, while
+        // the runtime watchdog abandons a timed-out turn by interrupting this thread
+        // ONLY (AbandonableFuture#cancel never touches the memory flag) and routes the
+        // late completion to onFailure, so the conversation document is thrown away.
+        // This is the earlier of two guards, not the durable one — an interrupt can
+        // still land after this point, which is why Conversation re-checks immediately
+        // before the post-conversation tasks.
+        if (conversationMemory.isCancelled()) {
+            throw new ConversationStopException();
+        }
+        if (Thread.currentThread().isInterrupted()) {
+            throw new LifecycleException.LifecycleInterruptedException("Execution was interrupted!");
         }
     }
 
@@ -346,17 +507,101 @@ public class LifecycleManager implements ILifecycleManager {
         if (actionData != null && actionData.getResult() != null) {
             summary.put("actions", actionData.getResult());
         }
-        // Tool execution trace (for LLM tasks) — enables live tool call display in UI
-        IData<?> traceData = conversationMemory.getCurrentStep().getLatestData("langchain:trace:" + task.getId().name());
-        if (traceData != null && traceData.getResult() != null) {
-            summary.put("toolTrace", traceData.getResult());
-        }
-        // Cascade confidence (when model cascade is active)
-        IData<Double> confidenceData = conversationMemory.getCurrentStep().getLatestData("audit:confidence");
-        if (confidenceData != null && confidenceData.getResult() != null) {
-            summary.put("confidence", confidenceData.getResult());
+        // Tool execution trace (LLM tasks only) — enables live tool call display in UI.
+        // One LlmTask execution iterates the LLM config's tasks and writes one
+        // "langchain:trace:<modelType>:<configTaskId>" key PER config task, so the
+        // trace has to be aggregated. getLatestData() cannot be used: it reverses the
+        // element list and returns only the LAST prefix match. The task-type gate is
+        // load-bearing — step data survives across tasks, so an ungated prefix scan
+        // would report the LLM's trace on every task that runs after it in this step.
+        if (isLlmTask(task)) {
+            List<Object> toolTrace = collectToolTrace(conversationMemory.getCurrentStep());
+            if (!toolTrace.isEmpty()) {
+                // Redact before it leaves the process. This summary feeds the SSE
+                // task_complete frame, and tool arguments/results are LLM- and
+                // user-controlled, so they can carry secrets (API keys, bearer
+                // tokens). The audit-ledger path already scrubs the same content via
+                // AuditLedgerService; this brings the live-display path to parity.
+                summary.put("toolTrace", redactToolTrace(toolTrace));
+            }
+            // Cascade confidence (when model cascade is active) — written as a Double by
+            // LlmTask's cascade branch. It used to write a String under a different key
+            // ("audit:cascade_confidence"), so this slot was never populated at all.
+            // Same gate as the trace above: it is an LLM-only signal that lingers in the
+            // step, so an ungated read reports it for every later task too.
+            IData<Double> confidenceData = conversationMemory.getCurrentStep().getLatestData(AUDIT_CONFIDENCE);
+            if (confidenceData != null && confidenceData.getResult() != null) {
+                summary.put("confidence", confidenceData.getResult());
+            }
         }
         return summary;
+    }
+
+    /**
+     * Whether this task is the LLM task, i.e. the only writer of the
+     * {@code audit:*} and {@code langchain:trace:*} step keys.
+     * <p>
+     * Both {@link #buildTaskSummary} and {@link #buildAuditEntry} read those keys,
+     * and {@code ConversationStep}'s data is never cleared between tasks — so an
+     * ungated read attributes the LLM's evidence to every task that runs after it
+     * in the same step. Kept as one shared predicate so the two readers cannot
+     * drift apart again.
+     */
+    private boolean isLlmTask(ILifecycleTask task) {
+        return TASK_TYPE_LANGCHAIN.equals(task.getType());
+    }
+
+    /**
+     * Aggregates every {@code langchain:trace:*} entry of the current step, in
+     * write order. {@link IConversationMemory.IConversationStep#getAllElements()}
+     * returns an insertion-ordered defensive copy, so no reordering is needed.
+     * <p>
+     * The caller must gate on the task type — this method deliberately does not, so
+     * it stays a pure read over the step.
+     */
+    private List<Object> collectToolTrace(IConversationMemory.IConversationStep currentStep) {
+        List<Object> aggregated = new ArrayList<>();
+        for (IData<?> element : currentStep.getAllElements()) {
+            if (element != null && element.getKey() != null
+                    && element.getKey().startsWith(LANGCHAIN_TRACE_PREFIX)
+                    && element.getResult() instanceof List<?> entries) {
+                aggregated.addAll(entries);
+            }
+        }
+        return aggregated;
+    }
+
+    /**
+     * Deep-redacts a collected tool trace before it is placed on the SSE
+     * {@code task_complete} summary. Each entry is a {@code Map} whose
+     * {@code arguments}/{@code result} strings are LLM- or user-controlled and may
+     * contain secrets. Mirrors {@code AuditLedgerService}'s scrub so the two
+     * outward-facing channels redact the same way. Returns a fresh structure — the
+     * trace stored in conversation memory is left intact for the owner-scoped
+     * {@code RestToolHistory} endpoint.
+     */
+    private static List<Object> redactToolTrace(List<Object> trace) {
+        List<Object> redacted = new ArrayList<>(trace.size());
+        for (Object entry : trace) {
+            redacted.add(redactTraceValue(entry));
+        }
+        return redacted;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Object redactTraceValue(Object value) {
+        if (value instanceof String s) {
+            return SecretRedactionFilter.redact(s);
+        } else if (value instanceof Map<?, ?> map) {
+            Map<String, Object> scrubbed = new LinkedHashMap<>(map.size());
+            for (Map.Entry<String, Object> e : ((Map<String, Object>) map).entrySet()) {
+                scrubbed.put(e.getKey(), redactTraceValue(e.getValue()));
+            }
+            return scrubbed;
+        } else if (value instanceof List<?> list) {
+            return list.stream().map(LifecycleManager::redactTraceValue).toList();
+        }
+        return value;
     }
 
     /**
@@ -381,21 +626,55 @@ public class LifecycleManager implements ILifecycleManager {
             output.put("output", outputData.getResult());
         }
 
-        // Collect LLM details (if present)
+        // Everything below is written by LlmTask (executeTask and executeResume) and
+        // only when an audit collector is attached. It is gated on the task type for
+        // the same reason buildTaskSummary gates the tool trace: the step's data
+        // survives across tasks, so an ungated read makes every task running after the
+        // LLM task in this step append a ledger row carrying the LLM's prompt, tokens,
+        // tool calls and — worst of all — its dollar cost. The ledger is append-only,
+        // so an auditor summing cost over the turn would read a multiple of the truth
+        // with no way to correct it after the fact.
+        boolean llmTask = isLlmTask(task);
+
+        // Collect LLM details (if present).
         Map<String, Object> llmDetail = null;
-        IData<String> promptData = currentStep.getLatestData("audit:compiled_prompt");
+        IData<String> promptData = llmTask ? currentStep.getLatestData(AUDIT_COMPILED_PROMPT) : null;
         if (promptData != null && promptData.getResult() != null) {
             llmDetail = new LinkedHashMap<>();
             llmDetail.put("compiledPrompt", promptData.getResult());
-            IData<String> responseData = currentStep.getLatestData("audit:model_response");
+            IData<String> responseData = currentStep.getLatestData(AUDIT_MODEL_RESPONSE);
             if (responseData != null)
                 llmDetail.put("modelResponse", responseData.getResult());
-            IData<String> modelData = currentStep.getLatestData("audit:model_name");
+            IData<String> modelData = currentStep.getLatestData(AUDIT_MODEL_NAME);
             if (modelData != null)
                 llmDetail.put("modelName", modelData.getResult());
-            IData<Map<String, Object>> tokenData = currentStep.getLatestData("audit:token_usage");
-            if (tokenData != null)
+            // Stricter than the two above on purpose: those have always produced values
+            // and their looser guard is grandfathered, whereas the keys below never had
+            // a writer at all, so nothing depends on a null result reaching llmDetail.
+            IData<Map<String, Object>> tokenData = currentStep.getLatestData(AUDIT_TOKEN_USAGE);
+            if (tokenData != null && tokenData.getResult() != null)
                 llmDetail.put("tokenUsage", tokenData.getResult());
+            IData<String> cascadeModelData = currentStep.getLatestData(AUDIT_CASCADE_MODEL);
+            if (cascadeModelData != null && cascadeModelData.getResult() != null)
+                llmDetail.put("cascadeModel", cascadeModelData.getResult());
+            IData<Double> confidenceData = currentStep.getLatestData(AUDIT_CONFIDENCE);
+            if (confidenceData != null && confidenceData.getResult() != null)
+                llmDetail.put("confidence", confidenceData.getResult());
+        }
+
+        // Tool execution evidence, accumulated by LlmTask across the whole turn.
+        Map<String, Object> toolCalls = null;
+        IData<Map<String, Object>> toolCallData = llmTask ? currentStep.getLatestData(AUDIT_TOOL_CALLS) : null;
+        if (toolCallData != null && toolCallData.getResult() != null && !toolCallData.getResult().isEmpty()) {
+            toolCalls = toolCallData.getResult();
+        }
+
+        // Dollar cost of this task: configured cascade LLM pricing plus tracked tool
+        // cost. Absent means nothing priced ran, which is a genuine 0.0.
+        double cost = 0.0;
+        IData<Double> costData = llmTask ? currentStep.getLatestData(AUDIT_COST) : null;
+        if (costData != null && costData.getResult() != null) {
+            cost = costData.getResult();
         }
 
         // Actions
@@ -407,8 +686,8 @@ public class LifecycleManager implements ILifecycleManager {
                 memory.getUserId(), null, // environment is set by ConversationService
                 stepIndex, task.getId().name(), task.getType(), taskIndex, durationMs, input.isEmpty() ? null : input,
                 output.isEmpty() ? null : output,
-                llmDetail, null, // toolCalls — set by LlmTask in memory
-                actions, 0.0, // cost — set by ToolCostTracker integration
+                llmDetail, toolCalls,
+                actions, cost,
                 Instant.now(), null // HMAC computed by AuditLedgerService
                 , null);
     }
@@ -426,22 +705,19 @@ public class LifecycleManager implements ILifecycleManager {
      *            list of task type prefixes to match
      * @return filtered list of tasks to execute
      */
-    private List<ILifecycleTask> getLifecycleTasks(List<String> lifecycleTaskTypes) {
-        List<ILifecycleTask> ret = new LinkedList<>();
-
-        // Find the first task that matches any of the specified types
+    /**
+     * Returns the ABSOLUTE index of the first task whose type matches any of the
+     * requested types (prefix match); selective execution runs that task and all
+     * subsequent ones. Returns -1 when no task matches.
+     */
+    private int getLifecycleStartIndex(List<String> lifecycleTaskTypes) {
         for (int i = 0; i < this.lifecycleTasks.size(); i++) {
             ILifecycleTask task = this.lifecycleTasks.get(i);
-
-            // Check if this task's type matches any of the requested types (prefix match)
             if (lifecycleTaskTypes.stream().anyMatch(type -> task.getType().startsWith(type))) {
-                // Include this task and all subsequent tasks
-                ret.addAll(this.lifecycleTasks.subList(i, this.lifecycleTasks.size()));
-                break;
+                return i;
             }
         }
-
-        return ret;
+        return -1;
     }
 
     /**
@@ -474,6 +750,33 @@ public class LifecycleManager implements ILifecycleManager {
             if (result != null && result.contains(IConversation.STOP_CONVERSATION)) {
                 throw new ConversationStopException();
             }
+        }
+    }
+
+    /**
+     * Checks if the current step contains a PAUSE_CONVERSATION action that was
+     * <em>newly added</em> by the just-executed task. This delta-based check
+     * prevents the re-pause loop (Blocker #1): on resume, the stale
+     * PAUSE_CONVERSATION action from the prior turn is already in the step's
+     * ACTIONS data, but it must not re-trigger the pause.
+     *
+     * @param actionsBeforeTask
+     *            actions snapshot taken before the task executed; if
+     *            PAUSE_CONVERSATION was already present, the task did not add it
+     *            and no pause is thrown.
+     */
+    private void checkIfPauseConversationAction(IConversationMemory conversationMemory,
+                                                int absoluteTaskIndex,
+                                                List<String> actionsBeforeTask)
+            throws ConversationPauseException {
+        IData<List<String>> actionData = conversationMemory.getCurrentStep().getLatestData(ACTIONS);
+        if (actionData == null)
+            return;
+        List<String> actions = actionData.getResult();
+        if (actions != null
+                && actions.contains(IConversation.PAUSE_CONVERSATION)
+                && !actionsBeforeTask.contains(IConversation.PAUSE_CONVERSATION)) {
+            throw new ConversationPauseException(workflowId.getId(), absoluteTaskIndex, "PAUSE_CONVERSATION action");
         }
     }
 
@@ -664,5 +967,65 @@ public class LifecycleManager implements ILifecycleManager {
             tracer = GlobalOpenTelemetry.getTracer("eddi.pipeline");
         }
         return tracer;
+    }
+
+    // ========================== Error Classification ==========================
+
+    /**
+     * Classifies the root cause of an error for metrics, audit, and dashboards.
+     * Typed causes are matched across the whole chain first — they are
+     * authoritative, so a wrapper's message can never outrank them. Message
+     * heuristics are only consulted when no typed cause matches.
+     *
+     * @return one of: "timeout", "transport", "rate_limit", "content_filter",
+     *         "unknown"
+     */
+    static String classifyError(Throwable e) {
+        for (Throwable current = e; current != null; current = current.getCause()) {
+            if (current instanceof SocketTimeoutException
+                    || current instanceof TimeoutException) {
+                return "timeout";
+            }
+            if (current instanceof ConnectException
+                    || current instanceof UnknownHostException) {
+                return "transport";
+            }
+        }
+        // Substring matching is easily fooled (e.g. "failed after 429ms"), so it only
+        // runs once the chain is known to hold no typed cause.
+        for (Throwable current = e; current != null; current = current.getCause()) {
+            String msg = current.getMessage();
+            if (msg == null) {
+                continue;
+            }
+            String lower = msg.toLowerCase();
+            if (lower.contains("rate limit") || lower.contains("429") || lower.contains("too many")) {
+                return "rate_limit";
+            }
+            if (lower.contains("content_filter") || lower.contains("content filter")) {
+                return "content_filter";
+            }
+        }
+        return "unknown";
+    }
+
+    /**
+     * Creates a redacted, truncated summary of an exception for audit and SSE
+     * events. Unlike {@link #summarizeException(Exception)} (which sanitizes for
+     * LLM consumption at 200 chars), this preserves full detail at 500 chars for
+     * admin visibility — URLs and class names are deliberately kept, since the
+     * audience is privileged and needs them to diagnose. Credentials are not: they
+     * are scrubbed via {@link SecretRedactionFilter}.
+     */
+    static String summarizeForAudit(Throwable e) {
+        String msg = e.getMessage();
+        if (msg == null || msg.isBlank()) {
+            msg = e.getClass().getSimpleName();
+        }
+        // Redact before truncating — cutting first can split a secret so the
+        // pattern no longer matches, leaving a fragment behind.
+        msg = SecretRedactionFilter.redact(msg);
+        // Truncate to 500 chars for safe embedding in JSON/SSE payloads
+        return msg.length() > 500 ? msg.substring(0, 500) + "..." : msg;
     }
 }
