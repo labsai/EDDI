@@ -1390,7 +1390,7 @@ public class AuditLedgerService {
             // No signing key for this agent — this is expected for agents without identity
             // setup.
             // Log at debug level to avoid noise.
-            LOGGER.debugv("Agent signing skipped for agent '{0}': {1}", entry.agentId(), e.getMessage());
+            LOGGER.debugv("Agent signing skipped for agent '{0}': {1}", sanitize(entry.agentId()), sanitize(e.getMessage()));
             return entry;
         }
     }
