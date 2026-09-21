@@ -212,7 +212,13 @@ public class PropertySetterTask implements ILifecycleTask {
                                             // replace it with a vault reference in conversation properties.
                                             templateString = autoVaultSecret(memory, name, templateString);
                                             // Store as conversation-scoped (the vault ref, not the plaintext)
-                                            conversationProperties.put(name, new Property(name, templateString, conversation));
+                                            var vaulted = new Property(name, templateString, conversation);
+                                            // The ONLY place this marker is ever set. It is what lets
+                                            // ConfigReferenceGuard tell this reference apart from the identical
+                                            // string arriving through conversation data — the scope it is stored
+                                            // under is conversation either way, so nothing else can.
+                                            vaulted.setAutoVaulted(Boolean.TRUE);
+                                            conversationProperties.put(name, vaulted);
                                         } else {
                                             // NOTE: Do NOT resolve vault references here — they must stay as-is
                                             // in conversation properties (which are persisted to DB).

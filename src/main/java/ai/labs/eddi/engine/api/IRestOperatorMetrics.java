@@ -8,8 +8,10 @@ import ai.labs.eddi.engine.api.model.OperatorCanaryReport;
 import ai.labs.eddi.engine.api.model.OperatorGateDryRunRequest;
 import ai.labs.eddi.engine.api.model.OperatorGateDryRunResult;
 import ai.labs.eddi.engine.api.model.OperatorGateStatusReport;
+import ai.labs.eddi.engine.api.model.OperatorSelfUrl;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
@@ -43,6 +45,38 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 @Tag(name = "Operations / Operator Metrics", description = "Client-reported operator canary and gate-verification outcomes")
 @RolesAllowed("eddi-admin")
 public interface IRestOperatorMetrics {
+
+    /**
+     * The address the operator's generated tools must target: the one <em>this
+     * process</em> can reach itself at.
+     * <p>
+     * It exists because the only other candidate the provisioning client has is its
+     * own {@code window.location.origin}, and that is the address the
+     * <b>browser</b> used. The two coincide only when nothing sits between the
+     * browser and EDDI; any SSH tunnel, published-port remap or reverse proxy on
+     * another port makes them differ, and the operator is then provisioned with an
+     * address that is unreachable from inside the server. That is not a
+     * hypothetical failure mode — it produced an operator on a staging deployment
+     * whose 22 tools all failed on connect while the agent reported itself deployed
+     * and gate-verified.
+     * <p>
+     * A GET with no arguments, because this is a property of the deployment and not
+     * of the request: the answer must not depend on the {@code Host} header, the
+     * {@code X-Forwarded-*} chain or anything else a proxy can rewrite.
+     *
+     * @see ai.labs.eddi.engine.security.SelfUrlResolver
+     */
+    @GET
+    @Path("/self-url")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(summary = "The base URL this deployment can reach itself at",
+               description = "Answers the address the Platform Operator's generated tools should target (eddi.self.base-url when set, "
+                       + "otherwise http://127.0.0.1:${quarkus.http.port}). Deliberately independent of the inbound request: the caller's "
+                       + "own origin is the browser's, which is not reachable from inside the server whenever a tunnel, a port mapping or a "
+                       + "reverse proxy sits in between.")
+    @APIResponse(responseCode = "200", description = "The resolved base URL and where it came from (source configured or loopback). "
+            + "baseUrl is null, with source unresolved, when quarkus.http.port is 0 (random) and eddi.self.base-url is not set.")
+    OperatorSelfUrl selfUrl();
 
     @POST
     @Path("/canary-result")

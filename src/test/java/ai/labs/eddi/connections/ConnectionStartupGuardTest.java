@@ -757,7 +757,7 @@ class ConnectionStartupGuardTest {
     }
 
     private static ConnectionConfiguration callerSuppliedConnection() {
-        return connection("gnowbe", AuthType.STATIC, Binding.CALLER_SUPPLIED);
+        return connection("acme", AuthType.STATIC, Binding.CALLER_SUPPLIED);
     }
 
     private static DocumentDescriptor descriptorOf(String resourceUri) {

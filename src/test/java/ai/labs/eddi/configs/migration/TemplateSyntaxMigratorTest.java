@@ -191,6 +191,84 @@ class TemplateSyntaxMigratorTest {
         assertEquals("{baseUrl}/{path}", migrator.migrate("[(${baseUrl + '/' + path})]"));
     }
 
+    // --- a "+" inside the literal being concatenated ---
+
+    /**
+     * The splitter used to be {@code split("\\s*\\+\\s*")}, which cut the literal
+     * apart and left a lone quote character as a part. A lone quote starts and ends
+     * with a quote, so it was taken for a quoted literal and stripped with
+     * {@code substring(1, 0)}: {@code StringIndexOutOfBoundsException}, which
+     * aborted the startup migration for every remaining document in the database.
+     */
+    @Test
+    void migrateStringConcat_literalIsAPlus() {
+        assertEquals("{a}+{b}", migrator.migrate("[[${a + '+' + b}]]"));
+    }
+
+    @Test
+    void migrateStringConcat_literalSurroundsAPlus() {
+        assertEquals("{prefix} + {suffix}", migrator.migrate("[[${prefix + ' + ' + suffix}]]"));
+    }
+
+    @Test
+    void migrateStringConcat_doubleQuotedLiteralIsAPlus() {
+        assertEquals("{a}+{b}", migrator.migrate("[[${a + \"+\" + b}]]"));
+    }
+
+    /**
+     * The shape of a template found in a real configuration: three literals
+     * concatenated so that the rendered output is itself a template expression, for
+     * a generated agent configuration. Malformed, never used, and it stopped the
+     * whole migration. Whatever it converts to, it must not throw.
+     */
+    @Test
+    void migrateStringConcat_nestedTemplateLiterals_doesNotThrow() {
+        String input = "{\"targetServerUrl\":\"[['[[${'+'properties.apiBaseUrl'+'}]]']]\"}";
+        String migrated = assertDoesNotThrow(() -> migrator.migrate(input));
+        assertFalse(migrated.contains("[[${"), "the crashing expression survived: " + migrated);
+    }
+
+    // --- an escaped quote inside the literal (Copilot review, PR #781) ---
+
+    /**
+     * A backslash escapes the next character inside an OGNL literal. Without that,
+     * the splitter leaves quote mode at the escaped apostrophe and reads the
+     * following {@code +} as a concat operator, cutting the literal in half.
+     */
+    @Test
+    void migrateStringConcat_escapedQuoteInsideLiteral() {
+        // Thymeleaf source: [[${a + 'it\'s + here' + b}]]
+        assertEquals("{a}it's + here{b}", migrator.migrate("[[${a + 'it\\'s + here' + b}]]"));
+    }
+
+    @Test
+    void migrateStringConcat_escapedDoubleQuoteInsideLiteral() {
+        // Thymeleaf source: [[${a + "say \"hi\" + bye" + b}]]
+        assertEquals("{a}say \"hi\" + bye{b}", migrator.migrate("[[${a + \"say \\\"hi\\\" + bye\" + b}]]"));
+    }
+
+    /**
+     * The escape only consumes the character after it, so a literal ending in an
+     * escaped backslash still has its closing delimiter recognised.
+     */
+    @Test
+    void migrateStringConcat_escapedBackslashAtEndOfLiteral() {
+        // Thymeleaf source: [[${a + 'dir\\' + b}]] — the literal is `dir\`
+        assertEquals("{a}dir\\{b}", migrator.migrate("[[${a + 'dir\\\\' + b}]]"));
+    }
+
+    /**
+     * Escapes other than a quote or a backslash are left exactly as they are. OGNL
+     * would read `\t` as a tab, but a Windows path in a config is the likelier
+     * intent and silently rewriting it into control characters is the worse
+     * mistake.
+     */
+    @Test
+    void migrateStringConcat_otherBackslashSequencesAreLeftAlone() {
+        // Thymeleaf source: [[${a + 'C:\temp' + b}]]
+        assertEquals("{a}C:\\temp{b}", migrator.migrate("[[${a + 'C:\\temp' + b}]]"));
+    }
+
     // --- B13: concatenation rewriting must not touch non-Thymeleaf content ---
 
     @Test
@@ -241,6 +319,53 @@ class TemplateSyntaxMigratorTest {
         assertTrue(migrator.containsThymeleafSyntax("#uuidUtils.extractId"));
         assertTrue(migrator.containsThymeleafSyntax("#json.serialize"));
         assertTrue(migrator.containsThymeleafSyntax("#encoder.base64"));
+    }
+
+    // --- A brace inside a string literal ---
+
+    /**
+     * The expression is located by scanning, not by a pattern that stops at the
+     * first closing brace. With the old quote-blind pattern this input matched
+     * nowhere: the concat handling never saw it, the output patterns below failed
+     * on it for the same reason, and the template was left in Thymeleaf syntax by a
+     * migration that runs once and then records itself complete.
+     */
+    @Test
+    void migrateConcat_withClosingBraceInsideALiteral() {
+        assertEquals("{a}}{b}", migrator.migrate("[[${a + '}' + b}]]"));
+    }
+
+    @Test
+    void migrateConcat_withOpeningBraceInsideALiteral() {
+        assertEquals("{a}{{b}", migrator.migrate("[(${a + '{' + b})]"));
+    }
+
+    /**
+     * The OGNL literal here is {@code 'it\'s}'}: the backslash keeps the apostrophe
+     * inside the literal, so the brace after it is inside the literal too. Both the
+     * escape and the brace have to be understood, or the scan ends in the wrong
+     * place.
+     */
+    @Test
+    void migrateConcat_withAnEscapedQuoteBeforeABrace() {
+        assertEquals("{a}it's}{b}", migrator.migrate("[[${a + 'it\\'s}' + b}]]"));
+    }
+
+    /**
+     * Nothing closes it, so nothing is known about where it ends. Rewriting on a
+     * guess would corrupt document content, which is worse than leaving a template
+     * for the operator to find.
+     */
+    @Test
+    void migrateConcat_unterminatedExpressionIsLeftAlone() {
+        String input = "before [[${a + 'x and the rest of the document";
+        assertEquals(input, migrator.migrate(input));
+    }
+
+    @Test
+    void migrateConcat_twoExpressionsOnOneLineBothConvert() {
+        assertEquals("{a}/{b} and {c}-{d}",
+                migrator.migrate("[[${a + '/' + b}]] and [[${c + '-' + d}]]"));
     }
 
     @Test

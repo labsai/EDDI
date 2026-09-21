@@ -2331,6 +2331,31 @@ export const handlers = [
       chunkOverlap: 64,
       maxResults: 5,
       minScore: 0.6,
+      sources: [
+        {
+          id: "src-1",
+          name: "public-docs",
+          type: "web",
+          enabled: true,
+          cron: "0 2 * * *",
+          web: {
+            startUrl: "https://example.com/docs/",
+            sameSiteOnly: true,
+            includeSubdomains: false,
+            pathPrefix: "/docs/",
+            maxDepth: 3,
+            maxPages: 200,
+            excludePatterns: ["*.pdf"],
+            requestDelayMs: 500,
+            respectRobots: true,
+          },
+          settings: {
+            tombstoneAfterMissedRuns: 2,
+            maxSegmentsPerRun: 20000,
+            timeBudgetMinutes: 10,
+          },
+        },
+      ],
     });
   }),
 
@@ -2345,6 +2370,55 @@ export const handlers = [
     return HttpResponse.json({
       status: "completed",
     });
+  }),
+
+  // Ingestion source endpoints (mock)
+  http.get("*/ragstore/rags/:id/sources/:sourceId/runs", () => {
+    return HttpResponse.json([
+      {
+        runId: "run-1",
+        sourceId: "src-1",
+        status: "COMPLETED",
+        startedAt: "2026-09-17T02:00:00Z",
+        finishedAt: "2026-09-17T02:04:12Z",
+        documentsSeen: 42,
+        documentsIngested: 3,
+        documentsUnchanged: 39,
+        documentsFailed: 0,
+        documentsTombstoned: 1,
+        segmentsStored: 57,
+        costUsd: 0.0,
+        error: null,
+      },
+    ]);
+  }),
+
+  http.post("*/ragstore/rags/:id/sources/:sourceId/run", () => {
+    return HttpResponse.json({ status: "started", sourceId: "src-1" }, { status: 202 });
+  }),
+
+  http.post("*/ragstore/rags/:id/sources/:sourceId/preview", () => {
+    return HttpResponse.json({
+      runId: "preview",
+      sourceId: "src-1",
+      outcome: "PREVIEW",
+      documentsSeen: 42,
+      documentsIngested: 3,
+      documentsUnchanged: 39,
+      documentsSkipped: 0,
+      documentsFailed: 0,
+      documentsTombstoned: 0,
+      segmentsStored: 0,
+      costUsd: 0,
+      replaceUnsupported: false,
+      tombstoningSkipped: false,
+      stopReason: "COMPLETED",
+      message: null,
+    });
+  }),
+
+  http.delete("*/ragstore/rags/:id/sources/:sourceId/documents", () => {
+    return HttpResponse.json({ status: "purged", sourceId: "src-1" });
   }),
 
   // --- Group Store Mock Handlers ---
@@ -5527,6 +5601,13 @@ export const backupSyncHandlers = [
   // don't care about it still trigger it as a side effect of gate
   // verification and the write canary. Without a default, every one of them
   // logs an MSW "unhandled request" warning that drowns out real ones.
+  // The address EDDI reports it can reach ITSELF at — what the operator's tools
+  // must target. Deliberately DIFFERENT from the test origin, so a test that
+  // accidentally provisions the browser's origin fails instead of passing by
+  // coincidence: that coincidence is precisely how the bug shipped.
+  http.get("*/administration/operator/self-url", () =>
+    HttpResponse.json({ baseUrl: "http://127.0.0.1:7070", source: "loopback" }),
+  ),
   http.post("*/administration/operator/canary-result", () => new HttpResponse(null, { status: 204 })),
   http.post("*/administration/operator/gate-status", () => new HttpResponse(null, { status: 204 })),
 
@@ -5771,8 +5852,8 @@ const mockConnections: Record<string, Record<string, unknown>> = {
   // own key per request, so the document carries a header name and nowhere to
   // send it — and no valueTemplate, which the backend refuses on this binding.
   conn6: {
-    name: "gnowbe",
-    description: "Each caller brings their own Gnowbe key",
+    name: "acme",
+    description: "Each caller brings their own Acme key",
     authType: "STATIC",
     binding: "CALLER_SUPPLIED",
     allowUnverifiedPrincipal: false,
@@ -5783,7 +5864,7 @@ const mockConnections: Record<string, Record<string, unknown>> = {
       username: null,
       passwordRef: null,
     },
-    baseUrlAllowlist: ["https://api.gnowbe.com"],
+    baseUrlAllowlist: ["https://api.example.com"],
     timeoutMs: null,
   },
 };

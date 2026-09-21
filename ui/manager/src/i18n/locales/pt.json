@@ -2056,7 +2056,55 @@
     "ingestText": "Ingerir Texto",
     "ingestionHistory": "Status de Ingestão",
     "saveFirstIngestion": "Salve a base de conhecimento primeiro para ativar a ingestão.",
-    "addParam": "Adicionar Parâmetro"
+    "addParam": "Adicionar Parâmetro",
+    "sources": {
+      "title": "Fontes de ingestão",
+      "add": "Adicionar fonte",
+      "remove": "Remover fonte",
+      "unnamed": "Fonte sem nome",
+      "disabled": "Desativada",
+      "enabled": "Ativada",
+      "running": "Em execução",
+      "emptyTitle": "Sem fontes de ingestão",
+      "emptyDescription": "Adicione uma fonte para que esta base de conhecimento rastreie um site e se mantenha atualizada.",
+      "name": "Nome",
+      "namePlaceholder": "public-docs",
+      "startUrl": "URL inicial",
+      "pathPrefix": "Prefixo de caminho",
+      "pathPrefixHint": "Rastrear apenas sob este caminho",
+      "cron": "Agendamento (cron)",
+      "cronHint": "Deixe vazio para executar apenas manualmente",
+      "maxDepth": "Profundidade máxima",
+      "maxPages": "Páginas máximas",
+      "respectRobots": "Respeitar robots.txt",
+      "respectRobotsHint": "Desative apenas para um site seu",
+      "includeSubdomains": "Incluir subdomínios",
+      "excludePatterns": "Padrões de exclusão",
+      "excludePatternsHint": "Globs aplicados ao caminho da URL, separados por vírgulas — * fica num segmento, ** atravessa-os",
+      "saveFirst": "Guarde a base de conhecimento para executar esta fonte, pré-visualizá-la ou ver o seu histórico.",
+      "run": "Executar agora",
+      "runFailed": "Não foi possível iniciar a execução. Pode já haver uma em curso.",
+      "preview": "Pré-visualizar",
+      "previewResult": "Pré-visualização — nada foi incorporado",
+      "purge": "Limpar estado",
+      "purgeTitle": "Limpar o estado de ingestão?",
+      "purgeDescription": "A próxima execução voltará a rastrear e incorporar tudo o que esta fonte ingeriu. Os documentos já armazenados não são removidos por isto.",
+      "purgeConfirm": "Limpar",
+      "history": "Execuções recentes",
+      "noRuns": "Esta fonte ainda não foi executada.",
+      "runSummary": "{{ingested}} ingeridos · {{unchanged}} inalterados",
+      "statSeen": "Vistos",
+      "statChanged": "Seriam ingeridos",
+      "statUnchanged": "Inalterados",
+      "statFailed": "Falharam",
+      "partialCrawl": "O rastreio parou num limite, por isso nada será tratado como eliminado.",
+      "saveBeforeRun": "Guarde primeiro a base de conhecimento — uma execução rastreia a configuração guardada, não as alterações no ecrã.",
+      "purgeFailed": "Não foi possível limpar o estado de ingestão.",
+      "previewFailed": "Não foi possível pré-visualizar esta fonte.",
+      "previewNotCompleted": "A pré-visualização não foi concluída.",
+      "disabledNoRun": "Esta fonte está desativada. Ative e guarde para a executar ou agendar.",
+      "purgeBlockedWhileRunning": "Há uma execução em curso. Limpar agora permitiria que uma segunda começasse em paralelo."
+    }
   },
   "onboarding": {
     "welcome": {
@@ -4150,8 +4198,17 @@
       "tools": "Ferramentas que receberá ({{toolCount}})",
       "activate": "Ativar e implantar",
       "callerIdentityNote": "O EDDI insere o seu token no momento da chamada. Nunca é guardado na conversa e só é enviado de volta para esta instalação.",
-      "rebuildWarning": "Ao guardar, é criado um novo agente operador e o atual é removido. A sua conversa de operador existente não será mantida.",
-      "environmentHint": "Onde o próprio agente operador é executado. Continua a poder ler qualquer ambiente."
+      "rebuildWarning": "Guardar SUBSTITUI o operador: é criado um novo agente e o atual ({{agentId}}) é retirado da implantação e eliminado. A sua conversa de operador atual não será mantida e, a partir daí, este ecrã passa a referir-se ao novo agente.",
+      "environmentHint": "Onde o próprio agente operador é executado. Continua a poder ler qualquer ambiente.",
+      "platformBaseUrl": "URL base da plataforma",
+      "platformBaseUrlHint": "O endereço em que o EDDI consegue alcançar a si mesmo — as ferramentas do operador o chamam de dentro do servidor, portanto não é o endereço que o seu navegador usa. Mantenha o valor pré-preenchido, a menos que saiba o contrário.",
+      "platformBaseUrlInvalid": "Isto tem de ser uma URL absoluta http:// ou https://, por exemplo http://127.0.0.1:7070.",
+      "platformBaseUrlUnknown": "Esta instalação do EDDI não consegue informar o seu próprio endereço, por isso será usada a origem do seu navegador. Isso só é correto quando nada (túnel, mapeamento de portas ou proxy reverso) está entre o seu navegador e o EDDI — caso contrário, introduza o endereço aqui.",
+      "platformBaseUrlLoopback": "Derivada da porta HTTP desta instalação. Substitua-a se o EDDI tiver de ser endereçado por um nome de serviço ou através de TLS no próprio processo.",
+      "platformBaseUrlAuto": "resolvida pelo servidor",
+      "platformBaseUrlDiffers": "Esta instalação indica atualmente o seu próprio endereço como {{serverUrl}}. O valor acima é diferente — mantenha-o apenas se o definiu de propósito.",
+      "platformBaseUrlQueryFailed": "Não foi possível perguntar ao servidor o seu próprio endereço. A ativação falhará a menos que o introduza aqui — ou recarregue para tentar de novo.",
+      "platformBaseUrlUnresolved": "Esta instalação usa uma porta HTTP aleatória e não tem eddi.self.base-url, por isso não consegue indicar onde se alcança a si própria. Introduza o endereço aqui."
     },
     "authMode": {
       "none": {
@@ -4199,7 +4256,10 @@
       "gateUnknown": "Barreira ainda não verificada",
       "gateVerified": "Barreira verificada",
       "gateNotVerified": "Barreira não verificada",
-      "gateUnverifiedHelp": "Não foi possível verificar a barreira de aprovação no documento deste agente."
+      "gateUnverifiedHelp": "Não foi possível verificar a barreira de aprovação no documento deste agente.",
+      "agentId": "Agente",
+      "platformBaseUrl": "Chama a plataforma em",
+      "platformBaseUrlUnknown": "não registada"
     },
     "chat": {
       "empty": "Pergunte sobre a sua instalação. O operador consulta e mostra-lhe cada chamada que faz.",
@@ -4313,6 +4373,9 @@
       "stepCount_one": "{{count}} passo",
       "stepCount_other": "{{count}} passos",
       "stepCount_many": "{{count}} passos"
+    },
+    "superseded": {
+      "title": "O agente operador anterior continua implantado."
     }
   },
   "groupWorkspace": {

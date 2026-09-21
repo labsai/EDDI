@@ -69,6 +69,7 @@ Log in to Grafana with `admin` / `admin`, then open **Dashboards → EDDI** — 
 `Integrations — MCP, A2A Identity, OpenAI-compatible API` ·
 `Capability Registry & Connections` · `Secrets Vault` · `Tenancy, Quotas & Audit` ·
 `Platform Operator` · `NATS JetStream` · `Backup — Export, Import & Sync` ·
+`RAG Ingestion` ·
 `Runtime context (Quarkus / JVM built-ins)`
 
 ---
@@ -596,6 +597,17 @@ eddi_summarization_calls_total              # Rolling-summary generations attemp
 eddi_summarization_errors_total             # Rolling-summary generations that failed
 eddi_summarization_duration_seconds         # Summarization duration (timer)
 ```
+
+### RAG Ingestion Metrics
+
+```text
+eddi_ingestion_segments_stored_total        # Chunks embedded and written by source ingestion
+eddi_ingestion_errors_total                 # Pages that failed to fetch, convert or embed
+```
+
+Both carry `knowledgeBase` (the RAG configuration's name) and `source` (the ingestion
+source's name). Unchanged pages are not counted, so a scheduled re-crawl of a static
+site stores nothing.
 
 ### Connection Resolution Metrics
 

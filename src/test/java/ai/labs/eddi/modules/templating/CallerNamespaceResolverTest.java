@@ -81,11 +81,12 @@ class CallerNamespaceResolverTest {
     }
 
     @Test
-    @DisplayName("vault references deliberately still fail in templated positions")
-    void vaultIsDeliberatelyNotPassedThrough() {
-        // Letting ${vault:...} survive templating would widen where a secret can be
-        // substituted — notably into a request body, which is persisted to
-        // conversation memory unscrubbed. Keep it failing loudly.
+    @DisplayName("a vault reference is not passed through by the caller resolver alone")
+    void vaultNeedsItsOwnResolver() {
+        // Pass-through is per namespace: the caller resolver must not swallow other
+        // namespaces. Vault references get their own resolver, paired with the
+        // executor's guard against references that arrive through data — see
+        // ConfigReferenceNamespaceResolversTest and ConfigReferenceGuardTest.
         var e = assertThrows(ITemplatingEngine.TemplateEngineException.class,
                 () -> engine.processTemplate("Bearer ${vault:my-key}", Map.of()));
         assertTrue(e.getMessage().contains("No namespace resolver found for [vault]"), e.getMessage());

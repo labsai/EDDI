@@ -242,7 +242,7 @@ describe("ConnectionDetailPage", () => {
       screen.getByTestId("connection-binding-explainer-CALLER_SUPPLIED"),
     ).toBeInTheDocument();
     expect(screen.getByTestId("connection-caller-supplied-header")).toHaveTextContent(
-      "X-EDDI-Connection-Credential: gnowbe <value>",
+      "X-EDDI-Connection-Credential: acme <value>",
     );
     expect(screen.queryByTestId("connection-header-value")).not.toBeInTheDocument();
 

@@ -59,6 +59,13 @@ export function OperatorPage() {
    * that sends the admin back to the form.
    */
   const [canaryWarning, setCanaryWarning] = useState<string | null>(null);
+  /**
+   * Set when a reconfigure could not retire the operator it replaced, so the old
+   * agent is probably still deployed. Its own state rather than `activationError`:
+   * that one renders inside the activation form, which is already closed by the
+   * time this is known.
+   */
+  const [supersededWarning, setSupersededWarning] = useState<string | null>(null);
   /** Delete is irreversible, so it is confirmed wherever it is offered. */
   const [confirmPausedReset, setConfirmPausedReset] = useState(false);
   /** Chat or History. Local, not a route: switching tabs is not a navigation
@@ -207,6 +214,13 @@ export function OperatorPage() {
           onSuccess: (outcome) => {
             setStage("idle");
             setShowActivation(false);
+            // A replacement whose predecessor could not be retired leaves TWO
+            // deployed operators. It gets a PERSISTENT banner, not a toast: the
+            // admin has to still be able to read it when they start wondering why
+            // the operator behaves oddly, and `activationError` is no use here
+            // because it renders inside the form this handler just closed.
+            setSupersededWarning(outcome.supersededWarning);
+            if (outcome.supersededWarning) toast.error(outcome.supersededWarning);
             // The predecessor agent was hard-deleted; its conversation id is dead.
             chat.reset();
             // Activation now ends at the deterministic checks — the operator is
@@ -455,6 +469,33 @@ export function OperatorPage() {
           <p className="text-sm text-muted-foreground">{t("operator.subtitle", "Ask about this EDDI deployment — it looks things up for you.")}</p>
         </div>
       </header>
+
+      {/* Two live operators is a correctness problem, not a warning: the panel and
+          the chat below address the NEW agent, and anything done to the old one
+          has no effect. Destructive tone, and it stays until the page is left. */}
+      {supersededWarning && (
+        <div
+          className="flex flex-wrap items-start gap-3 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
+          role="alert"
+          data-testid="operator-superseded-warning"
+        >
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span className="flex-1">
+            <strong className="font-medium">
+              {t("operator.superseded.title", "The previous operator agent is still deployed.")}
+            </strong>{" "}
+            {supersededWarning}
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setSupersededWarning(null)}
+            data-testid="operator-superseded-dismiss"
+          >
+            {t("common.dismiss", "Dismiss")}
+          </Button>
+        </div>
+      )}
 
       {/* Deployed is not the same as working. When the probe read failed, say so
           here rather than letting a green status badge imply everything is fine. */}

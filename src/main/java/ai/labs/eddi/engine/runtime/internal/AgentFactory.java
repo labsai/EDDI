@@ -166,6 +166,9 @@ public class AgentFactory implements IAgentFactory {
 
     private IAgent waitForDeploymentCompletion(AgentId agentIdObj, Deployment.Environment environment) {
         var deploymentFuture = deploymentListener.getRegisteredDeploymentEvent(agentIdObj.getId(), agentIdObj.getVersion());
+        // The id half of this key is a path parameter the caller chose, so every log
+        // call below quotes the sanitized rendering rather than the object (CWE-117).
+        var safeAgentId = sanitize(agentIdObj.toString());
 
         try {
             if (deploymentFuture != null) {
@@ -184,7 +187,7 @@ public class AgentFactory implements IAgentFactory {
             // Re-fetch the agent after deployment is complete
             IAgent agent = getAgentEnvironment(environment).get(agentIdObj);
             if (agent == null) {
-                log.error("Agent deployment did not complete successfully for agentId: " + agentIdObj);
+                log.error("Agent deployment did not complete successfully for agentId: " + safeAgentId);
                 return null;
             }
             if (agent.getDeploymentStatus() == Deployment.Status.IN_PROGRESS) {
@@ -193,9 +196,9 @@ public class AgentFactory implements IAgentFactory {
                 // and "not ready yet" is an ordinary answer, not a failure worth an
                 // ERROR on every poll.
                 if (deploymentFuture == null) {
-                    log.debugf("Agent %s is still deploying and no deployment future was registered — reporting not ready", agentIdObj);
+                    log.debugf("Agent %s is still deploying and no deployment future was registered — reporting not ready", safeAgentId);
                 } else {
-                    log.error("Agent deployment did not complete successfully for agentId: " + agentIdObj);
+                    log.error("Agent deployment did not complete successfully for agentId: " + safeAgentId);
                 }
                 return null;
             }
@@ -204,13 +207,13 @@ public class AgentFactory implements IAgentFactory {
         } catch (TimeoutException e) {
             // This caller's own patience ran out — the deployment itself may still
             // finish, and the shared future stays pending for everyone else.
-            log.warnf("Agent %s was still deploying after %ds — reporting not ready to this caller", agentIdObj, DEPLOYMENT_WAIT_SECONDS);
+            log.warnf("Agent %s was still deploying after %ds — reporting not ready to this caller", safeAgentId, DEPLOYMENT_WAIT_SECONDS);
             return null;
         } catch (InterruptedException e) {
             // Newly reachable through the timed get() (join() threw unchecked).
             // Restore the flag so the interrupt is not silently swallowed.
             Thread.currentThread().interrupt();
-            log.warnf("Interrupted while waiting for agent %s to deploy — reporting not ready", agentIdObj);
+            log.warnf("Interrupted while waiting for agent %s to deploy — reporting not ready", safeAgentId);
             return null;
         } catch (Exception e) {
             log.error("Error while waiting for agent deployment: " + e.getMessage(), e);
@@ -389,9 +392,9 @@ public class AgentFactory implements IAgentFactory {
 
     private void logAgentDeployment(String environment, String agentId, Integer agentVersion, Deployment.Status status) {
         if (status == Deployment.Status.IN_PROGRESS) {
-            log.info(String.format("Deploying agent... (environment=%s, agentId=%s, version=%s)", environment, agentId, agentVersion));
+            log.info(String.format("Deploying agent... (environment=%s, agentId=%s, version=%s)", environment, sanitize(agentId), agentVersion));
         } else {
-            log.info(String.format("Agent deployed with status: %s (environment=%s, agentId=%s, version=%s)", status, environment, agentId,
+            log.info(String.format("Agent deployed with status: %s (environment=%s, agentId=%s, version=%s)", status, environment, sanitize(agentId),
                     agentVersion));
         }
     }

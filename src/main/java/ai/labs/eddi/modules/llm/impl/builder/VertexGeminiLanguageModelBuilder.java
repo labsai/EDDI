@@ -11,8 +11,10 @@ import org.jboss.logging.Logger;
 
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyDouble;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 @ApplicationScoped
@@ -70,6 +72,54 @@ public class VertexGeminiLanguageModelBuilder implements ILanguageModelBuilder {
         return null;
     }
 
+    /**
+     * Model ids whose major version is 3 or above — {@code gemini-3-pro},
+     * {@code gemini-3.8-flash} and anything later, bare or in Vertex's resource
+     * form ({@code publishers/google/models/gemini-3-pro},
+     * {@code projects/.../models/gemini-3-pro}). Two or more leading digits also
+     * match, so a future {@code gemini-10-*} is not read as version 1.
+     */
+    private static final Pattern GEMINI_3_OR_LATER = Pattern
+            .compile("(?i)^(?:.*/)?gemini-(?:[3-9]|\\d{2,})(?:[.\\-][^/]*)?$");
+
+    /**
+     * Whether {@code modelId} names Gemini 3.x or later — the models that cannot
+     * use tools on this provider.
+     * <p>
+     * Gemini 3.x requires the opaque {@code thoughtSignature} on each
+     * {@code functionCall} echoed back on the follow-up request. The {@code gemini}
+     * provider now does that; this one cannot, and not through any EDDI setting:
+     * <ul>
+     * <li>{@code langchain4j-vertex-ai-gemini:1.20.0-beta30} does not model the
+     * field — no {@code thought}, {@code thinking} or {@code signature} anywhere in
+     * it, and {@code VertexAiGeminiChatModel} builds responses with
+     * {@code AiMessage.from(...)}, which has no attributes channel.</li>
+     * <li>The transport cannot carry it: that module pins
+     * {@code com.google.cloud:google-cloud-vertexai:1.27.0}, and the generated
+     * {@code com.google.cloud.vertexai.api.Part} it uses — from the transitive
+     * {@code com.google.api.grpc:proto-google-cloud-vertexai-v1:1.27.0} — has no
+     * {@code thought_signature} field.</li>
+     * </ul>
+     * So the build only warns, naming the alternative. A warning rather than a
+     * failure: a Gemini 3.x agent without tools works here.
+     */
+    static boolean isGemini3OrLater(String modelId) {
+        return modelId != null && GEMINI_3_OR_LATER.matcher(modelId.trim()).matches();
+    }
+
+    /** @see #isGemini3OrLater(String) */
+    static void warnIfGemini3(String modelId) {
+        if (isGemini3OrLater(modelId)) {
+            LOGGER.warnf("gemini-vertex model '%s' is Gemini 3.x or later, which cannot use tools on this provider: "
+                    + "Gemini 3.x requires the thoughtSignature it attaches to each functionCall echoed back on the "
+                    + "follow-up request, and neither langchain4j's vertex-ai-gemini module nor the Vertex AI Part "
+                    + "protobuf it depends on can carry that field. Tool calls will fail with "
+                    + "'400 INVALID_ARGUMENT — Function call is missing a thought_signature'. Use the 'gemini' "
+                    + "provider for Gemini 3.x with tools; 'gemini-vertex' supports Gemini 2.x. "
+                    + "See https://ai.google.dev/gemini-api/docs/thought-signatures", sanitize(modelId));
+        }
+    }
+
     @Override
     public ChatModel build(Map<String, String> parameters) {
         var builder = VertexAiGeminiChatModel.builder();
@@ -90,6 +140,7 @@ public class VertexGeminiLanguageModelBuilder implements ILanguageModelBuilder {
         if (!isNullOrEmpty(modelId)) {
             builder.modelName(modelId);
         }
+        warnIfGemini3(modelId);
 
         // Parsed as a double and narrowed: this setter takes a float, and a separate
         // float helper would buy nothing — every value a float accepts, a double

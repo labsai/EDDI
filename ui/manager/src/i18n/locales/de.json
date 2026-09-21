@@ -2034,7 +2034,55 @@
     "ingestText": "Text aufnehmen",
     "ingestionHistory": "Aufnahme-Status",
     "saveFirstIngestion": "Speichern Sie diese Knowledge Base zuerst, um die Dokumenten-Aufnahme zu aktivieren.",
-    "addParam": "Parameter hinzufügen"
+    "addParam": "Parameter hinzufügen",
+    "sources": {
+      "title": "Ingestions-Quellen",
+      "add": "Quelle hinzufügen",
+      "remove": "Quelle entfernen",
+      "unnamed": "Unbenannte Quelle",
+      "disabled": "Deaktiviert",
+      "enabled": "Aktiviert",
+      "running": "Läuft",
+      "emptyTitle": "Keine Ingestions-Quellen",
+      "emptyDescription": "Fügen Sie eine Quelle hinzu, damit diese Wissensdatenbank eine Website crawlt und sich aktuell hält.",
+      "name": "Name",
+      "namePlaceholder": "public-docs",
+      "startUrl": "Start-URL",
+      "pathPrefix": "Pfad-Präfix",
+      "pathPrefixHint": "Nur unterhalb dieses Pfads crawlen",
+      "cron": "Zeitplan (Cron)",
+      "cronHint": "Leer lassen, um nur manuell auszuführen",
+      "maxDepth": "Maximale Tiefe",
+      "maxPages": "Maximale Seitenzahl",
+      "respectRobots": "robots.txt beachten",
+      "respectRobotsHint": "Nur für eigene Websites deaktivieren",
+      "includeSubdomains": "Subdomains einbeziehen",
+      "excludePatterns": "Ausschlussmuster",
+      "excludePatternsHint": "Globs für den URL-Pfad, kommagetrennt — * bleibt in einem Segment, ** überschreitet sie",
+      "saveFirst": "Speichern Sie die Wissensdatenbank, um diese Quelle auszuführen, zu testen oder ihren Verlauf zu sehen.",
+      "run": "Jetzt ausführen",
+      "runFailed": "Ausführung konnte nicht gestartet werden. Möglicherweise läuft bereits eine.",
+      "preview": "Vorschau",
+      "previewResult": "Vorschau — es wurde nichts eingebettet",
+      "purge": "Status löschen",
+      "purgeTitle": "Ingestions-Status löschen?",
+      "purgeDescription": "Der nächste Lauf crawlt und embeddet alles neu, was diese Quelle erfasst hat. Bereits gespeicherte Dokumente werden dadurch nicht entfernt.",
+      "purgeConfirm": "Löschen",
+      "history": "Letzte Läufe",
+      "noRuns": "Diese Quelle wurde noch nicht ausgeführt.",
+      "runSummary": "{{ingested}} erfasst · {{unchanged}} unverändert",
+      "statSeen": "Gesehen",
+      "statChanged": "Würde erfassen",
+      "statUnchanged": "Unverändert",
+      "statFailed": "Fehlgeschlagen",
+      "partialCrawl": "Der Crawl endete an einem Limit, daher gilt nichts als gelöscht.",
+      "saveBeforeRun": "Speichern Sie die Knowledge Base zuerst — ein Lauf crawlt die gespeicherte Konfiguration, nicht die Änderungen auf dem Bildschirm.",
+      "purgeFailed": "Der Ingestion-Status konnte nicht gelöscht werden.",
+      "previewFailed": "Vorschau für diese Quelle nicht möglich.",
+      "previewNotCompleted": "Die Vorschau wurde nicht abgeschlossen.",
+      "disabledNoRun": "Diese Quelle ist deaktiviert. Aktivieren und speichern Sie sie, um sie auszuführen oder zu planen.",
+      "purgeBlockedWhileRunning": "Ein Lauf ist aktiv. Ein Löschen jetzt würde einen zweiten Lauf daneben zulassen."
+    }
   },
   "onboarding": {
     "welcome": {
@@ -4113,8 +4161,17 @@
       "tools": "Tools, die er erhält ({{toolCount}})",
       "activate": "Aktivieren & deployen",
       "callerIdentityNote": "EDDI setzt Ihr Token erst beim Aufruf ein. Es wird nie in der Konversation gespeichert und ausschließlich an diese Installation zurückgesendet.",
-      "rebuildWarning": "Beim Speichern wird ein neuer Operator-Agent erstellt und der aktuelle entfernt. Ihre bestehende Operator-Konversation wird nicht übernommen.",
-      "environmentHint": "Wo der Operator-Agent selbst läuft. Er kann weiterhin jede Umgebung auslesen."
+      "rebuildWarning": "Das Speichern ERSETZT den Operator: Ein neuer Agent wird erstellt, der aktuelle ({{agentId}}) wird undeployed und gelöscht. Ihre bestehende Operator-Unterhaltung wird nicht übernommen, und dieser Bildschirm bezieht sich danach auf den neuen Agenten.",
+      "environmentHint": "Wo der Operator-Agent selbst läuft. Er kann weiterhin jede Umgebung auslesen.",
+      "platformBaseUrl": "Basis-URL der Plattform",
+      "platformBaseUrlHint": "Die Adresse, unter der EDDI sich selbst erreicht — die Werkzeuge des Operators rufen sie aus dem Server heraus auf, es ist also nicht die Adresse, die Ihr Browser verwendet. Lassen Sie den vorbelegten Wert stehen, sofern Sie es nicht besser wissen.",
+      "platformBaseUrlInvalid": "Dies muss eine absolute http://- oder https://-URL sein, zum Beispiel http://127.0.0.1:7070.",
+      "platformBaseUrlUnknown": "Diese EDDI-Installation kann ihre eigene Adresse nicht melden, daher wird auf die Herkunft Ihres Browsers zurückgegriffen. Das ist nur korrekt, wenn nichts (kein Tunnel, keine Portzuordnung, kein Reverse-Proxy) zwischen Ihrem Browser und EDDI liegt — andernfalls tragen Sie die Adresse hier ein.",
+      "platformBaseUrlLoopback": "Aus dem HTTP-Port dieser Installation abgeleitet. Überschreiben Sie den Wert, wenn EDDI über einen Dienstnamen oder prozessinternes TLS angesprochen werden muss.",
+      "platformBaseUrlAuto": "vom Server ermittelt",
+      "platformBaseUrlDiffers": "Diese Installation meldet ihre eigene Adresse derzeit als {{serverUrl}}. Der Wert oben weicht davon ab — behalten Sie ihn nur, wenn Sie ihn bewusst gesetzt haben.",
+      "platformBaseUrlQueryFailed": "Der Server konnte nicht nach seiner eigenen Adresse gefragt werden. Die Aktivierung schlägt fehl, sofern Sie sie nicht hier eintragen — oder laden Sie neu, um es erneut zu versuchen.",
+      "platformBaseUrlUnresolved": "Diese Installation läuft auf einem zufälligen HTTP-Port und hat kein eddi.self.base-url, kann also nicht sagen, wo sie sich selbst erreicht. Tragen Sie die Adresse hier ein."
     },
     "authMode": {
       "none": {
@@ -4162,7 +4219,10 @@
       "gateUnknown": "Sperre nicht geprüft",
       "gateVerified": "Sperre verifiziert",
       "gateNotVerified": "Sperre nicht verifiziert",
-      "gateUnverifiedHelp": "Die Freigabesperre konnte im Dokument dieses Agenten nicht verifiziert werden."
+      "gateUnverifiedHelp": "Die Freigabesperre konnte im Dokument dieses Agenten nicht verifiziert werden.",
+      "agentId": "Agent",
+      "platformBaseUrl": "Ruft Plattform auf unter",
+      "platformBaseUrlUnknown": "nicht erfasst"
     },
     "chat": {
       "empty": "Fragen Sie nach Ihrer Installation. Der Operator schlägt nach und zeigt Ihnen jeden Aufruf, den er macht.",
@@ -4274,6 +4334,9 @@
       "noOpeningMessage": "(noch keine Nachricht)",
       "stepCount_one": "{{count}} Schritt",
       "stepCount_other": "{{count}} Schritte"
+    },
+    "superseded": {
+      "title": "Der vorherige Operator-Agent ist weiterhin deployed."
     }
   },
   "groupWorkspace": {

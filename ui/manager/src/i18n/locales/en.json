@@ -2114,7 +2114,55 @@
     "ingestText": "Ingest Text",
     "ingestionHistory": "Ingestion Status",
     "saveFirstIngestion": "Save this knowledge base first to enable document ingestion.",
-    "addParam": "Add Parameter"
+    "addParam": "Add Parameter",
+    "sources": {
+      "title": "Ingestion Sources",
+      "add": "Add source",
+      "remove": "Remove source",
+      "unnamed": "Unnamed source",
+      "disabled": "Disabled",
+      "enabled": "Enabled",
+      "running": "Running",
+      "emptyTitle": "No ingestion sources",
+      "emptyDescription": "Add a source to have this knowledge base crawl a site and keep itself up to date.",
+      "name": "Name",
+      "namePlaceholder": "public-docs",
+      "startUrl": "Start URL",
+      "pathPrefix": "Path prefix",
+      "pathPrefixHint": "Only crawl under this path",
+      "cron": "Schedule (cron)",
+      "cronHint": "Leave empty to run only by hand",
+      "maxDepth": "Max depth",
+      "maxPages": "Max pages",
+      "respectRobots": "Respect robots.txt",
+      "respectRobotsHint": "Turn off only for a site you own",
+      "includeSubdomains": "Include subdomains",
+      "excludePatterns": "Exclude patterns",
+      "excludePatternsHint": "Globs matched against the URL path, comma separated — * stays in one segment, ** crosses them",
+      "saveFirst": "Save the knowledge base to run this source, preview it or see its history.",
+      "run": "Run now",
+      "runFailed": "Could not start the run. A run may already be in flight.",
+      "preview": "Preview",
+      "previewResult": "Preview — nothing was embedded",
+      "purge": "Purge state",
+      "purgeTitle": "Purge ingestion state?",
+      "purgeDescription": "The next run will re-crawl and re-embed everything this source has ingested. Documents already stored are not removed by this.",
+      "purgeConfirm": "Purge",
+      "history": "Recent runs",
+      "noRuns": "This source has not run yet.",
+      "runSummary": "{{ingested}} ingested · {{unchanged}} unchanged",
+      "statSeen": "Seen",
+      "statChanged": "Would ingest",
+      "statUnchanged": "Unchanged",
+      "statFailed": "Failed",
+      "partialCrawl": "The crawl stopped at a limit, so nothing would be treated as deleted.",
+      "saveBeforeRun": "Save the knowledge base first — a run crawls the saved configuration, not the edits on screen.",
+      "purgeFailed": "Could not purge the ingestion state.",
+      "previewFailed": "Could not preview this source.",
+      "previewNotCompleted": "The preview did not complete.",
+      "disabledNoRun": "This source is disabled. Enable and save it to run or schedule it.",
+      "purgeBlockedWhileRunning": "A run is in flight. Purging now would let a second run start alongside it."
+    }
   },
   "onboarding": {
     "welcome": {
@@ -4113,8 +4161,17 @@
       "tools": "Tools it will be given ({{toolCount}})",
       "activate": "Activate & deploy",
       "callerIdentityNote": "EDDI substitutes your token when it makes the call. It is never stored in the conversation, and is only ever sent back to this deployment.",
-      "rebuildWarning": "Saving builds a new operator agent and removes the current one. Your existing operator conversation will not carry over.",
-      "environmentHint": "Where the operator agent itself runs. It can still read any environment."
+      "rebuildWarning": "Saving REPLACES the operator: a new agent is built and the current one ({{agentId}}) is undeployed and deleted. Your existing operator conversation will not carry over, and this screen will address the new agent from then on.",
+      "environmentHint": "Where the operator agent itself runs. It can still read any environment.",
+      "platformBaseUrl": "Platform base URL",
+      "platformBaseUrlHint": "The address EDDI can reach itself at — the operator's tools call it from inside the server, so it is not the address your browser uses. Leave it as prefilled unless you know otherwise.",
+      "platformBaseUrlInvalid": "This must be an absolute http:// or https:// URL, for example http://127.0.0.1:7070.",
+      "platformBaseUrlUnknown": "This EDDI deployment cannot report its own address, so it will fall back to your browser's origin. That is only correct when nothing (no tunnel, port mapping or reverse proxy) sits between your browser and EDDI — otherwise enter the address here.",
+      "platformBaseUrlLoopback": "Derived from this deployment's HTTP port. Override it if EDDI must be addressed by a service name or through in-process TLS.",
+      "platformBaseUrlAuto": "resolved from the server",
+      "platformBaseUrlDiffers": "This deployment currently reports its own address as {{serverUrl}}. The value above differs — keep it only if you set it on purpose.",
+      "platformBaseUrlQueryFailed": "The server could not be asked for its own address. Activation will fail unless you enter it here — or reload to try again.",
+      "platformBaseUrlUnresolved": "This deployment runs on a random HTTP port and has no eddi.self.base-url, so it cannot say where it can reach itself. Enter the address here."
     },
     "authMode": {
       "none": {
@@ -4162,7 +4219,10 @@
       "gateUnknown": "Gate not checked",
       "gateVerified": "Gate verified",
       "gateNotVerified": "Gate not verified",
-      "gateUnverifiedHelp": "The approval gate could not be verified on this agent's document."
+      "gateUnverifiedHelp": "The approval gate could not be verified on this agent's document.",
+      "agentId": "Agent",
+      "platformBaseUrl": "Calls platform at",
+      "platformBaseUrlUnknown": "not recorded"
     },
     "chat": {
       "empty": "Ask about your deployment. The operator looks things up and shows you every call it makes.",
@@ -4274,6 +4334,9 @@
       "noOpeningMessage": "(no message yet)",
       "stepCount_one": "{{count}} step",
       "stepCount_other": "{{count}} steps"
+    },
+    "superseded": {
+      "title": "The previous operator agent is still deployed."
     }
   },
   "groupWorkspace": {
