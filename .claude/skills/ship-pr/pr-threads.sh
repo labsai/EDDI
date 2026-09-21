@@ -135,20 +135,30 @@ else
   printf '%s\n' "$ALL" | grep '^\[OPEN\]' || true
 fi
 
+# Count tags from the PREFIX only. A finding whose own text mentions "[NO-REPLY]" --
+# review comments about this very script do -- would otherwise be counted as silent.
+# Everything from the node id rightwards is untrusted comment content, so cut it off.
+TAGS=$(printf '%s\n' "$ALL" | sed 's/ *PRRT_.*//')
+
 TOTAL=$(printf '%s\n' "$ALL" | grep -c . || true)
-OPEN=$(printf '%s\n' "$ALL" | grep -c '^\[OPEN\]' || true)
+OPEN=$(printf '%s\n' "$TAGS" | grep -c '^\[OPEN\]' || true)
 # Authorship, not comment count: the bot replying to itself is not an answer.
-SILENT=$(printf '%s\n' "$ALL" | grep -c '\[NO-REPLY\]' || true)
-SILENT_RESOLVED=$(printf '%s\n' "$ALL" | grep '^\[resolved' | grep -c '\[NO-REPLY\]' || true)
+SILENT=$(printf '%s\n' "$TAGS" | grep -c '\[NO-REPLY\]' || true)
+SILENT_RESOLVED=$(printf '%s\n' "$TAGS" | grep '^\[resolved' | grep -c '\[NO-REPLY\]' || true)
+UNSURE=$(printf '%s\n' "$TAGS" | grep -c '\[CHECK\]' || true)
 
 echo
 echo "threads: $TOTAL total, $OPEN unresolved, $SILENT with no reply from you"
+if [ "$UNSURE" -gt 0 ]; then
+  echo "         $UNSURE tagged [CHECK]: over 100 comments and no reply from you in the last"
+  echo "         100, so an earlier reply cannot be ruled out -- open these and look."
+fi
 if [ "$SILENT_RESOLVED" -gt 0 ]; then
   echo
   echo "!! $SILENT_RESOLVED RESOLVED thread(s) have no reply from you -- outstanding, not done."
   echo "   A bot resolves its own thread as soon as your push makes it outdated, so the"
   echo "   findings you actually fixed are the ones most likely to close unanswered."
-  echo "   List them:  bash $0 $PR --all | grep '\[NO-REPLY\]'"
+  echo "   List them:  bash $0 $PR --all | sed 's/ *PRRT_.*//;' | grep -n '\[NO-REPLY\]'"
 fi
 echo "read one in full:  bash $0 --show <threadId>"
 echo "reminder: nitpicks, duplicates and outside-diff-range findings live in review"
