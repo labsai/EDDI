@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.tools.impl;
 
 import ai.labs.eddi.engine.httpclient.SafeHttpClient;
+import ai.labs.eddi.modules.ingestion.HtmlToMarkdownConverter;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -21,7 +22,7 @@ class WebScraperToolTest {
 
     @BeforeEach
     void setUp() {
-        webScraperTool = new WebScraperTool(new SafeHttpClient(10000));
+        webScraperTool = new WebScraperTool(new SafeHttpClient(10000), new HtmlToMarkdownConverter());
     }
 
     // === SSRF Protection Tests ===

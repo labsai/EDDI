@@ -126,6 +126,66 @@ document already in MongoDB and reads back as `null` rather than failing, and ED
   writing it fails 1, the checkpoint clone dropping it fails 1.
 - apicalls, properties, memory and secrets suites plus the repo-wide guards: 6479 tests green.
 
+## 📄 refactor(ingestion): HTML→Markdown converter, and WebScraperTool stops duplicating it (2026-09-17)
+
+**Repo:** EDDI (`feat/html-to-markdown-converter`)
+
+### Why
+
+Ingesting a web page for retrieval needs more than `Jsoup.text()`. Flat text loses the structure a
+chunker needs (heading boundaries, which section a passage came from) and merges neighbouring blocks
+into single tokens. `WebScraperTool` was doing exactly that, with its own inline
+`"script, style, nav, footer, header, aside"` strip — a second, weaker copy of the same rules.
+
+This lands the converter salvaged from the stale PR #529, with its defects fixed, and makes the
+existing tool use it instead of its own extraction.
+
+### Why not a library
+
+Checked the classpath first: jsoup and pdfbox are present; flexmark-html2md, commonmark and the
+langchain4j document parsers are not. A general HTML→Markdown library optimises for fidelity to the
+source document, while ingestion wants the opposite — aggressive removal of everything a reader skips.
+~450 lines with a 60-case suite is cheaper than a new supply-chain dependency for that job.
+
+### Defects fixed from the salvaged draft
+
+Each of these silently degraded what reached the vector store; all 46 of the draft's own tests passed
+with them present, which is the point — bad ingestion has no stack trace.
+
+- **Adjacent blocks merged.** `div`/`section`/`article` appended children with no separator, so
+  `<div>Hello</div><div>World</div>` embedded as `HelloWorld`.
+- **`<header>` stripped globally**, deleting the page title in the `<article><header><h1>` layout most
+  documentation themes use. Now only `body > header` (the site banner) is removed.
+- **Unescaped `|` in table cells**, which ends the column early and shifts every later value under the
+  wrong header — corruption that surfaces only as a wrongly cited number.
+- **Code blocks flattened**: `text()` collapses whitespace, so every multi-line sample became one line.
+  Uses `wholeText()`.
+- **Headings resolved links against `null`**, leaving them relative and useless as citations.
+- **`<dl>`, `<details>`, `<figure>` fell through to the default branch** and ran together — collapsed
+  `<details>` content is still content and is now ingested with its summary as the label.
+- Alt-less images emitted `![](url)`: tokens spent on nothing. Dropped.
+- Boilerplate selectors extended with `role=navigation|banner|contentinfo|complementary`, cookie
+  banners, buttons, `svg`, `template`, `aria-hidden`.
+- `maxLength <= 0` truncated everything; now falls back to the default.
+- Dead `inPreBlock` plumbing removed (never set true by any caller).
+
+### WebScraperTool
+
+`extractWebPageText` now returns Markdown from the converter rather than a `text()` dump prefixed with
+`Title: `. Same 5000-character cap. This is a visible change to an LLM tool's output, and a deliberate
+one: the model gets headings, lists and tables instead of one run-on paragraph. Its `extractMainContent`
+helper is gone — it was the duplicate.
+
+### Tests
+
+60 converter tests: all 46 inherited from the draft pass unchanged against the rewrite (useful evidence
+the behaviour was preserved where it was right), plus 14 in `HtmlToMarkdownConverterSalvageTest`, one per
+defect above. `WebScraperToolExtendedTest` gains a case asserting structure survives.
+
+Note: `WebScraperToolTest` cannot run in this environment — its `setUp` constructs a real
+`SafeHttpClient`, and creating an `HttpClient` here fails with "Unable to establish loopback
+connection". Pre-existing and environmental; CI covers it.
+
 ## ♿ fix(ui): closing a dialog hands focus back to what opened it (2026-09-19)
 
 **Repo:** EDDI (`fix/dialog-return-focus`)
