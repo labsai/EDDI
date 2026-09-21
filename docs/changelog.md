@@ -37,7 +37,7 @@ which neither a reader nor an agent's context window could usefully hold.
 
 | Period | Entries | Size |
 |---|---|---|
-| [September 2026](changelog/2026-09.md) | 14 | 55 KB |
+| [September 2026](changelog/2026-09.md) | 16 | 60 KB |
 | [August 2026](changelog/2026-08.md) | 211 | 832 KB |
 | [July 2026](changelog/2026-07.md) | 147 | 648 KB |
 | [June 2026](changelog/2026-06.md) | 26 | 67 KB |
@@ -299,8 +299,299 @@ The Quick Start in `docs/mcp-server.md` only ever showed the unauthenticated
 
 ---
 
+## ⏱️ fix(schedule): close the review round and pin the guards by mutation (2026-09-04)
+
+**Repo:** EDDI (`fix/review-schedules`)
+
+Follow-up on the same branch, from three independent review rounds plus a diff-coverage pass.
+
+**Two CI failures this branch caused are fixed.** `ImportStyleTest` was red because the branch
+introduced two inline fully-qualified names — the exact convention that test enforces — in
+`RestScheduleStoreTest` and `MongoScheduleStoreTest`. And the vendored fuzz sources drifted
+because a Javadoc reformat of `PathNavigator` diverged from the copy `.clusterfuzzlite`
+vendors; the cosmetic edit is reverted rather than re-syncing the vendored file, keeping the
+diff to what the findings required.
+
+**Tests that could not fail were replaced.** Five were proven vacuous by mutation, not by
+inspection. Two `WordSplitter` cases never reached the bounds guard they claimed to pin — one
+used an input whose index made the new `i > 0 &&` term unreachable. A `MongoScheduleStore` test
+asserted `!rendered.contains("triggerType=CRON")` on a `Bson.toString()` where that string can
+never appear, so it was unconditionally true; it now encodes through the real codec registry
+and asserts BSON null for an absent trigger type and the value for a present one, catching both
+an invented default and a hardcoded null.
+
+Two further claims were **disputed with evidence and left alone**: their "changed" line was a
+rename from an inline FQN to an import, mandated by AGENTS.md 4.7. No test can fail on the
+revert of a rename, so the correct remedy is to drop the line from the coverage claim, not the
+test from the suite — and both were shown to kill real mutants first.
+
+**Diff coverage** of changed lines: 94.4% to 99.2% line, 89.3% to 98.2% branch.
+
 ---
 
+## ⏰ fix(schedule): correct fire bookkeeping, persistence and manual-fire claiming (2026-09-04)
+
+**Repo:** EDDI (`fix/review-schedules`)
+
+From the whole-repository code review. Scheduled fires were reporting success they had
+not earned, and losing state they had been given.
+
+**PostgreSQL lost the payload entirely.** `eddi_schedules` had no column for `message` —
+the text a CRON schedule sends to the agent, which `RestScheduleStore` makes mandatory on
+save — nor for `time_zone`, `one_time_at`, `environment`, `agent_version`, `created_by` or
+`persistent_conversation_id`. The value was written, silently dropped, read back null, and
+the scheduled turn ran with **null input**. Scheduling is enabled by default and PostgreSQL
+is a documented, supported backend. The columns are added with
+`ADD COLUMN IF NOT EXISTS` statements so existing databases upgrade in place, and the
+dropped `persistent_conversation_id` was separately re-opening the CAS claim on every
+heartbeat fire, breaking the single-owner CAS claim that keeps a fire from running twice.
+(The delivery contract is at-least-once, not exactly-once — `IScheduleStore`,
+`docs/scheduling.md` and `docs/hitl.md` all say so. An earlier draft of this entry claimed
+otherwise.)
+
+**Failures were recorded as successes.** The executor read its outcome from a latch that
+counts down on the failure branch too, so an error inside the pipeline looked like a green
+fire: retry, backoff and dead-lettering never engaged, and `docs/scheduling.md` documents a
+state machine that could not be reached.
+
+**Persistent fires un-claimed themselves mid-flight.** The strategy wrote the pre-claim
+schedule back with `replaceOne`, so the poller re-claimed and re-fired a schedule that was
+still running, routing both turns into the *same* persistent conversation — two interleaved
+turns, two cost charges, one memory.
+
+**Heartbeats drifted.** The next fire re-anchored on the moment a turn *finished* rather
+than when it was *due*, so a 40-second turn on a 60-second cadence actually fired every 100
+seconds.
+
+**A manual "fire now" took no cluster claim at all**, so it could run concurrently with the
+poller's own fire of the same schedule.
+
+Also: `PUT /schedulestore/schedules/{id}` silently erased `createdAt`, `createdBy`,
+`lastFired` and the claim state on MongoDB (PostgreSQL preserved them — a parity gap in the
+same feature), and `CronDescriber` rejected day-of-week `7`, which `CronParser.validate`
+accepts, so a valid stored schedule 400'd on read.
+
+### Regression coverage
+
+Every behavioural change is pinned by a test proven to fail with its fix reverted. Four
+tests that the auditor found could pass with the fix removed were rewritten to assert the
+corrected value precisely rather than a property the buggy code also satisfied — one had
+asserted only that the next fire time lies in the future, which the drifting formula did too.
+
+Three of this repository's own guard tests were failing and are now satisfied properly
+rather than relaxed: the three new `eddi.schedule.*` properties are documented in
+`docs/configuration-reference.md`, and the new `eddi.schedule.firelog.pruned` counter is
+both documented in `docs/metrics.md` and charted in the Grafana dashboard, because
+`MetricsDashboardCoverageTest` requires both.
+
+Recorded honestly as unverifiable locally: the `SafeHttpClient` redirect tests need a
+loopback socket, and the new DDL and Mongo codec paths are only exercised against real
+backends in CI.
+
+---
+
+
+## 🔒 fix(security): close the CWE-117 gap in the half of a log line no call site can reach (2026-09-20)
+
+**Repo:** EDDI (`fix/log-injection-record-boundary-handler`)
+
+`LogSanitizer.sanitize(...)` at a call site only ever covered the log **message**.
+`quarkus.log.console.format` ends in `%s%e`, and `%e` renders a stack trace whose FIRST
+line is the throwable's own `toString()` — `ClassName: message`. So an attacker-controlled
+CR/LF inside an **exception message** reached the console verbatim and forged a record that
+reads as a genuine, server-authored line, no matter how carefully the message half was
+sanitized. 412 log calls in `src/main/java` pass a throwable (244 as a trailing argument,
+168 as JBoss `*f(e, …)`), and none of them could fix this themselves.
+
+Dropping the throwable at those call sites was never the trade: `RestAgentAdministration`'s
+deploy-failed WARN tells the client only *"Deployment failed. Check server logs for
+details."*, so the stack trace is the sole diagnostic a failed deployment leaves.
+
+### What changed
+
+- **`LogSanitizer.escapeRecordBoundaries(String)`** — a second, record-level rule beside the
+  existing call-site `sanitize(...)`. It escapes rather than destroys: CR → `\r`, LF → `\n`,
+  U+2028/U+2029 and every other ISO control character → `\uXXXX`, TAB kept verbatim. Returns
+  the same instance when nothing needs escaping, and `null` for `null` (unlike `sanitize`,
+  which renders `null` as the string `"null"` — doing that to a throwable's message would turn
+  a printed `java.io.IOException` into `java.io.IOException: null`).
+- **`LogRecordRedactor`** now applies both rules in one pass: `SecretRedactionFilter.redact`
+  then `escapeRecordBoundaries`, to the record's formatted message and to every message in its
+  throwable graph (causes and suppressed included). `RedactedThrowable.of` takes the message
+  rewrite as a `UnaryOperator<String>` so one walk of the graph applies both rules instead of
+  nesting one stand-in inside another.
+- **`BoundedLogStore.capture`**'s own fallback path (used when the upstream pass threw) applies
+  the same `LogRecordRedactor.rewrite`, so the ring buffer, the DB and the SSE live tail agree
+  with the console.
+- **Two log calls that this change would otherwise have made uglier**: the `\n` in
+  `ConversationStepRunner`'s "Conversation not ready" ERROR became `": "` (the throwable is
+  passed too, so `%e` prints the trace anyway), and `ApiCallExecutor`'s trailing `\n` on the
+  execution-time INFO is gone (the pattern already ends in `%n`). They were the only two
+  deliberately multi-line log messages in `src/main/java`.
+
+### Design decision — escape the throwable's MESSAGE, not the rendered trace
+
+The obvious reading of "sanitize the rendered `%s%e`" is to scan the finished stack trace and
+escape the line breaks that do not begin a genuine continuation line (`\tat `, `Caused by:`,
+`\t... N more`). **Rejected**: those three prefixes are also three strings an attacker can put
+in an exception message, so such a scan has to decide which `Caused by:` is the JVM's and which
+is the payload, and it has no way to know.
+
+There is no need to guess. In a rendered trace the only text an attacker reaches is the
+`toString()` of each throwable in the graph; every other line is generated by the JDK from the
+`StackTraceElement` array. So EDDI escapes the messages *before* the trace is rendered, by
+substituting a copy of the throwable, and lets the JDK produce the structure from clean input.
+Nothing is parsed, nothing is guessed, and `LogRecordBoundaryForgeryTest` asserts the frames,
+the `Caused by:` and the `... N more` elision come out identical to what the original threw.
+
+Two further choices worth stating: **TAB is kept** (it cannot end a record, and it is what
+indents `\tat …`), and **a backslash is not doubled** — the escaping is therefore not injective,
+which is a cosmetic ambiguity rather than a forgery, and the alternative doubles every backslash
+in the Windows paths and regexes exception messages are full of.
+
+It is also a rewrite of the record rather than a new console formatter, matching the reasoning
+already recorded in `LogRecordRedactor`: one definition of "what goes out" for every destination.
+The filter is wired to the console handler alone via
+`quarkus.log.console.filter=eddi-log-capture`; a file or syslog handler would need the same
+filter, and the test below fails if that property or the `%s%e%n` format moves out from under
+the claim.
+
+### Tests
+
+New `LogRecordBoundaryForgeryTest` (10 tests) asserts on **rendered** output — a real
+`PatternFormatter` built from the pattern read out of `src/main/resources/application.properties`
+— because `LogCaptureSupport.captureLogsOf` reads `getMessage()`/`getParameters()` but not
+`getThrown()` and so cannot see this defect at all. Its shared invariant: after the first, every
+line of a rendered record must be a continuation the JDK generated. Covers the exception message,
+a cause, a suppressed exception, U+2028, the message half, a format parameter, plus "a clean
+record renders byte-for-byte as before and keeps its throwable" and the config guard.
+`LogSanitizerTest` gains 8 cases for the new method.
+
+**Mutation-checked.** Removing the escaping entirely fails 7 of 10 (the 3 survivors are the
+must-not-change tests). Escaping the message but not the throwable fails exactly the 5
+throwable-half tests — so none of them pass on the strength of the message fix.
+
+### And the message-level alerts, folded in
+
+The handler above stops any of these forging a record at *runtime*, but CodeQL's
+`java/log-injection` is a dataflow rule and keeps flagging the call site regardless — and if
+the filter is ever detached from a handler, the call site is what is left. So the same branch
+also applies the ordinary one-line `LogSanitizer.sanitize(...)` to **38 sinks across the eight
+files** the alerts name:
+
+| File | Sinks | The tainted arguments |
+|---|---|---|
+| `GroupHitlCoordinator` | 16 | `gc.getId()`, `gc.getGroupId()`, `groupConversationId`, `entry.getKey()`, `e.getMessage()` |
+| `GroupConversationService` | 11 | `gc.getId()`, `gc.getGroupId()`, `phase.name()`, `outcome.reason()` |
+| `MemberTurnExecutor` | 3 | `member.agentId()`, `gc.getId()`, `gc.getGroupId()`, `subGroupId` |
+| `ConversationHitlService` | 3 | `conversationId` |
+| `PhaseExecutionEngine` | 2 | `gc.getId()`, `phase.name()`, `decision.outcome()` |
+| `AuditLedgerService` | 1 | `entry.agentId()`, `e.getMessage()` |
+| `AgentGroupStore` | 1 | `groupConfiguration.getName()`, the phase name |
+| `SlackGroupDiscussionListener` | 1 | `groupConversationId`, `e.getMessage()` |
+
+Only String-typed arguments are wrapped; the enums, `Instant`s and counters in the same calls
+are left alone. `MemberTurnExecutor` and `SlackGroupDiscussionListener` gained the import; each
+of the other six already had it, and each call follows the style its own file already used
+(qualified `LogSanitizer.sanitize` in six, the static import in `ConversationHitlService` and
+`AuditLedgerService`).
+
+The alert list was resolved through `gh api`, not read off `main` at HEAD: a CodeQL alert's
+line number is relative to `most_recent_instance.commit_sha`. Two of the 41 reported alerts
+turned out to be stale against an older sha — one line had already been sanitized, the other no
+longer exists — which is how 41 became 38. The eight files carry a further ~70 log arguments of
+the same shape that CodeQL has *not* flagged, overwhelmingly `e.getMessage()`; those are left
+alone, because sanitizing them is a codebase-wide policy question and not this PR's.
+
+**Tests.** `SanitizedLogSinksTest` pins all 38 at the source: each is keyed by a fragment of its
+own message rather than a line number, and every flagged argument must occur only inside a
+`sanitize(...)`. Dropping one fails the build with the file, the message and the expression
+named. `GroupHitlCoordinatorLogInjectionTest` covers the two sinks reachable through a public
+method with one mock — the forged-id and the forged-exception-message halves — in the
+`LogCaptureSupport` idiom the earlier regression tests established. Both mutation-checked.
+
+A source guard rather than 38 behavioural tests is a deliberate call and is argued in the test's
+own Javadoc: the rest sit inside a phase loop or a state-race `catch` that takes a whole group
+discussion to reach, and a test that builds one to observe a single WARN grades the harness more
+than the fix.
+
+### What's next
+
+- `RestAgentAdministration`'s deploy-failed WARN carries a comment on branch
+  `fix/log-injection-agent-deployment-logs` (#799) explaining that the throwable cannot be
+  sanitized and that only a log handler can fix it. That branch is not merged, so the comment
+  does not exist on `main` and could not be updated here: **whichever of the two lands second
+  must update it** to say the handler now exists.
+- 110 further `java/log-injection` alerts remain open on `main` in files this PR does not touch —
+  `RestScheduleStore`, `RestUserMemoryStore`, `VaultSecretProvider`, the REST stores and others.
+  `RestAgentAdministration` and `AgentFactory` among them are PR #799's scope and were left to it.
+  None of them can forge a record at runtime now, so they are alert hygiene rather than exposure.
+
+---
+
+## 🕷️ feat(ingestion): web crawler — streaming, bounded, robots-aware (2026-09-17)
+
+**Repo:** EDDI (`feat/ingestion-web-crawler`)
+
+### Why a rewrite rather than a patch
+
+The crawler salvaged from PR #529 was competently written but wrong in shape: it buffered every page's
+full HTML in a `List` and returned it when the crawl finished, identified pages by the URL *requested*
+rather than the one reached, read every body with an unbounded `ofString()` **before** checking its
+Content-Type, and had no run budget. None of that is patchable without touching every line.
+
+It also had no `robots.txt` at all. EDDI installations crawl sites their operators do not own, on a
+schedule — ignoring robots gets the installation blocked and its operator a complaint.
+
+### What replaces it
+
+- **`WebCrawler`** — BFS, streaming to a `CrawlSink` one page at a time, so memory is independent of the
+  site's size. Budgets for pages, fetch attempts, bytes per page, total bytes and wall clock, each
+  reported as a `StopReason`. Cancellation checked between pages.
+- **`CrawlUrls`** — canonicalization. Lowercases scheme and host **but not the path**: the draft
+  lowercased the whole URL, so `/Docs/Guide` and `/docs/guide` collapsed into one entry and whichever
+  came second was silently never crawled. Also strips fragments, default ports, tracking parameters and
+  index filenames, and sorts query parameters, so one page is not ingested three times.
+- **`UrlPattern`** — exclude globs matched against the **path**, with every metacharacter escaped and
+  compiled once. Two defects fixed: the documented `*.pdf` could never match anything (`*` cannot cross
+  the slashes in `https://host/`), and a pattern containing `+` or `(` threw `PatternSyntaxException`
+  inside the crawl loop, where a blanket catch logged it as a *fetch* error and dropped the current
+  page's links — one bad pattern reduced a crawl to its seed URL.
+- **`RobotsPolicy`** — groups, longest-match `Allow`/`Disallow`, `*`/`$`, `Crawl-delay` and `Sitemap`.
+  Blank lines deliberately do not end a group: real files are full of them, and orphaning a group's
+  rules silently allows everything the site meant to block.
+- **`PageFetcher`/`SafeHttpPageFetcher`** — `sendValidated` per request (the crawler follows links
+  harvested from third-party pages, which is as user-controlled as a URL gets), with a hard cap on the
+  body read and charset taken from the header or sniffed from the document. Assuming UTF-8 turns legacy
+  pages into mojibake, and mojibake embeds without complaint.
+
+Identity is the URL after redirects, re-checked against the scope: a 301 to another host satisfied
+`sameSiteOnly` on the pre-redirect host and smuggled a foreign page into the knowledge base.
+`<link rel="canonical">` is honoured, but only when it stays on the same host.
+
+Sitemaps from robots.txt are crawled without needing a link — the cheapest discovery there is, and the
+mitigation for the one cost of conditional requests: a 304 has no body, so an unchanged page's links are
+not re-read that run.
+
+### Tests
+
+**113 unit tests, no network, no container, no test server.** The `PageFetcher` seam is there for exactly
+this: `FakeSite` serves an in-memory website, so scope decisions, budgets, redirect identity, robots,
+conditional requests, charset handling and error accounting all run in the unit gate. The draft's only
+coverage was one Testcontainers test the unit run does not execute, which is why none of these defects
+were caught.
+
+Three of the five failures on the first run were real bugs the tests found, not test bugs: sitemap URLs
+bypassed the scope check, `https://host/` and `https://host` canonicalized differently, and fetching the
+canonicalized form invented URLs the site never published (the crawler now fetches the address as
+published and uses the canonical form only as identity).
+
+Mutation-checked: reverting the final-URL identity and re-lowercasing the path fails four tests.
+
+### Next
+
+The source configuration and the pipeline that ties crawl → convert → state store → embed, with vector
+removal driven by the tombstone list, plus the Manager UI.
 ## 📄 refactor(ingestion): HTML→Markdown converter, and WebScraperTool stops duplicating it (2026-09-17)
 
 **Repo:** EDDI (`feat/html-to-markdown-converter`)
@@ -898,8 +1189,6 @@ so concurrent users overwrite each other's value. `secretInput` only hides the t
 
 ---
 
----
-
 ## 🔒 fix(ui): clear the 30 npm advisories Scorecard reports (2026-09-17)
 
 **Repo:** EDDI (`fix/ui-npm-vulnerabilities`)
@@ -1110,8 +1399,6 @@ The shipped realm (6.1.0 through 6.4.0) defines only the `openid` client scope, 
 That is fixed at the source, with the backend consequences it had, on `fix/keycloak-realm-client-scopes`.
 This change stays useful after it: realms provisioned by hand, other identity providers, and users
 without a name or email still reach the fallback.
-
----
 
 ---
 
@@ -2989,97 +3276,6 @@ line has been corrected in place.
 
 ---
 
-## ⏱️ fix(schedule): close the review round and pin the guards by mutation (2026-09-04)
-
-**Repo:** EDDI (`fix/review-schedules`)
-
-Follow-up on the same branch, from three independent review rounds plus a diff-coverage pass.
-
-**Two CI failures this branch caused are fixed.** `ImportStyleTest` was red because the branch
-introduced two inline fully-qualified names — the exact convention that test enforces — in
-`RestScheduleStoreTest` and `MongoScheduleStoreTest`. And the vendored fuzz sources drifted
-because a Javadoc reformat of `PathNavigator` diverged from the copy `.clusterfuzzlite`
-vendors; the cosmetic edit is reverted rather than re-syncing the vendored file, keeping the
-diff to what the findings required.
-
-**Tests that could not fail were replaced.** Five were proven vacuous by mutation, not by
-inspection. Two `WordSplitter` cases never reached the bounds guard they claimed to pin — one
-used an input whose index made the new `i > 0 &&` term unreachable. A `MongoScheduleStore` test
-asserted `!rendered.contains("triggerType=CRON")` on a `Bson.toString()` where that string can
-never appear, so it was unconditionally true; it now encodes through the real codec registry
-and asserts BSON null for an absent trigger type and the value for a present one, catching both
-an invented default and a hardcoded null.
-
-Two further claims were **disputed with evidence and left alone**: their "changed" line was a
-rename from an inline FQN to an import, mandated by AGENTS.md 4.7. No test can fail on the
-revert of a rename, so the correct remedy is to drop the line from the coverage claim, not the
-test from the suite — and both were shown to kill real mutants first.
-
-**Diff coverage** of changed lines: 94.4% to 99.2% line, 89.3% to 98.2% branch.
-
----
-
-## ⏰ fix(schedule): correct fire bookkeeping, persistence and manual-fire claiming (2026-09-04)
-
-**Repo:** EDDI (`fix/review-schedules`)
-
-From the whole-repository code review. Scheduled fires were reporting success they had
-not earned, and losing state they had been given.
-
-**PostgreSQL lost the payload entirely.** `eddi_schedules` had no column for `message` —
-the text a CRON schedule sends to the agent, which `RestScheduleStore` makes mandatory on
-save — nor for `time_zone`, `one_time_at`, `environment`, `agent_version`, `created_by` or
-`persistent_conversation_id`. The value was written, silently dropped, read back null, and
-the scheduled turn ran with **null input**. Scheduling is enabled by default and PostgreSQL
-is a documented, supported backend. The columns are added with
-`ADD COLUMN IF NOT EXISTS` statements so existing databases upgrade in place, and the
-dropped `persistent_conversation_id` was separately re-opening the CAS claim on every
-heartbeat fire, breaking the single-owner CAS claim that keeps a fire from running twice.
-(The delivery contract is at-least-once, not exactly-once — `IScheduleStore`,
-`docs/scheduling.md` and `docs/hitl.md` all say so. An earlier draft of this entry claimed
-otherwise.)
-
-**Failures were recorded as successes.** The executor read its outcome from a latch that
-counts down on the failure branch too, so an error inside the pipeline looked like a green
-fire: retry, backoff and dead-lettering never engaged, and `docs/scheduling.md` documents a
-state machine that could not be reached.
-
-**Persistent fires un-claimed themselves mid-flight.** The strategy wrote the pre-claim
-schedule back with `replaceOne`, so the poller re-claimed and re-fired a schedule that was
-still running, routing both turns into the *same* persistent conversation — two interleaved
-turns, two cost charges, one memory.
-
-**Heartbeats drifted.** The next fire re-anchored on the moment a turn *finished* rather
-than when it was *due*, so a 40-second turn on a 60-second cadence actually fired every 100
-seconds.
-
-**A manual "fire now" took no cluster claim at all**, so it could run concurrently with the
-poller's own fire of the same schedule.
-
-Also: `PUT /schedulestore/schedules/{id}` silently erased `createdAt`, `createdBy`,
-`lastFired` and the claim state on MongoDB (PostgreSQL preserved them — a parity gap in the
-same feature), and `CronDescriber` rejected day-of-week `7`, which `CronParser.validate`
-accepts, so a valid stored schedule 400'd on read.
-
-### Regression coverage
-
-Every behavioural change is pinned by a test proven to fail with its fix reverted. Four
-tests that the auditor found could pass with the fix removed were rewritten to assert the
-corrected value precisely rather than a property the buggy code also satisfied — one had
-asserted only that the next fire time lies in the future, which the drifting formula did too.
-
-Three of this repository's own guard tests were failing and are now satisfied properly
-rather than relaxed: the three new `eddi.schedule.*` properties are documented in
-`docs/configuration-reference.md`, and the new `eddi.schedule.firelog.pruned` counter is
-both documented in `docs/metrics.md` and charted in the Grafana dashboard, because
-`MetricsDashboardCoverageTest` requires both.
-
-Recorded honestly as unverifiable locally: the `SafeHttpClient` redirect tests need a
-loopback socket, and the new DDL and Mongo codec paths are only exercised against real
-backends in CI.
-
----
-
 ## Decision Log
 
 _For recording decisions that come up during implementation that aren't in the plan._
@@ -3096,6 +3292,7 @@ _For recording decisions that come up during implementation that aren't in the p
 | 2026-09-13 | Buffer a turn's audit entries and flush them after the pipeline, redacting a vaulted input | E2E: parser/rules entries carried a `scope: secret` plaintext into the append-only ledger | Redact after submission — impossible, entries are signed and immutable |
 | 2026-09-13 | Exclude stateful tools from the tool cache by reflecting over their `@Tool` classes | E2E: group members share a user, so `listArtifacts()` was served stale | Make caching opt-in per tool — changes every existing cached tool |
 | 2026-09-13 | New group save-time checks (member agentId, negative limits, preset roles, nesting cycles) are hard errors | E2E: all saved fine and failed at run time | Warn only — the invalid configs cannot run as written, and shipped templates pass |
+| 2026-09-20 | Escape record boundaries in the throwable's MESSAGE before the trace is rendered, not in the rendered `%s%e` output | `%e` prints `toString()` as the trace's first line, so a CR/LF in an exception message forged a record past every call-site `sanitize(...)` | Scan the rendered trace and keep the breaks that begin `\tat ` / `Caused by:` / `\t... N more` — an attacker can write all three into a message, so the scan has to guess; or drop the throwable at the ~415 call sites — the stack trace is often the only diagnostic left |
 |            |                                                                       |                                       |                                                             |
 
 ---
