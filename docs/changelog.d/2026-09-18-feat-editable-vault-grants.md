@@ -140,3 +140,19 @@ covered.
 - `src/main/java/ai/labs/eddi/engine/runtime/` — `IAgentFactory.getAllDeployedAgents`;
   `engine/setup/AgentSetupService` — its `vaultWarning` now points at `PUT …/grant` instead of a
   PATCH that never existed
+
+### Review follow-up (2026-09-21): an acknowledged failed check no longer covers a different grant
+
+Raised in review of [#796](https://github.com/labsai/EDDI/pull/796). The dialog blocks Save until
+the operator ticks the warning, and remembers *what* was ticked so that changing the proposal asks
+again. On the successful path that key is the list of agents that would lose access, which changes
+with the proposal. On the failed path every failure shared one literal key, `"check-failed"` — so
+ticking a failed check, changing the grant, and having the new check fail too left the old tick
+standing, and Save went through on a proposal whose impact nobody had seen. It is the one moment
+the warning exists for.
+
+The failed-check key now carries the proposed grant. `secrets-grants.test.tsx` gained
+`an acknowledgement of a failed check does not carry over to a different grant`, mirroring the
+existing test for the successful path; mutation-checked by restoring the shared key, which turns
+exactly that test red.
+

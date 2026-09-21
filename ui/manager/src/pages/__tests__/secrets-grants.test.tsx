@@ -474,6 +474,46 @@ describe("SecretsPage — agent grants", () => {
     await waitFor(() => expect(writes).toBe(1));
   });
 
+  it("an acknowledgement of a failed check does not carry over to a different grant", async () => {
+    // The successful branch keys the tick on the agents that would lose access,
+    // so a different answer asks again. A failed check has no such list, and
+    // every failure used to share the literal key "check-failed" — so a tick
+    // given for one proposal still counted for the next one, and Save went
+    // through on a grant whose impact nobody had ever seen.
+    const user = userEvent.setup();
+    let writes = 0;
+    server.use(
+      grantHandler({
+        dryRun: () => HttpResponse.json({ error: "boom" }, { status: 500 }),
+        onWrite: () => (writes += 1),
+      }),
+    );
+
+    renderSecrets();
+    await openEditor(user, "google-gemini-key");
+    await user.click(screen.getByTestId("grant-agent-remove-agent7"));
+
+    expect(
+      await screen.findByTestId("grant-losing-access-warning"),
+    ).toBeInTheDocument();
+    await user.click(screen.getByTestId("grant-acknowledge"));
+    expect(screen.getByTestId("grant-save")).not.toBeDisabled();
+
+    // A different proposal, and the check fails again. The tick was given for
+    // the previous one.
+    await user.type(
+      screen.getByPlaceholderText("Add an agent"),
+      "agent9{Enter}",
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("grant-acknowledge")).not.toBeChecked(),
+    );
+    expect(screen.getByTestId("grant-save")).toBeDisabled();
+    await user.click(screen.getByTestId("grant-save"));
+    expect(writes).toBe(0);
+  });
+
   it("an acknowledgement does not carry over to a different impact", async () => {
     const user = userEvent.setup();
     // The answer depends on the list asked about, as the real dry run's does.

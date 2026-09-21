@@ -157,8 +157,17 @@ function GrantEditor({
     ? (impact.data?.agentsLosingAccess ?? [])
     : [];
   const needsAcknowledgement = losingAccess.length > 0 || impactFailed;
+  /* What the tick was given for, so changing the grant takes it back.
+   *
+   * The successful branch keys on the agents that would lose access, which is
+   * what the warning names — a different proposal that harms different agents
+   * asks again. The failed branch has no such list, and keying it on the
+   * literal "check-failed" meant every failed check shared one key: acknowledge
+   * a failed check, change the grant, have the new check fail too, and the old
+   * tick still counted, so Save went through on a proposal nobody had looked
+   * at. It carries the proposal itself instead. */
   const impactKey = impactFailed
-    ? "check-failed"
+    ? `check-failed:${proposed.join(",")}`
     : losingAccess
         .map((a) => `${a.environment}/${a.agentId}/${a.agentVersion}`)
         .join(",");
