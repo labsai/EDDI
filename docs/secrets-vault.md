@@ -228,6 +228,11 @@ When the **client flags input as secret** (via the `secretInput` context key):
 3. The actual plaintext still flows through lifecycle data so `PropertySetterTask` can vault it
 4. The conversation log and API responses show `<secret input>` — **plaintext is never persisted**
 
+When the **client sends a credential as context** — for example the caller's token for a
+downstream API — it marks that context entry `"secret": true`. The value works for that one
+turn and is replaced by `<secret context>` in everything that outlives it. See
+[Passing Context Information → Secret Context Values](passing-context-information.md#secret-context-values).
+
 ### Output InputField Directive
 
 To signal the chat UI to show a password field, use the `inputField` output type in your output configuration:
@@ -245,7 +250,7 @@ The explanatory sentence ("Please enter your API key:") belongs in a sibling `te
 
 ### Chat UI: Password Fields + Secret Mode
 
-Both **eddi-chat-ui** and the **EDDI-Manager chat panel** support secret input:
+Both the **Chat UI** (`ui/chat`) and the **Manager chat panel** (`ui/manager`) support secret input:
 
 **Backend-driven password fields:**
 

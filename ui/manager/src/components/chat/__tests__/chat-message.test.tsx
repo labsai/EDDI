@@ -1,0 +1,259 @@
+import { describe, it, expect } from "vitest";
+import { screen } from "@testing-library/react";
+import { renderWithProviders } from "@/test/test-utils";
+import { ChatMessage } from "@/components/chat/chat-message";
+import type { ChatMessage as ChatMessageType } from "@/lib/api/chat";
+
+const userMessage: ChatMessageType = {
+  id: "msg-1", role: "user",
+  content: "Hello, how are you?",
+  timestamp: new Date("2024-01-15T10:30:00Z").getTime(),
+  isStreaming: false,
+};
+
+const agentMessage: ChatMessageType = {
+  id: "msg-2", role: "agent",
+  content: "I'm doing well, thanks!",
+  timestamp: new Date("2024-01-15T10:30:05Z").getTime(),
+  isStreaming: false,
+};
+
+const streamingMessage: ChatMessageType = {
+  id: "msg-3", role: "agent",
+  content: "",
+  timestamp: new Date("2024-01-15T10:30:10Z").getTime(),
+  isStreaming: true,
+};
+
+const agentNoContent: ChatMessageType = {
+  id: "msg-4", role: "agent",
+  content: "",
+  timestamp: new Date("2024-01-15T10:30:15Z").getTime(),
+  isStreaming: false,
+};
+
+describe("ChatMessage — untrusted HTML", () => {
+  it("keeps raw HTML in bot output escaped rather than live markup", () => {
+    // Bot/LLM output is untrusted; a live <iframe srcdoc> would execute script
+    // with full app-origin access (no CSP), so rehypeRaw must stay off.
+    const { container } = renderWithProviders(
+      <ChatMessage
+        message={{
+          ...agentMessage,
+          content:
+            '**hi**\n\n<iframe srcdoc="<script>window.__pwn=1</script>"></iframe>\n\n<img src="https://evil.example/leak.png">',
+        }}
+      />
+    );
+    expect(container.querySelector("iframe")).toBeNull();
+    expect(container.querySelector('img[src*="evil.example"]')).toBeNull();
+  });
+});
+
+describe("ChatMessage — judge verdicts", () => {
+  // Exactly what a debate judge agent stores: a bare JSON object whose
+  // reasoning is markdown with escaped newlines. Chatting with that agent
+  // directly used to print the object verbatim.
+  const verdictContent = JSON.stringify({
+    winner: "CON",
+    scores: { PRO: 6, CON: 8 },
+    reasoning: "### Verdict\nCON built the stronger case.\n\n### Teaching notes\n- **Unit economics** matter.",
+  });
+
+  it("renders the verdict as a decision card plus markdown, never as raw JSON", () => {
+    const { container } = renderWithProviders(
+      <ChatMessage message={{ ...agentMessage, content: verdictContent }} />
+    );
+    expect(screen.getByTestId("decision-record")).toBeInTheDocument();
+    expect(screen.getByTestId("decision-winner")).toHaveTextContent("CON");
+    expect(screen.getByTestId("decision-tally")).toHaveTextContent("PRO6");
+    expect(screen.getByRole("heading", { name: "Teaching notes" })).toBeInTheDocument();
+    expect(screen.getByText("Unit economics").tagName).toBe("STRONG");
+    expect(container.textContent).not.toContain('"winner"');
+    expect(container.textContent).not.toContain("\\n");
+  });
+
+  it("shows a TIE as a tie, not as a winner named TIE", () => {
+    renderWithProviders(
+      <ChatMessage
+        message={{
+          ...agentMessage,
+          content: JSON.stringify({ winner: "TIE", scores: { PRO: 7, CON: 7 }, reasoning: "Even." }),
+        }}
+      />
+    );
+    expect(screen.getByTestId("decision-tie")).toBeInTheDocument();
+    expect(screen.queryByTestId("decision-winner")).toBeNull();
+  });
+
+  it("leaves JSON that is not a verdict alone", () => {
+    const content = '{"position": "PRO", "reasoning": "because"}';
+    const { container } = renderWithProviders(
+      <ChatMessage message={{ ...agentMessage, content }} />
+    );
+    expect(screen.queryByTestId("decision-record")).toBeNull();
+    expect(container.textContent).toContain('"position"');
+  });
+
+  it("does not parse a verdict while it is still streaming", () => {
+    renderWithProviders(
+      <ChatMessage message={{ ...agentMessage, content: verdictContent, isStreaming: true }} />
+    );
+    expect(screen.queryByTestId("decision-record")).toBeNull();
+  });
+});
+
+describe("ChatMessage", () => {
+  it("renders user message content", () => {
+    renderWithProviders(<ChatMessage message={userMessage} />);
+    expect(screen.getByText("Hello, how are you?")).toBeInTheDocument();
+  });
+
+  it("renders agent message content", () => {
+    renderWithProviders(<ChatMessage message={agentMessage} />);
+    expect(screen.getByText("I'm doing well, thanks!")).toBeInTheDocument();
+  });
+
+  it("shows User icon for user messages", () => {
+    const { container } = renderWithProviders(
+      <ChatMessage message={userMessage} />
+    );
+    const userIcon = container.querySelector("svg.lucide-user");
+    expect(userIcon).not.toBeNull();
+  });
+
+  it("shows Bot icon for agent messages", () => {
+    const { container } = renderWithProviders(
+      <ChatMessage message={agentMessage} />
+    );
+    const botIcon = container.querySelector("svg.lucide-bot");
+    expect(botIcon).not.toBeNull();
+  });
+
+  it("shows typing indicator for streaming message with no content", () => {
+    renderWithProviders(
+      <ChatMessage message={streamingMessage} />
+    );
+    // Typing indicator has aria-label
+    expect(
+      screen.getByLabelText("Agent is typing")
+    ).toBeInTheDocument();
+  });
+
+  it("shows 'No response' for agent message with empty content and not streaming", () => {
+    renderWithProviders(
+      <ChatMessage message={agentNoContent} />
+    );
+    expect(screen.getByText("No response")).toBeInTheDocument();
+  });
+
+  it("shows timestamp", () => {
+    renderWithProviders(<ChatMessage message={userMessage} />);
+    // Should have a time displayed (format varies by locale)
+    const timeSpan = document.querySelector(
+      "span.text-\\[10px\\]"
+    );
+    expect(timeSpan).not.toBeNull();
+    expect(timeSpan?.textContent?.length).toBeGreaterThan(0);
+  });
+
+  it("applies animate-pulse class for streaming messages", () => {
+    const streamingWithContent: ChatMessageType = {
+      id: "msg-5", role: "agent",
+      content: "Typing...",
+      timestamp: Date.now(),
+      isStreaming: true,
+    };
+    const { container } = renderWithProviders(
+      <ChatMessage message={streamingWithContent} />
+    );
+    const pulseEl = container.querySelector(".animate-pulse");
+    expect(pulseEl).not.toBeNull();
+  });
+
+  it("user message uses primary background", () => {
+    const { container } = renderWithProviders(
+      <ChatMessage message={userMessage} />
+    );
+    const bubble = container.querySelector(".bg-primary");
+    expect(bubble).not.toBeNull();
+  });
+
+  it("agent message uses card background with border", () => {
+    const { container } = renderWithProviders(
+      <ChatMessage message={agentMessage} />
+    );
+    const bubble = container.querySelector(".bg-card");
+    expect(bubble).not.toBeNull();
+  });
+
+  it("user message aligns right (flex-row-reverse)", () => {
+    const { container } = renderWithProviders(
+      <ChatMessage message={userMessage} />
+    );
+    const msgDiv = container.querySelector(".group.relative");
+    expect(msgDiv?.className).toContain("flex-row-reverse");
+  });
+
+  it("agent message aligns left (flex-row)", () => {
+    const { container } = renderWithProviders(
+      <ChatMessage message={agentMessage} />
+    );
+    const msgDiv = container.querySelector(".group.relative");
+    expect(msgDiv?.className).toContain("flex-row");
+    expect(msgDiv?.className).not.toContain("flex-row-reverse");
+  });
+
+  it("renders an image thumbnail for an image attachment", () => {
+    renderWithProviders(
+      <ChatMessage
+        message={{
+          id: "a1", role: "user", content: "", timestamp: Date.now(),
+          attachments: [{ fileName: "pic.png", mimeType: "image/png", previewUrl: "blob:x" }],
+        }}
+      />
+    );
+    const img = screen.getByRole("img", { name: "pic.png" });
+    expect(img).toHaveAttribute("src", "blob:x");
+  });
+
+  it("renders a file chip with name and size for a non-image attachment", () => {
+    renderWithProviders(
+      <ChatMessage
+        message={{
+          id: "a2", role: "user", content: "see this", timestamp: Date.now(),
+          attachments: [{ fileName: "report.pdf", mimeType: "application/pdf", sizeBytes: 2048 }],
+        }}
+      />
+    );
+    expect(screen.getByText("report.pdf")).toBeInTheDocument();
+    expect(screen.getByText("2.0 KB")).toBeInTheDocument();
+    expect(screen.getByText("see this")).toBeInTheDocument();
+  });
+
+  it("flags an attachment that was not forwarded to the model", () => {
+    renderWithProviders(
+      <ChatMessage
+        message={{
+          id: "a3", role: "user", content: "", timestamp: Date.now(),
+          attachments: [{ fileName: "big.png", mimeType: "image/png", previewUrl: "blob:x", forwardableInline: false }],
+        }}
+      />
+    );
+    expect(screen.getByTestId("attachment-not-forwarded")).toBeInTheDocument();
+  });
+
+  it("escapes a malicious filename instead of rendering it as HTML", () => {
+    const evil = '<img src=x onerror=alert(1)>.pdf';
+    const { container } = renderWithProviders(
+      <ChatMessage
+        message={{
+          id: "a4", role: "user", content: "", timestamp: Date.now(),
+          attachments: [{ fileName: evil, mimeType: "application/pdf", sizeBytes: 1 }],
+        }}
+      />
+    );
+    expect(screen.getByText(evil)).toBeInTheDocument();
+    expect(container.querySelector("img[onerror]")).toBeNull();
+  });
+});

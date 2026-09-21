@@ -502,6 +502,7 @@ EDDI provides built-in infrastructure for regulatory compliance:
 | **Maven**      | 3.9+    | Bundled via `mvnw` / `mvnw.cmd` wrapper — no install needed       |
 | **MongoDB**    | 6.0+    | Local instance or Docker (`docker run -d -p 27017:27017 mongo:7`) |
 | **Docker**     | Latest  | For integration tests and container builds                        |
+| **Node.js**    | —       | Not required: Maven downloads Node 22 into `ui/node/` to build the Manager and Chat UIs. Install it only to run `npm run dev` in `ui/manager` or `ui/chat` |
 
 > **Windows users:** Replace `./mvnw` with `.\mvnw.cmd` in all commands below.
 
@@ -518,6 +519,8 @@ Dev mode starts the application with **live reload** — code changes are picked
 ```
 
 Then open [http://localhost:7070](http://localhost:7070). The Quarkus Dev UI is available at [http://localhost:7070/q/dev](http://localhost:7070/q/dev).
+
+> **💡 The Manager and Chat UI build with Maven, at packaging time.** Their sources live in `ui/manager` and `ui/chat`. `./mvnw package` (and `verify`, `install`) builds them into the jar, about two minutes; `compile`, `test` and dev mode never touch npm, so dev mode serves `/manage` only after a `package`. For frontend work run `npm run dev` in `ui/manager` (port 3000, proxying to the backend on 7070). Upgrading an older checkout? Run `./mvnw clean` once.
 
 Dev mode also enables:
 
@@ -548,6 +551,7 @@ Dev mode also enables:
 | `./mvnw compile`                                              | Compile sources only (fast feedback). Also runs the two `validate`-phase style gates, so it **fails** on an unused import (Checkstyle) or an unformatted file (`formatter:validate`) — neither edits your sources; run `./mvnw formatter:format` to fix formatting |
 | `./mvnw clean compile`                                        | Clean build — delete `target/` and recompile from scratch                   |
 | `./mvnw test`                                                 | Run **unit tests** (excludes `*IT.java` integration tests)                  |
+| `./mvnw package -DskipTests -DskipUi=true` | Build the jar **without** the Manager and Chat UIs (`compile` and `test` never build them) |
 | `./mvnw verify`                                               | Compile + unit tests + package. **Integration tests are skipped** — `skipITs` defaults to `true` in `pom.xml` |
 | `./mvnw verify -DskipITs=false`                               | **Full build** — adds the `*IT.java` integration tests (requires Docker). This is what CI runs |
 | `./mvnw validate`                                             | Run the **blocking style gates** — Checkstyle (`UnusedImports`/`RedundantImport` fail the build; `FileLength`/`LineLength` stay advisory) and `formatter:validate`, which reports unformatted files without touching them |
@@ -580,6 +584,7 @@ target/site/jacoco/index.html
 | `-Dquarkus.profile=<profile>`               | `dev`                       | Active Quarkus profile (`dev`, `test`, `prod`) |
 | `-DskipTests`                               | `false`                     | Skip all tests                                 |
 | `-DskipITs`                                 | `true`                      | Skip integration tests only                    |
+| `-DskipUi` | `false` | Skip the npm build of `ui/manager` and `ui/chat` (the jar then serves no UI) |
 
 </details>
 

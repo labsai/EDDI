@@ -1,0 +1,830 @@
+import { useTranslation } from "react-i18next";
+import { MessageSquareQuote, Copy, CheckCircle2, Code, ArrowRight, ChevronDown, ChevronUp, Check } from "lucide-react";
+import { useState, useRef, useEffect, useMemo } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { PhaseHeader } from "./phase-header";
+import { ApprovalBanner } from "@/components/hitl/approval-banner";
+import { HumanTurnBanner } from "./human-turn-banner";
+import { DiscussionInsights } from "./discussion-insights";
+import { AgentResponseCard } from "./agent-response-card";
+import { TaskBoard, PersistedTaskBoard } from "./task-board";
+import { DecisionRecordCard } from "./decision-record-card";
+import { hasDisplayableDecision } from "@/lib/group-config";
+import { isAgentFailurePlaceholder, parseTranscriptContent, safeFormatDate } from "./group-utils";
+import { AgentFailedNotice } from "./structured-entry-body";
+import type { GroupConversation, TranscriptEntry, PhaseType, TranscriptEntryType, DiscussionStyle, TaskDefinition } from "@/lib/api/groups";
+import type { HitlVerdict } from "@/lib/api/hitl";
+import type { GroupStreamState } from "@/hooks/use-group-discussion-stream";
+import { cn, formatUsd } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { styleInfo as localizedStyleInfo } from "@/lib/discussion-styles";
+
+interface DiscussionTranscriptProps {
+  conversation: GroupConversation | null;
+  /** Live streaming state from SSE hook — takes priority over conversation */
+  streamState?: GroupStreamState;
+  isLoading?: boolean;
+  /** Discussion style for visual theming */
+  discussionStyle?: DiscussionStyle;
+  /** Pre-configured tasks from group config (for TASK_FORCE style) */
+  preConfiguredTasks?: TaskDefinition[];
+  /**
+   * Submit a HITL approve/reject decision for the paused discussion. Receives
+   * the group conversation id so the parent can resume the right discussion.
+   */
+  onApprove?: (
+    gcId: string,
+    verdict: HitlVerdict,
+    note?: string,
+    taskApprovals?: Record<string, string>,
+  ) => void;
+  /** Cancel the paused/in-progress discussion. */
+  onCancelDiscussion?: (gcId: string) => void;
+  /** Whether an approve/reject/cancel decision is currently in-flight. */
+  isDeciding?: boolean;
+  /** Submit a HUMAN group member's turn (I6). Receives the group conversation id, the pending member id, and their response. */
+  onSubmitHumanInput?: (gcId: string, memberId: string, content: string) => void;
+  /** Whether a human-turn submission is currently in-flight. */
+  isSubmittingHumanInput?: boolean;
+  /** The group's `humanMemberConfig.turnTimeout` (I6), for the pending-turn countdown. */
+  humanTurnTimeout?: string | null;
+  /**
+   * agentId → display name from the group's roster. The fallback for a live
+   * stream, where no conversation document exists yet to carry
+   * `memberDisplayNames` — without it a planned task named its assignee by id.
+   */
+  rosterDisplayNames?: Record<string, string>;
+}
+
+interface PhaseGroup {
+  phaseIndex: number;
+  phaseName: string;
+  phaseType: PhaseType;
+  entries: TranscriptEntry[];
+}
+
+/** Style-aware accent colors for transcript theming */
+const STYLE_THEME: Record<DiscussionStyle, {
+  accent: string;
+  dotColor: string;
+  phaseAccent: string;
+  questionBg: string;
+  flowBg: string;
+  flowText: string;
+  progressBg: string;
+  progressText: string;
+  progressBorder: string;
+}> = {
+  ROUND_TABLE: {
+    accent: "text-amber-500",
+    dotColor: "bg-amber-500",
+    phaseAccent: "border-amber-500/30 bg-amber-500/5",
+    questionBg: "bg-amber-500/5 border-b-amber-500/20",
+    flowBg: "bg-amber-500/10",
+    flowText: "text-amber-600 dark:text-amber-400",
+    progressBg: "bg-amber-500/5",
+    progressText: "text-amber-600 dark:text-amber-400",
+    progressBorder: "border-amber-500/20",
+  },
+  PEER_REVIEW: {
+    accent: "text-teal-500",
+    dotColor: "bg-teal-500",
+    phaseAccent: "border-teal-500/30 bg-teal-500/5",
+    questionBg: "bg-teal-500/5 border-b-teal-500/20",
+    flowBg: "bg-teal-500/10",
+    flowText: "text-teal-600 dark:text-teal-400",
+    progressBg: "bg-teal-500/5",
+    progressText: "text-teal-600 dark:text-teal-400",
+    progressBorder: "border-teal-500/20",
+  },
+  DEVIL_ADVOCATE: {
+    accent: "text-rose-500",
+    dotColor: "bg-rose-500",
+    phaseAccent: "border-rose-500/30 bg-rose-500/5",
+    questionBg: "bg-rose-500/5 border-b-rose-500/20",
+    flowBg: "bg-rose-500/10",
+    flowText: "text-rose-600 dark:text-rose-400",
+    progressBg: "bg-rose-500/5",
+    progressText: "text-rose-600 dark:text-rose-400",
+    progressBorder: "border-rose-500/20",
+  },
+  DELPHI: {
+    accent: "text-violet-500",
+    dotColor: "bg-violet-500",
+    phaseAccent: "border-violet-500/30 bg-violet-500/5",
+    questionBg: "bg-violet-500/5 border-b-violet-500/20",
+    flowBg: "bg-violet-500/10",
+    flowText: "text-violet-600 dark:text-violet-400",
+    progressBg: "bg-violet-500/5",
+    progressText: "text-violet-600 dark:text-violet-400",
+    progressBorder: "border-violet-500/20",
+  },
+  DEBATE: {
+    accent: "text-indigo-500",
+    dotColor: "bg-indigo-500",
+    phaseAccent: "border-indigo-500/30 bg-indigo-500/5",
+    questionBg: "bg-indigo-500/5 border-b-indigo-500/20",
+    flowBg: "bg-indigo-500/10",
+    flowText: "text-indigo-600 dark:text-indigo-400",
+    progressBg: "bg-indigo-500/5",
+    progressText: "text-indigo-600 dark:text-indigo-400",
+    progressBorder: "border-indigo-500/20",
+  },
+  TASK_FORCE: {
+    accent: "text-orange-500",
+    dotColor: "bg-orange-500",
+    phaseAccent: "border-orange-500/30 bg-orange-500/5",
+    questionBg: "bg-orange-500/5 border-b-orange-500/20",
+    flowBg: "bg-orange-500/10",
+    flowText: "text-orange-600 dark:text-orange-400",
+    progressBg: "bg-orange-500/5",
+    progressText: "text-orange-600 dark:text-orange-400",
+    progressBorder: "border-orange-500/20",
+  },
+  NEGOTIATION: {
+    accent: "text-emerald-500",
+    dotColor: "bg-emerald-500",
+    phaseAccent: "border-emerald-500/30 bg-emerald-500/5",
+    questionBg: "bg-emerald-500/5 border-b-emerald-500/20",
+    flowBg: "bg-emerald-500/10",
+    flowText: "text-emerald-600 dark:text-emerald-400",
+    progressBg: "bg-emerald-500/5",
+    progressText: "text-emerald-600 dark:text-emerald-400",
+    progressBorder: "border-emerald-500/20",
+  },
+  CUSTOM: {
+    accent: "text-primary",
+    dotColor: "bg-primary",
+    phaseAccent: "border-primary/30 bg-primary/5",
+    questionBg: "bg-card/50",
+    flowBg: "bg-primary/10",
+    flowText: "text-primary",
+    progressBg: "bg-primary/5",
+    progressText: "text-primary",
+    progressBorder: "border-primary/20",
+  },
+};
+
+/**
+ * Infer PhaseType from TranscriptEntryType — used only to pick the phase
+ * header's icon, from whichever entry opens the group.
+ *
+ * Several entry types have no PhaseType of their own because they are recorded
+ * *inside* another phase rather than by one: DISSENT and ABSTAINED belong to the
+ * SYNTHESIS phase that provoked them, CONVERGENCE to the repeating phase it
+ * judged, BID to the EXECUTE phase its auction runs inside. They are mapped to
+ * the phase they live in so a group that happens to open with one is not
+ * mislabelled. The remaining unmapped types (FOLLOW_UP, and HUMAN_INPUT, which
+ * is declared but never actually produced — a HUMAN member's turn is recorded
+ * under the phase's own natural type instead) fall back to OPINION, and carry
+ * their own `phaseName` from the backend — "Follow-up" for the follow-up
+ * exchange — which is what the header actually shows.
+ */
+function entryTypeToPhaseType(type: TranscriptEntryType): PhaseType {
+  const map: Partial<Record<TranscriptEntryType, PhaseType>> = {
+    OPINION: "OPINION",
+    CRITIQUE: "CRITIQUE",
+    REVISION: "REVISION",
+    CHALLENGE: "CHALLENGE",
+    DEFENSE: "DEFENSE",
+    ARGUMENT: "ARGUE",
+    REBUTTAL: "REBUTTAL",
+    SYNTHESIS: "SYNTHESIS",
+    DISSENT: "SYNTHESIS",
+    ABSTAINED: "SYNTHESIS",
+    CONVERGENCE: "OPINION",
+    PLAN: "PLAN",
+    TASK_RESULT: "EXECUTE",
+    VERIFICATION: "VERIFY",
+    VOTE: "VOTE",
+    PROPOSAL: "PROPOSAL",
+    BARGAIN: "BARGAIN",
+    RETRO: "RETRO",
+    BID: "EXECUTE",
+  };
+  return map[type] || "OPINION";
+}
+
+function groupByPhase(entries: TranscriptEntry[]): PhaseGroup[] {
+  const groups: PhaseGroup[] = [];
+  let currentGroup: PhaseGroup | null = null;
+
+  for (const entry of entries) {
+    // Skip the user question — rendered separately
+    if (entry.type === "QUESTION") continue;
+
+    const phaseName = entry.phaseName || `Phase ${entry.phaseIndex}`;
+
+    if (!currentGroup || currentGroup.phaseIndex !== entry.phaseIndex || currentGroup.phaseName !== phaseName) {
+      currentGroup = {
+        phaseIndex: entry.phaseIndex,
+        phaseName,
+        phaseType: entryTypeToPhaseType(entry.type),
+        entries: [],
+      };
+      groups.push(currentGroup);
+    }
+    currentGroup.entries.push(entry);
+  }
+
+  return groups;
+}
+
+// State variants — labels resolved via i18n in component
+const STATE_VARIANTS: Record<string, { variant: "default" | "success" | "warning" | "destructive" }> = {
+  CREATED: { variant: "default" },
+  IN_PROGRESS: { variant: "warning" },
+  SYNTHESIZING: { variant: "warning" },
+  COMPLETED: { variant: "success" },
+  FAILED: { variant: "destructive" },
+  AWAITING_APPROVAL: { variant: "warning" },
+  AWAITING_HUMAN_INPUT: { variant: "warning" },
+  CANCELLED: { variant: "destructive" },
+};
+
+/** Height above which synthesis content is collapsed */
+const SYNTHESIS_COLLAPSE_HEIGHT = 300;
+
+export function DiscussionTranscript({
+  conversation,
+  streamState,
+  isLoading,
+  discussionStyle,
+  preConfiguredTasks,
+  onApprove,
+  onCancelDiscussion,
+  isDeciding,
+  onSubmitHumanInput,
+  isSubmittingHumanInput,
+  humanTurnTimeout,
+  rosterDisplayNames,
+}: DiscussionTranscriptProps) {
+  const { t } = useTranslation();
+  const [copied, setCopied] = useState(false);
+  const [allowHtml, setAllowHtml] = useState(false);
+  const [synthExpanded, setSynthExpanded] = useState(false);
+  const [synthCollapsible, setSynthCollapsible] = useState(false);
+  const synthRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Resolve theme colors
+  const style = discussionStyle || "ROUND_TABLE";
+  const theme = STYLE_THEME[style] || STYLE_THEME.ROUND_TABLE;
+  const styleInfo = localizedStyleInfo(style, t);
+
+  // Determine the effective data source: streaming or static
+  const isStreaming = !!streamState && (streamState.isStreaming || streamState.state !== "CREATED");
+
+  // Build effective transcript, state, and metadata
+  const effectiveTranscript = useMemo(
+    () => (isStreaming ? streamState!.transcript : (conversation?.transcript ?? [])),
+    [isStreaming, streamState, conversation?.transcript]
+  );
+  const effectiveState = isStreaming ? streamState!.state : (conversation?.state ?? "CREATED");
+  const effectiveCurrentPhase = isStreaming ? streamState!.currentPhase?.name : conversation?.currentPhaseName;
+  const currentPhaseIndex = isStreaming ? streamState!.currentPhase?.index : conversation?.currentPhaseIndex;
+  const effectiveSynthesis = isStreaming ? streamState!.synthesizedAnswer : conversation?.synthesizedAnswer;
+  // A live stream learns the decision from `decision_reached`; a reloaded
+  // conversation carries it on the document.
+  const effectiveDecision = isStreaming ? streamState!.decision : conversation?.decision;
+  const [questionExpanded, setQuestionExpanded] = useState(false);
+  // S3 fix: memoize question extraction to avoid scanning transcript on every render
+  const effectiveQuestion = useMemo(
+    () => isStreaming
+      ? (effectiveTranscript.find((e) => e.type === "QUESTION")?.content ?? "")
+      : (conversation?.originalQuestion ?? ""),
+    [isStreaming, effectiveTranscript, conversation?.originalQuestion]
+  );
+  // Roughly four lines of the header's width; a short question never gets a toggle.
+  const questionIsLong = effectiveQuestion.length > 280;
+  // C6 fix: use stable startedAt from stream state instead of new Date() per render
+  const effectiveCreated = isStreaming
+    ? (streamState!.startedAt ?? new Date().toISOString())
+    : (conversation?.created ?? new Date().toISOString());
+  const activeSpeakers = isStreaming ? streamState!.activeSpeakers : new Set<string>();
+  const streamError = isStreaming ? streamState!.error : null;
+
+  // The group conversation id to act on when paused: persisted conversation when
+  // viewing history, else the live-streamed conversation id.
+  const gcId = conversation?.id ?? streamState?.conversationId ?? null;
+
+  // Task ids awaiting per-task approval (TASK granularity) — ONLY the persisted
+  // task list's AWAITING_APPROVAL entries. We deliberately do NOT fall back to
+  // the full live task plan: sending a decision for tasks the backend hasn't
+  // gated would be rejected (400) or approve the wrong tasks. When paused, the
+  // page switches to the persisted conversation (which carries these statuses);
+  // with no awaiting list, the banner falls back to a plain phase-level decision.
+  const pendingTaskIds = useMemo(() => {
+    return (conversation?.taskList?.tasks ?? [])
+      .filter((task) => task.status === "AWAITING_APPROVAL")
+      .map((task) => task.id);
+  }, [conversation?.taskList]);
+
+  // Only surface the task-board "Awaiting Approval" column while actually paused.
+  const tasksAwaitingApproval = useMemo(
+    () => (effectiveState === "AWAITING_APPROVAL" ? new Set(pendingTaskIds) : undefined),
+    [effectiveState, pendingTaskIds],
+  );
+
+  // Memoize phases to avoid re-grouping on every render
+  const phases = useMemo(() => groupByPhase(effectiveTranscript), [effectiveTranscript]);
+
+  // Auto-scroll to bottom when new entries arrive during streaming (smooth)
+  useEffect(() => {
+    if (isStreaming && scrollRef.current) {
+      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+    }
+  }, [isStreaming, effectiveTranscript.length]);
+
+  // Measure synthesis content for collapsible
+  useEffect(() => {
+    if (synthRef.current) {
+      setSynthCollapsible(synthRef.current.scrollHeight > SYNTHESIS_COLLAPSE_HEIGHT);
+    }
+  }, [effectiveSynthesis]);
+
+  if (isLoading) {
+    return (
+      <div className="space-y-4 p-4">
+        <Skeleton className="h-16 w-full" />
+        <Skeleton className="h-32 w-full" />
+        <Skeleton className="h-32 w-full" />
+      </div>
+    );
+  }
+
+  if (!isStreaming && !conversation) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-center p-8">
+        <div className={cn(
+          "flex h-16 w-16 items-center justify-center rounded-2xl mb-4",
+          theme.flowBg
+        )}>
+          <MessageSquareQuote className={cn("h-8 w-8", theme.accent)} />
+        </div>
+        <p className="text-lg font-semibold text-foreground mb-1">
+          {t("groups.readyToDiscuss", "Ready to discuss")}
+        </p>
+        <p className="text-sm text-muted-foreground max-w-sm">
+          {t("groups.selectOrStart", "Select a past discussion from the history, or type a question below to start a new one.")}
+        </p>
+        {styleInfo && (
+          <div className={cn("flex items-center gap-2 mt-4 rounded-lg px-3 py-2 border border-border", theme.flowBg)}>
+            <span className="text-base">{styleInfo.icon}</span>
+            <span className={cn("text-sm font-medium", theme.flowText)}>{styleInfo.label}</span>
+            <span className="text-xs text-muted-foreground">— {styleInfo.flow}</span>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const stateVariant = STATE_VARIANTS[effectiveState] || STATE_VARIANTS.CREATED;
+  const discussionStateLabels: Record<string, string> = {
+    CREATED: t("groups.stateCreated", "Created"),
+    IN_PROGRESS: t("conversations.stateInProgress", "In Progress"),
+    SYNTHESIZING: t("groups.stateSynthesizing", "Synthesizing…"),
+    COMPLETED: t("groups.stateCompleted", "Completed"),
+    FAILED: t("groups.stateFailed", "Failed"),
+    AWAITING_APPROVAL: t("groups.stateAwaitingApproval", "Awaiting Approval"),
+    AWAITING_HUMAN_INPUT: t("groups.stateAwaitingHumanInput", "Awaiting Human Input"),
+    CANCELLED: t("groups.stateCancelled", "Cancelled"),
+  };
+  const stateLabel = discussionStateLabels[effectiveState] ?? effectiveState;
+
+  function handleCopySynthesis() {
+    const parsed = effectiveSynthesis ? parseTranscriptContent(effectiveSynthesis) : null;
+    if (parsed) {
+      navigator.clipboard.writeText(parsed);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  }
+
+  // Parse synthesis for display
+  const parsedSynthesis = effectiveSynthesis ? parseTranscriptContent(effectiveSynthesis) : null;
+
+  // Phase flow steps for breadcrumb
+  const flowSteps = STYLE_INFO_FLOW[style] || [];
+
+  // The cost ledger lives on the persisted conversation; no SSE event carries a
+  // running total, so a live stream shows nothing until the document is reloaded.
+  const costTotal = conversation?.totalCost;
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Question header — style-aware background */}
+      <div className={cn("border-b p-4 shrink-0", theme.questionBg)}>
+        <div className="flex items-start gap-3">
+          <div className={cn("flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold text-white shrink-0 bg-primary")}>
+            Q
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-1 flex-wrap">
+              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                {t("groups.question", "Question")}
+              </span>
+              <Badge variant={stateVariant!.variant} className="text-[10px]">
+                {stateLabel}
+              </Badge>
+              {isStreaming && (
+                <Badge variant="outline" className={cn("text-[10px] animate-pulse border-current", theme.accent)}>
+                  {t("groups.liveIndicator", "● LIVE")}
+                </Badge>
+              )}
+              {/* Accumulated cost (EDDI F5 cost ledger) — what a configured cost
+                  ceiling is measured against.
+
+                  Rendered ONLY when positive, and deliberately so: the ledger
+                  currently accrues cascade and priced-tool spend, so a discussion
+                  of ordinary model calls totals exactly 0. Showing "$0.00" would
+                  read as "this was free" rather than "this was not priced". */}
+              {costTotal != null && costTotal > 0 && (
+                <Badge
+                  variant="outline"
+                  className="text-[10px] tabular-nums"
+                  title={formatMemberCostBreakdown(conversation?.memberCosts, conversation?.memberDisplayNames)}
+                  data-testid="discussion-cost"
+                >
+                  {formatUsd(costTotal)}
+                </Badge>
+              )}
+              {/* Allow HTML toggle — opt-in for trusted content */}
+              <button
+                onClick={() => setAllowHtml((v) => !v)}
+                className={cn(
+                  "flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] transition-colors border",
+                  allowHtml
+                    ? "bg-primary/10 border-primary/30 text-primary"
+                    : "border-transparent text-muted-foreground hover:text-foreground hover:bg-secondary/50"
+                )}
+                title={t("groups.allowHtmlTooltip", "When enabled, renders HTML content (sanitized). Use only with trusted agents.")}
+              >
+                <Code className="h-3 w-3" />
+                {t("groups.htmlToggle", "HTML")}
+              </button>
+              <span className="text-[10px] text-muted-foreground ms-auto">
+                {safeFormatDate(effectiveCreated, "full")}
+              </span>
+            </div>
+            {/* Clamped when long: this header is pinned above the transcript, and
+                a teaching case's full brief took 70% of a tablet's height —
+                leaving the discussion itself a sliver to scroll in. */}
+            <p
+              className={cn(
+                "text-sm sm:text-base font-medium text-foreground whitespace-pre-line",
+                questionIsLong && !questionExpanded && "line-clamp-4",
+              )}
+              data-testid="discussion-question"
+            >
+              {effectiveQuestion}
+            </p>
+            {questionIsLong && (
+              <Button
+                type="button"
+                variant="link"
+                size="sm"
+                onClick={() => setQuestionExpanded((v) => !v)}
+                className="mt-1 h-auto gap-1 px-0 py-0 text-xs hover:text-primary/80 [&_svg]:h-3 [&_svg]:w-3"
+                data-testid="discussion-question-toggle"
+              >
+                {questionExpanded ? (
+                  <>
+                    <ChevronUp className="h-3 w-3" />
+                    {t("common.showLess", "Show less")}
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="h-3 w-3" />
+                    {t("common.showMore", "Show more")}
+                  </>
+                )}
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Phase flow indicator — shows the style's phases as breadcrumb with progress */}
+      {style !== "CUSTOM" && flowSteps.length > 0 && (
+        // Wraps: a five-step flow (NEGOTIATION) ran past a phone's edge inside an
+        // overflow-hidden column, so the last steps were clipped out of reach.
+        <div className={cn("flex flex-wrap items-center gap-x-1 gap-y-0.5 px-4 py-1.5 border-b border-border shrink-0", theme.flowBg)}>
+          {flowSteps.map((step, idx) => {
+            const isActive = effectiveCurrentPhase?.toLowerCase().includes(step.toLowerCase());
+            const isCompleted = effectiveState === "COMPLETED"
+              || (currentPhaseIndex != null && idx < currentPhaseIndex);
+            return (
+              <span key={idx} className="flex items-center gap-1">
+                <span className={cn(
+                  "flex items-center gap-0.5 text-[10px] font-medium rounded px-1.5 py-0.5 transition-colors",
+                  isActive
+                    ? `${theme.flowText} font-bold bg-white/50 dark:bg-white/10`
+                    : isCompleted
+                      ? `${theme.flowText} opacity-60`
+                      : "text-muted-foreground"
+                )}>
+                  {isCompleted && !isActive && (
+                    <Check className="h-2.5 w-2.5" />
+                  )}
+                  {t(`groups.flow.${step.replace(/\s+/g, "")}`, step)}
+                </span>
+                {idx < flowSteps.length - 1 && (
+                  <ArrowRight className="h-2.5 w-2.5 text-muted-foreground/50" />
+                )}
+              </span>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Transcript body */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
+        {/* Task Board — placed at top for better visibility */}
+        {style === "TASK_FORCE" && streamState?.taskPlan && !conversation?.taskList && (
+          <TaskBoard
+            taskPlan={streamState.taskPlan}
+            tasksInProgress={streamState.tasksInProgress}
+            tasksCompleted={streamState.tasksCompleted}
+            taskVerifications={streamState.taskVerifications}
+            tasksAwaitingApproval={tasksAwaitingApproval}
+            isStreaming={streamState.isStreaming}
+          />
+        )}
+        {/* Show empty task board placeholder during TASK_FORCE streaming before plan arrives */}
+        {style === "TASK_FORCE" && isStreaming && streamState && !streamState.taskPlan && !conversation?.taskList && (
+          <TaskBoard
+            taskPlan={null}
+            tasksInProgress={new Set()}
+            tasksCompleted={new Set()}
+            taskVerifications={new Map()}
+            isStreaming={true}
+          />
+        )}
+        {/* Persisted task list — NOT gated on TASK_FORCE: any style can carry
+            agent-filed tasks (I5) once `taskListConfig.allowAgentTaskCreation`
+            is on, and the old style gate hid exactly those. */}
+        {!isStreaming && (conversation?.taskList?.tasks?.length ?? 0) > 0 && (
+          <PersistedTaskBoard
+            taskList={conversation!.taskList!}
+            memberDisplayNames={conversation!.memberDisplayNames}
+          />
+        )}
+
+        {/* Artifacts, negotiation ledger and the windowing indicator (I17/I11/I9)
+            — shared with the Workforce board and history viewer so all three
+            transcript surfaces stay in step. Renders nothing when empty. */}
+        <DiscussionInsights conversation={conversation} />
+
+        {phases.map((phase, idx) => (
+          <PhaseHeader
+            key={`${phase.phaseIndex}-${phase.phaseName}-${idx}`}
+            name={phase.phaseName}
+            type={phase.phaseType}
+            entryCount={phase.entries.length}
+            isActive={
+              (effectiveState === "IN_PROGRESS" || effectiveState === "SYNTHESIZING") &&
+              phase.phaseIndex === (isStreaming ? streamState!.currentPhase?.index : conversation?.currentPhaseIndex)
+            }
+            defaultExpanded={true}
+            // `?.` on the map as well as on streamState: a stream state created
+            // before convergence tracking existed (a rehydrated store, a partial
+            // test double) has no map, and reading `.get` off it would take down
+            // the whole transcript rather than drop one badge.
+            convergence={streamState?.convergence?.get(phase.phaseIndex)}
+          >
+            {phase.entries.map((entry, entryIdx) => (
+              <AgentResponseCard
+                key={`${entry.speakerAgentId}-${entry.phaseIndex}-${entryIdx}`}
+                entry={entry}
+                isSpeaking={activeSpeakers.has(entry.speakerAgentId) && entry.content === null}
+                allowHtml={allowHtml}
+                discussionStyle={style}
+                preConfiguredTasks={preConfiguredTasks}
+                memberDisplayNames={conversation?.memberDisplayNames ?? rosterDisplayNames}
+              />
+            ))}
+          </PhaseHeader>
+        ))}
+
+        {/* Structured decision (verdict / tally / minority report). Rendered
+            ABOVE the prose synthesis: for a DEBATE the synthesis body IS the
+            judge's reasoning, so the finding it argues for has to come first. */}
+        {hasDisplayableDecision(effectiveDecision) && (
+          <DecisionRecordCard decision={effectiveDecision} />
+        )}
+
+        {/* Synthesized answer highlight */}
+        {parsedSynthesis && (
+          <div
+            className={cn(
+              "rounded-xl border-2 border-primary/40 bg-linear-to-b from-primary/10 to-primary/5 p-4 shadow-sm"
+            )}
+            data-testid="synthesis-card"
+          >
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <span className="text-lg">⭐</span>
+                <span className="text-sm font-bold text-primary">
+                  {t("groups.synthesis", "Synthesis")}
+                </span>
+              </div>
+              <button
+                onClick={handleCopySynthesis}
+                className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-primary/10 hover:text-primary transition-colors"
+                title={t("common.copy", "Copy")}
+              >
+                {copied ? (
+                  <>
+                    <CheckCircle2 className="h-3 w-3" /> {t("common.copied", "Copied")}
+                  </>
+                ) : (
+                  <>
+                    <Copy className="h-3 w-3" /> {t("common.copy", "Copy")}
+                  </>
+                )}
+              </button>
+            </div>
+            {/* Collapsible synthesis body */}
+            <div
+              ref={synthRef}
+              className={cn(
+                "relative transition-[max-height] duration-300 ease-in-out overflow-hidden",
+                synthCollapsible && !synthExpanded && "max-h-72"
+              )}
+            >
+              <div className="prose prose-sm dark:prose-invert max-w-none text-foreground [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs">
+                {/* Deliberately NO rehypeRaw: agent-produced synthesis text is
+                    untrusted, so raw HTML stays escaped rather than injected. */}
+                {isAgentFailurePlaceholder(effectiveSynthesis) ? (
+                  <AgentFailedNotice />
+                ) : (
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {parsedSynthesis}
+                  </ReactMarkdown>
+                )}
+              </div>
+              {/* Fade gradient when collapsed */}
+              {synthCollapsible && !synthExpanded && (
+                <div className="absolute bottom-0 inset-x-0 h-12 bg-gradient-to-t from-primary/5 to-transparent pointer-events-none" />
+              )}
+            </div>
+            {synthCollapsible && (
+              <button
+                onClick={() => setSynthExpanded((v) => !v)}
+                className="flex items-center gap-1 mt-2 text-xs font-medium text-primary hover:text-primary/80 transition-colors"
+              >
+                {synthExpanded ? (
+                  <>
+                    <ChevronUp className="h-3 w-3" />
+                    {t("common.showLess", "Show less")}
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="h-3 w-3" />
+                    {t("common.showMore", "Show more")}
+                  </>
+                )}
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* In-progress indicator — style-aware */}
+        {(effectiveState === "IN_PROGRESS" || effectiveState === "SYNTHESIZING") && (
+          <div className={cn("flex items-center gap-3 p-3 rounded-lg border", theme.progressBg, theme.progressBorder)}>
+            <div className="flex gap-1">
+              <span className={cn("h-2 w-2 rounded-full animate-bounce [animation-delay:0ms]", theme.dotColor)} />
+              <span className={cn("h-2 w-2 rounded-full animate-bounce [animation-delay:150ms]", theme.dotColor)} />
+              <span className={cn("h-2 w-2 rounded-full animate-bounce [animation-delay:300ms]", theme.dotColor)} />
+            </div>
+            <span className={cn("text-sm font-medium", theme.progressText)}>
+              {effectiveState === "SYNTHESIZING"
+                ? t("groups.synthesizing", "Moderator is synthesizing…")
+                : t("groups.discussing", "Agents are discussing…")}
+            </span>
+            {effectiveCurrentPhase && (
+              <Badge variant="outline" className="text-[10px]">
+                {effectiveCurrentPhase}
+              </Badge>
+            )}
+            {isStreaming && activeSpeakers.size > 0 && (
+              <span className="text-[10px] text-muted-foreground">
+                {t("groups.speakingCount", "{{count}} speaking", { count: activeSpeakers.size })}
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* HITL Approval Banner */}
+        {effectiveState === "AWAITING_APPROVAL" && (
+          <div className="px-6 py-4">
+            <ApprovalBanner
+              surface="group"
+              pauseReason={streamState?.hitlPause?.reason || conversation?.hitlPauseReason}
+              pausedAt={conversation?.pausedAt}
+              timeoutPolicy={conversation?.hitlTimeoutPolicy}
+              approvalTimeout={conversation?.hitlApprovalTimeout}
+              pausedPhaseName={streamState?.hitlPause?.phaseName || conversation?.pausedPhaseName}
+              granularity={streamState?.hitlPause?.granularity || conversation?.hitlPauseType}
+              pendingTaskIds={pendingTaskIds}
+              isSubmitting={isDeciding}
+              onDecide={(verdict, note, taskApprovals) => {
+                if (gcId) onApprove?.(gcId, verdict, note, taskApprovals);
+              }}
+              onCancel={
+                onCancelDiscussion && gcId ? () => onCancelDiscussion(gcId) : undefined
+              }
+            />
+          </div>
+        )}
+
+        {/* Live-stream badges for retro harvests and artifact writes (I8/I17) —
+            the same shared component as the persisted panels above, passed only
+            the live payloads since neither count survives a reload. */}
+        {isStreaming && (
+          <DiscussionInsights
+            className="px-6"
+            retroRecorded={streamState?.retroRecorded}
+            artifactUpdates={streamState?.artifactUpdates}
+          />
+        )}
+
+        {/* Human-turn banner (I6) — "you're up", not "approve/reject" */}
+        {effectiveState === "AWAITING_HUMAN_INPUT" && (() => {
+          const pending = streamState?.humanInputRequest;
+          const persisted = conversation?.pendingHumanInput;
+          const displayName = pending?.displayName ?? persisted?.displayName;
+          const phaseName = pending?.phaseName ?? conversation?.pausedPhaseName ?? undefined;
+          if (!displayName) return null;
+          return (
+            <div className="px-6 py-4">
+              <HumanTurnBanner
+                displayName={displayName}
+                renderedPrompt={persisted?.renderedPrompt ?? ""}
+                pausedPhaseName={phaseName}
+                requestedAt={persisted?.requestedAt}
+                turnTimeout={humanTurnTimeout}
+                isSubmitting={isSubmittingHumanInput}
+                onSubmit={(content) => {
+                  const memberId = persisted?.memberId ?? pending?.memberId;
+                  if (gcId && memberId) onSubmitHumanInput?.(gcId, memberId, content);
+                }}
+              />
+            </div>
+          );
+        })()}
+
+        {/* Error state */}
+        {streamError && (
+          <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/5 border border-destructive/20">
+            <span className="text-sm text-destructive font-medium">⚠️ {streamError}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Per-member spend, as the tooltip on the total. Only members that actually
+ * accrued cost appear — a zero row says nothing the absence of a row does not.
+ */
+function formatMemberCostBreakdown(
+  memberCosts: Record<string, number> | undefined,
+  memberDisplayNames: Record<string, string> | undefined,
+): string | undefined {
+  if (!memberCosts) return undefined;
+  const rows = Object.entries(memberCosts)
+    .filter(([, cost]) => typeof cost === "number" && cost > 0)
+    .sort(([, a], [, b]) => b - a)
+    .map(([agentId, cost]) => `${memberDisplayNames?.[agentId] ?? agentId}: ${formatUsd(cost)}`);
+  return rows.length ? rows.join("\n") : undefined;
+}
+
+/**
+ * Phase flow steps per discussion style for the breadcrumb indicator.
+ *
+ * These mirror the phase names the engine actually emits (`getStylePhases`), so
+ * they stay in the backend's English like every other phase name in the
+ * transcript. NEGOTIATION was missing here, which left the newest style with an
+ * empty breadcrumb while every older style showed one.
+ */
+const STYLE_INFO_FLOW: Record<string, string[]> = {
+  ROUND_TABLE: ["Opinion", "Discussion", "Synthesis"],
+  PEER_REVIEW: ["Opinion", "Critique", "Revision", "Synthesis"],
+  DEVIL_ADVOCATE: ["Opinion", "Challenge", "Defense", "Synthesis"],
+  DELPHI: ["Independent", "Anonymous Sharing", "Revised", "Synthesis"],
+  DEBATE: ["Pro Opening", "Con Opening", "Rebuttals", "Judgment"],
+  TASK_FORCE: ["Plan", "Execute", "Verify", "Synthesize"],
+  // Arbitration is `skipIf: AGREEMENT_REACHED` — part of the advertised flow,
+  // just not always run. Omitting it made the breadcrumb disagree with the
+  // phases the engine emits.
+  NEGOTIATION: ["Positions", "Proposals", "Bargaining", "Arbitration", "Synthesis"],
+};
+
+// Re-export for use in group-detail
+export { STYLE_THEME };

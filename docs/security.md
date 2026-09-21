@@ -48,9 +48,9 @@ This starts Keycloak alongside EDDI with pre-configured realm, clients, and test
 
 | User | Password | Role | Notes |
 |------|----------|------|-------|
-| `eddi` | `eddi` | `eddi-admin`, `eddi-editor` | Full access, forced password change on first login |
-| `viewer` | `viewer` | `eddi-viewer` | Read-only access, forced password change on first login |
-| `user` | `user` | `eddi-user` | Standard user access, forced password change on first login |
+| `eddi` | *none* | `eddi-admin`, `eddi-editor` | Full access. Ships without a password: set one at `http://localhost:8180/admin` (`admin`/`admin`) → Users → eddi → Credentials |
+| `viewer` | `viewer` | `eddi-viewer` | Read-only access. Development only: no password change is forced |
+| `user` | `user` | `eddi-user` | Standard user access. Development only: no password change is forced |
 
 ### Configuration Properties
 
@@ -112,7 +112,7 @@ if (checkForUserAuthentication &&
 
 ### Local Development Keycloak
 
-The EDDI-Manager repo provides a docker-compose for local Keycloak:
+The Manager (`ui/manager` in this repository) provides a docker-compose for local Keycloak — run it from that directory:
 
 ```bash
 docker compose -f docker-compose.keycloak.yml up
@@ -123,12 +123,103 @@ This starts Keycloak 26 on port 8180 with:
 - **Realm**: `eddi`
 - **Clients**: `eddi-frontend` (SPA, public), `eddi-backend` (bearer-only)
 - **Roles**: `eddi-admin`, `eddi-editor`, `eddi-user`, `eddi-viewer` (plus `eddi-approver`, used by the HITL approval endpoints)
-- **Test users**: `eddi`/`eddi` (`eddi-admin` + `eddi-editor`), `viewer`/`viewer` (`eddi-viewer`), `user`/`user` (`eddi-user`)
+- **Test users**: `viewer`/`viewer` (`eddi-viewer`), `user`/`user` (`eddi-user`), and `eddi` (`eddi-admin` + `eddi-editor`), which ships **without a password** — set one in the admin console at http://localhost:8180 (`admin`/`admin`)
 
 > `keycloak/eddi-realm.json` is the source of truth for client ids. Provisioning a
 > realm by hand from a doc that names a different one gets you `invalid_client`
 > at login: `RestManagerResource` hardcodes `eddi-frontend` as the id the Manager
 > SPA requests tokens for, so that is the client that has to exist.
+
+### Identity claims, and realms imported from EDDI 6.1.0–6.4.0
+
+EDDI identifies a caller by the principal Quarkus OIDC reads from the access
+token: `upn`, then `preferred_username`, then `sub`. Conversation ownership,
+long-term user memory, HITL attribution and workspaces all key on that name. So
+the `eddi-frontend` client has to put identity claims in its tokens, which takes
+three client scopes: `basic` (`sub`), `profile` (`preferred_username`, `name`)
+and `email`. The `openid` scope the realm also defines is there for a different
+reason: it puts `openid` in the token's `scope` claim even when a client did not
+ask for it, and Keycloak's userinfo endpoint — which the backend calls on every
+request — refuses a token without it.
+
+**The realm shipped with EDDI 6.1.0 through 6.4.0 had none of the three** (for
+Helm and Kustomize, which first shipped a realm in 6.4.0, that release only). It
+defined a single client scope, and a realm file that defines any client scopes
+gets only those: Keycloak creates its built-in ones only for realms that define
+none. The import logs `Referenced client scope 'profile' doesn't exist. Ignoring`
+and carries on. Tokens still authenticated and still carried their roles, so
+logins worked and role checks passed, but every caller's principal had no name:
+
+- Every conversation was stamped with a random `anonymous-<hex>` owner instead of
+  the user, and long-term user memories were filed under that same per-conversation
+  id, so nothing a user saved was recalled in their next conversation.
+- A user without `eddi-admin` who opened or continued their own conversation got
+  **HTTP 500**.
+- `GET /workspaces` reported no principal, so workspaces had nothing to scope to.
+- The Manager showed "?" in place of the user's initials and no name in the user
+  menu.
+
+Realm import only runs on first boot, so a fixed realm file does not reach a
+Keycloak that already has the `eddi` realm:
+
+- **`install.sh`** repairs it whenever it runs, including when EDDI is already up:
+  run the installer again while EDDI is running — with EDDI running, it only
+  refreshes the `eddi` command and checks Keycloak. If you installed on a port
+  other than 7070, pass the same one (`EDDI_PORT=7071 bash install.sh`): the
+  installer recognises a running EDDI only on the port it is given, and would
+  otherwise set up a new installation. Look for
+  `Checking Keycloak identity scopes ✅ (repaired: …)`, then sign out and in again.
+  `eddi update` does **not** run this check.
+- **`install.ps1`, Helm, Kustomize, or a realm provisioned by hand**: run the
+  repair below once, against the Keycloak admin API — on Windows from Git Bash or
+  WSL. It creates only the scopes that are missing, using the definitions in the
+  realm file, attaches them to `eddi-frontend`, and removes nothing, so running it
+  twice is harmless. It needs `curl` and `jq`, and a checkout of this repository
+  for the realm file (the three copies define the same scopes); run it from the
+  checkout's root. Set `KC`, `KC_ADMIN_USER` and `KC_ADMIN_PASSWORD` for your
+  Keycloak: `http://localhost:8180`, `admin` and `admin` for the docker-compose
+  setup the installers create, or the port-forward, `keycloak.adminUsername` and
+  the admin Secret on Kubernetes. It runs in a subshell, so pasting it into a
+  terminal cannot close that terminal when a step fails.
+
+  ```bash
+  ( set -eu
+  KC=${KC:-http://localhost:8180}   # kubectl -n eddi port-forward svc/keycloak 8080:8080 → http://localhost:8080
+  : "${KC_ADMIN_PASSWORD:?set KC_ADMIN_PASSWORD to the Keycloak admin password}"
+  REALM_FILE=keycloak/eddi-realm.json
+  # tr -d '\r': a native Windows jq.exe ends its output with CRLF under Git Bash
+  j() { jq "$@" | tr -d '\r'; }
+  TOKEN=$(curl -sSf -d client_id=admin-cli -d grant_type=password -d "username=${KC_ADMIN_USER:-admin}" \
+    --data-urlencode "password=$KC_ADMIN_PASSWORD" \
+    "$KC/realms/master/protocol/openid-connect/token" | j -r .access_token)
+  [ -n "$TOKEN" ] || { echo "could not log in to $KC as ${KC_ADMIN_USER:-admin}" >&2; exit 1; }
+  AUTH="Authorization: Bearer $TOKEN"
+  SPA=$(curl -sSf -H "$AUTH" "$KC/admin/realms/eddi/clients?clientId=eddi-frontend" | j -r '.[0].id // empty')
+  [ -n "$SPA" ] || { echo "no eddi-frontend client in realm eddi" >&2; exit 1; }
+  scope_id() {
+    curl -sSf -H "$AUTH" "$KC/admin/realms/eddi/client-scopes" \
+      | j -r --arg n "$1" '.[] | select(.name == $n) | .id'
+  }
+  for scope in basic profile email web-origins acr; do
+    if [ -z "$(scope_id "$scope")" ]; then
+      j -c --arg n "$scope" '.clientScopes[] | select(.name == $n)' "$REALM_FILE" \
+        | curl -sSf -X POST -H "$AUTH" -H "Content-Type: application/json" -d @- \
+            "$KC/admin/realms/eddi/client-scopes"
+      echo "created $scope"
+    fi
+    id=$(scope_id "$scope")
+    [ -n "$id" ] || { echo "client scope $scope is still missing" >&2; exit 1; }
+    curl -sSf -X PUT -H "$AUTH" "$KC/admin/realms/eddi/clients/$SPA/default-client-scopes/$id"
+    echo "attached $scope"
+  done )
+  ```
+
+Users pick the claims up at their next sign-in. The principal then becomes each
+user's username, so conversations and memories created **after** the repair
+belong to the user who created them. Anything written before it keeps its
+`anonymous-<hex>` owner: an `eddi-admin` can still open those conversations, but
+neither they nor the memories filed with them can be attributed to a person, so
+a data-subject request by username will not find them.
 
 ---
 
@@ -449,10 +540,10 @@ EDDI's CI/CD pipeline enforces multiple automated security gates before any code
 
 | Tool | Type | Scope | Mode | Override |
 |------|------|-------|------|----------|
-| **CodeQL** | SAST | Java source code | Blocking (PR) + weekly deep scan | N/A |
+| **CodeQL** | SAST | Java source code; the shipped UI sources (`.github/codeql/codeql-ui.yml`) | Blocking (PR) + weekly deep scan | N/A |
 | **Trivy** | CVE scanning | Filesystem deps + Docker image | Blocking (CRITICAL/HIGH) | `.trivyignore` |
 | **Gitleaks** | Secret scanning | Full git history | Blocking | `.gitleaksignore` |
-| **CycloneDX** | SBOM | Maven dependency tree | Artifact generation | N/A |
+| **CycloneDX** | SBOM | Maven dependency tree + both UIs’ npm production dependencies | Artifact generation | N/A |
 | **Jazzer** | Fuzz testing | PathNavigator, MatchingUtilities | JUnit integration | N/A |
 
 > **DAST is intentionally absent.** A ZAP API scan used to live in `ci.yml` and was removed rather than kept as decorative coverage: it ran *after* the image was pushed, it scanned an instance started with `EDDI_SECURITY_ALLOW_UNAUTHENTICATED` (so the authorization layer under test was switched off), and it ran passive-only with `fail_action: false`. Re-adding it means fixing all three at once — build the image in a job that does not push, stand up Keycloak, drive an authenticated OpenAPI scan against it, and gate the publish job on the result.

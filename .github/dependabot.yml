@@ -93,6 +93,128 @@ updates:
     commit-message:
       prefix: "chore(docker)"
 
+  # The two frontends under ui/. They ran Renovate in their own repos (automerge
+  # of minor/patch once CI was green); the Renovate app is not installed on this
+  # repository, and two bots on one repo is the one clearly wrong option.
+  - package-ecosystem: npm
+    directory: /ui/manager
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - chore
+    # Let a release settle before proposing it; security updates are not delayed.
+    cooldown:
+      default-days: 3
+      semver-major-days: 14
+    groups:
+      # One PR for every open advisory instead of one per package.
+      security-updates:
+        applies-to: security-updates
+        patterns:
+          - "*"
+      # vitest and every @vitest/* package peer-depend on each other at the EXACT
+      # same version, so bumping one alone fails `npm ci` with ERESOLVE. That is
+      # how the vitest 4.1.11 security fix (GHSA-82fw-gwwq-j7x9) arrived as a PR
+      # that could never go green. No update-types filter: majors must move
+      # together too. Declared before minor-and-patch so these land here instead.
+      vitest:
+        patterns:
+          - "vitest"
+          - "@vitest/*"
+      # Same shape: @stryker-mutator/vitest-runner pins @stryker-mutator/core exactly.
+      stryker:
+        patterns:
+          - "@stryker-mutator/*"
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # Carried over from the Manager's renovate.json: v8 folds react-router-dom
+      # into react-router, so an automated major breaks every import. Minor and
+      # patch bumps stay enabled — that is how a security fix arrives.
+      - dependency-name: "react-router*"
+        update-types: ["version-update:semver-major"]
+      # Vitest 5 is held back HERE ONLY, because it breaks the mutation gate:
+      # @stryker-mutator/vitest-runner 10.0.0 builds its per-test filter with a
+      # space, Vitest 5 joins test names with " > ", so the filter selects no
+      # test and every covered mutant "survives" (updates.ts: 0.00, against 81.85
+      # on Vitest 4 with the same runner) — stryker-mutator/stryker-js#6210.
+      # Remove once a fixed runner ships.
+      # ui/chat has no Stryker and is already on Vitest 5. update-types limits
+      # this to version updates; security updates are not affected.
+      - dependency-name: "vitest"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@vitest/*"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: npm
+    directory: /ui/chat
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - chore
+    # Let a release settle before proposing it; security updates are not delayed.
+    cooldown:
+      default-days: 3
+      semver-major-days: 14
+    groups:
+      # One PR for every open advisory instead of one per package.
+      security-updates:
+        applies-to: security-updates
+        patterns:
+          - "*"
+      # vitest and @vitest/* must move together; see the Manager entry above.
+      vitest:
+        patterns:
+          - "vitest"
+          - "@vitest/*"
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # Same as the Manager: a react-router v8 major needs a manual migration.
+      - dependency-name: "react-router*"
+        update-types: ["version-update:semver-major"]
+
+  # The Manager's design-sync tooling (ui/manager/.ds-sync) is its own npm project with
+  # its own lockfile, and Dependency Review and Trivy scan it like any other: a stale
+  # advisory there fails every PR. Not shipped, so version updates are rare and small.
+  - package-ecosystem: npm
+    directory: /ui/manager/.ds-sync
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 2
+    labels:
+      - dependencies
+      - chore
+    cooldown:
+      default-days: 3
+      semver-major-days: 14
+    groups:
+      security-updates:
+        applies-to: security-updates
+        patterns:
+          - "*"
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
   # GitHub Actions versions
   - package-ecosystem: github-actions
     directory: /

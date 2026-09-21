@@ -1621,6 +1621,168 @@ class DeploymentManifestsTest {
         }
 
         /**
+         * A realm file that supplies {@code clientScopes} at all gets ONLY those
+         * scopes: Keycloak creates its built-ins (profile, email, basic, roles,
+         * web-origins, acr, and the rest) solely for realms that do not. A name a
+         * client or the realm defaults list that the same file does not define is
+         * dropped with nothing but a WARN at import:
+         * {@code Referenced client scope 'profile' doesn't exist. Ignoring}.
+         * <p>
+         * That is how this realm shipped: {@code clientScopes} held only
+         * {@code openid}, so eddi-frontend's {@code profile}, {@code email},
+         * {@code roles}, {@code web-origins} and {@code acr} all vanished on import.
+         * The import still succeeded, login still worked and the roles still arrived
+         * (the client maps them itself), so the only symptoms were downstream; see
+         * {@link #theSpaClientIssuesTheIdentityClaimsEddiReads}.
+         */
+        @Test
+        @DisplayName("every client scope a realm copy references is defined in that copy")
+        void everyReferencedClientScopeIsDefined() throws IOException {
+            for (Path realm : List.of(COMPOSE_REALM, KUSTOMIZE_REALM, HELM_REALM)) {
+                JsonNode root = JSON.readTree(realm.toFile());
+                if (!root.has("clientScopes")) {
+                    continue; // Keycloak creates its built-ins, so every built-in name resolves
+                }
+                Set<String> defined = names(root, "clientScopes", "name");
+                Map<String, List<String>> references = new LinkedHashMap<>();
+                references.put("defaultDefaultClientScopes", stringList(root.get("defaultDefaultClientScopes")));
+                references.put("defaultOptionalClientScopes", stringList(root.get("defaultOptionalClientScopes")));
+                for (JsonNode clientNode : root.path("clients")) {
+                    String id = clientNode.path("clientId").asText();
+                    references.put(id + ".defaultClientScopes", stringList(clientNode.get("defaultClientScopes")));
+                    references.put(id + ".optionalClientScopes", stringList(clientNode.get("optionalClientScopes")));
+                }
+                references.forEach((where, scopes) -> {
+                    List<String> undefined = scopes.stream().filter(scope -> !defined.contains(scope)).toList();
+                    assertTrue(undefined.isEmpty(),
+                            realm + " lists " + undefined + " in " + where + " but defines only " + defined
+                                    + " in clientScopes. Because the file supplies clientScopes, Keycloak creates "
+                                    + "none of its built-ins and imports those references as nothing at all");
+                });
+            }
+        }
+
+        /**
+         * The claims EDDI identifies a caller by must be in the token the SPA gets.
+         * <p>
+         * Quarkus OIDC names the principal from {@code upn}, then
+         * {@code preferred_username}, then {@code sub}. A token with none of them,
+         * which is what this realm issued while its scopes were missing, authenticates
+         * and carries its roles but resolves to a principal with no name. Measured
+         * against a real backend: every conversation was stamped
+         * {@code anonymous-<hex>}, {@code GET /workspaces} reported no principal, and a
+         * non-admin opening their OWN conversation got HTTP 500 from
+         * {@code OwnershipValidator} with a null {@code callerId}. The Manager's avatar
+         * showed "?" because the same token has no name or email either.
+         * <p>
+         * Checked by what the attached scopes and the client's own mappers emit, not by
+         * scope names, so renaming a scope cannot satisfy it. {@code openid} stays
+         * pinned too: it puts {@code openid} in every token's {@code scope} claim,
+         * which Keycloak's userinfo endpoint requires and a direct-grant token does not
+         * otherwise carry, and the backend runs with
+         * {@code quarkus.oidc.authentication.user-info-required=true}.
+         */
+        @Test
+        @DisplayName("the SPA client issues the identity claims EDDI resolves a caller by")
+        void theSpaClientIssuesTheIdentityClaimsEddiReads() throws IOException {
+            for (Path realm : List.of(COMPOSE_REALM, KUSTOMIZE_REALM, HELM_REALM)) {
+                JsonNode root = JSON.readTree(realm.toFile());
+                JsonNode spa = client(root, "eddi-frontend");
+                List<String> attached = stringList(spa.get("defaultClientScopes"));
+
+                List<JsonNode> mappers = new ArrayList<>();
+                spa.path("protocolMappers").forEach(mappers::add);
+                for (JsonNode scope : root.path("clientScopes")) {
+                    if (attached.contains(scope.path("name").asText())) {
+                        scope.path("protocolMappers").forEach(mappers::add);
+                    }
+                }
+                Set<String> accessTokenClaims = new TreeSet<>();
+                boolean subMapper = false;
+                for (JsonNode mapper : mappers) {
+                    JsonNode config = mapper.path("config");
+                    boolean inAccessToken = "true".equals(config.path("access.token.claim").asText());
+                    String type = mapper.path("protocolMapper").asText();
+                    if ("oidc-sub-mapper".equals(type)) {
+                        subMapper = subMapper || inAccessToken;
+                    } else if ("oidc-full-name-mapper".equals(type)) {
+                        // Emits `name` from first + last name; it has no claim.name setting.
+                        if (inAccessToken) {
+                            accessTokenClaims.add("name");
+                        }
+                    } else if (inAccessToken && !config.path("claim.name").asText().isBlank()) {
+                        accessTokenClaims.add(config.path("claim.name").asText());
+                    }
+                }
+
+                assertTrue(subMapper,
+                        realm + ": eddi-frontend's access token has no `sub`. Since Keycloak 25 it comes from "
+                                + "the `basic` client scope, which the client must list in defaultClientScopes");
+                for (String claim : List.of("preferred_username", "email", "name")) {
+                    assertTrue(accessTokenClaims.contains(claim),
+                            realm + ": eddi-frontend's access token carries no `" + claim + "` (it emits "
+                                    + accessTokenClaims + "). Without preferred_username the backend's principal "
+                                    + "has no name, and without name and email the Manager cannot say who is "
+                                    + "signed in. Attach the `profile` and `email` scopes");
+                }
+
+                assertTrue(attached.contains("openid"),
+                        realm + ": eddi-frontend must keep the `openid` scope as a default. It puts `openid` in a "
+                                + "token's scope claim when the client did not ask for it, and Keycloak's userinfo "
+                                + "endpoint, which the backend calls for every request, refuses a token without it");
+            }
+        }
+
+        /**
+         * install.sh repairs realms imported before the identity scopes were fixed:
+         * realm import is one-shot, so a corrected file never reaches an existing
+         * Keycloak. It creates each missing scope from the definition in
+         * keycloak/eddi-realm.json, which it downloads anyway, so a scope it names that
+         * the file does not define would fail on every installation, one yellow warning
+         * at a time, while this repository's own checks stayed green.
+         */
+        @Test
+        @DisplayName("install.sh repairs exactly the identity scopes the realm file defines")
+        void installerRepairsTheScopesTheRealmDefines() throws IOException {
+            String installer = read(Path.of("install.sh"));
+            String loop = captureAfter(installer, "for scope in ([a-z -]+); do");
+            assertFalse(loop.isBlank(), "install.sh no longer has its `for scope in ...; do` identity-scope repair loop");
+            List<String> repaired = List.of(loop.split("\\s+"));
+
+            // main() exits early when EDDI is already up, and re-running the installer
+            // on a live installation is how it picks up fixes, so that branch has to
+            // run the repair too. It once did not, and the docs said it did.
+            int runningBranch = installer.indexOf("if [[ \"$EDDI_ALREADY_RUNNING\" == \"true\" ]]; then");
+            assertTrue(runningBranch >= 0, "install.sh no longer has main()'s already-running branch");
+            String running = installer.substring(runningBranch, installer.indexOf("exit 0", runningBranch));
+            assertTrue(running.contains("repair_running_keycloak"),
+                    "main()'s already-running branch exits without repair_running_keycloak, so re-running the "
+                            + "installer on a live 6.1-6.4 installation leaves its realm without identity claims");
+
+            // The manual repair in docs/security.md is the same loop by hand, for
+            // install.ps1, Helm and Kustomize.
+            String documented = captureAfter(read(Path.of("docs", "security.md")), "for scope in ([a-z -]+); do");
+            assertEquals(loop, documented,
+                    "docs/security.md's manual repair covers different scopes than install.sh, so operators "
+                            + "repairing by hand get a different realm than installer users");
+
+            JsonNode realm = JSON.readTree(COMPOSE_REALM.toFile());
+            Set<String> defined = names(realm, "clientScopes", "name");
+            assertTrue(defined.containsAll(repaired),
+                    "install.sh repairs " + repaired + " from " + COMPOSE_REALM + ", which defines only " + defined);
+
+            List<String> unrepaired = stringList(client(realm, "eddi-frontend").get("defaultClientScopes")).stream()
+                    // openid predates the broken realm, and a realm without it still has
+                    // Keycloak's built-ins: nothing an existing installation lacks.
+                    .filter(scope -> !"openid".equals(scope) && !repaired.contains(scope))
+                    .toList();
+            assertTrue(unrepaired.isEmpty(),
+                    COMPOSE_REALM + " gives eddi-frontend " + unrepaired + ", which install.sh does not repair on an "
+                            + "existing realm. Add them to its loop, or record here why an existing installation "
+                            + "does not need them");
+        }
+
+        /**
          * No shipped realm may carry a password for an account that holds EDDI's
          * privileged roles.
          * <p>
@@ -2919,10 +3081,31 @@ class DeploymentManifestsTest {
                             + "carries jobs a job actually depends on, so that reference resolves to the "
                             + "empty string, the condition is permanently false, and the job is SKIPPED on "
                             + "every run — reported as a grey check, never a red one");
-            assertTrue(dependencies.contains("build-and-test"),
-                    name + " must still run after build-and-test (" + dependencies + "): publishing an SBOM "
-                            + "or a preflight image for a commit whose tests never passed is the ordering "
-                            + "this job existed to enforce");
+            if (name.equals("sbom")) {
+                assertTrue(dependencies.contains("build-and-test"),
+                        name + " must still run after build-and-test (" + dependencies + "): uploading an SBOM "
+                                + "for a commit whose tests never passed is the ordering this job exists to "
+                                + "enforce");
+            } else {
+                // preflight-check is a pull-request dry run: it pushes to a registry inside the
+                // job and
+                // submits nothing, so there is no publication to hold back until the tests
+                // pass. What it
+                // needs is the image it certifies. And it must NOT wait on build-and-test,
+                // which gates on
+                // `backend`: on a UI-only pull request that job is skipped, GitHub then skips
+                // this one
+                // before evaluating its `if`, and the image the PR would publish goes
+                // uncertified.
+                // BuildQualityGatesTest grades that trap for every job; this pins the fix here.
+                assertTrue(dependencies.contains("build-image"),
+                        name + " must depend on build-image, which supplies the eddi-ci-image artifact it "
+                                + "certifies (" + dependencies + ")");
+                assertFalse(dependencies.contains("build-and-test"),
+                        name + " waits on build-and-test again (" + dependencies + "). build-and-test gates on "
+                                + "`backend`, so a UI-only pull request skips it, and GitHub then skips this job "
+                                + "too without evaluating its `code` condition");
+            }
         }
     }
 
