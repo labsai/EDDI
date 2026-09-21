@@ -503,6 +503,53 @@ class RagSourceIngestionServiceTest {
                     .readAllSchedules(anyInt(), anyInt(), anyBoolean());
         }
 
+        /**
+         * Review finding (CodeRabbit, #818): the repair arms through
+         * {@code setScheduleEnabled}, which writes {@code enabled} and {@code nextFire}
+         * and nothing else — a legacy row's null {@code timeZone} stays null. Every
+         * fire after the first is therefore re-armed by the poller through
+         * {@code resolveTimeZone(null)}, the deployment default, so arming the first
+         * one in UTC regardless would hand a non-UTC deployment exactly one interval of
+         * the wrong length. That is the same drift {@code buildSchedule} was fixed for,
+         * arriving by the back door.
+         */
+        @Test
+        @DisplayName("a legacy row with no zone is armed in the zone the poller will use, not in UTC")
+        void armsLegacyRowsInThePollerZone() throws Exception {
+            service.defaultTimeZone = "Asia/Tokyo";
+            var schedule = unarmedIngestionSchedule();
+            schedule.setCronExpression("0 2 * * *");
+            schedule.setTimeZone(null);
+            storeHolds(schedule);
+
+            service.repairUnarmedSchedules();
+
+            var fireTime = ArgumentCaptor.forClass(Instant.class);
+            verify(scheduleStore).setScheduleEnabled(eq("sched-1"), eq(true), fireTime.capture());
+            assertEquals(2, fireTime.getValue().atZone(ZoneId.of("Asia/Tokyo")).getHour(),
+                    "02:00 means 02:00 in the zone this row will be re-armed in; computing it in UTC "
+                            + "would make the first interval the odd one out on every deployment that "
+                            + "sets a time zone");
+        }
+
+        @Test
+        @DisplayName("a row that names its own zone is armed in that zone")
+        void armsInTheRowsOwnZoneWhenItHasOne() throws Exception {
+            service.defaultTimeZone = "Asia/Tokyo";
+            var schedule = unarmedIngestionSchedule();
+            schedule.setCronExpression("0 2 * * *");
+            schedule.setTimeZone("UTC");
+            storeHolds(schedule);
+
+            service.repairUnarmedSchedules();
+
+            var fireTime = ArgumentCaptor.forClass(Instant.class);
+            verify(scheduleStore).setScheduleEnabled(eq("sched-1"), eq(true), fireTime.capture());
+            assertEquals(2, fireTime.getValue().atZone(ZoneId.of("UTC")).getHour(),
+                    "the row's own zone is what the poller resolves first, so it is what the repair "
+                            + "must arm in");
+        }
+
         @Test
         @DisplayName("reaching the end of the data is reported as a complete sweep")
         void aFullSweepSaysSo() throws Exception {

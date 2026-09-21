@@ -64,6 +64,20 @@ rather than closing it — neither store offers a conditional write, and adding 
 writing it twice, once per backend — and the residual cost is at most one occurrence of a
 cron that, without this sweep, would fire never rather than late.
 
+**A third, from CodeRabbit (#818): the repair could not arm in UTC, and should not have
+tried.** `buildSchedule` writes `timeZone` for rows it creates, but the repair arms through
+`IScheduleStore.setScheduleEnabled`, which takes only `enabled` and `nextFire` — a legacy
+row's null `timeZone` stays null whatever the repair does. Every fire after the first is
+therefore re-armed by the poller through `resolveTimeZone(null)`, the deployment's
+`eddi.schedule.default-timezone`, so computing the first fire in UTC regardless would hand
+a non-UTC deployment exactly one interval of the wrong length — the same drift this PR
+fixed in `buildSchedule`, arriving on the repair path instead. The repair now reads the
+cron in the zone the poller will use for that row (its own if it names one, the deployment
+default otherwise), which is the only choice that makes the row internally consistent
+without a new store method. CodeRabbit's alternative — widen the store's re-arm to carry a
+zone — would normalise legacy rows to UTC as well, at the cost of a store-API change
+implemented twice; noted, not taken.
+
 The second: the 40-page bound used to end the walk **silently**, so past 20,000 schedules
 an operator read "armed 12 schedules" with no way to tell a finished repair from one that
 stopped a page short of the row they were waiting on. `repairUnarmedSchedules` now returns
@@ -138,6 +152,7 @@ explain the result.
 | Run button drops `source.enabled === false` | "does not offer Run for a source that is saved as disabled" |
 | The re-read guard before arming is removed | "a row another node armed while the sweep was listing is left alone" |
 | The walk always reports itself complete | "stopping at the page bound is reported, not swallowed" |
+| The repair arms in fixed UTC instead of the poller's zone | "a legacy row with no zone is armed in the zone the poller will use, not in UTC" (expected hour 2, got 11) |
 
 ### Files
 
@@ -155,13 +170,14 @@ Tests: `RagSourceIngestionServiceTest` (two new nested groups),
 ```
 
 ```decision-log
-| 2026-09-21 | Repair already-stored unarmed ingestion schedules with an idempotent startup sweep, rather than a migration script or leaving it to the next save | Rows written before the fix are dead for ever and nothing tells the operator to re-save the knowledge base | A one-off migration (needs running, and is skipped on upgrades); re-syncing every knowledge base at startup (delete-then-create races between nodes); a generic sweep over all schedules (wider blast radius than the defect) |
+| 2026-09-21 | Repair already-stored unarmed ingestion schedules with a repeatable startup sweep, rather than a migration script or leaving it to the next save | Rows written before the fix are dead for ever and nothing tells the operator to re-save the knowledge base | A one-off migration (needs running, and is skipped on upgrades); re-syncing every knowledge base at startup (delete-then-create races between nodes); a generic sweep over all schedules (wider blast radius than the defect) |
 ```
 
 ```decision-log
+| 2026-09-21 | Arm a legacy row in the zone the poller will use, rather than in UTC or by widening the store API | `setScheduleEnabled` cannot carry a zone, so a legacy row's `timeZone` stays null and the poller re-arms it in the deployment default; arming the first fire in UTC would make exactly one interval the wrong length | Adding a zone to the store's re-arm on both backends (CodeRabbit's suggestion — normalises legacy rows to UTC, at the cost of the same double implementation this change rejects elsewhere), leaving the fixed-UTC arm and the drift with it |
 | 2026-09-21 | Narrow the two-node repair race with a re-read rather than a conditional store write, and say so in the javadoc | The realistic cost is one skipped occurrence on a schedule that would otherwise never fire; a compare-and-set arm would need implementing twice, once per backend, which is the same "fix it in the store" the first decision above rejected | A conditional arm-only-when-null store operation on both backends (Copilot's suggestion), a distributed lock for a startup sweep, leaving the inaccurate idempotency claim in place |
 ```
 
 ```regression-note
-| 2026-09-21 | A RAG ingestion source with a cron was stored looking enabled and never fired; a ZIP could store a cron the REST API refuses; run reports named a null source; `docs/rag.md` overstated defaults; a Manager test asserted nothing | All five were raised in review on PR #790 and the PR was **merged with those threads unresolved** — the review caught them, the merge did not wait for them | `nextFire` computed in `buildSchedule` plus an idempotent startup repair for existing rows; cron validation shared between the REST and import paths; `effectiveId()` at all six report sites; docs corrected against the code; the Manager test rewritten to serve a saved-disabled source so no dirty-state guard can mask it | (this branch) |
+| 2026-09-21 | A RAG ingestion source with a cron was stored looking enabled and never fired; a ZIP could store a cron the REST API refuses; run reports named a null source; `docs/rag.md` overstated defaults; a Manager test asserted nothing | All five were raised in review on PR #790 and the PR was **merged with those threads unresolved** — the review caught them, the merge did not wait for them | `nextFire` computed in `buildSchedule` plus a repeatable startup repair for existing rows; cron validation shared between the REST and import paths; `effectiveId()` at all six report sites; docs corrected against the code; the Manager test rewritten to serve a saved-disabled source so no dirty-state guard can mask it | (this branch) |
 ```

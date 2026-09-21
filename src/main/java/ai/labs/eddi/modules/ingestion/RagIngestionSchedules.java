@@ -116,8 +116,30 @@ public final class RagIngestionSchedules {
      *             surface as a 500
      */
     public static Instant firstFire(String cronExpression) {
+        return firstFire(cronExpression, ZONE);
+    }
+
+    /**
+     * When a source with this cron first runs, read in a given zone.
+     *
+     * <p>
+     * The zone is a parameter and not always {@link #ZONE} because of the one case
+     * that cannot store a zone at all: the startup repair of rows written before
+     * {@code buildSchedule} armed anything. Those rows have a null
+     * {@code timeZone}, and {@code IScheduleStore.setScheduleEnabled} takes only
+     * {@code enabled} and {@code nextFire} — there is no way to write a zone
+     * through it. The poller will therefore re-arm every later fire through
+     * {@code resolveTimeZone(null)}, which is the deployment's
+     * {@code eddi.schedule.default-timezone}. Computing the first fire in UTC
+     * regardless would guarantee exactly one interval of the wrong length on any
+     * deployment that sets a zone. So the repair computes it in the zone the poller
+     * is going to use, which is the only choice that makes the row internally
+     * consistent without a new store method.
+     * </p>
+     */
+    public static Instant firstFire(String cronExpression, ZoneId zone) {
         try {
-            return CronParser.computeNextFire(cronExpression, Instant.now(), ZONE);
+            return CronParser.computeNextFire(cronExpression, Instant.now(), zone);
         } catch (IllegalStateException e) {
             throw new IllegalArgumentException(
                     "cron '" + cronExpression + "' has no matching fire time within the next two years", e);

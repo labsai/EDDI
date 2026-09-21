@@ -22,6 +22,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.time.Instant;
+import java.time.ZoneId;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
@@ -68,6 +69,14 @@ public class RagSourceIngestionService {
      */
     @ConfigProperty(name = "eddi.rag.ingestion.schedule-repair.enabled", defaultValue = "true")
     boolean scheduleRepairEnabled = true;
+
+    /**
+     * The zone the poller reads a schedule's cron in when the row does not name
+     * one. Read here so the startup repair below can compute a first fire the
+     * poller will agree with — see {@link #armIfUnarmed}.
+     */
+    @ConfigProperty(name = "eddi.schedule.default-timezone", defaultValue = "UTC")
+    String defaultTimeZone = RagIngestionSchedules.ZONE.getId();
 
     @Inject
     public RagSourceIngestionService(IngestionPipeline pipeline, IIngestionStateStore stateStore,
@@ -411,7 +420,15 @@ public class RagSourceIngestionService {
             if (current == null || current.getNextFire() != null || !current.isEnabled()) {
                 return false;
             }
-            Instant nextFire = RagIngestionSchedules.firstFire(cron);
+            // Read the cron in the zone the POLLER will use for this row, not in
+            // RagIngestionSchedules.ZONE. setScheduleEnabled writes only enabled and
+            // nextFire, so a legacy row's null timeZone stays null, and every fire
+            // after the first is re-armed through resolveTimeZone(null) — the
+            // deployment's eddi.schedule.default-timezone. Arming in UTC regardless
+            // would hand a non-UTC deployment exactly one interval of the wrong
+            // length, which is the same drift this PR fixed in buildSchedule, just
+            // moved onto the repair path.
+            Instant nextFire = RagIngestionSchedules.firstFire(cron, pollerZoneOf(current));
             scheduleStore.setScheduleEnabled(schedule.getId(), true, nextFire);
             return true;
         } catch (IllegalArgumentException | IResourceStore.ResourceStoreException
@@ -421,6 +438,31 @@ public class RagSourceIngestionService {
             LOGGER.errorf(e, "Ingestion schedule %s has no next fire time and could not be given one — "
                     + "it will not run", LogSanitizer.sanitize(schedule.getId()));
             return false;
+        }
+    }
+
+    /**
+     * The zone {@code SchedulePollerService.resolveTimeZone} will read this
+     * schedule's cron in: its own, when it names one, and otherwise the
+     * deployment's default. Same fallback, same invalid-zone tolerance — a row
+     * naming a zone the JDK does not know is re-armed by the poller in the default,
+     * so arming it here in the default is what keeps the two agreeing.
+     */
+    private ZoneId pollerZoneOf(ScheduleConfiguration schedule) {
+        String zone = schedule.getTimeZone();
+        if (zone != null && !zone.isBlank()) {
+            try {
+                return ZoneId.of(zone);
+            } catch (Exception e) {
+                LOGGER.warnf("Ingestion schedule %s names time zone '%s', which is not a zone; arming it in %s, "
+                        + "the same fallback the poller uses", LogSanitizer.sanitize(schedule.getId()),
+                        LogSanitizer.sanitize(zone), defaultTimeZone);
+            }
+        }
+        try {
+            return ZoneId.of(defaultTimeZone);
+        } catch (Exception e) {
+            return RagIngestionSchedules.ZONE;
         }
     }
 
