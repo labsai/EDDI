@@ -66,6 +66,30 @@ export interface OperatorConfig {
   model: string;
   /** Vault key *name* of the LLM credential — never the secret itself. */
   credentialKey: string | null;
+  /**
+   * The base URL the operator's generated tools target — the address **EDDI can
+   * reach itself at**, which is NOT the address this browser reached EDDI at.
+   *
+   * This used to be `window.location.origin`, taken at provisioning time and
+   * never stored. It was wrong on any deployment with something in between: a
+   * staging instance reached through an SSH tunnel on `localhost:7080`, fronting
+   * a container listening on `:7070`, got all 22 of its api-call resources
+   * pointed at `localhost:7080` — meaningless inside the container. The operator
+   * deployed, reported "Gate verified", and then failed every tool call while
+   * blaming the platform's internal services.
+   *
+   * `null` means "ask the backend" (`fetchPlatformSelfUrl`); a non-empty value is
+   * an explicit admin override and is used verbatim. Stored rather than derived
+   * so the operator screen can SHOW the address the live tools use — the field
+   * whose value the incident turned on was, until now, nowhere on screen.
+   *
+   * Optional, not just nullable: a config blob written before this field existed
+   * has no key at all, and the variable store hands those back verbatim. Every
+   * reader here must cope with `undefined` as well as `null` — they mean the same
+   * thing ("nobody has decided yet"), and a required type would only have moved
+   * the problem to a cast.
+   */
+  apiBaseUrl?: string | null;
   scope: OperatorScope;
   authMode: OperatorAuthMode;
   /** Editable half of the system prompt; the safety preamble is prepended. */
@@ -108,6 +132,8 @@ export function defaultOperatorConfig(promptBody?: string): OperatorConfig {
     provider: "anthropic",
     model: "claude-sonnet-5",
     credentialKey: null,
+    // Resolved from the backend at activation time — see apiBaseUrl's doc comment.
+    apiBaseUrl: null,
     scope,
     authMode: "none",
     promptBody: promptBody ?? defaultOperatorPromptBody(scope),
@@ -264,9 +290,10 @@ export async function provisionOperator(
     provider: config.provider,
     model: config.model,
     apiKey,
-    // Always this deployment: the generated tools call the EDDI instance the
-    // manager is talking to. Never the LLM's base URL.
-    apiBaseUrl: currentOrigin(),
+    // The address EDDI can reach ITSELF at, resolved by the caller (see
+    // resolveOperatorApiBaseUrl). Never this browser's origin, and never the
+    // LLM's base URL.
+    apiBaseUrl: requireApiBaseUrl(config),
     llmBaseUrl: baseUrl || undefined,
     apiAuth: apiAuthForMode(config.authMode),
     endpoints: buildEndpointFilter(config.scope),
@@ -316,6 +343,139 @@ export function assertProvisioned(result: SetupResult): void {
 /** The `apiAuth` value for an auth mode. `none` sends no header at all. */
 export function apiAuthForMode(mode: OperatorAuthMode): string | undefined {
   return mode === "caller-identity" ? CALLER_TOKEN_API_AUTH : undefined;
+}
+
+/**
+ * The base URL to provision the tools with, or a loud failure.
+ *
+ * Deliberately NOT a fallback to `window.location.origin`: that silent fallback
+ * IS the defect. The browser's origin is only ever a last-resort guess, and the
+ * one caller allowed to make it (`resolveOperatorApiBaseUrl`) does so explicitly
+ * and says so. By the time provisioning runs, the address must have been decided.
+ */
+function requireApiBaseUrl(config: OperatorConfig): string {
+  const resolved = normalizeBaseUrl(config.apiBaseUrl);
+  if (!resolved) {
+    throw new Error(
+      "The operator has no platform base URL to point its tools at. This is the address EDDI can reach itself at (for example http://127.0.0.1:7070) — resolve it before provisioning.",
+    );
+  }
+  return resolved;
+}
+
+/**
+ * Trim, and strip trailing slashes. `setup-api` concatenates the base URL with
+ * each path verbatim, so `http://eddi:7070/` would become `http://eddi:7070//…`
+ * in all 22 tools — which some routers answer and some 404. The backend's own
+ * answer is already normalised this way; an admin-typed value was not.
+ */
+export function normalizeBaseUrl(value: string | null | undefined): string {
+  return (value ?? "").trim().replace(/\/+$/, "");
+}
+
+/**
+ * Whether a (normalised) value is a bare origin — `http(s)://host[:port]` and
+ * nothing else. Parsed with `URL` rather than matched with a pattern alone: a
+ * character class that merely excludes `/` still admits `?tenant=x` (every
+ * generated path would become query content) and `user:pass@` (credentials baked
+ * into 22 resources). The textual check in front catches what `URL` normalises
+ * away, such as a trailing `/.`, so the value provisioned is the value validated.
+ */
+export function isOriginOnlyBaseUrl(value: string): boolean {
+  if (!/^https?:\/\/[^\s/?#@\\]+$/i.test(value)) return false;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  return (
+    (url.protocol === "http:" || url.protocol === "https:") &&
+    url.hostname.length > 0 &&
+    url.username === "" &&
+    url.password === "" &&
+    url.search === "" &&
+    url.hash === "" &&
+    url.pathname === "/"
+  );
+}
+
+/** What the backend reports as its own reachable address. */
+export interface PlatformSelfUrl {
+  /** `null` when `source` is `unresolved`. */
+  baseUrl: string | null;
+  /**
+   * `configured` (eddi.self.base-url), `loopback` (derived from the HTTP port), or
+   * `unresolved` — the deployment runs on a random port and set no override, so
+   * there is nothing the server can honestly answer.
+   */
+  source: string;
+}
+
+/**
+ * Ask EDDI for the address it can reach itself at.
+ *
+ * Returns `null` on a 404 — a backend older than the endpoint — so the caller can
+ * tell "this deployment cannot tell me" from a transport failure it should
+ * surface. Every other error propagates.
+ */
+export async function fetchPlatformSelfUrl(): Promise<PlatformSelfUrl | null> {
+  try {
+    return await api.get<PlatformSelfUrl>("/administration/operator/self-url");
+  } catch (error) {
+    if (isNotFound(error)) return null;
+    throw error;
+  }
+}
+
+/**
+ * Decide the base URL the operator's tools will target.
+ *
+ * Precedence, and the reasoning for it:
+ * 1. **An explicit value on the config.** An admin who typed an address into the
+ *    activation form knows something neither the browser nor the server does — a
+ *    service name, a mesh hostname, an in-cluster port.
+ * 2. **The backend's own answer.** `eddi.self.base-url` when the deployment sets
+ *    it, otherwise loopback on `quarkus.http.port`. This is the correct default
+ *    on every topology: a process reaching itself does not traverse the tunnel,
+ *    the port mapping or the reverse proxy that made the browser's origin wrong.
+ * 3. **This browser's origin**, only when the backend is too old to answer, and
+ *    with a warning. On a single-host deployment with nothing in between it is
+ *    right, which is exactly why the bug survived — it must never be reached
+ *    silently on anything else.
+ */
+export async function resolveOperatorApiBaseUrl(config: OperatorConfig): Promise<string> {
+  const explicit = normalizeBaseUrl(config.apiBaseUrl);
+  if (explicit) return explicit;
+
+  const self = await fetchPlatformSelfUrl();
+  const answered = normalizeBaseUrl(self?.baseUrl);
+  if (answered) return answered;
+  if (self) {
+    // The server ANSWERED, and its answer is that it cannot know (a random HTTP
+    // port and no eddi.self.base-url). Guessing the browser's origin here would be
+    // provisioning the one value known to be wrong on any proxied deployment —
+    // the original defect. Only a backend too old to answer (404 -> null) earns
+    // the fallback below.
+    throw new Error(
+      "This EDDI deployment cannot determine its own address (it runs on a random HTTP port and eddi.self.base-url is not set). Enter the platform base URL explicitly, or set eddi.self.base-url.",
+    );
+  }
+
+  const origin = currentOrigin();
+  // Checked BEFORE the warning: "falling back to ()" would be a misleading thing
+  // to log on the way to throwing.
+  if (!origin) {
+    throw new Error(
+      "This EDDI deployment cannot report its own base URL, and there is no browser origin to fall back on. Enter the platform base URL explicitly.",
+    );
+  }
+  console.warn(
+    "[operator] This EDDI deployment cannot report its own base URL (it predates /administration/operator/self-url). " +
+      `Falling back to this browser's origin (${origin}), which is only correct when nothing sits between the browser and EDDI. ` +
+      "If the operator's tools fail to connect, set the platform base URL explicitly.",
+  );
+  return origin;
 }
 
 function currentOrigin(): string {
@@ -620,9 +780,17 @@ export async function runOperatorCanary(
         };
         for (const entry of parsed.toolTrace ?? []) {
           if (entry.type === "tool_call") toolCalls += 1;
-          if (entry.type === "tool_result" && looksLikeAuthFailure(entry.result)) {
+          if (entry.type !== "tool_result") continue;
+          if (looksLikeAuthFailure(entry.result)) {
             toolError =
               "The operator's tools were rejected by EDDI (unauthorized). Its authentication mode cannot reach this deployment.";
+          }
+          // Checked SECOND and allowed to win: an unreachable address is the more
+          // actionable of the two, and it is the diagnosis the admin will not
+          // reach on their own — a connection failure narrated by the model reads
+          // as a broken platform, not as a wrong URL.
+          if (looksLikeConnectionFailure(entry.result)) {
+            toolError = connectionFailureMessage(config);
           }
         }
       } catch {
@@ -662,6 +830,55 @@ export async function runOperatorCanary(
       }
     }
   }
+}
+
+/**
+ * Whether a tool result reports that the tool could not reach its target at all.
+ *
+ * Distinct from every other failure on purpose. The operator's whole toolset
+ * shares one base URL, so "cannot connect" is almost never a fault in the thing
+ * being called — it is that URL. Left unlabelled, the model paraphrases the
+ * transport error into a confident diagnosis of the wrong subsystem; on the
+ * incident this was written for, "connection refused" became "a problem with the
+ * platform's internal services" and cost an afternoon of looking at a healthy
+ * server.
+ *
+ * Matched on the backend's own wording (`HttpCallToolsProvider.describeToolFailure`)
+ * plus the bare transport phrases an older backend emits, so this still fires
+ * against a deployment that predates that message.
+ */
+function looksLikeConnectionFailure(result: string | undefined): boolean {
+  if (!result) return false;
+  const head = result.slice(0, 400);
+  // Anchored to the shape of a FAILED call — `{"error": …}`, which is how the
+  // backend reports every tool failure — for the same reason looksLikeAuthFailure
+  // is anchored: an agent whose description mentions a refused connection is data,
+  // and flagging it would send the admin to "fix" a base URL that works.
+  if (!/^\s*\{\s*"error"\s*:/.test(head)) return false;
+  return (
+    /connection was refused|connection refused|econnrefused/i.test(head) ||
+    /host name could not be resolved|unknownhost|unresolved address|enotfound/i.test(head) ||
+    /no route to the host|no route to host/i.test(head) ||
+    /connection timed out|connect timed out/i.test(head)
+  );
+}
+
+/**
+ * What the admin is told when the operator's tools cannot reach their target.
+ *
+ * Names the address and the field, and says outright that EDDI's own health is
+ * not the thing to check. The URL is safe to show — it is configuration the admin
+ * can already read on this screen; credentials and headers deliberately are not
+ * mentioned at all.
+ */
+function connectionFailureMessage(config: OperatorConfig): string {
+  const target = config.apiBaseUrl?.trim();
+  return (
+    `The operator could not connect to the platform API at ${target || "its configured base URL"}. ` +
+    "This is the operator's own base URL being unreachable from the EDDI server — not an outage of EDDI or its internal services. " +
+    "It must be an address EDDI can reach itself at (for example http://127.0.0.1:7070), not the address your browser uses. " +
+    "Reconfigure the operator and set the platform base URL."
+  );
 }
 
 /**

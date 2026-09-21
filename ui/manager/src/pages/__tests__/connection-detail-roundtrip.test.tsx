@@ -43,14 +43,14 @@ const FIXTURES: Record<string, ConnectionConfiguration> = {
     timeoutMs: null,
   },
   "STATIC / CALLER_SUPPLIED": {
-    name: "gnowbe",
+    name: "acme",
     description: "Each caller brings their own key",
     authType: "STATIC",
     binding: "CALLER_SUPPLIED",
     allowUnverifiedPrincipal: false,
     staticAuth: { headerName: "x-api-key", valueTemplate: null, username: null, passwordRef: null },
     oauth: null,
-    baseUrlAllowlist: ["https://api.gnowbe.com"],
+    baseUrlAllowlist: ["https://api.example.com"],
     timeoutMs: null,
   },
   "BASIC / SERVICE": {

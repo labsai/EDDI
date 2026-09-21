@@ -31,7 +31,12 @@ import dev.langchain4j.service.tool.ToolExecutor;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
+import java.net.ConnectException;
+import java.net.NoRouteToHostException;
 import java.net.URI;
+import java.net.UnknownHostException;
+import java.net.http.HttpConnectTimeoutException;
+import java.nio.channels.UnresolvedAddressException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -75,6 +80,33 @@ class HttpCallToolsProvider implements ToolSourceProvider {
      * redaction concern below.
      */
     private static final int ARGS_LOG_MAX_BYTES = 512;
+
+    /**
+     * Bounds the cause walk in {@link #connectFailureKind} so a self-referential
+     * chain cannot spin.
+     */
+    private static final int MAX_CAUSE_DEPTH = 12;
+
+    /**
+     * Netty's connect timeout, matched by name so this class takes no Netty
+     * dependency.
+     */
+    private static final String NETTY_CONNECT_TIMEOUT = "io.netty.channel.ConnectTimeoutException";
+
+    /**
+     * {@code UrlValidationUtils}' two refusals, as ApiCallExecutor surfaces them.
+     */
+    private static final String SSRF_REFUSAL_PREFIX = "Access to internal/local addresses is not allowed";
+    private static final String SSRF_PRIVATE_PREFIX = "URL resolves to a private/internal address";
+
+    /**
+     * {@code scheme://userinfo@} — the userinfo part is dropped before a URL is
+     * echoed. Greedy up to the LAST {@code @} before the path: an admin-typed,
+     * un-encoded password such as {@code p@ss} would otherwise leave its tail
+     * behind. A legal authority has no {@code @} after the userinfo, so greedy is
+     * strictly the safer reading.
+     */
+    private static final Pattern URL_USERINFO = Pattern.compile("(?i)\\b([a-z][a-z0-9+.-]*://)[^/\\s]+@");
 
     /**
      * Keys produced by {@link IMemoryItemConverter#convert} that carry
@@ -242,7 +274,7 @@ class HttpCallToolsProvider implements ToolSourceProvider {
                             return serialized;
                         } catch (Exception e) {
                             LOGGER.error("Error executing httpcall tool '" + apiCall.getName() + "'", e);
-                            return errorResult(e.getMessage() != null ? e.getMessage() : "Unknown error");
+                            return errorResult(describeToolFailure(e, targetServerUrl, apiCall));
                         }
                     });
                 }
@@ -464,6 +496,149 @@ class HttpCallToolsProvider implements ToolSourceProvider {
      */
     private static String errorResult(String message) {
         return "{\"error\": \"" + new String(JsonStringEncoder.getInstance().quoteAsString(message)) + "\"}";
+    }
+
+    /**
+     * What a failed tool call reports back to the model.
+     *
+     * <h3>The bug this fixes</h3> A transport failure used to surface as the bare
+     * exception message — {@code "Connection refused"} and nothing else. The model
+     * has no way to tell an unreachable target from a broken dependency, so it
+     * guessed, and its guess was confidently wrong: an operator whose 22 tools all
+     * pointed at an address unreachable from inside the container told its admin
+     * "the documentation service is currently unavailable" and "this indicates a
+     * problem with the platform's internal services". That sent the admin to check
+     * EDDI's health, which was fine, instead of to the one field that was wrong. So
+     * a connect-class failure now names the address that was tried, the configured
+     * base URL, and what to check.
+     * <p>
+     * Facts and checks only, never reporting policy: how an agent phrases a failure
+     * to its user is agent configuration (its prompt), not something the engine
+     * dictates. And a refused connect does not by itself prove the address is wrong
+     * — a stopped service refuses too — so the listener is named alongside the base
+     * URL rather than ruled out.
+     *
+     * <h3>What may and may not go in here</h3> This string reaches the model and
+     * therefore, in paraphrase, the chat surface. The target URL goes in: it is the
+     * whole diagnostic value, and it is configuration an admin can already read.
+     * Headers do not, and neither does anything resolved from the vault — which is
+     * why this builds the address from {@code targetServerUrl} plus the
+     * <em>configured</em> path rather than from the fully-resolved request URI
+     * ({@code ApiCallExecutor} resolves {@code ${vault:…}} and global-variable
+     * references into that URI, so it can legitimately hold a secret). The result
+     * is redacted as a belt-and-braces measure in case a base URL itself carries
+     * credentials, e.g. {@code https://user:pass@host}.
+     */
+    static String describeToolFailure(Exception e, String targetServerUrl, ApiCall apiCall) {
+        String raw = e != null && e.getMessage() != null ? e.getMessage() : "Unknown error";
+        if (raw.startsWith(SSRF_REFUSAL_PREFIX) || raw.startsWith(SSRF_PRIVATE_PREFIX)) {
+            // Not a network failure: EDDI's own SSRF protection refused the address
+            // before any connection was attempted. With the protection on, a loopback or
+            // private self-URL can never work, and the model would otherwise be left to
+            // guess what "internal/local addresses" means for the platform's health.
+            return SecretRedactionFilter.redact("EDDI refused to call " + attemptedTarget(targetServerUrl, apiCall)
+                    + " because SSRF protection (eddi.security.ssrf-protection.enabled) blocks loopback, private and "
+                    + "link-local addresses (" + stripUserInfo(raw) + "). No request was sent. The base URL configured for "
+                    + "this tool (" + describeBase(targetServerUrl) + ") is such an address; with SSRF protection on, a tool "
+                    + "that calls EDDI itself needs a base URL (eddi.self.base-url) that passes the SSRF target policy.");
+        }
+        String connectFailure = connectFailureKind(e);
+        if (connectFailure == null) {
+            return SecretRedactionFilter.redact(stripUserInfo(raw));
+        }
+        String method = apiCall != null && apiCall.getRequest() != null && apiCall.getRequest().getMethod() != null
+                ? apiCall.getRequest().getMethod().toUpperCase(Locale.ROOT)
+                : "the request";
+        String attempted = attemptedTarget(targetServerUrl, apiCall);
+        return SecretRedactionFilter.redact(connectFailure + " while trying to reach " + method + " " + attempted + " (" + stripUserInfo(raw) + "). "
+                + "This is a transport failure: the request failed before any response was received. "
+                + "Things to check: that the base URL configured for this tool (" + describeBase(targetServerUrl) + ") is an "
+                + "address the EDDI server itself can reach — not the address a browser uses to reach EDDI — that the network "
+                + "path to it is open, and that a service is listening there.");
+    }
+
+    /**
+     * A short name for the kind of connect-class failure, or {@code null} when this
+     * is not one.
+     * <p>
+     * Matched on exception type through the whole cause chain, because the HTTP
+     * client wraps: the {@code ConnectException} that matters arrives as the cause
+     * of an {@code ExecutionException} of a {@code RuntimeException}. A message
+     * substring check is the fallback for clients that flatten a connect failure
+     * into text, and is deliberately last — a type is unambiguous, a message is
+     * locale- and client-dependent.
+     */
+    private static String connectFailureKind(Throwable e) {
+        int depth = 0;
+        for (Throwable cause = e; cause != null && depth < MAX_CAUSE_DEPTH; cause = cause.getCause(), depth++) {
+            if (cause instanceof UnknownHostException || cause instanceof UnresolvedAddressException) {
+                return "The host name could not be resolved";
+            }
+            // Connect-phase timeouts only. SocketTimeoutException also covers READ
+            // timeouts, where the service accepted the connection and then was slow —
+            // exactly the case this message must not call a failure "before any response".
+            // Netty's ConnectTimeoutException (what Vert.x raises when a firewall drops
+            // the SYN) extends ConnectException, so it is matched by name, and before
+            // the ConnectException branch that would otherwise call it "refused".
+            if (cause instanceof HttpConnectTimeoutException || NETTY_CONNECT_TIMEOUT.equals(cause.getClass().getName())) {
+                return "The connection timed out";
+            }
+            if (cause instanceof NoRouteToHostException) {
+                return "There is no route to the host";
+            }
+            // Last of the socket-level branches: "refused" is the fallback reading of a
+            // failed connect, and the three above are the cases that have a more
+            // specific and more actionable answer than that.
+            if (cause instanceof ConnectException) {
+                return "The connection was refused";
+            }
+            // A cause chain can be cyclic in pathological wrapping; depth bounds it.
+            if (cause.getCause() == cause) {
+                break;
+            }
+        }
+        String message = e != null && e.getMessage() != null ? e.getMessage().toLowerCase(Locale.ROOT) : "";
+        if (message.contains("connection refused")) {
+            return "The connection was refused";
+        }
+        if (message.contains("unresolved address") || message.contains("unknownhost") || message.contains("name or service not known")) {
+            return "The host name could not be resolved";
+        }
+        return null;
+    }
+
+    /**
+     * {@code targetServerUrl} joined to the call's CONFIGURED path — never the
+     * resolved one. Path parameters are left as their template placeholders, which
+     * is the point: the address is what is being diagnosed, not the arguments.
+     */
+    private static String attemptedTarget(String targetServerUrl, ApiCall apiCall) {
+        String path = apiCall != null && apiCall.getRequest() != null && apiCall.getRequest().getPath() != null
+                ? apiCall.getRequest().getPath().trim()
+                : "";
+        if (path.startsWith("http")) {
+            return stripUserInfo(path);
+        }
+        if (!path.isEmpty() && !path.startsWith("/")) {
+            path = "/" + path;
+        }
+        return describeBase(targetServerUrl) + path;
+    }
+
+    private static String describeBase(String targetServerUrl) {
+        return targetServerUrl == null || targetServerUrl.isBlank() ? "<not configured>" : stripUserInfo(targetServerUrl.trim());
+    }
+
+    /**
+     * Drop the {@code user:password@} part of every URL in the text.
+     * <p>
+     * {@link SecretRedactionFilter} recognises secret-SHAPED values ({@code sk-…},
+     * {@code Bearer …}, {@code key=value}); a plain password in a URL's userinfo is
+     * none of those and went through it verbatim. Removed structurally instead,
+     * because the address is what is being diagnosed and the credential never is.
+     */
+    static String stripUserInfo(String text) {
+        return text == null ? null : URL_USERINFO.matcher(text).replaceAll("$1");
     }
 
     /**

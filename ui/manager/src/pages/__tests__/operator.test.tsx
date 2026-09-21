@@ -135,6 +135,39 @@ describe("OperatorPage", () => {
       expect(await screen.findByTestId("operator-status-ready")).toBeInTheDocument();
     });
 
+    /**
+     * A reconfigure REPLACES the agent, so "which one am I looking at?" is a real
+     * question. It once had no answer on screen: two operators were deployed, the
+     * UI silently addressed the new one, and the abandoned one got debugged.
+     */
+    it("names the agent it is talking to", async () => {
+      serveConfig(activeConfig({ agentId: "op-1" }));
+      serveDeploymentStatus("READY");
+      renderWithProviders(<OperatorPage />);
+      expect(await screen.findByTestId("operator-status-agent-id")).toHaveTextContent("op-1");
+    });
+
+    /** The field the tools actually call — previously invisible everywhere. */
+    it("shows the platform address the operator's tools call", async () => {
+      serveConfig(activeConfig({ apiBaseUrl: "http://127.0.0.1:7070" }));
+      serveDeploymentStatus("READY");
+      renderWithProviders(<OperatorPage />);
+      expect(await screen.findByTestId("operator-status-platform-base-url")).toHaveTextContent(
+        "http://127.0.0.1:7070",
+      );
+    });
+
+    it("says so rather than showing nothing for an operator provisioned before the address was stored", async () => {
+      const legacy = activeConfig();
+      delete (legacy as { apiBaseUrl?: unknown }).apiBaseUrl;
+      serveConfig(legacy);
+      serveDeploymentStatus("READY");
+      renderWithProviders(<OperatorPage />);
+      expect(await screen.findByTestId("operator-status-platform-base-url")).toHaveTextContent(
+        /not recorded/i,
+      );
+    });
+
     it("surfaces a deployment ERROR with guidance rather than a bare badge", async () => {
       serveConfig(activeConfig());
       serveDeploymentStatus("ERROR");

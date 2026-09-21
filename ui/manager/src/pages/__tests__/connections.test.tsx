@@ -173,6 +173,6 @@ describe("ConnectionsPage", () => {
     );
     expect(within(card).queryByTestId("binding-SERVICE")).not.toBeInTheDocument();
     // And no account to link — the caller brings the credential each time.
-    expect(screen.queryByTestId("connect-gnowbe")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("connect-acme")).not.toBeInTheDocument();
   });
 });
