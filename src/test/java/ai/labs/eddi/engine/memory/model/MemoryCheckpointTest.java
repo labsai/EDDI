@@ -109,6 +109,23 @@ class MemoryCheckpointTest {
         }
 
         @Test
+        @DisplayName("Should preserve the auto-vault provenance marker through deep copy")
+        void testCreatePreservesAutoVaultedMarker() {
+            // Not carried by the all-args constructor the deep copy uses, and dropping
+            // it is not cosmetic: the marker is what ConfigReferenceGuard requires
+            // before it will resolve a credential reference read through
+            // {properties.x}, so a rollback that loses it turns every later API call
+            // using that secret into a refusal.
+            Property vaulted = new Property("apiKey", "${vault:agent1.apiKey}", Scope.conversation);
+            vaulted.setAutoVaulted(Boolean.TRUE);
+
+            MemoryCheckpoint checkpoint = MemoryCheckpoint.create(
+                    "conv-1", 0, Map.of("apiKey", vaulted), "test", "TestClass");
+
+            assertEquals(Boolean.TRUE, checkpoint.propertiesCopy().get("apiKey").getAutoVaulted());
+        }
+
+        @Test
         @DisplayName("Should deep-copy properties (original mutation doesn't affect checkpoint)")
         void testCreateDeepCopiesProperties() {
             Property mutableProp = new Property("name", "original", Scope.conversation);

@@ -391,6 +391,7 @@ These are visible in the conversation memory snapshot and the audit ledger.
 - ✅ **Phase 8c-γ**: RAG provider expansion (8 embedding models + 6 vector stores)
 - ✅ **Phase 8c-M**: Manager UI — RAG editor with full provider parity + document ingestion
 - ✅ **REST ingestion endpoint**: `POST /ragstore/rags/{id}/ingest`
+- ✅ **Workflow step registration**: `eddi://ai.labs.rag` is a registered lifecycle extension, so a workflow can declare a knowledge-base step and the Manager offers it (before this, Options 1 and 2 below could be saved but not deployed)
 
 ## Future Enhancements
 
