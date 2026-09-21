@@ -230,6 +230,7 @@ class ConversationMemoryUtilitiesHitlTest {
             batch.setPauseEpoch("epoch-1");
             batch.setLlmTaskId("task-a");
             batch.setChatTranscriptJson(CANARY_TRANSCRIPT);
+            batch.setGatingAssistantMessageJson(CANARY_TRANSCRIPT);
             batch.setTraceSoFar(List.of(Map.of("args", CANARY_ARGS)));
             batch.setInterimText(CANARY_INTERIM);
             batch.setFingerprint("sha256-" + CANARY_SECRET);
@@ -324,6 +325,7 @@ class ConversationMemoryUtilitiesHitlTest {
 
             // The batch-level heavy fields must be stripped too.
             assertNull(batch.getChatTranscriptJson(), "projected batch must not carry the transcript");
+            assertNull(batch.getGatingAssistantMessageJson(), "projected batch must not carry the gating message");
             assertNull(batch.getTraceSoFar(), "projected batch must not carry the trace");
             assertNull(batch.getFingerprint(), "projected batch must not carry the fingerprint");
             // Fix #1: the effective tool-approval config must NOT enter the names-only
@@ -379,6 +381,8 @@ class ConversationMemoryUtilitiesHitlTest {
             var snapshot = new ConversationMemorySnapshot();
             var batch = new PendingToolCallBatch();
             batch.setChatTranscriptJson("{\"messages\":[{\"args\":\"" + STALE_LEAKED_KEY + "\"}]}");
+            batch.setGatingAssistantMessageJson("{\"type\":\"AI\",\"toolExecutionRequests\":[{\"arguments\":\""
+                    + STALE_LEAKED_KEY + "\"}]}");
             batch.setTraceSoFar(List.of(Map.of("type", "tool_call", "arguments", STALE_LEAKED_KEY)));
             var call = new PendingToolCallBatch.PendingToolCall();
             call.setCallId("c1");
@@ -405,8 +409,20 @@ class ConversationMemoryUtilitiesHitlTest {
 
             var batch = snapshot.getHitlPendingToolCalls();
             assertNull(batch.getChatTranscriptJson());
+            assertNull(batch.getGatingAssistantMessageJson(), "embeds the gated calls' raw arguments");
             assertNull(batch.getTraceSoFar());
             assertNull(batch.getCalls().get(0).getArgumentsRaw());
+        }
+
+        @Test
+        @DisplayName("the fingerprint strip alone — the MCP approval-status path — drops the gating message")
+        void fingerprintStripDropsTheGatingMessage() {
+            // McpHitlTools serves detail=full through stripRequestFingerprintsForRead and
+            // nothing else, so the new field has to be dropped there, not only in the
+            // approver sanitizer the REST surface uses.
+            var snapshot = ConversationMemoryUtilities.stripRequestFingerprintsForRead(pausedSnapshot());
+
+            assertNull(snapshot.getHitlPendingToolCalls().getGatingAssistantMessageJson());
         }
 
         @Test

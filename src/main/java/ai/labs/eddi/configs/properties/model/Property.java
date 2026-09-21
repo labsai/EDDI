@@ -19,6 +19,38 @@ public class Property {
     private Scope scope = Scope.conversation;
     private Visibility visibility; // null = self (backward compat)
 
+    /**
+     * Provenance marker: {@code TRUE} on the value
+     * {@code PropertySetterTask.autoVaultSecret} wrote, and only on that value.
+     * <p>
+     * A {@code scope: "secret"} property instruction stores the vault reference
+     * with {@code scope: conversation}, so on the wire and in the conversation
+     * document it is indistinguishable from any other conversation property a
+     * template wrote from user input, a model reply or an API response. This field
+     * is the difference, and {@code ApiCallExecutor}'s
+     * {@link ai.labs.eddi.modules.apicalls.impl.ConfigReferenceGuard} requires it
+     * before it will resolve a credential reference that arrived through
+     * {@code {properties.x}}.
+     * <p>
+     * <b>Exactly one writer.</b> Nothing else sets it, no property instruction
+     * field maps to it ({@code PropertySetterTask.convertPropertyInstructions}
+     * reads a fixed set of keys, and this is not among them), and no REST endpoint
+     * accepts a {@code Property} as a request body. So "marked" means "this process
+     * vaulted it", not "this value looks vaulted".
+     * <p>
+     * <b>Unmarked is refused, deliberately.</b> {@code null} covers two cases that
+     * cannot be told apart — a property written from conversation data, and one
+     * written into a conversation document before this field existed — and one of
+     * them is the attack. Treating the pair as "allow" would leave the hole open
+     * permanently, since the attacker's property is unmarked too. The cost is a
+     * conversation that auto-vaulted a secret under an earlier release and makes
+     * the API call after the upgrade: the call is refused with the message that
+     * names the property, and re-running the {@code scope: "secret"} instruction
+     * (or starting a new conversation) marks it. That is recoverable; a permanent
+     * fail-open is not.
+     */
+    private Boolean autoVaulted;
+
     public Property(String name, String valueString, Scope scope) {
         this.name = name;
         this.valueString = valueString;
@@ -162,6 +194,19 @@ public class Property {
         return visibility;
     }
 
+    /**
+     * @return {@code TRUE} when {@code autoVaultSecret} produced this value,
+     *         {@code null} otherwise — see the field for why {@code null} is
+     *         refused rather than trusted
+     */
+    public Boolean getAutoVaulted() {
+        return autoVaulted;
+    }
+
+    public void setAutoVaulted(Boolean autoVaulted) {
+        this.autoVaulted = autoVaulted;
+    }
+
     public void setVisibility(Visibility visibility) {
         this.visibility = visibility;
     }
@@ -182,11 +227,11 @@ public class Property {
                 && Objects.equals(valueObject, that.valueObject) && Objects.equals(valueList, that.valueList)
                 && Objects.equals(valueInt, that.valueInt) && Objects.equals(valueFloat, that.valueFloat)
                 && Objects.equals(valueBoolean, that.valueBoolean) && Objects.equals(scope, that.scope)
-                && Objects.equals(visibility, that.visibility);
+                && Objects.equals(visibility, that.visibility) && Objects.equals(autoVaulted, that.autoVaulted);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(name, valueString, valueObject, valueList, valueInt, valueFloat, valueBoolean, scope, visibility);
+        return Objects.hash(name, valueString, valueObject, valueList, valueInt, valueFloat, valueBoolean, scope, visibility, autoVaulted);
     }
 }
