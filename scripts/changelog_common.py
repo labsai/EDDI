@@ -59,10 +59,11 @@ DAY = r"(0[1-9]|[12]\d|3[01])"
 
 # The date an entry carries, in its own heading: "... (2026-09-21)".
 #
-# The closing parenthesis is deliberately NOT required: entries already in the
-# live file and its archives are headed "(2026-07-02, after the revert)" and
-# "(2026-04-08 — part two)", and demanding ')' would stop split_sections
-# recognising them as entries at all.
+# The closing parenthesis is deliberately NOT required: fourteen entries already
+# in the live file and its archives are headed "(2026-07-02, session 2)" and
+# "(2026-04-08 cont.)", and demanding ')' would stop split_sections recognising
+# them as entries at all. Anything matching this must therefore also be caught
+# by ci.yml's Changelog Discipline job, which grades the same headings.
 DATE = re.compile(r"\((\d{4})-" + MONTH + "-" + DAY)
 
 # Date-shaped but not a date. Matched only to tell an author that their heading
@@ -83,29 +84,58 @@ REF_DEF = re.compile(r"^\[[^\]]+\]:\s*\S")
 # A code span, honouring the backtick-run rule: ``a `b` c`` is one span.
 SPAN = re.compile(r"(`+)(?:(?!\1).)*?\1")
 # A fence marker, allowing the indentation a fence inside a list item carries.
-FENCE_MARK = re.compile(r"^(`{3,})(.*)$")
+#
+# Tildes as well as backticks: CommonMark allows both, and a `~~~` fence was
+# invisible to every scan in this module — an example heading inside one split
+# the entry in two and an example ```decision-log row inside one was filed into
+# the live Decision Log.
+FENCE_MARK = re.compile(r"^(`{3,}|~{3,})(.*)$")
 
 
 def fence_mask(lines):
     """(one bool per line — True inside a fenced block, unterminated?).
 
-    A fence is closed by a run of at least as many backticks with no info
-    string, so a ```` ```decision-log ```` inside a ` ````markdown ` block that
-    *documents* the fragment format stays part of the example.
+    A fence is closed by a run of the SAME character, at least as long as the
+    one that opened it, with no info string. That is what keeps a
+    ```` ```decision-log ```` inside a ` ````markdown ` block that *documents*
+    the fragment format part of the example, and what stops a ``` closing a
+    ~~~ block.
     """
     inside = [False] * len(lines)
-    open_run = None
+    opened = None  # (fence character, run length)
     for i, line in enumerate(lines):
         mark = FENCE_MARK.match(line.strip())
-        if open_run is None:
+        if opened is None:
             if mark:
-                open_run = len(mark.group(1))
+                opened = (mark.group(1)[0], len(mark.group(1)))
                 inside[i] = True
         else:
             inside[i] = True
-            if mark and len(mark.group(1)) >= open_run and not mark.group(2).strip():
-                open_run = None
-    return inside, open_run is not None
+            if (mark and mark.group(1)[0] == opened[0]
+                    and len(mark.group(1)) >= opened[1] and not mark.group(2).strip()):
+                opened = None
+    return inside, opened is not None
+
+
+def closes(mark, opened):
+    """True when this FENCE_MARK match closes a fence opened with `opened`."""
+    return (mark.group(1)[0] == opened[0]
+            and len(mark.group(1)) >= opened[1]
+            and not mark.group(2).strip())
+
+
+def is_real_date(text):
+    """True when 'YYYY-MM-DD' is a day that exists.
+
+    MONTH and DAY bound the fields, which is enough to keep pretty_month() from
+    crashing, but they still admit 2026-02-30. Ordering survives that; a reader
+    finding it in the changelog does not.
+    """
+    try:
+        datetime.date.fromisoformat(text)
+        return True
+    except ValueError:
+        return False
 
 
 def heading_indices(lines, level="## "):
@@ -200,7 +230,12 @@ def undepth(body, where):
 
 
 def read(path):
-    return io.open(path, encoding="utf-8").read()
+    # utf-8-sig, not utf-8: an editor-written BOM otherwise stays on the first
+    # line, so the opening "## " is not at the start of it and the file is
+    # rejected as "has no '## ' heading" — pointing the author at a heading
+    # that is plainly there. Reading it off also strips it, since write() emits
+    # plain utf-8.
+    return io.open(path, encoding="utf-8-sig").read()
 
 
 def write(path, text):
