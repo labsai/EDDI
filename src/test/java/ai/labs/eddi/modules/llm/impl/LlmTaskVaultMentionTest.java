@@ -13,7 +13,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.util.Arrays;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -21,12 +23,12 @@ import static org.junit.jupiter.api.Assertions.*;
  * An LLM parameter may CARRY or TALK ABOUT a configuration reference without
  * crashing templating.
  * <p>
- * All four reference namespaces — {@code vault}, {@code vars},
- * {@code connection}, {@code caller} — are resolved AFTER templating, and none
- * has a Qute namespace resolver (see {@code CallerNamespaceResolver} for the
- * security reasoning). So Qute treats each as an unresolvable namespaced
- * expression and throws, and {@link LlmTask#escapeConfigReferenceMentions} is
- * what keeps the value intact.
+ * Every reference namespace — {@code vault}, the legacy {@code eddivault},
+ * {@code vars}, {@code connection} and {@code caller} — is resolved AFTER
+ * templating, and none has a Qute namespace resolver (see
+ * {@code CallerNamespaceResolver} for the security reasoning). So Qute treats
+ * each as an unresolvable namespaced expression and throws, and
+ * {@link LlmTask#escapeConfigReferenceMentions} is what keeps the value intact.
  * <p>
  * This covers two live shapes: the Platform Operator's prompt, which documents
  * {@code ${vault:key-name}} to the model, and an agent whose
@@ -86,6 +88,11 @@ class LlmTaskVaultMentionTest {
      * The live case: three of these four namespaces were NOT escaped, so a
      * parameter carrying one failed templating every turn. {@code modelName:
      * ${vars:gemini-model}} is the one that was observed on a deployment.
+     * <p>
+     * These four are spelled out so each carries its own realistic key shape and
+     * its own "still throws un-escaped" assertion.
+     * {@link #preCheckCoversEveryNamespaceInThePattern} is the exhaustive guard and
+     * additionally covers {@code eddivault}.
      */
     @ParameterizedTest(name = "{0} survives templating verbatim")
     @ValueSource(strings = {"${vault:gemini-api-key}", "${vars:gemini-model}", "${connection:crm-api}", "${caller:token}"})
@@ -123,6 +130,36 @@ class LlmTaskVaultMentionTest {
         String value = "${eddivault:default/gemini-api-key}";
 
         assertEquals(value, templatingEngine.processTemplate(LlmTask.escapeConfigReferenceMentions(value), Map.of()));
+    }
+
+    /**
+     * The pre-check in {@code escapeConfigReferenceMentions} is a hand-written
+     * superset of the pattern, so the two can drift: a namespace added to the
+     * pattern with no substring in the pre-check list would never reach the regex
+     * and would silently keep crashing templating — the exact bug this fix is
+     * about, reintroduced for one namespace.
+     * <p>
+     * So derive the namespaces FROM the pattern rather than restating them, and
+     * assert each one actually round-trips. This fails if a namespace is added to
+     * the pattern alone, and it is what makes {@code eddivault}'s reliance on
+     * {@code "vault:"} being a substring safe to leave implicit.
+     */
+    @Test
+    @DisplayName("every namespace in the pattern survives the pre-check — the two cannot drift")
+    void preCheckCoversEveryNamespaceInThePattern() throws Exception {
+        var alternation = Pattern.compile("\\\\\\{\\(\\?:([^)]+)\\):").matcher(LlmTask.CONFIG_REF_MENTION.pattern());
+        assertTrue(alternation.find(), "pattern shape changed; this guard needs updating: " + LlmTask.CONFIG_REF_MENTION);
+
+        var namespaces = alternation.group(1).split("\\|");
+        assertTrue(namespaces.length >= 5, "expected at least the 5 known namespaces, got " + Arrays.toString(namespaces));
+
+        for (var namespace : namespaces) {
+            String reference = "${" + namespace + ":some-key}";
+            assertEquals(reference, templatingEngine.processTemplate(
+                    LlmTask.escapeConfigReferenceMentions(reference), Map.of()),
+                    "namespace '" + namespace + "' is in CONFIG_REF_MENTION but is not escaped — "
+                            + "CONFIG_REF_NAMESPACES needs a substring of it");
+        }
     }
 
     @Test

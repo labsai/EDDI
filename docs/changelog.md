@@ -82,6 +82,14 @@ there, as the `CallerNamespaceResolver` security decision requires.
 throws, so the guard cannot go vacuous), the legacy prefix, and the reference-beside-expression case.
 Narrowing the pattern back to `vault` fails 5 of them with the exact production message.
 
+The escape has two halves that can drift: the regex, and a cheap `contains` pre-check that decides whether
+the regex runs at all. The pre-check list deliberately omits the legacy `eddivault:`, which is only covered
+because `"eddivault:"` contains `"vault:"` — correct, but invisible, and a namespace added to the regex
+alone would silently keep crashing. `preCheckCoversEveryNamespaceInThePattern` derives the namespaces from
+the pattern instead of restating them and asserts each round-trips, so the halves cannot diverge unnoticed.
+Mutation-checked both ways: dropping `"vault:"` from the pre-check fails 5 tests; adding a namespace to the
+pattern alone fails that guard and only that guard.
+
 ---
 
 ## 🧪 fix(ui): a dialog no longer takes focus from a field the user is typing in (2026-09-18)

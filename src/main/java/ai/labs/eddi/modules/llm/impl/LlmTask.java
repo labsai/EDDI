@@ -1189,10 +1189,20 @@ public class LlmTask implements ILifecycleTask {
      * Qute namespace resolver — so to Qute every one of them is an unresolvable
      * namespaced expression, not just {@code vault}.
      */
-    private static final Pattern CONFIG_REF_MENTION = Pattern.compile("\\{(?:vault|eddivault|vars|connection|caller):[^}]*\\}");
+    static final Pattern CONFIG_REF_MENTION = Pattern.compile("\\{(?:vault|eddivault|vars|connection|caller):[^}]*\\}");
 
     /**
-     * The namespaces {@link #CONFIG_REF_MENTION} matches, for the cheap pre-check.
+     * Substrings that make a value WORTH running {@link #CONFIG_REF_MENTION}
+     * against — the cheap pre-check, so the common no-reference value never pays
+     * for a regex.
+     * <p>
+     * This is a superset filter, not the namespace list: it must match everything
+     * the pattern can match, and may match more. The legacy {@code eddivault:}
+     * namespace is deliberately absent because {@code "eddivault:"} CONTAINS
+     * {@code "vault:"}, so it is already covered — dropping {@code "vault:"} from
+     * this list would silently stop escaping the legacy prefix too. Any namespace
+     * added to the pattern must have a substring of it present here;
+     * {@code LlmTaskVaultMentionTest} fails if one does not.
      */
     private static final List<String> CONFIG_REF_NAMESPACES = List.of("vault:", "vars:", "connection:", "caller:");
 
