@@ -175,10 +175,14 @@ test.describe("A2A discovery — anonymous reachability", () => {
   });
 
   test("/.well-known is not wildcarded open", async ({ request }) => {
-    // RFC 9728 protected-resource metadata is planned under this prefix
-    // (planning/saas-connectors-plan.md §6.3). A /.well-known/* permit would
-    // have opened it before anyone decided to.
-    const res = await request.get(`${API_BASE}/.well-known/oauth-protected-resource`);
+    // This probed /.well-known/oauth-protected-resource until EDDI began
+    // advertising /mcp as an OAuth protected resource. That sibling is now
+    // permitted deliberately, by its own narrow entry — so it no longer answers
+    // 401, and it is no longer a probe for a wildcard (it 404s: permitted, with
+    // the document itself served at the path-inserted form beneath it). The
+    // guard is unchanged in substance, on a path nobody has decided on:
+    // mcp-oauth.spec.ts and McpOAuthDiscoveryConfigTest cover the entry that was.
+    const res = await request.get(`${API_BASE}/.well-known/anything-else`);
     expect(
       res.status(),
       "a sibling of the permitted well-known paths answered without a token — the entry has"

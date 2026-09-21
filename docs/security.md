@@ -48,7 +48,7 @@ This starts Keycloak alongside EDDI with pre-configured realm, clients, and test
 
 | User | Password | Role | Notes |
 |------|----------|------|-------|
-| `eddi` | *none* | `eddi-admin`, `eddi-editor` | Full access. Ships without a password: set one at `http://localhost:8180/admin` (`admin`/`admin`) → Users → eddi → Credentials |
+| `eddi` | *none* | `eddi-admin`, `eddi-editor`, `eddi-viewer` | Full access (`eddi-viewer` included deliberately — there is no role hierarchy, so an admin without it is refused every MCP read tool). Ships without a password: set one at `http://localhost:8180/admin` (`admin`/`admin`) → Users → eddi → Credentials |
 | `viewer` | `viewer` | `eddi-viewer` | Read-only access. Development only: no password change is forced |
 | `user` | `user` | `eddi-user` | Standard user access. Development only: no password change is forced |
 
@@ -62,6 +62,32 @@ This starts Keycloak alongside EDDI with pre-configured realm, clients, and test
 | `quarkus.oidc.client-id`       | Runtime        | `eddi-backend`                      | OIDC client ID (bearer-only)                    |
 | `quarkus.oidc.application-type` | Runtime       | `service`                           | Bearer-only mode (no login redirects)           |
 | `authorization.enabled`        | Runtime        | `${quarkus.oidc.tenant-enabled}`    | Fine-grained `@RolesAllowed` authorization      |
+| `quarkus.oidc.token.audience`  | Runtime        | `eddi-backend`                      | The `aud` an access token must carry            |
+| `quarkus.oidc.token-cache.max-size` | Runtime   | `1000`                              | Caches the per-request userinfo lookup (`0` disables) |
+| `quarkus.oidc.token-cache.time-to-live` | Runtime | `3M`                              | How long a cached entry stays valid |
+| `quarkus.oidc.token-cache.clean-up-timer-interval` | Runtime | `5M`                    | How often stale entries are swept |
+
+> **The token cache defers a revocation check, not a validation.** Signature, expiry and
+> audience are verified on every request, before the cache is consulted. What it caches is the
+> userinfo lookup — which doubles as the session-revocation check, since Keycloak refuses
+> userinfo for a logged-out session. So a session killed in Keycloak keeps working here for up
+> to `time-to-live` (3 minutes). Set `max-size=0` to disable the cache and pay a Keycloak
+> round trip per request instead.
+
+> **Audience validation.** Quarkus verifies `aud` on an *access* token only when
+> `quarkus.oidc.token.audience` is set. Without it EDDI accepts any token the realm
+> issued, for any client in it — and since roles come from `realm_access/roles`, which
+> is client-independent, such a token arrives with the user's full rights. The shipped
+> realm's `eddi-frontend` and `eddi-mcp` clients both carry an `eddi-backend-audience`
+> protocol mapper, so their tokens satisfy it. **If you provision your own realm, any
+> client whose tokens EDDI should accept needs that mapper** (`oidc-audience-mapper`,
+> `included.client.audience=eddi-backend`) — otherwise every request answers `401`.
+> Setting `QUARKUS_OIDC_TOKEN_AUDIENCE=any` returns to accepting every token in the realm:
+> `any` is quarkus-oidc's sentinel for skipping audience validation, and is the supported
+> way to opt out.
+>
+> This also applies to the `/v1` adapter when it runs in `authenticated` mode, and to any
+> deployment pointed at its own identity provider rather than the shipped realm.
 
 > **Important:** `quarkus.oidc.enabled` is a **build-time** property — it cannot be changed at container start. The OIDC extension must always be active in the binary. Use `quarkus.oidc.tenant-enabled` (runtime) to toggle auth on/off via environment variables.
 
@@ -112,7 +138,13 @@ When OIDC is enabled, the following permission rules apply (see `application.pro
 | `/q/metrics/*` | **Authenticated** — deliberately not permitted (metrics leak deployment shape); a Prometheus scraper must present a Bearer token |
 | `/`, `/manage`, `/manage/*`, `/chat`, `/chat/*` | **Permit** — SPA entry points (the SPA loads and handles Keycloak login via keycloak-js) |
 | `/scripts/*`, `/fonts/*`, `/css/*`, `/js/*`, `/img/*` | **Permit** — Static assets for Manager SPA |
+| `/.well-known/oauth-protected-resource`, `/.well-known/oauth-protected-resource${quarkus.mcp.server.http.root-path}` | **Permit** (GET/HEAD) — the RFC 9728 document that tells an MCP client where to authenticate. Two exact paths, never a `/*` under the prefix, and the second interpolates the MCP root path so the rule follows the endpoint rather than stranding the document behind the catch-all if that path moves. It must be anonymously readable or discovery cannot start, and it discloses only the public Keycloak URL, which `/manage/__auth_config__.js` already serves unauthenticated. See [MCP Server](mcp-server.md#connecting-to-an-authenticated-instance) |
+| `/.well-known/agent.json`, `/a2a/agents/*/agent.json` | **Permit** (GET) — A2A Agent Card discovery: a peer agent fetches these before it has any credential |
+| `/.well-known/capabilities`, `/.well-known/capabilities/skills` | **Permit** (GET) — A2A capability discovery, and additionally gated by `eddi.a2a.capabilities.public` (default `false`, which answers 404) |
+| `/mcp`, `/mcp/*`, `/secretstore`, `/secretstore/*` | **Authenticated** — named explicitly rather than inheriting the catch-all, so a future permit rule cannot open them by accident; `HighValueSurfaceGuard` refuses a production boot if either is reachable unauthenticated |
 | `/*` (catch-all) | **Authenticated** — All other API endpoints require a valid Bearer token |
+
+> **`@PermitAll` does not make a path public.** Quarkus evaluates these path policies *before* declarative RBAC, so an endpoint annotated `@PermitAll` but not named in a `permit` rule still answers `401`. That ordering is also why the discovery document above needs its own rule: quarkus-oidc serves it from a Vert.x filter at priority 50, and authorization runs at 100 — higher first.
 
 > **Note:** there is no HTTP-layer permit for conversation endpoints — `/agents/production/*` is caught by the catch-all `authenticated` policy and answers `401` before any resource method runs. The production exemption in `RestAgentManagement.checkUserAuthIfApplicable` (below) is an inner check only; to expose a production conversation surface anonymously you must add your own `quarkus.http.auth.permission.*` permit rule.
 
@@ -143,9 +175,9 @@ docker compose -f docker-compose.keycloak.yml up
 This starts Keycloak 26 on port 8180 with:
 
 - **Realm**: `eddi`
-- **Clients**: `eddi-frontend` (SPA, public), `eddi-backend` (bearer-only)
+- **Clients**: `eddi-frontend` (SPA, public), `eddi-backend` (bearer-only), `eddi-mcp` (public, code+PKCE only — what an MCP client logs in through; see [MCP Server](mcp-server.md#connecting-to-an-authenticated-instance))
 - **Roles**: `eddi-admin`, `eddi-editor`, `eddi-user`, `eddi-viewer` (plus `eddi-approver`, used by the HITL approval endpoints)
-- **Test users**: `viewer`/`viewer` (`eddi-viewer`), `user`/`user` (`eddi-user`), and `eddi` (`eddi-admin` + `eddi-editor`), which ships **without a password** — set one in the admin console at http://localhost:8180 (`admin`/`admin`)
+- **Test users**: `viewer`/`viewer` (`eddi-viewer`), `user`/`user` (`eddi-user`), and `eddi` (`eddi-admin` + `eddi-editor` + `eddi-viewer`), which ships **without a password** — set one in the admin console at http://localhost:8180 (`admin`/`admin`)
 
 > `keycloak/eddi-realm.json` is the source of truth for client ids. Provisioning a
 > realm by hand from a doc that names a different one gets you `invalid_client`
