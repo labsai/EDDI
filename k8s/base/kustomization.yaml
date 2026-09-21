@@ -5,6 +5,12 @@
 # For a complete stack, use one of the overlays:
 #   kubectl apply -k k8s/overlays/mongodb/
 #   kubectl apply -k k8s/overlays/postgres/
+#
+# ⚠️  Create the eddi-secrets Secret FIRST — `bash k8s/create-secrets.sh`.
+# It is deliberately not a resource here: a Secret that kustomize reconciles
+# would overwrite the operator's vault master key with a placeholder on every
+# re-apply, and everything encrypted with the old key would become
+# undecryptable. See eddi-secret.yaml.example.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -13,7 +19,6 @@ namespace: eddi
 resources:
   - namespace.yaml
   - eddi-configmap.yaml
-  - eddi-secret.yaml
   - eddi-deployment.yaml
   - eddi-service.yaml
 

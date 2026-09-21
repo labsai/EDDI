@@ -1,0 +1,561 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { toast } from "sonner";
+import { screen, fireEvent, render, waitFor } from "@testing-library/react";
+import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { TopBar } from "@/components/layout/top-bar";
+import { AuthContext, type AuthContextValue } from "@/components/auth/auth-context";
+import { MemoryRouter } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { ThemeProvider } from "@/components/layout/theme-provider";
+
+/** Render TopBar with custom auth and route */
+function renderTopBarWithAuth(
+  authValue: AuthContextValue,
+  opts: {
+    initialRoute?: string;
+    sidebarVisible?: boolean;
+    onMenuClick?: () => void;
+  } = {}
+) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  return render(
+    <MemoryRouter initialEntries={[opts.initialRoute ?? "/manage"]}>
+      <QueryClientProvider client={queryClient}>
+        <ThemeProvider defaultTheme="light" storageKey="eddi-theme-topbar-test">
+          <AuthContext.Provider value={authValue}>
+            <TopBar
+              onMenuClick={opts.onMenuClick ?? vi.fn()}
+              sidebarVisible={opts.sidebarVisible ?? false}
+            />
+          </AuthContext.Provider>
+        </ThemeProvider>
+      </QueryClientProvider>
+    </MemoryRouter>
+  );
+}
+
+const keycloakAuth: AuthContextValue = {
+  authenticated: true,
+  loading: false,
+  user: {
+    username: "janedoe",
+    firstName: "Jane",
+    lastName: "Doe",
+    email: "jane@example.com",
+    fullName: "Jane Doe",
+  },
+  roles: ["admin"],
+  method: "keycloak",
+  login: vi.fn(),
+  logout: vi.fn(),
+};
+
+const guestAuth: AuthContextValue = {
+  authenticated: true,
+  loading: false,
+  user: null,
+  roles: [],
+  method: "none",
+  login: vi.fn(),
+  logout: vi.fn(),
+};
+
+import i18n from "@/i18n/config";
+
+describe("TopBar", () => {
+  beforeEach(async () => {
+    localStorage.clear();
+    await i18n.changeLanguage("en");
+  });
+
+  // ── Basic rendering ────────────────────────────────────────────────
+  it("renders theme toggle buttons", () => {
+    renderWithProviders(
+      <TopBar onMenuClick={() => {}} sidebarVisible={false} />
+    );
+
+    expect(screen.getByTestId("theme-light")).toBeInTheDocument();
+    expect(screen.getByTestId("theme-dark")).toBeInTheDocument();
+    expect(screen.getByTestId("theme-system")).toBeInTheDocument();
+  });
+
+  it("renders language selector", () => {
+    renderWithProviders(
+      <TopBar onMenuClick={() => {}} sidebarVisible={false} />
+    );
+
+    expect(screen.getByTestId("language-selector")).toBeInTheDocument();
+  });
+
+  it("renders mobile menu toggle", () => {
+    renderWithProviders(
+      <TopBar onMenuClick={() => {}} sidebarVisible={false} />
+    );
+
+    expect(screen.getByTestId("mobile-menu-toggle")).toBeInTheDocument();
+  });
+
+  it("changes theme on button click", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <TopBar onMenuClick={() => {}} sidebarVisible={false} />
+    );
+
+    const darkBtn = screen.getByTestId("theme-dark");
+    await user.click(darkBtn);
+
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
+  });
+
+  it("renders platform status indicator", () => {
+    renderWithProviders(
+      <TopBar onMenuClick={() => {}} sidebarVisible={false} />
+    );
+
+    expect(screen.getByTestId("platform-status")).toBeInTheDocument();
+  });
+
+  // ── Theme toggle ───────────────────────────────────────────────────
+  it("sets light theme on light button click", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <TopBar onMenuClick={() => {}} sidebarVisible={false} />
+    );
+
+    // First set dark, then set light
+    await user.click(screen.getByTestId("theme-dark"));
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
+
+    await user.click(screen.getByTestId("theme-light"));
+    expect(document.documentElement.classList.contains("light")).toBe(true);
+  });
+
+  it("theme buttons have aria-pressed attributes", () => {
+    renderWithProviders(
+      <TopBar onMenuClick={() => {}} sidebarVisible={false} />
+    );
+
+    // Default theme is "light" in test, so light should be pressed
+    const lightBtn = screen.getByTestId("theme-light");
+    expect(lightBtn).toHaveAttribute("aria-pressed", "true");
+
+    const darkBtn = screen.getByTestId("theme-dark");
+    expect(darkBtn).toHaveAttribute("aria-pressed", "false");
+  });
+
+  // ── Language selector ──────────────────────────────────────────────
+  it("language selector has 11 language options", () => {
+    renderWithProviders(
+      <TopBar onMenuClick={() => {}} sidebarVisible={false} />
+    );
+
+    const select = screen.getByTestId("language-selector") as HTMLSelectElement;
+    const options = select.querySelectorAll("option");
+    expect(options.length).toBe(11);
+  });
+
+  it("changes language on selector change", async () => {
+    renderWithProviders(
+      <TopBar onMenuClick={() => {}} sidebarVisible={false} />
+    );
+
+    const select = screen.getByTestId("language-selector") as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "de" } });
+
+    // Awaited, not synchronous: locales are code-split, so `changeLanguage`
+    // fetches a chunk before `languageChanged` fires and the controlled <select>
+    // re-renders. One tick, imperceptible to a user, but the assertion has to
+    // wait for it.
+    await waitFor(() => expect(select.value).toBe("de"));
+  });
+
+  it("lets the LAST pick win when two language changes overlap", async () => {
+    // Locale chunks differ in size, so picking Thai then Spanish can complete
+    // Spanish-then-Thai and leave the user reading a language they already moved
+    // on from. The most recent request has to be the one that stands.
+    const i18nModule = await import("@/i18n/config");
+    const resolvers: Array<() => void> = [];
+    const spy = vi
+      .spyOn(i18nModule.default, "changeLanguage")
+      .mockImplementation(
+        (() =>
+          new Promise<never>((resolve) => {
+            resolvers.push(resolve as () => void);
+          })) as unknown as typeof i18nModule.default.changeLanguage,
+      );
+    // `changeLanguage` is stubbed, so no bundle ever really loads. Report one as
+    // present to keep this test on the success path — ordering is what it is
+    // about; the missing-bundle path has its own test below.
+    const bundleSpy = vi
+      .spyOn(i18nModule.default, "hasResourceBundle")
+      .mockReturnValue(true);
+
+    renderWithProviders(<TopBar onMenuClick={() => {}} sidebarVisible={false} />);
+    const select = screen.getByTestId("language-selector") as HTMLSelectElement;
+
+    fireEvent.change(select, { target: { value: "th" } });
+    fireEvent.change(select, { target: { value: "es" } });
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
+
+    // Finish the SECOND request first, then the first — the out-of-order case.
+    resolvers[1]?.();
+    resolvers[0]?.();
+
+    // The stale completion must re-assert the latest pick rather than stand.
+    await waitFor(() => {
+      const asked = spy.mock.calls.map((c) => c[0]);
+      expect(asked[asked.length - 1]).toBe("es");
+    });
+    spy.mockRestore();
+    bundleSpy.mockRestore();
+  });
+
+  it("keeps the previous language and warns when a locale chunk fails to load", async () => {
+    // A tab held open across a deploy asks for a hashed locale chunk that no
+    // longer exists. i18next keeps the current language, so the UI stays usable —
+    // this pins that the failure is surfaced rather than swallowed as an
+    // unhandled rejection.
+    const i18nModule = await import("@/i18n/config");
+    const spy = vi
+      .spyOn(i18nModule.default, "changeLanguage")
+      .mockRejectedValueOnce(new Error("Failed to fetch dynamically imported module"));
+
+    renderWithProviders(
+      <TopBar onMenuClick={() => {}} sidebarVisible={false} />
+    );
+    const select = screen.getByTestId("language-selector") as HTMLSelectElement;
+    const before = select.value;
+    fireEvent.change(select, { target: { value: "ja" } });
+
+    await waitFor(() => expect(spy).toHaveBeenCalledWith("ja"));
+    // No unhandled rejection, and the selector did not move to a language whose
+    // strings never arrived.
+    await waitFor(() => expect(select.value).toBe(before));
+    spy.mockRestore();
+  });
+
+  it("warns and reverts when i18next reports success but no bundle arrived", async () => {
+    // The failure mode that actually happens. i18next 24 does NOT reject on a
+    // failed backend read: `changeLanguage` resolves, its callback reports
+    // `err === null`, and `i18n.language` moves to the requested code — only
+    // `resolvedLanguage` stays behind. Relying on a rejection here left the
+    // select reading "日本語" over English text with nothing to explain it.
+    const i18nModule = await import("@/i18n/config");
+    const i18nInstance = i18nModule.default;
+    const previous = i18nInstance.language;
+
+    const changeSpy = vi
+      .spyOn(i18nInstance, "changeLanguage")
+      .mockResolvedValue(((k: string) => k) as never);
+    const bundleSpy = vi
+      .spyOn(i18nInstance, "hasResourceBundle")
+      .mockReturnValue(false);
+    const toastSpy = vi.spyOn(toast, "error").mockReturnValue("id" as never);
+
+    renderWithProviders(
+      <TopBar onMenuClick={() => {}} sidebarVisible={false} />
+    );
+    fireEvent.change(screen.getByTestId("language-selector"), {
+      target: { value: "ja" },
+    });
+
+    await waitFor(() => expect(toastSpy).toHaveBeenCalled());
+    // And it puts the language back rather than leaving the select on "ja".
+    expect(changeSpy).toHaveBeenLastCalledWith(previous);
+
+    changeSpy.mockRestore();
+    bundleSpy.mockRestore();
+    toastSpy.mockRestore();
+  });
+
+  it("stays quiet when the bundle does arrive", async () => {
+    const i18nModule = await import("@/i18n/config");
+    const i18nInstance = i18nModule.default;
+
+    const changeSpy = vi
+      .spyOn(i18nInstance, "changeLanguage")
+      .mockResolvedValue(((k: string) => k) as never);
+    const bundleSpy = vi
+      .spyOn(i18nInstance, "hasResourceBundle")
+      .mockReturnValue(true);
+    const toastSpy = vi.spyOn(toast, "error").mockReturnValue("id" as never);
+
+    renderWithProviders(
+      <TopBar onMenuClick={() => {}} sidebarVisible={false} />
+    );
+    fireEvent.change(screen.getByTestId("language-selector"), {
+      target: { value: "ja" },
+    });
+
+    await waitFor(() => expect(changeSpy).toHaveBeenCalledWith("ja"));
+    expect(toastSpy).not.toHaveBeenCalled();
+
+    changeSpy.mockRestore();
+    bundleSpy.mockRestore();
+    toastSpy.mockRestore();
+  });
+
+  // ── Mobile menu ────────────────────────────────────────────────────
+  it("calls onMenuClick when mobile menu button is clicked", async () => {
+    const onMenuClick = vi.fn();
+    renderWithProviders(
+      <TopBar onMenuClick={onMenuClick} sidebarVisible={false} />
+    );
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("mobile-menu-toggle"));
+    expect(onMenuClick).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides mobile menu button when sidebar is visible", () => {
+    renderWithProviders(
+      <TopBar onMenuClick={() => {}} sidebarVisible={true} />
+    );
+
+    const btn = screen.getByTestId("mobile-menu-toggle");
+    expect(btn.className).toContain("hidden");
+  });
+
+  // ── Breadcrumbs ────────────────────────────────────────────────────
+  it("shows Dashboard breadcrumb on root route", () => {
+    renderWithProviders(
+      <TopBar onMenuClick={() => {}} sidebarVisible={false} />,
+      { initialRoute: "/manage" }
+    );
+
+    // Should have Dashboard as breadcrumb
+    expect(screen.getByText("Dashboard")).toBeInTheDocument();
+  });
+
+  it("shows multi-level breadcrumbs on nested routes", () => {
+    renderWithProviders(
+      <TopBar onMenuClick={() => {}} sidebarVisible={false} />,
+      { initialRoute: "/manage/agents" }
+    );
+
+    expect(screen.getByText("Dashboard")).toBeInTheDocument();
+    expect(screen.getByText("Agents")).toBeInTheDocument();
+  });
+
+  it("shows resource breadcrumbs", () => {
+    renderWithProviders(
+      <TopBar onMenuClick={() => {}} sidebarVisible={false} />,
+      { initialRoute: "/manage/resources" }
+    );
+
+    expect(screen.getByText("Resources")).toBeInTheDocument();
+  });
+
+  it("truncates MongoDB-style IDs in breadcrumbs", () => {
+    renderWithProviders(
+      <TopBar onMenuClick={() => {}} sidebarVisible={false} />,
+      { initialRoute: "/manage/agents/aabbccddeeff112233445566" }
+    );
+
+    // 24-hex-char ID should be truncated to first 8 chars + …
+    expect(screen.getByText("aabbccdd…")).toBeInTheDocument();
+  });
+
+  it("last breadcrumb is styled as current page", () => {
+    renderWithProviders(
+      <TopBar onMenuClick={() => {}} sidebarVisible={false} />,
+      { initialRoute: "/manage/agents" }
+    );
+
+    const agentsCrumb = screen.getByText("Agents");
+    expect(agentsCrumb).toHaveAttribute("aria-current", "page");
+  });
+
+  // ── User dropdown ──────────────────────────────────────────────────
+  it("shows user menu trigger when auth is keycloak", () => {
+    renderTopBarWithAuth(keycloakAuth);
+
+    expect(screen.getByTestId("user-menu-trigger")).toBeInTheDocument();
+  });
+
+  it("hides user menu trigger when auth is none", () => {
+    renderTopBarWithAuth(guestAuth);
+
+    expect(screen.queryByTestId("user-menu-trigger")).not.toBeInTheDocument();
+  });
+
+  it("shows user initials on the trigger button", () => {
+    renderTopBarWithAuth(keycloakAuth);
+
+    // "Jane Doe" → "JD"
+    expect(screen.getByText("JD")).toBeInTheDocument();
+  });
+
+  it("opens user dropdown on click", async () => {
+    renderTopBarWithAuth(keycloakAuth);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("user-menu-trigger"));
+
+    expect(screen.getByTestId("user-menu-dropdown")).toBeInTheDocument();
+    expect(screen.getByText("Jane Doe")).toBeInTheDocument();
+    expect(screen.getByText("jane@example.com")).toBeInTheDocument();
+  });
+
+  it("shows logout button in dropdown", async () => {
+    renderTopBarWithAuth(keycloakAuth);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("user-menu-trigger"));
+
+    expect(screen.getByTestId("user-menu-logout")).toBeInTheDocument();
+  });
+
+  it("calls logout when logout button is clicked", async () => {
+    const logoutFn = vi.fn();
+    renderTopBarWithAuth({ ...keycloakAuth, logout: logoutFn });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("user-menu-trigger"));
+    await user.click(screen.getByTestId("user-menu-logout"));
+
+    expect(logoutFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes dropdown after logout click", async () => {
+    renderTopBarWithAuth(keycloakAuth);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("user-menu-trigger"));
+    expect(screen.getByTestId("user-menu-dropdown")).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("user-menu-logout"));
+    expect(screen.queryByTestId("user-menu-dropdown")).not.toBeInTheDocument();
+  });
+
+  it("closes dropdown on Escape key", async () => {
+    renderTopBarWithAuth(keycloakAuth);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("user-menu-trigger"));
+    expect(screen.getByTestId("user-menu-dropdown")).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByTestId("user-menu-dropdown")).not.toBeInTheDocument();
+  });
+
+  it("closes dropdown on outside click", async () => {
+    renderTopBarWithAuth(keycloakAuth);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("user-menu-trigger"));
+    expect(screen.getByTestId("user-menu-dropdown")).toBeInTheDocument();
+
+    // Click outside (on the body)
+    await user.click(document.body);
+    expect(screen.queryByTestId("user-menu-dropdown")).not.toBeInTheDocument();
+  });
+
+  it("user menu trigger has aria-expanded attribute", async () => {
+    renderTopBarWithAuth(keycloakAuth);
+
+    const trigger = screen.getByTestId("user-menu-trigger");
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+
+    const user = userEvent.setup();
+    await user.click(trigger);
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("shows username as fallback when no name claims", () => {
+    renderTopBarWithAuth({
+      ...keycloakAuth,
+      user: { ...keycloakAuth.user!, fullName: "", firstName: "", lastName: "" },
+    });
+
+    const trigger = screen.getByTestId("user-menu-trigger");
+    expect(trigger).toHaveAttribute("title", "janedoe");
+    expect(screen.getByTestId("user-menu-initials")).toHaveTextContent("J");
+  });
+
+  it("joins given and family name when the token has no display name", () => {
+    renderTopBarWithAuth({
+      ...keycloakAuth,
+      user: { ...keycloakAuth.user!, fullName: "" },
+    });
+
+    expect(screen.getByTestId("user-menu-trigger")).toHaveAttribute("title", "Jane Doe");
+  });
+
+  // The token Keycloak issues when the realm grants no `profile`/`email` scope:
+  // every claim the avatar reads is absent. It used to render a literal "?".
+  it("shows a person icon, not a question mark, when the token has no profile claims", async () => {
+    renderTopBarWithAuth({
+      ...keycloakAuth,
+      user: { username: "", firstName: "", lastName: "", email: "", fullName: "" },
+    });
+
+    const trigger = screen.getByTestId("user-menu-trigger");
+    expect(trigger).not.toHaveTextContent("?");
+    expect(screen.getByTestId("user-menu-avatar-icon")).toBeInTheDocument();
+    expect(screen.queryByTestId("user-menu-initials")).not.toBeInTheDocument();
+    expect(trigger).toHaveAttribute("title", "Signed in");
+
+    const user = userEvent.setup();
+    await user.click(trigger);
+    expect(screen.getByTestId("user-menu-dropdown")).toHaveTextContent("Signed in");
+    expect(screen.getByTestId("user-menu-logout")).toBeInTheDocument();
+  });
+
+  it("does not repeat the email when it is the only label available", async () => {
+    renderTopBarWithAuth({
+      ...keycloakAuth,
+      user: { username: "", firstName: "", lastName: "", email: "jane@example.com", fullName: "" },
+    });
+
+    expect(screen.getByTestId("user-menu-initials")).toHaveTextContent("J");
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("user-menu-trigger"));
+    expect(screen.getAllByText("jane@example.com")).toHaveLength(1);
+  });
+
+  it("handles user without email in dropdown", async () => {
+    renderTopBarWithAuth({
+      ...keycloakAuth,
+      user: { ...keycloakAuth.user!, email: "" },
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("user-menu-trigger"));
+
+    expect(screen.getByText("Jane Doe")).toBeInTheDocument();
+    expect(screen.queryByText("jane@example.com")).not.toBeInTheDocument();
+  });
+
+  // ── Breadcrumb label map coverage ──────────────────────────────────
+  it("maps known route segments to labels", () => {
+    const routes = [
+      { route: "/manage/chat", label: "Chat" },
+      { route: "/manage/logs", label: "Logs" },
+      { route: "/manage/secrets", label: "Secrets" },
+      { route: "/manage/groups", label: "Groups" },
+      { route: "/manage/gdpr", label: "Privacy" },
+    ];
+
+    for (const { route, label } of routes) {
+      const { unmount } = renderWithProviders(
+        <TopBar onMenuClick={() => {}} sidebarVisible={false} />,
+        { initialRoute: route }
+      );
+      expect(screen.getByText(label)).toBeInTheDocument();
+      unmount();
+    }
+  });
+
+  it("strips 'view' suffix from unknown segments", () => {
+    renderWithProviders(
+      <TopBar onMenuClick={() => {}} sidebarVisible={false} />,
+      { initialRoute: "/manage/workflowview" }
+    );
+
+    // workflowview maps to nav.packages via labelMap
+    expect(screen.getByText("Workflows")).toBeInTheDocument();
+  });
+});

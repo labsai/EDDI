@@ -6,24 +6,84 @@ package ai.labs.eddi.engine.memory.model;
 
 import ai.labs.eddi.datastore.serialization.Id;
 import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.properties.model.Property;
+import ai.labs.eddi.engine.security.ResolutionPrincipal;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.time.Instant;
 import java.util.*;
 
 /**
  * @author ginccc
  */
 public class ConversationMemorySnapshot {
+    /**
+     * Current document shape this code understands (Wave 0, F6). Bump whenever a
+     * Wave adds a field resume-time logic depends on, and register that version's
+     * migration in {@code ConversationSchemaMigrations}. Mirrors {@code
+     * GroupConversation#CURRENT_SCHEMA_VERSION} for the single-conversation HITL
+     * resume path.
+     */
+    public static final int CURRENT_SCHEMA_VERSION = 1;
+    /**
+     * The version a stored document claims when its JSON carries no
+     * {@code schemaVersion} key. Mirrors
+     * {@code GroupConversation#LEGACY_SCHEMA_VERSION} and exists for the same
+     * reason: Jackson leaves the field initialiser standing for key-less documents,
+     * so the initialiser must be the legacy floor and the creation path
+     * ({@code ConversationMemoryUtilities}) stamps {@link #CURRENT_SCHEMA_VERSION}
+     * explicitly. While {@code CURRENT} is also {@code 1} this is indistinguishable
+     * from initialising to CURRENT — but only by coincidence, and the first bump to
+     * {@code 2} would silently re-create the group side's zero-iteration migration
+     * bug without this split.
+     */
+    public static final int LEGACY_SCHEMA_VERSION = 1;
+    /**
+     * The shape this specific document was last written in. Checked before a
+     * resume: newer than {@link #CURRENT_SCHEMA_VERSION} refuses (this deployment
+     * predates the document), older runs registered migrations forward. See
+     * {@code ConversationSchemaMigrations}.
+     */
+    private int schemaVersion = LEGACY_SCHEMA_VERSION;
     private String conversationId;
     private String agentId;
     private Integer agentVersion;
     private String userId;
+    /**
+     * How {@link #userId} came to be, fixed at creation. Absent in documents
+     * written before 6.2.0, which deserialize to {@code null} — read as NOT
+     * verified, so a legacy conversation must be restarted once before it can
+     * resolve a {@code PER_USER} connection. That polarity is the point: the
+     * conversations this field exists to distrust are exactly the ones that predate
+     * it.
+     */
+    private ResolutionPrincipal.Provenance resolutionProvenance;
     private Deployment.Environment environment;
     private ConversationState conversationState;
+    private String hitlPausedWorkflowId;
+    private int hitlPausedAbsoluteTaskIndex = -1;
+    private Instant hitlPausedAt;
+    private String hitlPauseReason;
+    private HitlTimeoutPolicy hitlTimeoutPolicy;
+    private String hitlApprovalTimeout;
+    // Tool-level HITL: null/"RULE" = behavior-rule pause, "TOOL_CALL" = gated tool
+    // pause.
+    private String hitlPauseType;
+    private PendingToolCallBatch hitlPendingToolCalls;
     private List<ConversationOutput> conversationOutputs = new LinkedList<>();
     private Map<String, Property> conversationProperties = new LinkedHashMap<>();
+    /**
+     * Keys of {@code longTerm} properties whose user-memory write is still owed
+     * because the turn that set them never reached its post-conversation tasks
+     * (HITL pause, error, cancel). Absent in documents written before 6.2.0, which
+     * deserialize to an empty set — the next completed turn simply falls back to
+     * the value diff, exactly as before.
+     *
+     * @see ai.labs.eddi.engine.memory.IConversationMemory#getPendingLongTermWrites()
+     */
+    private Set<String> pendingLongTermWrites = new LinkedHashSet<>();
     private List<ConversationStepSnapshot> conversationSteps = new LinkedList<>();
     private Stack<ConversationStepSnapshot> redoCache = new Stack<>();
 
@@ -42,6 +102,14 @@ public class ConversationMemorySnapshot {
     @Override
     public int hashCode() {
         return conversationSteps != null ? conversationSteps.hashCode() : 0;
+    }
+
+    public int getSchemaVersion() {
+        return schemaVersion;
+    }
+
+    public void setSchemaVersion(int schemaVersion) {
+        this.schemaVersion = schemaVersion;
     }
 
     @JsonProperty("_id")
@@ -69,6 +137,25 @@ public class ConversationMemorySnapshot {
     public static class ConversationStepSnapshot {
         private List<WorkflowRunSnapshot> packages = new LinkedList<>();
 
+        /**
+         * The step's rendered output — populated only for redo-cache entries, and
+         * {@code null} for the ordinary {@code conversationSteps}, whose outputs are
+         * stored once in {@link ConversationMemorySnapshot#conversationOutputs}.
+         * <p>
+         * Undo/redo in live memory always kept the output, because the step object
+         * carries it. Serialisation did not: a redo entry rehydrated as
+         * {@code new ConversationStep(new ConversationOutput())}, so
+         * {@code redoLastStep()} pushed an <em>empty</em> output over the answer it was
+         * supposed to restore. Since every request reloads memory from the store, that
+         * always fired in practice — redo returned 200 while destroying the turn, and
+         * the model lost it too, because {@code conversationOutputs} is what
+         * {@code ConversationHistoryBuilder} reads.
+         * <p>
+         * Absent in documents written before this field existed; those deserialize to
+         * {@code null} and load exactly as they did before.
+         */
+        private ConversationOutput conversationOutput;
+
         @Override
         public boolean equals(Object o) {
             if (this == o)
@@ -78,12 +165,13 @@ public class ConversationMemorySnapshot {
 
             ConversationStepSnapshot that = (ConversationStepSnapshot) o;
 
-            return Objects.equals(packages, that.packages);
+            return Objects.equals(packages, that.packages)
+                    && Objects.equals(conversationOutput, that.conversationOutput);
         }
 
         @Override
         public int hashCode() {
-            return packages != null ? packages.hashCode() : 0;
+            return Objects.hash(packages, conversationOutput);
         }
 
         public List<WorkflowRunSnapshot> getWorkflows() {
@@ -92,6 +180,14 @@ public class ConversationMemorySnapshot {
 
         public void setWorkflows(List<WorkflowRunSnapshot> packages) {
             this.packages = packages;
+        }
+
+        public ConversationOutput getConversationOutput() {
+            return conversationOutput;
+        }
+
+        public void setConversationOutput(ConversationOutput conversationOutput) {
+            this.conversationOutput = conversationOutput;
         }
 
     }
@@ -262,6 +358,14 @@ public class ConversationMemorySnapshot {
         this.userId = userId;
     }
 
+    public ResolutionPrincipal.Provenance getResolutionProvenance() {
+        return resolutionProvenance;
+    }
+
+    public void setResolutionProvenance(ResolutionPrincipal.Provenance resolutionProvenance) {
+        this.resolutionProvenance = resolutionProvenance;
+    }
+
     public Deployment.Environment getEnvironment() {
         return environment;
     }
@@ -278,6 +382,70 @@ public class ConversationMemorySnapshot {
         this.conversationState = conversationState;
     }
 
+    public String getHitlPausedWorkflowId() {
+        return hitlPausedWorkflowId;
+    }
+
+    public void setHitlPausedWorkflowId(String hitlPausedWorkflowId) {
+        this.hitlPausedWorkflowId = hitlPausedWorkflowId;
+    }
+
+    public int getHitlPausedAbsoluteTaskIndex() {
+        return hitlPausedAbsoluteTaskIndex;
+    }
+
+    public void setHitlPausedAbsoluteTaskIndex(int hitlPausedAbsoluteTaskIndex) {
+        this.hitlPausedAbsoluteTaskIndex = hitlPausedAbsoluteTaskIndex;
+    }
+
+    public Instant getHitlPausedAt() {
+        return hitlPausedAt;
+    }
+
+    public void setHitlPausedAt(Instant hitlPausedAt) {
+        this.hitlPausedAt = hitlPausedAt;
+    }
+
+    public String getHitlPauseReason() {
+        return hitlPauseReason;
+    }
+
+    public void setHitlPauseReason(String hitlPauseReason) {
+        this.hitlPauseReason = hitlPauseReason;
+    }
+
+    public HitlTimeoutPolicy getHitlTimeoutPolicy() {
+        return hitlTimeoutPolicy;
+    }
+
+    public void setHitlTimeoutPolicy(HitlTimeoutPolicy hitlTimeoutPolicy) {
+        this.hitlTimeoutPolicy = hitlTimeoutPolicy;
+    }
+
+    public String getHitlApprovalTimeout() {
+        return hitlApprovalTimeout;
+    }
+
+    public void setHitlApprovalTimeout(String hitlApprovalTimeout) {
+        this.hitlApprovalTimeout = hitlApprovalTimeout;
+    }
+
+    public String getHitlPauseType() {
+        return hitlPauseType;
+    }
+
+    public void setHitlPauseType(String hitlPauseType) {
+        this.hitlPauseType = hitlPauseType;
+    }
+
+    public PendingToolCallBatch getHitlPendingToolCalls() {
+        return hitlPendingToolCalls;
+    }
+
+    public void setHitlPendingToolCalls(PendingToolCallBatch hitlPendingToolCalls) {
+        this.hitlPendingToolCalls = hitlPendingToolCalls;
+    }
+
     public List<ConversationOutput> getConversationOutputs() {
         return conversationOutputs;
     }
@@ -292,6 +460,31 @@ public class ConversationMemorySnapshot {
 
     public void setConversationProperties(Map<String, Property> conversationProperties) {
         this.conversationProperties = conversationProperties;
+    }
+
+    /**
+     * Returns the live set, deliberately — do not "fix" this to return a copy or an
+     * unmodifiable view.
+     * <p>
+     * Static analysis flags this as exposing internal representation, which is true
+     * of every accessor on this Jackson DTO. Here the obvious remedy breaks
+     * persistence: {@code ConversationMemoryUtilities.convertConversationMemory}
+     * populates the field with
+     * {@code snapshot.getPendingLongTermWrites().addAll(memory.getPendingLongTermWrites())},
+     * so {@code Set.copyOf} would turn that into a <em>silent</em> no-op — the
+     * deferred writes would never reach the snapshot, reintroducing exactly the
+     * lost-{@code longTerm}-write bug (G6) this field was added to prevent — and
+     * {@code Collections.unmodifiableSet} would throw there instead.
+     * <p>
+     * Callers that must not alias take their own copy at the point it matters; see
+     * {@code Conversation.storePropertiesPermanently}.
+     */
+    public Set<String> getPendingLongTermWrites() {
+        return pendingLongTermWrites;
+    }
+
+    public void setPendingLongTermWrites(Set<String> pendingLongTermWrites) {
+        this.pendingLongTermWrites = pendingLongTermWrites == null ? new LinkedHashSet<>() : pendingLongTermWrites;
     }
 
     public List<ConversationStepSnapshot> getConversationSteps() {

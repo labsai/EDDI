@@ -1,0 +1,46 @@
+{
+  "outputSet": [
+    {
+      "action": "welcome",
+      "timesOccurred": 0,
+      "outputs": [
+        {
+          "valueAlternatives": [
+            {
+              "type": "text",
+              "text": "Welcome to the HITL test agent."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "action": "greet",
+      "timesOccurred": 0,
+      "outputs": [
+        {
+          "valueAlternatives": [
+            {
+              "type": "text",
+              "text": "Hello!"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "action": "ask_supervisor",
+      "timesOccurred": 0,
+      "outputs": [
+        {
+          "valueAlternatives": [
+            {
+              "type": "text",
+              "text": "Account deletion was executed after approval."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -905,7 +905,7 @@ class PropertySetterTaskTest {
         }
 
         @Test
-        @DisplayName("scope=secret vault fails — logs error and returns plaintext")
+        @DisplayName("scope=secret vault fails — fails CLOSED: aborts the turn and leaves no plaintext behind")
         void scopeSecretVaultFails() throws Exception {
             var memory = mock(IConversationMemory.class);
             var currentStep = mock(IWritableConversationStep.class);
@@ -922,12 +922,21 @@ class PropertySetterTaskTest {
             when(memory.getConversationProperties()).thenReturn(conversationProperties);
             when(memory.getAgentId()).thenReturn("agent456");
 
+            // The user typed the secret, so the plaintext is also sitting in the raw
+            // input data of this turn — the second place the old fail-open path leaked it.
+            var inputData = mock(IData.class);
+            when(currentStep.getLatestData("input:initial")).thenReturn(inputData);
+            when(inputData.getResult()).thenReturn("plaintext-secret");
+
+            var scrubbedInput = mock(IData.class);
+            when(dataFactory.createData(eq("input:initial"), anyString())).thenReturn(scrubbedInput);
+
             var templateDataObjects = new HashMap<String, Object>();
             when(memoryItemConverter.convert(memory)).thenReturn(templateDataObjects);
             when(templatingEngine.processTemplate(anyString(), anyMap()))
                     .thenAnswer(inv -> inv.getArgument(0));
 
-            // Make vault storage fail
+            // Vault unavailable — the DEFAULT deployment state (no EDDI_VAULT_MASTER_KEY)
             doThrow(new ISecretProvider.SecretProviderException("Vault unavailable"))
                     .when(secretProvider).store(any(), anyString(), anyString(), anyList());
 
@@ -949,13 +958,30 @@ class PropertySetterTaskTest {
             when(memory.getPreviousSteps()).thenReturn(previousSteps);
             when(previousSteps.size()).thenReturn(0);
 
-            // Should not throw — graceful degradation
-            assertDoesNotThrow(() -> task.execute(memory, propertySetter));
+            // A scope=secret property that cannot be vaulted must abort the turn.
+            var exception = assertThrows(LifecycleException.class, () -> task.execute(memory, propertySetter));
 
-            // Verify property is stored with plaintext (degraded mode)
-            var captor = ArgumentCaptor.forClass(Property.class);
-            verify(conversationProperties).put(eq("apiKey"), captor.capture());
-            assertEquals("plaintext-secret", captor.getValue().getValueString());
+            verify(secretProvider).store(any(), eq("plaintext-secret"), anyString(), anyList());
+            assertTrue(exception.getMessage().contains("apiKey"),
+                    "the failure must name the offending property, got: " + exception.getMessage());
+            assertTrue(exception.getMessage().contains("EDDI_VAULT_MASTER_KEY"),
+                    "the failure must tell the operator how to fix it, got: " + exception.getMessage());
+            assertFalse(exception.getMessage().contains("plaintext-secret"),
+                    "the secret itself must never appear in the error message");
+            assertInstanceOf(ISecretProvider.SecretProviderException.class, exception.getCause());
+
+            // (1) the plaintext must not survive as a conversation property — not under
+            // this name, not under any name, not in any scope.
+            verify(conversationProperties, never()).put(anyString(), any(Property.class));
+
+            // (2) nor as the raw input of the turn: the input data is replaced with the
+            // placeholder BEFORE the abort, and the echoed conversation output with it.
+            var storedValue = ArgumentCaptor.forClass(String.class);
+            verify(dataFactory).createData(eq("input:initial"), storedValue.capture());
+            assertEquals("<secret input>", storedValue.getValue());
+            verify(currentStep).storeData(scrubbedInput);
+            verify(currentStep).resetConversationOutput("input");
+            verify(currentStep).addConversationOutputString("input", "<secret input>");
         }
 
         @Test

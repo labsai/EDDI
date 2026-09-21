@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.memory.model;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
@@ -108,5 +110,52 @@ class AttachmentTest {
         assertNull(att.getBase64Data());
         att.setBase64Data("iVBORw0KGgo=");
         assertEquals("iVBORw0KGgo=", att.getBase64Data());
+    }
+
+    // ==================== Serialization (no payload persisted)
+    // ====================
+
+    @Test
+    void serialization_neverIncludesBase64Payload() throws Exception {
+        var mapper = new ObjectMapper().findAndRegisterModules();
+
+        var att = new Attachment("image/png", "photo.png", 1024, "gridfs://abc");
+        var secretPayload = "SECRETiVBORw0KGgoAAAANSUhEUgAAPAYLOAD";
+        att.setBase64Data(secretPayload);
+
+        String json = mapper.writeValueAsString(att);
+
+        // The raw base64 payload must NOT leak into persisted JSON — the transient
+        // keyword alone does not stop Jackson's getter-based serialization.
+        assertFalse(json.contains(secretPayload),
+                "base64 payload must not be serialized into persisted JSON: " + json);
+        assertFalse(json.contains("base64Data"),
+                "base64Data property must be absent from persisted JSON: " + json);
+
+        // Metadata that behavior rules match on must still be present.
+        assertTrue(json.contains("image/png"));
+        assertTrue(json.contains("photo.png"));
+        assertTrue(json.contains("gridfs://abc"));
+    }
+
+    @Test
+    void serialization_roundTripPreservesMetadataButNotPayload() throws Exception {
+        // Mirror EDDI's persistence mapper: attachments have round-tripped through
+        // Mongo since 6.0.0 despite the derived, setter-less contentSource getter,
+        // so the store mapper ignores unknown properties on read.
+        var mapper = new ObjectMapper().findAndRegisterModules()
+                .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+
+        var att = new Attachment("application/pdf", "doc.pdf", 2048, "pg://xyz");
+        att.setBase64Data("JVBERi0xLjQ=");
+
+        String json = mapper.writeValueAsString(att);
+        var restored = mapper.readValue(json, Attachment.class);
+
+        assertEquals("application/pdf", restored.getMimeType());
+        assertEquals("doc.pdf", restored.getFileName());
+        assertEquals(2048, restored.getSizeBytes());
+        assertEquals("pg://xyz", restored.getStorageRef());
+        assertNull(restored.getBase64Data(), "payload must not survive persistence round-trip");
     }
 }

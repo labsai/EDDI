@@ -47,6 +47,73 @@ public class OwnershipValidator {
     }
 
     /**
+     * Returns whether the caller holds the admin role. Always returns {@code true}
+     * when authorization is disabled (all callers are effectively admin).
+     */
+    public boolean isAdmin(SecurityIdentity identity) {
+        return !authEnabled || (identity != null && identity.hasRole("eddi-admin"));
+    }
+
+    /**
+     * Returns whether the caller holds the designated HITL approver role. Always
+     * returns {@code true} when authorization is disabled. Approvers may decide
+     * pending approvals they do not own and see them in pending listings.
+     */
+    public boolean isApprover(SecurityIdentity identity) {
+        return !authEnabled || (identity != null && identity.hasRole("eddi-approver"));
+    }
+
+    /**
+     * Returns whether the caller IS the resource owner — a pure identity
+     * comparison, no roles. Always {@code true} when authorization is disabled.
+     * Unowned resources (null/blank owner) return {@code false}; callers decide how
+     * to treat legacy data.
+     */
+    public boolean isOwner(SecurityIdentity identity, String resourceOwnerId) {
+        if (!authEnabled) {
+            return true;
+        }
+        if (identity == null || identity.isAnonymous()) {
+            return false;
+        }
+        String callerId = principalName(identity);
+        return callerId != null && callerId.equals(resourceOwnerId);
+    }
+
+    /**
+     * The caller's principal name, or {@code null} when the identity has no
+     * principal or the principal has a null or blank name.
+     * <p>
+     * An authenticated identity can be nameless: Quarkus OIDC derives the name from
+     * {@code upn}, {@code preferred_username} or {@code sub}, and a token carrying
+     * none of them resolves to {@code null}. {@link NamelessPrincipalAugmentor}
+     * rejects such tokens at authentication, so this is the second line: every
+     * check here treats a nameless caller as owning nothing, instead of calling
+     * {@code equals} on the null and answering 500.
+     */
+    public static String principalName(SecurityIdentity identity) {
+        if (identity == null || identity.getPrincipal() == null) {
+            return null;
+        }
+        String name = identity.getPrincipal().getName();
+        return name == null || name.isBlank() ? null : name;
+    }
+
+    /**
+     * Whether the identity is authenticated but has no usable principal name — the
+     * caller {@link #requireOwnerOrAdmin} refuses even on an unowned resource.
+     * {@code false} for a null or anonymous identity.
+     */
+    public static boolean isNamelessCaller(SecurityIdentity identity) {
+        return identity != null && !identity.isAnonymous() && principalName(identity) == null;
+    }
+
+    private static ForbiddenException namelessCaller(String action) {
+        LOGGER.warnf("Ownership check failed: the authenticated identity has no principal name, so it cannot %s", action);
+        return new ForbiddenException("Access denied: the authenticated identity has no principal name");
+    }
+
+    /**
      * Asserts that the caller matches the requested {@code userId} or holds the
      * {@code eddi-admin} role.
      *
@@ -68,7 +135,10 @@ public class OwnershipValidator {
             return;
         }
 
-        String callerId = identity.getPrincipal().getName();
+        String callerId = principalName(identity);
+        if (callerId == null) {
+            throw namelessCaller("access user data");
+        }
         if (!callerId.equals(requestedUserId)) {
             LOGGER.warnf("Ownership check failed: caller attempted to access another user's data");
             LOGGER.debugf("Ownership detail: caller='%s', requestedUserId='%s'", sanitize(callerId), sanitize(requestedUserId));
@@ -101,9 +171,15 @@ public class OwnershipValidator {
             return requestedUserId; // let @RolesAllowed handle anonymous access
         }
 
-        String callerId = identity.getPrincipal().getName();
+        String callerId = principalName(identity);
 
         if (requestedUserId == null || requestedUserId.isBlank()) {
+            if (callerId == null) {
+                // Returning null here used to hand the conversation to
+                // computeAnonymousUserIdIfEmpty, which stamped an authenticated
+                // user's conversation with a random anonymous-<hex> owner.
+                throw namelessCaller("own a conversation");
+            }
             return callerId;
         }
 
@@ -111,6 +187,9 @@ public class OwnershipValidator {
             return requestedUserId;
         }
 
+        if (callerId == null) {
+            throw namelessCaller("start a conversation");
+        }
         if (!callerId.equals(requestedUserId)) {
             LOGGER.warnf("UserId resolution rejected: caller attempted to impersonate another user");
             LOGGER.debugf("UserId resolution detail: caller='%s', requestedUserId='%s'", sanitize(callerId), sanitize(requestedUserId));
@@ -126,7 +205,9 @@ public class OwnershipValidator {
      *
      * <p>
      * No-op when authorization is disabled, or when {@code resourceOwnerId} is
-     * null/blank (legacy data without ownership tracking).
+     * null/blank (legacy data without ownership tracking) — except for an
+     * authenticated non-admin caller with no principal name, who is refused either
+     * way.
      * </p>
      *
      * @param identity
@@ -142,9 +223,6 @@ public class OwnershipValidator {
         if (!authEnabled) {
             return;
         }
-        if (resourceOwnerId == null || resourceOwnerId.isBlank()) {
-            return; // legacy data without ownership — allow access
-        }
         if (identity == null || identity.isAnonymous()) {
             return; // let @RolesAllowed handle anonymous access
         }
@@ -152,12 +230,63 @@ public class OwnershipValidator {
             return;
         }
 
-        String callerId = identity.getPrincipal().getName();
+        // Resolved before the legacy exemption: a nameless caller is refused even
+        // on an unowned resource, rather than slipping through the one branch that
+        // never looks at the name.
+        String callerId = principalName(identity);
+        if (callerId == null) {
+            throw namelessCaller("access a " + resourceType);
+        }
+        if (resourceOwnerId == null || resourceOwnerId.isBlank()) {
+            return; // legacy data without ownership — allow access
+        }
         if (!callerId.equals(resourceOwnerId)) {
             LOGGER.warnf("Ownership check failed: caller denied access to %s owned by another user", resourceType);
             LOGGER.debugf("Ownership detail: caller='%s', resourceType='%s', ownerId='%s'", sanitize(callerId), sanitize(resourceType),
                     sanitize(resourceOwnerId));
             throw new ForbiddenException("Access denied: you do not own this " + resourceType);
         }
+    }
+
+    /**
+     * Strict variant of {@link #requireOwnerOrAdmin} that denies access when the
+     * resource has no owner. Use for state-changing operations (approve, cancel,
+     * reject) where fail-closed is safer than allowing anyone to modify unowned
+     * resources.
+     */
+    public void requireOwnerOrAdminStrict(SecurityIdentity identity, String resourceOwnerId, String resourceType) {
+        if (!authEnabled) {
+            return;
+        }
+        if (resourceOwnerId == null || resourceOwnerId.isBlank()) {
+            // MINOR-2: Fail-closed for state-changing ops on unowned resources
+            if (identity != null && identity.hasRole("eddi-admin")) {
+                return; // Admin can still act on unowned resources
+            }
+            LOGGER.warnf("Ownership check failed: %s has no owner — denying access for state-changing operation", resourceType);
+            throw new ForbiddenException("Access denied: " + resourceType + " has no owner");
+        }
+        requireOwnerOrAdmin(identity, resourceOwnerId, resourceType);
+    }
+
+    /**
+     * HITL-specific ownership check: allows the resource owner, eddi-admin,
+     * <strong>or eddi-approver</strong> role to proceed. Use this for
+     * approve/reject/cancel endpoints where a designated human reviewer may not be
+     * the conversation owner.
+     * <p>
+     * Fail-closed: if the resource has no owner and the caller is not admin or
+     * approver, access is denied.
+     */
+    public void requireOwnerAdminOrApprover(SecurityIdentity identity, String resourceOwnerId, String resourceType) {
+        if (!authEnabled) {
+            return;
+        }
+        // Approver role is always allowed for HITL operations
+        if (identity != null && identity.hasRole("eddi-approver")) {
+            return;
+        }
+        // Fall through to the strict owner/admin check
+        requireOwnerOrAdminStrict(identity, resourceOwnerId, resourceType);
     }
 }

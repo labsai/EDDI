@@ -30,7 +30,7 @@ class A2AToolProviderManagerTest {
     void setUp() {
         SecretResolver secretResolver = mock(SecretResolver.class);
         GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
-        manager = new A2AToolProviderManager(globalVariableResolver, secretResolver);
+        manager = new A2AToolProviderManager(globalVariableResolver, secretResolver, false);
     }
 
     // ─── discoverTools empty/null ─────────────────────────────────

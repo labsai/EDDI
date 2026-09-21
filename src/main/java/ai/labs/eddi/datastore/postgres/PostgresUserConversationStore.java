@@ -19,6 +19,8 @@ import java.sql.*;
 import java.util.ArrayList;
 import java.util.List;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 /**
  * PostgreSQL implementation of {@link IUserConversationStore}.
  */
@@ -38,6 +40,12 @@ public class PostgresUserConversationStore implements IUserConversationStore {
             )
             """;
 
+    // Backs readUserConversationByConversationId — the reverse lookup used after a
+    // HITL resume to find the originating Slack thread. Without this, every such
+    // lookup is a full-table JSONB scan (parity with the Mongo store's index).
+    private static final String CREATE_INDEX_CONVERSATION_ID = "CREATE INDEX IF NOT EXISTS idx_user_conv_conversation_id "
+            + "ON user_conversations ((data->>'conversationId'))";
+
     private final Instance<DataSource> dataSourceInstance;
     private final IJsonSerialization jsonSerialization;
     private volatile boolean schemaInitialized = false;
@@ -53,6 +61,7 @@ public class PostgresUserConversationStore implements IUserConversationStore {
             return;
         try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
             stmt.execute(CREATE_TABLE);
+            stmt.execute(CREATE_INDEX_CONVERSATION_ID);
             schemaInitialized = true;
         } catch (SQLException e) {
             LOGGER.error("Failed to initialize user_conversations table", e);
@@ -66,6 +75,26 @@ public class PostgresUserConversationStore implements IUserConversationStore {
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, intent);
             ps.setString(2, userId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return jsonSerialization.deserialize(rs.getString("data"), UserConversation.class);
+                }
+            }
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
+        }
+        return null;
+    }
+
+    @Override
+    public UserConversation readUserConversationByConversationId(String conversationId) throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        // Reverse lookup on the JSONB payload — conversationId lives inside the
+        // serialized UserConversation (no dedicated column). LIMIT 1: a
+        // conversationId maps to at most one mapping (parity with Mongo).
+        String sql = "SELECT data FROM user_conversations WHERE data->>'conversationId' = ? LIMIT 1";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, conversationId);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
                     return jsonSerialization.deserialize(rs.getString("data"), UserConversation.class);
@@ -109,7 +138,10 @@ public class PostgresUserConversationStore implements IUserConversationStore {
             ps.setString(2, userId);
             ps.executeUpdate();
         } catch (SQLException e) {
-            LOGGER.error("Failed to delete user conversation intent=" + intent, e);
+            // Sanitized: the intent embeds a caller-supplied chat key (the OpenAI
+            // adapter builds channel:openai:<agentId>:<chatKey> from a request
+            // header), so a newline in it could forge log entries.
+            LOGGER.error("Failed to delete user conversation intent=" + sanitize(intent), e);
         }
     }
     // === GDPR ===

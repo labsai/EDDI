@@ -6,6 +6,7 @@ package ai.labs.eddi.integrations.slack.rest;
 
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
 import ai.labs.eddi.integrations.slack.SlackEventHandler;
+import ai.labs.eddi.integrations.slack.SlackInteractivityHandler;
 import ai.labs.eddi.integrations.slack.SlackSignatureVerifier;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -14,10 +15,14 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 import org.jboss.logging.Logger;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -43,6 +48,7 @@ import java.util.Set;
 @ApplicationScoped
 @Path("/integrations/slack")
 @Produces(MediaType.APPLICATION_JSON)
+@Tag(name = "Integrations / Slack Webhook", description = "Slack Events API webhook receiver")
 public class RestSlackWebhook {
 
     private static final Logger LOGGER = Logger.getLogger(RestSlackWebhook.class);
@@ -52,16 +58,19 @@ public class RestSlackWebhook {
     private final ChannelTargetRouter channelTargetRouter;
     private final SlackSignatureVerifier signatureVerifier;
     private final SlackEventHandler eventHandler;
+    private final SlackInteractivityHandler interactivityHandler;
     private final ObjectMapper objectMapper;
 
     @Inject
     public RestSlackWebhook(ChannelTargetRouter channelTargetRouter,
             SlackSignatureVerifier signatureVerifier,
             SlackEventHandler eventHandler,
+            SlackInteractivityHandler interactivityHandler,
             ObjectMapper objectMapper) {
         this.channelTargetRouter = channelTargetRouter;
         this.signatureVerifier = signatureVerifier;
         this.eventHandler = eventHandler;
+        this.interactivityHandler = interactivityHandler;
         this.objectMapper = objectMapper;
     }
 
@@ -117,7 +126,7 @@ public class RestSlackWebhook {
                     LOGGER.debugf("Slack event received: type=%s, event_id=%s", sanitize(eventType), sanitize(eventId));
 
                     // Delegate to handler (async — returns immediately)
-                    eventHandler.handleEventAsync(eventId, event);
+                    eventHandler.handleEventAsync(eventId, event, botUserId(payload));
                 }
             }
 
@@ -131,4 +140,126 @@ public class RestSlackWebhook {
                     .build();
         }
     }
+
+    /**
+     * Receive Slack interactivity payloads (block_actions from HITL Approve/Reject
+     * buttons). Slack sends {@code application/x-www-form-urlencoded} with a single
+     * {@code payload} parameter containing a JSON string.
+     * <p>
+     * Unlike {@code /events} (which may verify against the pooled set of signing
+     * secrets), a HITL decision is bound to the integration that OWNS it: we
+     * resolve the owning integration from the button value first, then verify the
+     * RAW body against ONLY that integration's signing secret. This prevents a
+     * holder of any one Slack secret from forging an approval on another
+     * integration's paused conversation (cross-integration IDOR). Legacy per-agent
+     * ChannelConnector secrets are excluded — a decision that cannot be bound to a
+     * new-style integration is rejected.
+     * <p>
+     * Responds 200 within Slack's 3-second window and processes the decision
+     * asynchronously.
+     *
+     * @param rawBody
+     *            the raw request body (needed for signature verification)
+     * @param signature
+     *            the X-Slack-Signature header
+     * @param timestamp
+     *            the X-Slack-Request-Timestamp header
+     * @return 200 OK for valid requests; 403 for invalid/unbindable signatures; 400
+     *         for a missing/malformed payload
+     */
+    @POST
+    @Path("/interactive")
+    @Consumes(MediaType.APPLICATION_FORM_URLENCODED)
+    public Response handleInteractive(String rawBody,
+                                      @HeaderParam("X-Slack-Signature") String signature,
+                                      @HeaderParam("X-Slack-Request-Timestamp") String timestamp) {
+
+        // Step 1: Extract the "payload" form parameter (URL-encoded JSON string).
+        String payloadJson = extractPayloadParam(rawBody);
+        if (payloadJson == null || payloadJson.isBlank()) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity("{\"error\":\"Missing payload\"}")
+                    .build();
+        }
+
+        // Step 2: Resolve the owning integration's signing secret from the payload
+        // (button value carries the integration name). A null secret means the
+        // decision cannot be bound to a new-style integration (legacy/unknown) —
+        // reject rather than accepting a pooled secret.
+        String owningSecret = interactivityHandler.resolveSigningSecretForDecision(payloadJson);
+        if (owningSecret == null) {
+            LOGGER.warn("Slack interactive decision could not be bound to an owning integration — rejecting");
+            return Response.status(Response.Status.FORBIDDEN)
+                    .entity("{\"error\":\"Invalid signature\"}")
+                    .build();
+        }
+
+        // Step 3: Verify the RAW body against ONLY the owning integration's secret.
+        if (!signatureVerifier.verifyWithSecret(timestamp, rawBody, signature, owningSecret)) {
+            LOGGER.warnf("Slack interactive signature verification failed (timestamp=%s)", sanitize(timestamp));
+            return Response.status(Response.Status.FORBIDDEN)
+                    .entity("{\"error\":\"Invalid signature\"}")
+                    .build();
+        }
+
+        // Step 4: Process async (Slack's 3-second requirement) and ack immediately.
+        interactivityHandler.handlePayloadAsync(payloadJson);
+        return Response.ok().build();
+    }
+
+    /**
+     * Extract and URL-decode the {@code payload} parameter from an
+     * {@code x-www-form-urlencoded} body. Returns {@code null} if absent.
+     */
+    static String extractPayloadParam(String rawBody) {
+        if (rawBody == null || rawBody.isBlank()) {
+            return null;
+        }
+        for (String pair : rawBody.split("&")) {
+            int eq = pair.indexOf('=');
+            if (eq <= 0) {
+                continue;
+            }
+            String key = pair.substring(0, eq);
+            if ("payload".equals(key)) {
+                try {
+                    return URLDecoder.decode(pair.substring(eq + 1), StandardCharsets.UTF_8);
+                } catch (IllegalArgumentException e) {
+                    // malformed percent-encoding — treat as a bad payload (handleInteractive
+                    // maps null -> 400) rather than letting it become a 500. This runs
+                    // before signature verification, so fail as a client error.
+                    return null;
+                }
+            }
+        }
+        return null;
+    }
+    /**
+     * This app's own Slack user id, from the event envelope.
+     *
+     * Slack puts it on {@code authorizations[].user_id} for the entry whose
+     * {@code is_bot} is true, on every {@code event_callback}. Taking it from here
+     * rather than calling {@code auth.test} means no extra request, no cache to
+     * invalidate on reinstall, and a value that is correct per workspace in a
+     * multi-workspace install.
+     *
+     * {@code null} when the envelope does not carry one — an older payload shape,
+     * or a user-token authorization. Callers must degrade rather than depend on it.
+     */
+    private static String botUserId(Map<String, Object> payload) {
+        Object authorizations = payload.get("authorizations");
+        if (!(authorizations instanceof List<?> list)) {
+            return null;
+        }
+        for (Object entry : list) {
+            if (entry instanceof Map<?, ?> auth
+                    && Boolean.TRUE.equals(auth.get("is_bot"))
+                    && auth.get("user_id") instanceof String userId
+                    && !userId.isBlank()) {
+                return userId;
+            }
+        }
+        return null;
+    }
+
 }

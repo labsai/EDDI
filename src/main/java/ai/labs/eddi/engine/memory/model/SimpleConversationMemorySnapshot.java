@@ -4,12 +4,15 @@
  */
 package ai.labs.eddi.engine.memory.model;
 
-import ai.labs.eddi.engine.memory.IConversationMemory;
+import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.model.Deployment;
 
+import java.time.Instant;
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * @author ginccc
@@ -22,10 +25,36 @@ public class SimpleConversationMemorySnapshot {
     private String userId;
     private Deployment.Environment environment;
     private ConversationState conversationState;
+    private Instant hitlPausedAt;
+    /**
+     * Task 13: HITL pause type ("TOOL_CALL" | "RULE" | null) carried onto the
+     * simple snapshot so delegated/MCP surfaces and the group member-turn path can
+     * additively surface it. Mirrors
+     * {@code ConversationMemorySnapshot.hitlPauseType}.
+     */
+    private String hitlPauseType;
+    /**
+     * Task 13: the gated tool-call batch for a TOOL_CALL pause — consumers read
+     * tool NAMES only (never arguments). Null for RULE pauses. Mirrors
+     * {@code ConversationMemorySnapshot.hitlPendingToolCalls}.
+     */
+    private PendingToolCallBatch hitlPendingToolCalls;
     private boolean undoAvailable;
     private boolean redoAvailable;
     private List<ConversationOutput> conversationOutputs = new LinkedList<>();
-    private IConversationMemory.IConversationProperties conversationProperties = new ConversationProperties(null);
+    /**
+     * Declared as the plain {@link Map}, matching the sibling
+     * {@code ConversationMemorySnapshot}, NOT as
+     * {@code IConversationMemory.IConversationProperties}.
+     * <p>
+     * The wire format is the same either way — {@code ConversationProperties} is a
+     * {@code LinkedHashMap} — but the interface broke the generated OpenAPI
+     * document: smallrye emitted {@code $ref: IConversationProperties} for it and
+     * never generated the schema, leaving this the one dangling reference in the
+     * spec. Any client that dereferences (swagger-parser does, so EDDI's own
+     * {@code setup-api} wizard did while reading EDDI's spec) errors on it.
+     */
+    private Map<String, Property> conversationProperties = new LinkedHashMap<>();
     private List<SimpleConversationStep> conversationSteps = new LinkedList<>();
 
     public static class SimpleConversationStep {
@@ -143,6 +172,30 @@ public class SimpleConversationMemorySnapshot {
         this.conversationState = conversationState;
     }
 
+    public Instant getHitlPausedAt() {
+        return hitlPausedAt;
+    }
+
+    public void setHitlPausedAt(Instant hitlPausedAt) {
+        this.hitlPausedAt = hitlPausedAt;
+    }
+
+    public String getHitlPauseType() {
+        return hitlPauseType;
+    }
+
+    public void setHitlPauseType(String hitlPauseType) {
+        this.hitlPauseType = hitlPauseType;
+    }
+
+    public PendingToolCallBatch getHitlPendingToolCalls() {
+        return hitlPendingToolCalls;
+    }
+
+    public void setHitlPendingToolCalls(PendingToolCallBatch hitlPendingToolCalls) {
+        this.hitlPendingToolCalls = hitlPendingToolCalls;
+    }
+
     public boolean isUndoAvailable() {
         return undoAvailable;
     }
@@ -167,11 +220,11 @@ public class SimpleConversationMemorySnapshot {
         this.conversationOutputs = conversationOutputs;
     }
 
-    public IConversationMemory.IConversationProperties getConversationProperties() {
+    public Map<String, Property> getConversationProperties() {
         return conversationProperties;
     }
 
-    public void setConversationProperties(IConversationMemory.IConversationProperties conversationProperties) {
+    public void setConversationProperties(Map<String, Property> conversationProperties) {
         this.conversationProperties = conversationProperties;
     }
 

@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.dictionary.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.patch.PatchInstruction;
 import ai.labs.eddi.configs.dictionary.IDictionaryStore;
 import ai.labs.eddi.configs.dictionary.IRestDictionaryStore;
@@ -34,8 +35,9 @@ public class RestDictionaryStore implements IRestDictionaryStore {
 
     @Inject
     public RestDictionaryStore(IDictionaryStore regularDictionaryStore, IDocumentDescriptorStore documentDescriptorStore,
-            IJsonSchemaCreator jsonSchemaCreator) {
-        restVersionInfo = new RestVersionInfo<>(resourceURI, regularDictionaryStore, documentDescriptorStore);
+            IJsonSchemaCreator jsonSchemaCreator,
+            ResourceAccessGuard resourceAccessGuard) {
+        restVersionInfo = new RestVersionInfo<>(resourceURI, regularDictionaryStore, documentDescriptorStore, resourceAccessGuard);
         this.regularDictionaryStore = regularDictionaryStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
     }
@@ -51,7 +53,7 @@ public class RestDictionaryStore implements IRestDictionaryStore {
 
     @Override
     public List<DocumentDescriptor> readRegularDictionaryDescriptors(String filter, Integer index, Integer limit) {
-        return restVersionInfo.readDescriptors("ai.labs.regulardictionary", filter, index, limit);
+        return restVersionInfo.readDescriptors(filter, index, limit);
     }
 
     @Override
@@ -61,6 +63,7 @@ public class RestDictionaryStore implements IRestDictionaryStore {
 
     @Override
     public List<String> readExpressions(String id, Integer version, String filter, String order, Integer index, Integer limit) {
+        restVersionInfo.requireViewAccess(id);
         try {
             return regularDictionaryStore.readExpressions(id, version, filter, order, index, limit);
         } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
@@ -85,6 +88,7 @@ public class RestDictionaryStore implements IRestDictionaryStore {
 
     @Override
     public Response patchRegularDictionary(String id, Integer version, List<PatchInstruction<DictionaryConfiguration>> patchInstructions) {
+        restVersionInfo.requireEditAccess(id);
         try {
             var currentDictionaryConfiguration = regularDictionaryStore.read(id, version);
             var patchedDictionaryConfiguration = patchDocument(currentDictionaryConfiguration, patchInstructions);
@@ -102,6 +106,11 @@ public class RestDictionaryStore implements IRestDictionaryStore {
 
         for (var patchInstruction : patchInstructions) {
             var regularConfigPatch = patchInstruction.getDocument();
+            // A missing operation is a malformed request (400). Switching on null threw
+            // a NullPointerException, reported as a 500.
+            if (patchInstruction.getOperation() == null) {
+                throw new IllegalArgumentException("Patch operation must be either SET or DELETE!");
+            }
             switch (patchInstruction.getOperation()) {
                 case SET -> {
                     currentDictionaryConfig.getWords().removeAll(regularConfigPatch.getWords());
@@ -122,6 +131,7 @@ public class RestDictionaryStore implements IRestDictionaryStore {
 
     @Override
     public Response duplicateRegularDictionary(String id, Integer version) {
+        restVersionInfo.requireViewAccess(id);
         restVersionInfo.validateParameters(id, version);
         try {
             var regularDictionaryConfiguration = regularDictionaryStore.read(id, version);

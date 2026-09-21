@@ -16,6 +16,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.*;
+import java.util.Objects;
 
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
@@ -291,6 +292,142 @@ public class ContextMatcherTest {
         Assertions.assertEquals(IRuleCondition.ExecutionState.FAIL, actualExecutionState);
     }
 
+    // --- runtime context type vs. configured context type ---
+
+    private void mockContext(Context.ContextType runtimeType, Object value) {
+        when(currentStep.getAllData(eq("context"))).then(invocation -> {
+            LinkedList<IData<Context>> ret = new LinkedList<>();
+            ret.add(new MockData<>("context:someContextKey", new Context(runtimeType, value)));
+            return ret;
+        });
+    }
+
+    @Test
+    public void executeConfiguredForExpressionsWithStringContext_returnsFail() {
+        // setup
+        setupValuesWithExpressions();
+        mockContext(Context.ContextType.string, "someString");
+
+        // test
+        IRuleCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory, new LinkedList<>());
+
+        // assert
+        Assertions.assertEquals(IRuleCondition.ExecutionState.FAIL, actualExecutionState);
+    }
+
+    @Test
+    public void executeConfiguredForObjectWithStringContext_returnsFail() {
+        // setup
+        setupValuesWithObject(true);
+        mockContext(Context.ContextType.string, "someString");
+
+        // test
+        IRuleCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory, new LinkedList<>());
+
+        // assert
+        Assertions.assertEquals(IRuleCondition.ExecutionState.FAIL, actualExecutionState);
+    }
+
+    @Test
+    public void executeConfiguredForStringWithExpressionsContext_returnsFail() {
+        // setup
+        setupValuesWithString();
+        mockContext(Context.ContextType.expressions, "expression(test)");
+
+        // test
+        IRuleCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory, new LinkedList<>());
+
+        // assert
+        Assertions.assertEquals(IRuleCondition.ExecutionState.FAIL, actualExecutionState);
+    }
+
+    @Test
+    public void executeWithArrayContext_returnsFail() {
+        // Context.ContextType has an 'array' value that contextmatcher cannot handle
+        setupValuesWithString();
+        mockContext(Context.ContextType.array, List.of("a", "b"));
+
+        IRuleCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory, new LinkedList<>());
+
+        Assertions.assertEquals(IRuleCondition.ExecutionState.FAIL, actualExecutionState);
+    }
+
+    /**
+     * A runtime context type that the matcher cannot express is not a plain
+     * mismatch — no configuration can ever match it, so it is reported instead of
+     * being swallowed at DEBUG level. This test also guards the enum pair: adding a
+     * value to {@link Context.ContextType} without teaching contextmatcher about it
+     * fails here.
+     */
+    @Test
+    public void unsupportedRuntimeContextTypesAreKnown() {
+        List<String> unsupported = Arrays.stream(Context.ContextType.values()).filter(type -> !ContextMatcher.isSupportedContextType(type))
+                .map(Enum::name).toList();
+
+        Assertions.assertEquals(List.of(Context.ContextType.array.name()), unsupported,
+                "'array' is the only runtime context type contextmatcher cannot evaluate");
+    }
+
+    @Test
+    public void everyConfigurableContextTypeIsSupportedAtRuntime() {
+        for (ContextMatcher.ContextType configurable : ContextMatcher.ContextType.values()) {
+            Assertions.assertTrue(ContextMatcher.isSupportedContextType(Context.ContextType.valueOf(configurable.name())),
+                    "configurable type '" + configurable + "' must be evaluable at runtime");
+        }
+    }
+
+    @Test
+    public void executeWithNullContextValue_returnsFail() {
+        setupValuesWithString();
+        mockContext(Context.ContextType.string, null);
+
+        IRuleCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory, new LinkedList<>());
+
+        Assertions.assertEquals(IRuleCondition.ExecutionState.FAIL, actualExecutionState);
+    }
+
+    // --- configuration validation ---
+
+    @Test
+    public void setConfigs_unknownContextType_isRejected() {
+        Map<String, String> values = new HashMap<>();
+        values.put("contextKey", "someContextKey");
+        values.put("contextType", "expression");
+
+        IllegalArgumentException exception = Assertions.assertThrows(IllegalArgumentException.class, () -> contextMatcher.setConfigs(values));
+
+        Assertions.assertTrue(exception.getMessage().contains("expression"), exception.getMessage());
+        Assertions.assertTrue(exception.getMessage().contains("expressions"), exception.getMessage());
+        Assertions.assertTrue(exception.getMessage().contains("object"), exception.getMessage());
+        Assertions.assertTrue(exception.getMessage().contains("string"), exception.getMessage());
+    }
+
+    @Test
+    public void validateConfiguration_missingContextKey_isRejected() {
+        Map<String, String> values = new HashMap<>();
+        values.put("contextType", "string");
+        values.put("string", "someString");
+        contextMatcher.setConfigs(values);
+
+        Assertions.assertThrows(IllegalArgumentException.class, () -> contextMatcher.validateConfiguration());
+    }
+
+    @Test
+    public void validateConfiguration_missingTypeSpecificValue_isRejected() {
+        Map<String, String> values = new HashMap<>();
+        values.put("contextKey", "someContextKey");
+        values.put("contextType", "string");
+        contextMatcher.setConfigs(values);
+
+        Assertions.assertThrows(IllegalArgumentException.class, () -> contextMatcher.validateConfiguration());
+    }
+
+    @Test
+    public void validateConfiguration_completeStringConfig_passes() {
+        setupValuesWithString();
+        contextMatcher.validateConfiguration();
+    }
+
     private static class MockData<T> implements IData<T> {
         private final String key;
         private T result;
@@ -366,12 +503,12 @@ public class ContextMatcherTest {
             if (o == null || getClass() != o.getClass())
                 return false;
             MockData<?> that = (MockData<?>) o;
-            return java.util.Objects.equals(key, that.key) && java.util.Objects.equals(result, that.result);
+            return Objects.equals(key, that.key) && Objects.equals(result, that.result);
         }
 
         @Override
         public int hashCode() {
-            return java.util.Objects.hash(key, result);
+            return Objects.hash(key, result);
         }
     }
 }

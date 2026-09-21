@@ -6,10 +6,13 @@ package ai.labs.eddi.modules.llm.tools.impl;
 
 import ai.labs.eddi.engine.httpclient.SafeHttpClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.net.http.HttpResponse;
+import java.net.http.HttpRequest;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -501,7 +504,7 @@ class WebSearchToolTest {
         @SuppressWarnings("unchecked")
         @Test
         void searchWeb_duckDuckGoSuccess_returnsResults() throws Exception {
-            var response = (java.net.http.HttpResponse<String>) org.mockito.Mockito.mock(java.net.http.HttpResponse.class);
+            var response = (HttpResponse<String>) org.mockito.Mockito.mock(HttpResponse.class);
             org.mockito.Mockito.when(response.statusCode()).thenReturn(200);
             org.mockito.Mockito.when(response.body()).thenReturn("""
                     {
@@ -523,10 +526,10 @@ class WebSearchToolTest {
         @SuppressWarnings("unchecked")
         @Test
         void searchWeb_duckDuckGoNon200_returnsError() throws Exception {
-            var response = (java.net.http.HttpResponse<String>) org.mockito.Mockito.mock(java.net.http.HttpResponse.class);
+            var response = (HttpResponse<String>) org.mockito.Mockito.mock(HttpResponse.class);
             org.mockito.Mockito.when(response.statusCode()).thenReturn(429);
             org.mockito.Mockito.doReturn(response).when(mockedClient).send(
-                    org.mockito.ArgumentMatchers.any(java.net.http.HttpRequest.class),
+                    org.mockito.ArgumentMatchers.any(HttpRequest.class),
                     org.mockito.ArgumentMatchers.any());
 
             String result = mockedTool.searchWeb("test", 5);
@@ -544,13 +547,13 @@ class WebSearchToolTest {
 
             var apiKeyField = WebSearchTool.class.getDeclaredField("googleApiKey");
             apiKeyField.setAccessible(true);
-            apiKeyField.set(mockedTool, java.util.Optional.of("test-key"));
+            apiKeyField.set(mockedTool, Optional.of("test-key"));
 
             var cxField = WebSearchTool.class.getDeclaredField("googleCx");
             cxField.setAccessible(true);
-            cxField.set(mockedTool, java.util.Optional.of("test-cx"));
+            cxField.set(mockedTool, Optional.of("test-cx"));
 
-            var response = (java.net.http.HttpResponse<String>) org.mockito.Mockito.mock(java.net.http.HttpResponse.class);
+            var response = (HttpResponse<String>) org.mockito.Mockito.mock(HttpResponse.class);
             org.mockito.Mockito.when(response.statusCode()).thenReturn(200);
             org.mockito.Mockito.when(response.body()).thenReturn("""
                     {"items":[{"title":"Google Result","snippet":"Google snippet","link":"https://g.com"}]}

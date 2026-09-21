@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.engine.docs.DocsService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -16,25 +17,35 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Tests for McpDocResources, focusing on path traversal prevention.
+ * <p>
+ * Every assertion here predates the extraction of {@link DocsService} and is
+ * kept verbatim: this class is the evidence that moving the filesystem access
+ * out did not change a single response an MCP client sees.
  */
 class McpDocResourcesTest {
 
     private McpDocResources resources;
+    private DocsService docsService;
 
     @TempDir
     Path tempDir;
 
     @BeforeEach
     void setUp() throws Exception {
-        resources = new McpDocResources();
-
-        // Set docsPath via reflection (normally injected by CDI)
-        Field docsPathField = McpDocResources.class.getDeclaredField("docsPath");
-        docsPathField.setAccessible(true);
-        docsPathField.set(resources, tempDir.toString());
+        docsService = docsServiceFor(tempDir.toString());
+        resources = new McpDocResources(docsService);
 
         // Create a test doc
         Files.writeString(tempDir.resolve("getting-started.md"), "# Getting Started\nHello!");
+    }
+
+    /** DocsService with docsPath set directly (normally injected by CDI). */
+    private static DocsService docsServiceFor(String path) throws Exception {
+        var service = new DocsService();
+        Field docsPathField = DocsService.class.getDeclaredField("docsPath");
+        docsPathField.setAccessible(true);
+        docsPathField.set(service, path);
+        return service;
     }
 
     @Test
@@ -104,11 +115,11 @@ class McpDocResourcesTest {
 
     @Test
     void listDocs_invalidDir_returnsError() throws Exception {
-        Field docsPathField = McpDocResources.class.getDeclaredField("docsPath");
-        docsPathField.setAccessible(true);
-        docsPathField.set(resources, "/nonexistent/path");
+        // A mis-set eddi.docs.path must still read as a misconfiguration, not as an
+        // index of zero documents — which would look like success.
+        var broken = new McpDocResources(docsServiceFor("/nonexistent/path"));
 
-        String result = resources.listDocs();
+        String result = broken.listDocs();
         assertTrue(result.contains("Docs directory not found"));
     }
 }

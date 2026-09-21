@@ -4,6 +4,10 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
@@ -13,23 +17,31 @@ import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
+import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
+import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 
+import java.net.URI;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 import static org.mockito.MockitoAnnotations.openMocks;
+import ai.labs.eddi.configs.rest.StrictConfigurationParser;
+import java.io.IOException;
 
 @DisplayName("McpAdminTools — Branch Coverage")
 class McpAdminToolsBranchCoverageTest {
@@ -56,8 +68,13 @@ class McpAdminToolsBranchCoverageTest {
         openMocks(this);
         // authEnabled=false so tests don't fail on requireRole
         tools = new McpAdminTools(restInterfaceFactory, agentAdmin, jsonSerialization,
+                strictConfigurationParser(),
                 scheduleStore, scheduleFireExecutor, schedulePollerService,
                 identity, false);
+        // fire_schedule_now claims the schedule first, exactly as the poller and the
+        // REST endpoint do. Default the claim to "won" so tests about anything else
+        // still reach the fire.
+        when(schedulePollerService.claimForManualFire(any())).thenReturn(true);
     }
 
     // ─── deployAgent ────────────────────────────────────────────────────
@@ -163,6 +180,47 @@ class McpAdminToolsBranchCoverageTest {
 
             String result = tools.deployAgent("agent1", 1, null);
             assertTrue(result.contains("error"));
+            assertTrue(result.contains("Check server logs"),
+                    "an unrecognised failure must NOT leak its own message to an MCP client");
+        }
+
+        /**
+         * An over-limit refusal is actionable ("undeploy an agent first"), so its
+         * reason is passed through verbatim rather than replaced by "check server logs"
+         * — which a model driving an MCP client cannot self-correct from and will retry
+         * in a loop.
+         */
+        @Test
+        @DisplayName("an over-quota refusal returns the quota reason verbatim")
+        void quotaExceededReturnsTheReason() {
+            when(agentAdmin.deployAgent(any(), anyString(), anyInt(), anyBoolean(), anyBoolean()))
+                    .thenThrow(new QuotaExceededException("Agent limit reached (5)"));
+
+            String result = tools.deployAgent("agent1", 1, null);
+
+            assertEquals("{\"error\":\"Agent limit reached (5)\"}", result);
+        }
+
+        /**
+         * The regression the {@code QuotaRefusal} marker exists for.
+         * {@code QuotaAccountingUnavailableException} is a sibling of
+         * {@code QuotaExceededException}, not a subclass, so the previous
+         * {@code catch (QuotaExceededException)} stopped matching it and a quota-store
+         * outage fell into the generic branch — reaching the client as "Failed to
+         * deploy agent. Check server logs for details."
+         */
+        @Test
+        @DisplayName("a quota-store outage also returns its reason, not the generic 'check server logs'")
+        void quotaAccountingUnavailableReturnsTheReason() {
+            when(agentAdmin.deployAgent(any(), anyString(), anyInt(), anyBoolean(), anyBoolean()))
+                    .thenThrow(new QuotaAccountingUnavailableException(
+                            "Quota accounting unavailable — denying request for safety"));
+
+            String result = tools.deployAgent("agent1", 1, null);
+
+            assertEquals("{\"error\":\"Quota accounting unavailable — denying request for safety\"}", result);
+            assertFalse(result.contains("Check server logs"),
+                    "a store outage is not an unknown failure; the MCP client must be told what happened");
         }
     }
 
@@ -522,6 +580,83 @@ class McpAdminToolsBranchCoverageTest {
         void blankMappings() {
             assertTrue(tools.applyAgentChanges("id", 1, "  ", null, null).contains("error"));
         }
+
+        private static final String WORKFLOW_ID = "aabbccddeeff001122334455";
+        private static final String OLD_LLM_URI = "eddi://ai.labs.llm/llmstore/llms/112233445566778899aabbcc?version=1";
+        private static final String NEW_LLM_URI = "eddi://ai.labs.llm/llmstore/llms/112233445566778899aabbcc?version=2";
+
+        /** One agent → one workflow → one LLM step whose URI the mapping replaces. */
+        private void cascadeThatUpdatesOneWorkflow() throws Exception {
+            var agentStore = mock(IRestAgentStore.class);
+            var workflowStore = mock(IRestWorkflowStore.class);
+            when(restInterfaceFactory.get(IRestAgentStore.class)).thenReturn(agentStore);
+            when(restInterfaceFactory.get(IRestWorkflowStore.class)).thenReturn(workflowStore);
+            when(jsonSerialization.deserialize(anyString(), eq(List.class)))
+                    .thenReturn(List.of(Map.of("oldUri", OLD_LLM_URI, "newUri", NEW_LLM_URI)));
+
+            var agent = new AgentConfiguration();
+            agent.setWorkflows(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + WORKFLOW_ID + "?version=1")));
+            when(agentStore.readAgent("agent1", 1)).thenReturn(agent);
+
+            var step = new WorkflowConfiguration.WorkflowStep();
+            step.setType(URI.create("eddi://ai.labs.llm"));
+            step.setConfig(new HashMap<>(Map.of("uri", OLD_LLM_URI)));
+            var workflow = new WorkflowConfiguration();
+            workflow.setWorkflowSteps(List.of(step));
+            when(workflowStore.readWorkflow(WORKFLOW_ID, 1)).thenReturn(workflow);
+
+            Response workflowResponse = mock(Response.class);
+            when(workflowResponse.getHeaderString("Location"))
+                    .thenReturn("eddi://ai.labs.workflow/workflowstore/workflows/" + WORKFLOW_ID + "?version=2");
+            when(workflowStore.updateWorkflow(eq(WORKFLOW_ID), eq(1), any())).thenReturn(workflowResponse);
+            Response agentResponse = mock(Response.class);
+            when(agentResponse.getHeaderString("Location")).thenReturn("eddi://ai.labs.agent/agentstore/agents/agent1?version=2");
+            when(agentStore.updateAgent(eq("agent1"), eq(1), any())).thenReturn(agentResponse);
+            when(jsonSerialization.serialize(any())).thenReturn("{}");
+        }
+
+        @SuppressWarnings("unchecked")
+        private Map<String, Object> lastSerializedResult() throws Exception {
+            var captor = ArgumentCaptor.forClass(Object.class);
+            verify(jsonSerialization, atLeastOnce()).serialize(captor.capture());
+            return (Map<String, Object>) captor.getValue();
+        }
+
+        @Test
+        @DisplayName("redeploy: a waited deploy that answers 200 with an ERROR body is not reported as redeployed")
+        void redeployFailureInBodyIsNotRedeployed() throws Exception {
+            cascadeThatUpdatesOneWorkflow();
+            Response deployResponse = mock(Response.class);
+            when(deployResponse.getStatus()).thenReturn(200);
+            when(deployResponse.getEntity()).thenReturn(Map.of("status", "ERROR", "error", "Deployment failed. Check server logs for details."));
+            when(agentAdmin.deployAgent(any(), eq("agent1"), eq(2), eq(true), eq(true))).thenReturn(deployResponse);
+
+            tools.applyAgentChanges("agent1", 1, "[...]", true, "production");
+            var result = lastSerializedResult();
+
+            assertEquals(false, result.get("redeployed"));
+            assertEquals("ERROR", result.get("deploymentStatus"));
+            assertEquals("Deployment failed. Check server logs for details.", result.get("deployError"));
+            assertEquals(false, result.get("previousVersionStillDeployed"));
+        }
+
+        @Test
+        @DisplayName("redeploy: READY with no error is redeployed, and the superseded version is flagged as still deployed")
+        void redeploySuccess() throws Exception {
+            cascadeThatUpdatesOneWorkflow();
+            Response deployResponse = mock(Response.class);
+            when(deployResponse.getStatus()).thenReturn(200);
+            when(deployResponse.getEntity()).thenReturn(Map.of("status", "READY"));
+            when(agentAdmin.deployAgent(any(), eq("agent1"), eq(2), eq(true), eq(true))).thenReturn(deployResponse);
+
+            tools.applyAgentChanges("agent1", 1, "[...]", true, "production");
+            var result = lastSerializedResult();
+
+            assertEquals(true, result.get("redeployed"));
+            assertEquals("READY", result.get("deploymentStatus"));
+            assertNull(result.get("deployError"));
+            assertEquals(true, result.get("previousVersionStillDeployed"));
+        }
     }
 
     // ─── schedule tools ─────────────────────────────────────────────────
@@ -747,6 +882,74 @@ class McpAdminToolsBranchCoverageTest {
             verify(scheduleFireExecutor).fire(schedule, "inst1", 1);
         }
 
+        /**
+         * {@code fire_schedule_now} used to call the executor directly: no cluster
+         * claim, so it raced the poller — and with
+         * {@code conversationStrategy=persistent} both pushed a turn into the SAME
+         * conversation — and no {@code recordManualFireOutcome}, so the fire never
+         * reached the retry/backoff/one-shot state machine. A failure here did not
+         * increment failCount and a success did not re-arm the schedule. Routing it
+         * through the same claim/fire/finally flow as the REST endpoint is the point.
+         */
+        @Test
+        @DisplayName("claims the schedule and records the outcome, like the REST endpoint")
+        void claimsAndRecordsTheOutcome() throws Exception {
+            var schedule = new ScheduleConfiguration();
+            schedule.setName("test");
+            schedule.setFailCount(2);
+            when(scheduleStore.readSchedule("sched1")).thenReturn(schedule);
+            when(schedulePollerService.getInstanceId()).thenReturn("inst1");
+            var fireLog = new ScheduleFireLog("log1", "sched1", "fire1", Instant.now(), Instant.now(),
+                    Instant.now(), "COMPLETED", "inst1", "conv1", null, 3, 0.0);
+            when(scheduleFireExecutor.fire(any(), anyString(), anyInt())).thenReturn(fireLog);
+            when(jsonSerialization.serialize(any())).thenReturn("{}");
+
+            tools.fireScheduleNow("sched1");
+
+            var inOrder = inOrder(schedulePollerService, scheduleFireExecutor);
+            inOrder.verify(schedulePollerService).claimForManualFire(schedule);
+            // The attempt this actually is, not a constant 1: a manual retry of a
+            // schedule on its third failure logged as "attempt 1" and hid the history.
+            inOrder.verify(scheduleFireExecutor).fire(schedule, "inst1", 3);
+            inOrder.verify(schedulePollerService).recordManualFireOutcome(schedule, fireLog);
+        }
+
+        @Test
+        @DisplayName("a refused claim does not fire")
+        void refusedClaimDoesNotFire() throws Exception {
+            var schedule = new ScheduleConfiguration();
+            schedule.setName("test");
+            when(scheduleStore.readSchedule("sched1")).thenReturn(schedule);
+            when(schedulePollerService.claimForManualFire(any())).thenReturn(false);
+            when(jsonSerialization.serialize(any())).thenReturn("{}");
+
+            tools.fireScheduleNow("sched1");
+
+            verify(scheduleFireExecutor, never()).fire(any(), anyString(), anyInt());
+            verify(schedulePollerService, never()).recordManualFireOutcome(any(), any());
+        }
+
+        /**
+         * REST refuses a manual fire of a HITL approval timeout for EVERYONE, because
+         * firing it applies the configured AUTO_APPROVE/AUTO_REJECT/ABORT decision with
+         * a system actor and no owner/admin/approver check. This tool must refuse too,
+         * or it is the same bypass behind a different door.
+         */
+        @Test
+        @DisplayName("refuses a HITL approval timeout")
+        void refusesHitlTimeoutSchedule() throws Exception {
+            var schedule = new ScheduleConfiguration();
+            schedule.setName("hitl-timeout-conv-1");
+            schedule.setMetadata(Map.of("hitlType", "hitl_timeout", "conversationId", "conv-1"));
+            when(scheduleStore.readSchedule("sched1")).thenReturn(schedule);
+            when(jsonSerialization.serialize(any())).thenReturn("{}");
+
+            tools.fireScheduleNow("sched1");
+
+            verify(schedulePollerService, never()).claimForManualFire(any());
+            verify(scheduleFireExecutor, never()).fire(any(), anyString(), anyInt());
+        }
+
         @Test
         @DisplayName("fire log with null completedAt/startedAt → duration null")
         void nullDuration() throws Exception {
@@ -761,6 +964,54 @@ class McpAdminToolsBranchCoverageTest {
             when(jsonSerialization.serialize(any())).thenReturn("{}");
 
             tools.fireScheduleNow("sched1");
+        }
+
+        /**
+         * The same interrupt discipline the REST endpoint got, on the tool that shares
+         * its flow.
+         * <p>
+         * {@code ScheduleFireExecutor.fire} deliberately re-asserts an interrupt that a
+         * blocking call inside it consumed, so on the interrupted path — shutdown, a
+         * cancelled tool invocation — this finally block runs with the flag set. The
+         * synchronous Mongo driver then throws {@code MongoInterruptedException} on
+         * connection checkout, {@code recordManualFireOutcome} swallows it, and the
+         * schedule stays CLAIMED with failCount never incremented until its lease
+         * expires. The flag must be parked across the write and re-asserted after it,
+         * or the cancellation signal is lost instead.
+         */
+        @Test
+        @DisplayName("an interrupted fire releases the claim with the flag parked, then restores it")
+        void interruptedFireReleasesTheClaimWithTheFlagParked() throws Exception {
+            var schedule = new ScheduleConfiguration();
+            schedule.setName("test");
+            when(scheduleStore.readSchedule("sched1")).thenReturn(schedule);
+            when(schedulePollerService.getInstanceId()).thenReturn("inst1");
+            var fireLog = new ScheduleFireLog("log1", "sched1", "fire1", Instant.now(), Instant.now(),
+                    Instant.now(), "FAILED", "inst1", "conv1", "interrupted", 1, 0.0);
+            // Mirror ScheduleFireExecutor.restoreInterrupt: the flag is set when fire()
+            // returns on the interrupted path.
+            when(scheduleFireExecutor.fire(any(), anyString(), anyInt())).thenAnswer(inv -> {
+                Thread.currentThread().interrupt();
+                return fireLog;
+            });
+            when(jsonSerialization.serialize(any())).thenReturn("{}");
+            var flagDuringRelease = new AtomicBoolean(true);
+            doAnswer(inv -> {
+                flagDuringRelease.set(Thread.currentThread().isInterrupted());
+                return null;
+            }).when(schedulePollerService).recordManualFireOutcome(any(), any());
+
+            try {
+                tools.fireScheduleNow("sched1");
+
+                assertFalse(flagDuringRelease.get(),
+                        "the bookkeeping write must not run under a set interrupt flag — the sync Mongo "
+                                + "driver throws MongoInterruptedException on connection checkout and the claim leaks");
+                assertTrue(Thread.currentThread().isInterrupted(),
+                        "the interrupt must be re-asserted afterwards, or the cancellation signal is swallowed");
+            } finally {
+                Thread.interrupted(); // never leak a set flag into the next test
+            }
         }
 
         @Test
@@ -897,5 +1148,23 @@ class McpAdminToolsBranchCoverageTest {
             assertNotNull(result);
             assertTrue(result.contains("schedule_deleted") || result.contains("error"));
         }
+    }
+
+    /**
+     * A parser that defers to this test's {@code jsonSerialization} mock, so the
+     * existing {@code when(jsonSerialization.deserialize(...))} stubs keep
+     * describing what these dispatch tests are actually about. Strictness itself is
+     * covered by {@code StrictConfigurationParserTest}; here the only thing that
+     * matters is that each resource type reaches the right store.
+     */
+    private StrictConfigurationParser strictConfigurationParser() {
+        var parser = mock(StrictConfigurationParser.class);
+        try {
+            lenient().when(parser.parse(anyString(), any()))
+                    .thenAnswer(invocation -> jsonSerialization.deserialize(invocation.getArgument(0), invocation.getArgument(1)));
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+        return parser;
     }
 }

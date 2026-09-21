@@ -66,10 +66,25 @@ public interface ISecretPersistence {
      */
     List<EncryptedSecret> listSecretsByTenant(String tenantId);
 
+    /**
+     * Rewrites one secret's ciphertext, IV and dekId, but only while the row still
+     * names {@code expectedDekId}.
+     *
+     * @param expectedDekId
+     *            the dekId read from the row, exactly as stored — a missing value
+     *            matches a missing value, so a pre-generation row is guarded on
+     *            being pre-generation
+     * @return false if another writer changed the row's sealing first, in which
+     *         case nothing was written
+     * @throws PersistenceException
+     *             if the write fails
+     */
+    boolean updateSecretSealing(EncryptedSecret secret, String expectedDekId);
+
     // ─── DEKs ───
 
     /**
-     * Insert or update an encrypted DEK. The key is {@code tenantId}.
+     * Insert or update an encrypted DEK. The key is {@code (tenantId, generation)}.
      *
      * @throws PersistenceException
      *             if the write fails
@@ -77,7 +92,20 @@ public interface ISecretPersistence {
     void upsertDek(EncryptedDek dek);
 
     /**
-     * Find an encrypted DEK by tenant ID.
+     * Inserts a DEK generation, and only if that generation does not exist yet.
+     * <p>
+     * This is the commit point of a DEK rotation, which is why it is an insert and
+     * not an upsert: two replicas rotating the same tenant at once must produce one
+     * winner and one clean refusal, never two keys claiming the same generation.
+     *
+     * @return false if {@code (tenantId, generation)} was already taken
+     * @throws PersistenceException
+     *             if the write fails for any other reason
+     */
+    boolean insertDek(EncryptedDek dek);
+
+    /**
+     * Find the tenant's <b>active</b> DEK — the highest generation it holds.
      *
      * @throws PersistenceException
      *             if the read fails
@@ -85,7 +113,25 @@ public interface ISecretPersistence {
     Optional<EncryptedDek> findDek(String tenantId);
 
     /**
-     * Delete an encrypted DEK for a specific tenant. Used during DEK rotation.
+     * Find one specific DEK generation, so ciphertext can be opened with the key it
+     * names rather than with whatever is newest.
+     *
+     * @throws PersistenceException
+     *             if the read fails
+     */
+    Optional<EncryptedDek> findDek(String tenantId, int generation);
+
+    /**
+     * Every generation a tenant holds, oldest first.
+     *
+     * @throws PersistenceException
+     *             if the read fails
+     */
+    List<EncryptedDek> listDeks(String tenantId);
+
+    /**
+     * Delete every DEK generation for a specific tenant. Used when a tenant's vault
+     * is reset.
      *
      * @throws PersistenceException
      *             if the delete fails
@@ -93,8 +139,9 @@ public interface ISecretPersistence {
     void deleteDek(String tenantId);
 
     /**
-     * List all encrypted DEKs across all tenants. Used during KEK rotation to
-     * re-encrypt every tenant's DEK with the new master key.
+     * List all encrypted DEKs across all tenants and all generations. Used during
+     * KEK rotation to re-wrap every key with the new master key — every generation,
+     * since ciphertext that has not been swept yet still depends on an older one.
      *
      * @throws PersistenceException
      *             if the read fails

@@ -1,0 +1,89 @@
+# EDDI-Manager design system
+
+React + **Tailwind CSS v4** components from the EDDI-Manager app (black & gold brand).
+Every component is imported from the bundle (`window.EDDI.*`) and styled by Tailwind
+utility classes that read EDDI's design tokens. Build screens by composing these
+components and styling your own layout with the same utility classes + tokens below.
+
+## Styling idiom — Tailwind utilities over CSS variables
+
+Style layout/spacing with Tailwind utility classes; never hand-write CSS or invent a
+class system. Colors come from EDDI's tokens (defined as CSS custom properties), used
+via the semantic Tailwind color names below — NOT raw hex.
+
+| Token (class suffix) | Meaning |
+|---|---|
+| `primary` / `primary-foreground` | brand gold (`#f59e0b`) + text on it |
+| `secondary` / `secondary-foreground` | muted neutral surface |
+| `background` / `foreground` | page bg + body text |
+| `card` / `card-foreground` | card surface + text |
+| `muted` / `muted-foreground` | subtle surface + secondary text |
+| `border`, `input` | hairline borders, field borders |
+| `destructive` / `destructive-foreground` | danger red |
+| `warning` / `warning-foreground` | caution amber + text on it |
+
+Use them as `bg-primary`, `text-primary-foreground`, `text-muted-foreground`,
+`border-border`, `bg-card`, `text-destructive`, etc. A caution surface is
+`border-warning/30 bg-warning/5` with `text-warning` on the icon and heading — do not
+reach for a raw `amber-*` class, and do not use `destructive` for something that is
+not dangerous. Common scales also apply:
+spacing (`p-5`, `gap-2`), radius
+(`rounded-lg`, `rounded-xl`), text (`text-sm`, `font-medium`), flex/grid.
+Dark mode: add the `dark` class to a root ancestor — tokens flip automatically.
+Many components forward `className` to extend their styling (merged with `cn()`),
+but not all (e.g. `BackLink` only takes `to`/`label`) — check each component's
+`.d.ts` for whether `className` is in its props.
+
+## Variant props (don't restyle — use the prop)
+
+- **Button** — `variant`: `primary` | `secondary` | `destructive` | `warning` | `outline` | `ghost` | `link`; `size`: `sm` | `md` | `lg` | `icon`. Put a lucide icon as a child for an icon+label button.
+- **Badge** — `variant`: `default` | `secondary` | `success` | `warning` | `destructive` | `outline`.
+- **Card** — compose `Card` > `CardHeader` (`CardTitle`, `CardDescription`) + `CardContent` + `CardFooter`.
+
+## App chrome — compose the shell, don't invent one
+
+The synced surface includes EDDI's real page chrome, so a full screen is composed from
+it rather than reimplemented:
+
+- **`Sidebar`** — `collapsed` / `onToggle`. The nav rail: brand mark, Manager/Workforce
+  switcher, collapsible sections, external links, version footer. It fills its parent's
+  height, so give it a height-constrained flex container.
+- **`TopBar`** — `onMenuClick` / `sidebarVisible`. Breadcrumb (derived from the router),
+  platform-status pill, and the theme/language controls.
+- **`PlatformStatus`**, **`PageLoader`**, **`MockDataBanner`** — the connectivity pill, a
+  route-level skeleton, and the demo-mode strip. All take no props.
+
+There is no `AppLayout` in the bundle — it is deliberately excluded. Build the frame as a
+full-height flex row: `Sidebar` beside a column of `TopBar` + your `<main>`, and give that
+main region `p-6` yourself (the app's layout supplies it, so pages never repeat it).
+
+Also available beyond the leaf components: **`DropdownMenu`** (Radix wrapper — compose
+`DropdownMenuTrigger` / `Content` / `Item` / `Separator` / `Label`), **`ModeSwitcher`**, and
+**`RefetchErrorNotice`** (inline "could not refresh" strip that keeps stale data on screen).
+
+## Where the truth lives
+
+- `styles.css` (+ its `@import`ed `_ds_bundle.css` and token CSS) — the complete token + utility vocabulary. Read it before styling.
+- `components/<group>/<Name>/<Name>.d.ts` — the exact props for each component.
+- `components/<group>/<Name>/<Name>.prompt.md` — per-component usage notes.
+
+## Idiomatic example
+
+```tsx
+import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter, Button, Badge } from "<bundle>";
+
+<Card className="max-w-md">
+  <CardHeader>
+    <div className="flex items-center justify-between">
+      <CardTitle>Customer Support</CardTitle>
+      <Badge variant="success">Deployed</Badge>
+    </div>
+    <CardDescription>Resolves tier-1 tickets and routes escalations.</CardDescription>
+  </CardHeader>
+  <CardContent className="text-sm text-muted-foreground">1,284 conversations · 96% resolved</CardContent>
+  <CardFooter className="gap-2">
+    <Button size="sm">Open</Button>
+    <Button size="sm" variant="outline">Configure</Button>
+  </CardFooter>
+</Card>
+```

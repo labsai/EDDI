@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.output.rest;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.output.IOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
@@ -37,7 +38,7 @@ class RestOutputStoreTest {
         outputStore = mock(IOutputStore.class);
         documentDescriptorStore = mock(IDocumentDescriptorStore.class);
         jsonSchemaCreator = mock(IJsonSchemaCreator.class);
-        restStore = new RestOutputStore(outputStore, documentDescriptorStore, jsonSchemaCreator);
+        restStore = new RestOutputStore(outputStore, documentDescriptorStore, jsonSchemaCreator, mock(ResourceAccessGuard.class));
     }
 
     @Nested
@@ -172,6 +173,20 @@ class RestOutputStoreTest {
             restStore.patchOutputSet("out-1", 1, List.of(instruction));
 
             verify(outputStore).read("out-1", 1);
+        }
+
+        @Test
+        @DisplayName("a missing operation is a caller error (400), not a NullPointerException (500)")
+        void missingOperationIsIllegalArgument() throws Exception {
+            var current = new OutputConfigurationSet();
+            current.setOutputSet(new ArrayList<>());
+            when(outputStore.read("out-1", 1)).thenReturn(current);
+
+            var instruction = new PatchInstruction<OutputConfigurationSet>();
+            instruction.setDocument(new OutputConfigurationSet());
+
+            assertThrows(IllegalArgumentException.class, () -> restStore.patchOutputSet("out-1", 1, List.of(instruction)));
+            verify(outputStore, never()).update(any(), any(), any());
         }
 
         @Test

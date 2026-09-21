@@ -1,4 +1,12 @@
-# PodDisruptionBudget — ensure at least 1 EDDI pod is always available
+# PodDisruptionBudget — bound voluntary disruption of EDDI
+#
+# maxUnavailable, NOT minAvailable: EDDI runs at exactly 1 replica (the
+# conversation coordinator lock is JVM-local — see k8s/base/eddi-deployment.yaml),
+# and `minAvailable: 1` against a single replica means the eviction API can never
+# succeed, so `kubectl drain` hangs forever and node maintenance is blocked.
+# `maxUnavailable: 1` keeps the pod protected from concurrent disruption while
+# still allowing a drain to proceed. Switch to `minAvailable` once EDDI can
+# genuinely run more than one replica.
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -7,7 +15,7 @@ metadata:
     app.kubernetes.io/name: eddi
     app.kubernetes.io/part-of: eddi
 spec:
-  minAvailable: 1
+  maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: eddi

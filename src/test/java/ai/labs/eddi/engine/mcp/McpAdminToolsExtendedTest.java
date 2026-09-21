@@ -35,6 +35,7 @@ import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import ai.labs.eddi.engine.triggermanagement.IRestAgentTriggerStore;
+import ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
@@ -46,6 +47,8 @@ import java.net.URI;
 import java.time.Instant;
 import java.util.*;
 
+import ai.labs.eddi.configs.rest.StrictConfigurationParser;
+import io.quarkus.security.identity.SecurityIdentity;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -116,11 +119,16 @@ class McpAdminToolsExtendedTest {
 
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
         lenient().when(schedulePollerService.getInstanceId()).thenReturn("test-instance");
+        // fire_schedule_now claims the schedule first, exactly as the poller and the
+        // REST endpoint do. Default the claim to "won" so tests about anything else
+        // still reach the fire.
+        lenient().when(schedulePollerService.claimForManualFire(any())).thenReturn(true);
 
-        var mockIdentity = mock(io.quarkus.security.identity.SecurityIdentity.class);
+        var mockIdentity = mock(SecurityIdentity.class);
         lenient().when(mockIdentity.isAnonymous()).thenReturn(true);
 
         tools = new McpAdminTools(restInterfaceFactory, agentAdmin, jsonSerialization,
+                strictConfigurationParser(),
                 scheduleStore, scheduleFireExecutor, schedulePollerService,
                 mockIdentity, false);
     }
@@ -1438,9 +1446,9 @@ class McpAdminToolsExtendedTest {
 
     @Test
     void createAgentTrigger_missingIntentInConfig_returnsError() throws IOException {
-        var config = new ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration();
+        var config = new AgentTriggerConfiguration();
         config.setIntent(null);
-        when(jsonSerialization.deserialize(anyString(), eq(ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration.class)))
+        when(jsonSerialization.deserialize(anyString(), eq(AgentTriggerConfiguration.class)))
                 .thenReturn(config);
 
         String result = tools.createAgentTrigger("{\"agentDeployments\":[]}");
@@ -1451,7 +1459,7 @@ class McpAdminToolsExtendedTest {
 
     @Test
     void createAgentTrigger_handlesException() throws IOException {
-        when(jsonSerialization.deserialize(anyString(), eq(ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration.class)))
+        when(jsonSerialization.deserialize(anyString(), eq(AgentTriggerConfiguration.class)))
                 .thenThrow(new RuntimeException("parse error"));
 
         String result = tools.createAgentTrigger("{\"bad json\"}");
@@ -1484,7 +1492,7 @@ class McpAdminToolsExtendedTest {
 
     @Test
     void updateAgentTrigger_handlesException() throws IOException {
-        when(jsonSerialization.deserialize(anyString(), eq(ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration.class)))
+        when(jsonSerialization.deserialize(anyString(), eq(AgentTriggerConfiguration.class)))
                 .thenThrow(new RuntimeException("update error"));
 
         String result = tools.updateAgentTrigger("support", "{}");
@@ -1509,5 +1517,23 @@ class McpAdminToolsExtendedTest {
         String result = tools.deleteAgentTrigger("support");
 
         assertTrue(result.contains("error"));
+    }
+
+    /**
+     * A parser that defers to this test's {@code jsonSerialization} mock, so the
+     * existing {@code when(jsonSerialization.deserialize(...))} stubs keep
+     * describing what these dispatch tests are actually about. Strictness itself is
+     * covered by {@code StrictConfigurationParserTest}; here the only thing that
+     * matters is that each resource type reaches the right store.
+     */
+    private StrictConfigurationParser strictConfigurationParser() {
+        var parser = mock(StrictConfigurationParser.class);
+        try {
+            lenient().when(parser.parse(anyString(), any()))
+                    .thenAnswer(invocation -> jsonSerialization.deserialize(invocation.getArgument(0), invocation.getArgument(1)));
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+        return parser;
     }
 }
