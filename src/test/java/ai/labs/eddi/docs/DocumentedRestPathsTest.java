@@ -85,7 +85,13 @@ class DocumentedRestPathsTest {
      * which point somebody deletes the assertion rather than the offending path.
      */
     private static Set<String> legacyChangeRecords() {
-        return Set.of("docs/changelog.md", "docs/changelog/", "docs/archive/handoff-v6.0-snapshot.md");
+        // docs/changelog.d/ is the same record one step earlier: a pending entry
+        // waiting for the nightly collation job to fold it into changelog.md.
+        // Without it, an entry that mentions a legacy path fails on the PR that
+        // writes it and passes the morning after it is collated — the assertion
+        // grading the text rather than the text's age.
+        return Set.of("docs/changelog.md", "docs/changelog/", "docs/changelog.d/",
+                "docs/archive/handoff-v6.0-snapshot.md");
     }
 
     /**
