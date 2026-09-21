@@ -114,7 +114,13 @@ class McpOAuthDiscoveryConfigTest {
         String resource = required(properties, RESOURCE);
         String mcpRootPath = required(properties, MCP_ROOT_PATH);
 
-        if (resource.startsWith("/")) {
+        if (resource.startsWith("$")) {
+            // Derived rather than repeated: the MCP root path is configurable, and
+            // a literal here would keep describing the old path after a move.
+            assertEquals("${" + MCP_ROOT_PATH + "}", resource,
+                    RESOURCE + " must be derived from " + MCP_ROOT_PATH + ", so moving the endpoint moves "
+                            + "what discovery advertises with it");
+        } else if (resource.startsWith("/")) {
             assertEquals(mcpRootPath, resource,
                     RESOURCE + " must name the path MCP is actually served at (" + MCP_ROOT_PATH + ")");
         } else {
@@ -195,9 +201,15 @@ class McpOAuthDiscoveryConfigTest {
                 "the discovery document must be readable without a token, or discovery cannot start");
         assertEquals(List.of("GET", "HEAD"), splitList(required(properties, METADATA_METHODS)),
                 METADATA_METHODS + " must allow reads only");
-        assertEquals(List.of(WELL_KNOWN, WELL_KNOWN + "/*"), splitList(required(properties, METADATA_PATHS)),
+        // Exact, not a /* under the prefix: a wildcard there would anonymously
+        // expose any future handler beneath it, which is the same mistake this
+        // file's other rules are written narrowly to avoid. The second path is
+        // the one quarkus-oidc serves for the configured resource, so it moves
+        // with the MCP root path.
+        assertEquals(List.of(WELL_KNOWN, WELL_KNOWN + required(properties, MCP_ROOT_PATH)),
+                splitList(required(properties, METADATA_PATHS)),
                 METADATA_PATHS + " must name the two exact well-known paths — the bare form and the "
-                        + "path-inserted form quarkus-oidc serves when the resource is a relative path");
+                        + "path-inserted form quarkus-oidc serves for " + MCP_ROOT_PATH);
     }
 
     /**

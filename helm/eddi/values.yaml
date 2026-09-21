@@ -124,6 +124,25 @@ eddi:
     # QUARKUS_OIDC_TOKEN_ISSUER, so tokens and discovery agree.
     publicUrl: ""
 
+    # What EDDI advertises at /.well-known/oauth-protected-resource/mcp, which is
+    # how an MCP client discovers where to authenticate. Both are deployment
+    # facts the chart cannot infer safely — publicUrl describes Keycloak, not
+    # EDDI — so they are settings rather than guesses.
+    resourceMetadata:
+      # The scheme in the advertised resource identifier. Unset, it follows
+      # EDDI's own `ingress.tls`: https behind a TLS ingress (where the scheme
+      # read from the request has already been downgraded by the proxy), http for
+      # the documented `kubectl port-forward` flow, which is plain http end to
+      # end and where advertising https hands a client a URL nothing serves.
+      # Set it explicitly if EDDI is fronted by TLS the chart does not render.
+      forceHttpsScheme: null
+
+      # The authorization server the document names. Leave empty when the chart
+      # deploys Keycloak — it already pins the public issuer. For a
+      # bring-your-own IdP set the PUBLIC issuer here: EDDI otherwise falls back
+      # to authServerUrl, which is the in-cluster address a client cannot reach.
+      authorizationServer: ""
+
   resources:
     requests:
       cpu: 250m
