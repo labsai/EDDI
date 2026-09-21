@@ -30,12 +30,84 @@ Add A2A fields to your agent configuration:
 
 ### Endpoints
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/.well-known/agent.json` | Default Agent Card (first A2A-enabled agent) |
-| `GET` | `/a2a/agents/{agentId}/agent.json` | Per-agent Agent Card |
-| `GET` | `/a2a/agents` | List all A2A-enabled agents |
-| `POST` | `/a2a/agents/{agentId}` | JSON-RPC 2.0 endpoint |
+| Method | Path | Description | Anonymous? |
+|---|---|---|---|
+| `GET` | `/.well-known/agent.json` | Default Agent Card (first A2A-enabled agent) | Yes |
+| `GET` | `/a2a/agents/{agentId}/agent.json` | Per-agent Agent Card | Yes |
+| `GET` | `/a2a/agents` | List all A2A-enabled agents | **No** |
+| `POST` | `/a2a/agents/{agentId}` | JSON-RPC 2.0 endpoint | **No** |
+| `GET` | `/.well-known/capabilities?skill=…` | Capability discovery | Only with `eddi.a2a.capabilities.public=true` |
+| `GET` | `/.well-known/capabilities/skills` | Registered skill names | Only with `eddi.a2a.capabilities.public=true` |
+
+### Who can call them
+
+On a deployment with `quarkus.oidc.tenant-enabled=false` — the shipped default —
+no endpoint requires a token, so the column above says nothing there. It is still
+not a promise that every row returns data: `eddi.a2a.enabled` and
+`eddi.a2a.capabilities.public` are independent switches, and an endpoint whose
+switch is off answers 404 whether or not a token was sent. With authentication
+on, the column is the contract:
+
+- **Agent Cards are anonymous by design.** A peer is handed a URL and fetches
+  `{url}/agent.json` before it holds any credential for your deployment; EDDI's
+  own client does exactly that, with `apiKey` optional. Reading a card needs the
+  agent id, so it discloses one agent, not the roster. When authentication is on,
+  the card carries an `authentication` block naming the token endpoint for the
+  JSON-RPC call that follows — see [The advertised token
+  endpoint](#the-advertised-token-endpoint).
+- **`GET /a2a/agents` requires authentication.** It enumerates every A2A-enabled
+  agent — name, description, skills, URL — which no part of the protocol needs,
+  and which is strictly more than the skill-name list gated behind
+  `eddi.a2a.capabilities.public`.
+- **The JSON-RPC endpoint requires authentication.** `tasks/send` runs a
+  conversation on your LLM budget.
+- **Capability discovery follows its flag.** `eddi.a2a.capabilities.public` is the
+  only *authentication* gate — no token is ever required or checked. It is not the
+  only gate: `eddi.a2a.enabled` still has to be on, and with either off the two
+  endpoints answer 404 to everyone. With both on they are anonymous, which is what
+  "public" means there.
+
+### The advertised token endpoint
+
+`authentication.credentials` has to name a token endpoint the **peer** can
+reach, which is not always the one EDDI uses: the Helm chart points
+`quarkus.oidc.auth-server-url` at the in-cluster Keycloak Service and the auth
+compose profile at `http://keycloak:8080`. Publishing either to an outside peer
+dead-ends its discovery.
+
+**Set `eddi.a2a.public-token-endpoint`** and that value is advertised verbatim.
+It is the *endpoint*, not the issuer, because the path is the provider-specific
+part — an issuer-shaped setting cannot express Okta's
+`https://example.okta.com/oauth2/default/v1/token`.
+
+Left empty, EDDI derives `<issuer>/protocol/openid-connect/token`, taking
+`<issuer>` from:
+
+1. **`eddi.keycloak.public.url`**, grafted onto the realm path from
+   `quarkus.oidc.auth-server-url`. Both shipped authenticated deployments already
+   set it — the Helm chart *requires* it, since the Manager SPA cannot start a
+   login without it — so they advertise a reachable endpoint with no new
+   configuration. Only the origin is taken from it; the realm path stays whatever
+   EDDI is configured against, so the two cannot drift apart.
+2. **`quarkus.oidc.auth-server-url`** unchanged — correct whenever EDDI and its
+   peers reach the IdP by the same name, which is the externally hosted IdP case.
+
+> **That derivation assumes Keycloak.** `/protocol/openid-connect/token` is
+> Keycloak's path, and it is what every shipped authenticated deployment runs. On
+> any other identity provider the derived value will be wrong, so set
+> `eddi.a2a.public-token-endpoint` there. Resolving the endpoint through OIDC
+> discovery (`<issuer>/.well-known/openid-configuration`) would remove the
+> assumption rather than document it, and is the right follow-up — it is not done
+> here because it turns rendering an anonymous card into an outbound HTTP call,
+> which needs `SafeHttpClient`, a cache and a failure policy of its own.
+
+> **Implementation note.** `@PermitAll` on the JAX-RS method is only half of
+> this. Quarkus evaluates the `quarkus.http.auth.permission.*` path policies
+> *before* declarative RBAC, so an endpoint that is not also named in a `permit`
+> entry in `application.properties` is claimed by the `/*` catch-all and answers
+> 401 regardless of its annotation. The two halves are kept in step by
+> `A2aEndpointPermissionsTest`; the status codes above are asserted against a
+> real Keycloak in `ui/manager/e2e/auth/a2a-discovery.spec.ts`.
 
 ### JSON-RPC Methods
 
@@ -68,6 +140,8 @@ Add A2A fields to your agent configuration:
 |---|---|---|
 | `eddi.a2a.enabled` | `true` | Master toggle for all A2A endpoints |
 | `eddi.a2a.base-url` | `http://localhost:7070` | Base URL used in Agent Card URLs |
+| `eddi.a2a.public-token-endpoint` | *(derived)* | The token endpoint advertised in Agent Cards — see [The advertised token endpoint](#the-advertised-token-endpoint) |
+| `eddi.a2a.capabilities.public` | `false` | Whether `/.well-known/capabilities` and `/.well-known/capabilities/skills` are served at all — see [Who can call them](#who-can-call-them) |
 
 ---
 
