@@ -162,10 +162,14 @@ class A2aEndpointPermissionsTest {
     @Test
     @DisplayName("/.well-known is not wildcarded — a future sibling must be decided, not inherited")
     void wellKnownIsEnumerated() {
-        // RFC 9728 protected-resource metadata is planned under this prefix
-        // (planning/saas-connectors-plan.md §6.3). A /.well-known/* permit would
-        // open it, and anything else later dropped there, with nobody deciding to.
-        assertPolicies("/.well-known/oauth-protected-resource", "GET", AUTHENTICATED);
+        // This test was written with RFC 9728 protected-resource metadata as its
+        // example of the sibling a /.well-known/* permit would open with nobody
+        // deciding to. That decision has since been taken deliberately: EDDI
+        // advertises /mcp as an OAuth protected resource, so the document is
+        // permitted by its own narrow entry (exact paths, GET/HEAD), asserted in
+        // McpOAuthDiscoveryConfigTest. The guard this test exists for is the line
+        // below it: a path nobody decided on still resolves to authenticated.
+        assertPolicies("/.well-known/oauth-protected-resource", "GET", PERMIT);
         assertPolicies("/.well-known/anything-else", "GET", AUTHENTICATED);
     }
 
