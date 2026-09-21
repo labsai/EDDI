@@ -212,7 +212,7 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                 continue;
             }
             if (SECRET_PLATFORM_CONFIG_KEYS.contains(key.toLowerCase(Locale.ROOT)) && !text.contains("${vault:")) {
-                LOG.warnf("Channel integration '%s' stores platformConfig.%s in plaintext — it is returned verbatim by "
+                LOGGER.warnf("Channel integration '%s' stores platformConfig.%s in plaintext — it is returned verbatim by "
                         + "GET /channelstore/channels/{id} and included in backups. Store it in the secrets vault and "
                         + "reference it as ${vault:<key>} instead; the router resolves that at send time.",
                         sanitize(config.getName()), sanitize(key));
