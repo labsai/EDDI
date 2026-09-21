@@ -223,6 +223,64 @@ class MongoDeploymentStorageTest {
         verify(collection, never()).dropIndex(any(Bson.class));
     }
 
+    /**
+     * MongoDB allows two indexes on one key pattern when their names and options
+     * differ, which is the shape an installation lands in if the partial index was
+     * ever built beside the old unrestricted one. Dropping whichever the server
+     * happened to list first could drop the good one and leave the conflict
+     * standing, so the rebuild would fail and the destructive index would survive.
+     */
+    @Test
+    @DisplayName("every index on the deployment key is dropped, not the first one listed")
+    void dropsEveryIndexOnTheDeploymentKey() {
+        MongoDatabase database = mock(MongoDatabase.class);
+        MongoCollection<Document> collection = mock(MongoCollection.class);
+        when(database.getCollection("deployments")).thenReturn(collection);
+
+        MongoCommandException keySpecsConflict = mock(MongoCommandException.class);
+        when(keySpecsConflict.getErrorCode()).thenReturn(86);
+        when(collection.createIndex(any(Bson.class), any(IndexOptions.class)))
+                .thenThrow(keySpecsConflict)
+                .thenReturn("environment_1_agentId_1_agentVersion_1");
+        stubIndexes(collection, List.of(ID_INDEX,
+                index("a_custom_name", DEPLOYMENT_KEY_PATTERN),
+                index("environment_1_agentId_1_agentVersion_1", DEPLOYMENT_KEY_PATTERN)));
+
+        assertDoesNotThrow(() -> new MongoDeploymentStorage(database, documentBuilder));
+
+        verify(collection).dropIndex("a_custom_name");
+        verify(collection).dropIndex("environment_1_agentId_1_agentVersion_1");
+        verify(collection, times(2)).createIndex(any(Bson.class), any(IndexOptions.class));
+    }
+
+    /**
+     * The case that made dropping by key pattern alone unsafe: an index of some
+     * other key holds the name this one would be given, while a perfectly good
+     * deployment-key index exists under a name of its own. Dropping ours removes a
+     * working constraint and still does not get past the name, so nothing is
+     * dropped and the conflict is reported.
+     */
+    @Test
+    @DisplayName("nothing is dropped when a different key holds the name ours would be given")
+    void dropsNothingWhenTheGeneratedNameBelongsToAnotherKey() {
+        MongoDatabase database = mock(MongoDatabase.class);
+        MongoCollection<Document> collection = mock(MongoCollection.class);
+        when(database.getCollection("deployments")).thenReturn(collection);
+
+        MongoCommandException keySpecsConflict = mock(MongoCommandException.class);
+        when(keySpecsConflict.getErrorCode()).thenReturn(86);
+        when(collection.createIndex(any(Bson.class), any(IndexOptions.class))).thenThrow(keySpecsConflict);
+        stubIndexes(collection, List.of(ID_INDEX,
+                index("environment_1_agentId_1_agentVersion_1", new Document("tenant", 1)),
+                index("our_partial_deployment_key", DEPLOYMENT_KEY_PATTERN)));
+        stubAggregate(collection, List.of());
+
+        assertDoesNotThrow(() -> new MongoDeploymentStorage(database, documentBuilder));
+
+        verify(collection, never()).dropIndex(anyString());
+        verify(collection, never()).dropIndex(any(Bson.class));
+    }
+
     private static final Document DEPLOYMENT_KEY_PATTERN = new Document("environment", 1).append("agentId", 1).append("agentVersion", 1);
     private static final Document ID_INDEX = index("_id_", new Document("_id", 1));
 

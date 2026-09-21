@@ -10,7 +10,6 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -65,13 +64,16 @@ public class TemplateSyntaxMigrator {
     }
 
     /**
-     * String concatenation inside a Thymeleaf output expression: {@code [[${a +
-     * 'lit' + b}]]} or {@code [(${a + 'lit' + b})]}. Anchored to the Thymeleaf
-     * delimiters on purpose — an unanchored <code>{…+…}</code> also matches JSON
-     * bodies ({@code {"a": 1+2}}) and plain arithmetic that merely happen to live
-     * in a document that contains Thymeleaf syntax elsewhere.
+     * The two Thymeleaf output forms, opening delimiter to closing delimiter:
+     * {@code [[${…}]]} escapes, {@code [(${…})]} does not.
+     *
+     * <p>
+     * Anchored to these delimiters on purpose — an unanchored <code>{…+…}</code>
+     * also matches JSON bodies ({@code {"a": 1+2}}) and plain arithmetic that
+     * merely happen to live in a document containing Thymeleaf syntax elsewhere.
+     * </p>
      */
-    private static final Pattern CONCAT_PATTERN = Pattern.compile("\\[\\[\\$\\{([^}]*?\\+[^}]*?)\\}\\]\\]|\\[\\(\\$\\{([^}]*?\\+[^}]*?)\\}\\)\\]");
+    private static final String[][] OUTPUT_DELIMITERS = {{"[[${", "}]]"}, {"[(${", "})]"}};
 
     /** The escape character inside an OGNL string literal. */
     private static final char ESCAPE = '\\';
@@ -84,29 +86,101 @@ public class TemplateSyntaxMigrator {
         if (!input.contains("+")) {
             return input;
         }
-        Matcher m = CONCAT_PATTERN.matcher(input);
-        var sb = new StringBuilder();
-        while (m.find()) {
-            // group 1 = escaped output [[${…}]], group 2 = unescaped output [(${…})]
-            String expr = (m.group(1) != null ? m.group(1) : m.group(2)).trim();
-            var replacement = new StringBuilder();
-            for (String part : splitOnConcatOperator(expr)) {
-                String trimmed = part.trim();
-                if (isStringLiteral(trimmed)) {
-                    // String literal → inline without braces
-                    replacement.append(literalText(trimmed));
-                } else if (!trimmed.isEmpty()) {
-                    // Variable → wrap in Qute expression. An empty part is not a variable:
-                    // it only arises from a leading, trailing or doubled +, i.e. from a
-                    // malformed expression, and `{}` would be a broken Qute expression where
-                    // nothing at all is merely a dropped empty operand.
-                    replacement.append('{').append(trimmed).append('}');
+        var out = new StringBuilder(input.length());
+        int cursor = 0;
+        while (cursor < input.length()) {
+            int open = -1;
+            String[] delimiters = null;
+            for (String[] candidate : OUTPUT_DELIMITERS) {
+                int at = input.indexOf(candidate[0], cursor);
+                if (at >= 0 && (open < 0 || at < open)) {
+                    open = at;
+                    delimiters = candidate;
                 }
             }
-            m.appendReplacement(sb, Matcher.quoteReplacement(replacement.toString()));
+            if (open < 0) {
+                break;
+            }
+            int bodyStart = open + delimiters[0].length();
+            int close = closingDelimiter(input, bodyStart, delimiters[1]);
+            if (close < 0) {
+                // Unterminated as far as this scan can tell. Copy the opening
+                // delimiter through and carry on rather than guessing where the
+                // expression ends — a wrong guess rewrites document content.
+                out.append(input, cursor, bodyStart);
+                cursor = bodyStart;
+                continue;
+            }
+            out.append(input, cursor, open);
+            String expr = input.substring(bodyStart, close).trim();
+            if (expr.indexOf('+') >= 0) {
+                out.append(concatToQute(expr));
+            } else {
+                // No concatenation: left exactly as it is, for the output patterns
+                // below to convert.
+                out.append(input, open, close + delimiters[1].length());
+            }
+            cursor = close + delimiters[1].length();
         }
-        m.appendTail(sb);
-        return sb.toString();
+        out.append(input, Math.min(cursor, input.length()), input.length());
+        return out.toString();
+    }
+
+    /**
+     * The index of the closing delimiter of an expression that starts at
+     * {@code from}, or {@code -1} when there is none.
+     *
+     * <p>
+     * A scan rather than a regex because the delimiter cannot be found by looking
+     * for the first {@code }}: an OGNL string literal may contain one. {@code [[${a
+     * + '}' + b}]]} defeated the old {@code [^}]*?} pattern entirely — it matched
+     * nowhere, so the expression never reached {@link #splitOnConcatOperator}, the
+     * output patterns further down failed on it for the same reason, and the
+     * template was left in Thymeleaf syntax on a migration that runs once and then
+     * records itself complete. That is the same defect
+     * {@code splitOnConcatOperator} fixed one level down, at the operator rather
+     * than at the delimiter.
+     * </p>
+     */
+    private static int closingDelimiter(String input, int from, String closing) {
+        char openQuote = 0;
+        boolean escaped = false;
+        for (int i = from; i < input.length(); i++) {
+            char c = input.charAt(i);
+            if (openQuote != 0) {
+                if (escaped) {
+                    escaped = false;
+                } else if (c == ESCAPE) {
+                    escaped = true;
+                } else if (c == openQuote) {
+                    openQuote = 0;
+                }
+            } else if (c == '\'' || c == '"') {
+                openQuote = c;
+            } else if (input.startsWith(closing, i)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /** One Thymeleaf concat expression, rendered as Qute. */
+    private static String concatToQute(String expr) {
+        var replacement = new StringBuilder();
+        for (String part : splitOnConcatOperator(expr)) {
+            String trimmed = part.trim();
+            if (isStringLiteral(trimmed)) {
+                // String literal → inline without braces
+                replacement.append(literalText(trimmed));
+            } else if (!trimmed.isEmpty()) {
+                // Variable → wrap in Qute expression. An empty part is not a variable:
+                // it only arises from a leading, trailing or doubled +, i.e. from a
+                // malformed expression, and `{}` would be a broken Qute expression where
+                // nothing at all is merely a dropped empty operand.
+                replacement.append('{').append(trimmed).append('}');
+            }
+        }
+        return replacement.toString();
     }
 
     /**

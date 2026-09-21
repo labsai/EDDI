@@ -130,6 +130,87 @@ class AgentDeploymentManagementBranchTest {
             verify(deploymentStore, never()).readDeploymentInfos(any());
         }
 
+        /**
+         * {@code isPending()} is fail-safe: a migration-log read that fails answers
+         * "pending", because answering "not pending" would let the sweep read every
+         * agent config as deleted and retire its deployment row. That is right for the
+         * sweep and must not strand readiness — this used to be the only call site of
+         * {@code setAgentsReadiness} in the process, so one failed read in the first
+         * second left the instance not-ready for its whole life while the scheduled
+         * sweep deployed its agents ten seconds later and served them correctly.
+         */
+        @Test
+        @DisplayName("a transient pending answer at startup still reports ready once the sweep runs")
+        void readinessIsGrantedByTheSweepAfterATransientPendingAnswer() throws Exception {
+            // Two pending answers: autoDeployAgents asks once inside checkDeployments
+            // and once for the readiness decision. Every later answer is false, which
+            // is the transient read failure clearing.
+            when(v6RenameMigration.isPending()).thenReturn(true, true, false);
+            when(deploymentStore.readDeploymentInfos(deployed)).thenReturn(List.of());
+            doAnswer(inv -> {
+                ((IMigrationManager.IMigrationFinished) inv.getArgument(0)).onComplete();
+                return null;
+            }).when(migrationManager).startMigrationIfFirstTimeRun(any());
+
+            management.autoDeployAgents();
+            verify(agentsReadiness, never()).setAgentsReadiness(true);
+
+            management.checkDeployments();
+
+            verify(agentsReadiness).setAgentsReadiness(true);
+        }
+
+        @Test
+        @DisplayName("readiness is granted once, however many sweeps follow")
+        void readinessIsGrantedOnlyOnce() throws Exception {
+            when(v6RenameMigration.isPending()).thenReturn(true, true, false);
+            when(deploymentStore.readDeploymentInfos(deployed)).thenReturn(List.of());
+            doAnswer(inv -> {
+                ((IMigrationManager.IMigrationFinished) inv.getArgument(0)).onComplete();
+                return null;
+            }).when(migrationManager).startMigrationIfFirstTimeRun(any());
+
+            management.autoDeployAgents();
+            management.checkDeployments();
+            management.checkDeployments();
+            management.checkDeployments();
+
+            verify(agentsReadiness, times(1)).setAgentsReadiness(true);
+        }
+
+        @Test
+        @DisplayName("a migration that stays pending never reports ready, however many sweeps run")
+        void aPersistentlyPendingMigrationNeverReportsReady() throws Exception {
+            when(v6RenameMigration.isPending()).thenReturn(true);
+            doAnswer(inv -> {
+                ((IMigrationManager.IMigrationFinished) inv.getArgument(0)).onComplete();
+                return null;
+            }).when(migrationManager).startMigrationIfFirstTimeRun(any());
+
+            management.autoDeployAgents();
+            management.checkDeployments();
+            management.checkDeployments();
+
+            verify(agentsReadiness, never()).setAgentsReadiness(true);
+            verify(deploymentStore, never()).readDeploymentInfos(any());
+        }
+
+        @Test
+        @DisplayName("a normal boot reports ready in the startup path and not again in the sweep")
+        void aNormalBootReportsReadyOnce() throws Exception {
+            when(v6RenameMigration.isPending()).thenReturn(false);
+            when(deploymentStore.readDeploymentInfos(deployed)).thenReturn(List.of());
+            doAnswer(inv -> {
+                ((IMigrationManager.IMigrationFinished) inv.getArgument(0)).onComplete();
+                return null;
+            }).when(migrationManager).startMigrationIfFirstTimeRun(any());
+
+            management.autoDeployAgents();
+            management.checkDeployments();
+
+            verify(agentsReadiness, times(1)).setAgentsReadiness(true);
+        }
+
         @Test
         @DisplayName("v6 rename migration exception is caught")
         void v6RenameException() throws Exception {

@@ -89,6 +89,13 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     private final List<DeploymentInfo> deploymentInfos = new LinkedList<>();
     /** Whether the "sweep parked" warning has been logged; see checkDeployments. */
     private final AtomicBoolean sweepParkedLogged = new AtomicBoolean();
+    /**
+     * Set when the startup path could not report ready because the rename migration
+     * was still pending, and taken by the first scheduled sweep that completes once
+     * it is not. Only the taker grants readiness, so however many ticks follow, it
+     * happens exactly once.
+     */
+    private final AtomicBoolean readinessDeferred = new AtomicBoolean();
 
     @Inject
     public AgentDeploymentManagement(IDeploymentStore deploymentStore, IAgentFactory agentFactory, IAgentStore agentStore,
@@ -156,20 +163,44 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         migrationManager.startMigrationIfFirstTimeRun(() -> {
             checkDeployments();
             if (v6RenameMigration.isPending()) {
-                // The sweep above was parked, so nothing has been deployed, and nothing will
-                // be for the life of this process: the rename migration only runs at startup.
+                // The sweep above was parked, so nothing has been deployed yet.
                 // Reporting ready now would send traffic to an instance with no agents.
-                LOGGER.error("Not reporting ready: the V6 rename migration has not completed, so no agent has been "
-                        + "deployed. Its own error is logged above; resolve it and restart.");
+                //
+                // Deferred rather than abandoned. isPending() is fail-safe: a
+                // migration-log read that fails answers "pending", because guessing
+                // "not pending" would let the sweep read every agent config as
+                // deleted and retire its deployment row. That is the right answer
+                // for the sweep and the wrong one to hang readiness on for ever —
+                // this used to be the only call site of setAgentsReadiness in the
+                // process, so a read that failed in this one second left the
+                // instance permanently not-ready while checkDeployments() deployed
+                // its agents ten seconds later and served them correctly.
+                LOGGER.error("Not reporting ready yet: the V6 rename migration has not completed, so no agent has "
+                        + "been deployed. Its own error is logged above. The scheduled deployment sweep reports "
+                        + "ready if the migration completes; if it does not, resolve it and restart.");
+                readinessDeferred.set(true);
                 return;
             }
-            agentsReadiness.setAgentsReadiness(true);
+            reportReady();
         });
 
         LOGGER.info("Finished deployment of agents.");
-        if (!v6RenameMigration.isPending()) {
-            LOGGER.info("E.D.D.I is ready!");
-        }
+    }
+
+    /**
+     * Grants readiness once, and logs the line that says so in the same place.
+     *
+     * <p>
+     * The two used to be independent: the flag was set inside the startup lambda
+     * and {@code E.D.D.I is ready!} was logged afterwards from a second
+     * {@code isPending()} call, so a migration-log read that failed in the first
+     * and succeeded in the second logged "ready" against an instance whose
+     * readiness flag was false.
+     * </p>
+     */
+    private void reportReady() {
+        agentsReadiness.setAgentsReadiness(true);
+        LOGGER.info("E.D.D.I is ready!");
     }
 
     // delayed, not delay: Scheduled#delayUnit defaults to MINUTES, so the numeric
@@ -243,6 +274,15 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                             }
                         }
                     });
+            // The sweep ran to completion with the migration no longer pending, so
+            // the agents this instance is supposed to serve are deployed. If the
+            // startup path had to defer readiness, this is where it is granted —
+            // there is no other scheduled path that would, and without this the
+            // instance stays not-ready for the life of the process after a single
+            // transient migration-log read failure at boot.
+            if (readinessDeferred.compareAndSet(true, false)) {
+                reportReady();
+            }
         } catch (ResourceStoreException e) {
             LOGGER.error(e.getLocalizedMessage(), e);
         }

@@ -24,7 +24,9 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static com.mongodb.client.model.Filters.and;
 import static com.mongodb.client.model.Filters.eq;
@@ -182,11 +184,29 @@ public class MongoDeploymentStorage implements IDeploymentStorage {
      * Which error the server raises for it is not something to reason about from
      * the codes alone. Current servers report the same key under the same
      * auto-generated name with different options as {@code IndexKeySpecsConflict}
-     * (86), not {@code IndexOptionsConflict} (85); 86 also covers a same-named
-     * index on a different key, which is someone else's. So on either code the
-     * index that actually sits on this key pattern is looked up and dropped <em>by
-     * name</em>, and if no index sits on it, the conflict is with some other index
-     * and is left alone. Anything else (E11000 above all) goes up to
+     * (86), not {@code IndexOptionsConflict} (85) — splitting on the code was tried
+     * and broke against a real server. So neither code decides anything: on either
+     * one the collection's own indexes are read and the decision is made from what
+     * is actually there.
+     * </p>
+     *
+     * <p>
+     * Two things have to hold, and the codes tell us neither. <b>Nothing that is
+     * not on this key may be dropped.</b> 86 also covers a same-named index on a
+     * <em>different</em> key — someone else's index that happens to hold the name
+     * this one would be given — and dropping the key-pattern index in that case
+     * removes a working constraint and then fails to rebuild, because the name
+     * conflict is still there. So if the generated name is held by an index on
+     * another key, nothing is dropped and the error is reported. <b>Everything that
+     * is on this key must go.</b> MongoDB allows two indexes on one key pattern
+     * when their names and options differ, which is the shape an installation lands
+     * in if the partial index was ever built beside the old unrestricted one;
+     * dropping only the first one listed could drop the good one and leave the
+     * conflict standing.
+     * </p>
+     *
+     * <p>
+     * Anything else (E11000 above all) goes up to
      * {@link #createDeploymentKeyIndex()}, which dedupes and retries.
      * </p>
      */
@@ -198,16 +218,30 @@ public class MongoDeploymentStorage implements IDeploymentStorage {
             if (e.getErrorCode() != INDEX_OPTIONS_CONFLICT_ERROR_CODE && e.getErrorCode() != INDEX_KEY_SPECS_CONFLICT_ERROR_CODE) {
                 throw e;
             }
-            String staleIndex = indexOnDeploymentKey();
-            if (staleIndex == null) {
-                // The conflict is with an index on some other key pattern, e.g. one that
-                // happens to have this name. Not ours: leave it and report.
+            Map<String, Document> indexes = indexesByName();
+            Document nameHolder = indexes.get(generatedDeploymentKeyIndexName());
+            if (nameHolder != null && !isOnDeploymentKey(nameHolder)) {
+                // Someone else's index holds the name this one would be given.
+                // Dropping ours would remove a working constraint and still not get
+                // past the name. Leave everything alone and report.
+                LOGGER.errorf("Cannot build the deployment-key index on '%s': the name '%s' is already held by an "
+                        + "index on a different key (%s). Nothing was dropped. Rename or remove that index by hand.",
+                        COLLECTION_DEPLOYMENTS, generatedDeploymentKeyIndexName(), nameHolder.get("key"));
                 throw e;
             }
-            LOGGER.warnf("The deployment-key index '%s' on '%s' exists with a different specification (%s). Dropping "
-                    + "and rebuilding it as a partial index, so that rows predating the 6.x rename migration stay out "
-                    + "of it.", staleIndex, COLLECTION_DEPLOYMENTS, e.getErrorMessage());
-            deploymentsCollection.dropIndex(staleIndex);
+            List<String> staleIndexes = indexes.entrySet().stream()
+                    .filter(entry -> isOnDeploymentKey(entry.getValue()))
+                    .map(Map.Entry::getKey)
+                    .toList();
+            if (staleIndexes.isEmpty()) {
+                // The conflict is with an index on some other key pattern. Not ours:
+                // leave it and report.
+                throw e;
+            }
+            LOGGER.warnf("The deployment-key index(es) %s on '%s' exist with a specification other than the partial "
+                    + "one (%s). Dropping them and rebuilding one partial index, so that rows predating the 6.x "
+                    + "rename migration stay out of it.", staleIndexes, COLLECTION_DEPLOYMENTS, e.getErrorMessage());
+            staleIndexes.forEach(deploymentsCollection::dropIndex);
         }
 
         // Rebuilt outside the catch so an E11000 here — duplicates the old index did
@@ -216,20 +250,47 @@ public class MongoDeploymentStorage implements IDeploymentStorage {
         deploymentsCollection.createIndex(DEPLOYMENT_KEY, uniqueKeyIndexOptions());
     }
 
-    /**
-     * The name of the index whose key pattern is exactly the deployment key, or
-     * null. Compared field by field and in order, since a compound index's field
-     * order is part of what it is; the direction values are compared numerically,
-     * because the server may report {@code 1} as an int, a long or a double.
-     */
-    private String indexOnDeploymentKey() {
+    /** The collection's indexes, by name, in the order the server lists them. */
+    private Map<String, Document> indexesByName() {
+        var byName = new LinkedHashMap<String, Document>();
         for (Document index : deploymentsCollection.listIndexes()) {
-            Object key = index.get("key");
-            if (key instanceof Document pattern && sameKeyPattern(pattern)) {
-                return index.getString("name");
+            String name = index.getString("name");
+            if (name != null) {
+                byName.put(name, index);
             }
         }
-        return null;
+        return byName;
+    }
+
+    /**
+     * Whether an index's key pattern is exactly the deployment key. Compared field
+     * by field and in order, since a compound index's field order is part of what
+     * it is; the direction values are compared numerically, because the server may
+     * report {@code 1} as an int, a long or a double.
+     */
+    private static boolean isOnDeploymentKey(Document index) {
+        return index.get("key") instanceof Document pattern && sameKeyPattern(pattern);
+    }
+
+    /**
+     * The name MongoDB gives an index on {@link #DEPLOYMENT_KEY} when none is
+     * supplied: the fields and their directions joined by underscores, which is
+     * what {@code createIndex} asks for here.
+     *
+     * <p>
+     * Derived from {@link #DEPLOYMENT_KEY_PATTERN} rather than written out, so it
+     * cannot drift from the key the index is actually built on.
+     * </p>
+     */
+    private static String generatedDeploymentKeyIndexName() {
+        var name = new StringBuilder();
+        for (String field : DEPLOYMENT_KEY_PATTERN.keySet()) {
+            if (!name.isEmpty()) {
+                name.append('_');
+            }
+            name.append(field).append('_').append(DEPLOYMENT_KEY_PATTERN.get(field));
+        }
+        return name.toString();
     }
 
     private static boolean sameKeyPattern(Document pattern) {

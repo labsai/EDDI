@@ -6,13 +6,20 @@ package ai.labs.eddi.configs.migration;
 
 import ai.labs.eddi.configs.migration.model.MigrationLog;
 import com.mongodb.MongoCommandException;
+import com.mongodb.MongoTimeoutException;
+import com.mongodb.ServerAddress;
 import com.mongodb.MongoNamespace;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.RenameCollectionOptions;
+import org.bson.BsonDocument;
+import org.bson.BsonDouble;
+import org.bson.BsonInt32;
+import org.bson.BsonString;
 import org.bson.Document;
+import org.bson.conversions.Bson;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -1024,6 +1031,199 @@ class V6RenameMigrationTest {
                     .thenThrow(new IllegalStateException("mongo down"));
 
             assertTrue(migration.isPending());
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────
+    // A pass that could not read or write never counts as migrated
+    // ───────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("collection access failures")
+    class CollectionAccessTests {
+
+        /**
+         * Only some of these collection names exist on any given database, and while
+         * the current driver answers {@code estimatedDocumentCount()} on a missing
+         * namespace with zero, others raise {@code NamespaceNotFound}. Counting that as
+         * a failure would leave the migration permanently incomplete on a database with
+         * nothing to migrate.
+         */
+        @Test
+        @DisplayName("NamespaceNotFound is nothing to migrate, and the migration completes")
+        void namespaceNotFoundIsSkipped() {
+            stubOneUnreadableCollection(commandFailure(26, "NamespaceNotFound"));
+
+            migration.runIfNeeded();
+
+            verify(migrationLogStore).createMigrationLog(any());
+        }
+
+        /**
+         * The defect: every failure used to return "nothing here", so an authorization
+         * error or a timeout was indistinguishable from an absent collection.
+         * {@code runIfNeeded} saw a clean total and wrote the completion log over a
+         * collection nobody had read — and since this migration runs once, those
+         * documents stayed in their v5 shape for good.
+         */
+        @Test
+        @DisplayName("an authorization failure keeps the migration incomplete")
+        void authorizationFailureBlocksCompletion() {
+            stubOneUnreadableCollection(commandFailure(13, "Unauthorized"));
+
+            migration.runIfNeeded();
+
+            verify(migrationLogStore, never()).createMigrationLog(any());
+        }
+
+        @Test
+        @DisplayName("a timeout keeps the migration incomplete")
+        void timeoutBlocksCompletion() {
+            stubOneUnreadableCollection(new MongoTimeoutException("no server available"));
+
+            migration.runIfNeeded();
+
+            verify(migrationLogStore, never()).createMigrationLog(any());
+        }
+
+        /**
+         * The other half of the same defect: {@code saveDocument} caught every write
+         * failure and returned normally, and the caller incremented its migrated count
+         * regardless. So even a pass that read its collection perfectly well could
+         * report a clean total for documents it had failed to write, and the completion
+         * log went in over them.
+         */
+        @Test
+        @DisplayName("a document that could not be written keeps the migration incomplete")
+        @SuppressWarnings("unchecked")
+        void aFailedWriteBlocksCompletion() {
+            when(migrationLogStore.readMigrationLog("v6-rename-migration-complete")).thenReturn(null);
+            when(database.getName()).thenReturn("eddi");
+
+            var stale = new Document("extension", "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/h1?version=1")
+                    .append("_id", new ObjectId());
+            MongoCollection<Document> unwritable = mock(MongoCollection.class);
+            when(unwritable.estimatedDocumentCount()).thenReturn(1L);
+            FindIterable<Document> iterable = mock(FindIterable.class);
+            MongoCursor<Document> cursor = mock(MongoCursor.class);
+            when(cursor.hasNext()).thenReturn(true, false);
+            when(cursor.next()).thenReturn(stale);
+            doReturn(cursor).when(iterable).iterator();
+            when(unwritable.find()).thenReturn(iterable);
+            when(unwritable.replaceOne(any(Bson.class), any(Document.class)))
+                    .thenThrow(new MongoTimeoutException("no server available"));
+
+            MongoCollection<Document> empty = mock(MongoCollection.class);
+            when(empty.estimatedDocumentCount()).thenReturn(0L);
+            when(database.getCollection(anyString()))
+                    .thenAnswer(invocation -> "descriptors".equals(invocation.getArgument(0)) ? unwritable : empty);
+
+            migration.runIfNeeded();
+
+            verify(unwritable).replaceOne(any(Bson.class), any(Document.class));
+            verify(migrationLogStore, never()).createMigrationLog(any());
+        }
+
+        /**
+         * Every collection is present and empty except {@code descriptors}, which
+         * raises {@code failure}.
+         *
+         * <p>
+         * One collection, not all of them, because the rename phase reads counts too
+         * and reports a source it cannot read as un-renamed — which aborts the run
+         * before any scan happens. A test that made every count fail would therefore
+         * see no completion log whatever this guard does, and pass for the wrong
+         * reason. {@code descriptors} is only ever touched after the renames, so what
+         * the migration does with the failure is what the assertion sees.
+         * </p>
+         */
+        @SuppressWarnings("unchecked")
+        private void stubOneUnreadableCollection(RuntimeException failure) {
+            when(migrationLogStore.readMigrationLog("v6-rename-migration-complete")).thenReturn(null);
+            when(database.getName()).thenReturn("eddi");
+            MongoCollection<Document> empty = mock(MongoCollection.class);
+            when(empty.estimatedDocumentCount()).thenReturn(0L);
+            MongoCollection<Document> unreadable = mock(MongoCollection.class);
+            when(unreadable.estimatedDocumentCount()).thenThrow(failure);
+            when(database.getCollection(anyString()))
+                    .thenAnswer(invocation -> "descriptors".equals(invocation.getArgument(0)) ? unreadable : empty);
+        }
+
+        private static MongoCommandException commandFailure(int code, String name) {
+            var response = new BsonDocument()
+                    .append("ok", new BsonDouble(0))
+                    .append("code", new BsonInt32(code))
+                    .append("codeName", new BsonString(name))
+                    .append("errmsg", new BsonString(name));
+            return new MongoCommandException(response, new ServerAddress());
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────
+    // Which of two colliding deployment rows is actually newer
+    // ───────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("strictlyNewer")
+    class StrictlyNewerTests {
+
+        @Test
+        @DisplayName("a later timestamp is newer")
+        void laterTimestampWins() {
+            ObjectId older = objectId(1_700_000_000, new byte[]{9, 9, 9, 9, 9}, 1);
+            ObjectId newer = objectId(1_700_000_001, new byte[]{1, 1, 1, 1, 1}, 0);
+
+            assertEquals(Boolean.TRUE, V6RenameMigration.strictlyNewer(newer, older));
+            assertEquals(Boolean.FALSE, V6RenameMigration.strictlyNewer(older, newer));
+        }
+
+        @Test
+        @DisplayName("inside one second, the same process orders by its counter")
+        void sameProcessOrdersByCounter() {
+            byte[] process = {7, 7, 7, 7, 7};
+            ObjectId first = objectId(1_700_000_000, process, 41);
+            ObjectId second = objectId(1_700_000_000, process, 42);
+
+            assertEquals(Boolean.TRUE, V6RenameMigration.strictlyNewer(second, first));
+            assertEquals(Boolean.FALSE, V6RenameMigration.strictlyNewer(first, second));
+        }
+
+        /**
+         * The defect. {@code ObjectId.compareTo} compares the five process-unique bytes
+         * before the three counter bytes, so for two ids written in the same second by
+         * different instances the larger id is as likely to be the older row — and the
+         * caller would have deleted the newer deployment status on the strength of it.
+         * There is no fact of the matter here, so the answer is "I cannot tell" and the
+         * caller refuses.
+         */
+        @Test
+        @DisplayName("inside one second, two processes cannot be ordered at all")
+        void differentProcessesInTheSameSecondAreUnordered() {
+            ObjectId mine = objectId(1_700_000_000, new byte[]{1, 1, 1, 1, 1}, 99);
+            ObjectId theirs = objectId(1_700_000_000, new byte[]{2, 2, 2, 2, 2}, 1);
+
+            assertNull(V6RenameMigration.strictlyNewer(mine, theirs));
+            assertNull(V6RenameMigration.strictlyNewer(theirs, mine));
+            // ...and this is precisely the pair full ObjectId ordering gets wrong:
+            // it calls the LOWER-counter row the newer one.
+            assertTrue(theirs.compareTo(mine) > 0);
+        }
+
+        /**
+         * An ObjectId with the three parts set exactly, so the ordering is stated, not
+         * sampled.
+         */
+        private static ObjectId objectId(int timestamp, byte[] processUnique, int counter) {
+            byte[] bytes = new byte[12];
+            bytes[0] = (byte) (timestamp >> 24);
+            bytes[1] = (byte) (timestamp >> 16);
+            bytes[2] = (byte) (timestamp >> 8);
+            bytes[3] = (byte) timestamp;
+            System.arraycopy(processUnique, 0, bytes, 4, 5);
+            bytes[9] = (byte) (counter >> 16);
+            bytes[10] = (byte) (counter >> 8);
+            bytes[11] = (byte) counter;
+            return new ObjectId(bytes);
         }
     }
 }

@@ -321,6 +321,53 @@ class TemplateSyntaxMigratorTest {
         assertTrue(migrator.containsThymeleafSyntax("#encoder.base64"));
     }
 
+    // --- A brace inside a string literal ---
+
+    /**
+     * The expression is located by scanning, not by a pattern that stops at the
+     * first closing brace. With the old quote-blind pattern this input matched
+     * nowhere: the concat handling never saw it, the output patterns below failed
+     * on it for the same reason, and the template was left in Thymeleaf syntax by a
+     * migration that runs once and then records itself complete.
+     */
+    @Test
+    void migrateConcat_withClosingBraceInsideALiteral() {
+        assertEquals("{a}}{b}", migrator.migrate("[[${a + '}' + b}]]"));
+    }
+
+    @Test
+    void migrateConcat_withOpeningBraceInsideALiteral() {
+        assertEquals("{a}{{b}", migrator.migrate("[(${a + '{' + b})]"));
+    }
+
+    /**
+     * The OGNL literal here is {@code 'it\'s}'}: the backslash keeps the apostrophe
+     * inside the literal, so the brace after it is inside the literal too. Both the
+     * escape and the brace have to be understood, or the scan ends in the wrong
+     * place.
+     */
+    @Test
+    void migrateConcat_withAnEscapedQuoteBeforeABrace() {
+        assertEquals("{a}it's}{b}", migrator.migrate("[[${a + 'it\\'s}' + b}]]"));
+    }
+
+    /**
+     * Nothing closes it, so nothing is known about where it ends. Rewriting on a
+     * guess would corrupt document content, which is worse than leaving a template
+     * for the operator to find.
+     */
+    @Test
+    void migrateConcat_unterminatedExpressionIsLeftAlone() {
+        String input = "before [[${a + 'x and the rest of the document";
+        assertEquals(input, migrator.migrate(input));
+    }
+
+    @Test
+    void migrateConcat_twoExpressionsOnOneLineBothConvert() {
+        assertEquals("{a}/{b} and {c}-{d}",
+                migrator.migrate("[[${a + '/' + b}]] and [[${c + '-' + d}]]"));
+    }
+
     @Test
     void containsThymeleafSyntax_negative() {
         assertFalse(migrator.containsThymeleafSyntax(null));

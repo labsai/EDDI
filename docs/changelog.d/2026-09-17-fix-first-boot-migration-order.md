@@ -163,6 +163,74 @@ A final independent review found five more things; all are fixed here.
 reverting the literal-aware split, the partial filter, the dedupe `$match`, the index-conflict rebuild,
 the sweep gate or the "do not mark complete when a document failed" behaviour each makes a test fail.
 
+### Review round: five findings, all in code that runs against a production database (2026-09-21)
+
+- **A pass that could not read a collection counted as a pass with nothing to do.**
+  `migrateAgentFields`, `migrateCollection`, `migrateDescriptors` and `migrateEnvironments` each
+  opened with a bare `catch (Exception e) { return 0; }`, so an authorization error, a timeout or a
+  step-down read exactly like "this collection does not exist": `runIfNeeded()` saw a clean total and
+  wrote the completion log over a collection nobody had read, and because the migration runs once,
+  those documents stayed in their v5 shape for good. Only `MongoCommandException` code 26
+  (`NamespaceNotFound`) is a skip now — the rule `V6QuteMigration` already applied — and everything
+  else is counted, so the migration runs again on the next start. The four passes now return a shared
+  `(migrated, failed)` result and `runIfNeeded()` aggregates `failed` across all of them, not only
+  across the environment pass.
+- **`saveDocument` swallowed every write failure and the callers counted the document anyway.** It
+  returned `void` after catching everything, and it also declined silently to write an `_id` shape it
+  cannot address. Either way the caller incremented `migrated`. It now reports whether the write
+  happened and the callers count accordingly.
+- **"Newest `_id` wins" was not sound across processes.** An ObjectId is
+  `[4 bytes timestamp][5 bytes process-unique][3 bytes counter]` and `compareTo` compares them in
+  that order, so for two ids created in the same second by different instances the larger id is as
+  likely to be the older row — and this branch deletes the loser, which is a deployment status gone
+  with nothing to recover it from. `strictlyNewer` now answers only where insertion order is
+  established: a different second, or the same second and the same process, where the counter means
+  what it looks like it means. Same second, different process is "cannot tell", and the collision is
+  left unresolved — logged with both ids, counted as a failure, migration incomplete. A migration
+  that stops and names two rows to reconcile is recoverable; a deleted row is not.
+- **Index recovery could drop the wrong index, or the only good one.** `indexOnDeploymentKey()`
+  returned the *first* index whose key pattern matched, and MongoDB allows two indexes on one key
+  pattern when their names and options differ — the shape an installation lands in if the partial
+  index was ever built beside the old unrestricted one. Every index on the deployment key is dropped
+  now, then one partial index is rebuilt. And before anything is dropped, the index holding the name
+  this one would be given is checked: if that name belongs to an index on a *different* key, nothing
+  is dropped and the conflict is reported, because dropping ours would remove a working constraint
+  and still not get past the name. The generated name is derived from `DEPLOYMENT_KEY_PATTERN`, not
+  written out, so it cannot drift from the key the index is built on. Neither error code decides
+  anything: splitting on 85 versus 86 was tried in an earlier round and broke against a real server,
+  which reports the same key under the same name as 86.
+- **A transient migration-log read failure left the instance not-ready for ever.**
+  `setAgentsReadiness(true)` had exactly one call site, inside the startup path that runs once a
+  second after boot. `isPending()` is deliberately fail-safe — a read that fails answers "pending",
+  because answering "not pending" would let the sweep read every agent config as deleted and retire
+  its deployment row — so one failed read in that second left readiness false for the life of the
+  process while `checkDeployments()` deployed the agents ten seconds later and served them correctly.
+  Readiness is now deferred rather than abandoned, and the first scheduled sweep that completes with
+  the migration no longer pending grants it, exactly once. `E.D.D.I is ready!` moved to that same
+  point: it used to be logged from a second `isPending()` call after the lambda, so a read that
+  failed in one and succeeded in the other logged "ready" against an instance whose readiness flag
+  was false.
+- **A `}` inside a string literal defeated the Thymeleaf-to-Qute scan entirely.** `CONCAT_PATTERN`
+  used `[^}]*?`, so `[[${a + '}' + b}]]` matched nowhere: the quote-aware splitter this PR added was
+  never reached, the output patterns failed on it for the same reason, and the template was left in
+  Thymeleaf syntax by a migration that runs once and then records itself complete. The expression is
+  now located by a scan that tracks quote state and backslash escapes — the same state machine as
+  the splitter, at the delimiter instead of at the operator. An unterminated expression is left
+  exactly as it is rather than rewritten on a guess.
+
+**Tests.** `V6RenameMigrationTest` gained `CollectionAccessTests` (NamespaceNotFound completes; an
+authorization failure and a timeout each keep the migration incomplete) and `StrictlyNewerTests`,
+whose third case asserts both that two processes inside one second are unordered *and* that full
+`ObjectId` ordering calls the lower-counter row the newer one — the defect, stated.
+`MongoDeploymentStorageTest` (mocked) gained "every index on the deployment key is dropped, not the
+first one listed" and "nothing is dropped when a different key holds the name ours would be given";
+the Testcontainers test against a real MongoDB stays as it is, and is what proved an earlier
+85-only fix wrong. `TemplateSyntaxMigratorTest` gained exact-output cases for a quoted `}`, a quoted
+`{`, an escaped quote before a brace, an unterminated expression and two expressions on one line.
+`AgentDeploymentManagementBranchTest` gained four readiness cases: granted by the sweep after a
+transient pending answer, granted once however many sweeps follow, never granted while the migration
+stays pending, and granted once on a normal boot.
+
 ```decision-log
 | 2026-09-18 | Keep the v5→v6 conversation rewrite a client-side pass; no skip-if-clean pre-check | Staging: 20 of 24 startup minutes in `migrateEnvironments` over 80 MB | A pre-check was built and removed: a nested legacy URI has no filter form, so proving a collection clean costs the same read. Server-side `updateMany` is the real fix, left as follow-up |
 ```
