@@ -102,6 +102,7 @@
   - [May 2026](changelog/2026-05.md)
   - [April 2026](changelog/2026-04.md)
   - [March 2026](changelog/2026-03.md)
+  - [Pending entries](changelog.d/README.md)
 - [FAQs](how-to....md)
 
 ## Archive
