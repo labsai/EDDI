@@ -4145,8 +4145,17 @@
       "tools": "将授予它的工具（{{toolCount}} 个）",
       "activate": "启用并部署",
       "callerIdentityNote": "EDDI 在发起调用时才代入你的令牌。它不会存入会话，也只会发回本部署。",
-      "rebuildWarning": "保存会新建一个操作员智能体并移除当前的。你现有的操作员会话不会保留。",
-      "environmentHint": "操作员智能体自身运行的位置。它仍可读取任意环境。"
+      "rebuildWarning": "保存将替换运维助手：系统会新建一个智能体，并将当前的智能体（{{agentId}}）下线并删除。现有的运维助手会话不会延续，此后本页面将指向新的智能体。",
+      "environmentHint": "操作员智能体自身运行的位置。它仍可读取任意环境。",
+      "platformBaseUrl": "平台基础 URL",
+      "platformBaseUrlHint": "EDDI 能够访问自身的地址。运维助手的工具是在服务器内部调用它的，因此不是你的浏览器所用的地址。除非你确知另有需要，请保留预填的值。",
+      "platformBaseUrlInvalid": "必须是以 http:// 或 https:// 开头的绝对 URL，例如 http://127.0.0.1:7070。",
+      "platformBaseUrlUnknown": "此 EDDI 部署无法报告自身地址，因此将回退到你浏览器的来源地址。只有在浏览器与 EDDI 之间没有任何隧道、端口映射或反向代理时，该地址才是正确的；否则请在此处填写地址。",
+      "platformBaseUrlLoopback": "由此部署的 HTTP 端口推导得出。如果必须通过服务名或进程内 TLS 访问 EDDI，请覆盖此值。",
+      "platformBaseUrlAuto": "由服务器解析",
+      "platformBaseUrlDiffers": "此部署当前报告的自身地址为 {{serverUrl}}。上方的值与之不同——仅在你有意设置时才保留。",
+      "platformBaseUrlQueryFailed": "无法向服务器查询其自身地址。除非在此处填写，否则激活将失败；也可刷新页面重试。",
+      "platformBaseUrlUnresolved": "此部署运行在随机 HTTP 端口上且未设置 eddi.self.base-url，因此无法告知访问自身的地址。请在此处填写地址。"
     },
     "authMode": {
       "none": {
@@ -4194,7 +4203,10 @@
       "gateUnknown": "门禁未检查",
       "gateVerified": "门禁已验证",
       "gateNotVerified": "门禁未验证",
-      "gateUnverifiedHelp": "无法在该代理的文档上验证审批门禁。"
+      "gateUnverifiedHelp": "无法在该代理的文档上验证审批门禁。",
+      "agentId": "智能体",
+      "platformBaseUrl": "调用平台地址",
+      "platformBaseUrlUnknown": "未记录"
     },
     "chat": {
       "empty": "来问问你的部署。操作员会去查，并向你展示它发出的每一次调用。",
@@ -4306,6 +4318,9 @@
       "noOpeningMessage": "(尚无消息)",
       "stepCount_one": "{{count}} 步",
       "stepCount_other": "{{count}} 步"
+    },
+    "superseded": {
+      "title": "之前的运维助手智能体仍处于部署状态。"
     }
   },
   "groupWorkspace": {

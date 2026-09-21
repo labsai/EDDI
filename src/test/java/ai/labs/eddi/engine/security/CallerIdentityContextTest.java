@@ -363,22 +363,22 @@ class CallerIdentityContextTest {
     @Test
     @DisplayName("the connection name runs to the first space; everything after it is the whole value")
     void credentialSplitsOnTheFirstSpace() {
-        var identity = requestWith(false, "gnowbe key-id:secret");
+        var identity = requestWith(false, "acme key-id:secret");
         assertNotNull(identity.capture());
-        assertEquals("key-id:secret", identity.capture().connectionCredential("gnowbe"));
+        assertEquals("key-id:secret", identity.capture().connectionCredential("acme"));
     }
 
     @Test
     @DisplayName("a value containing spaces is kept intact, so 'Bearer abc' needs no escaping")
     void valueWithSpacesIsKeptWhole() {
-        assertEquals("Bearer abc def", requestWith(false, "gnowbe Bearer abc def").capture().connectionCredential("gnowbe"));
+        assertEquals("Bearer abc def", requestWith(false, "acme Bearer abc def").capture().connectionCredential("acme"));
     }
 
     @Test
     @DisplayName("a connection supplied twice is dropped entirely rather than resolved by header order")
     void duplicateNameIsDropped() {
-        var identity = requestWith(false, "gnowbe first", "gnowbe second", "other keep-me").capture();
-        assertNull(identity.connectionCredential("gnowbe"), "which of two credentials a call is made with must never depend on ordering");
+        var identity = requestWith(false, "acme first", "acme second", "other keep-me").capture();
+        assertNull(identity.connectionCredential("acme"), "which of two credentials a call is made with must never depend on ordering");
         assertEquals("keep-me", identity.connectionCredential("other"), "an unrelated connection on the same request is unaffected");
     }
 
@@ -403,8 +403,8 @@ class CallerIdentityContextTest {
     @DisplayName("a value over 8192 characters is dropped")
     void overlongValueIsDropped() {
         String atCap = "x".repeat(8192);
-        assertEquals(atCap, requestWith(false, "gnowbe " + atCap).capture().connectionCredential("gnowbe"), "8192 is within the cap");
-        assertNull(requestWith(false, "gnowbe " + atCap + "x").capture().connectionCredential("gnowbe"));
+        assertEquals(atCap, requestWith(false, "acme " + atCap).capture().connectionCredential("acme"), "8192 is within the cap");
+        assertNull(requestWith(false, "acme " + atCap + "x").capture().connectionCredential("acme"));
     }
 
     @Test
@@ -419,7 +419,7 @@ class CallerIdentityContextTest {
     @Test
     @DisplayName("an anonymous request's credentials are dropped with the identity — nobody unauthenticated may spend one")
     void anonymousRequestDropsCredentials() {
-        assertNull(requestWith(true, "gnowbe key-id:secret").capture(),
+        assertNull(requestWith(true, "acme key-id:secret").capture(),
                 "a caller that has not authenticated must not make EDDI spend a credential on its behalf");
     }
 

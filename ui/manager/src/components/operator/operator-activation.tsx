@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, Loader2, Sparkles, ShieldCheck, ShieldAlert, Lock, Unlock } from "lucide-react";
+import { AlertTriangle, Info, Loader2, Sparkles, ShieldCheck, ShieldAlert, Lock, Unlock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,6 +9,7 @@ import { LLM_PROVIDERS, getProviderConfig } from "@/lib/api/agent-setup";
 import { MODEL_SUGGESTIONS, isBaseUrlRequired } from "@/lib/model-suggestions";
 import { useVaultHealth } from "@/hooks/use-secrets";
 import { useAuth } from "@/hooks/use-auth";
+import { usePlatformSelfUrl } from "@/hooks/use-operator";
 import {
   safetyPreambleForScope,
   defaultOperatorPromptBody,
@@ -19,7 +20,7 @@ import {
   type OperatorScope,
 } from "@/lib/operator/tool-scopes";
 import { extractVaultKeyName, toVaultRef } from "@/lib/operator/vault-ref";
-import type { OperatorConfig, OperatorAuthMode } from "@/lib/api/operator";
+import { isOriginOnlyBaseUrl, normalizeBaseUrl, type OperatorConfig, type OperatorAuthMode } from "@/lib/api/operator";
 import type { ActivationStage } from "@/hooks/use-operator";
 import { cn } from "@/lib/utils";
 
@@ -54,6 +55,28 @@ export function OperatorActivation({
     initial.credentialKey ? toVaultRef(initial.credentialKey) : "",
   );
   const [baseUrl, setBaseUrl] = useState("");
+  /**
+   * The address EDDI can reach ITSELF at — what the generated tools will target.
+   *
+   * Surfaced as a field at all because the value that broke a staging deployment
+   * (`window.location.origin`, the browser's address) was never visible anywhere:
+   * the operator reported itself deployed and gate-verified while every tool call
+   * failed on connect. Prefilled from the backend below rather than left blank —
+   * an admin should have to touch this only when the server's own answer is wrong.
+   */
+  const [apiBaseUrl, setApiBaseUrl] = useState(initial.apiBaseUrl ?? "");
+  const [apiBaseUrlTouched, setApiBaseUrlTouched] = useState(false);
+  const { data: selfUrl, isLoading: selfUrlLoading, isError: selfUrlFailed } = usePlatformSelfUrl();
+  useEffect(() => {
+    // Fills a BLANK, untouched field and nothing else. All three conditions are
+    // load-bearing: a value carried in from a previous activation and a value the
+    // admin typed are both deliberate choices, and the emptiness check is what
+    // makes this safe against the race — the query resolves after mount, so an
+    // admin who types immediately would otherwise have the answer appended to
+    // (or dropped on top of) what they wrote.
+    if (apiBaseUrlTouched || initial.apiBaseUrl || apiBaseUrl) return;
+    if (selfUrl?.baseUrl) setApiBaseUrl(selfUrl.baseUrl);
+  }, [selfUrl, apiBaseUrlTouched, initial.apiBaseUrl, apiBaseUrl]);
   const [environment, setEnvironment] = useState(initial.environment);
   const [authMode, setAuthMode] = useState<OperatorAuthMode>(initial.authMode);
 
@@ -142,7 +165,30 @@ export function OperatorActivation({
    */
   const authModeUnusable = oidcEnabled && authMode === "none";
 
+  /**
+   * Empty is allowed and means "let activation resolve it" — the resolver asks the
+   * backend and only then falls back to the browser origin, with a warning. What is
+   * NOT allowed is a value that cannot be a base URL at all, which would be
+   * baked into 22 resources before anything noticed.
+   */
+  // Checked on the normalised value: scheme://host[:port] and nothing else. A
+  // path would be prepended to every generated tool's path, a query would
+  // swallow it, and credentials would be baked into all of them.
+  const apiBaseUrlInvalid = apiBaseUrl.trim().length > 0 && !isOriginOnlyBaseUrl(normalizeBaseUrl(apiBaseUrl));
+  /**
+   * The server's own answer, normalised the way activation will normalise the
+   * field, so the two can be compared. A stored value from an earlier activation
+   * wins over the server's answer on reconfigure — so when the deployment has
+   * since moved port or set eddi.self.base-url, the field can hold a stale address
+   * while the server reports a new one. Saying so is the difference between a
+   * reconfigure that fixes the operator and one that re-provisions the old fault.
+   */
+  const serverBaseUrl = normalizeBaseUrl(selfUrl?.baseUrl);
+  const fieldBaseUrl = normalizeBaseUrl(apiBaseUrl);
+  const differsFromServer = Boolean(serverBaseUrl && fieldBaseUrl && fieldBaseUrl !== serverBaseUrl);
+
   const modelStepValid =
+    !apiBaseUrlInvalid &&
     Boolean(model.trim()) &&
     (!needsKey || Boolean(apiKey.trim())) &&
     (!baseUrlRequired || Boolean(baseUrl.trim()));
@@ -168,6 +214,9 @@ export function OperatorActivation({
         promptBody,
         authMode,
         credentialKey: extractVaultKeyName(apiKey),
+        // Trimmed to null rather than "" so `resolveOperatorApiBaseUrl` sees
+        // "not set" and asks the backend, instead of provisioning a blank target.
+        apiBaseUrl: normalizeBaseUrl(apiBaseUrl) || null,
         scope,
       },
       apiKey,
@@ -270,6 +319,76 @@ export function OperatorActivation({
             )}
 
             <Field
+              label={t("operator.activation.platformBaseUrl", "Platform base URL")}
+              hint={t(
+                "operator.activation.platformBaseUrlHint",
+                "The address EDDI can reach itself at — the operator's tools call it from inside the server, so it is not the address your browser uses. Leave it as prefilled unless you know otherwise.",
+              )}
+              htmlFor="operator-platform-base-url"
+            >
+              <input
+                value={apiBaseUrl}
+                onChange={(e) => {
+                  setApiBaseUrlTouched(true);
+                  setApiBaseUrl(e.target.value);
+                }}
+                placeholder={selfUrlLoading ? "…" : "http://127.0.0.1:7070"}
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                id="operator-platform-base-url"
+                data-testid="operator-platform-base-url"
+              />
+              {apiBaseUrlInvalid && (
+                <Notice tone="error" icon={AlertTriangle} testId="operator-platform-base-url-invalid">
+                  {t(
+                    "operator.activation.platformBaseUrlInvalid",
+                    "This must be an absolute http:// or https:// URL, for example http://127.0.0.1:7070.",
+                  )}
+                </Notice>
+              )}
+              {selfUrlFailed && (
+                <Notice tone="warning" icon={AlertTriangle} testId="operator-platform-base-url-query-failed">
+                  {t(
+                    "operator.activation.platformBaseUrlQueryFailed",
+                    "The server could not be asked for its own address. Activation will fail unless you enter it here — or reload to try again.",
+                  )}
+                </Notice>
+              )}
+              {selfUrl?.source === "unresolved" && (
+                <Notice tone="warning" icon={AlertTriangle} testId="operator-platform-base-url-unresolved">
+                  {t(
+                    "operator.activation.platformBaseUrlUnresolved",
+                    "This deployment runs on a random HTTP port and has no eddi.self.base-url, so it cannot say where it can reach itself. Enter the address here.",
+                  )}
+                </Notice>
+              )}
+              {!selfUrlLoading && !selfUrlFailed && selfUrl === null && (
+                <Notice tone="warning" icon={AlertTriangle} testId="operator-platform-base-url-unknown">
+                  {t(
+                    "operator.activation.platformBaseUrlUnknown",
+                    "This EDDI deployment cannot report its own address, so it will fall back to your browser's origin. That is only correct when nothing (no tunnel, port mapping or reverse proxy) sits between your browser and EDDI — otherwise enter the address here.",
+                  )}
+                </Notice>
+              )}
+              {differsFromServer && (
+                <Notice tone="info" icon={Info} testId="operator-platform-base-url-differs">
+                  {t(
+                    "operator.activation.platformBaseUrlDiffers",
+                    "This deployment currently reports its own address as {{serverUrl}}. The value above differs — keep it only if you set it on purpose.",
+                    { serverUrl: serverBaseUrl },
+                  )}
+                </Notice>
+              )}
+              {selfUrl?.source === "loopback" && !differsFromServer && fieldBaseUrl === serverBaseUrl && (
+                <p className="text-xs text-muted-foreground" data-testid="operator-platform-base-url-source">
+                  {t(
+                    "operator.activation.platformBaseUrlLoopback",
+                    "Derived from this deployment's HTTP port. Override it if EDDI must be addressed by a service name or through in-process TLS.",
+                  )}
+                </p>
+              )}
+            </Field>
+
+            <Field
               label={t("operator.activation.environment", "Environment")}
               hint={t("operator.activation.environmentHint", "Where the operator agent itself runs. It can still read any environment.")}
               htmlFor="operator-environment"
@@ -315,6 +434,10 @@ export function OperatorActivation({
               <Summary label={t("operator.activation.provider", "Provider")} value={providerConfig?.name ?? provider} />
               <Summary label={t("operator.activation.model", "Model")} value={model} />
               <Summary label={t("operator.activation.environment", "Environment")} value={environment} />
+              <Summary
+                label={t("operator.activation.platformBaseUrl", "Platform base URL")}
+                value={apiBaseUrl.trim() || t("operator.activation.platformBaseUrlAuto", "resolved from the server")}
+              />
               <Summary
                 label={t("operator.activation.authMode", "How the operator authenticates")}
                 value={t(`operator.authMode.${authMode}.label`)}
@@ -365,7 +488,11 @@ export function OperatorActivation({
 
             {initial.agentId && (
               <Notice tone="warning" icon={AlertTriangle} testId="operator-rebuild-warning">
-                {t("operator.activation.rebuildWarning", "Saving builds a new operator agent and removes the current one. Your existing operator conversation will not carry over.")}
+                {t(
+                  "operator.activation.rebuildWarning",
+                  "Saving REPLACES the operator: a new agent is built and the current one ({{agentId}}) is undeployed and deleted. Your existing operator conversation will not carry over, and this screen will address the new agent from then on.",
+                  { agentId: initial.agentId },
+                )}
               </Notice>
             )}
 

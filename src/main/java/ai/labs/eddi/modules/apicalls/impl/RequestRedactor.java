@@ -140,7 +140,7 @@ public class RequestRedactor {
      * A header whose value came from a {@code ${connection:name}} is a credential
      * by construction — that is the only thing a connection resolves to — but
      * nothing about it need <em>look</em> like one. The connection owns the header
-     * name, and {@code X-Amp-Id} or {@code X-Gnowbe-Key} matches no conventional
+     * name, and {@code X-Amp-Id} or {@code X-Acme-Key} matches no conventional
      * credential pattern; the value is whatever the provider issued, and an opaque
      * key matches no value shape either. Relying on the heuristics here wrote such
      * a credential to MongoDB and showed it to a HITL approver in full. So the
