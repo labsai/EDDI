@@ -33,7 +33,7 @@ import java.util.function.LongSupplier;
 @ApplicationScoped
 public class RestLogAdmin implements IRestLogAdmin {
 
-    private static final Logger log = Logger.getLogger(RestLogAdmin.class);
+    private static final Logger LOGGER = Logger.getLogger(RestLogAdmin.class);
 
     private static final long HEARTBEAT_INTERVAL_MS = 15_000;
 
@@ -107,7 +107,7 @@ public class RestLogAdmin implements IRestLogAdmin {
                                     .comment("heartbeat")
                                     .build();
                             eventSink.send(heartbeat).exceptionally(t -> {
-                                log.debugv("Failed to send heartbeat: {0}", t.getMessage());
+                                LOGGER.debugv("Failed to send heartbeat: {0}", t.getMessage());
                                 return null;
                             });
                             lastEventTime.set(clock.getAsLong());
@@ -125,7 +125,7 @@ public class RestLogAdmin implements IRestLogAdmin {
                     if (!eventSink.isClosed()) {
                         eventSink.close();
                     }
-                    log.debugv("SSE log listener {0} removed (client disconnected or max lifetime reached)", listenerId);
+                    LOGGER.debugv("SSE log listener {0} removed (client disconnected or max lifetime reached)", listenerId);
                 } catch (Exception e) {
                     // CDI container may already be shut down (e.g. during test teardown) —
                     // swallow to avoid noisy "ArC container not initialized" stacktraces
@@ -133,7 +133,7 @@ public class RestLogAdmin implements IRestLogAdmin {
             }
         });
 
-        log.debugv("SSE log stream started (listenerId={0}, agentId={1}, level={2})", listenerId, agentId, level);
+        LOGGER.debugv("SSE log stream started (listenerId={0}, agentId={1}, level={2})", listenerId, agentId, level);
     }
 
     @Override
@@ -145,12 +145,12 @@ public class RestLogAdmin implements IRestLogAdmin {
         try {
             OutboundSseEvent event = sse.newEventBuilder().name("log").mediaType(MediaType.APPLICATION_JSON_TYPE).data(LogEntry.class, entry).build();
             eventSink.send(event).exceptionally(t -> {
-                log.debugv("Failed to send SSE log event: {0}", t.getMessage());
+                LOGGER.debugv("Failed to send SSE log event: {0}", t.getMessage());
                 return null;
             });
             lastEventTime.set(clock.getAsLong());
         } catch (Exception e) {
-            log.debugv("Error sending SSE log event: {0}", e.getMessage());
+            LOGGER.debugv("Error sending SSE log event: {0}", e.getMessage());
         }
     }
 }

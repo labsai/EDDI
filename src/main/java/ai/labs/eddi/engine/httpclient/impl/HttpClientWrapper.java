@@ -48,7 +48,7 @@ public class HttpClientWrapper implements IHttpClient {
     private static final int TEXT_LIMIT = 150;
     private final WebClientSession webClient;
     private final String userAgent;
-    private static final Logger log = Logger.getLogger(HttpClientWrapper.class);
+    private static final Logger LOGGER = Logger.getLogger(HttpClientWrapper.class);
 
     @Inject
     public HttpClientWrapper(VertxHttpClient httpClient, @ConfigProperty(name = "systemRuntime.projectDomain") String projectDomain,
@@ -135,7 +135,7 @@ public class HttpClientWrapper implements IHttpClient {
             try {
                 return URLDecoder.decode(raw, StandardCharsets.UTF_8);
             } catch (IllegalArgumentException e) {
-                log.debug("Could not percent-decode a query component; recording it verbatim", e);
+                LOGGER.debug("Could not percent-decode a query component; recording it verbatim", e);
                 return raw;
             }
         }
@@ -143,7 +143,7 @@ public class HttpClientWrapper implements IHttpClient {
         @Override
         public IRequest setBasicAuthentication(String username, String password, String realm, boolean preemptive) {
             if (!preemptive) {
-                log.warn("Non-preemptive authentication is not supported with Vert.x WebClient; falling back to preemptive.");
+                LOGGER.warn("Non-preemptive authentication is not supported with Vert.x WebClient; falling back to preemptive.");
             }
             request.basicAuthentication(username, password);
             return this;
@@ -258,7 +258,7 @@ public class HttpClientWrapper implements IHttpClient {
                         long contentLength = Long.parseLong(contentLengthHeader);
                         if (contentLength > maxLength) {
                             String message = String.format("Response Content-Length %d exceeds maximum allowed length %d", contentLength, maxLength);
-                            log.warn(message);
+                            LOGGER.warn(message);
                             handler.handle(Future.failedFuture(new IResponse.HttpResponseException(message)));
                             return;
                         }
@@ -270,7 +270,7 @@ public class HttpClientWrapper implements IHttpClient {
                 Buffer body = response.body();
                 if (body != null && body.length() > maxLength) {
                     String message = String.format("Response body length %d exceeds maximum allowed length %d", body.length(), maxLength);
-                    log.warn(message);
+                    LOGGER.warn(message);
                     handler.handle(Future.failedFuture(new IResponse.HttpResponseException(message)));
                     return;
                 }
@@ -331,10 +331,10 @@ public class HttpClientWrapper implements IHttpClient {
                     try {
                         completeListener.onComplete(ar.result());
                     } catch (IResponse.HttpResponseException e) {
-                        log.error(e.getLocalizedMessage(), e);
+                        LOGGER.error(e.getLocalizedMessage(), e);
                     }
                 } else {
-                    log.error(ar.cause().getLocalizedMessage(), ar.cause());
+                    LOGGER.error(ar.cause().getLocalizedMessage(), ar.cause());
                     // Notify listener of failure via a synthetic 503 response.
                     ResponseWrapper errorResponse = new ResponseWrapper();
                     errorResponse.setHttpCode(503);
@@ -344,7 +344,7 @@ public class HttpClientWrapper implements IHttpClient {
                     try {
                         completeListener.onComplete(errorResponse);
                     } catch (IResponse.HttpResponseException e) {
-                        log.error("Error while calling onComplete with error response", e);
+                        LOGGER.error("Error while calling onComplete with error response", e);
                     }
                 }
             });

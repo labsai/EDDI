@@ -49,7 +49,7 @@ public class RestAgentManagement implements IRestAgentManagement {
     @Inject
     SecurityIdentity identity;
 
-    private static final Logger log = Logger.getLogger(RestAgentManagement.class);
+    private static final Logger LOGGER = Logger.getLogger(RestAgentManagement.class);
 
     @Inject
     public RestAgentManagement(IRestAgentEngine restAgentEngine, IUserConversationStore userConversationStore,
@@ -130,7 +130,7 @@ public class RestAgentManagement implements IRestAgentManagement {
      */
     private static String logAndBuildOpaqueMessage(String context, Exception e) {
         String correlationId = UUID.randomUUID().toString();
-        log.errorf(e, "%s [correlationId=%s]: %s", context, correlationId, e.getLocalizedMessage());
+        LOGGER.errorf(e, "%s [correlationId=%s]: %s", context, correlationId, e.getLocalizedMessage());
         return "Internal server error (correlationId: " + correlationId + ")";
     }
 

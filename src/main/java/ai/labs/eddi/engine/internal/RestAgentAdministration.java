@@ -61,7 +61,7 @@ public class RestAgentAdministration implements IRestAgentAdministration {
     private final IRuntime runtime;
     private final TenantQuotaService tenantQuotaService;
 
-    private static final Logger log = Logger.getLogger(RestAgentAdministration.class);
+    private static final Logger LOGGER = Logger.getLogger(RestAgentAdministration.class);
 
     private final ResourceAccessGuard resourceAccessGuard;
 
@@ -116,12 +116,13 @@ public class RestAgentAdministration implements IRestAgentAdministration {
                 try {
                     deployFuture.get(30, TimeUnit.SECONDS);
                 } catch (TimeoutException e) {
-                    log.warn("Deployment wait timed out for Agent " + agentId + " v" + version);
+                    LOGGER.warn("Deployment wait timed out for Agent " + agentId + " v" + version);
                     deployError = "Deployment timed out";
                 } catch (ExecutionException e) {
                     Throwable cause = e.getCause();
                     // Log full details server-side, expose only safe message to client
-                    log.warn("Deployment failed for Agent " + agentId + " v" + version + ": " + (cause != null ? cause.getMessage() : e.getMessage()),
+                    LOGGER.warn(
+                            "Deployment failed for Agent " + agentId + " v" + version + ": " + (cause != null ? cause.getMessage() : e.getMessage()),
                             cause != null ? cause : e);
                     deployError = "Deployment failed. Check server logs for details.";
                 } catch (InterruptedException e) {
@@ -144,7 +145,7 @@ public class RestAgentAdministration implements IRestAgentAdministration {
 
             return Response.accepted().build();
         } catch (Exception e) {
-            log.error(e.getLocalizedMessage(), e);
+            LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
     }
@@ -184,7 +185,7 @@ public class RestAgentAdministration implements IRestAgentAdministration {
         } catch (IResourceStore.ResourceStoreException e) {
             // A store outage is not "agent missing" — let the deploy proceed and fail
             // (or succeed) on its own terms rather than reporting a false 404.
-            log.warnf("Could not verify that Agent %s v%s exists before deploying: %s",
+            LOGGER.warnf("Could not verify that Agent %s v%s exists before deploying: %s",
                     LogSanitizer.sanitize(agentId), version, e.getMessage());
         }
     }
@@ -258,7 +259,7 @@ public class RestAgentAdministration implements IRestAgentAdministration {
                 }
             }
         } catch (Exception e) {
-            log.warnf("Agent quota check: could not determine the deployed-agent count, allowing deploy of %s: %s", agentId, e.getMessage());
+            LOGGER.warnf("Agent quota check: could not determine the deployed-agent count, allowing deploy of %s: %s", agentId, e.getMessage());
             return;
         }
 
@@ -269,7 +270,7 @@ public class RestAgentAdministration implements IRestAgentAdministration {
 
         var result = tenantQuotaService.checkAgentQuota(tenantQuotaService.getDefaultTenantId(), deployedAgentIds.size());
         if (!result.allowed()) {
-            log.warnf("Denying deployment of Agent %s to %s: %s", agentId, environment, result.reason());
+            LOGGER.warnf("Denying deployment of Agent %s to %s: %s", agentId, environment, result.reason());
             // A store that could not answer is a 503, not a 429 — same split as the
             // conversation and API-call gates in ConversationService. This one is
             // synchronous, so QuotaAccountingUnavailableExceptionMapper runs and
@@ -358,12 +359,13 @@ public class RestAgentAdministration implements IRestAgentAdministration {
                 }
 
                 undeploy(environment, agentId, version);
-                log.info(String.format("Successfully undeployed Agent (agentId=%s, agentVersion=%s, environment=%s)", agentId, version, environment));
+                LOGGER.info(
+                        String.format("Successfully undeployed Agent (agentId=%s, agentVersion=%s, environment=%s)", agentId, version, environment));
             } while (undeployThisAndAllPreviousAgentVersions && version-- > 1);
 
             return Response.accepted().build();
         } catch (Exception e) {
-            log.error(e.getLocalizedMessage(), e);
+            LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
     }
@@ -396,7 +398,7 @@ public class RestAgentAdministration implements IRestAgentAdministration {
             } catch (IllegalAccessException e) {
                 return throwErrorForbidden(agentId, version, e);
             } catch (Exception e) {
-                log.error(e.getLocalizedMessage(), e);
+                LOGGER.error(e.getLocalizedMessage(), e);
                 throw new InternalServerErrorException(e.getLocalizedMessage(), e);
             }
 
@@ -455,14 +457,14 @@ public class RestAgentAdministration implements IRestAgentAdministration {
 
     private Status throwError(String agentId, Integer version, ServiceException e, String message) {
         message = String.format(message, agentId, version);
-        log.error(message, e);
+        LOGGER.error(message, e);
         throw sneakyThrow(e);
     }
 
     private Void throwErrorForbidden(String agentId, Integer version, IllegalAccessException e) {
         String message = "Agent deployment is currently in progress! (agentId=%s , version=%s)";
         message = String.format(message, agentId, version);
-        log.error(message, e);
+        LOGGER.error(message, e);
         throw new WebApplicationException(new Throwable(message), Response.Status.FORBIDDEN.getStatusCode());
     }
 
@@ -475,11 +477,11 @@ public class RestAgentAdministration implements IRestAgentAdministration {
                 if (!schedule.isEnabled()) {
                     var nextFire = schedule.getNextFire() != null ? schedule.getNextFire() : Instant.now();
                     scheduleStore.setScheduleEnabled(schedule.getId(), true, nextFire);
-                    log.infof("[SCHEDULE] Auto-enabled schedule '%s' (id=%s) on Agent %s deploy", schedule.getName(), schedule.getId(), agentId);
+                    LOGGER.infof("[SCHEDULE] Auto-enabled schedule '%s' (id=%s) on Agent %s deploy", schedule.getName(), schedule.getId(), agentId);
                 }
             }
         } catch (Exception e) {
-            log.warnf(e, "[SCHEDULE] Failed to auto-enable schedules for Agent %s (non-fatal)", agentId);
+            LOGGER.warnf(e, "[SCHEDULE] Failed to auto-enable schedules for Agent %s (non-fatal)", agentId);
         }
     }
 
@@ -489,11 +491,12 @@ public class RestAgentAdministration implements IRestAgentAdministration {
             for (var schedule : schedules) {
                 if (schedule.isEnabled()) {
                     scheduleStore.setScheduleEnabled(schedule.getId(), false, null);
-                    log.infof("[SCHEDULE] Auto-disabled schedule '%s' (id=%s) on Agent %s undeploy", schedule.getName(), schedule.getId(), agentId);
+                    LOGGER.infof("[SCHEDULE] Auto-disabled schedule '%s' (id=%s) on Agent %s undeploy", schedule.getName(), schedule.getId(),
+                            agentId);
                 }
             }
         } catch (Exception e) {
-            log.warnf(e, "[SCHEDULE] Failed to auto-disable schedules for Agent %s (non-fatal)", agentId);
+            LOGGER.warnf(e, "[SCHEDULE] Failed to auto-disable schedules for Agent %s (non-fatal)", agentId);
         }
     }
 }

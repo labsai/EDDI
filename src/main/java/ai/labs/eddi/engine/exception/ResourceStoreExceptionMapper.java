@@ -25,14 +25,14 @@ import java.util.UUID;
  */
 @Provider
 public class ResourceStoreExceptionMapper implements ExceptionMapper<IResourceStore.ResourceStoreException> {
-    private static final Logger log = Logger.getLogger(ResourceStoreExceptionMapper.class);
+    private static final Logger LOGGER = Logger.getLogger(ResourceStoreExceptionMapper.class);
 
     static final String GENERIC_MESSAGE = "Internal server error";
 
     @Override
     public Response toResponse(IResourceStore.ResourceStoreException exception) {
         String correlationId = UUID.randomUUID().toString();
-        log.errorf(exception, "Resource store failure [correlationId=%s]: %s", correlationId, exception.getLocalizedMessage());
+        LOGGER.errorf(exception, "Resource store failure [correlationId=%s]: %s", correlationId, exception.getLocalizedMessage());
         return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
                 .type(MediaType.TEXT_PLAIN)
                 .entity(GENERIC_MESSAGE + " (correlationId: " + correlationId + ")")
