@@ -232,10 +232,25 @@ parameter rather than ignoring it.
 > Stored vectors were always correct; only the query side was wrong, so **no
 > re-ingestion is needed**. Retrieval quality should improve on the next query.
 
-> **`taskType` is still honoured** for Gemini. It sets the model's build-time default,
-> which now applies only where no role is specified — and EDDI's RAG paths always specify
-> one. Set it only if you are deliberately using a non-retrieval task type such as
-> `SEMANTIC_SIMILARITY` or `CLASSIFICATION`.
+> **A deliberately pinned `taskType` still wins.** Gemini's `taskType` is a build-time
+> default that langchain4j consults *only when no role is given* — a role maps
+> unconditionally onto `RETRIEVAL_DOCUMENT` / `RETRIEVAL_QUERY`. So if EDDI attached a role
+> unconditionally, a `taskType` of `SEMANTIC_SIMILARITY`, `CLASSIFICATION` or `CLUSTERING`
+> that you had set on purpose would stop reaching the provider, and everything ingested
+> afterwards would land in the same index with a different geometry from what is already
+> there. EDDI therefore leaves the role off when you have configured a non-retrieval
+> `taskType`, and your setting continues to apply to both sides.
+>
+> `RETRIEVAL_DOCUMENT` and `RETRIEVAL_QUERY` are **not** treated that way.
+> `RETRIEVAL_DOCUMENT` is the default EDDI applies when you configure nothing, and it is
+> exactly the value that caused queries to be embedded as documents — writing it out by
+> hand must not opt back into the defect. Both values say "this knowledge base is for
+> retrieval", which is what the role refines.
+>
+> This only applies where `taskType` reaches Google at all. `gemini-embedding-2` — the
+> default model — does not accept `task_type`; langchain4j sends none and prefixes a
+> role-specific instruction to the text instead, so a `taskType` set there was already
+> inert and the role is always attached.
 
 ## Vector Stores
 

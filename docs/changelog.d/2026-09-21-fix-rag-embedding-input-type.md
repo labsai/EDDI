@@ -61,8 +61,38 @@ model reports no input type at all. Two call-site tests assert ingestion asks fo
 `DOCUMENT` and retrieval asks for `QUERY`, which is what makes the fix real: the decorator
 is useless if both sites still ask for the same thing.
 
+`EmbeddingModelFactoryTest.PinnedTaskTypeDecision` (7, new) grades
+`pinsNonRetrievalTaskType` directly. It is package-private and tested on its own because
+every path through `build()` constructs a live provider client, which needs a socket — so
+the model-level tests only run where one is available, and the decision itself has to be
+gradeable anywhere. `PinnedTaskType` (6, new) covers the same decision through
+`getOrCreate` and runs in CI.
+
 `docs/rag.md` gained an "Asymmetric models" section covering which providers are affected,
-why `taskType` is still honoured, and that no re-ingestion is required.
+what happens to a pinned `taskType`, and that no re-ingestion is required.
+
+### Follow-up: a pinned Gemini `taskType` is no longer overridden by the role
+
+Raised in review of [#810](https://github.com/labsai/EDDI/pull/810). Attaching the role to
+every RAG call fixes the query side, but `GoogleAiEmbeddingModel.toTaskType` falls back to
+the build-time `taskType` **only when no input type is given**; a role maps
+unconditionally onto `RETRIEVAL_QUERY` / `RETRIEVAL_DOCUMENT`. A knowledge base configured
+with `taskType: SEMANTIC_SIMILARITY` (or `CLASSIFICATION`, or `CLUSTERING`) would
+therefore have stopped sending it, and everything ingested afterwards would have used
+`RETRIEVAL_DOCUMENT` — two incompatible geometries in one index, with nothing failing to
+say so.
+
+`EmbeddingModelFactory.pinsNonRetrievalTaskType` now detects that case and leaves the role
+off, so the configured task type keeps reaching the provider on both sides. Three
+boundaries are deliberate:
+
+- **`RETRIEVAL_DOCUMENT` and `RETRIEVAL_QUERY` do not pin.** The first is the default this
+  factory applies and is precisely the value that produced the defect; honouring it would
+  leave the bug in place for anyone who had written the default out by hand.
+- **`gemini-embedding-2` never pins.** langchain4j sends no `task_type` for any model whose
+  name contains `embedding-2` and applies a role instruction instead, so a pinned task type
+  is already inert there and skipping the role would cost the instruction for nothing.
+- **`taskType` is a Gemini parameter.** A stray one on Cohere or OpenAI pins nothing.
 
 ---
 

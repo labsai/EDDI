@@ -239,6 +239,169 @@ class EmbeddingModelFactoryTest {
         }
     }
 
+    /**
+     * Tagging every RAG call with its role fixes queries being embedded as
+     * documents, but a Gemini {@code taskType} set on purpose has to survive it:
+     * {@code GoogleAiEmbeddingModel.toTaskType} falls back to the build-time task
+     * type only when no input type is given, so an unconditional role would
+     * silently retire a configured {@code SEMANTIC_SIMILARITY} and mix two vector
+     * geometries in one index.
+     */
+    @Nested
+    @DisplayName("pinsNonRetrievalTaskType — the decision, without a provider client")
+    class PinnedTaskTypeDecision {
+
+        @Test
+        @DisplayName("SEMANTIC_SIMILARITY on a task-type-aware Gemini model is pinned")
+        void semanticSimilarityIsPinned() {
+            assertTrue(EmbeddingModelFactory.pinsNonRetrievalTaskType("gemini",
+                    Map.of("model", "gemini-embedding-001", "taskType", "SEMANTIC_SIMILARITY")));
+        }
+
+        @Test
+        @DisplayName("CLASSIFICATION and CLUSTERING are pinned as well")
+        void otherNonRetrievalTaskTypesArePinned() {
+            assertTrue(EmbeddingModelFactory.pinsNonRetrievalTaskType("gemini",
+                    Map.of("model", "gemini-embedding-001", "taskType", "CLASSIFICATION")));
+            assertTrue(EmbeddingModelFactory.pinsNonRetrievalTaskType("gemini",
+                    Map.of("model", "gemini-embedding-001", "taskType", "CLUSTERING")));
+        }
+
+        @Test
+        @DisplayName("RETRIEVAL_DOCUMENT is the default that caused the defect, so it is not a pin")
+        void retrievalDocumentIsNotAPin() {
+            assertFalse(EmbeddingModelFactory.pinsNonRetrievalTaskType("gemini",
+                    Map.of("model", "gemini-embedding-001", "taskType", "RETRIEVAL_DOCUMENT")));
+        }
+
+        @Test
+        @DisplayName("RETRIEVAL_QUERY is not a pin either — both say 'this is for retrieval'")
+        void retrievalQueryIsNotAPin() {
+            assertFalse(EmbeddingModelFactory.pinsNonRetrievalTaskType("gemini",
+                    Map.of("model", "gemini-embedding-001", "taskType", "RETRIEVAL_QUERY")));
+        }
+
+        @Test
+        @DisplayName("an absent or blank taskType is not a pin")
+        void absentTaskTypeIsNotAPin() {
+            assertFalse(EmbeddingModelFactory.pinsNonRetrievalTaskType("gemini", Map.of("model", "gemini-embedding-001")));
+            assertFalse(EmbeddingModelFactory.pinsNonRetrievalTaskType("gemini",
+                    Map.of("model", "gemini-embedding-001", "taskType", "   ")));
+        }
+
+        @Test
+        @DisplayName("Gemini Embedding 2 ignores task_type, so nothing is pinned there — including the default model")
+        void embedding2IsNeverAPin() {
+            assertFalse(EmbeddingModelFactory.pinsNonRetrievalTaskType("gemini",
+                    Map.of("model", "gemini-embedding-2", "taskType", "SEMANTIC_SIMILARITY")));
+            assertFalse(EmbeddingModelFactory.pinsNonRetrievalTaskType("gemini",
+                    Map.of("taskType", "SEMANTIC_SIMILARITY")),
+                    "the default model is gemini-embedding-2, which sends no task_type at all");
+        }
+
+        @Test
+        @DisplayName("taskType is a Gemini parameter — it pins nothing on another provider")
+        void otherProvidersAreNeverPinned() {
+            // A model name that is NOT embedding-2, or the Gemini-2 branch would
+            // answer first and this would pass whether the provider is checked or
+            // not.
+            assertFalse(EmbeddingModelFactory.pinsNonRetrievalTaskType("cohere",
+                    Map.of("model", "embed-english-v3.0", "taskType", "SEMANTIC_SIMILARITY")));
+            assertFalse(EmbeddingModelFactory.pinsNonRetrievalTaskType("openai",
+                    Map.of("model", "text-embedding-3-small", "taskType", "SEMANTIC_SIMILARITY")));
+        }
+    }
+
+    @Nested
+    @DisplayName("a deliberately pinned Gemini taskType survives the role")
+    class PinnedTaskType {
+
+        @Test
+        @DisplayName("a non-retrieval taskType on a task-type-aware model keeps the role off the request")
+        void nonRetrievalTaskType_isNotOverriddenByTheRole() {
+            var config = createConfig("gemini", Map.of(
+                    "apiKey", "test-key",
+                    "model", "gemini-embedding-001",
+                    "taskType", "SEMANTIC_SIMILARITY"));
+
+            EmbeddingModel model = factory.getOrCreate(config, EmbeddingInputType.DOCUMENT);
+
+            assertFalse(model instanceof InputTypedEmbeddingModel,
+                    "a pinned SEMANTIC_SIMILARITY must reach the provider, so no role may be attached");
+        }
+
+        @Test
+        @DisplayName("CLASSIFICATION is pinned for the query role too, not only for ingestion")
+        void nonRetrievalTaskType_isNotOverriddenOnTheQuerySide() {
+            var config = createConfig("gemini", Map.of(
+                    "apiKey", "test-key",
+                    "model", "gemini-embedding-001",
+                    "taskType", "CLASSIFICATION"));
+
+            EmbeddingModel model = factory.getOrCreate(config, EmbeddingInputType.QUERY);
+
+            assertFalse(model instanceof InputTypedEmbeddingModel,
+                    "pinning must apply to both roles, or the two sides embed with different task types");
+        }
+
+        @Test
+        @DisplayName("an explicit RETRIEVAL_DOCUMENT is the defect, not a pin, so the role still applies")
+        void explicitRetrievalDocument_stillGetsTheRole() {
+            var config = createConfig("gemini", Map.of(
+                    "apiKey", "test-key",
+                    "model", "gemini-embedding-001",
+                    "taskType", "RETRIEVAL_DOCUMENT"));
+
+            EmbeddingModel model = factory.getOrCreate(config, EmbeddingInputType.QUERY);
+
+            var typed = assertInstanceOf(InputTypedEmbeddingModel.class, model,
+                    "writing the default out by hand must not opt back into embedding queries as documents");
+            assertEquals(EmbeddingInputType.QUERY, typed.inputType());
+        }
+
+        @Test
+        @DisplayName("Gemini Embedding 2 ignores taskType entirely, so a pin there must not cost the role")
+        void embedding2_ignoresThePinAndKeepsTheRole() {
+            var config = createConfig("gemini", Map.of(
+                    "apiKey", "test-key",
+                    "model", "gemini-embedding-2",
+                    "taskType", "SEMANTIC_SIMILARITY"));
+
+            EmbeddingModel model = factory.getOrCreate(config, EmbeddingInputType.QUERY);
+
+            var typed = assertInstanceOf(InputTypedEmbeddingModel.class, model,
+                    "langchain4j sends no task_type for an embedding-2 model and uses a role instruction instead");
+            assertEquals(EmbeddingInputType.QUERY, typed.inputType());
+        }
+
+        @Test
+        @DisplayName("with no taskType configured at all the role applies as before")
+        void noTaskType_getsTheRole() {
+            var config = createConfig("gemini", Map.of(
+                    "apiKey", "test-key",
+                    "model", "gemini-embedding-001"));
+
+            EmbeddingModel model = factory.getOrCreate(config, EmbeddingInputType.DOCUMENT);
+
+            var typed = assertInstanceOf(InputTypedEmbeddingModel.class, model);
+            assertEquals(EmbeddingInputType.DOCUMENT, typed.inputType());
+        }
+
+        @Test
+        @DisplayName("a non-Gemini provider that accepts an input type is unaffected by a stray taskType")
+        void cohere_isUnaffected() {
+            var config = createConfig("cohere", Map.of(
+                    "apiKey", "test-key",
+                    "taskType", "SEMANTIC_SIMILARITY"));
+
+            EmbeddingModel model = factory.getOrCreate(config, EmbeddingInputType.QUERY);
+
+            var typed = assertInstanceOf(InputTypedEmbeddingModel.class, model,
+                    "taskType is a Gemini parameter; it must not disable the role anywhere else");
+            assertEquals(EmbeddingInputType.QUERY, typed.inputType());
+        }
+    }
+
     private RagConfiguration createConfig(String provider, Map<String, String> params) {
         var config = new RagConfiguration();
         config.setEmbeddingProvider(provider);
