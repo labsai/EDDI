@@ -87,11 +87,29 @@ public class HtmlToMarkdownConverter {
     /**
      * Page-level header only. {@code body > header} catches the site banner while
      * leaving {@code article > header} — which usually holds the title — intact.
+     *
+     * <p>
+     * Deliberately not {@code body > div > header}. A content wrapper is often a
+     * direct child of body, and its own {@code <header>} holds the page's {@code
+     *
+    <h1>}; removing it here dropped that heading before the wrapper was even chosen
+     * as the root. Site banners nested in a div are covered by
+     * {@code [role=banner]} and {@code .site-header} in {@link #NOISE_SELECTOR},
+     * which name what they are instead of guessing from depth.
      */
-    private static final String PAGE_HEADER_SELECTOR = "body > header, body > div > header";
+    private static final String PAGE_HEADER_SELECTOR = "body > header";
 
-    /** Where a page's real content usually lives, most specific first. */
-    private static final String MAIN_CONTENT_SELECTOR = "main, article, #content, #main, .content, .main-content";
+    /**
+     * Where a page's real content usually lives, most specific first — and read in
+     * that order.
+     *
+     * <p>
+     * As one comma-separated selector it was not: {@code selectFirst} answers in
+     * document order, so a page with a {@code <div class="content">} wrapper above
+     * its {@code <main>} was rooted at the wrapper, which is the less specific
+     * match. Each entry is now tried in turn.
+     */
+    private static final List<String> MAIN_CONTENT_SELECTORS = List.of("main", "article", "#content", "#main", ".content", ".main-content");
 
     /**
      * Whether this converter handles the given MIME type.
@@ -130,7 +148,7 @@ public class HtmlToMarkdownConverter {
             return "";
         }
 
-        Element main = doc.selectFirst(MAIN_CONTENT_SELECTOR);
+        Element main = firstMatch(doc);
         if (main != null) {
             root = main;
         }
@@ -145,10 +163,20 @@ public class HtmlToMarkdownConverter {
 
         String result = collapseBlankLines(markdown.toString()).trim();
         if (result.length() > cap) {
+            // The notice counts against the cap. Appending it afterwards returned
+            // more characters than the caller asked for — WebScraperTool passes
+            // 5000 precisely because that is what it can afford to hold.
+            String notice = "\n\n[Content truncated - exceeded " + cap + " character limit]";
+            // Unless the cap is too small to hold the notice and anything else,
+            // in which case the notice is dropped rather than served instead of
+            // the content: a caller that asks for 11 characters wants 11
+            // characters of document, not 51 characters of apology.
+            boolean roomForNotice = cap - notice.length() > 0;
+            int room = roomForNotice ? cap - notice.length() : cap;
             // Never cut between the halves of a surrogate pair: a lone half is not
             // valid text, and some embedding providers reject the whole request.
-            int end = Character.isHighSurrogate(result.charAt(cap - 1)) ? cap - 1 : cap;
-            result = result.substring(0, end) + "\n\n[Content truncated - exceeded " + cap + " character limit]";
+            int end = Character.isHighSurrogate(result.charAt(room - 1)) ? room - 1 : room;
+            result = result.substring(0, end) + (roomForNotice ? notice : "");
         }
         return result;
     }
@@ -189,7 +217,7 @@ public class HtmlToMarkdownConverter {
             case "ul" -> appendList(output, element, baseUrl, false, depth);
             case "ol" -> appendList(output, element, baseUrl, true, depth);
             case "dl" -> appendDefinitionList(output, element, baseUrl, depth);
-            case "table" -> appendTable(output, element);
+            case "table" -> appendTable(output, element, baseUrl);
             case "details" -> appendDetails(output, element, baseUrl, depth);
             case "figure" -> appendFigure(output, element, baseUrl, depth);
             case "hr" -> output.append("\n---\n\n");
@@ -204,7 +232,7 @@ public class HtmlToMarkdownConverter {
             case "img" -> appendImage(output, element, baseUrl);
             case "strong", "b" -> appendInlineFormatted(output, element, baseUrl, "**", depth);
             case "em", "i" -> appendInlineFormatted(output, element, baseUrl, "*", depth);
-            case "code" -> output.append("`").append(escapeInlineCode(element.text())).append("`");
+            case "code" -> appendInlineCode(output, element.text());
             case "del", "s", "strike" -> appendInlineFormatted(output, element, baseUrl, "~~", depth);
             case "sub" -> appendInlineFormatted(output, element, baseUrl, "~", depth);
             case "sup" -> appendInlineFormatted(output, element, baseUrl, "^", depth);
@@ -451,7 +479,7 @@ public class HtmlToMarkdownConverter {
         output.append("\n");
     }
 
-    private void appendTable(StringBuilder output, Element element) {
+    private void appendTable(StringBuilder output, Element element, String baseUrl) {
         output.append("\n");
 
         Element thead = element.selectFirst("thead");
@@ -461,7 +489,7 @@ public class HtmlToMarkdownConverter {
         if (headerRow != null) {
             Elements headers = headerRow.select("th, td");
             if (!headers.isEmpty()) {
-                appendRow(output, headers);
+                appendRow(output, headers, baseUrl);
                 output.append("| ");
                 for (int i = 0; i < headers.size(); i++) {
                     output.append("--- | ");
@@ -479,17 +507,33 @@ public class HtmlToMarkdownConverter {
             }
             Elements cells = row.select("td, th");
             if (!cells.isEmpty()) {
-                appendRow(output, cells);
+                appendRow(output, cells, baseUrl);
             }
         }
 
         output.append("\n");
     }
 
-    private void appendRow(StringBuilder output, Elements cells) {
+    /**
+     * A row, with each cell rendered the way the same content would be rendered
+     * anywhere else.
+     *
+     * <p>
+     * {@code cell.text()} kept the words and dropped everything that carries
+     * meaning: a link's destination, an image's alt text, inline code, emphasis,
+     * and the line breaks a {@code <br>
+     * } stands for. A table is where a page puts its most structured facts, so it
+     * was the worst place to flatten.
+     */
+    private void appendRow(StringBuilder output, Elements cells, String baseUrl) {
         output.append("| ");
         for (Element cell : cells) {
-            output.append(escapeTableCell(cell.text())).append(" | ");
+            StringBuilder rendered = new StringBuilder();
+            appendInline(rendered, cell, baseUrl, 0);
+            // escapeTableCell still runs over the result: it collapses the newlines
+            // a <br> produced and escapes any pipe, whether it came from the text
+            // or from a rendered link.
+            output.append(escapeTableCell(rendered.toString())).append(" | ");
         }
         output.append("\n");
     }
@@ -519,8 +563,42 @@ public class HtmlToMarkdownConverter {
         if (text.equals(href)) {
             output.append("<").append(href).append(">");
         } else {
-            output.append("[").append(escapeMarkdown(text)).append("](").append(href).append(")");
+            output.append("[").append(escapeMarkdown(text)).append("](").append(asDestination(href)).append(")");
         }
+    }
+
+    /**
+     * A link destination, in angle brackets when it needs them.
+     *
+     * <p>
+     * A bare destination ends at the first space, and its parentheses have to
+     * balance. A URL containing either — which query strings and Wikipedia-style
+     * paths both produce — silently truncated the link and spilled the rest into
+     * the text.
+     */
+    private static String asDestination(String href) {
+        if (href == null || href.isEmpty()) {
+            return "";
+        }
+        if (!href.contains(" ") && parenthesesBalance(href)) {
+            return href;
+        }
+        // Angle brackets take anything but a literal < or >, which cannot appear in
+        // a URL that has been through resolveUrl anyway.
+        return "<" + href.replace("<", "%3C").replace(">", "%3E") + ">";
+    }
+
+    private static boolean parenthesesBalance(String href) {
+        int depth = 0;
+        for (int i = 0; i < href.length(); i++) {
+            char character = href.charAt(i);
+            if (character == '(') {
+                depth++;
+            } else if (character == ')' && --depth < 0) {
+                return false;
+            }
+        }
+        return depth == 0;
     }
 
     /**
@@ -600,10 +678,49 @@ public class HtmlToMarkdownConverter {
                 .replace(">", "\\>");
     }
 
-    private String escapeInlineCode(String text) {
-        if (text == null) {
-            return "";
+    /**
+     * A code span, fenced by more backticks than it contains.
+     *
+     * <p>
+     * Backslash-escaping was wrong: Markdown does not process escapes inside a code
+     * span, so {@code a\`b} reached the reader with the backslash in it and the
+     * span ended at the wrong place. CommonMark's rule is to use a longer fence,
+     * and to pad with a space when the content starts or ends with a backtick so
+     * the fence and the content do not run together.
+     */
+    private void appendInlineCode(StringBuilder output, String text) {
+        String code = text == null ? "" : text;
+        String fence = "`".repeat(longestBacktickRun(code) + 1);
+        boolean pad = code.startsWith("`") || code.endsWith("`");
+        output.append(fence);
+        if (pad) {
+            output.append(' ');
         }
-        return text.replace("`", "\\`");
+        output.append(code);
+        if (pad) {
+            output.append(' ');
+        }
+        output.append(fence);
+    }
+
+    private static int longestBacktickRun(String text) {
+        int longest = 0;
+        int current = 0;
+        for (int i = 0; i < text.length(); i++) {
+            current = text.charAt(i) == '`' ? current + 1 : 0;
+            longest = Math.max(longest, current);
+        }
+        return longest;
+    }
+
+    /** The first of {@link #MAIN_CONTENT_SELECTORS} that matches, in that order. */
+    private static Element firstMatch(Document doc) {
+        for (String selector : MAIN_CONTENT_SELECTORS) {
+            Element found = doc.selectFirst(selector);
+            if (found != null) {
+                return found;
+            }
+        }
+        return null;
     }
 }

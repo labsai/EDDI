@@ -299,9 +299,150 @@ class HtmlToMarkdownConverterSalvageTest {
 
         String result = converter.convert(html, null, 11);
 
-        int cutAt = result.indexOf("\n\n[Content truncated");
-        assertTrue(cutAt > 0, "expected a truncation marker, was: " + result);
-        assertFalse(Character.isHighSurrogate(result.charAt(cutAt - 1)), "the cut must not leave half a pair");
+        // Eleven characters cannot hold the truncation notice as well, so the
+        // notice is dropped rather than served instead of the document.
+        assertTrue(result.length() <= 11, "the cap is a cap: " + result.length());
+        assertFalse(Character.isHighSurrogate(result.charAt(result.length() - 1)),
+                "the cut must not leave half a pair");
+    }
+
+    @Test
+    @DisplayName("the truncation notice fits inside the cap rather than pushing past it")
+    void truncationNoticeCountsAgainstTheCap() {
+        String html = "<p>" + "word ".repeat(400) + "</p>";
+
+        String result = converter.convert(html, null, 500);
+
+        // WebScraperTool passes 5000 because that is what it can afford to hold.
+        // Appending the notice after truncating returned more than was asked for.
+        assertTrue(result.length() <= 500, "the cap is a cap: " + result.length());
+        assertTrue(result.contains("[Content truncated"), result);
+        assertTrue(result.indexOf("[Content truncated") > 0, "content must come before the notice");
+    }
+
+    @Test
+    @DisplayName("a content wrapper keeps its own header")
+    void aContentWrapperKeepsItsHeader() {
+        // .content is a direct child of body, so "body > div > header" matched the
+        // header holding the page's h1 and removed it — before .content was even
+        // chosen as the root.
+        String html = """
+                <html><body>
+                  <div class="content">
+                    <header><h1>Guide</h1></header>
+                    <p>How to do the thing.</p>
+                  </div>
+                </body></html>
+                """;
+
+        String markdown = converter.convert(html, null);
+
+        assertTrue(markdown.contains("Guide"), markdown);
+        assertTrue(markdown.contains("How to do the thing."), markdown);
+    }
+
+    @Test
+    @DisplayName("a site banner wrapped in a div is still dropped")
+    void aWrappedSiteBannerIsStillDropped() {
+        // What "body > div > header" was reaching for. [role=banner] and
+        // .site-header name what they are instead of guessing from depth.
+        String html = """
+                <html><body>
+                  <div><header class="site-header"><a href="/">Acme</a></header></div>
+                  <main><p>Real content.</p></main>
+                </body></html>
+                """;
+
+        String markdown = converter.convert(html, null);
+
+        assertFalse(markdown.contains("Acme"), markdown);
+        assertTrue(markdown.contains("Real content."), markdown);
+    }
+
+    @Test
+    @DisplayName("the main-content selectors are a priority order, not document order")
+    void mainContentSelectorsAreAPriorityOrder() {
+        // A .content wrapper above <main>. selectFirst answers in document order,
+        // so the less specific match won and the page was rooted at the wrapper.
+        String html = """
+                <html><body>
+                  <div class="content"><p>Sidebar blurb.</p></div>
+                  <main><p>The actual article.</p></main>
+                </body></html>
+                """;
+
+        String markdown = converter.convert(html, null);
+
+        assertTrue(markdown.contains("The actual article."), markdown);
+        assertFalse(markdown.contains("Sidebar blurb."), markdown);
+    }
+
+    @Test
+    @DisplayName("a code span is fenced by more backticks than it contains")
+    void codeSpansChooseTheirFence() {
+        // Markdown does not process backslash escapes inside a code span, so
+        // replacing ` with \` left the backslash in the output and ended the span
+        // in the wrong place.
+        String markdown = converter.convert("<p><code>a`b</code></p>", null);
+
+        assertFalse(markdown.contains("\\`"), "a backslash escape does nothing inside a code span: " + markdown);
+        assertTrue(markdown.contains("``a`b``"), markdown);
+    }
+
+    @Test
+    @DisplayName("a code span that starts or ends with a backtick is padded")
+    void codeSpansPadAgainstTheirFence() {
+        String markdown = converter.convert("<p><code>`tick</code></p>", null);
+
+        // Without the space the fence and the content run together and the span
+        // does not parse.
+        assertTrue(markdown.contains("`` `tick ``"), markdown);
+    }
+
+    @Test
+    @DisplayName("a table cell keeps the markup every other context keeps")
+    void tableCellsKeepTheirMarkup() {
+        String html = """
+                <table>
+                  <tr><th>Name</th><th>Where</th></tr>
+                  <tr><td><code>id</code></td><td><a href="https://example.com/docs">the docs</a></td></tr>
+                </table>
+                """;
+
+        String markdown = converter.convert(html, null);
+
+        // cell.text() kept the words and dropped everything that carries meaning:
+        // a link's destination, inline code, emphasis, an image's alt text.
+        assertTrue(markdown.contains("`id`"), markdown);
+        assertTrue(markdown.contains("[the docs](https://example.com/docs)"), markdown);
+    }
+
+    @Test
+    @DisplayName("a pipe from a rendered link cannot break the columns")
+    void tableCellsEscapeWhatTheyRender() {
+        String html = """
+                <table><tr><td><a href="https://example.com/a|b">x</a></td><td>y</td></tr></table>
+                """;
+
+        String markdown = converter.convert(html, null);
+
+        assertFalse(markdown.contains("example.com/a|b"), "an unescaped pipe shifts every later column: " + markdown);
+    }
+
+    @Test
+    @DisplayName("a link destination with a space or unbalanced parens gets angle brackets")
+    void linkDestinationsAreBracketedWhenTheyNeedIt() {
+        String withSpace = converter.convert("<p><a href=\"https://example.com/a b\">x</a></p>", null);
+        // A bare destination ends at the first space, so the rest spilled into the
+        // text and the link pointed somewhere else.
+        assertTrue(withSpace.contains("(<https://example.com/a b>)"), withSpace);
+
+        String unbalanced = converter.convert("<p><a href=\"https://example.com/a(b\">x</a></p>", null);
+        assertTrue(unbalanced.contains("(<https://example.com/a(b>)"), unbalanced);
+
+        // A destination that needs nothing is left alone, brackets included.
+        String plain = converter.convert("<p><a href=\"https://example.com/a(b)c\">x</a></p>", null);
+        assertTrue(plain.contains("(https://example.com/a(b)c)"), plain);
     }
 
     @Test
