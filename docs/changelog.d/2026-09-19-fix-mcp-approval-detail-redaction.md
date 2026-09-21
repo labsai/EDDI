@@ -41,9 +41,14 @@ there) plus the full serialized LLM transcript. On a deployment without OIDC,
   GDPR Art. 15 export (conversation outputs only); the HITL audit entry (`argsDigest`, a SHA-256 — not
   the arguments); `RestToolHistory` (step traces, owner-only, not the pending batch);
   `RestTemplatePreview` (`MemoryItemConverter` exposes no HITL fields).
-- **Pending, concurrent:** `fix/gemini-thought-signatures` (not yet merged, no commits at the time of
-  writing) adds `PendingToolCallBatch.gatingAssistantMessageJson`, which embeds raw tool arguments.
-  Whichever change lands second must null it in `sanitizePendingToolCallsForApprover` — and add it to
-  this test's canary set.
+- **The concurrent change landed first, and this branch absorbed it.** `fix/gemini-thought-signatures`
+  (#794) added `PendingToolCallBatch.gatingAssistantMessageJson`, which embeds every gated call's raw
+  arguments. It dropped that field inside `stripRequestFingerprintsForRead`, with the reasoning that
+  the method was "the one method every full-detail read calls — including the MCP approval-status
+  tool, which calls nothing else". That premise is exactly what this branch removes, and its own
+  sanitizer already nulls the field, so the merge keeps the strip there and drops the duplicate: one
+  projection, one place a new raw-argument field has to be listed. The test that asserted the partial
+  strip drops the field now asserts that the partial strip is private — the invariant that kept the
+  two doors from drifting again.
 
 ---
