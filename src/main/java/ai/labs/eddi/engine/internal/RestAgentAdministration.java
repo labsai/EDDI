@@ -121,7 +121,8 @@ public class RestAgentAdministration implements IRestAgentAdministration {
                 } catch (ExecutionException e) {
                     Throwable cause = e.getCause();
                     // Log full details server-side, expose only safe message to client
-                    LOGGER.warn("Deployment failed for Agent " + agentId + " v" + version + ": " + (cause != null ? cause.getMessage() : e.getMessage()),
+                    LOGGER.warn(
+                            "Deployment failed for Agent " + agentId + " v" + version + ": " + (cause != null ? cause.getMessage() : e.getMessage()),
                             cause != null ? cause : e);
                     deployError = "Deployment failed. Check server logs for details.";
                 } catch (InterruptedException e) {
@@ -156,7 +157,7 @@ public class RestAgentAdministration implements IRestAgentAdministration {
      * Without this the asynchronous path answers {@code 202 Accepted} for any id at
      * all — a typo'd or already-deleted agent included. The deployment then fails
      * on the runtime executor, where no status code can reach the caller, so the
-     * only signal is a line in the server LOGGER. Everything about the response says
+     * only signal is a line in the server log. Everything about the response says
      * the deploy was taken: a CI pipeline, the Manager and the setup API alike read
      * 202 as success and move on to start a conversation that can never exist.
      * <p>
@@ -358,7 +359,8 @@ public class RestAgentAdministration implements IRestAgentAdministration {
                 }
 
                 undeploy(environment, agentId, version);
-                LOGGER.info(String.format("Successfully undeployed Agent (agentId=%s, agentVersion=%s, environment=%s)", agentId, version, environment));
+                LOGGER.info(
+                        String.format("Successfully undeployed Agent (agentId=%s, agentVersion=%s, environment=%s)", agentId, version, environment));
             } while (undeployThisAndAllPreviousAgentVersions && version-- > 1);
 
             return Response.accepted().build();
@@ -489,7 +491,8 @@ public class RestAgentAdministration implements IRestAgentAdministration {
             for (var schedule : schedules) {
                 if (schedule.isEnabled()) {
                     scheduleStore.setScheduleEnabled(schedule.getId(), false, null);
-                    LOGGER.infof("[SCHEDULE] Auto-disabled schedule '%s' (id=%s) on Agent %s undeploy", schedule.getName(), schedule.getId(), agentId);
+                    LOGGER.infof("[SCHEDULE] Auto-disabled schedule '%s' (id=%s) on Agent %s undeploy", schedule.getName(), schedule.getId(),
+                            agentId);
                 }
             }
         } catch (Exception e) {
