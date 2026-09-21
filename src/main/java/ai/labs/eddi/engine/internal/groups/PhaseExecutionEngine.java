@@ -448,11 +448,12 @@ public class PhaseExecutionEngine {
                 existing != null ? existing.dissents() : null);
         gc.setDecision(decision);
         if (decision.type() == DecisionType.VERDICT) {
-            LOGGER.infof("Group %s recorded a debate verdict at phase '%s': %s", gc.getId(), phase.name(), decision.outcome());
+            LOGGER.infof("Group %s recorded a debate verdict at phase '%s': %s", LogSanitizer.sanitize(gc.getId()),
+                    LogSanitizer.sanitize(phase.name()), LogSanitizer.sanitize(decision.outcome()));
             return true;
         }
         LOGGER.infof("Group %s produced a debate judgment that could not be read as a verdict at phase '%s' — "
-                + "keeping the prose conclusion", gc.getId(), phase.name());
+                + "keeping the prose conclusion", LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(phase.name()));
         return false;
     }
 
