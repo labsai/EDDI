@@ -14,8 +14,10 @@ import ai.labs.eddi.engine.api.model.OperatorCanaryReport;
 import ai.labs.eddi.engine.api.model.OperatorGateDryRunRequest;
 import ai.labs.eddi.engine.api.model.OperatorGateDryRunResult;
 import ai.labs.eddi.engine.api.model.OperatorGateStatusReport;
+import ai.labs.eddi.engine.api.model.OperatorSelfUrl;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalGate;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalPatterns;
+import ai.labs.eddi.engine.security.SelfUrlResolver;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -39,13 +41,21 @@ public class RestOperatorMetrics implements IRestOperatorMetrics {
 
     private final OperatorMetricsService operatorMetricsService;
     private final IAgentStore agentStore;
+    private final SelfUrlResolver selfUrlResolver;
     /** Stateless — the same construction the orchestrator uses. */
     private final ToolApprovalGate toolApprovalGate = new ToolApprovalGate();
 
     @Inject
-    public RestOperatorMetrics(OperatorMetricsService operatorMetricsService, IAgentStore agentStore) {
+    public RestOperatorMetrics(OperatorMetricsService operatorMetricsService, IAgentStore agentStore,
+            SelfUrlResolver selfUrlResolver) {
         this.operatorMetricsService = operatorMetricsService;
         this.agentStore = agentStore;
+        this.selfUrlResolver = selfUrlResolver;
+    }
+
+    @Override
+    public OperatorSelfUrl selfUrl() {
+        return new OperatorSelfUrl(selfUrlResolver.baseUrl(), selfUrlResolver.source());
     }
 
     @Override

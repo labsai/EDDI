@@ -5589,6 +5589,13 @@ export const backupSyncHandlers = [
   // don't care about it still trigger it as a side effect of gate
   // verification and the write canary. Without a default, every one of them
   // logs an MSW "unhandled request" warning that drowns out real ones.
+  // The address EDDI reports it can reach ITSELF at — what the operator's tools
+  // must target. Deliberately DIFFERENT from the test origin, so a test that
+  // accidentally provisions the browser's origin fails instead of passing by
+  // coincidence: that coincidence is precisely how the bug shipped.
+  http.get("*/administration/operator/self-url", () =>
+    HttpResponse.json({ baseUrl: "http://127.0.0.1:7070", source: "loopback" }),
+  ),
   http.post("*/administration/operator/canary-result", () => new HttpResponse(null, { status: 204 })),
   http.post("*/administration/operator/gate-status", () => new HttpResponse(null, { status: 204 })),
 
@@ -5833,8 +5840,8 @@ const mockConnections: Record<string, Record<string, unknown>> = {
   // own key per request, so the document carries a header name and nowhere to
   // send it — and no valueTemplate, which the backend refuses on this binding.
   conn6: {
-    name: "gnowbe",
-    description: "Each caller brings their own Gnowbe key",
+    name: "acme",
+    description: "Each caller brings their own Acme key",
     authType: "STATIC",
     binding: "CALLER_SUPPLIED",
     allowUnverifiedPrincipal: false,
@@ -5845,7 +5852,7 @@ const mockConnections: Record<string, Record<string, unknown>> = {
       username: null,
       passwordRef: null,
     },
-    baseUrlAllowlist: ["https://api.gnowbe.com"],
+    baseUrlAllowlist: ["https://api.example.com"],
     timeoutMs: null,
   },
 };

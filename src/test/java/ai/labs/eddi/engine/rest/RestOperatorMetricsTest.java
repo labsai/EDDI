@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.api.OperatorMetricsService;
 import ai.labs.eddi.engine.api.model.OperatorCanaryReport;
 import ai.labs.eddi.engine.api.model.OperatorGateDryRunRequest;
 import ai.labs.eddi.engine.api.model.OperatorGateStatusReport;
+import ai.labs.eddi.engine.security.SelfUrlResolver;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.InternalServerErrorException;
@@ -22,6 +23,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Optional;
 
 import io.micrometer.core.instrument.Counter;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -51,7 +53,30 @@ class RestOperatorMetricsTest {
         var service = new OperatorMetricsService(registry);
         service.registerGateGauge();
         agentStore = mock(IAgentStore.class);
-        rest = new RestOperatorMetrics(service, agentStore);
+        rest = new RestOperatorMetrics(service, agentStore, new SelfUrlResolver(Optional.empty(), 7070));
+    }
+
+    /**
+     * The endpoint the Manager asks instead of guessing at
+     * {@code window.location.origin}. It answers from deployment configuration
+     * only, so the same request from any caller gets the same address.
+     */
+    @Test
+    @DisplayName("self-url answers the deployment's own address and where it came from")
+    void selfUrlAnswersTheDeploymentsOwnAddress() {
+        var answer = rest.selfUrl();
+        assertEquals("http://127.0.0.1:7070", answer.baseUrl());
+        assertEquals(SelfUrlResolver.SOURCE_LOOPBACK, answer.source());
+    }
+
+    @Test
+    @DisplayName("self-url reports a configured override as configured")
+    void selfUrlReportsAnOverride() {
+        var withOverride = new RestOperatorMetrics(new OperatorMetricsService(new SimpleMeterRegistry()), agentStore,
+                new SelfUrlResolver(Optional.of("https://eddi.internal:8443"), 7070));
+        var answer = withOverride.selfUrl();
+        assertEquals("https://eddi.internal:8443", answer.baseUrl());
+        assertEquals(SelfUrlResolver.SOURCE_CONFIGURED, answer.source());
     }
 
     @Test

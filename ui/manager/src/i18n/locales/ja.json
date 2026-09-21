@@ -4178,8 +4178,17 @@
       "tools": "付与されるツール（{{toolCount}} 件）",
       "activate": "有効にしてデプロイ",
       "callerIdentityNote": "EDDI は呼び出し時にトークンを差し込みます。会話には保存されず、この環境にのみ送られます。",
-      "rebuildWarning": "保存すると新しいオペレーターエージェントが作成され、現在のものは削除されます。既存のオペレーターとの会話は引き継がれません。",
-      "environmentHint": "オペレーターエージェント自体が動作する場所です。どの環境でも読み取りは可能です。"
+      "rebuildWarning": "保存するとオペレーターは置き換えられます。新しいエージェントが作成され、現在のエージェント ({{agentId}}) はアンデプロイされ削除されます。既存のオペレーター会話は引き継がれず、以降この画面は新しいエージェントを対象にします。",
+      "environmentHint": "オペレーターエージェント自体が動作する場所です。どの環境でも読み取りは可能です。",
+      "platformBaseUrl": "プラットフォームのベース URL",
+      "platformBaseUrlHint": "EDDI が自分自身に到達できるアドレスです。オペレーターのツールはサーバー内部から呼び出すため、ブラウザーが使うアドレスとは異なります。事情が分かっている場合を除き、初期値のままにしてください。",
+      "platformBaseUrlInvalid": "http:// または https:// で始まる絶対 URL を指定してください（例: http://127.0.0.1:7070）。",
+      "platformBaseUrlUnknown": "この EDDI デプロイは自身のアドレスを返せないため、ブラウザーのオリジンにフォールバックします。これはブラウザーと EDDI の間にトンネル・ポートマッピング・リバースプロキシが一切ない場合にのみ正しい値です。そうでなければ、ここにアドレスを入力してください。",
+      "platformBaseUrlLoopback": "このデプロイの HTTP ポートから導出しました。EDDI をサービス名やプロセス内 TLS で指定する必要がある場合は上書きしてください。",
+      "platformBaseUrlAuto": "サーバーから取得",
+      "platformBaseUrlDiffers": "このデプロイは現在、自身のアドレスを {{serverUrl}} と報告しています。上の値はこれと異なります。意図して設定した場合のみそのままにしてください。",
+      "platformBaseUrlQueryFailed": "サーバーに自身のアドレスを問い合わせられませんでした。ここに入力しない限り有効化は失敗します。再試行するにはページを再読み込みしてください。",
+      "platformBaseUrlUnresolved": "このデプロイはランダムな HTTP ポートで動作しており eddi.self.base-url も未設定のため、自分自身に到達できるアドレスを示せません。ここにアドレスを入力してください。"
     },
     "authMode": {
       "none": {
@@ -4227,7 +4236,10 @@
       "gateUnknown": "ゲート未チェック",
       "gateVerified": "ゲート確認済み",
       "gateNotVerified": "ゲート未確認",
-      "gateUnverifiedHelp": "このエージェントのドキュメントで承認ゲートを確認できませんでした。"
+      "gateUnverifiedHelp": "このエージェントのドキュメントで承認ゲートを確認できませんでした。",
+      "agentId": "エージェント",
+      "platformBaseUrl": "プラットフォームの呼び出し先",
+      "platformBaseUrlUnknown": "記録なし"
     },
     "chat": {
       "empty": "ご自身の環境について質問してください。オペレーターが調べ、行ったすべての呼び出しを表示します。",
@@ -4339,6 +4351,9 @@
       "noOpeningMessage": "(メッセージはまだありません)",
       "stepCount_one": "{{count}} ステップ",
       "stepCount_other": "{{count}} ステップ"
+    },
+    "superseded": {
+      "title": "以前のオペレーターエージェントがまだデプロイされています。"
     }
   },
   "groupWorkspace": {

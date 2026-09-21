@@ -60,6 +60,7 @@
     "GET /administration/logs/history",
     "GET /administration/logs/instance-id",
     "GET /administration/logs/stream",
+    "GET /administration/operator/self-url",
     "GET /administration/orphans",
     "GET /administration/quotas",
     "GET /administration/quotas/{tenantId}",
