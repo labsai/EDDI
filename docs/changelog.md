@@ -187,6 +187,19 @@ to the 401 challenge, so there is no new EDDI code — five properties and one p
   removing one surfaces the other.
 - **https is forced by default.** `quarkus.http.proxy.*` is unset, so behind a TLS-terminating
   ingress the identifier would be advertised as `http://`.
+- **The permit path interpolates the MCP root path (review round 4).** It read
+  `/.well-known/oauth-protected-resource/mcp`, a literal, while the advertised resource was
+  already derived from `${quarkus.mcp.server.http.root-path}`. An operator who moved the MCP
+  root would have moved the document with it and left the permit rule behind: the metadata
+  request then meets the catch-all `authenticated` policy and answers 401, and the 401
+  challenge that is supposed to bootstrap discovery points at a path that also answers 401.
+  Both halves now interpolate the same property. `McpOAuthDiscoveryConfigTest` asserts the
+  raw expression — asserting the resolved form would pass either way — and resolves it
+  against the root path for its match checks; reverting the property to the literal fails
+  that test. `A2aEndpointPermissionsTest` builds its matcher from this file, so it grew a
+  small expander for `${…}` inside a permission path and now probes the path-inserted
+  document through it; unexpanded, that path entered the matcher as a literal and the model
+  reported `authenticated` for a document Quarkus permits.
 
 ### Files
 
@@ -194,6 +207,7 @@ to the 401 challenge, so there is no new EDDI code — five properties and one p
 - `src/test/java/ai/labs/eddi/configs/McpOAuthDiscoveryConfigTest.java` (new)
 - `ui/manager/e2e/auth/auth.spec.ts`, `ui/manager/docker-compose.integration-keycloak.yml`
 - `docs/mcp-server.md`, `docs/security.md`
+- `src/test/java/ai/labs/eddi/engine/a2a/A2aEndpointPermissionsTest.java`
 
 ---
 
@@ -244,6 +258,13 @@ The Quick Start in `docs/mcp-server.md` only ever showed the unauthenticated
   scope; `eddi-frontend` gets `realm_access.roles` only from its own protocol mapper. A
   dynamically registered client cannot carry mappers, so its tokens authenticate and then
   fail every tool with "requires role" — the worst failure shape available.
+- **Review follow-up (2026-09-21).** The §3.2 configuration block quoted a hardcoded `/mcp`
+  in both `resource-metadata.resource` and the permit rule's second path. What ships derives
+  both from `${quarkus.mcp.server.http.root-path}`, so an operator who moves the MCP root
+  moves the metadata document and its permit rule with it; a hardcoded permit path would
+  leave the relocated document behind the `authenticated` policy and 401 the discovery
+  request before it starts. The snippet now matches `application.properties`.
+
 - **The EDDI → client direction is deliberately out of scope** and recorded as such in the
   plan, so it is not re-derived: it needs Claude Code channels rather than MCP, and two
   design answers first — attribution (nothing reads the token's `azp`, so a model answering
