@@ -39,24 +39,45 @@ export function AccessibleDialog({
 }: AccessibleDialogProps) {
   const { t } = useTranslation();
   const dialogRef = useRef<HTMLDivElement>(null);
-  const previousFocusRef = useRef<HTMLElement | null>(null);
   const titleId = useId();
 
-  // Store the previously focused element and focus the dialog on open
+  // The element to hand focus back to on close, recorded while rendering the
+  // opening render — before React commits the dialog. Any effect is too late:
+  // an `autoFocus` field inside the dialog has taken focus by then, and
+  // "returning" focus to it after close sends it to <body>.
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+  const wasOpenRef = useRef(false);
+  if (open && !wasOpenRef.current) {
+    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  }
+  wasOpenRef.current = open;
+
+  // Focus the dialog on open, and return focus to the trigger on close.
   useEffect(() => {
-    if (open) {
-      previousFocusRef.current = document.activeElement as HTMLElement;
-      // Focus the dialog after render
-      requestAnimationFrame(() => {
-        const firstFocusable = dialogRef.current?.querySelector<HTMLElement>(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-        );
-        firstFocusable?.focus();
-      });
-    } else {
-      // Return focus to the trigger element
-      previousFocusRef.current?.focus();
-    }
+    if (!open) return;
+    // Focus the dialog after render — unless focus is already inside it. An
+    // `autoFocus` field has claimed it during commit, and a user can click
+    // into a field before the frame runs; moving either to the first focusable
+    // (usually the Close button) sent their typing nowhere. Under a loaded CI
+    // runner the late frame did exactly that mid-`userEvent.type`.
+    const frame = requestAnimationFrame(() => {
+      const dialog = dialogRef.current;
+      if (!dialog || dialog.contains(document.activeElement)) return;
+      dialog
+        .querySelector<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')
+        ?.focus();
+    });
+    // A cleanup rather than an `open === false` branch: several callers mount
+    // the dialog already open and unmount it to close (`{target && <ShareDialog
+    // open …/>}`), and an unmount never renders `open={false}`. Restore only if
+    // focus was actually lost with the dialog's DOM — StrictMode runs this
+    // cleanup once on mount with the dialog still up and focus inside it.
+    return () => {
+      cancelAnimationFrame(frame);
+      const target = previousFocusRef.current;
+      const active = document.activeElement;
+      if (target?.isConnected && (!active || active === document.body)) target.focus();
+    };
   }, [open]);
 
   // Escape key handler

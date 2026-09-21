@@ -50,6 +50,96 @@ bottom of this file and are never archived.
 
 ---
 
+## ♿ fix(ui): closing a dialog hands focus back to what opened it (2026-09-19)
+
+**Repo:** EDDI (`fix/dialog-return-focus`)
+
+`AccessibleDialog` promises "return focus to trigger element on close". It did not keep that promise
+in either of the two ways the Manager closes a dialog, so keyboard and screen-reader users were left on
+`<body>` and had to find their place from the top of the page again.
+
+### What was wrong
+
+- **With an `autoFocus` field inside** (`CreateAgentDialog`'s Name, the dictionary picker's search),
+  "what had focus" was recorded in a `useEffect`. React applies `autoFocus` during commit, before any
+  effect runs, so the recorded element was the dialog's own field. On close it had unmounted, and
+  focusing it did nothing.
+- **When closed by unmounting.** `ShareDialog` (on the Agents, Workflows and resource list pages) and
+  the Triggers dialog are rendered as `{target && <X open … />}` and close by unmounting. Focus was
+  only restored on an `open === false` render, which an unmount never produces.
+
+### What changed
+
+- `ui/manager/src/components/ui/accessible-dialog.tsx`: the trigger is recorded while rendering the
+  opening render, before React commits the dialog. It is restored in the effect's cleanup, which runs
+  on close and on unmount alike, but only if focus was actually lost with the dialog (it sits on
+  `<body>`). That guard does two things: StrictMode runs the cleanup once on mount with the dialog
+  still up, where an unconditional restore pulled focus out of the open dialog, and focus the user
+  deliberately moved elsewhere is not taken back.
+- `ui/manager/src/components/ui/__tests__/accessible-dialog-focus-return.test.tsx` (new): autoFocus
+  close, unmount close, StrictMode mount, and focus moved elsewhere. Against `main` the first two fail;
+  with the `<body>` guard removed the last two fail.
+
+### Note
+
+This rewrites the same effect as #788 (initial focus no longer steals from a focused field), which
+landed first. `main` is merged in here and the conflict resolved to keep both: #788's guarded,
+cancelled frame, and this branch's cleanup restore — the cleanup now cancels the frame *and* returns
+focus.
+
+---
+
+## 🧪 fix(ui): a dialog no longer takes focus from a field the user is typing in (2026-09-18)
+
+**Repo:** EDDI (`fix/share-dialog-flaky-test`)
+
+`UI Manager Checks` failed intermittently (run 35295321603) in two unrelated-looking tests that
+pass locally: `share-dialog` › "does not let two quick Enters skip the ownership confirmation"
+(`share-owner-warning` never appeared) and `create-agent-dialog` › "allows typing in description
+field" (the field was empty after `user.type`). They had one cause, and it was in the component, not
+the tests.
+
+### Root cause
+
+`AccessibleDialog` moved initial focus to its first focusable element (the header's Close button)
+inside a `requestAnimationFrame` scheduled on open. On a loaded runner that frame fired *after* the
+test had clicked into a field, and user-event sends keystrokes to `document.activeElement`: "bob"
+went to the Close button, the share subject stayed empty, Enter failed validation, and no warning was
+ever rendered. The same frame overrode every `autoFocus` inside the dialog in the real UI —
+`CreateAgentDialog` autofocuses its Name field, and focus ended on the X a frame later.
+
+Reproduced by stubbing `requestAnimationFrame` to a 30–150 ms timeout: the original share-dialog tests
+then fail with exactly the CI error, and the create-agent tests with exactly the empty value.
+
+### What changed
+
+- `ui/manager/src/components/ui/accessible-dialog.tsx`: the frame leaves focus alone when it is
+  already inside the dialog, and is cancelled on cleanup. The trap, Escape and return-focus behaviour
+  are unchanged.
+- `ui/manager/src/components/ui/__tests__/accessible-dialog.test.tsx` (new): holds the frame and
+  releases it by hand, so "focus reached a field first" is deterministic. Covers the empty-dialog
+  default (Close gets focus), a field focused before the frame, and an `autoFocus` field.
+  Mutation-checked: removing the guard fails the latter two.
+- `ui/manager/src/components/workspaces/__tests__/share-dialog.test.tsx`: the warning assertions made
+  straight after a user event now wait (`findByTestId` for it appearing, `waitFor` for it
+  disappearing, the latter safe because each test has just seen it present). This is hygiene, **not**
+  the fix — with the delayed frame and the old component these still fail, just after the wait. The
+  behavioural guards (`shared` not called, `sentSubject` null) are unchanged.
+
+### Verification
+
+With the fix, the 80 ms and 150 ms delayed-frame copies of both the old and the new share-dialog tests
+and of `create-agent-dialog` pass (246/246); without it, they fail as CI did. Full Manager suite with
+coverage green locally.
+
+### Not done
+
+`previousFocusRef` is captured in the same effect, after an `autoFocus` child has already taken focus,
+so on close focus "returns" to that (now unmounted) field instead of the trigger. Pre-existing and
+separate; left alone here.
+
+---
+
 ## 🛠️ fix(migration): four first-boot defects found upgrading a real 5.5.1 database (2026-09-17)
 
 **Repo:** EDDI (`fix/first-boot-migration-order`)
@@ -217,6 +307,302 @@ the sweep gate or the "do not mark complete when a document failed" behaviour ea
 
 ---
 
+## 🔐 fix(a2a): make the A2A endpoints' anonymity real, and decide which of them deserve it (2026-09-17)
+
+**Repo:** EDDI (`fix/a2a-anonymous-discovery-permissions`)
+
+`RestA2AEndpoint` annotated five endpoints `@PermitAll`, intending them to be reachable by peer
+agents that hold no EDDI credential. None of them were named in a
+`quarkus.http.auth.permission.*` entry. **Quarkus evaluates those path policies before declarative
+RBAC**, so the `/*` catch-all (`policy=authenticated`) claimed all five: on any instance with
+`quarkus.oidc.tenant-enabled=true`, Agent Card discovery answered **401** to exactly the callers it
+exists for — a bare 401, since `quarkus.oidc.application-type=service` sends no login redirect. The
+annotation and the deployment had disagreed for as long as the endpoints existed.
+
+Nothing caught it because `A2aEndpointIT` runs against a `BaseStandaloneIT` instance with
+authorization off, where `DisabledAuthController` switches the path policies off wholesale and a
+permitted path and a protected one answer identically.
+
+### The decision, endpoint by endpoint
+
+Not all five were meant to be anonymous, so this is not "add a permit entry for the five".
+
+| Endpoint | Posture | Why |
+|---|---|---|
+| `GET /.well-known/agent.json` | **permit** | The A2A discovery convention. A peer reads the card *before* it holds any credential |
+| `GET /a2a/agents/{agentId}/agent.json` | **permit** | The card EDDI's own client fetches — `A2AToolProviderManager.fetchAgentCard` sends `apiKey` only if one is configured. Needs the agent id, so it discloses one agent, not the roster |
+| `GET /a2a/agents` | **authenticated** — `@PermitAll` removed | The whole roster: every A2A agent's name, description, skills and URL. Strictly more than the skill-name list that sits behind `eddi.a2a.capabilities.public`, and nothing in the protocol or in this repo fetches it |
+| `GET /.well-known/capabilities` | **permit** at the HTTP layer | `eddi.a2a.capabilities.public` (default `false`) is the only *authorization* gate — `eddi.a2a.enabled` gates it as well, but neither looks at the caller. While either is off the handler answers 404 to authenticated and anonymous callers alike, so permitting the path widens nothing — and while both are on, "public" has to mean *without a token* |
+| `GET /.well-known/capabilities/skills` | **permit** at the HTTP layer | Same flag, same reasoning |
+
+Where code and config disagreed, the **code** was changed: `listA2AAgents` lost `@PermitAll` and
+gained `@Authenticated`, rather than gaining a permit entry.
+
+### Design decisions
+
+- **`/a2a/agents/*/agent.json`, not `/a2a/agents/*`.** Quarkus 3.39's `ImmutablePathMatcher`
+  supports an inner wildcard matching exactly one path segment, and the distinction is load-bearing
+  twice over. A `/a2a/agents/*` prefix would (a) permit the roster, because the prefix registers
+  under `/a2a/agents` and wins over the catch-all, and (b) **break A2A outright**: the JSON-RPC
+  `POST /a2a/agents/{agentId}` would match a `methods=GET` entry, and Quarkus *denies* on a method
+  mismatch rather than falling through. Both are asserted.
+- **No `/.well-known/*` wildcard.** RFC 9728 protected-resource metadata is planned under that
+  prefix (`planning/saas-connectors-plan.md` §6.3); a wildcard would pre-permit it, and anything
+  else later dropped there, with nobody deciding to. The paths are enumerated and a test asserts a
+  sibling still requires authentication.
+- **One knob for capability discovery.** The permission entry does not re-express
+  `eddi.a2a.capabilities.public`; duplicating the gate into a second property is how the two drift.
+
+### Tests
+
+- **`A2aEndpointPermissionsTest`** (new, unit — runs in `./mvnw test`, no container). Feeds the
+  shipped `application.properties` through Quarkus's own `ImmutablePathMatcher` and resolves the
+  effective policy per path and method, replicating `findHttpMatchers`' method-filtering rule. Its
+  last test reflects over `RestA2AEndpoint` and asserts every `@PermitAll` / `@Authenticated` method
+  resolves to the policy it claims — so the *next* endpoint added with a forgotten permit entry
+  fails here. Mutation-checked three ways: removing the card entry reproduces the original
+  `[authenticated]`; widening to `/a2a/agents/*` catches both failure modes above; a
+  `/.well-known/*` wildcard trips the sibling assertion.
+- **`ui/manager/e2e/auth/a2a-discovery.spec.ts`** (new). The auth E2E tier is the only one that
+  enforces authentication, so it is where the real status codes belong: it creates an A2A-enabled
+  agent (a card is built from stored config, no deployment needed), then asserts 200 anonymous for
+  both cards and both capability endpoints and 401 anonymous for the roster, the JSON-RPC surface
+  and an unlisted `/.well-known` sibling. It opens with its own "this backend really is enforcing
+  auth" guard so it cannot pass vacuously, and re-checks the roster with an admin token so the 401
+  is provably about anonymity.
+- `docker-compose.integration-keycloak.yml` sets `EDDI_A2A_CAPABILITIES_PUBLIC=true`, because with
+  the flag off the spec could not tell "permitted, flag says no" (404) from "the permission entry is
+  missing again". The flag-off 404 stays covered by `RestA2AEndpointTest`.
+
+### Files
+
+- `src/main/resources/application.properties` — new `a2a-agent-card` and `a2a-capabilities` permit
+  entries, GET-only, before the catch-all
+- `src/main/java/ai/labs/eddi/engine/a2a/RestA2AEndpoint.java` — `listA2AAgents` is
+  `@Authenticated`; Javadoc on every endpoint records the posture and why
+- `src/test/java/ai/labs/eddi/engine/a2a/A2aEndpointPermissionsTest.java` — new
+- `ui/manager/e2e/auth/a2a-discovery.spec.ts` — new
+- `ui/manager/docker-compose.integration-keycloak.yml` — capability flag on
+- `docs/a2a-protocol.md` — an "Anonymous?" column and a "Who can call them" section
+- `docs/configuration-reference.md` — `eddi.a2a.capabilities.public` says what it actually gates
+
+### Review follow-up (PR #782)
+
+Three findings, all valid, all fixed on the branch:
+
+- The generic guard resolved the HTTP verb as `isAnnotationPresent(GET) ? "GET" : "POST"`, so a
+  future `@PermitAll @PUT` would have been graded against a method it does not serve — and since
+  the permit entries are GET-only, that is precisely the drift the guard exists to catch. The verb
+  now comes from whichever annotation is meta-annotated `jakarta.ws.rs.HttpMethod`, and the guard
+  fails on anything other than exactly one. Confirmed by planting a `@PermitAll @PUT` endpoint plus
+  a permit entry naming POST: the old code passed it, the new code names the entry and the verb.
+- `docs/a2a-protocol.md` said everything is reachable without a token when OIDC is off. True of
+  authentication, misleading about the result — `eddi.a2a.capabilities.public` is an independent
+  switch and its endpoints 404 either way while it is off.
+- `docs/configuration-reference.md` said the capability endpoints expose agent *names*.
+  `CapabilityMatch` is `(agentId, skill, confidence, attributes)` — ids. The surface is smaller
+  than the doc claimed, which if anything strengthens the case for leaving `/a2a/agents` (names,
+  descriptions, URLs) authenticated.
+
+**Second pass** (CodeRabbit's first review was rate-limited before it saw the fix commits, so both bots
+were asked for a fresh look):
+
+- `eddi.a2a.capabilities.public` was described as "the only gate". `eddi.a2a.enabled` gates the
+  capability endpoints too (`if (!a2aEnabled || !capabilitiesPublic) → 404`). Reworded in all five
+  places that said it to "the only *authorization* gate — neither flag inspects the caller", which
+  is the claim the permit entry actually rests on.
+- The Agent Card's `authentication.credentials` is built from `quarkus.oidc.auth-server-url`, i.e.
+  the URL **EDDI** uses to reach the IdP. The shapes that bundle Keycloak set that to an in-cluster
+  or compose hostname, so the token endpoint advertised to an outside peer does not resolve — which
+  this PR makes consequential, because the card is now anonymously readable under auth. Initially
+  deferred as a config-design decision; **fixed here** once CodeRabbit raised it independently at
+  Major severity — see the fourth pass below.
+
+**Third pass — two findings Copilot *suppressed* into its review body**, where they have no thread and
+a `reviewThreads` query cannot see them. Both were real, and both are properly this PR's:
+
+- **`/.well-known/agent.json` fanned out over the whole roster.** `getDefaultAgentCard()` called
+  `listA2AAgents()` and returned `cards.get(0)` — building a card for every A2A-enabled agent
+  (`getCurrentResourceId` + `read` + `readDescriptor` apiece, up to 100 candidates) and discarding
+  all but one. Merely wasteful while the endpoint required a token; an amplification vector now that
+  this PR makes it anonymous. `AgentCardService.getDefaultAgentCard()` now stops at the first match
+  (`collectA2AAgents(stopAtFirst)`), and `AgentCardServiceTest` asserts **one** store read across 25
+  candidates rather than asserting the card — the card was always right, the cost was not.
+- **The E2E cleanup scored a failed request as success.** `await call().catch(() => undefined)`
+  followed by `res === undefined || res.status() < 400` passed when the request never completed,
+  leaking the A2A-enabled fixture agent. That one contaminates specifically: the default Agent Card
+  is whichever A2A agent comes first, so a leftover is exactly what a later run reads. The soft
+  assertion now requires a real 2xx/3xx and reports the status or the error.
+
+**Fourth pass — the advertised token endpoint, raised independently by both reviewers.** Deferred
+twice on scope, then implemented: two reviewers agreeing, both framing it as "the permission change
+makes this pre-existing URL consequential", outweighed the argument for keeping it separate.
+
+`AgentCardService.advertisedTokenEndpoint()` resolves what the card advertises:
+
+- **`eddi.a2a.public-token-endpoint`** (new, optional) — advertised verbatim. The *endpoint*, not
+  the issuer, because the path is the provider-specific part.
+- Otherwise `<issuer>/protocol/openid-connect/token`, where `<issuer>` is **`eddi.keycloak.public.url`**
+  grafted onto the realm path from `quarkus.oidc.auth-server-url`, falling back to
+  `quarkus.oidc.auth-server-url` itself. Both shipped authenticated deployments already set the
+  public URL — Helm *requires* it, since the Manager SPA cannot start a login without it — so they
+  become correct with no new configuration. Only the origin is taken from it; the realm path stays
+  what EDDI is configured against, so the two cannot drift. **Nothing moves for a deployment that
+  does not opt in**, which is what made this safe to do inside a permissions PR.
+
+The derivation **assumes Keycloak**, which the docs now say rather than gloss. OIDC discovery would
+remove the assumption instead of documenting it and is the right follow-up; it is not done here
+because it turns rendering an anonymous card into an outbound HTTP call, needing `SafeHttpClient`,
+a cache and a failure policy.
+
+Verified end to end rather than by unit test alone — built the image, ran the Keycloak tier, and read
+the anonymous card: `credentials` is now
+`http://localhost:8180/realms/eddi/protocol/openid-connect/token`, the published port an outside peer
+sees, where it was `http://keycloak:8080/...`. That URL is provably reachable — it is the one the
+test fixtures fetch their tokens from. `a2a-discovery.spec.ts` now asserts it exactly, as the
+reviewer asked.
+
+**Fifth pass — a bug in the fourth pass.** CodeRabbit (Major) caught that the property introduced
+above was the *issuer*, while the Keycloak path `/protocol/openid-connect/token` was appended to
+whatever it named. So the one knob documented as "the escape hatch for a non-Keycloak IdP" handed an
+Okta or Auth0 operator their issuer with a Keycloak path stapled on — it did not do the job it was
+documented as doing, and the docs, the commit message and the reply to the reviewer all repeated the
+claim.
+
+Replaced `eddi.a2a.public-auth-server-url` with `eddi.a2a.public-token-endpoint`, advertised
+verbatim: **one** property instead of two, and it actually covers the case the other one claimed to.
+The property was one commit old and unreleased, so nothing depended on it. Two tests pin the
+distinction, including one asserting the Keycloak path is never appended to an endpoint given in
+full.
+
+Also seen this pass and **not** fixed here: `UI Manager Checks` went red on
+`share-dialog.test.tsx › does not let two quick Enters skip the ownership confirmation`, a file this
+branch does not touch. It passes 15/15 locally three runs in a row, and the cause is visible in the
+test — a synchronous `expect(screen.getByTestId("share-owner-warning"))` immediately after an async
+`userEvent.type`, with no `waitFor`, so a slow runner loses the race. A real flake with a one-line
+fix, but in unrelated code; filed separately rather than smuggled into a permissions PR.
+
+### What's next
+
+Nothing outstanding for A2A. The generic lesson — `@PermitAll` is not a permit entry — applies to
+any future endpoint meant to be anonymous; `A2aEndpointPermissionsTest` only guards
+`RestA2AEndpoint`, and widening it to every `@PermitAll` in the codebase would be a reasonable
+follow-up.
+
+---
+
+## 🔏 chore(ci): settle the dependency-review licence policy — deny-list kept, broadened, documented (2026-09-17)
+
+**Repo:** EDDI (`chore/dependency-review-license-policy`)
+
+### Why
+
+`.github/workflows/dependency-review.yml` printed a deprecation warning on every PR
+("The deny-licenses option is deprecated for possible removal in the next major
+release"). The comment above the option already recorded the deferral: migrating to
+`allow-licenses` means enumerating every licence the project accepts, which is a
+repo-wide policy decision, not a mechanical swap. This session established the real
+input, put the decision to the maintainer, and implemented the answer.
+
+### What the dependency graph actually contains
+
+Enumerated three ways: `license-maven-plugin:add-third-party` for the resolved Maven
+tree (582 artefacts), `npm query ":not(.dev)"` for both UIs, and — the one that
+matters — the live graph the action actually reads,
+`gh api repos/labsai/EDDI/dependency-graph/sbom`.
+
+GitHub's Maven graph parses `pom.xml` directly and does **not** resolve transitives,
+so the policy is evaluated against 95 Maven entries, not 582:
+
+| Count | Licence |
+|---|---|
+| 58 | `NOASSERTION` — BOM-managed (`io.quarkus:*`, `jakarta.annotation`, `caffeine`) or `${property}`-versioned (all 22 `dev.langchain4j:*`) |
+| 27 | `Apache-2.0` |
+| 4 | `MIT` (testcontainers) |
+| 2 | `Apache-2.0 AND BSD-3-Clause AND MIT` (maven plugins) |
+| 2 | `LicenseRef-bad-non-standard` — `org.jsoup:jsoup`, `io.github.classgraph:classgraph`; both are really MIT |
+| 1 | `BSD-2-Clause` (postgresql) |
+| 1 | `EPL-2.0 OR (Apache-2.0 AND EPL-2.0)` (jacoco) |
+
+npm contributes 1137 graph entries but `fail-on-scopes` defaults to `runtime` and
+`main.ts` runs the licence check on the scope-filtered set, so only production deps
+count: manager 179 (MIT 164, OFL-1.1 8, ISC 2, Apache-2.0 2, BSD-3-Clause 1,
+`MPL-2.0 OR Apache-2.0` 1) and chat 126 (MIT 122, ISC 2, BSD-3-Clause 1). The
+MPL-2.0, CC-BY-4.0 and Python-2.0 entries in the graph are all devDependencies.
+
+### Decision
+
+Keep `deny-licenses`, broaden it, and record why the warning is accepted. Three
+findings from reading the action's source made the allow-list migration the worse
+option rather than merely the more expensive one:
+
+1. **It would fail the build today.** `spdx.satisfies()` returns `false` for an
+   expression it cannot match, so the two `LicenseRef-bad-non-standard` entries land
+   in `forbidden` → `setFailed` under an allow-list. Under a deny-list
+   `satisfiesAny()` returns `false` and they pass. Migrating would mean two permanent
+   per-package exclusions that exist only to work around GitHub's own normalisation.
+2. **It buys no coverage.** The 58 unknown-licence entries go to the `unlicensed`
+   bucket, and `printNullLicenses()` only prints — it never sets `issueFound`. They
+   are informational in *both* modes.
+3. **Removal is not scheduled.** Upstream issue #997 was closed by stalebot after 180
+   days of inactivity, not by a decision, and v5.0.0 (2026-05-08) is a node20 → node24
+   runtime bump that leaves `deny-licenses` fully documented in `action.yml`. There is
+   no newer v4 digest, so the pin stays at v4.9.0.
+
+The line is drawn at the library level, because EDDI is Apache-2.0 and ships a fat jar
+inside a distributed Docker image — a combined work. Permissive and weak (file-level)
+copyleft stay acceptable; EPL especially has to, since the whole Jakarta EE / JUnit /
+JaCoCo layer Quarkus pulls in is EPL, usually dual with GPL-2.0 under the Classpath
+Exception. Denied: AGPL-3.0, GPL-2.0, GPL-3.0, LGPL-2.0/2.1/3.0 (each `-only` and
+`-or-later`), SSPL-1.0, BUSL-1.1, Elastic-2.0. The additions past the original two are
+not hypothetical — the realistic hazard for middleware is a dependency relicensing to
+source-available, and EDDI already depends on MongoDB and Elasticsearch clients.
+
+### Verified, not assumed
+
+Ran the candidate list through the same libraries the action uses
+(`@onebeyond/spdx-license-satisfies`, `spdx-expression-parse`) against every licence
+value in the live SBOM:
+
+- nothing currently in the graph is newly denied — the change is a strict superset of
+  the old behaviour with no regression;
+- every listed hazard is caught;
+- deprecated ids still match: a dep declared `GPL-3.0` is caught by `GPL-3.0-only`, so
+  modernising the identifiers does not weaken the gate;
+- Classpath-Exception artefacts do **not** false-positive —
+  `EPL-2.0 OR GPL-2.0-with-classpath-exception` and
+  `CDDL-1.1 OR GPL-2.0-only WITH Classpath-exception-2.0` both pass with `GPL-2.0-only`
+  and `GPL-2.0-or-later` denied. This was the main risk of adding GPL-2.0 and it is
+  disproven, not hoped.
+
+Known trade-off, recorded in the workflow: `satisfiesAny()` treats `A OR B` as denied
+when either side is, so a *directly declared* dep offering `Apache-2.0 OR LGPL-2.1`
+would be flagged despite the Apache option. Nothing hits this today — the dual-licensed
+artefacts (`net.java.dev.jna`, `org.javassist`, `com.github.java-json-tools:*`) are all
+transitive and invisible to GitHub's Maven graph.
+
+### Dropped the Caffeine exemption
+
+The `allow-dependencies-licenses` entry for Caffeine is **removed**. It was first kept
+with a corrected comment calling it cosmetic; CodeRabbit pushed back on the PR, and it
+was right. `groupChanges` in the action's `src/licenses.ts` says so in its own comment —
+*"we leave it off of the `licensed` and `unlicensed` lists"* — so the input drops a
+package from the licence check **entirely**, not just from the unknown-licence notice.
+The exemption therefore also waived `deny-licenses` for any future Caffeine release
+whose licence GitHub *can* resolve, while buying nothing: per finding 2 an unresolved
+licence cannot fail the build anyway, and 57 other entries sit in the same bucket
+unexempted. Caffeine remains verified Apache-2.0 (its own POM on Maven Central at 3.2.4,
+the version the Quarkus BOM resolves), shipped transitively via `quarkus-caffeine`
+before it was ever declared here — nothing needed waiving. The replacement note records
+when that input *is* appropriate: a package whose licence GitHub reports wrongly, naming
+the licence being accepted.
+
+### Files
+
+- `.github/workflows/dependency-review.yml` — broadened `deny-licenses`, removed
+  `allow-dependencies-licenses`; rewrote the comments to record the decision, the
+  evidence, and the revisit condition (upstream announcing removal, or GitHub resolving
+  BOM-managed Maven coordinates).
 ## ⬆️ chore(ui): Node 22 toolchain, Stryker 10, Vitest 5 for the Chat UI (2026-09-17)
 
 **Repo:** EDDI (`feat/node-22-toolchain`, stacked on `fix/ui-npm-vulnerabilities` / #770)
@@ -3329,6 +3715,7 @@ _For recording decisions that come up during implementation that aren't in the p
 | 2026-03-05 | Use Astro (not Expo) for website                                      | Static site on GitHub Pages           | Expo would add unnecessary abstraction for a marketing site |
 | 2026-03-05 | Use AI complexity scale (🟢/🟡/🔴/⚫) instead of human time estimates | AI will do all implementation work    | Human hours are meaningless for AI execution                |
 | 2026-03-05 | Docs already published at docs.labs.ai                                | Third-party tool reads `docs/` folder | Could migrate to Astro Content Collections later            |
+| 2026-09-17 | Keep `deny-licenses` in dependency-review, broadened to GPL-2.0, LGPL-2.0/2.1/3.0, SSPL-1.0, BUSL-1.1 and Elastic-2.0 | An allow-list would fail today on the `LicenseRef-bad-non-standard` values GitHub reports for jsoup and classgraph, and would gate nothing extra — unknown licences are informational in both modes | Migrate to `allow-licenses` (needs two permanent per-package exclusions to work around GitHub's normalisation); leave the list at GPL-3.0/AGPL-3.0 (misses the source-available relicensing hazard that actually threatens a project depending on MongoDB and Elasticsearch clients) |
 | 2026-09-17 | Mark secret context on the value (`"secret": true`), scrub every copy when the turn ends | A per-user credential sent as context was stored, echoed and copied into properties; `scope: secret` holds one vault slot per agent | A list of secret keys in the agent configuration — couples every agent to one client's field names |
 | 2026-09-14 | Connection deployment settings are runtime-writable; a set property pins its value (409 on change) | Properties-only meant a restart per change and protected nothing from `eddi-admin`, who already writes the vault and can send any `${vault:}` value anywhere via an httpcall | Keep properties only (restart, no real protection); store without pinning (removes the operator/admin split for deployments that have one); seed the store from properties (a removed property would be silently replaced by its copy) |
 | 2026-09-13 | Block the cloud metadata service on every outbound path, even with `eddi.security.ssrf-protection.enabled=false` | E2E: a config-authored httpcall reached `169.254.169.254` | Flip SSRF protection on by default — breaks every configured internal API |
