@@ -100,6 +100,72 @@ there) plus the full serialized LLM transcript. On a deployment without OIDC,
 
 ---
 
+## 🕷️ feat(ingestion): web crawler — streaming, bounded, robots-aware (2026-09-17)
+
+**Repo:** EDDI (`feat/ingestion-web-crawler`)
+
+### Why a rewrite rather than a patch
+
+The crawler salvaged from PR #529 was competently written but wrong in shape: it buffered every page's
+full HTML in a `List` and returned it when the crawl finished, identified pages by the URL *requested*
+rather than the one reached, read every body with an unbounded `ofString()` **before** checking its
+Content-Type, and had no run budget. None of that is patchable without touching every line.
+
+It also had no `robots.txt` at all. EDDI installations crawl sites their operators do not own, on a
+schedule — ignoring robots gets the installation blocked and its operator a complaint.
+
+### What replaces it
+
+- **`WebCrawler`** — BFS, streaming to a `CrawlSink` one page at a time, so memory is independent of the
+  site's size. Budgets for pages, fetch attempts, bytes per page, total bytes and wall clock, each
+  reported as a `StopReason`. Cancellation checked between pages.
+- **`CrawlUrls`** — canonicalization. Lowercases scheme and host **but not the path**: the draft
+  lowercased the whole URL, so `/Docs/Guide` and `/docs/guide` collapsed into one entry and whichever
+  came second was silently never crawled. Also strips fragments, default ports, tracking parameters and
+  index filenames, and sorts query parameters, so one page is not ingested three times.
+- **`UrlPattern`** — exclude globs matched against the **path**, with every metacharacter escaped and
+  compiled once. Two defects fixed: the documented `*.pdf` could never match anything (`*` cannot cross
+  the slashes in `https://host/`), and a pattern containing `+` or `(` threw `PatternSyntaxException`
+  inside the crawl loop, where a blanket catch logged it as a *fetch* error and dropped the current
+  page's links — one bad pattern reduced a crawl to its seed URL.
+- **`RobotsPolicy`** — groups, longest-match `Allow`/`Disallow`, `*`/`$`, `Crawl-delay` and `Sitemap`.
+  Blank lines deliberately do not end a group: real files are full of them, and orphaning a group's
+  rules silently allows everything the site meant to block.
+- **`PageFetcher`/`SafeHttpPageFetcher`** — `sendValidated` per request (the crawler follows links
+  harvested from third-party pages, which is as user-controlled as a URL gets), with a hard cap on the
+  body read and charset taken from the header or sniffed from the document. Assuming UTF-8 turns legacy
+  pages into mojibake, and mojibake embeds without complaint.
+
+Identity is the URL after redirects, re-checked against the scope: a 301 to another host satisfied
+`sameSiteOnly` on the pre-redirect host and smuggled a foreign page into the knowledge base.
+`<link rel="canonical">` is honoured, but only when it stays on the same host.
+
+Sitemaps from robots.txt are crawled without needing a link — the cheapest discovery there is, and the
+mitigation for the one cost of conditional requests: a 304 has no body, so an unchanged page's links are
+not re-read that run.
+
+### Tests
+
+**113 unit tests, no network, no container, no test server.** The `PageFetcher` seam is there for exactly
+this: `FakeSite` serves an in-memory website, so scope decisions, budgets, redirect identity, robots,
+conditional requests, charset handling and error accounting all run in the unit gate. The draft's only
+coverage was one Testcontainers test the unit run does not execute, which is why none of these defects
+were caught.
+
+Three of the five failures on the first run were real bugs the tests found, not test bugs: sitemap URLs
+bypassed the scope check, `https://host/` and `https://host` canonicalized differently, and fetching the
+canonicalized form invented URLs the site never published (the crawler now fetches the address as
+published and uses the canonical form only as identity).
+
+Mutation-checked: reverting the final-URL identity and re-lowercasing the path fails four tests.
+
+### Next
+
+The source configuration and the pipeline that ties crawl → convert → state store → embed, with vector
+removal driven by the tombstone list, plus the Manager UI.
+
+---
+
 ## 📄 refactor(ingestion): HTML→Markdown converter, and WebScraperTool stops duplicating it (2026-09-17)
 
 **Repo:** EDDI (`feat/html-to-markdown-converter`)
