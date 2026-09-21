@@ -188,7 +188,7 @@ class AgentOrchestratorCoverageTest {
         lenient()
                 .when(toolExecutionService.executeToolWrapped(any(ToolInvocation.class), anyString(), nullable(String.class), any(),
                         any(Supplier.class),
-                        anyBoolean(), anyBoolean(), anyBoolean(), anyInt()))
+                        anyBoolean(), anyBoolean(), anyBoolean(), anyInt(), anyInt()))
                 .thenAnswer(inv -> {
                     Supplier<String> sup = inv.getArgument(4);
                     return sup.get();
@@ -454,7 +454,7 @@ class AgentOrchestratorCoverageTest {
         // executeToolWrapped invoked with all-false flags, and carrying BOTH names:
         // the dispatched method name plus the whitelist slug it is configured under.
         verify(toolExecutionService).executeToolWrapped(argThat(calculateInvocation()), anyString(), nullable(String.class), any(),
-                any(Supplier.class), eq(false), eq(false), eq(false), anyInt());
+                any(Supplier.class), eq(false), eq(false), eq(false), anyInt(), anyInt());
     }
 
     /**
@@ -487,7 +487,7 @@ class AgentOrchestratorCoverageTest {
         // stopped passing one would make this verification match zero invocations.
         ArgumentCaptor<String> scopeTag = ArgumentCaptor.forClass(String.class);
         verify(toolExecutionService).executeToolWrapped(argThat(calculateInvocation()), anyString(), scopeTag.capture(), any(),
-                any(Supplier.class), anyBoolean(), anyBoolean(), anyBoolean(), anyInt());
+                any(Supplier.class), anyBoolean(), anyBoolean(), anyBoolean(), anyInt(), anyInt());
         return scopeTag.getValue();
     }
 
@@ -509,7 +509,7 @@ class AgentOrchestratorCoverageTest {
         lenient()
                 .when(toolExecutionService.executeToolWrapped(any(ToolInvocation.class), anyString(), nullable(String.class), any(),
                         any(Supplier.class),
-                        anyBoolean(), anyBoolean(), anyBoolean(), anyInt()))
+                        anyBoolean(), anyBoolean(), anyBoolean(), anyInt(), anyInt()))
                 .thenAnswer(inv -> {
                     Supplier<String> sup = inv.getArgument(4);
                     return sup.get();
@@ -593,7 +593,7 @@ class AgentOrchestratorCoverageTest {
 
         ArgumentCaptor<Integer> rateLimit = ArgumentCaptor.forClass(Integer.class);
         verify(toolExecutionService).executeToolWrapped(argThat(calculateInvocation()), anyString(), nullable(String.class), any(),
-                any(Supplier.class), anyBoolean(), anyBoolean(), anyBoolean(), rateLimit.capture());
+                any(Supplier.class), anyBoolean(), anyBoolean(), anyBoolean(), rateLimit.capture(), anyInt());
         return rateLimit.getValue();
     }
 
@@ -644,6 +644,90 @@ class AgentOrchestratorCoverageTest {
         assertEquals(42, capturedRateLimit(task));
     }
 
+    // ─── per-tool execution timeout ───
+
+    /**
+     * Runs one {@code calculate} call for the given task and returns the execution
+     * timeout the orchestrator handed to
+     * {@link ToolExecutionService#executeToolWrapped}.
+     */
+    private int capturedToolTimeoutMs(LlmConfiguration.Task task) throws Exception {
+        ChatModel chatModel = mock(ChatModel.class);
+        var calcReq = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"3+3\"}").build();
+        when(chatModel.chat(any(ChatRequest.class)))
+                .thenReturn(toolBatch(calcReq))
+                .thenReturn(text("six"));
+        when(calculatorTool.calculate("3+3")).thenReturn("6");
+
+        var result = orchestrator.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), task, memory);
+        assertEquals("six", result.response());
+
+        ArgumentCaptor<Integer> timeout = ArgumentCaptor.forClass(Integer.class);
+        verify(toolExecutionService).executeToolWrapped(argThat(calculateInvocation()), anyString(), nullable(String.class), any(),
+                any(Supplier.class), anyBoolean(), anyBoolean(), anyBoolean(), anyInt(), timeout.capture());
+        return timeout.getValue();
+    }
+
+    /**
+     * A task stored before the field existed deserializes
+     * {@code defaultToolTimeoutMs} as null. It must still get a bound, or the whole
+     * feature is inert for every agent already in the database.
+     */
+    @Test
+    void toolCall_noTimeoutConfigured_usesTheEngineDefault() throws Exception {
+        assertEquals(ToolLoopRunner.DEFAULT_TOOL_TIMEOUT_MS, capturedToolTimeoutMs(calcOnlyTask()));
+    }
+
+    @Test
+    void toolCall_perToolTimeoutOverride_usesConfiguredTimeout() throws Exception {
+        var task = calcOnlyTask();
+        task.setDefaultToolTimeoutMs(50_000);
+        task.setToolTimeoutsMs(Map.of("calculate", 7_000));
+
+        assertEquals(7_000, capturedToolTimeoutMs(task),
+                "a dispatch-name entry must win over defaultToolTimeoutMs");
+    }
+
+    /**
+     * The documented form, and the one {@code toolRateLimits} got wrong for a
+     * release: operators key these maps on the same slugs as
+     * {@code builtInToolsWhitelist}, but a built-in dispatches under its
+     * {@code @Tool} method name, which is never equal to its slug.
+     */
+    @Test
+    void toolCall_timeoutKeyedOnCanonicalSlug_binds() throws Exception {
+        var task = calcOnlyTask();
+        task.setDefaultToolTimeoutMs(50_000);
+        task.setToolTimeoutsMs(Map.of("calculator", 7_000));
+
+        assertEquals(7_000, capturedToolTimeoutMs(task),
+                "a toolTimeoutsMs entry keyed on the documented 'calculator' slug must reach the executor");
+    }
+
+    @Test
+    void toolCall_dispatchNameTimeoutWinsOverSlug() throws Exception {
+        var task = calcOnlyTask();
+        task.setDefaultToolTimeoutMs(50_000);
+        task.setToolTimeoutsMs(Map.of("calculator", 7_000, "calculate", 3_000));
+
+        assertEquals(3_000, capturedToolTimeoutMs(task),
+                "the more specific dispatch-name key must win over the tool-wide slug key");
+    }
+
+    /**
+     * The exemption an operator reaches for when exactly one tool is legitimately
+     * long-running: {@code -1} on that tool, rather than unbounding the whole task.
+     */
+    @Test
+    void toolCall_perToolTimeoutOfMinusOne_disablesTheBoundForThatToolOnly() throws Exception {
+        var task = calcOnlyTask();
+        task.setDefaultToolTimeoutMs(5_000);
+        task.setToolTimeoutsMs(Map.of("calculate", -1));
+
+        assertEquals(-1, capturedToolTimeoutMs(task),
+                "a negative per-tool entry must pass through unchanged, not be clamped to the default");
+    }
+
     @Test
     void toolCall_toolPricingOverride_reachesTheExecutor() throws Exception {
         var task = calcOnlyTask();
@@ -660,7 +744,7 @@ class AgentOrchestratorCoverageTest {
 
         ArgumentCaptor<ToolInvocation> invocation = ArgumentCaptor.forClass(ToolInvocation.class);
         verify(toolExecutionService).executeToolWrapped(invocation.capture(), anyString(), nullable(String.class), any(),
-                any(Supplier.class), anyBoolean(), anyBoolean(), anyBoolean(), anyInt());
+                any(Supplier.class), anyBoolean(), anyBoolean(), anyBoolean(), anyInt(), anyInt());
         assertEquals(0.05, invocation.getValue().priceOverride(),
                 "a toolPricing entry keyed on the canonical slug must travel with the invocation");
     }

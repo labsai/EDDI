@@ -149,7 +149,7 @@ class AgentOrchestratorResumeToolLoopTest {
         when(tenantQuotaService.getDefaultTenantId()).thenReturn("t");
         when(tenantQuotaService.checkCostBudget(any())).thenReturn(QuotaCheckResult.OK);
         when(toolExecutionService.executeToolWrapped(any(ToolInvocation.class), anyString(), nullable(String.class), any(), any(Supplier.class),
-                anyBoolean(), anyBoolean(), anyBoolean(), anyInt()))
+                anyBoolean(), anyBoolean(), anyBoolean(), anyInt(), anyInt()))
                 .thenAnswer(inv -> {
                     Supplier<String> sup = inv.getArgument(4);
                     return sup.get();
@@ -311,13 +311,52 @@ class AgentOrchestratorResumeToolLoopTest {
         ArgumentCaptor<ToolInvocation> invocation = ArgumentCaptor.forClass(ToolInvocation.class);
         ArgumentCaptor<Integer> rateLimit = ArgumentCaptor.forClass(Integer.class);
         verify(toolExecutionService).executeToolWrapped(invocation.capture(), anyString(), nullable(String.class), any(),
-                any(Supplier.class), anyBoolean(), anyBoolean(), anyBoolean(), rateLimit.capture());
+                any(Supplier.class), anyBoolean(), anyBoolean(), anyBoolean(), rateLimit.capture(), anyInt());
 
         assertEquals("calculate", invocation.getValue().dispatchName());
         assertEquals("calculator", invocation.getValue().canonicalName(),
                 "the resume path must resolve the slug too, or pricing and TTLs differ after a human approval");
         assertEquals(9, rateLimit.getValue(),
                 "a slug-keyed toolRateLimits entry must bind on the resume path as well");
+    }
+
+    /**
+     * The other half of "an awaiting-approval call is not on the clock".
+     *
+     * <p>
+     * The gate keeps a pending call out of the timed execution step entirely — see
+     * {@code AgentOrchestratorToolPauseTest}. This pins what happens on the far
+     * side of the pause: the approved call is handed the FULL configured timeout,
+     * freshly resolved, with nothing deducted for however long the human took. A
+     * human who approves after an hour must not hand the tool a budget of minus
+     * fifty-nine minutes.
+     * </p>
+     */
+    @Test
+    @DisplayName("resume: an approved call is timed from when it starts, with the full configured timeout")
+    void resumeCarriesTheFullConfiguredTimeout() throws Exception {
+        var task = twoToolTask();
+        task.setDefaultToolTimeoutMs(50_000);
+        task.setToolTimeoutsMs(Map.of("calculator", 9_000));
+        var r1 = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"6*7\"}").build();
+        var batch = batchWith(0, List.of(gatedCall("c1", "calculate", "{\"expression\":\"6*7\"}")), List.of(r1));
+
+        when(journalStore.tryClaim(eq("conv-1"), eq("epoch-1"), anyString(), eq("calculate"), eq("reviewer-1")))
+                .thenReturn(true);
+        when(calculatorTool.calculate("6*7")).thenReturn("42");
+
+        ChatModel chatModel = mock(ChatModel.class);
+        when(chatModel.chat(any(ChatRequest.class))).thenReturn(text("42"));
+
+        orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), true);
+
+        ArgumentCaptor<Integer> timeout = ArgumentCaptor.forClass(Integer.class);
+        verify(toolExecutionService).executeToolWrapped(any(ToolInvocation.class), anyString(), nullable(String.class), any(),
+                any(Supplier.class), anyBoolean(), anyBoolean(), anyBoolean(), anyInt(), timeout.capture());
+
+        assertEquals(9_000, timeout.getValue(),
+                "the resumed call must get its whole configured budget; the approval wait is not deducted from it, "
+                        + "and a slug-keyed toolTimeoutsMs entry must bind here as it does on the live path");
     }
 
     @Test
@@ -687,7 +726,7 @@ class AgentOrchestratorResumeToolLoopTest {
         when(costTracker.getConversationCosts("conv-1")).thenReturn(metrics);
         when(toolExecutionService.getCostTracker()).thenReturn(costTracker);
         when(toolExecutionService.executeToolWrapped(any(ToolInvocation.class), anyString(), nullable(String.class), any(), any(Supplier.class),
-                anyBoolean(), anyBoolean(), anyBoolean(), anyInt()))
+                anyBoolean(), anyBoolean(), anyBoolean(), anyInt(), anyInt()))
                 .thenAnswer(inv -> {
                     metrics.addToolCost("calculate", 0.002);
                     Supplier<String> sup = inv.getArgument(4);

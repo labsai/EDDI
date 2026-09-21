@@ -638,6 +638,11 @@ class ToolLoopRunner {
             String canonicalName = ToolNameResolver.canonical(toolRequest.name(), toolCanonicalNames);
             int rateLimit = resolveRateLimit(toolRateLimits, toolRequest.name(), canonicalName, defaultRateLimit);
             Double priceOverride = resolveOverride(task.getToolPricing(), toolRequest.name(), canonicalName);
+            // Read off the task rather than threaded down as a parameter, like
+            // toolPricing on the line above and unlike toolRateLimits — the task is
+            // already here, and this method's parameter list is long enough.
+            int toolTimeoutMs = resolveToolTimeoutMs(task.getToolTimeoutsMs(), toolRequest.name(), canonicalName,
+                    defaultToolTimeoutMs(task));
 
             // Partition the tool-result cache by identity, so one user's result can never
             // be served back to another. A null tag means no usable identity was
@@ -649,7 +654,8 @@ class ToolLoopRunner {
 
             var invocation = new ToolInvocation(toolRequest.name(), canonicalName, priceOverride);
             toolResult = toolExecutionService.executeToolWrapped(invocation, toolRequest.arguments(), cacheScopeTag, conversationId,
-                    () -> executor.execute(toolRequest, null), enableRateLimiting, enableCaching, enableCostTracking, rateLimit);
+                    () -> executor.execute(toolRequest, null), enableRateLimiting, enableCaching, enableCostTracking, rateLimit,
+                    toolTimeoutMs);
         } else {
             toolResult = "Error: Tool '" + toolRequest.name() + "' not found";
         }
@@ -780,6 +786,23 @@ class ToolLoopRunner {
     private static final int MINIMUM_TOOL_RESULT_CHARS = 256;
 
     /**
+     * Per-tool execution timeout applied when a task sets none: two minutes.
+     *
+     * <p>
+     * Far above every transport timeout the tool sources set for themselves (MCP
+     * and A2A default to 30s each), so those keep reporting their own, more
+     * specific errors and this only fires on a genuine hang — and far below the
+     * "forever" a hung tool used to get.
+     * </p>
+     *
+     * <p>
+     * Kept equal to the initializer on {@code LlmConfiguration.Task}; see
+     * {@link #defaultToolTimeoutMs} for why both exist.
+     * </p>
+     */
+    static final int DEFAULT_TOOL_TIMEOUT_MS = 120_000;
+
+    /**
      * Resolves the per-minute rate limit for one call: an entry keyed on the
      * dispatch name wins, then the canonical slug, then the task default.
      *
@@ -807,6 +830,47 @@ class ToolLoopRunner {
             limit = toolRateLimits.get(canonicalName);
         }
         return limit != null ? limit : defaultRateLimit;
+    }
+
+    /**
+     * The task's default per-tool execution timeout in milliseconds, or
+     * {@link #DEFAULT_TOOL_TIMEOUT_MS} when the task does not set one.
+     *
+     * <p>
+     * A stored configuration written before the field existed deserializes it as
+     * null, so the fallback here — not the field initializer on
+     * {@code LlmConfiguration.Task} — is what actually decides the default for
+     * every agent already in the database. The two are kept equal on purpose.
+     * </p>
+     */
+    static int defaultToolTimeoutMs(LlmConfiguration.Task task) {
+        Integer configured = task.getDefaultToolTimeoutMs();
+        return configured != null ? configured : DEFAULT_TOOL_TIMEOUT_MS;
+    }
+
+    /**
+     * Resolves the execution timeout for one call: an entry keyed on the dispatch
+     * name wins, then the canonical slug, then the task default — the same
+     * precedence as {@link #resolveRateLimit}, and for the same reason.
+     *
+     * <p>
+     * A non-positive value (the documented {@code -1}, and {@code 0} with it) is
+     * passed through unchanged: {@code ToolExecutionService} reads it as "no bound"
+     * and runs the tool inline. That is what makes a per-tool entry of {@code -1}
+     * an exemption for one deliberately long-running tool rather than a setting
+     * that has to be applied to the whole task.
+     * </p>
+     */
+    static int resolveToolTimeoutMs(Map<String, Integer> toolTimeoutsMs, String dispatchName, String canonicalName,
+                                    int defaultToolTimeoutMs) {
+        if (toolTimeoutsMs == null) {
+            return defaultToolTimeoutMs;
+        }
+        Integer timeout = toolTimeoutsMs.get(dispatchName);
+        if (timeout == null) {
+            timeout = toolTimeoutsMs.get(canonicalName);
+        }
+        return timeout != null ? timeout : defaultToolTimeoutMs;
     }
 
     /**

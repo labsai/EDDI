@@ -4,17 +4,27 @@
  */
 package ai.labs.eddi.modules.llm.tools;
 
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.opentelemetry.context.Context;
 import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
 
 /**
- * Wrapper for tool execution with caching, rate limiting and cost tracking.
+ * Wrapper for tool execution with caching, rate limiting, per-call timeouts and
+ * cost tracking.
  *
  * <p>
  * The single entry point is {@link #executeToolWrapped}, called from
@@ -37,10 +47,57 @@ import java.util.function.Supplier;
  * report zero. Re-introducing concurrent tool calls means batching at the
  * {@code AgentOrchestrator} dispatch loop, not resurrecting reflection.
  * </p>
+ *
+ * <p>
+ * The per-call execution timeout added later does <em>not</em> reopen that
+ * door. It bounds the one supplier this class already runs, on the live
+ * dispatch path, and it is still one call at a time: the pipeline thread simply
+ * waits on a worker instead of running the tool itself, so it can stop waiting.
+ * No {@code Method}, no instance, no argument array — nothing reflective is
+ * involved, and the calls of a batch are no more concurrent than before.
+ * </p>
+ *
+ * <p>
+ * What a timeout does <em>not</em> do is stop the tool. The future is cancelled
+ * with {@code mayInterruptIfRunning}, so a worker blocked in interruptible I/O
+ * unwinds at once — but one stuck in a native call, a non-interruptible driver
+ * or a tight loop keeps running, and it still holds the same
+ * {@code IConversationMemory} the turn does. It can therefore still write to
+ * conversation memory, minutes after the model was told the call failed, and
+ * still fire whatever external side effect it had begun. That is the honest
+ * cost of bounding a call in a language with no safe kill: the alternative on
+ * offer is not "stop it cleanly", it is "wait forever". Tools whose side
+ * effects must not be doubled belong behind the HITL tool-approval gate or a
+ * per-tool {@code toolTimeoutsMs} entry of {@code -1}, not behind a shorter
+ * timeout.
+ * </p>
  */
 @ApplicationScoped
 public class ToolExecutionService {
     private static final Logger LOGGER = Logger.getLogger(ToolExecutionService.class);
+
+    /**
+     * {@code timeoutMs} value meaning "no bound": run the tool inline on the
+     * calling thread, exactly as this class did before timeouts existed.
+     * <p>
+     * Zero is treated identically — an operator writing {@code 0} means "off", not
+     * "expire immediately", and the same convention already governs
+     * {@code maxToolContextTokens}.
+     */
+    public static final int TIMEOUT_DISABLED = -1;
+
+    /**
+     * Where a time-bounded tool call runs.
+     * <p>
+     * One executor for the whole application, not one per call, and virtual threads
+     * rather than a pool so that the abandoned worker of a timed-out call costs
+     * (almost) nothing while it stays stuck: a parked virtual thread holds no
+     * platform thread and no megabyte-sized stack, which is the difference between
+     * a hung tool being an incident and being a log line. A field initializer
+     * rather than {@code @PostConstruct} because unit tests construct this service
+     * directly.
+     */
+    private final ExecutorService timeoutExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
     @Inject
     ToolCacheService cacheService;
@@ -53,6 +110,18 @@ public class ToolExecutionService {
 
     @Inject
     MeterRegistry meterRegistry;
+
+    /**
+     * Carries the turn's caller (and resolution principal) onto the timeout worker.
+     * <p>
+     * Without it a time-bounded tool call would lose both bindings the moment it
+     * left the pipeline thread, and a {@code ${caller:token}} header or a
+     * {@code PER_USER} connection would fail closed for no reason an agent designer
+     * could see — the exact drift {@link CallerIdentityContext#propagate} exists to
+     * prevent. Null-tolerant: unit tests build this service by hand.
+     */
+    @Inject
+    CallerIdentityContext callerIdentityContext;
 
     /**
      * Returns the cost tracker for budget checking.
@@ -100,8 +169,13 @@ public class ToolExecutionService {
     public String executeToolWrapped(String toolName, String arguments, String cacheScopeTag, String conversationId,
                                      Supplier<String> toolExecution, boolean enableRateLimiting, boolean enableCaching,
                                      boolean enableCostTracking, int rateLimit) {
+        // No execution timeout on this overload, and deliberately so: its one caller
+        // is McpCallsTask, whose tools are bounded by the transport timeout in their
+        // own configuration (McpCallsConfiguration#timeoutMs, 30s by default). The
+        // per-tool timeout resolved below belongs to LlmConfiguration.Task, which a
+        // mcpcalls.json workflow step never has.
         return executeToolWrapped(ToolInvocation.of(toolName), arguments, cacheScopeTag, conversationId, toolExecution,
-                enableRateLimiting, enableCaching, enableCostTracking, rateLimit);
+                enableRateLimiting, enableCaching, enableCostTracking, rateLimit, TIMEOUT_DISABLED);
     }
 
     /**
@@ -124,12 +198,17 @@ public class ToolExecutionService {
      * @param invocation
      *            the tool call, carrying dispatch name, canonical slug and any
      *            operator price override
+     * @param timeoutMs
+     *            wall-clock ceiling on the execution step, resolved from
+     *            {@code toolTimeoutsMs}/{@code defaultToolTimeoutMs}.
+     *            {@link #TIMEOUT_DISABLED} (or {@code 0}) runs the tool inline with
+     *            no bound
      * @see #executeToolWrapped(String, String, String, String, Supplier, boolean,
      *      boolean, boolean, int)
      */
     public String executeToolWrapped(ToolInvocation invocation, String arguments, String cacheScopeTag, String conversationId,
                                      Supplier<String> toolExecution, boolean enableRateLimiting, boolean enableCaching,
-                                     boolean enableCostTracking, int rateLimit) {
+                                     boolean enableCostTracking, int rateLimit, int timeoutMs) {
 
         String toolName = invocation.dispatchName();
         long startTime = System.currentTimeMillis();
@@ -164,8 +243,13 @@ public class ToolExecutionService {
                 }
             }
 
-            // 3. Execute tool
-            String result = toolExecution.get();
+            // 3. Execute tool, under the configured wall-clock ceiling.
+            //
+            // This is the step that had no bound at all: a tool that never returned
+            // held the conversation turn open for as long as it felt like. The wait
+            // is bounded here rather than in each of the seven tool sources because
+            // this is the one place all of them pass through.
+            String result = executeBounded(toolExecution, timeoutMs);
 
             // 4. Cache result (TTL from the canonical slug, key from the dispatch name)
             if (cacheable) {
@@ -192,6 +276,25 @@ public class ToolExecutionService {
 
             return result;
 
+        } catch (ToolTimedOut timedOut) {
+            // Deliberately NOT rethrown, and deliberately not a TimeoutException.
+            //
+            // RetryConfiguration.isRetryableError treats a TimeoutException anywhere
+            // in the cause chain as retryable, so letting one escape this method would
+            // put a hanging tool on a retry loop — three more full waits, and three
+            // more chances to fire whatever side effect the tool had already started.
+            // The model is told instead, in the same shape as the rate-limit branch
+            // above, and gets to recover: apologise, try a different tool, or answer
+            // without one.
+            //
+            // Nothing is cached and nothing is charged: both of those steps sit after
+            // the execution step we just left.
+            meterRegistry.counter("eddi.tool.execution.failure", "tool", toolName).increment();
+            meterRegistry.counter("eddi.tool.execution.timeout", "tool", toolName).increment();
+            LOGGER.warnf("Tool '%s' exceeded its %dms execution timeout and was abandoned; the model was told so.",
+                    toolName, timedOut.timeoutMs);
+            return "Error: Execution timed out after " + timedOut.timeoutMs + "ms for tool: " + toolName;
+
         } catch (Exception e) {
             long executionTime = System.currentTimeMillis() - startTime;
             String error = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
@@ -200,6 +303,140 @@ public class ToolExecutionService {
 
             LOGGER.error(String.format("Tool '%s' failed (%dms): %s", toolName, executionTime, error), e);
             return "Error executing tool: " + error;
+        }
+    }
+
+    /**
+     * Runs {@code toolExecution}, giving up after {@code timeoutMs}.
+     *
+     * <p>
+     * With no bound configured the supplier runs inline on the calling thread,
+     * byte-identical to what this class did before timeouts existed — no worker, no
+     * context hand-off, nothing to get wrong on the path operators leave alone.
+     * </p>
+     *
+     * <p>
+     * With a bound, the supplier runs on {@link #timeoutExecutor} and the pipeline
+     * thread waits on the future. On expiry the future is cancelled with
+     * {@code mayInterruptIfRunning}, which interrupts the worker: a tool blocked in
+     * interruptible I/O or a {@code sleep} unwinds immediately, and one spinning in
+     * an uninterruptible call keeps running until it finishes on its own. See the
+     * class-level note on why that residual case is survivable.
+     * </p>
+     *
+     * <p>
+     * Same shape as {@code CascadingModelExecutor#executeStepWithTimeout}, which
+     * bounds a model cascade step: one virtual-thread executor, the caller bindings
+     * carried across, {@code cancel(true)} on expiry, and the
+     * {@code ExecutionException} unwrapped so the cause reaches its own handler.
+     * Deliberately so — a second, differently-shaped way of timing work in the same
+     * package is how one of them ends up missing a binding.
+     * </p>
+     *
+     * @throws ToolTimedOut
+     *             when the bound expires — caught by the caller and turned into a
+     *             result for the model
+     */
+    private String executeBounded(Supplier<String> toolExecution, int timeoutMs) throws Exception {
+        if (timeoutMs <= 0) {
+            return toolExecution.get();
+        }
+
+        Future<String> future = timeoutExecutor.submit(carryContext(toolExecution));
+        try {
+            return future.get(timeoutMs, TimeUnit.MILLISECONDS);
+        } catch (TimeoutException expired) {
+            future.cancel(true);
+            // Constructed with no cause on purpose: a TimeoutException reachable
+            // through getCause() would make this retryable again by the back door.
+            throw new ToolTimedOut(timeoutMs);
+        } catch (InterruptedException interrupted) {
+            // The pipeline thread itself was cancelled (agent watchdog, abandoned
+            // cascade step). Take the tool down with it and re-arm the flag so the
+            // dispatch loop's own Thread.interrupted() check still sees it.
+            future.cancel(true);
+            Thread.currentThread().interrupt();
+            throw interrupted;
+        } catch (ExecutionException failed) {
+            // Unwrap, so a tool's own failure reaches the generic handler with the
+            // message it actually threw rather than "java.lang.RuntimeException: …"
+            // wrapped one layer deeper than before this method existed.
+            Throwable cause = failed.getCause();
+            if (cause instanceof Exception e) {
+                throw e;
+            }
+            if (cause instanceof Error error) {
+                throw error;
+            }
+            throw failed;
+        }
+    }
+
+    /**
+     * Wraps the supplier so the worker thread keeps the bindings the turn has set
+     * on the pipeline thread.
+     *
+     * <p>
+     * Three of them travel:
+     * </p>
+     * <ul>
+     * <li>the caller identity and the resolution principal, together, via
+     * {@link CallerIdentityContext#propagate} — the single place that pairing is
+     * maintained, so a {@code ${caller:token}} header and a {@code PER_USER}
+     * connection resolve on the worker exactly as they would inline;</li>
+     * <li>{@code EddiToolBridge}'s conversation id, which that tool reads from a
+     * {@link ThreadLocal} rather than from its arguments;</li>
+     * <li>the OpenTelemetry context, so spans a tool opens stay children of the
+     * {@code eddi.pipeline.task} span instead of becoming roots.</li>
+     * </ul>
+     */
+    private Callable<String> carryContext(Supplier<String> toolExecution) {
+        final String bridgeConversationId = EddiToolBridge.currentConversationId();
+
+        Callable<String> work = () -> {
+            final String previous = EddiToolBridge.currentConversationId();
+            EddiToolBridge.setCurrentConversationId(bridgeConversationId);
+            try {
+                return toolExecution.get();
+            } finally {
+                if (previous == null) {
+                    EddiToolBridge.clearCurrentConversationId();
+                } else {
+                    EddiToolBridge.setCurrentConversationId(previous);
+                }
+            }
+        };
+
+        if (callerIdentityContext != null) {
+            work = callerIdentityContext.propagate(work);
+        }
+        return Context.current().wrap(work);
+    }
+
+    /**
+     * Stop the executor when the application does, so a shutdown is not held open
+     * by a tool that was already hanging.
+     */
+    @PreDestroy
+    void shutdown() {
+        timeoutExecutor.shutdownNow();
+    }
+
+    /**
+     * Internal signal that a tool call outlived its bound.
+     *
+     * <p>
+     * Private, unchecked, stackless and <em>not</em> a
+     * {@link java.util.concurrent.TimeoutException} — see the catch block that
+     * consumes it. It never leaves this class.
+     * </p>
+     */
+    private static final class ToolTimedOut extends RuntimeException {
+        private final int timeoutMs;
+
+        private ToolTimedOut(int timeoutMs) {
+            super("tool execution exceeded " + timeoutMs + "ms", null, false, false);
+            this.timeoutMs = timeoutMs;
         }
     }
 }

@@ -168,7 +168,7 @@ class AgentOrchestratorToolContextBudgetTest {
     /** Every dispatched tool call returns the same fixed-size payload. */
     private void stubToolResult(String payload) {
         lenient().when(toolExecutionService.executeToolWrapped(any(ToolInvocation.class), nullable(String.class),
-                nullable(String.class), nullable(String.class), any(), anyBoolean(), anyBoolean(), anyBoolean(), anyInt()))
+                nullable(String.class), nullable(String.class), any(), anyBoolean(), anyBoolean(), anyBoolean(), anyInt(), anyInt()))
                 .thenReturn(payload);
     }
 

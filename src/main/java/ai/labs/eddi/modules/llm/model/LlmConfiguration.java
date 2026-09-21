@@ -350,6 +350,58 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         private Map<String, Integer> toolRateLimits;
 
         /**
+         * Wall-clock ceiling, in milliseconds, on a single tool execution. Default:
+         * 120000 (two minutes).
+         * <p>
+         * Every tool call the model makes — built-in, http, MCP, A2A, dynamic, memory
+         * and recall alike — runs through the same
+         * {@code ToolExecutionService.executeToolWrapped} pipeline, whose execution
+         * step had no time bound at all: a tool that never returns held the
+         * conversation turn open forever. This is that bound.
+         * <p>
+         * When it expires the call is abandoned (its worker is cancelled and
+         * interrupted) and the MODEL is handed an error result, exactly as it is for a
+         * rate-limited call, so it can apologise, try a different tool or answer
+         * without one. The turn itself does not fail, nothing is cached and nothing is
+         * charged for the abandoned call.
+         * <p>
+         * The default sits deliberately far above the transport timeouts the tool
+         * sources set for themselves ({@code mcp.timeoutMs} and {@code a2a.timeoutMs}
+         * default to 30000 each), so those keep reporting their own, more specific
+         * errors and this only ever fires on a genuine hang.
+         * <p>
+         * Set {@code -1} (or {@code 0}) to disable the bound entirely and restore the
+         * unbounded behaviour this field replaced; the call then runs inline on the
+         * pipeline thread, as it did before this field existed.
+         * <p>
+         * A human-approval pause is never on this clock. A gated tool call does not
+         * enter the execution pipeline at all — {@code ToolLoopRunner} throws
+         * {@code ToolApprovalRequiredException} before it — and the resumed call is
+         * timed from the moment it actually starts running, not from when it was
+         * requested.
+         *
+         * @since 6.4.1
+         */
+        private Integer defaultToolTimeoutMs = 120_000;
+
+        /**
+         * Per-tool execution timeouts in milliseconds, overriding
+         * {@link #defaultToolTimeoutMs} for individual tools.
+         * <p>
+         * Keyed exactly like {@link #toolRateLimits}: an entry under the dispatch name
+         * the model invoked ({@code searchNews}) wins over one under the canonical
+         * built-in slug ({@code websearch}), which in turn wins over the task default.
+         * A slug entry therefore covers every {@code @Tool} method of that built-in.
+         * <p>
+         * As with {@link #defaultToolTimeoutMs}, {@code -1} (or {@code 0}) means no
+         * bound — the way to exempt one deliberately long-running tool without
+         * unbounding every other tool on the task.
+         *
+         * @since 6.4.1
+         */
+        private Map<String, Integer> toolTimeoutsMs;
+
+        /**
          * Per-tool cache partitioning, keyed by tool name. Recognized values are
          * {@code "user"} (default), {@code "conversation"} and {@code "global"} — see
          * the {@code ToolCacheScope} enum for the authoritative list.
@@ -857,6 +909,22 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setToolRateLimits(Map<String, Integer> toolRateLimits) {
             this.toolRateLimits = toolRateLimits;
+        }
+
+        public Integer getDefaultToolTimeoutMs() {
+            return defaultToolTimeoutMs;
+        }
+
+        public void setDefaultToolTimeoutMs(Integer defaultToolTimeoutMs) {
+            this.defaultToolTimeoutMs = defaultToolTimeoutMs;
+        }
+
+        public Map<String, Integer> getToolTimeoutsMs() {
+            return toolTimeoutsMs;
+        }
+
+        public void setToolTimeoutsMs(Map<String, Integer> toolTimeoutsMs) {
+            this.toolTimeoutsMs = toolTimeoutsMs;
         }
 
         public Map<String, String> getToolCacheScopes() {

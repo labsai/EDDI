@@ -1870,7 +1870,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "The four terminal outcomes of `ToolExecutionService.executeToolWrapped()`. Stacked, because every wrapped call lands in exactly one.",
+          "description": "The outcomes of `ToolExecutionService.executeToolWrapped()`. `success` and `failure` partition every wrapped call between them; `cached` refines `success`, and `ratelimited` and `timeout` refine `failure`, so those three series are counted twice in the stack rather than being alternatives.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -1921,6 +1921,17 @@
               "editorMode": "code",
               "range": true,
               "legendFormat": "ratelimited"
+            },
+            {
+              "refId": "E",
+              "expr": "sum(rate(eddi_tool_execution_timeout_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "timeout"
             }
           ],
           "fieldConfig": {

@@ -164,6 +164,7 @@ eddi_tool_execution_success_total           # Successful executions
 eddi_tool_execution_failure_total           # Failed executions
 eddi_tool_execution_cached_total            # Cache-served executions
 eddi_tool_execution_ratelimited_total       # Rate-limited executions
+eddi_tool_execution_timeout_total           # Executions abandoned at their per-tool timeout
 eddi_tool_execution_duration_seconds        # Execution duration (timer)
 ```
 

@@ -343,7 +343,7 @@ class DocumentationAccuracyTest {
         String doc = read("docs/langchain.md");
         String model = read("src/main/java/ai/labs/eddi/modules/llm/model/LlmConfiguration.java");
         for (String field : List.of("toolLoadingStrategy", "maxToolsInContext", "conversationSummary",
-                "maxSystemPromptChars", "responseValidation")) {
+                "maxSystemPromptChars", "responseValidation", "defaultToolTimeoutMs", "toolTimeoutsMs")) {
             assertTrue(model.contains(field), "LlmConfiguration no longer declares " + field);
             assertTrue(doc.contains("`" + field + "`"), "langchain.md does not document " + field);
         }
