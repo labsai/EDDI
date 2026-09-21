@@ -154,6 +154,30 @@ class EmbeddingModelFactoryTest {
         assertTrue(ex.getMessage().contains("Supported:"), "Error message should list supported providers");
     }
 
+    /**
+     * {@code RagConfiguration.validate()} guards its provider check with
+     * {@code embeddingProvider != null}, so a knowledge base saved with an explicit
+     * null provider is accepted and only fails here. It has to fail by naming the
+     * missing configuration, not as a NullPointerException raised by switching on
+     * null from inside the factory.
+     */
+    @Test
+    void nullProvider_shouldThrowNamingTheMissingConfiguration() {
+        var config = createConfig(null, Map.of());
+
+        var ex = assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT));
+        assertTrue(ex.getMessage().contains("Supported:"), "Error message should list supported providers");
+    }
+
+    /** A provider of nothing but whitespace is the same omission as a null one. */
+    @Test
+    void blankProvider_shouldThrowNamingTheMissingConfiguration() {
+        var config = createConfig("   ", Map.of());
+
+        var ex = assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT));
+        assertTrue(ex.getMessage().contains("Supported:"), "Error message should list supported providers");
+    }
+
     @Test
     void openaiProvider_shouldCreateModel() {
         var config = createConfig("openai", Map.of("apiKey", "test-key"));

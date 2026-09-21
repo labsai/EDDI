@@ -94,6 +94,22 @@ boundaries are deliberate:
   is already inert there and skipping the role would cost the instruction for nothing.
 - **`taskType` is a Gemini parameter.** A stray one on Cohere or OpenAI pins nothing.
 
+### Follow-up: an unconfigured embedding provider names itself
+
+Raised by the static-analysis reviewer on [#810](https://github.com/labsai/EDDI/pull/810).
+`EmbeddingModelFactory.build` switches on the provider string, and
+`RagConfiguration.validate()` guards its own provider check with
+`embeddingProvider != null && !embeddingProvider.isBlank()` — it rejects providers it does
+not *recognise*, not ones that are absent. A knowledge base saved with an explicit null
+`embeddingProvider` therefore saved cleanly and only failed at first use, as a bare
+`NullPointerException` thrown by switching on null from inside the factory, naming nothing
+the operator could act on. A blank provider already fell through to the switch's `default`
+and was reported properly; null now says the same thing.
+
+The supported-provider list moved into one `SUPPORTED_PROVIDERS_HINT` constant shared by
+both rejections, so the absent-provider and unrecognised-provider messages cannot drift
+apart as providers are added.
+
 ---
 
 

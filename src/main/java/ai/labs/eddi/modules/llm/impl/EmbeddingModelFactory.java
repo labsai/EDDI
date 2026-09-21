@@ -49,6 +49,13 @@ public class EmbeddingModelFactory {
 
     private static final Logger LOGGER = Logger.getLogger(EmbeddingModelFactory.class);
 
+    /**
+     * Named in both rejections below — an absent provider and an unrecognised one
+     * are the same problem to whoever has to fix the configuration, so they get the
+     * same list rather than two that can drift apart.
+     */
+    private static final String SUPPORTED_PROVIDERS_HINT = "Supported: openai, azure-openai, ollama, mistral, bedrock, cohere, gemini, vertex";
+
     private final Cache<String, EmbeddingModel> cache = Caffeine.newBuilder().maximumSize(50).expireAfterAccess(Duration.ofMinutes(30)).build();
     private final GlobalVariableResolver globalVariableResolver;
     private final SecretResolver secretResolver;
@@ -124,6 +131,16 @@ public class EmbeddingModelFactory {
         // Trimmed, as RagConfiguration validates it: " openai" must not save and then
         // fail here as an unsupported provider.
         String provider = config.getEmbeddingProvider() != null ? config.getEmbeddingProvider().trim() : null;
+        // RagConfiguration.validate() only rejects providers it does not RECOGNISE —
+        // `embeddingProvider != null && !isBlank()` guards its own check, so a
+        // knowledge base saved with an explicit null provider passes validation and
+        // arrives here. The switch below would then throw a bare NullPointerException
+        // from deep inside the factory instead of naming the field the operator has to
+        // fix; a blank provider already reaches the switch's `default` and is reported
+        // properly, so say the same thing for null.
+        if (provider == null || provider.isEmpty()) {
+            throw new IllegalArgumentException("No embedding provider configured for this knowledge base. " + SUPPORTED_PROVIDERS_HINT);
+        }
         params = SecretResolver.requireResolved(secretResolver.resolveSecrets(params), "embedding model '" + provider + "'");
         LOGGER.infof("Building embedding model for provider: %s", provider);
 
@@ -136,9 +153,7 @@ public class EmbeddingModelFactory {
             case "cohere" -> buildCohere(params);
             case "gemini" -> buildGemini(params);
             case "vertex" -> buildVertex(params);
-            default -> throw new IllegalArgumentException(
-                    "Unsupported embedding provider: " + provider
-                            + ". Supported: openai, azure-openai, ollama, mistral, bedrock, cohere, gemini, vertex");
+            default -> throw new IllegalArgumentException("Unsupported embedding provider: " + provider + ". " + SUPPORTED_PROVIDERS_HINT);
         };
 
         if (pinsNonRetrievalTaskType(provider, params)) {
