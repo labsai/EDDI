@@ -318,6 +318,21 @@ a reviewer reads.
 > The one case you may skip: a thread the bot opened *and* closed with no finding in it
 > (duplicate notices, "review skipped" chatter). Read it before deciding it is that.
 
+**When CodeRabbit confirms, you are done.** If the last comment on a thread is the bot
+acknowledging your fix, the thread is closed out — do not reply again. Answering an
+acknowledgement is how a two-message exchange turns into a ping-pong that costs a review from
+the hourly allowance each time. The thread needs *a* human reply, not the last word.
+
+So a finished thread is one of: your reply and the bot's confirmation; your reply and silence;
+or your push-back left open for a human. A thread with only the bot's opening comment is never
+finished, resolved or not.
+
+**Match the reply to the finding.** A confirmed fix can be one line — "fixed in `<sha>`" —
+and that is a complete answer; padding it helps nobody. Spend the words where they carry
+information a reader would not otherwise have: *why* you disagree, *what* the second failure
+mode was, *which* caller made the bot wrong. The test is whether someone reading the thread
+cold can tell what happened without opening the diff.
+
 **Resolve only threads a bot opened.** A human closes their own, whether you fixed it or
 pushed back; reply, say what you did, and leave it open.
 
@@ -326,7 +341,14 @@ scratch branch), push, reply naming the commit. Resolve once that commit's CI is
 on push.
 
 **Push back.** Reply with the reason and the evidence — the line, the test, the AGENTS.md
-rule. Then resolve if it was a bot.
+rule — and then resolve it yourself. You and the reviewing bot can settle most disagreements
+between you; a finding you can refute with a concrete citation does not need a human to
+adjudicate it, and routing every one upward is its own kind of noise.
+
+Escalate instead of resolving when the call is genuinely not yours: a security or data-loss
+question, a product or API-contract decision, or a case where the bot answers your push-back
+and still disagrees. Then leave it open and say so in the report. A *human's* thread is always
+theirs to close, whichever way it went.
 
 **Defer it.** Reply saying so and what happens instead. Same resolve rule.
 
