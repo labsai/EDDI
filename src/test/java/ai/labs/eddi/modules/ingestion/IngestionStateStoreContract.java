@@ -440,6 +440,168 @@ public interface IngestionStateStoreContract {
         assertNotNull(run.error());
     }
 
+    // === fencing a superseded run ===
+
+    /**
+     * Puts a worker in the position the reaper leaves it in: its run has been
+     * failed, a replacement has claimed the source, and it is about to wake up and
+     * write with the run id it still holds.
+     *
+     * @return the id of the run that has just been superseded
+     */
+    private String supersede(String staleRunId) {
+        int reaped = store().reapStaleRuns(SOURCE, Instant.now().plusSeconds(60));
+        assertEquals(1, reaped, "the stalled run should have been reaped");
+        return staleRunId;
+    }
+
+    @Test
+    @DisplayName("a reaped run cannot overwrite a document the run that replaced it owns")
+    default void staleRunCannotRecordAnIngestedDocument() {
+        String stale = openRun(SOURCE);
+        store().recordIngested(SOURCE, DOC, "hash-1", "\"etag-1\"", null, stale);
+        supersede(stale);
+        String replacement = openRun(SOURCE);
+
+        // The stalled worker wakes up and finishes the document it was embedding
+        // when it lost the source.
+        store().recordIngested(SOURCE, DOC, "hash-stale", "\"etag-stale\"", null, stale);
+
+        DocumentState state = store().lookup(SOURCE, DOC).orElseThrow();
+        assertEquals("hash-1", state.contentHash(), "a superseded run must not rewrite the stored hash");
+        assertEquals("\"etag-1\"", state.etag());
+
+        // ...and the run that replaced it writes the same document normally.
+        store().recordIngested(SOURCE, DOC, "hash-2", null, null, replacement);
+        assertEquals("hash-2", store().lookup(SOURCE, DOC).orElseThrow().contentHash());
+    }
+
+    @Test
+    @DisplayName("a reaped run cannot revive a tombstoned document whose vectors are gone")
+    default void staleRunCannotReviveATombstonedDocument() {
+        // The worst case of the lot, and the reason the fence exists. Tombstoning
+        // deleted this document's vectors. A stale recordIngested clears the
+        // tombstone and restores the hash the vectors used to match, so every later
+        // run compares hashes, reports the page "unchanged" and never embeds it
+        // again. The page is unreachable for good, and nothing is logged.
+        String first = openRun(SOURCE);
+        store().recordIngested(SOURCE, DOC, "hash-1", null, null, first);
+        closeRun(first, SOURCE, IngestionRun.Status.COMPLETED);
+
+        String stale = openRun(SOURCE);
+        assertEquals(1, store().tombstoneMissing(SOURCE, stale, 1).size());
+        supersede(stale);
+        openRun(SOURCE);
+
+        store().recordIngested(SOURCE, DOC, "hash-1", null, null, stale);
+
+        DocumentState state = store().lookup(SOURCE, DOC).orElseThrow();
+        assertTrue(state.tombstoned(), "a superseded run must not lift a tombstone");
+        assertTrue(state.hasChanged("hash-1"),
+                "the document must still be re-embedded — its vectors were deleted");
+    }
+
+    @Test
+    @DisplayName("a reaped run cannot clear the miss counter the run that replaced it is keeping")
+    default void staleRunCannotRecordADocumentAsSeen() {
+        String first = openRun(SOURCE);
+        store().recordIngested(SOURCE, DOC, "hash-1", null, null, first);
+        closeRun(first, SOURCE, IngestionRun.Status.COMPLETED);
+
+        String stale = openRun(SOURCE);
+        store().tombstoneMissing(SOURCE, stale, 3);
+        assertEquals(1, store().lookup(SOURCE, DOC).orElseThrow().missedRuns());
+        supersede(stale);
+        openRun(SOURCE);
+
+        store().recordSeen(SOURCE, DOC, stale);
+
+        assertEquals(1, store().lookup(SOURCE, DOC).orElseThrow().missedRuns(),
+                "a superseded run's sighting must not forgive a miss the live run is counting");
+    }
+
+    @Test
+    @DisplayName("a reaped run cannot make the live run lose a document it just saw")
+    default void staleRunCannotStampTheRunMarkerOfADocumentTheLiveRunSaw() {
+        // recordUnreachable writes only the run marker, which looks harmless until
+        // you follow it: escaping the miss count is exactly what that marker does.
+        // A stale worker overwriting it hands a page the live run has already seen
+        // back to tombstoneMissing — and tombstoning is what deletes vectors.
+        String first = openRun(SOURCE);
+        store().recordIngested(SOURCE, DOC, "hash-1", null, null, first);
+        supersede(first);
+        String live = openRun(SOURCE);
+        store().recordSeen(SOURCE, DOC, live);
+
+        store().recordUnreachable(SOURCE, DOC, first);
+
+        assertTrue(store().tombstoneMissing(SOURCE, live, 1).isEmpty(),
+                "a document the live run saw must not be deleted because a zombie called it unreachable");
+        assertFalse(store().lookup(SOURCE, DOC).orElseThrow().tombstoned());
+    }
+
+    @Test
+    @DisplayName("a reaped run tombstones nothing, so it deletes no vectors")
+    default void staleRunCannotTombstone() {
+        String first = openRun(SOURCE);
+        store().recordIngested(SOURCE, DOC, "hash-1", null, null, first);
+        closeRun(first, SOURCE, IngestionRun.Status.COMPLETED);
+
+        String stale = openRun(SOURCE);
+        supersede(stale);
+        openRun(SOURCE);
+
+        assertTrue(store().tombstoneMissing(SOURCE, stale, 1).isEmpty(),
+                "a superseded run's reconciliation saw an arbitrary subset of the source");
+        DocumentState state = store().lookup(SOURCE, DOC).orElseThrow();
+        assertFalse(state.tombstoned());
+        assertEquals(0, state.missedRuns(), "a superseded run must not raise anyone's miss counter either");
+    }
+
+    @Test
+    @DisplayName("the run that replaced a reaped one can still write every document")
+    default void theReplacementRunOwnsEverySortOfDocument() {
+        // The fence is worthless if it also blocks the live run. This covers the
+        // three paths a write can take: a row inherited from an earlier run, a row
+        // the live run created itself, and a document nobody has ever seen.
+        String first = openRun(SOURCE);
+        store().recordIngested(SOURCE, DOC, "hash-1", null, null, first);
+        supersede(first);
+
+        String live = openRun(SOURCE);
+        store().recordIngested(SOURCE, DOC, "hash-2", null, null, live);
+        store().recordIngested(SOURCE, DOC + "/new", "hash-new", null, null, live);
+        store().recordSeen(SOURCE, DOC + "/new", live);
+        store().recordUnreachable(SOURCE, DOC, live);
+
+        assertEquals("hash-2", store().lookup(SOURCE, DOC).orElseThrow().contentHash());
+        assertEquals("hash-new", store().lookup(SOURCE, DOC + "/new").orElseThrow().contentHash());
+        assertEquals(live, store().lookup(SOURCE, DOC).orElseThrow().lastRunId());
+
+        // A row the live run inserted belongs to it as much as one it inherited —
+        // otherwise a document first seen mid-run would be the one hole in the
+        // fence, and it is the hole a stalled worker is most likely to find.
+        store().recordIngested(SOURCE, DOC + "/new", "hash-stale", null, null, first);
+        assertEquals("hash-new", store().lookup(SOURCE, DOC + "/new").orElseThrow().contentHash(),
+                "a document the live run created must be fenced against the run it replaced");
+    }
+
+    @Test
+    @DisplayName("fencing one source does not fence another")
+    default void fencingIsScopedPerSource() {
+        String other = openRun(OTHER_SOURCE);
+        store().recordIngested(OTHER_SOURCE, DOC, "hash-b", null, null, other);
+
+        String stale = openRun(SOURCE);
+        supersede(stale);
+        openRun(SOURCE);
+
+        // Reaping SOURCE released SOURCE's rows. It must not have touched the run
+        // that is still crawling OTHER_SOURCE.
+        store().recordIngested(OTHER_SOURCE, DOC, "hash-b2", null, null, other);
+        assertEquals("hash-b2", store().lookup(OTHER_SOURCE, DOC).orElseThrow().contentHash());
+    }
+
     // === unreachable documents ===
 
     @Test

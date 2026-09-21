@@ -44,6 +44,23 @@ import java.util.function.Supplier;
  * {@link #startRun} a real mutual exclusion rather than a check-then-act race —
  * a second caller gets a duplicate-key error and is told a run is already in
  * flight.
+ *
+ * <h2>Fencing without a join</h2>
+ *
+ * <p>
+ * The fence the interface describes cannot be a lookup of the run row: MongoDB
+ * cannot join collections in an update, and multi-document transactions need a
+ * replica set, while EDDI supports standalone MongoDB and ships {@code mongo:7}
+ * standalone in {@code docker-compose.yml}. So ownership is denormalized onto
+ * the document row as {@link #FIELD_FENCING_RUN_ID} and every document write
+ * puts the caller's {@code runId} in its own filter. A superseded run's update
+ * then matches no document — and on the upsert path it collides with the unique
+ * {@code (sourceId, documentId)} index instead, which is the same answer.
+ *
+ * <p>
+ * {@link #FIELD_FENCING_GENERATION} carries the claim's sequence number so the
+ * ownership stamps themselves are ordered: a stamp delayed past its own run's
+ * reaping cannot take the source back from the run that replaced it.
  */
 @ApplicationScoped
 @DefaultBean
@@ -64,8 +81,13 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
     private static final String FIELD_LAST_RUN_ID = "lastRunId";
     private static final String FIELD_MISSED_RUNS = "missedRuns";
     private static final String FIELD_TOMBSTONED = "tombstoned";
+    /** The run that currently owns this document row — see the class comment. */
+    private static final String FIELD_FENCING_RUN_ID = "fencingRunId";
+    /** The claim sequence number that stamped {@link #FIELD_FENCING_RUN_ID}. */
+    private static final String FIELD_FENCING_GENERATION = "fencingGeneration";
 
     private static final String FIELD_RUN_ID = "runId";
+    private static final String FIELD_GENERATION = "generation";
     private static final String FIELD_STATUS = "status";
     private static final String FIELD_STARTED_AT = "startedAt";
     private static final String FIELD_FINISHED_AT = "finishedAt";
@@ -156,15 +178,30 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
                 // entered the knowledge base rather than resetting its history.
                 Updates.setOnInsert(FIELD_FIRST_INGESTED_AT, Date.from(now)));
 
-        translating("record an ingested document",
-                () -> documents.updateOne(byDocument(sourceId, documentId), update,
-                        new UpdateOptions().upsert(true)));
+        translating("record an ingested document", () -> {
+            try {
+                // upsert, so a document this source has never held gets a row. The
+                // fence is in the filter: an existing row owned by another run does
+                // not match, the upsert tries to insert instead, and the unique
+                // (sourceId, documentId) index rejects it. A duplicate key here can
+                // mean nothing else, because that index is the only unique one on
+                // this collection.
+                return documents.updateOne(ownedDocument(sourceId, documentId, runId), update,
+                        new UpdateOptions().upsert(true));
+            } catch (MongoWriteException e) {
+                if (e.getError().getCategory() == ErrorCategory.DUPLICATE_KEY) {
+                    fenced("record an ingested document", sourceId, documentId, runId);
+                    return null;
+                }
+                throw e;
+            }
+        });
     }
 
     @Override
     public void recordSeen(String sourceId, String documentId, String runId) {
         translating("record a document as seen",
-                () -> documents.updateOne(byDocument(sourceId, documentId),
+                () -> documents.updateOne(ownedDocument(sourceId, documentId, runId),
                         Updates.combine(
                                 Updates.set(FIELD_LAST_RUN_ID, runId),
                                 Updates.set(FIELD_MISSED_RUNS, 0),
@@ -178,7 +215,7 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
         // exactly as they were, so this run neither condemns the document nor
         // absolves it.
         translating("record a document as unreachable",
-                () -> documents.updateOne(byDocument(sourceId, documentId),
+                () -> documents.updateOne(ownedDocument(sourceId, documentId, runId),
                         Updates.set(FIELD_LAST_RUN_ID, runId),
                         new UpdateOptions().upsert(false)));
     }
@@ -188,8 +225,12 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
         int threshold = Math.max(1, missedRunsThreshold);
         return translating("tombstone missing documents", () -> {
 
+            // Both filters are fenced on the run: a superseded run raises nobody's
+            // miss counter and tombstones nobody, so it hands its caller an empty
+            // list and deletes no vectors.
             Bson missed = Filters.and(
                     Filters.eq(FIELD_SOURCE_ID, sourceId),
+                    Filters.eq(FIELD_FENCING_RUN_ID, runId),
                     Filters.ne(FIELD_LAST_RUN_ID, runId),
                     Filters.ne(FIELD_TOMBSTONED, true));
 
@@ -197,6 +238,7 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
 
             Bson dueForTombstone = Filters.and(
                     Filters.eq(FIELD_SOURCE_ID, sourceId),
+                    Filters.eq(FIELD_FENCING_RUN_ID, runId),
                     Filters.ne(FIELD_TOMBSTONED, true),
                     Filters.gte(FIELD_MISSED_RUNS, threshold));
 
@@ -244,12 +286,15 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
     @Override
     public Optional<String> startRun(String sourceId) {
         String runId = UUID.randomUUID().toString();
+        long generation = nextGeneration(sourceId);
         Document run = new Document(FIELD_RUN_ID, runId)
                 .append(FIELD_SOURCE_ID, sourceId)
                 .append(FIELD_STATUS, IngestionRun.Status.RUNNING.name())
+                .append(FIELD_GENERATION, generation)
                 .append(FIELD_STARTED_AT, Date.from(Instant.now()));
         try {
             runs.insertOne(run);
+            takeOwnership(sourceId, runId, generation);
             return Optional.of(runId);
         } catch (MongoWriteException e) {
             if (e.getError().getCategory() == ErrorCategory.DUPLICATE_KEY) {
@@ -314,6 +359,19 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
 
     @Override
     public int reapStaleRuns(String sourceId, Instant startedBefore) {
+        int reaped = doReap(sourceId, startedBefore);
+        if (reaped > 0) {
+            // Ownership goes to nobody, so the worker just declared dead is fenced
+            // from this moment rather than only once a replacement run claims the
+            // source. No runId matches a missing field.
+            translating("release ownership of a reaped source",
+                    () -> documents.updateMany(Filters.eq(FIELD_SOURCE_ID, sourceId),
+                            Updates.unset(FIELD_FENCING_RUN_ID)));
+        }
+        return reaped;
+    }
+
+    private int doReap(String sourceId, Instant startedBefore) {
         return translating("reap stale runs", () -> {
             var result = runs.updateMany(
                     Filters.and(
@@ -329,8 +387,62 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
         });
     }
 
+    /**
+     * The sequence number for the next claim of this source. Racing claimants can
+     * compute the same number, which is harmless: only one of them survives the
+     * partial unique index on {@code (sourceId, status=RUNNING)}.
+     */
+    private long nextGeneration(String sourceId) {
+        return translating("read a source's run generation", () -> {
+            Document newest = runs.find(Filters.eq(FIELD_SOURCE_ID, sourceId))
+                    .sort(Sorts.descending(FIELD_GENERATION))
+                    .limit(1)
+                    .first();
+            Number current = newest == null ? null : newest.get(FIELD_GENERATION, Number.class);
+            return (current == null ? 0L : current.longValue()) + 1;
+        });
+    }
+
+    /**
+     * Hands the source's existing document rows to the run that has just claimed
+     * it, so every later write can be fenced on the {@code runId} the caller
+     * already holds.
+     *
+     * <p>
+     * The generation guard is what keeps the stamps ordered. Without it a stamp
+     * held up long enough for its own run to be reaped could land after the
+     * replacement run's and take the source back, silencing the run that is
+     * actually working.
+     */
+    private void takeOwnership(String sourceId, String runId, long generation) {
+        translating("take ownership of a source's documents",
+                () -> documents.updateMany(
+                        Filters.and(
+                                Filters.eq(FIELD_SOURCE_ID, sourceId),
+                                Filters.or(
+                                        Filters.exists(FIELD_FENCING_GENERATION, false),
+                                        Filters.lt(FIELD_FENCING_GENERATION, generation))),
+                        Updates.combine(
+                                Updates.set(FIELD_FENCING_RUN_ID, runId),
+                                Updates.set(FIELD_FENCING_GENERATION, generation))));
+    }
+
+    private static void fenced(String what, String sourceId, String documentId, String runId) {
+        // Debug, not warn: the reaper has already decided this run is dead and
+        // finishRun says so once. A doomed crawl would otherwise log a line per
+        // document about a result that is discarded anyway.
+        LOGGER.debugf("Ignored an attempt to %s for source '%s', document '%s': run %s no longer owns the source",
+                what, LogSanitizer.sanitize(sourceId), LogSanitizer.sanitize(documentId),
+                LogSanitizer.sanitize(runId));
+    }
+
     private static Bson byDocument(String sourceId, String documentId) {
         return Filters.and(Filters.eq(FIELD_SOURCE_ID, sourceId), Filters.eq(FIELD_DOCUMENT_ID, documentId));
+    }
+
+    /** {@link #byDocument} plus the fence — see the class comment. */
+    private static Bson ownedDocument(String sourceId, String documentId, String runId) {
+        return Filters.and(byDocument(sourceId, documentId), Filters.eq(FIELD_FENCING_RUN_ID, runId));
     }
 
     private static DocumentState toDocumentState(Document document) {

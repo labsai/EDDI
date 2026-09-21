@@ -34,6 +34,15 @@ import java.util.UUID;
  * what makes {@link #startRun} mutually exclusive across instances: a second
  * caller's INSERT violates it and is told a run is already in flight, rather
  * than two crawls racing into one knowledge base.
+ *
+ * <p>
+ * PostgreSQL could fence document writes by subquerying the run table in the
+ * same statement. It deliberately does not: MongoDB has no equivalent, and a
+ * PostgreSQL-only fence would re-introduce exactly the backend divergence the
+ * shared contract exists to catch. Ownership is denormalized onto the document
+ * row instead, identically on both backends — see
+ * {@link ai.labs.eddi.modules.ingestion.IIngestionStateStore} for the rules and
+ * the MongoDB store for why the choice was forced there.
  */
 @ApplicationScoped
 @DefaultBean
@@ -53,6 +62,8 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
                 last_run_id VARCHAR(64),
                 missed_runs INTEGER NOT NULL DEFAULT 0,
                 tombstoned BOOLEAN NOT NULL DEFAULT FALSE,
+                fencing_run_id VARCHAR(64),
+                fencing_generation BIGINT,
                 PRIMARY KEY (source_id, document_id)
             )
             """;
@@ -62,6 +73,7 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
                 run_id VARCHAR(64) PRIMARY KEY,
                 source_id TEXT NOT NULL,
                 status VARCHAR(16) NOT NULL,
+                generation BIGINT NOT NULL DEFAULT 0,
                 started_at TIMESTAMP NOT NULL,
                 finished_at TIMESTAMP,
                 documents_seen INTEGER NOT NULL DEFAULT 0,
@@ -80,6 +92,17 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
     /** One in-flight run per source — see the class comment. */
     private static final String CREATE_ACTIVE_RUN_INDEX = "CREATE UNIQUE INDEX IF NOT EXISTS idx_ingestion_runs_active ON rag_ingestion_runs (source_id) "
             + "WHERE status = 'RUNNING'";
+
+    /**
+     * The fencing columns, added separately so a database created by an earlier
+     * build of this schema gains them. {@code CREATE TABLE IF NOT EXISTS} is a
+     * no-op against an existing table and would otherwise leave the fence silently
+     * un-enforceable.
+     */
+    private static final String[] ADD_FENCING_COLUMNS = {
+            "ALTER TABLE rag_ingestion_documents ADD COLUMN IF NOT EXISTS fencing_run_id VARCHAR(64)",
+            "ALTER TABLE rag_ingestion_documents ADD COLUMN IF NOT EXISTS fencing_generation BIGINT",
+            "ALTER TABLE rag_ingestion_runs ADD COLUMN IF NOT EXISTS generation BIGINT NOT NULL DEFAULT 0"};
 
     private final Instance<DataSource> dataSourceInstance;
     private volatile boolean schemaInitialized;
@@ -107,6 +130,9 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
                 Statement statement = connection.createStatement()) {
             statement.execute(CREATE_DOCUMENTS_TABLE);
             statement.execute(CREATE_RUNS_TABLE);
+            for (String alter : ADD_FENCING_COLUMNS) {
+                statement.execute(alter);
+            }
             statement.execute(CREATE_RUNS_SOURCE_INDEX);
             statement.execute(CREATE_ACTIVE_RUN_INDEX);
             schemaInitialized = true;
@@ -143,11 +169,17 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
 
         // first_ingested_at is only written on insert, so re-ingesting a changed
         // page keeps the date it first entered the knowledge base.
+        //
+        // The WHERE on DO UPDATE is the fence, applied by the same statement as the
+        // write: a row owned by another run is left exactly as it is. Zero affected
+        // rows can mean nothing else here — an insert affects one row, and a
+        // conflict without the fence affects one too.
         String sql = """
                 INSERT INTO rag_ingestion_documents
                     (source_id, document_id, content_hash, etag, last_modified,
-                     first_ingested_at, last_ingested_at, last_run_id, missed_runs, tombstoned)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, FALSE)
+                     first_ingested_at, last_ingested_at, last_run_id, missed_runs, tombstoned,
+                     fencing_run_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, FALSE, ?)
                 ON CONFLICT (source_id, document_id) DO UPDATE SET
                     content_hash = EXCLUDED.content_hash,
                     etag = EXCLUDED.etag,
@@ -156,6 +188,7 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
                     last_run_id = EXCLUDED.last_run_id,
                     missed_runs = 0,
                     tombstoned = FALSE
+                WHERE rag_ingestion_documents.fencing_run_id = EXCLUDED.fencing_run_id
                 """;
         Timestamp now = Timestamp.from(Instant.now());
         try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
@@ -167,7 +200,10 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
             statement.setTimestamp(6, now);
             statement.setTimestamp(7, now);
             statement.setString(8, runId);
-            statement.executeUpdate();
+            statement.setString(9, runId);
+            if (statement.executeUpdate() == 0) {
+                fenced("record an ingested document", sourceId, documentId, runId);
+            }
         } catch (SQLException e) {
             // Losing this write means the document is embedded again next run, and
             // the run after that, for as long as the failure lasts.
@@ -180,12 +216,13 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
         String sql = """
                 UPDATE rag_ingestion_documents
                    SET last_run_id = ?, missed_runs = 0, tombstoned = FALSE
-                 WHERE source_id = ? AND document_id = ?
+                 WHERE source_id = ? AND document_id = ? AND fencing_run_id = ?
                 """;
         try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, runId);
             statement.setString(2, sourceId);
             statement.setString(3, documentId);
+            statement.setString(4, runId);
             statement.executeUpdate();
         } catch (SQLException e) {
             throw new IngestionStateStoreException("Failed to record a seen document", e);
@@ -199,12 +236,13 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
         String sql = """
                 UPDATE rag_ingestion_documents
                    SET last_run_id = ?
-                 WHERE source_id = ? AND document_id = ?
+                 WHERE source_id = ? AND document_id = ? AND fencing_run_id = ?
                 """;
         try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, runId);
             statement.setString(2, sourceId);
             statement.setString(3, documentId);
+            statement.setString(4, runId);
             statement.executeUpdate();
         } catch (SQLException e) {
             throw new IngestionStateStoreException("Failed to record an unreachable document", e);
@@ -216,10 +254,12 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
         int threshold = Math.max(1, missedRunsThreshold);
         List<DocumentState> tombstoned = new ArrayList<>();
 
+        // Both statements are fenced on fencing_run_id: a superseded run raises
+        // nobody's miss counter and tombstones nobody, so it deletes no vectors.
         String bump = """
                 UPDATE rag_ingestion_documents
                    SET missed_runs = missed_runs + 1
-                 WHERE source_id = ? AND tombstoned = FALSE
+                 WHERE source_id = ? AND tombstoned = FALSE AND fencing_run_id = ?
                    AND (last_run_id IS DISTINCT FROM ?)
                 """;
         // RETURNING makes the select-and-mark one statement, so two runs finishing
@@ -227,7 +267,8 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
         String tombstone = """
                 UPDATE rag_ingestion_documents
                    SET tombstoned = TRUE
-                 WHERE source_id = ? AND tombstoned = FALSE AND missed_runs >= ?
+                 WHERE source_id = ? AND tombstoned = FALSE AND fencing_run_id = ?
+                   AND missed_runs >= ?
                 RETURNING *
                 """;
 
@@ -235,11 +276,13 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
             try (PreparedStatement statement = connection.prepareStatement(bump)) {
                 statement.setString(1, sourceId);
                 statement.setString(2, runId);
+                statement.setString(3, runId);
                 statement.executeUpdate();
             }
             try (PreparedStatement statement = connection.prepareStatement(tombstone)) {
                 statement.setString(1, sourceId);
-                statement.setInt(2, threshold);
+                statement.setString(2, runId);
+                statement.setInt(3, threshold);
                 try (ResultSet resultSet = statement.executeQuery()) {
                     while (resultSet.next()) {
                         tombstoned.add(toDocumentState(resultSet));
@@ -289,18 +332,36 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
     @Override
     public Optional<String> startRun(String sourceId) {
         String runId = UUID.randomUUID().toString();
+        // The generation is derived in the statement that claims the run. Two
+        // claimants racing under READ COMMITTED can still read the same MAX and
+        // compute the same number, which is harmless: only one of them survives the
+        // partial unique index, so only one of them ever stamps anything.
         String sql = """
-                INSERT INTO rag_ingestion_runs (run_id, source_id, status, started_at)
-                VALUES (?, ?, 'RUNNING', ?)
+                INSERT INTO rag_ingestion_runs (run_id, source_id, status, generation, started_at)
+                SELECT ?, ?, 'RUNNING', COALESCE(MAX(generation), 0) + 1, ?
+                  FROM rag_ingestion_runs WHERE source_id = ?
                 ON CONFLICT DO NOTHING
+                RETURNING generation
                 """;
-        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setString(1, runId);
-            statement.setString(2, sourceId);
-            statement.setTimestamp(3, Timestamp.from(Instant.now()));
-            // Zero rows means the partial unique index rejected it: a run is already
-            // in flight for this source. Losing that race is expected, not an error.
-            return statement.executeUpdate() == 1 ? Optional.of(runId) : Optional.empty();
+        try (Connection connection = connection()) {
+            long generation;
+            try (PreparedStatement statement = connection.prepareStatement(sql)) {
+                statement.setString(1, runId);
+                statement.setString(2, sourceId);
+                statement.setTimestamp(3, Timestamp.from(Instant.now()));
+                statement.setString(4, sourceId);
+                try (ResultSet resultSet = statement.executeQuery()) {
+                    // No row means the partial unique index rejected it: a run is
+                    // already in flight for this source. Losing that race is expected,
+                    // not an error.
+                    if (!resultSet.next()) {
+                        return Optional.empty();
+                    }
+                    generation = resultSet.getLong(1);
+                }
+            }
+            takeOwnership(connection, sourceId, runId, generation);
+            return Optional.of(runId);
         } catch (SQLException e) {
             // An empty Optional means "a run is already in flight", which would be a
             // lie here and would show the operator a 409 for a database fault.
@@ -382,14 +443,66 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
                        error = 'Run abandoned — no completion recorded before the stale threshold'
                  WHERE source_id = ? AND status = 'RUNNING' AND started_at < ?
                 """;
-        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setTimestamp(1, Timestamp.from(Instant.now()));
-            statement.setString(2, sourceId);
-            statement.setTimestamp(3, Timestamp.from(startedBefore));
-            return statement.executeUpdate();
+        // Ownership goes to nobody, so the worker just declared dead is fenced from
+        // this moment rather than only once a replacement run claims the source.
+        // NULL never equals a runId, so every later write of its own matches
+        // nothing.
+        String release = "UPDATE rag_ingestion_documents SET fencing_run_id = NULL WHERE source_id = ?";
+        try (Connection connection = connection()) {
+            int reaped;
+            try (PreparedStatement statement = connection.prepareStatement(sql)) {
+                statement.setTimestamp(1, Timestamp.from(Instant.now()));
+                statement.setString(2, sourceId);
+                statement.setTimestamp(3, Timestamp.from(startedBefore));
+                reaped = statement.executeUpdate();
+            }
+            if (reaped > 0) {
+                try (PreparedStatement statement = connection.prepareStatement(release)) {
+                    statement.setString(1, sourceId);
+                    statement.executeUpdate();
+                }
+            }
+            return reaped;
         } catch (SQLException e) {
             throw new IngestionStateStoreException("Failed to reap stale ingestion runs", e);
         }
+    }
+
+    /**
+     * Hands the source's existing document rows to the run that has just claimed
+     * it, so every later write can be fenced on the {@code runId} the caller
+     * already holds.
+     *
+     * <p>
+     * The generation guard is what keeps the stamps ordered. Without it a stamp
+     * held up long enough for its own run to be reaped could land after the
+     * replacement run's and take the source back, silencing the run that is
+     * actually working.
+     */
+    private static void takeOwnership(Connection connection, String sourceId, String runId, long generation)
+            throws SQLException {
+
+        String sql = """
+                UPDATE rag_ingestion_documents
+                   SET fencing_run_id = ?, fencing_generation = ?
+                 WHERE source_id = ? AND (fencing_generation IS NULL OR fencing_generation < ?)
+                """;
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, runId);
+            statement.setLong(2, generation);
+            statement.setString(3, sourceId);
+            statement.setLong(4, generation);
+            statement.executeUpdate();
+        }
+    }
+
+    private static void fenced(String what, String sourceId, String documentId, String runId) {
+        // Debug, not warn: the reaper has already decided this run is dead and
+        // finishRun says so once. A doomed crawl would otherwise log a line per
+        // document about a result that is discarded anyway.
+        LOGGER.debugf("Ignored an attempt to %s for source '%s', document '%s': run %s no longer owns the source",
+                what, LogSanitizer.sanitize(sourceId), LogSanitizer.sanitize(documentId),
+                LogSanitizer.sanitize(runId));
     }
 
     private static DocumentState toDocumentState(ResultSet resultSet) throws SQLException {
