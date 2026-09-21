@@ -171,6 +171,12 @@ file, a reordered deck, UTF-16, and text whose first bytes look like an image), 
 16 `IngestedFileService` cases, 13 pipeline cases for the upload path, 6 source-removal cases, 14 REST
 cases, and 10 Manager cases.
 
+Three of them are the ones that matter: a real `.docx` is stored, read by the real extractor, split by
+the real chunker and answers a real retrieval — and stops answering once it is deleted. Every unit test
+on the way there can pass while that one fails, which is exactly what happened to the draft this
+feature builds on: ingestion and retrieval keyed on different names, and nothing noticed, because no
+test ever performed a retrieval after an ingest.
+
 **Docs**: `docs/rag.md` — the two source types, the upload block, what can be read, every limit and why,
 the file endpoints, and what a purge, a source removal and a ZIP export each do to stored files.
 

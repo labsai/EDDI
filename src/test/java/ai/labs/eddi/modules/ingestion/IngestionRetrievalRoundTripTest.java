@@ -22,6 +22,7 @@ import ai.labs.eddi.modules.ingestion.extract.CsvTextExtractor;
 import ai.labs.eddi.modules.ingestion.extract.DocumentExtractors;
 import ai.labs.eddi.modules.ingestion.extract.ExcelTextExtractor;
 import ai.labs.eddi.modules.ingestion.extract.HtmlDocumentExtractor;
+import ai.labs.eddi.modules.ingestion.extract.OfficeFixtures;
 import ai.labs.eddi.modules.ingestion.extract.PdfTextExtractor;
 import ai.labs.eddi.modules.ingestion.extract.PlainTextExtractor;
 import ai.labs.eddi.modules.ingestion.extract.PowerPointTextExtractor;
@@ -220,6 +221,78 @@ class IngestionRetrievalRoundTripTest {
 
     private IngestionReport ingest(FakeSite site) {
         return pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+    }
+
+    @Test
+    @DisplayName("an uploaded document is retrievable by what it says")
+    void uploadedDocumentIsRetrievable() {
+        // The whole point of the feature, asserted end to end: a real .docx goes
+        // in, the real extractor reads it, the real chunker splits it, the real
+        // retrieval answers a question with it. Every unit test on the way here
+        // can pass while this one fails — the draft this replaces keyed ingestion
+        // and retrieval on different names and nothing noticed, because no test
+        // ever performed a retrieval after an ingest.
+        fileStore.store(uploadKey(), "leave-policy.docx", WORD_MIME,
+                OfficeFixtures.docx("Heading1|Leave policy", "|Employees get 30 days of paid leave."));
+
+        var report = pipelineFor(new FakeSite())
+                .run(KB_RESOURCE_ID, knowledgeBase(), uploadSource(), Mode.INGEST);
+
+        assertEquals(1, report.documentsIngested());
+        assertTrue(retrieve("how much paid leave do employees get").contains("30 days of paid leave"),
+                "the uploaded document must answer a question about its contents");
+    }
+
+    @Test
+    @DisplayName("a replaced upload answers with the new text and not the old")
+    void replacedUploadStopsAnsweringWithTheOldText() {
+        fileStore.store(uploadKey(), "leave-policy.docx", WORD_MIME,
+                OfficeFixtures.docx("|Employees get 20 days of paid leave."));
+        var pipeline = pipelineFor(new FakeSite());
+        pipeline.run(KB_RESOURCE_ID, knowledgeBase(), uploadSource(), Mode.INGEST);
+
+        fileStore.store(uploadKey(), "leave-policy.docx", WORD_MIME,
+                OfficeFixtures.docx("|Employees get 30 days of paid leave."));
+        pipeline.run(KB_RESOURCE_ID, knowledgeBase(), uploadSource(), Mode.INGEST);
+
+        String answer = retrieve("how much paid leave do employees get");
+        assertTrue(answer.contains("30 days"), answer);
+        // Last year's policy retrievable beside this year's is worse than having
+        // no knowledge base at all.
+        assertFalse(answer.contains("20 days"), answer);
+    }
+
+    @Test
+    @DisplayName("a deleted upload stops answering")
+    void deletedUploadStopsBeingRetrievable() {
+        var stored = fileStore.store(uploadKey(), "leave-policy.docx", WORD_MIME,
+                OfficeFixtures.docx("|Employees get 30 days of paid leave."));
+        var pipeline = pipelineFor(new FakeSite());
+        pipeline.run(KB_RESOURCE_ID, knowledgeBase(), uploadSource(), Mode.INGEST);
+        assertTrue(retrieve("paid leave").contains("30 days"));
+
+        pipeline.forgetDocument(KB_RESOURCE_ID, knowledgeBase(), uploadSource(), stored.fileId());
+
+        // Not at the next run: a source with no cron has no next run, and the
+        // operator was told the document was gone. Null is the honest answer once
+        // nothing matches, so either shape counts as gone.
+        String context = retrieve("paid leave");
+        assertTrue(context == null || !context.contains("30 days"),
+                "a deleted file must stop reaching the LLM: " + context);
+    }
+
+    private static final String WORD_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+    private static String uploadKey() {
+        return IngestionPipeline.stateKey(KB_RESOURCE_ID, uploadSource());
+    }
+
+    private static IngestionSource uploadSource() {
+        var source = new IngestionSource();
+        source.setId("src-files");
+        source.setName("handbooks");
+        source.setType(IngestionSource.TYPE_UPLOAD);
+        return source;
     }
 
     private IngestionPipeline pipelineFor(FakeSite site) {

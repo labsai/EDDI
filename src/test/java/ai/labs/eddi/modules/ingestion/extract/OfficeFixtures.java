@@ -23,7 +23,7 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 /**
- * Office and PDF files built in memory, for the extractor tests.
+ * Office and PDF files built in memory, for any test that needs a real one.
  *
  * <p>
  * Built rather than checked in as binaries. A committed .docx is opaque: when a
@@ -32,13 +32,13 @@ import java.util.zip.ZipOutputStream;
  * the interesting cases are the malformed ones. Here the XML is right next to
  * the assertion.
  */
-final class OfficeFixtures {
+public final class OfficeFixtures {
 
     private OfficeFixtures() {
     }
 
     /** A .docx whose body is the given paragraphs, each {@code style|text}. */
-    static byte[] docx(String... styledParagraphs) {
+    public static byte[] docx(String... styledParagraphs) {
         StringBuilder body = new StringBuilder();
         for (String paragraph : styledParagraphs) {
             int separator = paragraph.indexOf('|');
@@ -74,7 +74,7 @@ final class OfficeFixtures {
     }
 
     /** A .pptx with one slide per argument, each slide one line of text. */
-    static byte[] pptx(String... slideTexts) {
+    public static byte[] pptx(String... slideTexts) {
         Map<String, String> parts = new LinkedHashMap<>();
         for (int i = 0; i < slideTexts.length; i++) {
             parts.put("ppt/slides/slide" + (i + 1) + ".xml", """
@@ -121,7 +121,7 @@ final class OfficeFixtures {
      *            shared-string indexes — so a gap in the references is a gap in the
      *            sheet
      */
-    static byte[] xlsx(String sheetName, List<String> sharedStrings, List<Map<String, Integer>> rows) {
+    public static byte[] xlsx(String sheetName, List<String> sharedStrings, List<Map<String, Integer>> rows) {
         StringBuilder sheetData = new StringBuilder();
         for (int rowNumber = 1; rowNumber <= rows.size(); rowNumber++) {
             sheetData.append("<row r=\"").append(rowNumber).append("\">");
@@ -167,7 +167,7 @@ final class OfficeFixtures {
     }
 
     /** A PDF with one page per argument. */
-    static byte[] pdf(String... pageTexts) {
+    public static byte[] pdf(String... pageTexts) {
         try (PDDocument document = new PDDocument(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             for (String text : pageTexts) {
                 PDPage page = new PDPage();
