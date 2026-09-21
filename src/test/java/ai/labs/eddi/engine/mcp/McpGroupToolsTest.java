@@ -593,6 +593,24 @@ class McpGroupToolsTest {
         assertEquals(2, captor.getValue().size(), "the owner filter must exempt admins");
     }
 
+    @Test
+    void namelessCaller_seesNoConversationsInTheGroupListing() throws Exception {
+        var theirs = new GroupConversation();
+        theirs.setId("gc-theirs");
+        theirs.setUserId("alice");
+        // A legacy row with no owner must not match a caller with no name.
+        var unowned = new GroupConversation();
+        unowned.setId("gc-unowned");
+        when(groupConversationService.listGroupConversations("g1", 0, 20)).thenReturn(List.of(theirs, unowned));
+
+        String result = toolsAsUser(null, "eddi-viewer").list_group_conversations("g1", null, null);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<GroupConversation>> captor = ArgumentCaptor.forClass(List.class);
+        verify(jsonSerialization).serialize(captor.capture());
+        assertTrue(captor.getValue().isEmpty(), "a caller with no principal name owns nothing, got: " + result);
+    }
+
     private GroupConversation ownedBy(String userId) throws Exception {
         GroupConversation gc = new GroupConversation();
         gc.setId("gc1");

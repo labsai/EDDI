@@ -14,21 +14,39 @@ Each entry records:
 
 ## Where to Add an Entry
 
-**Add new entries directly below the `---` that closes this section**, above the
-most recent existing entry. Never append to an archive file.
+**Not here.** Write your entry as a new file in
+[`changelog.d/`](changelog.d/README.md) — `YYYY-MM-DD-<slug>.md`, with the slug
+unique to your branch — and leave this file alone. The same goes for the two
+running registers at the bottom: their rows ride along in the fragment, in a
+fenced `decision-log` or `regression-note` block.
 
-This file holds only recent work and is capped at **250 KB** —
-`ChangelogRotationTest` fails the build if it grows past that. When it does, run:
+Entries used to be inserted at the top of this file, and the registers appended
+to at the bottom. Both are a fixed point in a shared file, which git cannot
+merge: with several PRs open, every one of them conflicted with every other over
+a document that had nothing to do with the code under review. A fragment is a new
+file under a name no other branch picks, so the same two PRs merge without
+touching each other.
+
+`.github/workflows/changelog-collate.yml` runs nightly, merges the fragments in
+here **by date** — a PR that stayed open for weeks lands among its
+contemporaries rather than on top — trims this file back under its rotation
+target, and opens a PR. Until that PR merges, `changelog.d/` holds the newest
+history, so read it alongside the top of this file. To do it by hand:
 
 ```bash
-python scripts/rotate-changelog.py
+python scripts/collate-changelog.py   # fragments -> this file
+python scripts/rotate-changelog.py    # this file -> docs/changelog/<YYYY-MM>.md
 ```
 
-It moves the oldest entries into `docs/changelog/<YYYY-MM>.md` by the date each
-entry carries, adds one `../` to the relative links it moves (an archive sits a
-directory deeper than this file) without touching the ones inside code spans, and
-regenerates the Archive table below from what is on disk. Add any newly created
-archive file to [`SUMMARY.md`](SUMMARY.md). Do not raise the cap.
+This file holds only recent work and is capped at **250 KB** —
+`ChangelogRotationTest` fails the build if it grows past that. Rotation runs at a
+lower threshold than the cap, trimming back to **200 KB** whenever the file is
+over that, so the session whose entry tips it over is not the one made to rotate
+it. Rotation moves the oldest entries into `docs/changelog/<YYYY-MM>.md` by date,
+adds one `../` to the relative links it moves (an archive sits a directory deeper
+than this file) without touching the ones inside code spans, and regenerates both
+the Archive table below and the changelog list in [`SUMMARY.md`](SUMMARY.md) from
+what is on disk. Do not raise the cap.
 
 The single file this replaced had reached 1.9 MB — roughly half a million tokens —
 which neither a reader nor an agent's context window could usefully hold.
@@ -47,6 +65,89 @@ which neither a reader nor an agent's context window could usefully hold.
 
 The two running registers — **Decision Log** and **Regression Notes** — live at the
 bottom of this file and are never archived.
+
+---
+
+## 🔎 fix(operator): let the Platform Operator inspect knowledge bases (2026-09-17)
+
+**Repo:** EDDI (`fix/operator-rag-reads`)
+
+### Why
+
+An admin asked the Operator to check a RAG knowledge base. It answered that the tool `readRag`
+"was not found". That tool never existed: `tool-scopes.ts` named no `ragstore` path, so no RAG
+tool was ever generated — the model guessed a name by analogy with `readLlm` and the tool loop
+answered `Error: Tool 'readRag' not found` (`ToolLoopRunner:654`).
+
+The guess was the symptom of an asymmetry. The Operator *can* read `docs/rag.md` (the docs
+endpoints are granted in both scopes), so it knew knowledge bases exist — while holding no tool
+for one and no sentence saying so. Knowing a feature exists with neither a tool nor a word about
+it is what produces an improvised tool call, the same failure `BODY_AUTHORING_NO_AGENT` already
+prevents for agents.
+
+### What changed
+
+- **`tool-scopes.ts`** — three reads added: `GET /ragstore/rags/descriptors`, `GET /ragstore/rags/{id}`,
+  `GET /ragstore/rags/{id}/ingestion/{ingestionId}/status`. Descriptors are included because a KB is
+  asked about by NAME; without the listing the by-id read is unreachable. New predicates
+  `grantsKnowledgeBaseReads` / `grantsKnowledgeBaseAuthoring`.
+- **`system-prompt.ts`** — a knowledge-base section, conditional on those reads, plus a derived
+  "you cannot create, edit or ingest" sentence; `rag` added to the step-type list and the docs map.
+- **`McpAdminTools`** — `read_resource` gained a `"rag"` case, so an MCP client can read a KB config too.
+
+### Decisions
+
+- **Not folded into `WORKFLOW_EXTENSION_STORES`.** That constant doubles as
+  `WRITABLE_EXTENSION_STORES`; adding `ragstore/rags` there would grant PUT/POST as a side effect
+  of wanting a read.
+- **Reads only; `ingest` stays excluded**, as `planning/operator-write-scope-plan.md` §5 requires.
+  The ingestion *status* read is what answers "did the documents land?" without a write.
+- **No new exposure class.** RAG embedding and vector-store credentials are `${vault:...}`
+  references resolved at runtime, exactly like `llmstore`, which was already granted.
+- **The boundary sentence is derived, not asserted**, so allow-listing a RAG write later cannot
+  leave the prompt claiming the opposite.
+
+### Note
+
+Existing operators keep their old tool set — tools are provisioned at activation, so an operator
+must be re-activated to gain these.
+
+
+### Review round 1 (Copilot)
+
+Four inline findings plus one *suppressed* comment (no thread — only visible in the review body), all
+acted on:
+
+- **`ai.labs.rag` → `unknown` in `STEP_TYPE_TO_RESOURCE_TYPE`** — a real dead end: an MCP client
+  following `list_agent_resources` into `read_resource` would have passed `unknown` and never
+  reached the new case. Mapping added, and the test that pinned `unknown` updated.
+- **The cheatsheet leaked RAG unconditionally** — `rag (knowledge base)` in the step-type list and
+  the `rag` docs-map entry sat in `BODY_CHEATSHEET`, which every prompt carries. A prompt without the
+  RAG endpoints therefore still said knowledge bases exist. Both moved into the conditional section,
+  which now has a *no-reads* variant that names the `rag` step and states the boundary rather than
+  going silent — silence is what produced the invented call.
+- **The ingestion claim did not track its own endpoint** — `grantsKnowledgeBaseReads` gates a section
+  that promised an ingestion check while requiring only the two config reads. Split into
+  `grantsIngestionStatusReads` rather than requiring all three: the config reads are a complete
+  capability alone, so demanding the third would drop the whole section on a deployment missing one
+  endpoint.
+- **`grantsKnowledgeBaseAuthoring` missed the duplicate verb** (a *suppressed* Copilot comment, which
+  carries no thread — found by grepping the review body). `POST /ragstore/rags/{id}` is `duplicateRag`,
+  and a copy of a knowledge base is a new knowledge base, so granting it would have left the prompt
+  telling an operator that CAN create one that it cannot. Added, with a test covering all four
+  authoring routes.
+- **Plaintext credentials in a `RagConfiguration`** — the exposure is real but not new: `GET
+  /llmstore/llms/{id}` returns a plaintext key verbatim too, and `RestLlmStore` says so in its own
+  javadoc. RAG was, however, the one credential-carrying store with **no write-time warning**, so it
+  now has the same one `RestLlmStore` and `RestChannelIntegrationStore` already had (warn, never
+  reject — a rejection breaks vault-less instances). Redacting config reads platform-wide is a
+  separate change; doing it for RAG alone would imply the other stores are safe.
+
+**Files:** `ui/manager/src/lib/operator/tool-scopes.ts`, `.../system-prompt.ts`, their tests,
+`src/main/java/ai/labs/eddi/engine/mcp/McpAdminTools.java`,
+`src/main/java/ai/labs/eddi/configs/rag/rest/RestRagStore.java`,
+`src/test/java/ai/labs/eddi/engine/mcp/{McpAdminToolsSwitchCoverageTest,McpAdminToolsTest}.java`,
+`src/test/java/ai/labs/eddi/configs/rag/rest/RestRagStoreWriteValidationTest.java`, `docs/mcp-server.md`
 
 ---
 
@@ -255,6 +356,7 @@ Mutation-checked: reverting the final-URL identity and re-lowercasing the path f
 
 The source configuration and the pipeline that ties crawl → convert → state store → embed, with vector
 removal driven by the tombstone list, plus the Manager UI.
+
 ## 📄 refactor(ingestion): HTML→Markdown converter, and WebScraperTool stops duplicating it (2026-09-17)
 
 **Repo:** EDDI (`feat/html-to-markdown-converter`)
@@ -402,173 +504,6 @@ coverage green locally.
 `previousFocusRef` is captured in the same effect, after an `autoFocus` child has already taken focus,
 so on close focus "returns" to that (now unmounted) field instead of the trigger. Pre-existing and
 separate; left alone here.
-
----
-
-## 🛠️ fix(migration): four first-boot defects found upgrading a real 5.5.1 database (2026-09-17)
-
-**Repo:** EDDI (`fix/first-boot-migration-order`)
-
-Found by rehearsing an upgrade of a customer deployment's **staging** EDDI 5.5.1 database (MongoDB Atlas, 3012
-documents, 7 agents, 195 conversations) to 6.4.0 against a verified restore of the production-like
-dump. Four defects fire on the first boot against a 5.x database; two of them destroy data. All four
-are fixed here with tests, including three that drive a real MongoDB through Testcontainers.
-
-### What changed
-
-- **`TemplateSyntaxMigrator.migrateStringConcat` crashed on a `+` inside a string literal.** It split
-  the concat expression with `split("\\s*\\+\\s*")`, which cuts literals apart: a literal `'+'`
-  became two lone quote characters, a lone quote both starts and ends with a quote so it was taken for
-  a quoted literal, and stripping its delimiters was `substring(1, 0)` —
-  `StringIndexOutOfBoundsException: Range [1, 0) out of bounds for length 1`. A new
-  `splitOnConcatOperator` splits only outside quotes, and `isStringLiteral` requires length ≥ 2 and
-  matching delimiters. The real trigger on staging was a single `httpcalls` config holding a template
-  whose three concatenated literals render as another template expression.
-- **`V6QuteMigration.migrateCollection` had no per-document isolation**, so that one malformed template
-  aborted the Thymeleaf→Qute conversion for *every* config in the database, logging only "will retry
-  on next startup" — where it threw again. Each document now migrates in its own try/catch, failures
-  are logged with collection and id, and the migration is **not** marked complete while any document
-  failed, so it retries once the data is fixed. `migrateCollection` returns a
-  `CollectionResult(migrated, failed)`.
-- **`MongoDeploymentStorage`'s unique `(environment, agentId, agentVersion)` index destroyed deployment
-  rows on a pre-rename database.** EDDI 5 wrote `botId`/`botVersion`; Mongo indexes the absent
-  `agentId` as null, so an unrestricted unique index read all 113 staging rows as duplicates of one
-  another, `createIndex` failed with E11000, and the recovery path `removeDuplicateDeploymentRows()`
-  kept one row for the whole collection and deleted 112. The index is now partial on
-  `agentId`/`agentVersion` existing, and the dedupe pipeline `$match`es only rows that carry the key.
-- **The `@Scheduled(every = "10s", delayed = "10s")` `checkDeployments()` sweep ran before the rename
-  migration and deleted deployments.** On a first boot against a 5.x database the agent configs are
-  still in `bots`; `agents` does not exist until `V6RenameMigration` creates it, so
-  `isAgentConfigMissing` returned true for every deployed agent and the sweep called
-  `deleteDeploymentInfo` on each. Observed live: the deployment rows of both deployed agents deleted. The
-  sweep now returns early while `V6RenameMigration.isPending()`.
-
-### Design decisions
-
-- **The sweep gate asks the migration, it does not track a flag.** The first cut set a
-  `volatile boolean startupMigrationsAttempted` at the end of `autoDeployAgents()`. Two problems:
-  nothing set it if anything above it threw (parking the sweep, and with it all deployment, forever),
-  and it read "migrations attempted" as "collections renamed" — so a rename migration that *failed*
-  released the sweep to delete the rows anyway. `V6RenameMigration.isPending()` is the actual
-  precondition: `enabled && no completion entry in the migration log`, latched once complete so a
-  ten-second schedule does not re-read the log forever, and fail-safe (an unreadable log counts as
-  pending). Disabled is deliberately *not* pending — the property defaults to false, so "no completion
-  entry" is the permanent state of every installation that never needed the migration, and reading that
-  as pending would park the sweep on every normal EDDI 6 database. It also made the fix testable
-  without rewriting the ~25 existing `checkDeployments()` tests, which call it directly on a freshly
-  constructed object.
-- **A conflicting index is dropped and rebuilt.** Mongo does not re-shape an existing index: adding
-  `partialFilterExpression` to a key pattern that already carries the non-partial unique index is
-  refused, not a no-op. Every installation already running 6.x would otherwise have kept the destructive
-  index while logging something that reads like a warning about duplicate rows. On either conflict code
-  the index actually sitting on the deployment key is looked up and dropped **by name**; if none does,
-  the conflict is with someone else's index and is left alone. E11000 still goes to the
-  dedupe-and-retry path, because there the *rows* are wrong and dropping the index would throw the
-  constraint away instead of fixing them.
-- **The partial filter uses `$exists`, not a null check**, so a row that legitimately carries a null
-  `agentVersion` stays inside the uniqueness constraint. Only rows missing the field entirely — i.e.
-  pre-rename rows — fall out of the index.
-- **Not marking the Qute migration complete on a failure re-scans on every boot.** That is accepted:
-  `TEMPLATE_COLLECTIONS` is four config collections plus their `.history` counterparts, the scan is
-  cheap, and a migrated document contains no Thymeleaf syntax so nothing is rewritten twice. Shipping a
-  half-migrated database silently is the worse trade. A collection that cannot be counted is a
-  failure too, with one exception: `NamespaceNotFound` (26). Only some of these names exist on any given
-  database and some driver versions answer `estimatedDocumentCount` on a missing namespace with that
-  error rather than zero, so counting it would leave the migration permanently incomplete on a
-  database with nothing to migrate; any other count failure means a collection nobody has read.
-- **An empty part of a concat expression is now skipped rather than rendered as `{}`.** An empty
-  operand only arises from a leading, trailing or doubled `+`, i.e. from an expression that was already
-  malformed; `{}` is a broken Qute expression where nothing at all is a dropped empty operand.
-
-### Review follow-up (PR #781)
-
-Copilot found a real gap in the first version of the splitter: it left quote mode at the *first*
-matching quote character, escaped or not, so a valid OGNL literal such as `'it\'s + here'` ended at
-the escaped apostrophe and the `+` after it was read as an operator — cutting the literal in half
-again, just for a rarer input. A backslash now escapes the next character while inside a literal.
-
-Stripping the delimiters also reduces `\'`, `\"` and `\\` to the character they stood for, because
-the conversion inlines the literal's text verbatim and Thymeleaf renders `'it\'s'` as `it's` — leaving
-the backslash in would put it on the screen. The other OGNL escapes (`\t`, `\n`, …) are deliberately
-left exactly as they are: a Windows path in a config is the likelier intent than a control character,
-and guessing wrong there rewrites config content rather than merely failing to tidy it.
-
-CodeRabbit then found that the `catch` around `estimatedDocumentCount()` was half-right in the other
-direction: keeping the missing-collection case out of the failure count also swallowed authorization
-errors, timeouts and server errors, so `runIfNeeded()` saw zero failures and recorded completion over
-a collection it had never read — the same silent half-migration the per-document guard exists to
-prevent. Only `NamespaceNotFound` (26) now counts as "nothing to migrate here"; anything else counts
-as a failure and keeps the migration incomplete. A pre-existing test
-(`runIfNeeded_collectionsNotExist`) asserted the old behaviour on a false premise — `getCollection`
-does not contact the server, so it never fails merely because a collection is absent — and now
-asserts the corrected contract under the name `runIfNeeded_collectionAccessFailureBlocksCompletion`.
-
-A final independent review found five more things; all are fixed here.
-
-- **A v5 database with two deployment rows that become one v6 key never finished migrating, and so
-  never deployed an agent again.** `ENVIRONMENT_REWRITES` maps both `unrestricted` and `restricted` to
-  `production`, and v5's own check-then-act upsert wrote same-environment duplicates. The unique index
-  `MongoDeploymentStorage` builds at construction already exists when the migration runs, so the second
-  row's write failed E11000 on every boot — the first row already rewritten, the second never could be
-  — and with the sweep waiting on the migration, nothing deployed. Before this PR the dedupe deleted
-  rows but boot completed; the PR had turned lossy-but-booting into never-deploying. A collision is now
-  resolved with the store's own rule: one row per key, the newest `_id` kept, so every node picks the
-  same survivor. `migrateEnvironments` also isolates documents: one that cannot be written is logged,
-  the rest still go through, and the migration is left incomplete rather than aborted. Three
-  Testcontainers tests cover both collision shapes and the no-collision control. The staging rehearsal
-  could not have caught this: it held no such pair.
-- **A pre-check on `migrateEnvironments` was removed.** An earlier commit on this branch added one to
-  skip a clean collection, motivated by the staging measurement: the startup migrations took 24
-  minutes, ~20 of them this pass on `conversationmemories` (195 documents averaging 410 KB; a read-only
-  `mongodump` of the collection took 14 minutes on the same cluster). It could not help. Two of its
-  three conditions were server-side counts, but the third — a legacy URI nested at arbitrary depth —
-  has no filter form, and a sampled version was rejected because a miss is permanent once the migration
-  records completion; an exhaustive one reads the whole collection, which is the entire cost. Clean
-  collection: one read either way; dirty: two counts plus the same pass. It was net zero at best and
-  the PR described it as a speedup. Removing the 20 minutes needs the rewrite moved server-side
-  (`updateMany` with `$rename`/`$set`); that is follow-up work, not in this PR.
-- **The index-conflict handling had the error codes wrong.** The review suggested handling 85 alone,
-  and the real-server test showed why that is also wrong: an old non-partial index on the same key under
-  the same auto-generated name comes back as `IndexKeySpecsConflict` (86) on current servers. Handling 85
-  only passed every mocked test and left the destructive index in place. Now either code triggers a
-  lookup of the index on the deployment key, dropped by name; a same-named index on another key is not
-  touched.
-- **`/q/health/ready` reported ready with nothing deployed.** With the rename migration pending the
-  sweep is parked, yet `autoDeployAgents()` still set readiness. It now stays not-ready, with an ERROR
-  saying why; the migration only runs at startup, so that lasts until a restart after the cause is fixed.
-  The "sweep parked" warning is logged once instead of every ten seconds.
-- **This entry contradicted itself** on whether an unreadable collection counts as a failure; corrected
-  above to match the code.
-
-
-### Files
-
-- `src/main/java/ai/labs/eddi/configs/migration/TemplateSyntaxMigrator.java`
-- `src/main/java/ai/labs/eddi/configs/migration/V6QuteMigration.java`
-- `src/main/java/ai/labs/eddi/configs/migration/V6RenameMigration.java` — new `isPending()`
-- `src/main/java/ai/labs/eddi/configs/deployment/mongo/MongoDeploymentStorage.java`
-- `src/main/java/ai/labs/eddi/engine/runtime/internal/AgentDeploymentManagement.java`
-- `src/test/java/ai/labs/eddi/configs/migration/TemplateSyntaxMigratorTest.java`,
-  `V6QuteMigrationTest.java`, `V6RenameMigrationTest.java` — the concat fixture fails with the
-  original `StringIndexOutOfBoundsException` against the pre-fix splitter
-- `src/test/java/ai/labs/eddi/configs/deployment/mongo/MongoDeploymentStorageTest.java` (mocked) and
-  `src/test/java/ai/labs/eddi/datastore/mongo/MongoDeploymentStorageTest.java` (Testcontainers —
-  pre-rename rows survive construction, a non-partial index is rebuilt as partial, and the dedupe
-  spares pre-rename rows on a half-migrated collection)
-- `src/test/java/ai/labs/eddi/datastore/mongo/V6RenameMigrationDeploymentsTest.java` (Testcontainers —
-  deployment rows that collapse onto one v6 key)
-- `src/test/java/ai/labs/eddi/engine/runtime/internal/AgentDeploymentManagementTest.java`,
-  `AgentDeploymentManagementBranchTest.java`
-
-### Verification
-
-201 tests green in the selection (`TemplateSyntaxMigratorTest`, `V6QuteMigrationTest`, both
-`MongoDeploymentStorageTest`s, `V6RenameMigrationTest`, `V6RenameMigrationBranchTest`,
-`AgentDeploymentManagementTest`, `AgentDeploymentManagementBranchTest`) plus the repo-wide guards
-(`ImportStyleTest`, `DocumentationLinksTest`, `StrictBoundaryShippedConfigsTest`,
-`RuleSetStoreShippedRulesetsTest`, `BuildQualityGatesTest`, `ChangelogRotationTest`). Mutation-checked:
-reverting the literal-aware split, the partial filter, the dedupe `$match`, the index-conflict rebuild,
-the sweep gate or the "do not mark complete when a document failed" behaviour each makes a test fail.
 
 ---
 
@@ -868,6 +803,7 @@ the licence being accepted.
   `allow-dependencies-licenses`; rewrote the comments to record the decision, the
   evidence, and the revisit condition (upstream announcing removal, or GitHub resolving
   BOM-managed Maven coordinates).
+
 ## ⬆️ chore(ui): Node 22 toolchain, Stryker 10, Vitest 5 for the Chat UI (2026-09-17)
 
 **Repo:** EDDI (`feat/node-22-toolchain`, stacked on `fix/ui-npm-vulnerabilities` / #770)
@@ -931,6 +867,95 @@ Stryker 10 dropped Node 20 (Dependabot #768 was red for that reason) and Vitest 
   recur; all four entries are present. `npm audit`: 0 vulnerabilities in both UIs.
 
 ---
+
+## 🔒 fix(security): a token with no principal name fails closed — 401 up front, 403 in the ownership checks (2026-09-17)
+
+**Repo:** EDDI (`fix/nameless-principal-fail-closed`)
+
+### Problem
+
+Measured against `labsai/eddi` with OIDC enforced and a Keycloak realm whose access tokens carried no
+`upn`, `preferred_username` or `sub`: Quarkus authenticates the token but resolves the principal name to
+`null`. Two consequences followed.
+
+- `OwnershipValidator.validateAndResolveUserId` returned that `null` as the resolved userId, and
+  `ConversationSetup.computeAnonymousUserIdIfEmpty` then stamped an authenticated user's conversation with
+  a random `anonymous-<hex>` owner the user could never read back.
+- `GET`/`POST /agents/{conversationId}` by a non-admin owner answered **500**:
+  `requireOwnerOrAdmin` called `callerId.equals(...)` on the null. `validateUserAccess`,
+  `validateAndResolveUserId` and `isOwner` had the same unguarded `getName().equals`, as did the group
+  conversation owner filters in `RestGroupConversation.listGroupConversations` and
+  `McpGroupTools.list_group_conversations`.
+
+The shipped realm is fixed separately (`fix/keycloak-realm-client-scopes`); this change is for every other
+identity provider or hand-built realm that can produce the same token.
+
+### What changed
+
+- **`NamelessPrincipalAugmentor`** (new, `engine/security`) — a `SecurityIdentityAugmentor` that fails
+  authentication (`AuthenticationFailedException` → **401**) for a non-anonymous identity whose principal is
+  missing or whose name is null or blank. It logs a `[SECURITY]` WARN naming the claims it looked for (the
+  configured `quarkus.oidc.token.principal-claim`, else `upn`/`preferred_username`/`sub`) and the token's
+  issuer and `azp`, log-sanitized, never the token. A misconfigured realm fails every request, so the WARN is
+  throttled to once per five minutes and the rest log at DEBUG. Anonymous identities pass untouched.
+- **`OwnershipValidator`** — a public static `principalName(identity)` normalises a missing principal and a
+  null/blank name to `null`. Every check denies a nameless non-admin with **403** instead of NPE-ing:
+  `isOwner` is `false`, `validateUserAccess`/`requireOwnerOrAdmin` (and so `requireOwnerOrAdminStrict` and
+  `requireOwnerAdminOrApprover`) throw `ForbiddenException`, and `validateAndResolveUserId` throws rather
+  than resolving to `null`.
+- **The legacy-owner exemption no longer admits a nameless caller** (Copilot review on PR #773).
+  `requireOwnerOrAdmin` returned for an unowned resource *before* it looked at the caller's name, so a
+  nameless non-admin still reached legacy conversations and group conversations through it. It now resolves
+  the name first and only then applies the exemption; `ConversationAccessGuard.canAccessConversation`,
+  which must admit exactly what that check admits, uses the new `OwnershipValidator.isNamelessCaller` to
+  hide unowned conversations from the same caller. Anonymous and admin callers are unchanged.
+- **Group conversation listings** (`RestGroupConversation`, `McpGroupTools`) use `principalName` and return
+  nothing for a nameless caller — including legacy rows with no owner, which a null-to-null comparison would
+  otherwise have matched.
+- **`docs/security.md`** — new "The Token Must Name the User" section: the claims Quarkus reads, the 401 and
+  its WARN, and the two fixes (add the claim, or set `QUARKUS_OIDC_TOKEN_PRINCIPAL_CLAIM`).
+
+### Design decisions
+
+- **Reject at authentication, and keep the 403s.** The augmentor is the legible failure: one 401 and one WARN
+  that say what is missing, rather than a 500 on one endpoint, a silently orphaned conversation on another
+  and an empty list on a third. The null-safe validator is defence in depth for any identity that reaches a
+  resource without passing through the augmentor (a future auth mechanism, a test identity).
+- **401, not 403.** The token is not *forbidden* something; it cannot identify the caller at all, which is an
+  authentication failure. The Manager and Chat UI treat 401 and 403 alike, so there is no redirect loop.
+- **Admins keep their role-based bypass in the validator.** `requireOwnerOrAdmin` and an admin naming an
+  explicit `userId` are authorized by the role, not the name. An admin with *no* `userId` to resolve is still
+  denied — there is nobody to file the conversation under. In practice the augmentor rejects the admin's
+  nameless token first.
+- **No escape hatch.** A nameless identity cannot own anything, so there is no configuration in which letting
+  it through is useful; the remedy is `quarkus.oidc.token.principal-claim`.
+- **Background paths are unaffected.** Schedule fires, group members and sub-agents never authenticate a
+  request, so they never reach the augmentor, and the validator's `identity == null` branches are unchanged.
+- **Other principal reads left alone.** `HitlAccessGuard`, `RestConnectionAuthorization`,
+  `RestConnectionSettings`, `A2ATaskHandler`, `OpenAiAuthFilter`, `SpaceContext`, `RestScheduleStore`,
+  `CallerIdentityContext` and `RestAgentEngine` already null-check the name; the audit stamps in
+  `RestAgentEngine` (`endedBy`, `cancelledBy`) and `RestGroupConversation` (`submittedBy`, `decidedBy`) record
+  `null` rather than failing, which the augmentor now makes unreachable.
+
+### Tests
+
+- `OwnershipValidatorTest` — new `nameless principal` nested class: every method with a null, empty and
+  whitespace name (plus an identity with no principal), admin and non-admin (32 cases).
+- `NamelessPrincipalAugmentorTest` (new) — named and anonymous pass through; null/blank/missing principal
+  fail with `AuthenticationFailedException`; the diagnostic names the default or configured claim and the
+  sanitized issuer/client; the WARN throttle.
+- `RestGroupConversationTest`, `McpGroupToolsTest` — a nameless caller lists nothing, including an unowned row.
+- `OwnershipValidatorTest`, `ConversationAccessGuardTest` — a nameless caller is refused an unowned resource by
+  `requireOwnerOrAdmin`, `requireConversationOwner` and `canAccessConversation`; an admin is not. With the
+  reordering reverted, 5 of these fail.
+- **Mutation-checked:** with `OwnershipValidator` and both listings reverted to `origin/main` and the augmentor
+  short-circuited, 22 of the new tests fail (NPEs, missing 403s, missing 401s). The blank-name cases that
+  pass against the old code do so because a blank name never equalled a real owner; they stay as regression
+  guards.
+- **Not run end to end against a live Keycloak.** That a failing augmentor answers 401 was checked in the
+  Quarkus 3.39.3 sources instead: `QuarkusIdentityProviderManagerImpl` chains the augmentors into the
+  authentication `Uni`, and `HttpSecurityRecorder.DefaultAuthFailureHandler` answers an
+  `AuthenticationFailedException` with the mechanism's challenge (401). No unit test covers that HTTP step.
 
 ## 🔒 feat(context): secret context values — usable for one turn, never stored or returned (2026-09-17)
 
@@ -3127,7 +3152,6 @@ _For recording decisions that come up during implementation that aren't in the p
 | 2026-09-13 | Buffer a turn's audit entries and flush them after the pipeline, redacting a vaulted input | E2E: parser/rules entries carried a `scope: secret` plaintext into the append-only ledger | Redact after submission — impossible, entries are signed and immutable |
 | 2026-09-13 | Exclude stateful tools from the tool cache by reflecting over their `@Tool` classes | E2E: group members share a user, so `listArtifacts()` was served stale | Make caching opt-in per tool — changes every existing cached tool |
 | 2026-09-13 | New group save-time checks (member agentId, negative limits, preset roles, nesting cycles) are hard errors | E2E: all saved fine and failed at run time | Warn only — the invalid configs cannot run as written, and shipped templates pass |
-| 2026-09-18 | Keep the v5→v6 conversation rewrite a client-side pass; no skip-if-clean pre-check | Staging: 20 of 24 startup minutes in `migrateEnvironments` over 80 MB | A pre-check was built and removed: a nested legacy URI has no filter form, so proving a collection clean costs the same read. Server-side `updateMany` is the real fix, left as follow-up |
 | 2026-09-20 | Escape record boundaries in the throwable's MESSAGE before the trace is rendered, not in the rendered `%s%e` output | `%e` prints `toString()` as the trace's first line, so a CR/LF in an exception message forged a record past every call-site `sanitize(...)` | Scan the rendered trace and keep the breaks that begin `\tat ` / `Caused by:` / `\t... N more` — an attacker can write all three into a message, so the scan has to guess; or drop the throwable at the ~415 call sites — the stack trace is often the only diagnostic left |
 |            |                                                                       |                                       |                                                             |
 
@@ -3138,3 +3162,4 @@ _For recording decisions that come up during implementation that aren't in the p
 _Track any regressions introduced during implementation for quick debugging._
 
 | Date | Regression | Cause | Fix | Commit |
+| ---- | ---------- | ----- | --- | ------ |

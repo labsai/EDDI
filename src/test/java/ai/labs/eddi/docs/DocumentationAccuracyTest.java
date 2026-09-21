@@ -102,12 +102,25 @@ class DocumentationAccuracyTest {
     /**
      * Every documentation page except the changelog and its archives, which record
      * what was true at the time and must not be rewritten to match today's code.
+     * <p>
+     * A pending fragment under {@code docs/changelog.d/} is excluded for the same
+     * reason one step earlier: it is a changelog entry that has not been collated
+     * yet, so it is the same historical record — it just spends a day or so in its
+     * own file before the nightly job folds it into {@code changelog.md}. Grading
+     * it as a current page would have the assertions fire on an entry and stop
+     * firing on the identical text the next morning.
+     * <p>
+     * That directory's own {@code README.md} is NOT excluded. It documents how to
+     * write a fragment, it is not going anywhere, and it is exactly the kind of
+     * page this class exists to keep true.
      */
     private static List<Path> currentDocs() {
         List<Path> docs = new ArrayList<>();
         for (Path p : markdownFiles()) {
             String rel = repoRoot().relativize(p).toString().replace('\\', '/');
-            if (rel.equals("docs/changelog.md") || rel.startsWith("docs/changelog/")) {
+            if (rel.equals("docs/changelog.md")
+                    || rel.startsWith("docs/changelog/")
+                    || (rel.startsWith("docs/changelog.d/") && !rel.endsWith("/README.md"))) {
                 continue;
             }
             docs.add(p);
