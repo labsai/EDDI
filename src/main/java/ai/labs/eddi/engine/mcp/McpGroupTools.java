@@ -441,9 +441,10 @@ public class McpGroupTools {
             // group and read everyone's transcripts.
             if (ownershipValidator.isAuthEnabled() && identity != null && !identity.isAnonymous()
                     && !identity.hasRole("eddi-admin")) {
-                String callerId = identity.getPrincipal().getName();
+                // A nameless principal owns nothing — an empty list, not an NPE.
+                String callerId = OwnershipValidator.principalName(identity);
                 conversations = conversations.stream()
-                        .filter(gc -> callerId.equals(gc.getUserId()))
+                        .filter(gc -> callerId != null && callerId.equals(gc.getUserId()))
                         .toList();
             }
             return jsonSerialization.serialize(conversations);
