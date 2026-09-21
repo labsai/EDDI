@@ -133,9 +133,9 @@ npm run build    # Outputs to dist/
 
 ## 5. Mandatory Workflow
 
-1. **Before work**: `git status`, read this file + any `changelog.md`
+1. **Before work**: `git status`, read this file + the top of `docs/changelog.md` and anything pending in `docs/changelog.d/`
 2. **During work**: Commit with `feat(chat-ui):` / `fix(chat-ui):`. Each commit must build.
-3. **After work**: Update `changelog.md`
+3. **After work**: add your entry as a **new file** `docs/changelog.d/YYYY-MM-DD-<slug>.md` — never edit `docs/changelog.md`, which every open PR would conflict over. See [`docs/changelog.d/README.md`](../../docs/changelog.d/README.md).
 
 ### DO NOT
 
