@@ -590,7 +590,7 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
     /**
      * Wraps a Callable with an attempt counter. The counter is diagnostic only — it
      * records how often the head task of a conversation was handed to the runtime
-     * and is reported in the dead-letter LOGGER. It never drives a re-execution: a
+     * and is reported in the dead-letter log. It never drives a re-execution: a
      * turn that reported failure has already run.
      */
     static class RetryableCallable {
