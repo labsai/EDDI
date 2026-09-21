@@ -103,7 +103,7 @@ public class EmbeddingModelFactory {
      * <p>
      * Making the role a required parameter rather than adding an optional overload
      * is the point: a caller cannot forget it, and the compiler names every site
-     * that has to choose. There are two.
+     * that has to choose. There are three: retrieval, and the two ingestion paths.
      *
      * @param config
      *            the knowledge base's embedding configuration

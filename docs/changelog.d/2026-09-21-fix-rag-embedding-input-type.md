@@ -24,7 +24,8 @@ document.
 
 - `getOrCreate` now takes the role as a **required** parameter. Required rather than an
   optional overload deliberately: a caller cannot forget it, and the compiler names every
-  site that has to choose. There are two.
+  site that has to choose. There are three: retrieval, and the two ingestion
+  paths.
 - The role is part of the cache key — to an asymmetric provider the two roles are two
   different models, and sharing one entry is the defect.
 - `InputTypedEmbeddingModel` (new) attaches the role via `defaultRequestParameters()`,
@@ -109,6 +110,23 @@ and was reported properly; null now says the same thing.
 The supported-provider list moved into one `SUPPORTED_PROVIDERS_HINT` constant shared by
 both rejections, so the absent-provider and unrecognised-provider messages cannot drift
 apart as providers are added.
+
+### Follow-up: the crawler ingestion path, which `main` added underneath this branch
+
+`main` gained `IngestionPipeline` (the crawl-and-ingest path) while this branch was open,
+and it calls `embeddingModelFactory.getOrCreate(knowledgeBase)`. That is a third call site
+for a method this branch had made two-argument, so the merge of the two did not compile —
+which is the required parameter doing exactly the job it was chosen for. An optional
+overload would have merged silently and left the crawler sharing retrieval's cache entry,
+reintroducing the original defect on the one ingestion path that did not exist when the
+defect was found.
+
+`IngestionPipeline.Collector.model()` now asks for `DOCUMENT`; it is storing vectors.
+`IngestionPipelineTest` pins that directly, and `IngestionRetrievalRoundTripTest` — which
+drives a real crawl and a real retrieval against one factory — now records the role each
+half asks for and asserts the pair is `[DOCUMENT, QUERY]`. That assertion is the one that
+would have caught this: the two halves sharing a role is the whole defect, and the
+round-trip test is the only place both halves are visible at once.
 
 ---
 
