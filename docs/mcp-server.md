@@ -681,8 +681,8 @@ For a client with no OAuth support, or for a quick test, the token can be pasted
 **1. Get a token.** The shipped realm's `eddi-frontend` client is public and permits the direct access grant:
 
 ```bash
-read -rsp "Password for eddi: " EDDI_PASSWORD && echo
-printf '%s' "$EDDI_PASSWORD" | curl -s \
+read -rsp "Password for eddi: " KC_PASSWORD && echo
+printf '%s' "$KC_PASSWORD" | curl -s \
   -d grant_type=password -d client_id=eddi-frontend -d username=eddi \
   --data-urlencode "password@-" \
   http://localhost:8180/realms/eddi/protocol/openid-connect/token
