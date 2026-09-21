@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.rag;
 
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
+import dev.langchain4j.model.embedding.request.EmbeddingInputType;
 import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.embedding.EmbeddingModel;
@@ -18,6 +19,8 @@ import org.mockito.Mock;
 import java.util.Map;
 
 import dev.langchain4j.data.embedding.Embedding;
+import org.mockito.ArgumentCaptor;
+
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -45,7 +48,7 @@ class RagIngestionServiceTest {
 
     @Test
     void ingest_shouldReturnIngestionId() {
-        when(embeddingModelFactory.getOrCreate(any())).thenReturn(embeddingModel);
+        when(embeddingModelFactory.getOrCreate(any(), any())).thenReturn(embeddingModel);
         when(embeddingStoreFactory.getOrCreate(any(), anyString())).thenReturn(embeddingStore);
         when(embeddingModel.embed(any(TextSegment.class)))
                 .thenReturn(Response.from(Embedding.from(new float[]{0.1f})));
@@ -59,9 +62,37 @@ class RagIngestionServiceTest {
         assertFalse(ingestionId.isBlank());
     }
 
+    /**
+     * Ingestion must ask for a DOCUMENT model.
+     * <p>
+     * This and its counterpart in {@code RagContextProviderTest} are what make the
+     * fix real: the decorator can be perfect and the defect survives if both call
+     * sites still ask for the same role. They did — both called a single-argument
+     * {@code getOrCreate} with the same configuration, so they shared one cache
+     * entry, and Gemini's {@code taskType} (default {@code RETRIEVAL_DOCUMENT}) was
+     * applied to queries too.
+     */
+    @Test
+    void ingest_asksForADocumentModel() {
+        when(embeddingModelFactory.getOrCreate(any(), any())).thenReturn(embeddingModel);
+        when(embeddingStoreFactory.getOrCreate(any(), anyString())).thenReturn(embeddingStore);
+        when(embeddingModel.embed(any(TextSegment.class)))
+                .thenReturn(Response.from(Embedding.from(new float[]{0.1f})));
+        when(embeddingModel.embed(anyString())).thenReturn(Response.from(Embedding.from(new float[]{0.1f})));
+
+        service.ingest("test-kb", "Hello world document content.", "test-doc.txt", createConfig());
+
+        // ingest() hands the work to a virtual thread, so the factory call has not
+        // necessarily happened yet when ingest() returns.
+        var role = ArgumentCaptor.forClass(EmbeddingInputType.class);
+        verify(embeddingModelFactory, timeout(5000).atLeastOnce()).getOrCreate(any(), role.capture());
+        assertEquals(EmbeddingInputType.DOCUMENT, role.getValue(),
+                "text being stored must be embedded as a DOCUMENT");
+    }
+
     @Test
     void getStatus_shouldReturnPendingInitially() {
-        when(embeddingModelFactory.getOrCreate(any())).thenReturn(embeddingModel);
+        when(embeddingModelFactory.getOrCreate(any(), any())).thenReturn(embeddingModel);
         when(embeddingStoreFactory.getOrCreate(any(), anyString())).thenReturn(embeddingStore);
 
         var config = createConfig();

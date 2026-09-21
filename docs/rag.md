@@ -206,6 +206,37 @@ These are visible in the conversation memory snapshot and the audit ledger.
 | `gemini` | `gemini-embedding-2` | `apiKey` | Google Gemini embeddings |
 | `vertex` | `text-embedding-005` | `project` | `location` (default: `us-central1`); uses GCP credentials |
 
+### Asymmetric models: queries and documents are embedded differently
+
+Some embedding models are **asymmetric** — they produce a different vector for the same
+text depending on whether it is a document being *stored* or a query being *searched
+with*, and the retrieval quality they advertise assumes you tell them which. Google's
+Gemini is the clearest example: it exposes `RETRIEVAL_DOCUMENT` and `RETRIEVAL_QUERY` as
+distinct task types.
+
+**EDDI handles this for you, and there is nothing to configure.** Ingestion asks for a
+`DOCUMENT` model and retrieval asks for a `QUERY` one; the two are cached separately, and
+the role travels with the model instance because `EmbeddingStoreContentRetriever` offers
+no way to pass a per-call parameter.
+
+The role is only applied to providers that accept one. In langchain4j 1.20.0 that is
+**`gemini` and `cohere`**; the other six declare no `INPUT_TYPE` parameter and are handed
+the provider's model unchanged. This is not a hard-coded list — EDDI reads each model's
+own `supportedParameters()`, so it cannot drift out of date when the dependency is
+upgraded. The distinction matters because langchain4j *rejects* an unsupported per-call
+parameter rather than ignoring it.
+
+> **Upgrading an existing Gemini knowledge base.** Before this behaviour existed, EDDI
+> built one model per knowledge base and used it for both roles — so with Gemini's
+> `taskType` defaulting to `RETRIEVAL_DOCUMENT`, queries were embedded as documents.
+> Stored vectors were always correct; only the query side was wrong, so **no
+> re-ingestion is needed**. Retrieval quality should improve on the next query.
+
+> **`taskType` is still honoured** for Gemini. It sets the model's build-time default,
+> which now applies only where no role is specified — and EDDI's RAG paths always specify
+> one. Set it only if you are deliberately using a non-retrieval task type such as
+> `SEMANTIC_SIMILARITY` or `CLASSIFICATION`.
+
 ## Vector Stores
 
 | Store Type | Required Parameters | Notes |

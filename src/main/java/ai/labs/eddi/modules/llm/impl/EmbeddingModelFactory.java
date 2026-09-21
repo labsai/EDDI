@@ -13,6 +13,7 @@ import com.github.benmanes.caffeine.cache.Caffeine;
 import dev.langchain4j.model.bedrock.BedrockTitanEmbeddingModel;
 import dev.langchain4j.model.cohere.CohereEmbeddingModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
+import dev.langchain4j.model.embedding.request.EmbeddingInputType;
 import dev.langchain4j.model.googleai.GoogleAiEmbeddingModel;
 import dev.langchain4j.model.googleai.GoogleAiEmbeddingModel.TaskType;
 import dev.langchain4j.model.mistralai.MistralAiEmbeddingModel;
@@ -81,12 +82,39 @@ public class EmbeddingModelFactory {
 
     /**
      * Returns a cached or newly created embedding model for the given
-     * configuration.
+     * configuration, tagged for the role it will be used in.
+     *
+     * <h4>Why the role is a required argument</h4>
+     *
+     * Asymmetric embedding models produce a different vector for the same text
+     * depending on whether it is being stored or searched with, and they have to be
+     * told which. Ingestion and retrieval previously called a single-argument
+     * {@code getOrCreate} with the same configuration, so they shared one cache
+     * entry and therefore one instance — and Gemini bakes its {@code taskType} in
+     * at construction, defaulting to {@code RETRIEVAL_DOCUMENT}. Every Gemini
+     * knowledge base was embedding its queries as documents.
+     * <p>
+     * Making the role a required parameter rather than adding an optional overload
+     * is the point: a caller cannot forget it, and the compiler names every site
+     * that has to choose. There are two.
+     *
+     * @param config
+     *            the knowledge base's embedding configuration
+     * @param inputType
+     *            {@link EmbeddingInputType#DOCUMENT} when ingesting,
+     *            {@link EmbeddingInputType#QUERY} when retrieving
+     *
+     * @return a model for that role; for the providers that do not accept an input
+     *         type this is the provider's model unchanged
+     *
+     * @see InputTypedEmbeddingModel
      */
-    public EmbeddingModel getOrCreate(RagConfiguration config) {
+    public EmbeddingModel getOrCreate(RagConfiguration config, EmbeddingInputType inputType) {
         String paramKey = config.getEmbeddingParameters() != null ? new TreeMap<>(config.getEmbeddingParameters()).toString() : "";
-        String cacheKey = config.getEmbeddingProvider() + ":" + paramKey;
-        return cache.get(cacheKey, k -> build(config));
+        // The role is part of the key: to an asymmetric provider the two roles are
+        // two different models, and sharing one entry is precisely the defect.
+        String cacheKey = config.getEmbeddingProvider() + ":" + paramKey + ":" + inputType;
+        return cache.get(cacheKey, k -> InputTypedEmbeddingModel.wrapIfSupported(build(config), inputType));
     }
 
     private EmbeddingModel build(RagConfiguration config) {
