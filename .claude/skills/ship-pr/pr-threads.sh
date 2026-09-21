@@ -10,6 +10,11 @@
 #
 # The nodeId is what addPullRequestReviewThreadReply and resolveReviewThread take.
 #
+# Only the last 100 comments are fetched. If a thread is longer than that and no
+# reply from you appears in that window, we cannot prove one does not exist earlier,
+# so such a thread is tagged [CHECK] rather than asserted [NO-REPLY] -- a false alarm
+# is still a wrong answer.
+#
 # `comments=N` counts EVERY comment including the one that opened the thread, so
 # comments=1 means nobody has answered. <first>-><last> is the opening and the most
 # recent author: when they differ, someone replied — but note CodeRabbit often replies
@@ -93,9 +98,10 @@ FORMAT='.data.repository.pullRequest as $pr
   | $pr.reviewThreads.nodes[]
   | (if .cmts.totalCount > 100 then .cmts.nodes else .cmts.nodes[1:] end) as $replies
   | ([ $replies[] | select((.author.login // "") == $me) ] | length > 0) as $answered
+  | (.cmts.totalCount > 100 and ($answered | not)) as $unsure
   | (if .isResolved then "[resolved by " + (.resolvedBy.login // "?") + "] " else "[OPEN]     " end)
   + (if .isOutdated then "[outdated] " else "" end)
-  + (if $answered then "" else "[NO-REPLY] " end)
+  + (if $answered then "" elif $unsure then "[CHECK] " else "[NO-REPLY] " end)
   + .id
   + "  " + (.path // "?") + ":" + ((.line // .originalLine // 0) | tostring)
   + "  " + (.opener.nodes[0].author.login // "?")
