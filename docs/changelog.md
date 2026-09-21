@@ -14,21 +14,39 @@ Each entry records:
 
 ## Where to Add an Entry
 
-**Add new entries directly below the `---` that closes this section**, above the
-most recent existing entry. Never append to an archive file.
+**Not here.** Write your entry as a new file in
+[`changelog.d/`](changelog.d/README.md) — `YYYY-MM-DD-<slug>.md`, with the slug
+unique to your branch — and leave this file alone. The same goes for the two
+running registers at the bottom: their rows ride along in the fragment, in a
+fenced `decision-log` or `regression-note` block.
 
-This file holds only recent work and is capped at **250 KB** —
-`ChangelogRotationTest` fails the build if it grows past that. When it does, run:
+Entries used to be inserted at the top of this file, and the registers appended
+to at the bottom. Both are a fixed point in a shared file, which git cannot
+merge: with several PRs open, every one of them conflicted with every other over
+a document that had nothing to do with the code under review. A fragment is a new
+file under a name no other branch picks, so the same two PRs merge without
+touching each other.
+
+`.github/workflows/changelog-collate.yml` runs nightly, merges the fragments in
+here **by date** — a PR that stayed open for weeks lands among its
+contemporaries rather than on top — trims this file back under its rotation
+target, and opens a PR. Until that PR merges, `changelog.d/` holds the newest
+history, so read it alongside the top of this file. To do it by hand:
 
 ```bash
-python scripts/rotate-changelog.py
+python scripts/collate-changelog.py   # fragments -> this file
+python scripts/rotate-changelog.py    # this file -> docs/changelog/<YYYY-MM>.md
 ```
 
-It moves the oldest entries into `docs/changelog/<YYYY-MM>.md` by the date each
-entry carries, adds one `../` to the relative links it moves (an archive sits a
-directory deeper than this file) without touching the ones inside code spans, and
-regenerates the Archive table below from what is on disk. Add any newly created
-archive file to [`SUMMARY.md`](SUMMARY.md). Do not raise the cap.
+This file holds only recent work and is capped at **250 KB** —
+`ChangelogRotationTest` fails the build if it grows past that. Rotation runs at a
+lower threshold than the cap, trimming back to **200 KB** whenever the file is
+over that, so the session whose entry tips it over is not the one made to rotate
+it. Rotation moves the oldest entries into `docs/changelog/<YYYY-MM>.md` by date,
+adds one `../` to the relative links it moves (an archive sits a directory deeper
+than this file) without touching the ones inside code spans, and regenerates both
+the Archive table below and the changelog list in [`SUMMARY.md`](SUMMARY.md) from
+what is on disk. Do not raise the cap.
 
 The single file this replaced had reached 1.9 MB — roughly half a million tokens —
 which neither a reader nor an agent's context window could usefully hold.
@@ -50,81 +68,147 @@ bottom of this file and are never archived.
 
 ---
 
-## 🔒 fix(apicalls): auto-vaulted properties carry a provenance marker; the guard requires it (2026-09-20)
+## 🔒 fix(security): close the CWE-117 gap in the half of a log line no call site can reach (2026-09-20)
 
-**Repo:** EDDI (`fix/vault-references-in-templates`)
+**Repo:** EDDI (`fix/log-injection-record-boundary-handler`)
 
-### Why
+`LogSanitizer.sanitize(...)` at a call site only ever covered the log **message**.
+`quarkus.log.console.format` ends in `%s%e`, and `%e` renders a stack trace whose FIRST
+line is the throwable's own `toString()` — `ClassName: message`. So an attacker-controlled
+CR/LF inside an **exception message** reached the console verbatim and forged a record that
+reads as a genuine, server-authored line, no matter how carefully the message half was
+sanitized. 412 log calls in `src/main/java` pass a throwable (244 as a trailing argument,
+168 as JBoss `*f(e, …)`), and none of them could fix this themselves.
 
-`ConfigReferenceGuard.autoVaultReferences` decided whether a conversation property named by an
-HTTP-call template may resolve a vault secret by **looking at the value**: it accepted the property
-when its value was character-for-character what `PropertySetterTask.autoVaultSecret` would have
-written for that property, under this conversation's agent and tenant. Two PR reviewers (Copilot,
-CodeRabbit) asked for a provenance check instead, and the previous entry recorded why it was not
-done then: `Property` carried no marker. A `scope: "secret"` instruction stores its vault reference
-with `scope: conversation`, indistinguishable on disk from a property a template wrote from user
-input, a model reply or an API response — so `${vault:<agentId>.apiKey}` was a string an attacker
-could simply produce, and the shape test accepted it.
-
-What that bought an attacker was bounded (the key is derived from the agent and the property name
-the template reads, and the request goes to the endpoint the configuration names), which is why it
-shipped. It is still a value the configuration never wrote being resolved into an outgoing request.
+Dropping the throwable at those call sites was never the trade: `RestAgentAdministration`'s
+deploy-failed WARN tells the client only *"Deployment failed. Check server logs for
+details."*, so the stack trace is the sole diagnostic a failed deployment leaves.
 
 ### What changed
 
-- **`Property.autoVaulted`** (new, `Boolean`) — the provenance marker, set by
-  `PropertySetterTask.autoVaultSecret` and by **nothing else**. No property-instruction field maps to
-  it (`convertPropertyInstructions` reads a fixed key set), and no REST endpoint takes a `Property` as
-  a request body, so "marked" means "this process vaulted it" rather than "this value looks vaulted".
-- **`ConfigReferenceGuard`** requires the marker before it will allow a reference read through
-  `{properties.x}`. The agent/property/tenant comparison is kept behind it — redundant by
-  construction, since `autoVaultSecret` derives all three itself, and kept as the bound that still
-  holds if a marked `Property` ever reaches memory from somewhere other than that method.
-- **`ApiCallExecutor`** passes the live `Map<String, Property>` from `IConversationMemory` into
-  `buildRequest` → `resolveGuardedVariables` → the guard. `ConversationProperties.toMap()` — what
-  templates and, until now, the guard see — flattens each `Property` to its raw value and loses the
-  marker, so it needs a channel of its own. Read from memory at build time, not captured earlier: a
-  pre-request property instruction writes through to the same map between `execute` being called and
-  the request being built. Threaded through `execute`, `resolve` and `executeFireAndForgetCalls`.
-- **`MemoryCheckpoint.copyProperties`** carries the marker across the deep copy. It clones through the
-  all-args constructor, which does not take the new field — a rollback that dropped it would turn
-  every later API call using that secret into a refusal.
-- `docs/secrets-vault.md`: the auto-vaulted-property case now rests on provenance, and what an
-  unmarked property means.
+- **`LogSanitizer.escapeRecordBoundaries(String)`** — a second, record-level rule beside the
+  existing call-site `sanitize(...)`. It escapes rather than destroys: CR → `\r`, LF → `\n`,
+  U+2028/U+2029 and every other ISO control character → `\uXXXX`, TAB kept verbatim. Returns
+  the same instance when nothing needs escaping, and `null` for `null` (unlike `sanitize`,
+  which renders `null` as the string `"null"` — doing that to a throwable's message would turn
+  a printed `java.io.IOException` into `java.io.IOException: null`).
+- **`LogRecordRedactor`** now applies both rules in one pass: `SecretRedactionFilter.redact`
+  then `escapeRecordBoundaries`, to the record's formatted message and to every message in its
+  throwable graph (causes and suppressed included). `RedactedThrowable.of` takes the message
+  rewrite as a `UnaryOperator<String>` so one walk of the graph applies both rules instead of
+  nesting one stand-in inside another.
+- **`BoundedLogStore.capture`**'s own fallback path (used when the upstream pass threw) applies
+  the same `LogRecordRedactor.rewrite`, so the ring buffer, the DB and the SSE live tail agree
+  with the console.
+- **Two log calls that this change would otherwise have made uglier**: the `\n` in
+  `ConversationStepRunner`'s "Conversation not ready" ERROR became `": "` (the throwable is
+  passed too, so `%e` prints the trace anyway), and `ApiCallExecutor`'s trailing `\n` on the
+  execution-time INFO is gone (the pattern already ends in `%n`). They were the only two
+  deliberately multi-line log messages in `src/main/java`.
 
-### Decision: unmarked is refused, not grandfathered
+### Design decision — escape the throwable's MESSAGE, not the rendered trace
 
-`null` covers two cases that cannot be told apart — a property written from conversation data, and
-one written into a conversation document before the field existed. Accepting the pair for
-compatibility would leave the hole open permanently, because the attacker's property is unmarked
-too; the fix would be decorative. So unmarked fails closed.
+The obvious reading of "sanitize the rendered `%s%e`" is to scan the finished stack trace and
+escape the line breaks that do not begin a genuine continuation line (`\tat `, `Caused by:`,
+`\t... N more`). **Rejected**: those three prefixes are also three strings an attacker can put
+in an exception message, so such a scan has to decide which `Caused by:` is the JVM's and which
+is the payload, and it has no way to know.
 
-The cost is a conversation that auto-vaulted a secret under an earlier release and makes the API
-call after the upgrade: the call is refused with the error that names the field and the reference,
-and re-running the `scope: "secret"` instruction (the user supplies the secret again, or a new
-conversation starts) marks it. Bounded — it needs the vault enabled, which is not the shipped
-default — and recoverable. A permanent fail-open is neither.
+There is no need to guess. In a rendered trace the only text an attacker reaches is the
+`toString()` of each throwable in the graph; every other line is generated by the JDK from the
+`StackTraceElement` array. So EDDI escapes the messages *before* the trace is rendered, by
+substituting a copy of the throwable, and lets the JDK produce the structure from clean input.
+Nothing is parsed, nothing is guessed, and `LogRecordBoundaryForgeryTest` asserts the frames,
+the `Caused by:` and the `... N more` elision come out identical to what the original threw.
 
-Deserialization stays backward compatible in the mechanical sense: the field is absent from every
-document already in MongoDB and reads back as `null` rather than failing, and EDDI's global
-`NON_NULL` inclusion means an unmarked property does not gain the field on write either.
+Two further choices worth stating: **TAB is kept** (it cannot end a record, and it is what
+indents `\tat …`), and **a backslash is not doubled** — the escaping is therefore not injective,
+which is a cosmetic ambiguity rather than a forgery, and the alternative doubles every backslash
+in the Windows paths and regexes exception messages are full of.
 
-### Verification
+It is also a rewrite of the record rather than a new console formatter, matching the reasoning
+already recorded in `LogRecordRedactor`: one definition of "what goes out" for every destination.
+The filter is wired to the console handler alone via
+`quarkus.log.console.filter=eddi-log-capture`; a file or syslog handler would need the same
+filter, and the test below fails if that property or the `%s%e%n` format moves out from under
+the claim.
 
-- `ConfigReferenceGuardTest` 10 → 13: the three existing auto-vault cases kept (`autoVaultProperty`,
-  `autoVaultTenantIsPinned`, `autoVaultOwnTenant`, now stating the marker explicitly — tenant pinning
-  still refuses a *marked* property under a foreign tenant, so provenance is necessary and not
-  sufficient), plus an unmarked property holding the exact reference, an explicit `FALSE`, and no
-  properties at all.
-- `ApiCallExecutorConfigReferenceTest` +1: the request `autoVaultedPropertyHeader` sends, refused
-  byte-for-byte when the same property is unmarked — the vault is never asked and nothing is sent.
-- `PropertySetterTaskSecretScrubTest` +2: a `scope: "secret"` write is marked; an ordinary write of
-  the identical string is not.
-- `PropertyTest` +5 (JSON round-trip, an unmarked property omits the field, a pre-marker document
-  reads back unmarked), `MemoryCheckpointTest` +1 (the marker survives the deep copy).
-- Mutation-checked one at a time: the guard ignoring the marker fails 3 tests, `autoVaultSecret` not
-  writing it fails 1, the checkpoint clone dropping it fails 1.
-- apicalls, properties, memory and secrets suites plus the repo-wide guards: 6479 tests green.
+### Tests
+
+New `LogRecordBoundaryForgeryTest` (10 tests) asserts on **rendered** output — a real
+`PatternFormatter` built from the pattern read out of `src/main/resources/application.properties`
+— because `LogCaptureSupport.captureLogsOf` reads `getMessage()`/`getParameters()` but not
+`getThrown()` and so cannot see this defect at all. Its shared invariant: after the first, every
+line of a rendered record must be a continuation the JDK generated. Covers the exception message,
+a cause, a suppressed exception, U+2028, the message half, a format parameter, plus "a clean
+record renders byte-for-byte as before and keeps its throwable" and the config guard.
+`LogSanitizerTest` gains 8 cases for the new method.
+
+**Mutation-checked.** Removing the escaping entirely fails 7 of 10 (the 3 survivors are the
+must-not-change tests). Escaping the message but not the throwable fails exactly the 5
+throwable-half tests — so none of them pass on the strength of the message fix.
+
+### And the message-level alerts, folded in
+
+The handler above stops any of these forging a record at *runtime*, but CodeQL's
+`java/log-injection` is a dataflow rule and keeps flagging the call site regardless — and if
+the filter is ever detached from a handler, the call site is what is left. So the same branch
+also applies the ordinary one-line `LogSanitizer.sanitize(...)` to **38 sinks across the eight
+files** the alerts name:
+
+| File | Sinks | The tainted arguments |
+|---|---|---|
+| `GroupHitlCoordinator` | 16 | `gc.getId()`, `gc.getGroupId()`, `groupConversationId`, `entry.getKey()`, `e.getMessage()` |
+| `GroupConversationService` | 11 | `gc.getId()`, `gc.getGroupId()`, `phase.name()`, `outcome.reason()` |
+| `MemberTurnExecutor` | 3 | `member.agentId()`, `gc.getId()`, `gc.getGroupId()`, `subGroupId` |
+| `ConversationHitlService` | 3 | `conversationId` |
+| `PhaseExecutionEngine` | 2 | `gc.getId()`, `phase.name()`, `decision.outcome()` |
+| `AuditLedgerService` | 1 | `entry.agentId()`, `e.getMessage()` |
+| `AgentGroupStore` | 1 | `groupConfiguration.getName()`, the phase name |
+| `SlackGroupDiscussionListener` | 1 | `groupConversationId`, `e.getMessage()` |
+
+Only String-typed arguments are wrapped; the enums, `Instant`s and counters in the same calls
+are left alone. `MemberTurnExecutor` and `SlackGroupDiscussionListener` gained the import; each
+of the other six already had it, and each call follows the style its own file already used
+(qualified `LogSanitizer.sanitize` in six, the static import in `ConversationHitlService` and
+`AuditLedgerService`).
+
+The alert list was resolved through `gh api`, not read off `main` at HEAD: a CodeQL alert's
+line number is relative to `most_recent_instance.commit_sha`. Two of the 41 reported alerts
+turned out to be stale against an older sha — one line had already been sanitized, the other no
+longer exists — which is how 41 became 38. The eight files carry a further ~70 log arguments of
+the same shape that CodeQL has *not* flagged, overwhelmingly `e.getMessage()`; those are left
+alone, because sanitizing them is a codebase-wide policy question and not this PR's.
+
+**Tests.** `SanitizedLogSinksTest` pins all 38 at the source: each is keyed by a fragment of its
+own message rather than a line number, and every flagged argument must occur only inside a
+`sanitize(...)`. Dropping one fails the build with the file, the message and the expression
+named. `GroupHitlCoordinatorLogInjectionTest` covers the two sinks reachable through a public
+method with one mock — the forged-id and the forged-exception-message halves — in the
+`LogCaptureSupport` idiom the earlier regression tests established. Both mutation-checked.
+
+A source guard rather than 38 behavioural tests is a deliberate call and is argued in the test's
+own Javadoc: the rest sit inside a phase loop or a state-race `catch` that takes a whole group
+discussion to reach, and a test that builds one to observe a single WARN grades the harness more
+than the fix.
+
+### What's next
+
+- `RestAgentAdministration`'s deploy-failed WARN carries a comment on branch
+  `fix/log-injection-agent-deployment-logs` (#799) explaining that the throwable cannot be
+  sanitized and that only a log handler can fix it. That branch is not merged, so the comment
+  does not exist on `main` and could not be updated here: **whichever of the two lands second
+  must update it** to say the handler now exists.
+- 110 further `java/log-injection` alerts remain open on `main` in files this PR does not touch —
+  `RestScheduleStore`, `RestUserMemoryStore`, `VaultSecretProvider`, the REST stores and others.
+  `RestAgentAdministration` and `AgentFactory` among them are PR #799's scope and were left to it.
+  None of them can forge a record at runtime now, so they are alert hygiene rather than exposure.
+
+---
+
+---
+
+---
 
 ## 🕷️ feat(ingestion): web crawler — streaming, bounded, robots-aware (2026-09-17)
 
@@ -189,7 +273,6 @@ Mutation-checked: reverting the final-URL identity and re-lowercasing the path f
 
 The source configuration and the pipeline that ties crawl → convert → state store → embed, with vector
 removal driven by the tombstone list, plus the Manager UI.
-
 ## 📄 refactor(ingestion): HTML→Markdown converter, and WebScraperTool stops duplicating it (2026-09-17)
 
 **Repo:** EDDI (`feat/html-to-markdown-converter`)
@@ -339,103 +422,6 @@ so on close focus "returns" to that (now unmounted) field instead of the trigger
 separate; left alone here.
 
 ---
-
-## 🔒 fix(apicalls): configuration references work in templated HTTP-call fields; data-supplied ones are refused (2026-09-17)
-
-**Repo:** EDDI (`fix/vault-references-in-templates`)
-
-### Why
-
-HTTP-call values are rendered by Qute before `${vars:…}`, `${vault:…}`, `${eddivault:…}`, `${caller:…}` and
-`${connection:…}` are resolved. Only `caller` had a pass-through namespace resolver, so every other reference
-in a URL, header, body or query parameter failed the call with "No namespace resolver found" — including
-`${connection:name}` headers, the documented way to use connections, and the vault references
-`docs/secrets-vault.md` lists as supported. Vault was kept failing on purpose, because a resolved body was
-stored unredacted.
-
-The resolvers run on the *rendered* string, so a reference that conversation data put there was resolved
-too: a template substituting user input, a model reply or an API response sent the plaintext of any vault
-secret named in that data (grants are checked at deploy, not at read). That was independent of the
-namespace failure.
-
-### What changed
-
-- `ReferencePassThroughNamespaceResolver` (new base; `CallerNamespaceResolver` now extends it) and
-  `ConfigReferenceNamespaceResolvers` with pass-through beans for `vault`, `eddivault`, `connection` and `vars`.
-- `ConfigReferenceGuard` (new): after rendering and before resolution, every credential reference
-  (`vault`, `eddivault`, `connection`, `caller`) must appear in that field's configuration template, or be the
-  value of a property the template names that is exactly this agent's auto-vault reference
-  (`${vault:<agentId>.<name>}`, under this conversation's own tenant). Otherwise the call is refused, naming
-  the field. `${vars:…}` is not itself a credential reference, but a variable may hold one — see the second
-  review fix below for how that is guarded.
-- `ApiCallExecutor` records the vault plaintexts it substitutes (`BuiltRequest.resolvedSecrets`) and redacts
-  them by value from the memory request record (`RequestRedactor.redactResolvedSecrets`), the approval
-  preview (`ResolvedRequest.withoutResolvedSecrets`, fingerprint unchanged) and the request log lines.
-- `docs/secrets-vault.md`: where references are resolved, and the rule above.
-
-### Verification
-
-- `ConfigReferenceNamespaceResolversTest`, `ConfigReferenceGuardTest` (10) and
-  `ApiCallExecutorConfigReferenceTest` (15, incl. the nested `VariableIndirection` group) — the executor with
-  the real Qute engine, not a templating stub — plus `RequestRedactorTest`'s new `SafeRequestLog` group (5),
-  `ApiCallExecutorTest`, `ApiCallExecutorSecretContextTest`, `ApiCallExecutorBatchPrincipalPropagationTest`,
-  `ResolvedRequestTest`, `CallerNamespaceResolverTest`. The apicalls, templating, secrets, connections,
-  variables and properties suites are green (6353 tests), as are the repo-wide guards.
-- Mutation-checked, one fix at a time: redacting after formatting instead of before, dropping the
-  post-variable-expansion guard pass, accepting any tenant prefix on an auto-vault property, removing the
-  fail-closed throw, and resolving a second time to build the value each fail a test.
-- End to end on the packaged build (MongoDB, vault on, recording mock API): `${vars:}` in the target URL and
-  `${vault:}` in a header and the body reach the API; an injected reference to another agent's secret is
-  refused and never sent; neither secret appears in the response, the conversation read, the stored
-  conversation or the server log (17/17). Run on the pre-merge branch; **not** re-run after the merge and the
-  review fixes below, which add a fail-closed path a packaged run would exercise differently.
-
-### Merged `main` (2026-09-20)
-
-`main` had moved 28 commits on. Two conflicts:
-
-- **`ApiCallExecutor.executeFireAndForgetCalls`** — `main` had moved batch request *building* onto the turn's
-  own thread (each iteration getting its own copy of the template data) so an unsatisfiable reference fails
-  the turn instead of a worker nobody reads; this branch had changed the same loop to carry `BuiltRequest`
-  so the log line could be redacted. Resolved by keeping `main`'s structure and collecting `BuiltRequest`
-  rather than `IRequest`. `main`'s `rejectExpiredSecretContext` calls in `buildRequest` auto-merged beside
-  the guard calls and were kept on all four fields.
-- **`docs/changelog.md`** — both sides added an entry at the top; both kept.
-
-### Review fixes
-
-Five findings from the PR review, all in the security path:
-
-- **The log line is redacted before it is formatted.** `RequestWrapper.toString()` folds newlines and cuts the
-  body at 150 characters, so redacting its *output* by exact value missed a secret carrying a newline (a PEM
-  key) or straddling the cut. New `RequestRedactor.safeRequestLog(IRequest, Set)` reads the raw components
-  from `IRequest.toMap()`, redacts those, and shortens afterwards; all three call sites use it.
-- **`${vars:…}` can no longer smuggle a credential reference in.** A global variable is allowed to hold
-  `${vault:…}` or `${connection:…}`, so a data-supplied `${vars:x}` passed the guard (not yet a credential
-  reference) and became one after expansion. `ApiCallExecutor.resolveGuardedVariables` now guards again after
-  expansion, against the configured template expanded the same way — a configured variable's reference is
-  allowed, a data-supplied one is refused. Covered for URL, body, header and query parameter; in the path the
-  reference never forms at all, because `pathSafeView` percent-encodes what data puts there (now asserted).
-- **The auto-vault property exception no longer crosses tenants.** It accepted any `<tenant>/` prefix, so a
-  user-supplied `${vault:victim/thisAgent.apiKey}` read another tenant's secret of that key name. The
-  reference is now compared character-for-character against what `autoVaultSecret` would have written for that
-  property under *this* conversation's tenant. Also removes the per-call `Pattern.compile`.
-- **An unresolvable reference fails closed.** `SecretResolver.resolveValue` leaves a reference it cannot
-  resolve in place, and the call went out carrying the literal `${vault:name}` as its credential. It now
-  refuses, naming the field and the reference — the rule `SecretResolver.requireResolved` already applies to
-  LLM client parameters.
-- **One resolution per reference.** The bookkeeping pass and the substitution pass resolved separately, so a
-  rotation between them put the new plaintext in the request while only the old one was in the redaction set —
-  the value actually sent was the one that survived into memory, previews and logs. `resolveSecrets` now
-  builds the string from the same resolutions it records.
-
-Not fixed here, and why: the auto-vault exception was still a *shape* test rather than a provenance test.
-`Property` carried no "auto-vaulted" marker — a `scope: "secret"` instruction stores its vault reference with
-`scope: conversation`, exactly like any other property — so a real provenance check needed a marker on the
-persisted property model. What was left was bounded: the reference is derived from this agent and the
-property name the template reads, so data could not choose which secret is read, and it goes only to the
-endpoint the configuration names. **Closed on this branch by the 2026-09-20 entry above**, which adds that
-marker and makes the guard require it.
 
 ## 🔐 fix(a2a): make the A2A endpoints' anonymity real, and decide which of them deserve it (2026-09-17)
 
@@ -2993,6 +2979,7 @@ _For recording decisions that come up during implementation that aren't in the p
 | 2026-09-13 | Buffer a turn's audit entries and flush them after the pipeline, redacting a vaulted input | E2E: parser/rules entries carried a `scope: secret` plaintext into the append-only ledger | Redact after submission — impossible, entries are signed and immutable |
 | 2026-09-13 | Exclude stateful tools from the tool cache by reflecting over their `@Tool` classes | E2E: group members share a user, so `listArtifacts()` was served stale | Make caching opt-in per tool — changes every existing cached tool |
 | 2026-09-13 | New group save-time checks (member agentId, negative limits, preset roles, nesting cycles) are hard errors | E2E: all saved fine and failed at run time | Warn only — the invalid configs cannot run as written, and shipped templates pass |
+| 2026-09-20 | Escape record boundaries in the throwable's MESSAGE before the trace is rendered, not in the rendered `%s%e` output | `%e` prints `toString()` as the trace's first line, so a CR/LF in an exception message forged a record past every call-site `sanitize(...)` | Scan the rendered trace and keep the breaks that begin `\tat ` / `Caused by:` / `\t... N more` — an attacker can write all three into a message, so the scan has to guess; or drop the throwable at the ~415 call sites — the stack trace is often the only diagnostic left |
 |            |                                                                       |                                       |                                                             |
 
 ---
@@ -3002,3 +2989,4 @@ _For recording decisions that come up during implementation that aren't in the p
 _Track any regressions introduced during implementation for quick debugging._
 
 | Date | Regression | Cause | Fix | Commit |
+| ---- | ---------- | ----- | --- | ------ |
