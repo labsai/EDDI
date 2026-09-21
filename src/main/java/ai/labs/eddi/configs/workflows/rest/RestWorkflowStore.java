@@ -250,7 +250,7 @@ public class RestWorkflowStore implements IRestWorkflowStore {
         if (skipped > 0) {
             // The operator's only feedback is this response: a cascade that skipped
             // half the graph used to answer exactly like one that deleted all of it,
-            // with the difference visible only in the server LOGGER.
+            // with the difference visible only in the server log.
             return Response.fromResponse(response).header(CASCADE_SKIPPED_HEADER, skipped).build();
         }
         return response;

@@ -113,7 +113,7 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
             LOGGER.errorf("Refusing to purge orphans: the reference scan was incomplete (%s)", scan.failureReason());
             // Build the Response explicitly rather than using the (String, Status)
             // constructor: that one sets no entity, so the caller would receive a bare
-            // 409 and the reason would exist only in the server LOGGER.
+            // 409 and the reason would exist only in the server log.
             throw new WebApplicationException(Response.status(Response.Status.CONFLICT)
                     .entity(Map.of("error", "incomplete_scan", "message",
                             "Refusing to purge orphans: the reference scan was incomplete (" + scan.failureReason()
