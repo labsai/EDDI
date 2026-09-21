@@ -14,21 +14,39 @@ Each entry records:
 
 ## Where to Add an Entry
 
-**Add new entries directly below the `---` that closes this section**, above the
-most recent existing entry. Never append to an archive file.
+**Not here.** Write your entry as a new file in
+[`changelog.d/`](changelog.d/README.md) — `YYYY-MM-DD-<slug>.md`, with the slug
+unique to your branch — and leave this file alone. The same goes for the two
+running registers at the bottom: their rows ride along in the fragment, in a
+fenced `decision-log` or `regression-note` block.
 
-This file holds only recent work and is capped at **250 KB** —
-`ChangelogRotationTest` fails the build if it grows past that. When it does, run:
+Entries used to be inserted at the top of this file, and the registers appended
+to at the bottom. Both are a fixed point in a shared file, which git cannot
+merge: with several PRs open, every one of them conflicted with every other over
+a document that had nothing to do with the code under review. A fragment is a new
+file under a name no other branch picks, so the same two PRs merge without
+touching each other.
+
+`.github/workflows/changelog-collate.yml` runs nightly, merges the fragments in
+here **by date** — a PR that stayed open for weeks lands among its
+contemporaries rather than on top — trims this file back under its rotation
+target, and opens a PR. Until that PR merges, `changelog.d/` holds the newest
+history, so read it alongside the top of this file. To do it by hand:
 
 ```bash
-python scripts/rotate-changelog.py
+python scripts/collate-changelog.py   # fragments -> this file
+python scripts/rotate-changelog.py    # this file -> docs/changelog/<YYYY-MM>.md
 ```
 
-It moves the oldest entries into `docs/changelog/<YYYY-MM>.md` by the date each
-entry carries, adds one `../` to the relative links it moves (an archive sits a
-directory deeper than this file) without touching the ones inside code spans, and
-regenerates the Archive table below from what is on disk. Add any newly created
-archive file to [`SUMMARY.md`](SUMMARY.md). Do not raise the cap.
+This file holds only recent work and is capped at **250 KB** —
+`ChangelogRotationTest` fails the build if it grows past that. Rotation runs at a
+lower threshold than the cap, trimming back to **200 KB** whenever the file is
+over that, so the session whose entry tips it over is not the one made to rotate
+it. Rotation moves the oldest entries into `docs/changelog/<YYYY-MM>.md` by date,
+adds one `../` to the relative links it moves (an archive sits a directory deeper
+than this file) without touching the ones inside code spans, and regenerates both
+the Archive table below and the changelog list in [`SUMMARY.md`](SUMMARY.md) from
+what is on disk. Do not raise the cap.
 
 The single file this replaced had reached 1.9 MB — roughly half a million tokens —
 which neither a reader nor an agent's context window could usefully hold.
@@ -37,7 +55,7 @@ which neither a reader nor an agent's context window could usefully hold.
 
 | Period | Entries | Size |
 |---|---|---|
-| [September 2026](changelog/2026-09.md) | 17 | 64 KB |
+| [September 2026](changelog/2026-09.md) | 16 | 60 KB |
 | [August 2026](changelog/2026-08.md) | 211 | 832 KB |
 | [July 2026](changelog/2026-07.md) | 147 | 648 KB |
 | [June 2026](changelog/2026-06.md) | 26 | 67 KB |
@@ -50,56 +68,147 @@ bottom of this file and are never archived.
 
 ---
 
-## 🔗 feat(rag): knowledge-base sources and the ingestion pipeline (2026-09-17)
+## 🔒 fix(security): close the CWE-117 gap in the half of a log line no call site can reach (2026-09-20)
 
-**Repo:** EDDI (`feat/rag-ingestion-pipeline`)
+**Repo:** EDDI (`fix/log-injection-record-boundary-handler`)
 
-### Why sources live on the knowledge base
+`LogSanitizer.sanitize(...)` at a call site only ever covered the log **message**.
+`quarkus.log.console.format` ends in `%s%e`, and `%e` renders a stack trace whose FIRST
+line is the throwable's own `toString()` — `ClassName: message`. So an attacker-controlled
+CR/LF inside an **exception message** reached the console verbatim and forged a record that
+reads as a genuine, server-authored line, no matter how carefully the message half was
+sanitized. 412 log calls in `src/main/java` pass a throwable (244 as a trailing argument,
+168 as JBoss `*f(e, …)`), and none of them could fix this themselves.
 
-`RagConfiguration` gains `sources[]` rather than ingestion sources becoming a 13th resource type. The
-vector store is keyed by the knowledge base, so a source that could exist independently of one has to
-name its target by string — and that is exactly how the draft in PR #529 came to key ingestion on the
-**source's** name (`kbId = sourceConfig.name()`) while `RagContextProvider` keys retrieval on the
-**knowledge base's**. Crawled content went into one pgvector table and every query read another. The run
-reported success; the agent retrieved nothing. No test caught it because none performed a retrieval
-after an ingest. Ownership removes the possibility rather than documenting it.
+Dropping the throwable at those call sites was never the trade: `RestAgentAdministration`'s
+deploy-failed WARN tells the client only *"Deployment failed. Check server logs for
+details."*, so the stack trace is the sole diagnostic a failed deployment leaves.
 
-### The pipeline
+### What changed
 
-`IngestionPipeline` runs crawl → convert → compare → embed per document, then reconciles deletions:
+- **`LogSanitizer.escapeRecordBoundaries(String)`** — a second, record-level rule beside the
+  existing call-site `sanitize(...)`. It escapes rather than destroys: CR → `\r`, LF → `\n`,
+  U+2028/U+2029 and every other ISO control character → `\uXXXX`, TAB kept verbatim. Returns
+  the same instance when nothing needs escaping, and `null` for `null` (unlike `sanitize`,
+  which renders `null` as the string `"null"` — doing that to a throwable's message would turn
+  a printed `java.io.IOException` into `java.io.IOException: null`).
+- **`LogRecordRedactor`** now applies both rules in one pass: `SecretRedactionFilter.redact`
+  then `escapeRecordBoundaries`, to the record's formatted message and to every message in its
+  throwable graph (causes and suppressed included). `RedactedThrowable.of` takes the message
+  rewrite as a `UnaryOperator<String>` so one walk of the graph applies both rules instead of
+  nesting one stand-in inside another.
+- **`BoundedLogStore.capture`**'s own fallback path (used when the upstream pass threw) applies
+  the same `LogRecordRedactor.rewrite`, so the ring buffer, the DB and the SSE live tail agree
+  with the console.
+- **Two log calls that this change would otherwise have made uglier**: the `\n` in
+  `ConversationStepRunner`'s "Conversation not ready" ERROR became `": "` (the throwable is
+  passed too, so `%e` prints the trace anyway), and `ApiCallExecutor`'s trailing `\n` on the
+  execution-time INFO is gone (the pattern already ends in `%n`). They were the only two
+  deliberately multi-line log messages in `src/main/java`.
 
-- **Re-ingesting replaces.** A document's chunks are removed by `documentId` metadata before its new
-  ones are added. The draft called `EmbeddingStoreIngestor.ingest`, which only appends and never
-  removed anything, so a page edited weekly left a year of stale versions retrievable beside the current
-  one. Where a store's driver cannot delete by metadata, the run says so (`replaceUnsupported`) instead
-  of quietly accumulating.
-- **A document is recorded only after its vectors are stored.** The draft committed the content hash
-  while *deciding* whether to ingest, with embedding afterwards inside a `catch` that only logged — so a
-  single 429 marked a page done forever.
-- **Only a crawl that covered the source may conclude anything is gone.** A run stopped by its page cap,
-  time budget or segment budget sets `tombstoningSkipped` and deletes nothing.
-- **Tombstoned documents lose their vectors.** In the draft, "stale detection" flipped a flag in a side
-  table nothing consulted at retrieval time, so a deleted page kept answering questions forever.
-- Segments carry `documentId`, `url`, `title`, `sourceName`, `runId` and `ingestedAt`, so an answer can
-  cite its source. Counts are the segments actually written, not `markdown.length() / chunkSize`.
-- `maxSegmentsPerRun` is the cost ceiling — exact without a pricing table; set
-  `costPerThousandSegments` to have runs report dollars too. `PREVIEW` mode crawls and reports what
-  would change without embedding or recording anything.
+### Design decision — escape the throwable's MESSAGE, not the rendered trace
+
+The obvious reading of "sanitize the rendered `%s%e`" is to scan the finished stack trace and
+escape the line breaks that do not begin a genuine continuation line (`\tat `, `Caused by:`,
+`\t... N more`). **Rejected**: those three prefixes are also three strings an attacker can put
+in an exception message, so such a scan has to decide which `Caused by:` is the JVM's and which
+is the payload, and it has no way to know.
+
+There is no need to guess. In a rendered trace the only text an attacker reaches is the
+`toString()` of each throwable in the graph; every other line is generated by the JDK from the
+`StackTraceElement` array. So EDDI escapes the messages *before* the trace is rendered, by
+substituting a copy of the throwable, and lets the JDK produce the structure from clean input.
+Nothing is parsed, nothing is guessed, and `LogRecordBoundaryForgeryTest` asserts the frames,
+the `Caused by:` and the `... N more` elision come out identical to what the original threw.
+
+Two further choices worth stating: **TAB is kept** (it cannot end a record, and it is what
+indents `\tat …`), and **a backslash is not doubled** — the escaping is therefore not injective,
+which is a cosmetic ambiguity rather than a forgery, and the alternative doubles every backslash
+in the Windows paths and regexes exception messages are full of.
+
+It is also a rewrite of the record rather than a new console formatter, matching the reasoning
+already recorded in `LogRecordRedactor`: one definition of "what goes out" for every destination.
+The filter is wired to the console handler alone via
+`quarkus.log.console.filter=eddi-log-capture`; a file or syslog handler would need the same
+filter, and the test below fails if that property or the `%s%e%n` format moves out from under
+the claim.
 
 ### Tests
 
-**25 pipeline tests, 23 more for the in-memory state store.** The test double implements the same
-`IngestionStateStoreContract` as MongoDB and PostgreSQL, so it cannot quietly behave differently from
-production — the failure mode that let the draft's two stores drift apart.
+New `LogRecordBoundaryForgeryTest` (10 tests) asserts on **rendered** output — a real
+`PatternFormatter` built from the pattern read out of `src/main/resources/application.properties`
+— because `LogCaptureSupport.captureLogsOf` reads `getMessage()`/`getParameters()` but not
+`getThrown()` and so cannot see this defect at all. Its shared invariant: after the first, every
+line of a rendered record must be a continuation the JDK generated. Covers the exception message,
+a cause, a suppressed exception, U+2028, the message half, a format parameter, plus "a clean
+record renders byte-for-byte as before and keeps its throwable" and the config guard.
+`LogSanitizerTest` gains 8 cases for the new method.
 
-Mutation-checked against all four headline defects: keying the store on the source, appending instead of
-replacing, recording the hash before embedding, and tombstoning after a partial crawl each fail between
-one and seven tests.
+**Mutation-checked.** Removing the escaping entirely fails 7 of 10 (the 3 survivors are the
+must-not-change tests). Escaping the message but not the throwable fails exactly the 5
+throwable-half tests — so none of them pass on the strength of the message fix.
 
-### Note on the branch
+### And the message-level alerts, folded in
 
-This branch is stacked: it contains the converter, state store and crawler commits because the pipeline
-needs all three. Merge those three first, or review this as a stack.
+The handler above stops any of these forging a record at *runtime*, but CodeQL's
+`java/log-injection` is a dataflow rule and keeps flagging the call site regardless — and if
+the filter is ever detached from a handler, the call site is what is left. So the same branch
+also applies the ordinary one-line `LogSanitizer.sanitize(...)` to **38 sinks across the eight
+files** the alerts name:
+
+| File | Sinks | The tainted arguments |
+|---|---|---|
+| `GroupHitlCoordinator` | 16 | `gc.getId()`, `gc.getGroupId()`, `groupConversationId`, `entry.getKey()`, `e.getMessage()` |
+| `GroupConversationService` | 11 | `gc.getId()`, `gc.getGroupId()`, `phase.name()`, `outcome.reason()` |
+| `MemberTurnExecutor` | 3 | `member.agentId()`, `gc.getId()`, `gc.getGroupId()`, `subGroupId` |
+| `ConversationHitlService` | 3 | `conversationId` |
+| `PhaseExecutionEngine` | 2 | `gc.getId()`, `phase.name()`, `decision.outcome()` |
+| `AuditLedgerService` | 1 | `entry.agentId()`, `e.getMessage()` |
+| `AgentGroupStore` | 1 | `groupConfiguration.getName()`, the phase name |
+| `SlackGroupDiscussionListener` | 1 | `groupConversationId`, `e.getMessage()` |
+
+Only String-typed arguments are wrapped; the enums, `Instant`s and counters in the same calls
+are left alone. `MemberTurnExecutor` and `SlackGroupDiscussionListener` gained the import; each
+of the other six already had it, and each call follows the style its own file already used
+(qualified `LogSanitizer.sanitize` in six, the static import in `ConversationHitlService` and
+`AuditLedgerService`).
+
+The alert list was resolved through `gh api`, not read off `main` at HEAD: a CodeQL alert's
+line number is relative to `most_recent_instance.commit_sha`. Two of the 41 reported alerts
+turned out to be stale against an older sha — one line had already been sanitized, the other no
+longer exists — which is how 41 became 38. The eight files carry a further ~70 log arguments of
+the same shape that CodeQL has *not* flagged, overwhelmingly `e.getMessage()`; those are left
+alone, because sanitizing them is a codebase-wide policy question and not this PR's.
+
+**Tests.** `SanitizedLogSinksTest` pins all 38 at the source: each is keyed by a fragment of its
+own message rather than a line number, and every flagged argument must occur only inside a
+`sanitize(...)`. Dropping one fails the build with the file, the message and the expression
+named. `GroupHitlCoordinatorLogInjectionTest` covers the two sinks reachable through a public
+method with one mock — the forged-id and the forged-exception-message halves — in the
+`LogCaptureSupport` idiom the earlier regression tests established. Both mutation-checked.
+
+A source guard rather than 38 behavioural tests is a deliberate call and is argued in the test's
+own Javadoc: the rest sit inside a phase loop or a state-race `catch` that takes a whole group
+discussion to reach, and a test that builds one to observe a single WARN grades the harness more
+than the fix.
+
+### What's next
+
+- `RestAgentAdministration`'s deploy-failed WARN carries a comment on branch
+  `fix/log-injection-agent-deployment-logs` (#799) explaining that the throwable cannot be
+  sanitized and that only a log handler can fix it. That branch is not merged, so the comment
+  does not exist on `main` and could not be updated here: **whichever of the two lands second
+  must update it** to say the handler now exists.
+- 110 further `java/log-injection` alerts remain open on `main` in files this PR does not touch —
+  `RestScheduleStore`, `RestUserMemoryStore`, `VaultSecretProvider`, the REST stores and others.
+  `RestAgentAdministration` and `AgentFactory` among them are PR #799's scope and were left to it.
+  None of them can forge a record at runtime now, so they are alert hygiene rather than exposure.
+
+---
+
+---
+
+---
 
 ## 🕷️ feat(ingestion): web crawler — streaming, bounded, robots-aware (2026-09-17)
 
@@ -164,7 +273,6 @@ Mutation-checked: reverting the final-URL identity and re-lowercasing the path f
 
 The source configuration and the pipeline that ties crawl → convert → state store → embed, with vector
 removal driven by the tombstone list, plus the Manager UI.
-
 ## 📄 refactor(ingestion): HTML→Markdown converter, and WebScraperTool stops duplicating it (2026-09-17)
 
 **Repo:** EDDI (`feat/html-to-markdown-converter`)
@@ -224,67 +332,6 @@ defect above. `WebScraperToolExtendedTest` gains a case asserting structure surv
 Note: `WebScraperToolTest` cannot run in this environment — its `setUp` constructs a real
 `SafeHttpClient`, and creating an `HttpClient` here fails with "Unable to establish loopback
 connection". Pre-existing and environmental; CI covers it.
-
-## 🗃️ feat(ingestion): document state and run history for RAG sources (2026-09-17)
-
-**Repo:** EDDI (`feat/ingestion-state-store`)
-
-### Why
-
-Ingesting a source is a *reconciliation*, not an append: each run compares what the source offers now
-against what the knowledge base holds, and decides per document whether to skip, re-embed, or conclude
-it is gone. That needs durable state, and the shape of it is where the salvaged PR #529 went wrong —
-quietly, because a corrupted knowledge base has no stack trace. `IIngestionStateStore` is that state,
-designed so the draft's four failure modes are not expressible.
-
-### The two rules the API enforces
-
-- **A document is recorded only after its vectors are stored.** The draft's `shouldIngest(source, doc,
-  content)` upserted the new hash while *deciding* whether to ingest, and embedding happened afterwards
-  inside a `catch` that only logged. One 429 from the embedding provider therefore marked a page done
-  forever: the hash matched on every later run, so it reported "unchanged" and was never embedded. Here
-  `lookup` and `recordIngested` are separate calls and the Javadoc says which side of the embedding call
-  each belongs on.
-- **A document missing from one run is not a deleted document.** The draft marked everything not seen in
-  the current run as stale, unconditionally — so a site outage, a network blip, or simply hitting
-  `maxPages` flagged the remainder of the corpus. `tombstoneMissing` counts *consecutive* misses and only
-  tombstones at a threshold, and callers are told not to call it for a failed run at all.
-
-### What it stores
-
-Per (source, document): content hash, ETag and Last-Modified for conditional fetching, first/last
-ingested timestamps, last run id, consecutive miss count, tombstone flag. Per run: status, timings, the
-seen/ingested/unchanged/failed/tombstoned counters, segments stored, cost in dollars, and the error —
-so a failure is visible in the Manager rather than only in a log line.
-
-`startRun` returns empty when a run is already in flight, enforced by a **partial unique index** on
-`(source_id) WHERE status = 'RUNNING'` in both backends. This is what stops an operator clicking "run
-now" five times from starting five concurrent crawls into one knowledge base, and because the database
-enforces it, it holds across instances. `reapStaleRuns` releases a source whose run died with its
-process.
-
-`ContentHashes.sha256` is a static utility rather than an interface method: the draft had each backend
-carry its own copy, two chances to drift, and a drift silently re-embeds an entire knowledge base.
-
-### Tests
-
-**One shared contract, run against both backends** — `IngestionStateStoreContract` is a JUnit interface
-with 23 cases, implemented by `MongoIngestionStateStoreTest` and `PostgresIngestionStateStoreTest`
-(Testcontainers). The draft's two stores had drifted apart — one overwrote the first-ingest timestamp on
-every call while the other preserved it — and nothing failed, because each was only tested against
-itself. A knowledge base that behaves differently depending on the operator's database choice is a
-support problem with no error message.
-
-Plus 7 cases for `ContentHashes`, including a pinned published SHA-256 vector: if the hash ever changes,
-every deployed knowledge base re-embeds itself on the next run.
-
-53 tests, all green on both backends. Mutation-checked: reverting `setOnInsert` to `set` and ignoring the
-miss threshold fails three of them.
-
-### Next
-
-The crawler, then the source config plus the pipeline that ties fetch → convert → this store → embed,
-with vector removal driven by the tombstone list.
 
 ## ♿ fix(ui): closing a dialog hands focus back to what opened it (2026-09-19)
 
@@ -2860,6 +2907,60 @@ deployment might happen to be configured as.
 
 ---
 
+## ⏰ fix(schedule): a fire log can no longer outlive the schedule it belongs to (2026-09-06)
+
+**Repo:** EDDI (`fix/review-schedules`)
+
+Review round on this branch: 17 comments. Six were genuinely open and are fixed; the substantive
+one took two attempts, because the first was a mitigation described as a fix.
+
+**Erasure could report success over a log row it had not removed.** `deleteWithCascade` deleted
+logs and schedules in a transaction and then swept again after commit, which catches every log
+written before the sweep — but a fire already in flight can commit its log afterwards, so a GDPR
+erasure still reported success over a row carrying the erased user's `conversationId`. The window
+is now closed at the *write* side rather than by widening the sweep.
+
+On PostgreSQL `logFire` issues a guarded insert — `INSERT … SELECT … WHERE EXISTS (SELECT 1 FROM
+eddi_schedules WHERE id = ?)` — so the subquery is evaluated under the same snapshot that writes
+the row and a log for a deleted schedule cannot be committed at all. Zero rows is the correct
+outcome, logged at DEBUG, never thrown: a benign race must not surface on the fire path. A foreign
+key with `ON DELETE CASCADE` was the other candidate and was rejected — existing deployments
+already hold orphaned fire logs, which is the bug, so `ADD CONSTRAINT` would fail on exactly the
+installs that need it.
+
+MongoDB has no conditional insert, and a pre-check only moves the race. So it inserts, re-reads the
+schedule from the primary, and deletes the log it just wrote if the schedule has gone. Against the
+cascade's three steps there is no interleaving where the log survives its schedule: either the
+schedule delete precedes the re-read and the compensation fires, or it does not and the cascade's
+own delete or the post-commit sweep catches the document.
+
+Both sweeps are kept, re-framed as belt-and-braces for logs written by a replica that had not yet
+observed the delete. The one operator-visible consequence — a schedule deleted mid-fire may lose
+that attempt's log — is documented in `docs/scheduling.md` as deliberate.
+
+**Outcome writes are fenced by the claim's fire id.** `markCompleted`/`markFailed`/`markSkipped`
+and `markDeadLettered` now take the expected fire id, so a fire that exceeded its lease cannot
+overwrite the outcome of the fire that reclaimed the row.
+
+**Three CodeQL log-injection sites** in `PostgresScheduleStore` (`scheduleId`, `agentId` and a HITL
+timeout schedule name, all caller-supplied) now go through `LogSanitizer.sanitize`, matching what
+`MongoScheduleStore` already did.
+
+**Redirects no longer rewrite every method to GET.** `SafeHttpClient` splits the rule per status:
+307/308 preserve method and body, 303 rewrites to GET, and 301/302 rewrite only POST — so PUT,
+PATCH and DELETE keep their method, body and `Content-Type`.
+
+**The minimum-interval check no longer depends on when it runs.** `CronParser` derived the gap by
+walking fires from `Instant.now()`, so the same expression could pass validation on one day and
+fail on another. It is now computed from the parsed fields: the tightest pair within a firing day,
+and the tightest gap across days scanned over a full 28-year Gregorian cycle.
+
+**Correction.** An earlier entry on this branch described scheduling as "exactly-once". Delivery is
+at-least-once — `IScheduleStore`, `docs/scheduling.md` and `docs/hitl.md` all say so — and that
+line has been corrected in place.
+
+---
+
 ---
 
 ## Decision Log
@@ -2878,6 +2979,7 @@ _For recording decisions that come up during implementation that aren't in the p
 | 2026-09-13 | Buffer a turn's audit entries and flush them after the pipeline, redacting a vaulted input | E2E: parser/rules entries carried a `scope: secret` plaintext into the append-only ledger | Redact after submission — impossible, entries are signed and immutable |
 | 2026-09-13 | Exclude stateful tools from the tool cache by reflecting over their `@Tool` classes | E2E: group members share a user, so `listArtifacts()` was served stale | Make caching opt-in per tool — changes every existing cached tool |
 | 2026-09-13 | New group save-time checks (member agentId, negative limits, preset roles, nesting cycles) are hard errors | E2E: all saved fine and failed at run time | Warn only — the invalid configs cannot run as written, and shipped templates pass |
+| 2026-09-20 | Escape record boundaries in the throwable's MESSAGE before the trace is rendered, not in the rendered `%s%e` output | `%e` prints `toString()` as the trace's first line, so a CR/LF in an exception message forged a record past every call-site `sanitize(...)` | Scan the rendered trace and keep the breaks that begin `\tat ` / `Caused by:` / `\t... N more` — an attacker can write all three into a message, so the scan has to guess; or drop the throwable at the ~415 call sites — the stack trace is often the only diagnostic left |
 |            |                                                                       |                                       |                                                             |
 
 ---
@@ -2887,3 +2989,4 @@ _For recording decisions that come up during implementation that aren't in the p
 _Track any regressions introduced during implementation for quick debugging._
 
 | Date | Regression | Cause | Fix | Commit |
+| ---- | ---------- | ----- | --- | ------ |
