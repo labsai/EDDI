@@ -319,6 +319,26 @@ public class MongoScheduleStore implements IScheduleStore {
     }
 
     @Override
+    public boolean armIfUnarmed(String scheduleId, Instant nextFire) throws IResourceStore.ResourceStoreException {
+        try {
+            // The nextFire condition lives in the FILTER, not in a read-then-write:
+            // every node's repair sweep touches this row at the same moment, and the
+            // update is what decides which of them wins. eq(NEXT_FIRE, null) matches a
+            // stored null and a missing field alike, which is what "never armed" looks
+            // like across the rows this repair exists for. A row that already has a
+            // fire time keeps it, fireStatus included — re-arming a CLAIMED row would
+            // steal it from the node currently running it.
+            UpdateResult result = scheduleCollection.updateOne(
+                    and(eq(ID, scheduleId), eq(ENABLED, true), eq(NEXT_FIRE, null)),
+                    combine(set(NEXT_FIRE, epochMillis(nextFire)), set(FIRE_STATUS, FireStatus.PENDING.name()),
+                            set(UPDATED_AT, epochMillis(Instant.now()))));
+            return result.getModifiedCount() == 1;
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException("Failed to arm schedule " + scheduleId, e);
+        }
+    }
+
+    @Override
     public void deleteSchedule(String scheduleId) throws IResourceStore.ResourceStoreException {
         try {
             // Fire logs first: they are unreachable once the schedule is gone, and each

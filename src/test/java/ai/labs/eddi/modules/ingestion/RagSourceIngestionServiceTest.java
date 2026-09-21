@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -373,18 +374,11 @@ class RagSourceIngestionServiceTest {
                     .thenAnswer(invocation -> (int) invocation.getArgument(1) == 0
                             ? List.of(schedules)
                             : List.of());
-            // The sweep re-reads a row before writing it, so a second node that
-            // arrives after the first has armed it sees the armed value. By default
-            // the re-read agrees with the listing; the test that cares overrides it.
-            when(scheduleStore.readSchedule(anyString())).thenAnswer(invocation -> {
-                String id = invocation.getArgument(0);
-                for (ScheduleConfiguration schedule : schedules) {
-                    if (id.equals(schedule.getId())) {
-                        return schedule;
-                    }
-                }
-                return null;
-            });
+            // The conditional write succeeds by default — Mockito's own default for a
+            // boolean is false, which would model a store where every node always
+            // loses the race and nothing is ever armed. The test that cares about
+            // losing it overrides this.
+            when(scheduleStore.armIfUnarmed(anyString(), any())).thenReturn(true);
         }
 
         @Test
@@ -395,9 +389,25 @@ class RagSourceIngestionServiceTest {
             service.repairUnarmedSchedules();
 
             ArgumentCaptor<Instant> fireTime = ArgumentCaptor.forClass(Instant.class);
-            verify(scheduleStore).setScheduleEnabled(eq("sched-1"), eq(true), fireTime.capture());
+            verify(scheduleStore).armIfUnarmed(eq("sched-1"), fireTime.capture());
             assertNotNull(fireTime.getValue());
             assertEquals(2, fireTime.getValue().atZone(ZoneId.of("UTC")).getHour());
+        }
+
+        @Test
+        @DisplayName("the write is conditional, so a second node cannot move a fire time already set")
+        void armsOnlyWhileStillUnarmed() throws Exception {
+            // Each node computes its own occurrence from its own clock, so across a
+            // cron boundary they differ — an unconditional write let the slower node
+            // replace the earlier fire with the later one and skip it. The condition
+            // belongs in the store's predicate, which is the only place both nodes
+            // meet.
+            storeHolds(unarmedIngestionSchedule());
+
+            service.repairUnarmedSchedules();
+
+            verify(scheduleStore).armIfUnarmed(eq("sched-1"), any());
+            verify(scheduleStore, never()).setScheduleEnabled(anyString(), anyBoolean(), any());
         }
 
         @Test
@@ -409,7 +419,7 @@ class RagSourceIngestionServiceTest {
 
             service.repairUnarmedSchedules();
 
-            verify(scheduleStore, never()).setScheduleEnabled(anyString(), anyBoolean(), any());
+            verify(scheduleStore, never()).armIfUnarmed(anyString(), any());
         }
 
         @Test
@@ -427,7 +437,7 @@ class RagSourceIngestionServiceTest {
 
             service.repairUnarmedSchedules();
 
-            verify(scheduleStore, never()).setScheduleEnabled(anyString(), anyBoolean(), any());
+            verify(scheduleStore, never()).armIfUnarmed(anyString(), any());
         }
 
         @Test
@@ -438,7 +448,7 @@ class RagSourceIngestionServiceTest {
 
             service.repairUnarmedSchedules();
 
-            verify(scheduleStore, never()).setScheduleEnabled(anyString(), anyBoolean(), any());
+            verify(scheduleStore, never()).armIfUnarmed(anyString(), any());
         }
 
         @Test
@@ -455,28 +465,27 @@ class RagSourceIngestionServiceTest {
 
         /**
          * Review finding (Copilot, #818): the listing this sweep walks is a snapshot,
-         * and {@code setScheduleEnabled} overwrites {@code nextFire} unconditionally.
-         * Two nodes booting together would both see the row as unarmed, and the slower
-         * one's later {@code Instant.now()} could replace the first node's occurrence
-         * with the following one — a skipped fire. The re-read is what makes the second
-         * node stand down.
+         * and {@code setScheduleEnabled} overwrote {@code nextFire} unconditionally.
+         * Two nodes booting together both see the row as unarmed, and the slower one's
+         * later {@code Instant.now()} replaced the first node's occurrence with the
+         * following one — a skipped fire. The condition now lives in the store's write
+         * predicate, so the second node's write matches nothing and it is told so.
          */
         @Test
         @DisplayName("a row another node armed while the sweep was listing is left alone")
         void doesNotOverwriteARowAnotherNodeAlreadyArmed() throws Exception {
-            var asListed = unarmedIngestionSchedule();
-            storeHolds(asListed);
+            storeHolds(unarmedIngestionSchedule());
+            // What the store reports when its "still unarmed" predicate matched nothing
+            // — the row acquired a fire time between the listing and this write.
+            when(scheduleStore.armIfUnarmed(anyString(), any())).thenReturn(false);
 
-            var asStoredNow = unarmedIngestionSchedule();
-            asStoredNow.setNextFire(Instant.now().plusSeconds(60));
-            when(scheduleStore.readSchedule("sched-1")).thenReturn(asStoredNow);
-
-            var result = service.repairUnarmedSchedules();
+            var result = assertDoesNotThrow(() -> service.repairUnarmedSchedules());
 
             verify(scheduleStore, never()).setScheduleEnabled(anyString(), anyBoolean(), any());
             assertEquals(0, result.armed(),
                     "a row somebody else armed is not one this sweep repaired, and counting it would "
                             + "report work that did not happen");
+            assertTrue(result.complete(), "losing the race is not a reason to call the sweep unfinished");
         }
 
         /**
@@ -505,13 +514,13 @@ class RagSourceIngestionServiceTest {
 
         /**
          * Review finding (CodeRabbit, #818): the repair arms through
-         * {@code setScheduleEnabled}, which writes {@code enabled} and {@code nextFire}
-         * and nothing else — a legacy row's null {@code timeZone} stays null. Every
-         * fire after the first is therefore re-armed by the poller through
-         * {@code resolveTimeZone(null)}, the deployment default, so arming the first
-         * one in UTC regardless would hand a non-UTC deployment exactly one interval of
-         * the wrong length. That is the same drift {@code buildSchedule} was fixed for,
-         * arriving by the back door.
+         * {@code armIfUnarmed}, which writes {@code nextFire} and nothing else — a
+         * legacy row's null {@code timeZone} stays null. Every fire after the first is
+         * therefore re-armed by the poller through {@code resolveTimeZone(null)}, the
+         * deployment default, so arming the first one in UTC regardless would hand a
+         * non-UTC deployment exactly one interval of the wrong length. That is the same
+         * drift {@code buildSchedule}'s {@code setTimeZone} was fixed for, arriving by
+         * the back door.
          */
         @Test
         @DisplayName("a legacy row with no zone is armed in the zone the poller will use, not in UTC")
@@ -525,7 +534,7 @@ class RagSourceIngestionServiceTest {
             service.repairUnarmedSchedules();
 
             var fireTime = ArgumentCaptor.forClass(Instant.class);
-            verify(scheduleStore).setScheduleEnabled(eq("sched-1"), eq(true), fireTime.capture());
+            verify(scheduleStore).armIfUnarmed(eq("sched-1"), fireTime.capture());
             assertEquals(2, fireTime.getValue().atZone(ZoneId.of("Asia/Tokyo")).getHour(),
                     "02:00 means 02:00 in the zone this row will be re-armed in; computing it in UTC "
                             + "would make the first interval the odd one out on every deployment that "
@@ -544,7 +553,7 @@ class RagSourceIngestionServiceTest {
             service.repairUnarmedSchedules();
 
             var fireTime = ArgumentCaptor.forClass(Instant.class);
-            verify(scheduleStore).setScheduleEnabled(eq("sched-1"), eq(true), fireTime.capture());
+            verify(scheduleStore).armIfUnarmed(eq("sched-1"), fireTime.capture());
             assertEquals(2, fireTime.getValue().atZone(ZoneId.of("UTC")).getHour(),
                     "the row's own zone is what the poller resolves first, so it is what the repair "
                             + "must arm in");

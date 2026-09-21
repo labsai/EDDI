@@ -309,21 +309,18 @@ public class RagSourceIngestionService {
      * <p>
      * Safe to run on every boot and on every node of a cluster: it only touches
      * rows that are enabled, marked as ingestion schedules, carry a cron and have
-     * no {@code nextFire} at all, so after the first pass nothing matches. The row
-     * is re-read immediately before it is written, so a second node arriving after
-     * the first has armed a row sees the armed value and leaves it alone. Arming
-     * goes through {@code setScheduleEnabled}, the existing store-agnostic re-arm,
-     * rather than a new store method.
+     * no {@code nextFire} at all, so after the first pass nothing matches.
      *
      * <p>
-     * That re-read narrows the window between two nodes to a single store
-     * round-trip; it does not close it, because neither store offers a conditional
-     * write and adding one means writing it twice, once per backend. The residual
-     * race costs at most <em>one</em> occurrence of a cron that has never fired at
-     * all — two nodes landing inside the same round-trip on opposite sides of a
-     * cron boundary would store the later of two occurrences — on a schedule that
-     * without this sweep would fire never rather than late. That is the trade this
-     * sweep is deliberately making.
+     * Two nodes do <em>not</em> compute the same occurrence: each uses its own
+     * {@code Instant.now()}, so across a cron boundary one computes 10:01 and the
+     * other 10:02, and an unconditional write let the slower node replace the
+     * earlier fire with the later one — the schedule skips an occurrence. Arming
+     * therefore goes through {@link IScheduleStore#armIfUnarmed}, which carries the
+     * "still unarmed" condition in the write predicate itself. That is the only
+     * place the nodes meet, so the first writer wins and every other one is a
+     * no-op; a re-read before writing would only have narrowed the window, not
+     * closed it.
      *
      * <p>
      * Failures are logged, never thrown: a repair that cannot read the store must
@@ -409,30 +406,26 @@ public class RagSourceIngestionService {
             return false;
         }
         try {
-            // Re-read before writing. The listing above is a snapshot, and on a
-            // cluster another node may have armed this row between the two: without
-            // this check that node's occurrence would be overwritten with a later
-            // one computed from a newer Instant.now(), skipping a fire. It is a
-            // narrowing, not a lock — neither store offers a conditional write, and
-            // adding one means writing it twice, once per backend, for a row that
-            // would otherwise fire never rather than late.
-            ScheduleConfiguration current = scheduleStore.readSchedule(schedule.getId());
-            if (current == null || current.getNextFire() != null || !current.isEnabled()) {
-                return false;
-            }
             // Read the cron in the zone the POLLER will use for this row, not in
-            // RagIngestionSchedules.ZONE. setScheduleEnabled writes only enabled and
-            // nextFire, so a legacy row's null timeZone stays null, and every fire
-            // after the first is re-armed through resolveTimeZone(null) — the
-            // deployment's eddi.schedule.default-timezone. Arming in UTC regardless
-            // would hand a non-UTC deployment exactly one interval of the wrong
-            // length, which is the same drift this PR fixed in buildSchedule, just
-            // moved onto the repair path.
-            Instant nextFire = RagIngestionSchedules.firstFire(cron, pollerZoneOf(current));
-            scheduleStore.setScheduleEnabled(schedule.getId(), true, nextFire);
-            return true;
-        } catch (IllegalArgumentException | IResourceStore.ResourceStoreException
-                | IResourceStore.ResourceNotFoundException e) {
+            // RagIngestionSchedules.ZONE. armIfUnarmed writes only nextFire, so a
+            // legacy row's null timeZone stays null, and every fire after the first
+            // is re-armed through resolveTimeZone(null) — the deployment's
+            // eddi.schedule.default-timezone. Arming in UTC regardless would hand a
+            // non-UTC deployment exactly one interval of the wrong length, which is
+            // the drift buildSchedule's setTimeZone fixed, moved onto the repair
+            // path. The zone is read from the listed row rather than re-read: it is
+            // the same field the poller resolves, and unlike nextFire nothing races
+            // to change it.
+            Instant nextFire = RagIngestionSchedules.firstFire(cron, pollerZoneOf(schedule));
+            // No re-read first: the store's own predicate carries the "still unarmed"
+            // condition, so a second round-trip would only narrow a window this write
+            // already closes — and would still be reading a snapshot.
+            //
+            // A lost race is a success: another node armed the row a moment ago, so it
+            // is armed. Only the count of rows THIS node repaired is affected, and that
+            // number is a log line, not a decision.
+            return scheduleStore.armIfUnarmed(schedule.getId(), nextFire);
+        } catch (IllegalArgumentException | IResourceStore.ResourceStoreException e) {
             // One unrepairable row must not stop the sweep: the next one may be the
             // schedule somebody is waiting on.
             LOGGER.errorf(e, "Ingestion schedule %s has no next fire time and could not be given one — "

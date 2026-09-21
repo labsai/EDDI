@@ -58,11 +58,14 @@ claimed two nodes "compute the same next occurrence", which is only true if both
 inside the same cron period. They need not: the listing is a snapshot and
 `setScheduleEnabled` overwrites `nextFire` unconditionally, so a slower node crossing a
 cron boundary could replace the first node's occurrence with the following one and skip a
-fire. The sweep now **re-reads the row immediately before writing it** and stands down if
-somebody has already armed it. That narrows the window to a single store round-trip
-rather than closing it — neither store offers a conditional write, and adding one means
-writing it twice, once per backend — and the residual cost is at most one occurrence of a
-cron that, without this sweep, would fire never rather than late.
+fire. Arming now goes through **`IScheduleStore.armIfUnarmed`**, which carries the "still
+unarmed" condition in the write predicate itself — `AND next_fire IS NULL AND
+enabled=true` on the Postgres `UPDATE`, `eq(NEXT_FIRE, null)` in the Mongo filter, which
+matches a stored null and a missing field alike. That is the only place the two nodes
+meet, so the first writer wins and every other one is a no-op that reports `false`; a
+lost race is treated as success, because the row is armed either way. An earlier draft
+re-read the row before writing instead, which narrowed the window to one store
+round-trip without closing it.
 
 **A third, from CodeRabbit (#818): the repair could not arm in UTC, and should not have
 tried.** `buildSchedule` writes `timeZone` for rows it creates, but the repair arms through
@@ -150,7 +153,7 @@ explain the result.
 | `repairUnarmedSchedules` returns early | "an ingestion schedule with no fire time is given one" |
 | `prepareImportedRag` drops `requireValidCrons` | `RestImportServiceRagCronTest` → both refusal cases |
 | Run button drops `source.enabled === false` | "does not offer Run for a source that is saved as disabled" |
-| The re-read guard before arming is removed | "a row another node armed while the sweep was listing is left alone" |
+| `armIfUnarmed` is replaced by the unconditional `setScheduleEnabled` | "a row another node armed while the sweep was listing is left alone" |
 | The walk always reports itself complete | "stopping at the page bound is reported, not swallowed" |
 | The repair arms in fixed UTC instead of the poller's zone | "a legacy row with no zone is armed in the zone the poller will use, not in UTC" (expected hour 2, got 11) |
 
@@ -174,8 +177,8 @@ Tests: `RagSourceIngestionServiceTest` (two new nested groups),
 ```
 
 ```decision-log
-| 2026-09-21 | Arm a legacy row in the zone the poller will use, rather than in UTC or by widening the store API | `setScheduleEnabled` cannot carry a zone, so a legacy row's `timeZone` stays null and the poller re-arms it in the deployment default; arming the first fire in UTC would make exactly one interval the wrong length | Adding a zone to the store's re-arm on both backends (CodeRabbit's suggestion — normalises legacy rows to UTC, at the cost of the same double implementation this change rejects elsewhere), leaving the fixed-UTC arm and the drift with it |
-| 2026-09-21 | Narrow the two-node repair race with a re-read rather than a conditional store write, and say so in the javadoc | The realistic cost is one skipped occurrence on a schedule that would otherwise never fire; a compare-and-set arm would need implementing twice, once per backend, which is the same "fix it in the store" the first decision above rejected | A conditional arm-only-when-null store operation on both backends (Copilot's suggestion), a distributed lock for a startup sweep, leaving the inaccurate idempotency claim in place |
+| 2026-09-21 | Arm a legacy row in the zone the poller will use, rather than in UTC or by widening the store's re-arm to carry one | `armIfUnarmed` writes only `nextFire`, so a legacy row's `timeZone` stays null and the poller re-arms it in the deployment default; arming the first fire in UTC regardless would make exactly one interval the wrong length | Adding a zone to the store's re-arm on both backends (CodeRabbit's suggestion — it would also normalise legacy rows to UTC, at the cost of a third field in a predicate that exists to do one thing), leaving the fixed-UTC arm and the drift with it |
+| 2026-09-21 | Close the two-node repair race with a conditional `armIfUnarmed` on both stores rather than a re-read | A re-read narrows the window to one store round-trip and still reads a snapshot; the predicate is the only place two nodes meet, and ~20 lines per backend is a small price for a write that cannot skip a fire | A re-read before writing (narrows, does not close), a distributed lock for a startup sweep, leaving the inaccurate idempotency claim in place |
 ```
 
 ```regression-note

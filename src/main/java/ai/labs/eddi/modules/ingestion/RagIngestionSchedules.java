@@ -126,15 +126,15 @@ public final class RagIngestionSchedules {
      * The zone is a parameter and not always {@link #ZONE} because of the one case
      * that cannot store a zone at all: the startup repair of rows written before
      * {@code buildSchedule} armed anything. Those rows have a null
-     * {@code timeZone}, and {@code IScheduleStore.setScheduleEnabled} takes only
-     * {@code enabled} and {@code nextFire} — there is no way to write a zone
-     * through it. The poller will therefore re-arm every later fire through
+     * {@code timeZone}, and {@code IScheduleStore.armIfUnarmed} takes only the id
+     * and the {@code nextFire} — there is no way to write a zone through it. The
+     * poller will therefore re-arm every later fire through
      * {@code resolveTimeZone(null)}, which is the deployment's
      * {@code eddi.schedule.default-timezone}. Computing the first fire in UTC
      * regardless would guarantee exactly one interval of the wrong length on any
      * deployment that sets a zone. So the repair computes it in the zone the poller
      * is going to use, which is the only choice that makes the row internally
-     * consistent without a new store method.
+     * consistent without widening that predicate to carry a third field.
      * </p>
      */
     public static Instant firstFire(String cronExpression, ZoneId zone) {
