@@ -223,8 +223,10 @@ Retrieved vector-RAG context (Options 1 and 2) is **always** appended to the LLM
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/ragstore/rags/{id}/ingest?version=N&kbId=...&documentName=...` | Ingest a text document (returns 202 + ingestion ID) |
+| `POST` | `/ragstore/rags/{id}/ingest?version=N&documentName=...` | Ingest a text document (returns 202 + ingestion ID). Also accepts `kbId` — **see the warning below before using it** |
 | `GET` | `/ragstore/rags/{id}/ingestion/{ingestionId}/status` | Poll ingestion status |
+
+> **Leave `kbId` unset.** It overrides the key the documents are stored under, and it defaults to the knowledge base's `name`, which is the key **retrieval always uses** — `RagContextProvider` keys the store on `ragConfig.getName()` and has no way to be pointed anywhere else. So passing a `kbId` that is anything other than the KB's exact `name` ingests into a store nothing reads: the call returns `202`, the status goes to `completed`, the documents are really embedded and really stored, and retrieval finds nothing, permanently. Ingestion *sources* are not affected — `IngestionPipeline` keys on the name and cannot diverge.
 
 **Example: Ingest a document**
 
@@ -457,6 +459,7 @@ INFO log — is downstream of a match, and the only log on the early-return path
 | 3 | Does `knowledgeBases[].name` match the KB's `name`? | Compare against the `RagConfiguration`. It matches on `name`, not id, and a miss is skipped silently |
 | 4 | Is the deployed agent version the one you edited? | Retrieval reads the workflow of the agent version in the conversation, and configs are versioned |
 | 5 | Was anything actually ingested — and is it still there? | Poll the ingestion status. On an `in-memory` store, confirm nothing has evicted it since (see [Vector Stores](#vector-stores)) |
+| 6 | Did ingestion write where retrieval reads? | If you passed `kbId` to `/ingest`, it must equal the KB's `name` exactly, or the documents are in a store retrieval never opens (see [Document Ingestion](#document-ingestion)) |
 
 Raise `RagContextProvider` to `DEBUG` to see the early return directly:
 
@@ -467,9 +470,10 @@ quarkus.log.category."ai.labs.eddi.modules.llm.impl.RagContextProvider".level=DE
 ### Context is retrieved but the answer ignores it
 
 Check `rag:context:{taskId}` in conversation memory for what was actually injected. If it ends in a
-`[... N further retrieved passage(s) omitted ...]` marker, the block hit `maxRagContextChars` — raise
-it, or lower `maxResults` or the number of knowledge bases. If the passages are present but
-irrelevant, lower `minScore` to widen the search or raise it to tighten it.
+`[... N further retrieved passage(s) omitted: RAG context limit (X chars) reached ...]` marker, the
+block hit `maxRagContextChars` — raise it, or lower `maxResults` or the number of knowledge bases.
+If the passages are present but irrelevant, lower `minScore` to widen the search or raise it to
+tighten it.
 
 ## Embedding Providers
 

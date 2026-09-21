@@ -44,12 +44,20 @@ two-sided configuration that was reported. That is a documentation defect, not a
 - **REST API**: states outright that no `/query`, `/search` or `/retrieve` endpoint exists and that
   those return `404`. Users were trying `httpCallRag` against their own KB as a workaround and
   hitting 404s with nothing telling them the endpoint was never meant to exist.
+- **Document Ingestion**: warns off the `kbId` query parameter, found while reviewing this change.
+  `RagContextProvider` keys the embedding store on `ragConfig.getName()` and cannot be pointed
+  elsewhere, but `RestRagIngestion` lets the caller override that key (`effectiveKbId`, favouring
+  the `kbId` param over the name). Any `kbId` other than the KB's exact `name` therefore ingests
+  into a store nothing reads — `202`, status `completed`, documents genuinely embedded and stored,
+  retrieval empty for ever. Ingestion *sources* are unaffected: `IngestionPipeline` keys on
+  `knowledgeBase.getName()`, and `IngestionRetrievalRoundTripTest` pins that round trip after an
+  earlier draft shipped exactly this divergence on the source path.
 - **Vector Stores**: `in-memory` is no longer described only as "ephemeral, for dev/test only". The
   cached object *is* the data, and `EmbeddingStoreFactory` holds it in a Caffeine cache bounded at 50
   stores with a 30-minute `expireAfterAccess` and a full invalidation on any secret or global-variable
   change — so an in-memory KB empties itself after 30 idle minutes, on restart, and on credential
   rotation, then returns no context rather than an error.
-- **New `## Troubleshooting`** section: an ordered five-step check for the silent-no-context case, and
+- **New `## Troubleshooting`** section: an ordered six-step check for the silent-no-context case, and
   the `quarkus.log.category` line that makes the early return visible.
 - **Status**: the workflow-step bullet said "Options 1 and 2 below" while they are above it.
 
@@ -62,10 +70,18 @@ carries the workflow-step requirement and links to `rag.md`.
 
 ### Not changed
 
-The engine. No code defect was found on the retrieval path. Two real gaps are recorded here rather
-than fixed: there is no retrieval REST endpoint for a knowledge base (so no supported way to search
-one from outside a conversation), and `ai.labs.rag` registration is on `main` but in no release tag,
-so deployments on `6.4.0` or earlier cannot wire up vector RAG at all.
+The engine. No defect was found on the retrieval path itself. Three gaps are recorded here rather
+than fixed, each arguably worth its own issue:
+
+1. **`kbId` on `/ingest` can write where nothing reads** (above). The parameter has no correct
+   non-default value, because retrieval cannot be pointed at a custom key — so the fix is probably
+   to reject a `kbId` that does not equal the KB's `name`, or to drop the parameter, rather than to
+   document it. Documented here because a doc change cannot make a `202` mean something else.
+2. **No retrieval REST endpoint** for a knowledge base, so there is no supported way to test that
+   ingestion worked without running a conversation — which is what sent the reporting user to
+   `httpCallRag` and a wall of 404s.
+3. **`ai.labs.rag` registration is in no release tag.** It is on `main`; the newest tag is `6.4.0`.
+   Deployments on `6.4.0` or earlier cannot wire up vector RAG at all, whatever the docs now say.
 
 ```decision-log
 | 2026-09-21 | Document the three-sided KB binding instead of making the workflow step optional | Retrieval discovers knowledge bases from the workflow document, which is what makes a KB an agent-level capability rather than a per-task one; inferring a binding from `knowledgeBases[].name` alone would let any task reach any KB in the deployment. The requirement is correct — it was undocumented. |
@@ -73,4 +89,5 @@ so deployments on `6.4.0` or earlier cannot wire up vector RAG at all.
 
 ```regression-note
 | 2026-09-21 | A RAG setup with a correct KB config and a correct `knowledgeBases` reference but no `eddi://ai.labs.rag` workflow step retrieves nothing, and says nothing: no context, no `rag:trace:*`, no error, and the only log is `DEBUG` "No RAG steps found in workflow". Check the workflow step first, and `GET /extensionstore/extensions` before that on older builds. |
+| 2026-09-21 | `POST /ragstore/rags/{id}/ingest` accepts a `kbId` that overrides the embedding-store key, but retrieval always keys on the KB's `name` and cannot be redirected. A `kbId` that is not exactly the `name` ingests into a store nothing reads, reporting `202` then `completed` the whole way. Leave `kbId` unset. Ingestion sources are unaffected. |
 ```
