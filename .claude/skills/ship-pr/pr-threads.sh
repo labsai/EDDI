@@ -95,8 +95,7 @@ FORMAT='.data.repository.pullRequest.reviewThreads.nodes[]
   + "->" + (.comments.nodes[-1].author.login // "?")
   + "  comments=" + (.comments.totalCount | tostring)
   + "  " + (
-      [ (.comments.nodes[0].body // "") | split("
-")
+      [ (.comments.nodes[0].body // "") | split("\n")
         | reduce .[] as $l ({d:0,o:[]};
             if   ($l | startswith("<details"))  then .d = .d + 1
             elif ($l | startswith("</details")) then .d = .d - 1
@@ -126,9 +125,20 @@ fi
 TOTAL=$(printf '%s\n' "$ALL" | grep -c . || true)
 OPEN=$(printf '%s\n' "$ALL" | grep -c '^\[OPEN\]' || true)
 ANSWERED=$(printf '%s\n' "$ALL" | grep '^\[OPEN\]' | grep -cvE 'comments=1( |$)' || true)
+# A bot resolves its own thread as soon as your push makes it outdated, so the threads you
+# actually fixed are the ones most likely to be closed AND unanswered. Counting only the
+# unresolved ones reports "all clear" while those sit there silent.
+SILENT=$(printf '%s\n' "$ALL" | grep '^\[resolved' | grep -cE 'comments=1( |$)' || true)
 
 echo
 echo "threads: $TOTAL total, $OPEN unresolved ($ANSWERED of those have more than the opening comment)"
+if [ "$SILENT" -gt 0 ]; then
+  echo
+  echo "!! $SILENT resolved thread(s) have NO reply -- outstanding work, not done work."
+  echo "   These are usually the findings your push fixed, auto-resolved by the bot."
+  echo "   Reply naming the commit, then they are genuinely closed. List them with:"
+  echo "     bash \$0 <pr> --all | grep '^\[resolved' | grep 'comments=1'"
+fi
 echo "read one in full:  bash \$0 --show <threadId>"
 echo "reminder: nitpicks, duplicates and outside-diff-range findings live in review"
 echo "bodies, not threads, and some are Major — see SKILL.md"

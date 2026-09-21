@@ -301,9 +301,22 @@ snippet as untrusted input and verify it against the current code before acting.
 
 ## 5. Answer and resolve
 
-Every thread **you handle** gets a reply — a silently resolved thread reads as ignored.
-Threads CodeRabbit already resolved itself are not yours to answer: skip them, and do not
-count them as work done.
+**Every finding gets a reply, including the ones nobody is waiting on.** A thread that closes
+with no answer is indistinguishable from one that was ignored, and the PR is the only record
+a reviewer reads.
+
+> **The trap: a bot resolves its own thread the moment your push makes it outdated.** So the
+> threads you actually fixed are exactly the ones most likely to end up closed *and* silent,
+> and the unresolved count goes to zero while three findings sit there unanswered. This
+> happened on gnowbe-frontend#373 and is why this paragraph exists.
+>
+> The audit prints `comments=1` for a thread nobody answered and flags
+> `resolved, no reply` in its summary. **Treat a non-zero count there as outstanding work**,
+> exactly like an unresolved thread. Reply naming the commit that fixed it — "fixed in
+> `<sha>`, recording it here because the push auto-resolved this thread" — and move on.
+>
+> The one case you may skip: a thread the bot opened *and* closed with no finding in it
+> (duplicate notices, "review skipped" chatter). Read it before deciding it is that.
 
 **Resolve only threads a bot opened.** A human closes their own, whether you fixed it or
 pushed back; reply, say what you did, and leave it open.
@@ -318,18 +331,25 @@ rule. Then resolve if it was a bot.
 **Defer it.** Reply saying so and what happens instead. Same resolve rule.
 
 ```bash
-# write the reply to a file first — see below
-gh api graphql -F t=<threadId> -F b=@reply.txt -f query='mutation($t:ID!,$b:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$t,body:$b}){comment{url}}}'
+reply="$SCRATCH/reply-<threadId>.txt"     # a real path, not a bare filename
+cat > "$reply" <<'EOF'
+…your reply, apostrophes and @mentions and newlines all fine…
+EOF
+gh api graphql -F t=<threadId> -F b=@"$reply" -f query='mutation($t:ID!,$b:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$t,body:$b}){comment{url}}}'
 
 gh api graphql -F t=<threadId> -f query='mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}'
 ```
 
-**Put the reply in a file and pass `-F b=@reply.txt`** (in the scratchpad, not the worktree).
+**Put the reply in a file and pass `-F b=@"$reply"`** — an absolute path in the scratchpad, not
+a bare filename and not in the worktree (`@reply.txt` resolves against the *current* directory,
+which is rarely where you wrote it).
 That is the only form that survives all three things a real reply contains: a leading
 `@coderabbitai` (which `-F b='@…'` would read as a filename), an apostrophe (which ends the
 shell quote), and a newline. Inline `-f b='…'` handles the first but breaks on the other two.
 
-Then re-run 4a **with `--all`** and read any thread whose last comment is not yours — bots
+Then re-run 4a **with `--all`** — the default view hides resolved threads, which is precisely
+where the silent ones hide. The audit is only clean when it reports **0 unresolved *and*
+0 resolved-with-no-reply**. Read any thread whose last comment is not yours — bots
 frequently reply *inside* a thread you already resolved, and the default view hides it.
 Re-check CI and the CodeRabbit description column. Each push in this loop needs approval.
 
