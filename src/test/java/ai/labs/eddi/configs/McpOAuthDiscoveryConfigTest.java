@@ -203,13 +203,18 @@ class McpOAuthDiscoveryConfigTest {
                 METADATA_METHODS + " must allow reads only");
         // Exact, not a /* under the prefix: a wildcard there would anonymously
         // expose any future handler beneath it, which is the same mistake this
-        // file's other rules are written narrowly to avoid. The second path is
-        // the one quarkus-oidc serves for the configured resource, so it moves
-        // with the MCP root path.
-        assertEquals(List.of(WELL_KNOWN, WELL_KNOWN + required(properties, MCP_ROOT_PATH)),
+        // file's other rules are written narrowly to avoid.
+        //
+        // The second path must carry the property EXPRESSION, not the value it
+        // currently expands to. The permit rule and the advertised resource have
+        // to move together: spell /mcp here and an operator who relocates the MCP
+        // root leaves the document behind the authenticated policy, so the
+        // metadata request 401s and the 401 challenge points at a path that 401s
+        // too. Asserting the resolved form would pass either way.
+        assertEquals(List.of(WELL_KNOWN, WELL_KNOWN + "${" + MCP_ROOT_PATH + "}"),
                 splitList(required(properties, METADATA_PATHS)),
-                METADATA_PATHS + " must name the two exact well-known paths — the bare form and the "
-                        + "path-inserted form quarkus-oidc serves for " + MCP_ROOT_PATH);
+                METADATA_PATHS + " must name the bare well-known path and the path-inserted one, the "
+                        + "latter derived from ${" + MCP_ROOT_PATH + "} rather than repeating its value");
     }
 
     /**
@@ -221,14 +226,21 @@ class McpOAuthDiscoveryConfigTest {
     @Test
     @DisplayName("the permit rule cannot match anything but the metadata document")
     void permitRuleMatchesNothingElse() throws Exception {
-        List<String> patterns = splitList(required(applicationProperties(), METADATA_PATHS));
+        var properties = applicationProperties();
+        String mcpRootPath = required(properties, MCP_ROOT_PATH);
+        // What the runtime matches against is the expanded value, so the
+        // expressions are resolved here — against the same root path the rule
+        // interpolates, which is what makes this check follow the endpoint.
+        List<String> patterns = splitList(required(properties, METADATA_PATHS)).stream()
+                .map(pattern -> pattern.replace("${" + MCP_ROOT_PATH + "}", mcpRootPath))
+                .toList();
 
-        for (String forbidden : List.of("/mcp", "/mcp/messages", "/secretstore", "/agents", "/",
+        for (String forbidden : List.of(mcpRootPath, mcpRootPath + "/messages", "/secretstore", "/agents", "/",
                 "/.well-known/agent.json", "/.well-known/openid-configuration")) {
             assertFalse(patterns.stream().anyMatch(pattern -> matches(pattern, forbidden)),
                     "the metadata permit rule must not match " + forbidden + " — patterns: " + patterns);
         }
-        for (String allowed : List.of(WELL_KNOWN, WELL_KNOWN + "/mcp")) {
+        for (String allowed : List.of(WELL_KNOWN, WELL_KNOWN + mcpRootPath)) {
             assertTrue(patterns.stream().anyMatch(pattern -> matches(pattern, allowed)),
                     "the metadata permit rule must match " + allowed + " — patterns: " + patterns);
         }
