@@ -1237,6 +1237,12 @@ fires on a genuine hang.
 > native call keeps running and can still complete its side effect after the model
 > was told it failed. For a tool whose side effects must never be doubled, put it
 > behind the HITL tool-approval gate or give it `-1`, rather than a short timeout.
+>
+> Such workers are counted, not assumed away: the gauge
+> `eddi_tool_execution_abandoned` reports how many are still running with nobody
+> waiting on them. It normally reads zero, so a value that climbs and does not
+> come back down is a tool leaking workers — pair it with
+> `eddi_tool_execution_timeout_total` to see which one.
 
 #### Budgets
 

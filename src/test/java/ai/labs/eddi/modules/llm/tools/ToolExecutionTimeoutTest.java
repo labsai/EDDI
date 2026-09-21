@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.tools;
 
+import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -92,6 +93,27 @@ class ToolExecutionTimeoutTest {
         Field field = target.getClass().getDeclaredField(fieldName);
         field.setAccessible(true);
         field.set(target, value);
+    }
+
+    /**
+     * A supplier that swallows its interruption and keeps running, the way a tool
+     * inside a native call or a tight loop does. This is the worker the class
+     * javadoc admits cannot be stopped, and the one the abandoned gauge counts.
+     */
+    private static Supplier<String> ignoresInterruption(CountDownLatch started, CountDownLatch release) {
+        return () -> {
+            started.countDown();
+            boolean released = false;
+            while (!released) {
+                try {
+                    released = release.await(FOREVER_MS, TimeUnit.MILLISECONDS);
+                } catch (InterruptedException e) {
+                    // Deliberately swallowed, interrupt flag deliberately not
+                    // re-armed: that is the whole point of this fixture.
+                }
+            }
+            return "finished long after nobody was waiting";
+        };
     }
 
     /** A supplier that blocks until interrupted, counting its own invocations. */
@@ -288,5 +310,57 @@ class ToolExecutionTimeoutTest {
         runBounded("boundedTool", () -> "ok", 10_000);
         assertSame(before, field.get(service),
                 "the executor is per service, not per call — a pool created per call is a leak by construction");
+    }
+
+    /**
+     * The gauge exists because the honest answer to "what happens to a tool that
+     * ignores its interruption" is "it keeps running", and an operator who cannot
+     * see that happening cannot act on it. Copilot asked for an admission bound on
+     * the executor instead; that would refuse a healthy tool call because unrelated
+     * calls are stuck, turning one tool's hang into a conversation-wide failure.
+     * Counting is the part that is unambiguously right.
+     */
+    @Test
+    @DisplayName("a worker that ignores its interruption is counted on eddi.tool.execution.abandoned until it stops")
+    void abandonedWorkerIsCountedUntilItFinishes() throws Exception {
+        var started = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+
+        String result = runBounded("stubbornTool", ignoresInterruption(started, release), SHORT_TIMEOUT_MS);
+
+        assertTrue(result.startsWith("Error: Execution timed out"), result);
+        assertTrue(started.await(5, TimeUnit.SECONDS), "the worker should have entered the tool");
+
+        var gauge = meterRegistry.find("eddi.tool.execution.abandoned").gauge();
+        assertNotNull(gauge, "the abandoned-worker gauge must be registered, or the leak is invisible");
+        assertEquals(1.0, gauge.value(),
+                "the call timed out, the worker ignored the interrupt and is still inside the tool — "
+                        + "that is exactly one abandoned worker, and it is the number an alert fires on");
+
+        release.countDown();
+        assertEquals(0.0, awaitGauge(gauge, 0.0),
+                "a worker that finally returns stops being abandoned; a gauge that only ever climbs would "
+                        + "make every past hang look like a present one");
+    }
+
+    @Test
+    @DisplayName("a bounded call that returns in time leaves nothing behind on the gauge")
+    void completedBoundedCallLeavesTheGaugeAtZero() throws Exception {
+        runBounded("boundedTool", () -> "ok", 10_000);
+
+        var gauge = meterRegistry.find("eddi.tool.execution.abandoned").gauge();
+        assertNotNull(gauge);
+        assertEquals(0.0, awaitGauge(gauge, 0.0),
+                "nothing was abandoned, so nothing may be counted — a gauge that drifts up on healthy "
+                        + "traffic is worse than no gauge at all");
+    }
+
+    /** Polls the gauge for a short while, so a worker's own exit is not a race. */
+    private static double awaitGauge(Gauge gauge, double expected) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (gauge.value() != expected && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+        return gauge.value();
     }
 }

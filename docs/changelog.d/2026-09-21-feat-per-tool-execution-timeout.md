@@ -36,7 +36,8 @@ PR's code is reused here.
 - **New meter `eddi.tool.execution.timeout`**, tagged `tool`, incremented alongside
   `eddi.tool.execution.failure` (the same pairing `ratelimited` already uses). Documented in
   [`metrics.md`](../metrics.md) and charted as target `E` of the "Execution outcomes" panel in
-  [`eddi-full-metrics-dashboard.json`](../monitoring/eddi-full-metrics-dashboard.json).
+  [`eddi-full-metrics-dashboard.json`](../monitoring/eddi-full-metrics-dashboard.json). Joined by the
+  gauge **`eddi.tool.execution.abandoned`** and its own panel — see "The abandoned worker" below.
 - **Context travels with the call.** A bounded call leaves the pipeline thread, so the worker is
   wrapped with `CallerIdentityContext.propagate` (caller **and** resolution principal, the pairing
   that method exists to keep together), with `EddiToolBridge`'s thread-local conversation id, and with
@@ -99,9 +100,25 @@ holds no platform thread and no megabyte-sized stack, which is the difference be
 being an incident and being a log line. One executor per application, created as a field initializer
 (unit tests construct the service directly) and `shutdownNow()` in `@PreDestroy`.
 
+**Counted, not assumed away** (Copilot review, #817). Cheap is not free, and an operator who cannot
+see workers piling up cannot act on it. The gauge **`eddi.tool.execution.abandoned`** reports how many
+are still inside a tool that nobody is waiting for any more — normally zero, because `cancel(true)`
+unwinds anything interruptible, so a non-zero reading names the native-call case above. It is derived
+from two counters that are each incremented and decremented in a `finally` on the thread that owns
+them (`runningWorkers` inside the task body, `awaitedWorkers` around the `future.get`), so a worker
+cancelled before it ever started counts in neither and the gauge cannot drift; it clamps at zero
+rather than reporting the transient `-1` of a submit observed between the two reads. Deployment-wide
+rather than per-tool: which tool leaked is already answered by `eddi.tool.execution.timeout`.
+
+The same review asked for an **admission bound** on the executor, refusing new calls once too many
+workers are stuck. Deliberately not done: that converts one tool's hang into a refusal of unrelated,
+healthy tool calls — a conversation-wide blast radius in exchange for a leak that is already strictly
+smaller than the unbounded wait it replaced. Left as a question for a human reviewer rather than
+settled in a follow-up commit.
+
 ### Verification
 
-`.\mvnw.cmd compile` clean. New tests: `ToolExecutionTimeoutTest` (10), `ToolTimeoutResolutionTest`
+`.\mvnw.cmd compile` clean. New tests: `ToolExecutionTimeoutTest` (12), `ToolTimeoutResolutionTest`
 (8), five timeout cases in `AgentOrchestratorCoverageTest`, one each in
 `AgentOrchestratorToolPauseTest` and `AgentOrchestratorResumeToolLoopTest`. Final run: 357 tests, 0
 failures, one surefire report per named class. Repo-wide guards run: `ImportStyleTest`,
@@ -128,5 +145,6 @@ predicted named tests; sources restored byte-for-byte afterwards and re-run gree
 | 2026-09-21 | Return an error string on expiry instead of throwing | `RetryConfiguration.isRetryableError` treats `TimeoutException` as retryable, so a thrown timeout becomes a retry loop over a hang; and the rate-limit branch already established "tell the model, keep the turn" | Throwing a `LifecycleException` (fails the turn), throwing `TimeoutException` (retried), a custom checked exception (every caller would have to translate it back into a string anyway) |
 | 2026-09-21 | Run the bounded call on a shared virtual-thread executor, inline when unbounded | A timeout needs a second thread by construction; virtual threads make the abandoned worker of a hung tool nearly free, and running inline when disabled keeps the untouched path byte-identical | A fixed platform-thread pool (an abandoned worker costs a whole thread and stack, and a pool of N hung tools deadlocks the N+1st), a pool per call (leak by construction) |
 | 2026-09-21 | Add `int timeoutMs` as a tenth parameter rather than a field on `ToolInvocation` | The brief asked for the `rateLimit` shape end to end, and `rateLimit` is a parameter; it also breaks stale Mockito stubs at COMPILE time instead of silently mismatching at runtime | Putting it on the `ToolInvocation` record (would have kept every `any(ToolInvocation.class)` stub compiling while no longer describing the call), a separate 10-arg overload (same silent-mismatch problem) |
+| 2026-09-21 | Count abandoned workers on a gauge, but put no admission bound on the timeout executor | A leak an operator cannot see is the dangerous half of the trade-off, and counting is unambiguously right; refusing healthy tool calls because unrelated ones are stuck trades a per-tool failure for a conversation-wide one, which is a product call rather than a review fix | A bounded-queue or semaphore executor with a model-visible "too many tools running" error (Copilot's suggestion, left open for a human), a per-tool `Semaphore` (same blast radius, more bookkeeping), doing nothing and leaving the accumulation undetectable |
 | 2026-09-21 | Leave the `String` overload unbounded | Its only caller is `McpCallsTask`, which has no `LlmConfiguration.Task` and already bounds its tools with `McpCallsConfiguration.timeoutMs` | Giving it the same default (would apply an LLM-task setting to a workflow step that cannot configure it) |
 ```
