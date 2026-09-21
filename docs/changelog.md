@@ -133,6 +133,57 @@ acted on:
 
 ---
 
+## 🧪 fix(ui): a dialog no longer takes focus from a field the user is typing in (2026-09-18)
+
+**Repo:** EDDI (`fix/share-dialog-flaky-test`)
+
+`UI Manager Checks` failed intermittently (run 35295321603) in two unrelated-looking tests that
+pass locally: `share-dialog` › "does not let two quick Enters skip the ownership confirmation"
+(`share-owner-warning` never appeared) and `create-agent-dialog` › "allows typing in description
+field" (the field was empty after `user.type`). They had one cause, and it was in the component, not
+the tests.
+
+### Root cause
+
+`AccessibleDialog` moved initial focus to its first focusable element (the header's Close button)
+inside a `requestAnimationFrame` scheduled on open. On a loaded runner that frame fired *after* the
+test had clicked into a field, and user-event sends keystrokes to `document.activeElement`: "bob"
+went to the Close button, the share subject stayed empty, Enter failed validation, and no warning was
+ever rendered. The same frame overrode every `autoFocus` inside the dialog in the real UI —
+`CreateAgentDialog` autofocuses its Name field, and focus ended on the X a frame later.
+
+Reproduced by stubbing `requestAnimationFrame` to a 30–150 ms timeout: the original share-dialog tests
+then fail with exactly the CI error, and the create-agent tests with exactly the empty value.
+
+### What changed
+
+- `ui/manager/src/components/ui/accessible-dialog.tsx`: the frame leaves focus alone when it is
+  already inside the dialog, and is cancelled on cleanup. The trap, Escape and return-focus behaviour
+  are unchanged.
+- `ui/manager/src/components/ui/__tests__/accessible-dialog.test.tsx` (new): holds the frame and
+  releases it by hand, so "focus reached a field first" is deterministic. Covers the empty-dialog
+  default (Close gets focus), a field focused before the frame, and an `autoFocus` field.
+  Mutation-checked: removing the guard fails the latter two.
+- `ui/manager/src/components/workspaces/__tests__/share-dialog.test.tsx`: the warning assertions made
+  straight after a user event now wait (`findByTestId` for it appearing, `waitFor` for it
+  disappearing, the latter safe because each test has just seen it present). This is hygiene, **not**
+  the fix — with the delayed frame and the old component these still fail, just after the wait. The
+  behavioural guards (`shared` not called, `sentSubject` null) are unchanged.
+
+### Verification
+
+With the fix, the 80 ms and 150 ms delayed-frame copies of both the old and the new share-dialog tests
+and of `create-agent-dialog` pass (246/246); without it, they fail as CI did. Full Manager suite with
+coverage green locally.
+
+### Not done
+
+`previousFocusRef` is captured in the same effect, after an `autoFocus` child has already taken focus,
+so on close focus "returns" to that (now unmounted) field instead of the trigger. Pre-existing and
+separate; left alone here.
+
+---
+
 ## ⬆️ chore(ui): Node 22 toolchain, Stryker 10, Vitest 5 for the Chat UI (2026-09-17)
 
 **Repo:** EDDI (`feat/node-22-toolchain`, stacked on `fix/ui-npm-vulnerabilities` / #770)
