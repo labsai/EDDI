@@ -14,21 +14,39 @@ Each entry records:
 
 ## Where to Add an Entry
 
-**Add new entries directly below the `---` that closes this section**, above the
-most recent existing entry. Never append to an archive file.
+**Not here.** Write your entry as a new file in
+[`changelog.d/`](changelog.d/README.md) — `YYYY-MM-DD-<slug>.md`, with the slug
+unique to your branch — and leave this file alone. The same goes for the two
+running registers at the bottom: their rows ride along in the fragment, in a
+fenced `decision-log` or `regression-note` block.
 
-This file holds only recent work and is capped at **250 KB** —
-`ChangelogRotationTest` fails the build if it grows past that. When it does, run:
+Entries used to be inserted at the top of this file, and the registers appended
+to at the bottom. Both are a fixed point in a shared file, which git cannot
+merge: with several PRs open, every one of them conflicted with every other over
+a document that had nothing to do with the code under review. A fragment is a new
+file under a name no other branch picks, so the same two PRs merge without
+touching each other.
+
+`.github/workflows/changelog-collate.yml` runs nightly, merges the fragments in
+here **by date** — a PR that stayed open for weeks lands among its
+contemporaries rather than on top — trims this file back under its rotation
+target, and opens a PR. Until that PR merges, `changelog.d/` holds the newest
+history, so read it alongside the top of this file. To do it by hand:
 
 ```bash
-python scripts/rotate-changelog.py
+python scripts/collate-changelog.py   # fragments -> this file
+python scripts/rotate-changelog.py    # this file -> docs/changelog/<YYYY-MM>.md
 ```
 
-It moves the oldest entries into `docs/changelog/<YYYY-MM>.md` by the date each
-entry carries, adds one `../` to the relative links it moves (an archive sits a
-directory deeper than this file) without touching the ones inside code spans, and
-regenerates the Archive table below from what is on disk. Add any newly created
-archive file to [`SUMMARY.md`](SUMMARY.md). Do not raise the cap.
+This file holds only recent work and is capped at **250 KB** —
+`ChangelogRotationTest` fails the build if it grows past that. Rotation runs at a
+lower threshold than the cap, trimming back to **200 KB** whenever the file is
+over that, so the session whose entry tips it over is not the one made to rotate
+it. Rotation moves the oldest entries into `docs/changelog/<YYYY-MM>.md` by date,
+adds one `../` to the relative links it moves (an archive sits a directory deeper
+than this file) without touching the ones inside code spans, and regenerates both
+the Archive table below and the changelog list in [`SUMMARY.md`](SUMMARY.md) from
+what is on disk. Do not raise the cap.
 
 The single file this replaced had reached 1.9 MB — roughly half a million tokens —
 which neither a reader nor an agent's context window could usefully hold.
@@ -3027,3 +3045,4 @@ _For recording decisions that come up during implementation that aren't in the p
 _Track any regressions introduced during implementation for quick debugging._
 
 | Date | Regression | Cause | Fix | Commit |
+| ---- | ---------- | ----- | --- | ------ |

@@ -331,7 +331,14 @@ class ConfigurationReferenceCoverageTest {
      * an exemption, because the test goes on passing.
      */
     private static boolean isChangelog(String relative) {
-        return relative.equals("docs/changelog.md") || relative.startsWith("docs/changelog/");
+        // docs/changelog.d/ holds entries that have been written but not yet
+        // collated into changelog.md. They are the same record a day earlier, so
+        // exempting one and grading the other means an entry naming a retired
+        // property fails on the PR that writes it and passes once the nightly
+        // job moves it — the test grading the text's location, not the text.
+        return relative.equals("docs/changelog.md")
+                || relative.startsWith("docs/changelog/")
+                || relative.startsWith("docs/changelog.d/");
     }
 
     /**
