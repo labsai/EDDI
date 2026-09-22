@@ -1,6 +1,6 @@
 ## 🐛 fix(llm): `includeFirstAgentMessage` dropped the user's own first turn (2026-09-22)
 
-**Repo:** EDDI (`claude/smc-demo-bugs-tests`)
+**Repo:** EDDI (`fix/pilot-demo-findings`)
 
 ### Why
 
@@ -47,15 +47,28 @@ The premise has also expired. The Anthropic Messages API reference no longer doc
 message was removed — and was rewritten. Mutation-checked: restoring the unconditional
 `removeFirst()` fails five of them.
 
-**Open question for the team:** does `includeFirstAgentMessage` still earn its place now
-that its original reason has gone? That is a deprecation call, not a bug fix, and is left
-open deliberately.
+### And now deprecated
+
+The flag's only documented reason to exist has expired, so it is marked **deprecated**:
+`LlmTask` logs a WARN naming the task the first time each configured task uses it, the
+parameter table says not to use it in new configs, and `docs/langchain.md` gains a
+*Deprecated parameters* section explaining what to do instead.
+
+**Deprecated rather than removed**, deliberately. Agent behaviour lives in JSON stored in
+MongoDB and imported from ZIPs — per `AGENTS.md`, the one backward-compatibility boundary
+this codebase has. Silently ignoring a parameter an author set on purpose would be *worse*
+than honouring it: an agent that genuinely wants its greeting withheld would start sending
+it, with no diagnostic. The flag keeps working exactly as before.
+
+Once per task, not once per turn: an LLM task runs on every message of every conversation,
+and a per-turn WARN is a flood operators learn to filter out — which is the same as not
+warning at all.
 
 ---
 
 ## 🔒 fix(security): a missing `role-claim-path` 403'd every admin, silently (2026-09-22)
 
-**Repo:** EDDI (`claude/smc-demo-bugs-tests`)
+**Repo:** EDDI (`fix/pilot-demo-findings`)
 
 ### Why
 
@@ -88,7 +101,7 @@ runtime ERROR stays a warning about an operator override rather than about us.
 
 ## 🐛 fix(ui): `/manage/` answered 200 with an empty body (2026-09-22)
 
-**Repo:** EDDI (`claude/smc-demo-bugs-tests`)
+**Repo:** EDDI (`fix/pilot-demo-findings`)
 
 ### Why
 
@@ -113,7 +126,7 @@ never asked for at all. Covers `""`, `"/"`, `"//"`, `"./"` and `"/./"`. Mutation
 
 ## ✨ feat(groups): a rejected decision is `REJECTED`, not `FAILED` (2026-09-22)
 
-**Repo:** EDDI (`claude/smc-demo-bugs-tests`)
+**Repo:** EDDI (`fix/pilot-demo-findings`)
 
 ### Why
 
@@ -167,7 +180,7 @@ the ledger recorded `"decidedBy": ""`. The audit writer already renders a null d
 
 ## ✨ feat(groups): say at save time when debate roles turn a synthesis into a verdict (2026-09-22)
 
-**Repo:** EDDI (`claude/smc-demo-bugs-tests`)
+**Repo:** EDDI (`fix/pilot-demo-findings`)
 
 ### Why
 
@@ -198,7 +211,7 @@ is itself a debater, a moderator-less roster, an explicit `inputTemplate` (the d
 opt-out), arguments after the synthesis, and a ROUND_TABLE with debate roles.
 
 ```decision-log
-| 2026-09-22 | `includeFirstAgentMessage` drops a message only when it is the agent's | The unconditional `removeFirst()` emptied the history of any agent with no `ai.labs.output` step, and Anthropic rejected the call | Deprecating the flag outright — its premise has expired, but that is a team decision, and role-awareness fixes the defect either way |
+| 2026-09-22 | `includeFirstAgentMessage` drops a message only when it is the agent's, and the flag is deprecated | The unconditional `removeFirst()` emptied the history of any agent with no `ai.labs.output` step, and Anthropic rejected the call; the Anthropic rule the flag exists for no longer applies | REMOVING it — agent behaviour lives in stored JSON, and silently ignoring a deliberate setting would start sending a greeting the author chose to withhold, with no diagnostic |
 | 2026-09-22 | A HITL rejection gets its own `REJECTED` state rather than reusing `FAILED` | The Manager rendered a recorded human decision as a red "Failed" badge | Re-labelling `FAILED` in the UI only — the backend distinction is what audit and API consumers need |
 | 2026-09-22 | Pre-`REJECTED` documents keep `FAILED`; no migration | Nothing stored distinguishes a rejection from a failure, so a migration could only guess | Backfilling from the audit ledger — it is not guaranteed enabled |
 | 2026-09-22 | The debate-verdict note is INFO, not a save-time rejection | For a real DEBATE group the verdict path is the intended behaviour; rejecting would break every existing debate config | A hard error, and a WARN (which would cry wolf on every correct debate) |

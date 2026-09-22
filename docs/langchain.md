@@ -116,7 +116,7 @@ This is the standard way to use the Langchain task - just connect to an LLM and 
 | `prompt`                   | string  | Override user input (if not set, uses actual input)   | ""                |
 | **Context Control**        |         |                                                       |                   |
 | `logSizeLimit`             | int     | Conversation history limit (`-1` = unlimited, `0` = none) | falls back to `conversationHistoryLimit` (default 10) |
-| `includeFirstAgentMessage` | boolean | Include the opening **agent** message in context. `false` drops it — and only it: a first message from the *user* is always kept | true              |
+| `includeFirstAgentMessage` | boolean | **Deprecated — do not use in new configs.** Include the opening **agent** message in context. `false` drops it — and only it: a first message from the *user* is always kept. Setting it logs a WARN; see [Deprecated parameters](#deprecated-parameters) | true              |
 | **Output Control**         |         |                                                       |                   |
 | `convertToObject`          | boolean | Parse response as JSON. Enables three-layer enforcement: system prompt reinforcement, native API JSON mode (see the [provider matrix](#native-json-mode--provider-matrix)), and pre-parse validation | false             |
 | `responseSchema`           | string  | JSON schema for structured output. When set with `convertToObject=true`, the exact schema is injected into the system prompt so the LLM knows the expected format | ""                |
@@ -255,7 +255,7 @@ Both stored shapes therefore keep working: a config that sets only `streamingTim
 }
 ```
 
-> **`includeFirstAgentMessage` is no longer needed for Anthropic.** This example keeps
+> **`includeFirstAgentMessage` is deprecated and no longer needed for Anthropic.** This example keeps
 > `"false"` only because countless existing configs carry it. The advice it used to
 > illustrate — "Anthropic doesn't allow the first message to be from the agent, so set
 > this to `false`" — described a restriction the
@@ -1510,6 +1510,41 @@ When `convertToObject=true`, the raw LLM response is **always** persisted in con
 - **Schema specificity**: The more specific your `responseSchema`, the more reliable the output. Use type hints (`"string"`, `"number"`, `"boolean"`) and descriptions
 
 ---
+
+## Deprecated parameters
+
+### `includeFirstAgentMessage`
+
+**Deprecated. Still honoured; do not use it in new configurations.**
+
+It exists for one reason: Anthropic used to reject a conversation whose first
+message was an assistant turn, so the flag stripped EDDI's opening greeting to
+make the history start with a user message.
+
+**That restriction is gone.** The
+[Messages API reference](https://platform.claude.com/docs/en/api/messages) no
+longer documents a first-message role rule anywhere, and a history beginning with
+an assistant turn is accepted.
+
+What remains is a flag whose only documented reason to exist has expired, and
+which for years was implemented as *remove the first message* regardless of whose
+it was — so an agent with no `ai.labs.output` step, which opens on the **user's**
+turn, sent an empty history and Anthropic answered
+`invalid_request_error: messages: Field required`. The removal is role-aware now,
+so the flag is no longer dangerous; it is merely pointless for the case it was
+written for.
+
+**Why deprecated rather than removed.** Agent behaviour lives in JSON stored in
+MongoDB and imported from ZIPs — the one backward-compatibility boundary this
+codebase has. Silently ignoring a parameter an author set deliberately would be
+worse than honouring it: an agent that genuinely wants its greeting withheld
+would start sending it, with no diagnostic. So the flag keeps working exactly as
+before, and `LlmTask` logs a WARN naming the task the first time each configured
+task uses it.
+
+**What to do:** delete it from the task. Keep it only if that agent must really
+withhold its opening greeting from the model — which is a presentation choice,
+not a provider requirement.
 
 ## Common Issues and Troubleshooting
 

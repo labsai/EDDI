@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { Toaster } from "sonner";
+import { Toaster, toast } from "sonner";
 import userEvent from "@testing-library/user-event";
 import { ThemeProvider } from "@/components/layout/theme-provider";
 import { ResourceDetailPage } from "@/pages/resource-detail";
@@ -57,7 +57,15 @@ function renderEditor() {
           <Routes>
             <Route path="/manage/resources/:type/:id" element={<ResourceDetailPage />} />
           </Routes>
-          <Toaster />
+          {/*
+            * Toasts must outlive the test, not sonner's 4-second default.
+            * "offers a Deploy action…" has to render the toast, find its action
+            * button and click it; on a loaded CI runner that whole sequence took
+            * 15 s, so the toast auto-dismissed underneath it and the click landed
+            * on a detached node — the assertion then failed on an empty deploy
+            * list, which reads like the action being broken rather than gone.
+            */}
+          <Toaster duration={600_000} />
         </ThemeProvider>
       </QueryClientProvider>
     </MemoryRouter>,
@@ -120,6 +128,10 @@ const originalConsoleError = console.error;
 afterEach(() => {
   console.error = originalConsoleError;
   vi.restoreAllMocks();
+  // sonner's toast store is module-global and survives unmount, so with the long
+  // duration above a toast from one test is still on screen for the next --
+  // "Found multiple elements with the role button and name Deploy". Clear it.
+  toast.dismiss();
 });
 
 describe("ResourceDetailPage — a plain Save says it is not live", () => {

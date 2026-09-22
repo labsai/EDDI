@@ -1,6 +1,6 @@
 ## 🐛 fix(manager): "Show more" on a group's question could not be undone (2026-09-22)
 
-**Repo:** EDDI (`claude/smc-demo-bugs-tests`)
+**Repo:** EDDI (`fix/pilot-demo-findings`)
 
 ### Why
 
@@ -24,7 +24,7 @@ self-scrolling once expanded, collapsible again, and untouched for a short quest
 
 ## 🐛 fix(manager): "New Discussion" was a no-op on a group with history (2026-09-22)
 
-**Repo:** EDDI (`claude/smc-demo-bugs-tests`)
+**Repo:** EDDI (`fix/pilot-demo-findings`)
 
 ### Why
 
@@ -54,7 +54,7 @@ over".
 
 ## ✨ feat(manager): the Workforce advisor thread can start over (2026-09-22)
 
-**Repo:** EDDI (`claude/smc-demo-bugs-tests`)
+**Repo:** EDDI (`fix/pilot-demo-findings`)
 
 ### Why
 
@@ -81,7 +81,7 @@ and a failed start leaves the thread on the old working conversation rather than
 
 ## 🐛 fix(manager): the log SSE stream no longer opens on every page (2026-09-22)
 
-**Repo:** EDDI (`claude/smc-demo-bugs-tests`)
+**Repo:** EDDI (`fix/pilot-demo-findings`)
 
 ### Why
 
@@ -122,7 +122,7 @@ again — the runtime tests cannot see that, and `main.tsx` is not importable fr
 
 ## ✨ feat(manager): a rejected discussion reads as a decision (2026-09-22)
 
-**Repo:** EDDI (`claude/smc-demo-bugs-tests`)
+**Repo:** EDDI (`fix/pilot-demo-findings`)
 
 ### What changed
 
@@ -161,7 +161,7 @@ through the approve path in `group-detail-selection.test.tsx`; and a locale swee
 
 ## ✨ feat(manager): the editor says when a debate synthesis answers with a verdict (2026-09-22)
 
-**Repo:** EDDI (`claude/smc-demo-bugs-tests`)
+**Repo:** EDDI (`fix/pilot-demo-findings`)
 
 ### What changed
 
@@ -182,7 +182,7 @@ on the panel.
 
 ## 🐛 fix(manager): a plain Save no longer claims a change is live (2026-09-22)
 
-**Repo:** EDDI (`claude/smc-demo-bugs-tests`)
+**Repo:** EDDI (`fix/pilot-demo-findings`)
 
 ### Why
 
