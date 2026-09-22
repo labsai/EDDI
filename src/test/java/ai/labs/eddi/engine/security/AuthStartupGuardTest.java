@@ -10,6 +10,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Field;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -27,11 +28,20 @@ class AuthStartupGuardTest {
     private AuthStartupGuard createGuard(boolean oidcEnabled, boolean allowUnauthenticated,
                                          LaunchMode launchMode)
             throws Exception {
+        return createGuard(oidcEnabled, allowUnauthenticated, launchMode, Optional.of("realm_access/roles"), "groups");
+    }
+
+    private AuthStartupGuard createGuard(boolean oidcEnabled, boolean allowUnauthenticated,
+                                         LaunchMode launchMode, Optional<String> rolesClaimPath,
+                                         String workspacesGroupsClaim)
+            throws Exception {
         AuthStartupGuard guard = spy(new AuthStartupGuard());
 
         // Set @ConfigProperty fields via reflection
         setField(guard, "oidcEnabled", oidcEnabled);
         setField(guard, "allowUnauthenticated", allowUnauthenticated);
+        setField(guard, "rolesClaimPath", rolesClaimPath);
+        setField(guard, "workspacesGroupsClaim", workspacesGroupsClaim);
 
         // Override getLaunchMode() to control the static LaunchMode.current()
         doReturn(launchMode).when(guard).getLaunchMode();
@@ -107,5 +117,76 @@ class AuthStartupGuardTest {
         warnModeField.setAccessible(true);
         assertFalse((boolean) warnModeField.get(guard),
                 "warnMode should be false when OIDC is enabled");
+    }
+
+    // ─── role-claim diagnostics (A1) ─────────────────────────────
+
+    /**
+     * The 6.4.0 image shipped without {@code quarkus.oidc.roles.role-claim-path}.
+     * quarkus-oidc then read roles from its default {@code groups} claim, the
+     * seeded {@code eddi} administrator's roles resolved to its group paths, and
+     * every {@code @RolesAllowed} endpoint answered 403 with an empty body and
+     * <b>no log line at all</b>. Accounts in no group worked, so it looked like one
+     * broken account. These cases are the log line that was missing.
+     */
+    @Test
+    @DisplayName("OIDC on + roles claim path unset → names the env var to set")
+    void rolesClaimUnset_isReported() throws Exception {
+        AuthStartupGuard guard = createGuard(true, false, LaunchMode.NORMAL, Optional.empty(), "groups");
+
+        Optional<String> diagnostic = guard.rolesClaimDiagnostic();
+
+        assertTrue(diagnostic.isPresent(), "an unset roles claim path must not be silent");
+        assertTrue(diagnostic.get().contains("QUARKUS_OIDC_ROLES_ROLE_CLAIM_PATH"),
+                "the message must name the setting to change: " + diagnostic.get());
+        assertTrue(diagnostic.get().contains("403"), diagnostic.get());
+    }
+
+    @Test
+    @DisplayName("OIDC on + blank roles claim path → treated as unset")
+    void rolesClaimBlank_isReported() throws Exception {
+        AuthStartupGuard guard = createGuard(true, false, LaunchMode.NORMAL, Optional.of("   "), "groups");
+
+        assertTrue(guard.rolesClaimDiagnostic().isPresent(), "a blank value is as good as absent");
+    }
+
+    @Test
+    @DisplayName("OIDC on + roles claim path equal to the workspaces groups claim → reported")
+    void rolesClaimCollidesWithWorkspaceGroups_isReported() throws Exception {
+        AuthStartupGuard guard = createGuard(true, false, LaunchMode.NORMAL, Optional.of("groups"), "groups");
+
+        Optional<String> diagnostic = guard.rolesClaimDiagnostic();
+
+        assertTrue(diagnostic.isPresent(), "reading roles and workspace groups from one claim is the whole bug");
+        assertTrue(diagnostic.get().contains("eddi.workspaces.groups-claim"), diagnostic.get());
+    }
+
+    @Test
+    @DisplayName("OIDC on + realm_access/roles → silent")
+    void rolesClaimConfigured_isSilent() throws Exception {
+        AuthStartupGuard guard = createGuard(true, false, LaunchMode.NORMAL, Optional.of("realm_access/roles"), "groups");
+
+        assertTrue(guard.rolesClaimDiagnostic().isEmpty(), "the shipped configuration must not warn");
+    }
+
+    @Test
+    @DisplayName("OIDC off → silent, whatever the claim path says")
+    void oidcDisabled_isSilent() throws Exception {
+        AuthStartupGuard guard = createGuard(false, true, LaunchMode.NORMAL, Optional.empty(), "groups");
+
+        assertTrue(guard.rolesClaimDiagnostic().isEmpty(),
+                "nothing reads roles when nothing authenticates — a warning here would be noise");
+    }
+
+    @Test
+    @DisplayName("a custom workspaces groups claim moves the collision with it")
+    void collisionFollowsACustomWorkspacesClaim() throws Exception {
+        // Not "groups": the check must compare the two configured values, not match a
+        // hard-coded literal.
+        AuthStartupGuard collides = createGuard(true, false, LaunchMode.NORMAL, Optional.of("teams"), "teams");
+        AuthStartupGuard clear = createGuard(true, false, LaunchMode.NORMAL, Optional.of("groups"), "teams");
+
+        assertTrue(collides.rolesClaimDiagnostic().isPresent());
+        assertTrue(clear.rolesClaimDiagnostic().isEmpty());
     }
 }
