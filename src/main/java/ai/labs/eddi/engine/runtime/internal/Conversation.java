@@ -75,6 +75,9 @@ public class Conversation implements IConversation {
      */
     private final Map<String, Property> longTermBaseline = new HashMap<>();
 
+    /** Serialized properties at the start of this turn — the undo baseline. */
+    private Map<String, Map<String, Object>> propertiesAtTurnStart;
+
     /**
      * Keys of the context entries this turn's client marked {@code "secret": true}.
      * Their stored copy is replaced wholesale when the turn ends.
@@ -378,6 +381,8 @@ public class Conversation implements IConversation {
 
             if (startNewStep) {
                 startNextStep();
+                // The turn's starting point for undo — see recordPropertyChanges.
+                propertiesAtTurnStart = conversationMemory instanceof ConversationMemory cm ? cm.serializedProperties() : null;
             }
 
             var lifecycleData = prepareLifecycleData(message, contexts, clearedResultTypes);
@@ -413,6 +418,13 @@ public class Conversation implements IConversation {
 
     private void postConversationLifecycleTasks() throws IResourceStore.ResourceStoreException {
         removeOldInvalidProperties();
+        if (propertiesAtTurnStart != null && conversationMemory instanceof ConversationMemory cm) {
+            // After the step-scope cleanup, so only what outlives the turn is recorded.
+            // A turn completed through a HITL resume runs in a new Conversation without
+            // this snapshot and records nothing — undo then leaves its properties as
+            // they are, which is the behaviour every turn had before.
+            cm.recordPropertyChanges(propertiesAtTurnStart);
+        }
         storePropertiesPermanently();
     }
 

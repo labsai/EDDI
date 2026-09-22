@@ -4,6 +4,10 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.memory.ConversationMemory;
+import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
+import ai.labs.eddi.configs.properties.model.Property.Visibility;
+import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
@@ -970,6 +974,8 @@ public class ConversationService implements IConversationService {
                             conversationId, loadedStateForUndo);
                     return false;
                 }
+                // The undone step is now on top of the redo cache.
+                syncLongTermChanges(conversationMemory, conversationMemory.getRedoCache().peek(), true);
                 return true;
             } else {
                 return false;
@@ -1016,6 +1022,7 @@ public class ConversationService implements IConversationService {
                             conversationId, loadedStateForRedo);
                     return false;
                 }
+                syncLongTermChanges(conversationMemory, conversationMemory.getCurrentStep(), false);
                 return true;
             } else {
                 return false;
@@ -1195,6 +1202,70 @@ public class ConversationService implements IConversationService {
     }
 
     // --- Internal helpers ---
+
+    /**
+     * Carries an undo ({@code revert}) or redo of {@code step}'s {@code longTerm}
+     * property changes into the user memory store, which the conversation-memory
+     * undo cannot reach: a slot the undone turn filled stayed filled in every later
+     * conversation.
+     * <p>
+     * Deliberately conservative. The store is shared with the user's other
+     * conversations and agents, so an entry is only rewritten when it still holds
+     * exactly the value this step left there; anything changed since is left alone.
+     * An entry is only recreated when none exists for the key. Best effort: a store
+     * failure is logged, the undo itself stands.
+     */
+    void syncLongTermChanges(IConversationMemory memory, IConversationMemory.IConversationStep step, boolean revert) {
+        if (userMemoryStore == null || step == null) {
+            return;
+        }
+        var changes = ConversationMemory.propertyChanges(step);
+        if (changes.isEmpty()) {
+            return;
+        }
+        String userId = memory.getUserId();
+        String agentId = memory.getAgentId();
+        changes.forEach((key, beforeAfter) -> {
+            Property stored = revert ? beforeAfter[1] : beforeAfter[0];
+            Property target = revert ? beforeAfter[0] : beforeAfter[1];
+            boolean storedIsLongTerm = stored != null && stored.getScope() == Property.Scope.longTerm;
+            boolean targetIsLongTerm = target != null && target.getScope() == Property.Scope.longTerm;
+            if (!storedIsLongTerm && !targetIsLongTerm) {
+                return;
+            }
+            try {
+                List<UserMemoryEntry> sameKey = userMemoryStore.getAllEntries(userId).stream()
+                        .filter(e -> key.equals(e.key()))
+                        .filter(e -> e.visibility() == Visibility.global || Objects.equals(agentId, e.sourceAgentId()))
+                        .toList();
+                if (storedIsLongTerm) {
+                    Object expected = UserMemoryEntry.fromProperty(stored, userId, agentId, null, Visibility.self).value();
+                    UserMemoryEntry current = sameKey.stream().filter(e -> Objects.equals(e.value(), expected)).findFirst().orElse(null);
+                    if (current == null) {
+                        return; // changed since this step — not ours to rewrite
+                    }
+                    if (targetIsLongTerm) {
+                        Object value = UserMemoryEntry.fromProperty(target, userId, agentId, null, Visibility.self).value();
+                        userMemoryStore.upsert(new UserMemoryEntry(current.id(), userId, key, value, current.category(), current.visibility(),
+                                current.sourceAgentId(), current.groupIds(), memory.getConversationId(), false, current.accessCount(),
+                                current.createdAt(), current.updatedAt()));
+                    } else {
+                        userMemoryStore.deleteEntry(current.id());
+                    }
+                } else if (sameKey.isEmpty()) {
+                    // The step removed (or never stored) the key; recreate it only when
+                    // nothing has taken its place. The property's own visibility, else
+                    // self — a restore must never widen who can read it.
+                    Visibility visibility = target.getVisibility() != null ? target.getVisibility() : Visibility.self;
+                    userMemoryStore.upsert(UserMemoryEntry.fromProperty(target, userId, agentId, memory.getConversationId(),
+                            visibility == Visibility.group ? Visibility.self : visibility, List.of()));
+                }
+            } catch (Exception e) {
+                LOGGER.warnf("Could not %s long-term property '%s' for conversation %s: %s", revert ? "revert" : "re-apply",
+                        sanitize(key), sanitize(memory.getConversationId()), e.getMessage());
+            }
+        });
+    }
 
     IPropertiesHandler createPropertiesHandler(final String userId, final AgentConfiguration.UserMemoryConfig memoryConfig) {
         return createPropertiesHandler(userId, memoryConfig, memoryConfig != null);

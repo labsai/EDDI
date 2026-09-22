@@ -125,3 +125,15 @@ observed there, and carries a regression test.
   exception class names and reduces a JSON error body to its `message`, and `keep_all` emits the
   action on top of the actions the task itself added.
   [`LifecycleManager.java`](../../src/main/java/ai/labs/eddi/engine/lifecycle/internal/LifecycleManager.java)
+- **Undo did not undo properties.** It popped the step and nothing else, so a slot filled by the
+  undone turn stayed filled — in the conversation and in long-term memory (reproduced live: after
+  undo, both a conversation-scoped and a `longTerm` property still held the undone value). Each
+  completed turn now records its property changes on its step (`properties:changes`, uncommitted
+  and non-public), which undo reverts and redo re-applies; `ConversationService` carries the
+  `longTerm` part into the user-memory store, but only where the store still holds exactly the value
+  this turn wrote — a change made since by another conversation or agent is left alone. A new turn
+  now also clears the redo stack: redo after *undo → new message* used to graft a step from the
+  abandoned timeline. Turns completed through a HITL resume record no changes (undo leaves their
+  properties as before).
+  [`ConversationMemory.java`](../../src/main/java/ai/labs/eddi/engine/memory/ConversationMemory.java),
+  [`ConversationService.java`](../../src/main/java/ai/labs/eddi/engine/internal/ConversationService.java)

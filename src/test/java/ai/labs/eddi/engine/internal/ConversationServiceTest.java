@@ -20,6 +20,9 @@ import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
 import ai.labs.eddi.engine.lifecycle.IConversation;
+import ai.labs.eddi.configs.properties.model.Property;
+import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
+import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.IPropertiesHandler;
@@ -57,6 +60,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
+import java.time.Instant;
 import java.util.*;
 import java.util.Stack;
 
@@ -1020,5 +1024,81 @@ class ConversationServiceTest {
         snapshot.getRedoCache().push(redoStep);
 
         return snapshot;
+    }
+
+    // =================================================================
+    // Undo / redo carry longTerm property changes into the user memory store
+    // =================================================================
+
+    /**
+     * A memory whose latest turn changed {@code key} from {@code before} to
+     * {@code after} (longTerm).
+     */
+    private ConversationMemory memoryWithLongTermChange(String key, String before, String after) {
+        var memory = new ConversationMemory("aabbccddeeff112233445566", "agent-1", 1, "user-1");
+        if (before != null) {
+            memory.getConversationProperties().put(key, new Property(key, before, Property.Scope.longTerm));
+        }
+        memory.startNextStep();
+        var baseline = memory.serializedProperties();
+        if (after != null) {
+            memory.getConversationProperties().put(key, new Property(key, after, Property.Scope.longTerm));
+        } else {
+            memory.getConversationProperties().remove(key);
+        }
+        memory.recordPropertyChanges(baseline);
+        return memory;
+    }
+
+    private static UserMemoryEntry storedEntry(String key, Object value, String owner) {
+        return new UserMemoryEntry("id-" + key, "user-1", key, value, "fact", Property.Visibility.global, owner, List.of(), "c", false, 0,
+                Instant.now(), Instant.now());
+    }
+
+    @Test
+    void undo_revertsALongTermValueTheStoreStillHolds() throws Exception {
+        var memory = memoryWithLongTermChange("color", "teal", "red");
+        when(userMemoryStore.getAllEntries("user-1")).thenReturn(List.of(storedEntry("color", "red", "agent-1")));
+
+        conversationService.syncLongTermChanges(memory, memory.getCurrentStep(), true);
+
+        var written = ArgumentCaptor.forClass(UserMemoryEntry.class);
+        verify(userMemoryStore).upsert(written.capture());
+        assertEquals("teal", written.getValue().value());
+        assertEquals(Property.Visibility.global, written.getValue().visibility(), "the stored entry's scope is kept");
+    }
+
+    @Test
+    void undo_leavesAValueChangedSinceAlone() throws Exception {
+        var memory = memoryWithLongTermChange("color", "teal", "red");
+        // another conversation has written "blue" since this turn
+        when(userMemoryStore.getAllEntries("user-1")).thenReturn(List.of(storedEntry("color", "blue", "agent-2")));
+
+        conversationService.syncLongTermChanges(memory, memory.getCurrentStep(), true);
+
+        verify(userMemoryStore, never()).upsert(any());
+        verify(userMemoryStore, never()).deleteEntry(anyString());
+    }
+
+    @Test
+    void undo_deletesALongTermEntryTheUndoneTurnCreated() throws Exception {
+        var memory = memoryWithLongTermChange("diet", null, "vegan");
+        when(userMemoryStore.getAllEntries("user-1")).thenReturn(List.of(storedEntry("diet", "vegan", "agent-1")));
+
+        conversationService.syncLongTermChanges(memory, memory.getCurrentStep(), true);
+
+        verify(userMemoryStore).deleteEntry("id-diet");
+    }
+
+    @Test
+    void redo_reappliesTheLongTermValue() throws Exception {
+        var memory = memoryWithLongTermChange("color", "teal", "red");
+        when(userMemoryStore.getAllEntries("user-1")).thenReturn(List.of(storedEntry("color", "teal", "agent-1")));
+
+        conversationService.syncLongTermChanges(memory, memory.getCurrentStep(), false);
+
+        var written = ArgumentCaptor.forClass(UserMemoryEntry.class);
+        verify(userMemoryStore).upsert(written.capture());
+        assertEquals("red", written.getValue().value());
     }
 }

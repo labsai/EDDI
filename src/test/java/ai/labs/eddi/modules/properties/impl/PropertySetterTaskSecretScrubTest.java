@@ -27,6 +27,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -44,6 +45,8 @@ import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -315,8 +318,8 @@ class PropertySetterTaskSecretScrubTest {
         String bob = memory.getConversationProperties().get("apiKey").getValueString();
 
         assertNotEquals(alice, bob);
-        var refs = org.mockito.ArgumentCaptor.forClass(SecretReference.class);
-        org.mockito.Mockito.verify(secretProvider, org.mockito.Mockito.times(2)).store(refs.capture(), anyString(), anyString(), any());
+        var refs = ArgumentCaptor.forClass(SecretReference.class);
+        verify(secretProvider, times(2)).store(refs.capture(), anyString(), anyString(), any());
         assertNotEquals(refs.getAllValues().get(0).keyName(), refs.getAllValues().get(1).keyName());
         assertTrue(AutoVaultedSecrets.belongsToUser(refs.getAllValues().get(0).keyName(), "user-1"));
         assertTrue(AutoVaultedSecrets.belongsToUser(refs.getAllValues().get(1).keyName(), "user-2"));
@@ -335,6 +338,6 @@ class PropertySetterTaskSecretScrubTest {
         String second = memory.getConversationProperties().get("apiKey").getValueString();
 
         assertNotEquals(first, second);
-        org.mockito.Mockito.verify(secretProvider).delete(SecretReference.parse(first));
+        verify(secretProvider).delete(SecretReference.parse(first));
     }
 }
