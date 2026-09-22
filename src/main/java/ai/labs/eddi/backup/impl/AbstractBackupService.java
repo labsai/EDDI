@@ -5,8 +5,10 @@
 package ai.labs.eddi.backup.impl;
 
 import java.net.URI;
-import java.util.LinkedList;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
@@ -66,8 +68,16 @@ abstract class AbstractBackupService {
             {"eddi://ai.labs.package/packagestore/packages/", "eddi://ai.labs.workflow/workflowstore/workflows/"},
             {"eddi://ai.labs.bot/botstore/bots/", "eddi://ai.labs.agent/agentstore/agents/"},};
 
+    /**
+     * Every distinct resource URI the pattern finds, in the order first seen.
+     * <p>
+     * Distinct because each URI returned is read and created once: a document that
+     * names the same resource twice — a parser step's dictionary that the parser
+     * document names as well — used to create it twice, and every reference was
+     * then repointed at the second copy, leaving the first an orphan.
+     */
     List<URI> extractResourcesUris(String resourceConfigString, Pattern uriPattern) throws CallbackMatcher.CallbackMatcherException {
-        List<URI> ret = new LinkedList<>();
+        Set<URI> ret = new LinkedHashSet<>();
 
         CallbackMatcher callbackMatcher = new CallbackMatcher(uriPattern);
         callbackMatcher.replaceMatches(resourceConfigString, matchResult -> {
@@ -76,7 +86,7 @@ abstract class AbstractBackupService {
             ret.add(URI.create(uri));
             return null;
         });
-        return ret;
+        return new ArrayList<>(ret);
     }
 
     /**

@@ -47,6 +47,12 @@ sides join. Two properties of that key matter:
   `config.uri` is where the engine itself looks; `extensions` carries nested
   things such as the parser's `dictionaries` list, whose entries have a
   `config.uri` of their own and are scanned as well.
+- **A document can name resources too.** A parser document names its own
+  dictionaries; `WorkflowExtensions.scanDocument` keys each under the document
+  (`eddi://ai.labs.parser#0/config/@document/extensions/dictionaries/0/config`),
+  so they are matched, created and updated like the workflow's own. Writing one
+  repoints the parser document that names it, never a workflow step. A resource
+  the workflow already names is keyed once, under the workflow's key.
 - **A step type may repeat.** A workflow with a pre-LLM and a post-LLM
   `eddi://ai.labs.httpcalls` step keeps an entry for each, told apart by the
   `#<occurrence>` ordinal, instead of collapsing onto one.

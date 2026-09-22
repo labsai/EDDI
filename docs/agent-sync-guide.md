@@ -332,10 +332,11 @@ promoted before:
   refused.
 
 A dictionary that *only* a parser document names — not the workflow's parser step
-— lands with the first promotion, but a later sync does not carry changes to it:
-the sync matches what the workflow references, and that dictionary is not one of
-those. The dictionaries the running agent uses are the ones its workflow step
-names, and those are synced every time.
+— is matched like any other resource: the preview lists it under the parser, a
+change to it is written, and one added on the source is created on the target.
+The parser document is then written naming the target's copies, at the versions
+the sync just wrote. A selective export that leaves such a dictionary out still
+imports; the parser keeps naming it as the archive wrote it.
 
 ## Upgrade Strategy (ZIP Import)
 

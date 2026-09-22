@@ -54,6 +54,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -158,6 +159,59 @@ class RestImportServiceParserTravelTest {
     }
 
     @Test
+    @DisplayName("an archive whose parser names a dictionary it does not carry still imports")
+    void parserDictionaryLeftOutOfTheArchive() throws Exception {
+        // A selective export that deselected the dictionary. The parser keeps naming
+        // it as the archive wrote it — the pipeline never loads the document — rather
+        // than the whole import failing over a file the product chose to leave out.
+        stubArchive(false, true);
+
+        var workflowStore = mock(IWorkflowStore.class);
+        when(workflowStore.create(any())).thenReturn(resourceId(NEW_WORKFLOW_ID, 1));
+        var parserStore = mock(IParserStore.class);
+        when(parserStore.create(any())).thenReturn(resourceId(NEW_PARSER_ID, 1));
+        var dictionaryStore = mock(IDictionaryStore.class);
+
+        try (var cdi = stubCdi(IAgentStore.class, stubAgentCreation(),
+                IWorkflowStore.class, workflowStore,
+                IParserStore.class, parserStore,
+                IDictionaryStore.class, dictionaryStore)) {
+            Response response = importService.importAgent(
+                    new ByteArrayInputStream(new byte[0]), "create", null, null, null);
+            assertEquals(201, response.getStatus());
+        }
+
+        verify(dictionaryStore, never()).create(any());
+        var parser = ArgumentCaptor.forClass(ParserConfiguration.class);
+        verify(parserStore).create(parser.capture());
+        assertTrue(mapper.writeValueAsString(parser.getValue()).contains(DICT_URI));
+    }
+
+    @Test
+    @DisplayName("a dictionary both the parser step and its document name is created once")
+    void sharedDictionaryIsCreatedOnce() throws Exception {
+        stubArchive(true, false);
+
+        var workflowStore = mock(IWorkflowStore.class);
+        when(workflowStore.create(any())).thenReturn(resourceId(NEW_WORKFLOW_ID, 1));
+        var parserStore = mock(IParserStore.class);
+        when(parserStore.create(any())).thenReturn(resourceId(NEW_PARSER_ID, 1));
+        var dictionaryStore = mock(IDictionaryStore.class);
+        when(dictionaryStore.create(any())).thenReturn(resourceId(NEW_DICT_ID, 1));
+
+        try (var cdi = stubCdi(IAgentStore.class, stubAgentCreation(),
+                IWorkflowStore.class, workflowStore,
+                IParserStore.class, parserStore,
+                IDictionaryStore.class, dictionaryStore)) {
+            importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null);
+        }
+
+        // Twice would leave the first copy an orphan: every reference is repointed
+        // at the second.
+        verify(dictionaryStore, times(1)).create(any());
+    }
+
+    @Test
     @DisplayName("an archive written before parsers travelled imports as it always did")
     void legacyArchiveKeepsItsParserStep() throws Exception {
         archive(false);
@@ -227,6 +281,40 @@ class RestImportServiceParserTravelTest {
                 Files.writeString(new File(versionDir, PARSER_ID + ".parser.json").toPath(),
                         "{\"extensions\":{\"dictionaries\":[{\"type\":\"eddi://ai.labs.parser.dictionaries.regular\","
                                 + "\"config\":{\"uri\":\"" + DICT_URI + "\"}}]},\"config\":{}}");
+                Files.writeString(new File(versionDir, DICT_ID + ".regulardictionary.json").toPath(),
+                        "{\"words\":[]}");
+            }
+        });
+    }
+
+    /**
+     * A parser step naming a parser document that names a dictionary.
+     *
+     * @param stepNamesDictionaryToo
+     *            whether the step's own extensions name the same dictionary — twice
+     * @param dictionaryLeftOut
+     *            whether the archive leaves the dictionary's file out
+     */
+    private void stubArchive(boolean stepNamesDictionaryToo, boolean dictionaryLeftOut) throws Exception {
+        String dictionaryRef = "{\"type\":\"eddi://ai.labs.parser.dictionaries.regular\",\"config\":{\"uri\":\""
+                + DICT_URI + "\"}}";
+        stubUnzip(dir -> {
+            Files.writeString(new File(dir, AGENT_ORIGIN_ID + ".agent.json").toPath(),
+                    "{\"workflows\":[\"eddi://ai.labs.workflow/workflowstore/workflows/"
+                            + WORKFLOW_ID + "?version=1\"]}");
+            File versionDir = new File(dir, WORKFLOW_ID + "/1");
+            assertTrue(versionDir.mkdirs() || versionDir.isDirectory());
+            Files.writeString(new File(versionDir, WORKFLOW_ID + ".workflow.json").toPath(),
+                    "{\"workflowSteps\":[{\"type\":\"eddi://ai.labs.parser\",\"config\":{\"uri\":\""
+                            + PARSER_URI + "\"}"
+            // Twice: once per mention used to mean once per create.
+                            + (stepNamesDictionaryToo
+                                    ? ",\"extensions\":{\"dictionaries\":[" + dictionaryRef + "," + dictionaryRef + "]}"
+                                    : "")
+                            + "}]}");
+            Files.writeString(new File(versionDir, PARSER_ID + ".parser.json").toPath(),
+                    "{\"extensions\":{\"dictionaries\":[" + dictionaryRef + "]},\"config\":{}}");
+            if (!dictionaryLeftOut) {
                 Files.writeString(new File(versionDir, DICT_ID + ".regulardictionary.json").toPath(),
                         "{\"words\":[]}");
             }

@@ -323,9 +323,16 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                         readExistingConfigs(parserStore, extractResourcesUris(workflowConfigString, PARSER_URI_PATTERN)));
                 writeSelectedConfigs(workflowPath, parserConfigs, PARSER_EXT, selectedIds);
 
-                Map<IResourceId, String> dictionaryConfigs = convertConfigsToString(
-                        readConfigs(regularDictionaryStore,
-                                extractResourcesUris(withParsers(workflowConfigString, parserConfigs), DICTIONARY_URI_PATTERN)));
+                // The workflow's dictionaries must exist, as every extension it names
+                // must. One only a parser document names is carried when it exists:
+                // the pipeline never loads that document, so a dictionary it names
+                // having been deleted must not block the backup.
+                List<URI> workflowDictionaryUris = extractResourcesUris(workflowConfigString, DICTIONARY_URI_PATTERN);
+                Map<IResourceId, Object> dictionaries = new LinkedHashMap<>(
+                        readConfigs(regularDictionaryStore, workflowDictionaryUris));
+                dictionaries.putAll(readExistingConfigs(regularDictionaryStore,
+                        parserOnlyUris(parserConfigs, workflowDictionaryUris, DICTIONARY_URI_PATTERN)));
+                Map<IResourceId, String> dictionaryConfigs = convertConfigsToString(dictionaries);
                 writeSelectedConfigs(workflowPath, dictionaryConfigs, DICTIONARY_EXT, selectedIds);
 
                 Map<IResourceId, String> behaviorConfigs = convertConfigsToString(
@@ -538,7 +545,11 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     private void addExtensionResources(List<ExportableResource> resources, String wfJson,
                                        String parentWorkflowId) {
         addExtensionResourcesForType(resources, wfJson, PARSER_URI_PATTERN, PARSER_EXT, parentWorkflowId);
-        addExtensionResourcesForType(resources, wfJson, DICTIONARY_URI_PATTERN, "regulardictionary", parentWorkflowId);
+        // A row for every dictionary the export writes — the ones a parser document
+        // names included. Without them a selective export, which posts back exactly
+        // the rows it was shown, left those dictionaries out of the archive.
+        addExtensionResourcesForType(resources, wfJson + parserDocumentsText(wfJson), DICTIONARY_URI_PATTERN,
+                "regulardictionary", parentWorkflowId);
         addExtensionResourcesForType(resources, wfJson, BEHAVIOR_URI_PATTERN, "behavior", parentWorkflowId);
         addExtensionResourcesForType(resources, wfJson, HTTPCALLS_URI_PATTERN, "httpcalls", parentWorkflowId);
         addExtensionResourcesForType(resources, wfJson, LANGCHAIN_URI_PATTERN, "langchain", parentWorkflowId);
@@ -916,25 +927,36 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     }
 
     /**
-     * The workflow document and every parser document it references, as one string
-     * to scan.
+     * The URIs the given parser documents name that the workflow does not.
      * <p>
      * A dictionary can be referenced either inline from a parser <em>step</em> — in
      * which case it is already in the workflow JSON — or from a parser
      * <em>document</em> the step points at. Scanning only the workflow found the
      * first kind and missed the second.
      */
-    private static String withParsers(String workflowConfigString, Map<IResourceId, String> parserConfigs) {
+    private List<URI> parserOnlyUris(Map<IResourceId, String> parserConfigs, List<URI> workflowUris, Pattern uriPattern)
+            throws CallbackMatcher.CallbackMatcherException {
         if (parserConfigs == null || parserConfigs.isEmpty()) {
-            return workflowConfigString;
+            return List.of();
         }
-        StringBuilder combined = new StringBuilder(workflowConfigString);
-        for (String parserConfig : parserConfigs.values()) {
-            if (parserConfig != null) {
-                combined.append(System.lineSeparator()).append(parserConfig);
-            }
+        List<URI> uris = new ArrayList<>(
+                extractResourcesUris(String.join(System.lineSeparator(), parserConfigs.values()), uriPattern));
+        uris.removeAll(workflowUris);
+        return uris;
+    }
+
+    /**
+     * The parser documents a workflow names, as text to scan for references; one
+     * that cannot be read contributes nothing.
+     */
+    private String parserDocumentsText(String wfJson) {
+        try {
+            return String.join(System.lineSeparator(), convertConfigsToString(
+                    readExistingConfigs(parserStore, extractResourcesUris(wfJson, PARSER_URI_PATTERN))).values());
+        } catch (Exception e) {
+            LOGGER.debugf("Could not read the parser documents of a workflow for the preview: %s", e.getMessage());
+            return "";
         }
-        return combined.toString();
     }
 
     /**

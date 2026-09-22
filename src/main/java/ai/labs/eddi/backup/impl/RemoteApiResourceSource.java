@@ -658,22 +658,49 @@ public class RemoteApiResourceSource implements IResourceSource {
     private Map<String, ExtensionSourceData> readExtensionsFromWorkflow(WorkflowConfiguration config) {
         Map<String, ExtensionSourceData> extensions = new LinkedHashMap<>();
 
-        for (WorkflowExtensions.ExtensionRef ref : WorkflowExtensions.scan(config)) {
-            String restPath = ref.type().restPath();
-            String extId = ref.resourceId().getId();
-            try {
-                String contentJson = httpGet(restPath + extId + "?version=" + ref.resourceId().getVersion());
-                String name = readRemoteDescriptorName(descriptorsPathOf(restPath), extId);
+        List<WorkflowExtensions.ExtensionRef> refs = WorkflowExtensions.scan(config);
+        for (WorkflowExtensions.ExtensionRef ref : refs) {
+            readRemoteExtension(ref, extensions);
+        }
 
-                extensions.put(ref.key(), new ExtensionSourceData(
-                        extId, name, ref.fileExtension(), ref.stepType(), contentJson));
+        // The dictionaries a parser document names itself. One the workflow already
+        // references is read once, under the workflow's key.
+        Set<String> read = new HashSet<>();
+        extensions.values().forEach(extension -> read.add(extension.sourceId()));
+        for (WorkflowExtensions.ExtensionRef ref : refs) {
+            ExtensionSourceData document = extensions.get(ref.key());
+            if (document == null || !AbstractBackupService.PARSER_EXT.equals(document.type())) {
+                continue;
+            }
+            try {
+                for (WorkflowExtensions.ExtensionRef inner : WorkflowExtensions.scanDocument(ref,
+                        jsonSerialization.deserialize(document.contentJson()))) {
+                    if (read.add(inner.resourceId().getId())) {
+                        readRemoteExtension(inner, extensions);
+                    }
+                }
             } catch (Exception e) {
-                LOGGER.debugf("Could not read remote extension %s: %s",
+                LOGGER.debugf("Could not scan remote parser %s for its dictionaries: %s",
                         LogSanitizer.sanitize(String.valueOf(ref.extensionUri())), LogSanitizer.sanitize(e.getMessage()));
             }
         }
 
         return extensions;
+    }
+
+    private void readRemoteExtension(WorkflowExtensions.ExtensionRef ref, Map<String, ExtensionSourceData> into) {
+        String restPath = ref.type().restPath();
+        String extId = ref.resourceId().getId();
+        try {
+            String contentJson = httpGet(restPath + extId + "?version=" + ref.resourceId().getVersion());
+            String name = readRemoteDescriptorName(descriptorsPathOf(restPath), extId);
+
+            into.put(ref.key(), new ExtensionSourceData(
+                    extId, name, ref.fileExtension(), ref.stepType(), contentJson));
+        } catch (Exception e) {
+            LOGGER.debugf("Could not read remote extension %s: %s",
+                    LogSanitizer.sanitize(String.valueOf(ref.extensionUri())), LogSanitizer.sanitize(e.getMessage()));
+        }
     }
 
     /**

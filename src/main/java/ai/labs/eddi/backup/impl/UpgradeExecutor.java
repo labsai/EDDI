@@ -189,9 +189,6 @@ public class UpgradeExecutor {
                     // diffs only inside the UPDATE branch therefore threw away every
                     // extension change the preview had just shown the operator, and the
                     // response still said 200 OK.
-                    Map<String, URI> extensionUpdates = processWorkflowExtensions(
-                            sourceWf, wfDiff, diffMap, selectedSourceIds, outcome);
-
                     // The workflow document itself changed — reordered steps, a
                     // changed step config, a condition — and the preview said so.
                     // Counting that as "skipped" and writing nothing told the
@@ -199,11 +196,16 @@ public class UpgradeExecutor {
                     boolean adoptSourceConfig = wfDiff.action() == DiffAction.UPDATE
                             && isSelected(selectedSourceIds, sourceWf.sourceId());
 
+                    Set<String> createdForAdoption = new HashSet<>();
+                    Map<String, URI> extensionUpdates = processWorkflowExtensions(
+                            sourceWf, wfDiff, diffMap, selectedSourceIds, adoptSourceConfig, createdForAdoption,
+                            outcome);
+
                     int failuresBefore = outcome.failures.size();
                     URI updatedUri = extensionUpdates.isEmpty() && !adoptSourceConfig
                             ? null
                             : updateMatchedWorkflow(sourceWf, wfDiff, extensionUpdates,
-                                    adoptSourceConfig, outcome);
+                                    adoptSourceConfig, createdForAdoption, outcome);
                     if (updatedUri != null) {
                         updatedWorkflowUris.put(wfDiff.targetId(), updatedUri);
                         // Counted only when nothing failed on the way: a workflow whose
@@ -369,22 +371,33 @@ public class UpgradeExecutor {
      * For each extension in a matched workflow, update the target extension with
      * the source content.
      *
+     * @param adoptSourceConfig
+     *            whether the source workflow's steps will replace the target's; a
+     *            parser the target's step does not name by URI can then be created
+     *            and wired in by the adoption
+     * @param createdForAdoption
+     *            receives the key of every resource created for the adoption to
+     *            place — the only references the adoption may add
      * @return map of canonical extension key → updated extension URI (with new
-     *         version)
+     *         version), for the workflow's own references only — a resource a
+     *         parser document names is repointed in that document, not in the
+     *         workflow
      */
     private Map<String, URI> processWorkflowExtensions(
                                                        WorkflowSourceData sourceWf,
                                                        ResourceDiff wfDiff,
                                                        Map<String, ResourceDiff> diffMap,
                                                        Set<String> selectedSourceIds,
+                                                       boolean adoptSourceConfig,
+                                                       Set<String> createdForAdoption,
                                                        Outcome outcome) {
 
         Map<String, URI> updates = new LinkedHashMap<>();
         // Target resource id -> the URI this run wrote it at, for the parser
         // documents that name those resources and are written after them.
         Map<String, URI> writtenThisRun = new HashMap<>();
-        // Source resource id -> where that resource lives on the target now. The
-        // fallback for a parser document that has no target copy to pair with.
+        // Source resource id -> where that resource lives on the target now: what a
+        // parser document's references are repointed at.
         Map<String, URI> onTargetBySourceId = new HashMap<>();
         // The target workflow's own references, read once and only if a resource
         // turns out to be missing from the target.
@@ -394,6 +407,7 @@ public class UpgradeExecutor {
             String extensionKey = entry.getKey();
             ExtensionSourceData sourceExt = entry.getValue();
             ResourceDiff extDiff = diffMap.get(sourceExt.sourceId());
+            boolean inDocument = WorkflowExtensions.isInDocument(extensionKey);
 
             if (extDiff == null)
                 continue;
@@ -410,15 +424,15 @@ public class UpgradeExecutor {
             if (PARSER_EXT.equals(sourceExt.type())) {
                 // The source's parser names the source's dictionaries. Written as it
                 // is, the target's parser would name ids that exist only on the source
-                // — so each one is swapped for the target's counterpart, on the version
-                // this run just wrote where it wrote one: first those the workflow
-                // itself names, then, by position, any only the parser names.
-                String repointed = NestedReferences.repointBySourceId(sourceExt.contentJson(), onTargetBySourceId);
-                repointed = NestedReferences.repointAgainst(repointed, extDiff.targetContent(), writtenThisRun);
+                // — so each one is swapped for its counterpart on the target, at the
+                // version this run wrote where it wrote one.
                 sourceExt = new ExtensionSourceData(sourceExt.sourceId(), sourceExt.name(), sourceExt.type(),
-                        sourceExt.stepType(), repointed);
-                // Unchanged in itself, but naming a dictionary this run moved on: left
-                // alone it would keep pointing at the version just superseded.
+                        sourceExt.stepType(),
+                        NestedReferences.repointBySourceId(sourceExt.contentJson(), onTargetBySourceId));
+                // The preview already says UPDATE when a dictionary the parser names is
+                // written; this holds the same for a write the preview could not foresee
+                // (a conflict retry that moved a version), so the parser never keeps
+                // naming the version just superseded.
                 if (action == DiffAction.SKIP
                         && NestedReferences.namesAny(extDiff.targetContent(), writtenThisRun.keySet())) {
                     action = DiffAction.UPDATE;
@@ -442,7 +456,9 @@ public class UpgradeExecutor {
                                 sourceExt.sourceId(), sourceExt.name(), outcome)) {
                             outcome.updated++;
                         }
-                        updates.put(extensionKey, written.uri());
+                        if (!inDocument) {
+                            updates.put(extensionKey, written.uri());
+                        }
                         writtenThisRun.put(extDiff.targetId(), written.uri());
                         onTargetBySourceId.put(sourceExt.sourceId(), written.uri());
                         LOGGER.infof("Updated %s '%s' (target=%s, v%d→v%d)",
@@ -454,40 +470,55 @@ public class UpgradeExecutor {
                                 "the store did not accept the update");
                     }
                 } else if (action == DiffAction.CREATE) {
-                    if (targetRefs == null) {
-                        targetRefs = targetReferences(wfDiff);
+                    URI created = null;
+                    if (inDocument) {
+                        // Named by a parser document, which is written after this and
+                        // repointed at it — the one referrer a CREATE needs.
+                        created = createExtension(sourceExt, "a parser document names it", outcome);
+                    } else {
+                        if (targetRefs == null) {
+                            targetRefs = targetReferences(wfDiff);
+                        }
+                        WorkflowExtensions.ExtensionRef targetRef = targetRefs.get(extensionKey);
+                        if (targetRef != null) {
+                            created = healDanglingReference(sourceExt, targetRef, outcome);
+                        } else if (adoptSourceConfig && PARSER_EXT.equals(sourceExt.type())) {
+                            // Both workflows have the parser step; only the target's names
+                            // no parser document. The adoption about to happen writes the
+                            // source's step, which does — and it is repointed at this.
+                            created = createExtension(sourceExt, "the source's parser step names it", outcome);
+                            if (created != null) {
+                                createdForAdoption.add(extensionKey);
+                            }
+                        } else {
+                            // Deliberately NOT created. The only thing that would consume the
+                            // new URI is updateWorkflowExtensionUris, which can repoint a
+                            // reference the target workflow already has — and CREATE means,
+                            // by definition, that it has none. Creating the resource anyway
+                            // left it in the store with nothing pointing at it, counted it as
+                            // created, answered 201, changed the agent's behaviour not at
+                            // all, and previewed the same CREATE again on the next sync, so
+                            // every run added another unreferenced copy.
+                            //
+                            // Cloning the source's step into the target workflow instead was
+                            // considered and rejected: the preview has no row for "a step
+                            // will be added to your existing pipeline", so it would reshape a
+                            // live agent's pipeline off the back of a resource row the
+                            // operator approved as a config change.
+                            outcome.failed(sourceExt.sourceId(), sourceExt.type(), sourceExt.name(),
+                                    "the target workflow has no step referencing this " + sourceExt.type()
+                                            + " — add the step to the target workflow, or import the source"
+                                            + " workflow as a new one, then sync again");
+                            LOGGER.warnf("Skipped %s '%s': the target workflow has no step to reference it",
+                                    LogSanitizer.sanitize(sourceExt.type()), LogSanitizer.sanitize(sourceExt.name()));
+                        }
                     }
-                    int failuresBeforeHeal = outcome.failures.size();
-                    URI healed = healDanglingReference(sourceExt, targetRefs.get(extensionKey), outcome);
-                    if (healed != null) {
-                        updates.put(extensionKey, healed);
-                        onTargetBySourceId.put(sourceExt.sourceId(), healed);
-                        continue;
+                    if (created != null) {
+                        if (!inDocument) {
+                            updates.put(extensionKey, created);
+                        }
+                        onTargetBySourceId.put(sourceExt.sourceId(), created);
                     }
-                    if (outcome.failures.size() > failuresBeforeHeal) {
-                        // It was that case and the recreate failed; that failure says so.
-                        continue;
-                    }
-                    // Deliberately NOT created. The only thing that would consume the
-                    // new URI is updateWorkflowExtensionUris, which can repoint a
-                    // reference the target workflow already has — and CREATE means, by
-                    // definition, that it has none. Creating the resource anyway left
-                    // it in the store with nothing pointing at it, counted it as
-                    // created, answered 201, changed the agent's behaviour not at all,
-                    // and previewed the same CREATE again on the next sync, so every
-                    // run added another unreferenced copy.
-                    //
-                    // Cloning the source's step into the target workflow instead was
-                    // considered and rejected: the preview has no row for "a step will
-                    // be added to your existing pipeline", so it would reshape a live
-                    // agent's pipeline off the back of a resource row the operator
-                    // approved as a config change.
-                    outcome.failed(sourceExt.sourceId(), sourceExt.type(), sourceExt.name(),
-                            "the target workflow has no step referencing this " + sourceExt.type()
-                                    + " — add the step to the target workflow, or import the source"
-                                    + " workflow as a new one, then sync again");
-                    LOGGER.warnf("Skipped %s '%s': the target workflow has no step to reference it",
-                            LogSanitizer.sanitize(sourceExt.type()), LogSanitizer.sanitize(sourceExt.name()));
                 }
             } catch (Exception e) {
                 LOGGER.warnf(e, "Failed to process extension %s '%s'", LogSanitizer.sanitize(sourceExt.type()),
@@ -538,8 +569,8 @@ public class UpgradeExecutor {
 
     /**
      * Recreates a resource the target's workflow step names but the target no
-     * longer has, and returns its URI for the step to be repointed at — or null
-     * when this is not that case.
+     * longer has, and returns its URI for the step to be repointed at; null, with
+     * the reason recorded, when it cannot.
      * <p>
      * The matcher reports such a resource as CREATE, because it could not read the
      * target's copy; the policy above refuses a CREATE, because there is usually no
@@ -554,23 +585,43 @@ public class UpgradeExecutor {
      */
     private URI healDanglingReference(ExtensionSourceData source, WorkflowExtensions.ExtensionRef targetRef,
                                       Outcome outcome) {
-        if (targetRef == null || !targetRef.fileExtension().equals(source.type())) {
+        String couldNotCompare = "the target's " + source.type() + " at " + targetRef.extensionUri()
+                + " could not be read, so it was neither compared nor replaced — sync again";
+        if (!targetRef.fileExtension().equals(source.type())) {
+            outcome.failed(source.sourceId(), source.type(), source.name(), couldNotCompare);
             return null;
         }
         ExtensionStoreOps<Object> ops = resolveExtensionOps(source.type());
         IResourceStore<Object> store = getStore(ops.storeClass());
         try {
             store.read(targetRef.resourceId().getId(), targetRef.resourceId().getVersion());
+            // It is there after all: the preview's read of it failed for some other
+            // reason, and nothing it said about this resource can be trusted.
+            outcome.failed(source.sourceId(), source.type(), source.name(), couldNotCompare);
             return null;
         } catch (IResourceStore.ResourceNotFoundException missing) {
-            // The one case this is for — fall through and recreate it.
+            // The one case this is for — recreate it.
+            return createExtension(source, "the target's workflow names " + targetRef.extensionUri()
+                    + ", which it does not have", outcome);
         } catch (Exception e) {
             LOGGER.debugf("Could not confirm whether %s is missing: %s",
                     LogSanitizer.sanitize(String.valueOf(targetRef.extensionUri())), LogSanitizer.sanitize(e.getMessage()));
+            outcome.failed(source.sourceId(), source.type(), source.name(), couldNotCompare);
             return null;
         }
+    }
 
+    /**
+     * Creates a resource from the source's content, with its descriptor, and counts
+     * it; null, with the failure recorded, when that fails.
+     *
+     * @param why
+     *            what will reference it, for the log
+     */
+    private URI createExtension(ExtensionSourceData source, String why, Outcome outcome) {
         try {
+            ExtensionStoreOps<Object> ops = resolveExtensionOps(source.type());
+            IResourceStore<Object> store = getStore(ops.storeClass());
             IResourceId created = store.create(jsonSerialization.deserialize(source.contentJson(), ops.configClass()));
             URI createdUri = URI.create(ops.resourceUri() + created.getId() + ops.versionQueryParam() + created.getVersion());
             DocumentDescriptor descriptor = createDocumentDescriptor(createdUri);
@@ -578,12 +629,11 @@ public class UpgradeExecutor {
             documentDescriptorStore.createDescriptor(created.getId(), created.getVersion(),
                     resourceAccessGuard.stampNewDescriptor(descriptor));
             outcome.created++;
-            LOGGER.infof("Recreated %s '%s': the target's workflow named %s, which it does not have",
-                    LogSanitizer.sanitize(source.type()), LogSanitizer.sanitize(source.name()),
-                    LogSanitizer.sanitize(String.valueOf(targetRef.extensionUri())));
+            LOGGER.infof("Created %s '%s': %s", LogSanitizer.sanitize(source.type()),
+                    LogSanitizer.sanitize(source.name()), LogSanitizer.sanitize(why));
             return createdUri;
         } catch (Exception e) {
-            LOGGER.warnf(e, "Failed to recreate %s '%s'", LogSanitizer.sanitize(source.type()),
+            LOGGER.warnf(e, "Failed to create %s '%s'", LogSanitizer.sanitize(source.type()),
                     LogSanitizer.sanitize(source.name()));
             outcome.failed(source.sourceId(), source.type(), source.name(), e);
             return null;
@@ -890,7 +940,8 @@ public class UpgradeExecutor {
      */
     private URI updateMatchedWorkflow(WorkflowSourceData sourceWf, ResourceDiff wfDiff,
                                       Map<String, URI> extensionUpdates,
-                                      boolean adoptSourceConfig, Outcome outcome) {
+                                      boolean adoptSourceConfig, Set<String> createdForAdoption,
+                                      Outcome outcome) {
         String workflowId = wfDiff.targetId();
         Integer workflowVersion = wfDiff.targetVersion();
         try {
@@ -910,7 +961,7 @@ public class UpgradeExecutor {
                 LOGGER.warnf("Workflow %s changed in the source but its current version could not be read —"
                         + " its steps are left as they are", LogSanitizer.sanitize(workflowId));
             } else if (adoptSourceConfig && hasSteps(sourceWf.config())) {
-                refusedAdoption = adoptableSourceConfig(sourceWf.config(), targetRefs);
+                refusedAdoption = adoptableSourceConfig(sourceWf.config(), targetRefs, createdForAdoption);
                 if (refusedAdoption == null) {
                     configToWrite = sourceWf.config();
                 }
@@ -989,9 +1040,12 @@ public class UpgradeExecutor {
      * @return null when the source config can be adopted, otherwise the reason for
      *         the operator
      */
-    private String adoptableSourceConfig(WorkflowConfiguration sourceConfig, Map<String, URI> targetRefs) {
+    private String adoptableSourceConfig(WorkflowConfiguration sourceConfig, Map<String, URI> targetRefs,
+                                         Set<String> createdForAdoption) {
         for (WorkflowExtensions.ExtensionRef ref : WorkflowExtensions.scan(sourceConfig)) {
-            if (!targetRefs.containsKey(ref.key())) {
+            // A reference whose resource this run created for the adoption to place
+            // is placed like any other.
+            if (!targetRefs.containsKey(ref.key()) && !createdForAdoption.contains(ref.key())) {
                 return "the source workflow's steps were not applied: it references a " + ref.fileExtension()
                         + " at '" + ref.key() + "' that the target workflow does not have"
                         + " — add the step to the target workflow, or import the source workflow as a new one";

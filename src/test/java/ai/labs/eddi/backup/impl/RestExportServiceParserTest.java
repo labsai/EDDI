@@ -5,6 +5,8 @@
 package ai.labs.eddi.backup.impl;
 
 import ai.labs.eddi.backup.IZipArchive;
+import ai.labs.eddi.backup.model.ExportPreview;
+import ai.labs.eddi.backup.model.ExportPreview.ExportableResource;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.apicalls.IApiCallsStore;
@@ -178,5 +180,34 @@ class RestExportServiceParserTest {
         assertFalse(archivedFiles.stream().anyMatch(f -> f.endsWith(PARSER_FILE)), "got " + archivedFiles);
         assertTrue(archivedFiles.stream().anyMatch(f -> f.endsWith(WORKFLOW_ID + ".workflow.json")),
                 "the rest of the agent must still be exported, got " + archivedFiles);
+    }
+
+    @Test
+    @DisplayName("a selective export of every previewed row still carries the dictionary only the parser names")
+    void selectiveExportCarriesTheParsersDictionary() {
+        // The Manager posts back exactly the rows the preview showed. Without a row
+        // for this dictionary it was left out, and the archive's parser then named a
+        // dictionary the archive did not carry.
+        ExportPreview preview = exportService.previewExport(AGENT_ID, 1);
+        assertTrue(preview.resources().stream().anyMatch(row -> DICT_ID.equals(row.resourceId())),
+                "the preview must list the dictionary the parser names, got " + preview.resources());
+
+        String everyRow = String.join(",", preview.resources().stream().map(ExportableResource::resourceId).toList());
+        Response response = exportService.exportAgent(AGENT_ID, 1, everyRow, null, null);
+
+        assertEquals(200, response.getStatus());
+        assertTrue(archivedFiles.stream().anyMatch(f -> f.endsWith(DICT_FILE)), "got " + archivedFiles);
+    }
+
+    @Test
+    @DisplayName("a dictionary only the parser names that no longer exists is left out, not fatal")
+    void missingParserDictionaryDoesNotFailTheExport() throws Exception {
+        when(dictionaryStore.read(DICT_ID, 1)).thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+
+        Response response = exportService.exportAgent(AGENT_ID, 1, null, null, null);
+
+        assertEquals(200, response.getStatus());
+        assertTrue(archivedFiles.stream().anyMatch(f -> f.endsWith(PARSER_FILE)), "got " + archivedFiles);
+        assertFalse(archivedFiles.stream().anyMatch(f -> f.endsWith(DICT_FILE)), "got " + archivedFiles);
     }
 }

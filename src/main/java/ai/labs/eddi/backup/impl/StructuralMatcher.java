@@ -236,6 +236,23 @@ public class StructuralMatcher {
         Map<String, ExtensionSourceData> sourceExtensions = sourceWf.extensions();
         Map<String, TargetExtension> targetExtensions = readTargetExtensions(targetId, targetVersion);
 
+        // Where each matched source resource lives on the target. A parser document
+        // names its dictionaries by id, and those ids differ between instances by
+        // construction; compared as written, every parser that names one would read
+        // as changed on every sync.
+        Map<String, URI> onTarget = new HashMap<>();
+        for (Map.Entry<String, ExtensionSourceData> entry : sourceExtensions.entrySet()) {
+            TargetExtension targetExt = targetExtensions.get(entry.getKey());
+            URI uri = targetExt == null
+                    ? null
+                    : WorkflowExtensions.resourceUri(entry.getValue().type(), targetExt.id, targetExt.version);
+            if (uri != null) {
+                onTarget.put(entry.getValue().sourceId(), uri);
+            }
+        }
+
+        List<ResourceDiff> extensionDiffs = new ArrayList<>();
+        Set<String> changing = new HashSet<>();
         for (Map.Entry<String, ExtensionSourceData> entry : sourceExtensions.entrySet()) {
             String extensionKey = entry.getKey();
             ExtensionSourceData sourceExt = entry.getValue();
@@ -244,32 +261,58 @@ public class StructuralMatcher {
             if (targetExt != null) {
                 // Matched by step type + occurrence
                 String tgtContent = targetExt.contentJson;
-                // A parser document names its dictionaries by id, and those ids differ
-                // between instances by construction. Compared as written, every parser
-                // that names a dictionary would read as changed on every sync.
                 String srcContent = AbstractBackupService.PARSER_EXT.equals(sourceExt.type())
-                        ? NestedReferences.repointAgainst(sourceExt.contentJson(), tgtContent, Map.of())
+                        ? NestedReferences.repointBySourceId(sourceExt.contentJson(), onTarget)
                         : sourceExt.contentJson();
                 DiffAction extAction = contentEquals(secretNeutral(srcContent, tgtContent), tgtContent)
                         ? DiffAction.SKIP
                         : DiffAction.UPDATE;
 
-                diffs.add(new ResourceDiff(
+                extensionDiffs.add(new ResourceDiff(
                         sourceExt.sourceId(), sourceExt.type(), sourceExt.name(),
                         extAction, targetExt.id, targetExt.version, "type",
                         includeContent ? srcContent : null,
                         includeContent ? tgtContent : null, -1));
+                if (extAction != DiffAction.SKIP) {
+                    changing.add(sourceExt.sourceId());
+                }
             } else {
                 // No match — new extension type in this workflow
-                diffs.add(new ResourceDiff(
+                extensionDiffs.add(new ResourceDiff(
                         sourceExt.sourceId(), sourceExt.type(), sourceExt.name(),
                         DiffAction.CREATE, null, null, null,
                         includeContent ? sourceExt.contentJson() : null,
                         null, -1));
+                changing.add(sourceExt.sourceId());
             }
         }
 
+        // A parser document unchanged in itself still has to be written when a
+        // dictionary it names is: it names that dictionary by version, and the sync
+        // moves the dictionary to a new one. Saying SKIP here and writing it anyway
+        // would make the result disagree with the preview the operator approved.
+        for (ResourceDiff diff : extensionDiffs) {
+            ExtensionSourceData sourceExt = findBySourceId(sourceExtensions, diff.sourceId());
+            if (diff.action() == DiffAction.SKIP && sourceExt != null
+                    && AbstractBackupService.PARSER_EXT.equals(sourceExt.type())
+                    && NestedReferences.namesAny(sourceExt.contentJson(), changing)) {
+                diff = new ResourceDiff(diff.sourceId(), diff.resourceType(), diff.name(), DiffAction.UPDATE,
+                        diff.targetId(), diff.targetVersion(), diff.matchStrategy(), diff.sourceContent(),
+                        diff.targetContent(), diff.workflowIndex());
+            }
+            diffs.add(diff);
+        }
+
         return diffs;
+    }
+
+    private static ExtensionSourceData findBySourceId(Map<String, ExtensionSourceData> extensions, String sourceId) {
+        for (ExtensionSourceData extension : extensions.values()) {
+            if (extension.sourceId().equals(sourceId)) {
+                return extension;
+            }
+        }
+        return null;
     }
 
     private List<ResourceDiff> buildUnmatchedWorkflowDiffs(WorkflowSourceData sourceWf) {
@@ -380,6 +423,17 @@ public class StructuralMatcher {
     private record TargetExtension(String id, int version, String contentJson) {
     }
 
+    private void readTargetExtension(WorkflowExtensions.ExtensionRef ref, Map<String, TargetExtension> into) {
+        try {
+            Object extConfig = readTypedExtension(ref);
+            String json = serializeSafe(extConfig);
+            into.put(ref.key(), new TargetExtension(
+                    ref.resourceId().getId(), ref.resourceId().getVersion(), json));
+        } catch (Exception e) {
+            LOGGER.warnf(e, "Could not read target extension %s", ref.extensionUri());
+        }
+    }
+
     /**
      * Reads all extensions a target workflow references, keyed by the canonical
      * {@link WorkflowExtensions} key. The URI of each extension is read from the
@@ -398,14 +452,30 @@ public class StructuralMatcher {
             return result;
         }
 
-        for (WorkflowExtensions.ExtensionRef ref : WorkflowExtensions.scan(wfConfig)) {
+        List<WorkflowExtensions.ExtensionRef> refs = WorkflowExtensions.scan(wfConfig);
+        for (WorkflowExtensions.ExtensionRef ref : refs) {
+            readTargetExtension(ref, result);
+        }
+
+        // The dictionaries the target's parser documents name themselves, keyed the
+        // way the source keys them. One the workflow already references is read once,
+        // under the workflow's key.
+        Set<String> read = new HashSet<>();
+        result.values().forEach(extension -> read.add(extension.id));
+        for (WorkflowExtensions.ExtensionRef ref : refs) {
+            TargetExtension document = result.get(ref.key());
+            if (document == null || !AbstractBackupService.PARSER_EXT.equals(ref.fileExtension())) {
+                continue;
+            }
             try {
-                Object extConfig = readTypedExtension(ref);
-                String json = serializeSafe(extConfig);
-                result.put(ref.key(), new TargetExtension(
-                        ref.resourceId().getId(), ref.resourceId().getVersion(), json));
+                for (WorkflowExtensions.ExtensionRef inner : WorkflowExtensions.scanDocument(ref,
+                        jsonSerialization.deserialize(document.contentJson))) {
+                    if (read.add(inner.resourceId().getId())) {
+                        readTargetExtension(inner, result);
+                    }
+                }
             } catch (Exception e) {
-                LOGGER.warnf(e, "Could not read target extension %s", ref.extensionUri());
+                LOGGER.warnf(e, "Could not scan target parser %s for its dictionaries", ref.extensionUri());
             }
         }
 

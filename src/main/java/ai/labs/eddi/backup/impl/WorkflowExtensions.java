@@ -52,12 +52,24 @@ import static ai.labs.eddi.backup.impl.AbstractBackupService.RAG_EXT;
  * workflow with two {@code eddi://ai.labs.httpcalls} steps keeps both instead
  * of collapsing them onto one key.
  *
+ * <h3>References inside a document</h3> A parser document names its own
+ * dictionaries. {@link #scanDocument} finds them under the parser's key plus
+ * {@value #DOCUMENT_MARKER} and the path inside the document, e.g.
+ * {@code eddi://ai.labs.parser#0/config/@document/extensions/dictionaries/0/config}.
+ * Both sides derive those keys the same way, so such a dictionary is matched,
+ * previewed, created and updated like any other resource — only it is
+ * referenced from the parser document, not from the workflow, so nothing in the
+ * workflow is repointed for it ({@link #isInDocument}).
+ *
  * @since 6.0.0
  */
 final class WorkflowExtensions {
 
     /** The map key under which a workflow step stores its extension URI. */
     static final String KEY_URI = "uri";
+
+    /** Separates a document's own key from the path of a reference inside it. */
+    static final String DOCUMENT_MARKER = "/@document";
 
     /** Guards against a pathological (or cyclic-looking) nested config. */
     private static final int MAX_DEPTH = 10;
@@ -140,6 +152,20 @@ final class WorkflowExtensions {
         }
     }
 
+    /**
+     * The versioned resource URI of a resource of this file-extension type, or null
+     * for a type that is not registered.
+     */
+    static URI resourceUri(String fileExtension, String resourceId, int version) {
+        for (ExtensionType type : BY_AUTHORITY.values()) {
+            if (type.fileExtension().equals(fileExtension)) {
+                return URI.create("eddi://" + type.resourceAuthority() + type.restPath() + resourceId
+                        + "?version=" + version);
+            }
+        }
+        return null;
+    }
+
     /** Metadata for the type of resource a URI addresses, or null if unknown. */
     static ExtensionType typeOf(URI resourceUri) {
         if (resourceUri == null) {
@@ -174,6 +200,36 @@ final class WorkflowExtensions {
             collect(refs, step.getExtensions(), base + "/extensions", i, stepType, 0);
         }
         return refs;
+    }
+
+    /**
+     * The resources a referenced document names itself — a parser document's
+     * dictionaries — keyed under the document's own key.
+     * <p>
+     * Documents are not followed further: a reference to another parser inside a
+     * parser document is left out, which also keeps a self-referencing document
+     * from recursing.
+     *
+     * @param document
+     *            the referenced document, parsed into maps and lists
+     */
+    static List<ExtensionRef> scanDocument(ExtensionRef owner, Object document) {
+        List<ExtensionRef> refs = new ArrayList<>();
+        if (owner == null || document == null) {
+            return refs;
+        }
+        collect(refs, document, owner.key() + DOCUMENT_MARKER, owner.stepIndex(), owner.stepType(), 0);
+        refs.removeIf(ref -> PARSER_EXT.equals(ref.fileExtension()));
+        return refs;
+    }
+
+    /**
+     * Whether a key names a reference held inside a document rather than by the
+     * workflow itself. Writing such a resource repoints the document that names it,
+     * never a workflow step.
+     */
+    static boolean isInDocument(String key) {
+        return key != null && key.contains(DOCUMENT_MARKER + "/");
     }
 
     @SuppressWarnings("unchecked")

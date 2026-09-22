@@ -14,6 +14,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -41,63 +42,55 @@ class NestedReferencesTest {
     }
 
     @Test
-    @DisplayName("each source reference becomes the target's reference at the same position")
-    void pairsByPosition() {
+    @DisplayName("each reference becomes its counterpart on the target, whatever the version it named")
+    void repointsBySourceId() {
         String source = parser(DICT + SOURCE_A + "?version=4", DICT + SOURCE_B + "?version=1");
-        String target = parser(DICT + TARGET_A + "?version=2", DICT + TARGET_B + "?version=7");
 
-        assertEquals(target, NestedReferences.repointAgainst(source, target, Map.of()),
-                "the same parser on both sides must compare equal once its ids are the target's");
+        String repointed = NestedReferences.repointBySourceId(source, Map.of(
+                SOURCE_A, URI.create(DICT + TARGET_A + "?version=2"),
+                SOURCE_B, URI.create(DICT + TARGET_B + "?version=7")));
+
+        assertEquals(parser(DICT + TARGET_A + "?version=2", DICT + TARGET_B + "?version=7"), repointed);
     }
 
     @Test
-    @DisplayName("a dictionary this run wrote is named at the version it was written at")
-    void movesOntoTheVersionJustWritten() {
-        String source = parser(DICT + SOURCE_A + "?version=4");
-        String target = parser(DICT + TARGET_A + "?version=2");
-
-        String repointed = NestedReferences.repointAgainst(source, target,
-                Map.of(TARGET_A, URI.create(DICT + TARGET_A + "?version=3")));
-
-        assertEquals(parser(DICT + TARGET_A + "?version=3"), repointed);
-    }
-
-    @Test
-    @DisplayName("documents that do not line up are left as the source wrote them")
-    void mismatchedCountIsNotGuessed() {
+    @DisplayName("a reference with no counterpart is left as it is, so the document still reads as changed")
+    void unmatchedReferenceIsKept() {
         String source = parser(DICT + SOURCE_A + "?version=1", DICT + SOURCE_B + "?version=1");
-        String target = parser(DICT + TARGET_A + "?version=1");
 
-        assertSame(source, NestedReferences.repointAgainst(source, target, Map.of()),
-                "a dictionary added on the source is a change the preview has to show");
+        String repointed = NestedReferences.repointBySourceId(source,
+                Map.of(SOURCE_A, URI.create(DICT + TARGET_A + "?version=2")));
+
+        assertEquals(parser(DICT + TARGET_A + "?version=2", DICT + SOURCE_B + "?version=1"), repointed);
     }
 
     @Test
-    @DisplayName("a position naming a different kind of resource is not paired")
-    void mismatchedTypeIsNotGuessed() {
-        String source = parser(DICT + SOURCE_A + "?version=1");
-        String target = parser(RULES + TARGET_A + "?version=1");
-
-        assertSame(source, NestedReferences.repointAgainst(source, target, Map.of()));
-    }
-
-    @Test
-    @DisplayName("one source reference paired with two different targets is not guessed either")
-    void conflictingPairingIsNotGuessed() {
-        String source = parser(DICT + SOURCE_A + "?version=1", DICT + SOURCE_A + "?version=1");
-        String target = parser(DICT + TARGET_A + "?version=1", DICT + TARGET_B + "?version=1");
-
-        assertSame(source, NestedReferences.repointAgainst(source, target, Map.of()));
-    }
-
-    @Test
-    @DisplayName("with no target copy, or nothing to pair, the source comes back unchanged")
-    void nothingToPair() {
+    @DisplayName("a counterpart of a different kind of resource is never substituted")
+    void differentTypeIsNotSubstituted() {
         String source = parser(DICT + SOURCE_A + "?version=1");
 
-        assertSame(source, NestedReferences.repointAgainst(source, null, Map.of()));
-        String empty = parser();
-        assertSame(empty, NestedReferences.repointAgainst(empty, parser(), Map.of()));
+        assertSame(source, NestedReferences.repointBySourceId(source,
+                Map.of(SOURCE_A, URI.create(RULES + TARGET_A + "?version=1"))));
+    }
+
+    @Test
+    @DisplayName("nothing to swap hands back the very same document")
+    void nothingToSwap() {
+        String source = parser(DICT + SOURCE_A + "?version=1");
+
+        assertSame(source, NestedReferences.repointBySourceId(source, Map.of()));
+        assertSame(source, NestedReferences.repointBySourceId(source,
+                Map.of(SOURCE_B, URI.create(DICT + TARGET_B + "?version=1"))));
+        assertNull(NestedReferences.repointBySourceId(null, Map.of()));
+    }
+
+    @Test
+    @DisplayName("a version is swapped whole: version=1 is never read as the start of version=10")
+    void versionIsMatchedWhole() {
+        String source = parser(DICT + SOURCE_A + "?version=10");
+
+        assertEquals(parser(DICT + TARGET_A + "?version=3"), NestedReferences.repointBySourceId(source,
+                Map.of(SOURCE_A, URI.create(DICT + TARGET_A + "?version=3"))));
     }
 
     @Test

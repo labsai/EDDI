@@ -231,30 +231,57 @@ public class ZipResourceSource implements IResourceSource {
     private Map<String, ExtensionSourceData> readExtensions(Path workflowDir, WorkflowConfiguration config) {
         Map<String, ExtensionSourceData> extensions = new LinkedHashMap<>();
 
-        for (WorkflowExtensions.ExtensionRef ref : WorkflowExtensions.scan(config)) {
+        List<WorkflowExtensions.ExtensionRef> refs = WorkflowExtensions.scan(config);
+        for (WorkflowExtensions.ExtensionRef ref : refs) {
+            readExtension(workflowDir, ref, extensions);
+        }
+
+        // The dictionaries a parser document names itself. One the workflow already
+        // references is read once, under the workflow's key.
+        Set<String> read = new HashSet<>();
+        extensions.values().forEach(extension -> read.add(extension.sourceId()));
+        for (WorkflowExtensions.ExtensionRef ref : refs) {
+            ExtensionSourceData document = extensions.get(ref.key());
+            if (document == null || !AbstractBackupService.PARSER_EXT.equals(document.type())) {
+                continue;
+            }
             try {
-                String fileExtension = ref.fileExtension();
-                Path resourcePath = Paths.get(FileUtilities.buildPath(
-                        workflowDir.toString(),
-                        ref.resourceId().getId() + "." + fileExtension + ".json"));
-
-                if (!Files.exists(resourcePath)) {
-                    LOGGER.debugf("Workflow references %s but the archive does not contain %s",
-                            ref.extensionUri(), resourcePath.getFileName());
-                    continue;
+                for (WorkflowExtensions.ExtensionRef inner : WorkflowExtensions.scanDocument(ref,
+                        jsonSerialization.deserialize(document.contentJson()))) {
+                    if (read.add(inner.resourceId().getId())) {
+                        readExtension(workflowDir, inner, extensions);
+                    }
                 }
-
-                String contentJson = readFile(resourcePath);
-                String name = readNameFromDescriptor(workflowDir, ref.resourceId().getId());
-
-                extensions.put(ref.key(), new ExtensionSourceData(
-                        ref.resourceId().getId(), name, fileExtension, ref.stepType(), contentJson));
             } catch (Exception e) {
-                LOGGER.debugf("Failed to read extension %s: %s", ref.extensionUri(), e.getMessage());
+                LOGGER.debugf("Failed to scan parser %s for its dictionaries: %s", ref.extensionUri(), e.getMessage());
             }
         }
 
         return extensions;
+    }
+
+    private void readExtension(Path workflowDir, WorkflowExtensions.ExtensionRef ref,
+                               Map<String, ExtensionSourceData> extensions) {
+        try {
+            String fileExtension = ref.fileExtension();
+            Path resourcePath = Paths.get(FileUtilities.buildPath(
+                    workflowDir.toString(),
+                    ref.resourceId().getId() + "." + fileExtension + ".json"));
+
+            if (!Files.exists(resourcePath)) {
+                LOGGER.debugf("Workflow references %s but the archive does not contain %s",
+                        ref.extensionUri(), resourcePath.getFileName());
+                return;
+            }
+
+            String contentJson = readFile(resourcePath);
+            String name = readNameFromDescriptor(workflowDir, ref.resourceId().getId());
+
+            extensions.put(ref.key(), new ExtensionSourceData(
+                    ref.resourceId().getId(), name, fileExtension, ref.stepType(), contentJson));
+        } catch (Exception e) {
+            LOGGER.debugf("Failed to read extension %s: %s", ref.extensionUri(), e.getMessage());
+        }
     }
 
     private Path findVersionDir(String workflowId, String version) {

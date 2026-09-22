@@ -20,13 +20,19 @@ What that took, beyond registering the type:
   never looked inside a document. A parser document holds its dictionaries' ids
   itself, and those differ between instances by construction, so compared as
   written it read as changed on every sync and was then written with the source's
-  ids. [`NestedReferences`](../../src/main/java/ai/labs/eddi/backup/impl/NestedReferences.java)
-  pairs them — by position against the target's copy, which is how the workflow
-  already pairs steps, and by source id for the dictionaries the workflow itself
-  names. [`UpgradeExecutor`](../../src/main/java/ai/labs/eddi/backup/impl/UpgradeExecutor.java)
+  ids. The dictionaries a parser document names are now resources of their own in
+  the match: [`WorkflowExtensions.scanDocument`](../../src/main/java/ai/labs/eddi/backup/impl/WorkflowExtensions.java)
+  keys each one under the document, both sources and the target derive the same
+  keys, and the preview, the create and the update treat them like any other
+  resource. [`NestedReferences`](../../src/main/java/ai/labs/eddi/backup/impl/NestedReferences.java)
+  then swaps each reference in the parser for its matched counterpart, by source
+  id. [`UpgradeExecutor`](../../src/main/java/ai/labs/eddi/backup/impl/UpgradeExecutor.java)
   writes parser documents after the dictionaries, so a parser names the version
-  the run just wrote, and writes one the preview called unchanged when a
-  dictionary it names moved on.
+  the run just wrote, and the preview already reports such a parser as UPDATE.
+- **A resource named twice is created once.** `extractResourcesUris` returned a
+  URI once per mention, so a dictionary both a parser step and its document named
+  was created twice and the first copy orphaned. It now returns each distinct URI
+  once, for every resource type.
 - **Nothing that used to import stops importing.** Every archive written before
   this carries the parser step without the document. `RestImportService` imports
   only the parser documents an archive actually carries; one it lacks leaves the
@@ -58,3 +64,8 @@ now says what travels, what does not, and how to fill a promoted knowledge base.
 `UpgradeExecutorParserTest` — each behaviour above mutation-checked (the fix
 reverted, the test confirmed red).
 
+```decision-log
+| 2026-09-28 | A parser document's dictionaries are matched as resources keyed under the document, and the parser repointed by source id — never paired by position | Pairing a document's references by position with the target's copy made a dictionary *replaced* by another at the same place compare equal, so the preview said SKIP and nothing was synced; keying them lets the ordinary machinery diff, create and update them | Positional pairing against the target's copy (the first version of this change — silent on a replacement); pairing by the target descriptor's originId (only covers resources an import created, and still leaves new dictionaries uncreated) |
+| 2026-09-28 | An archive without a parser document imports its parser step unchanged, instead of pruning the step as a `create` does for any other missing config | Every archive written before parser documents travelled lacks the file; pruning would leave the agent unable to parse input, and a `merge` would fail with no local copy to answer the reference. The pipeline never loads the document, so the old behaviour was harmless | Treating parser like every other type (breaks every existing archive); failing with a message (the operator cannot act on it — the product wrote the archive) |
+| 2026-09-28 | A sync recreates a resource the target's step names but the target no longer has — only when the store confirms it is gone | Every agent promoted before parser documents travelled names a parser its instance never had; refusing that CREATE would fail every later sync of it | Reporting it as a failure (permanent 207 for every previously promoted agent); recreating on any read failure (a timeout would orphan a live resource) |
+```

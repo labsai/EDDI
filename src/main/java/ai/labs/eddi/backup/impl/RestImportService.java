@@ -261,8 +261,9 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         addDiffsForUris(diffs, parserUris, PARSER_EXT, workflowDir);
         // The dictionaries the import creates include those only a parser document
         // names, so the preview has to find them in the same place.
-        addDiffsForType(diffs, workflowFileString + archivedText(parserUris, PARSER_EXT, workflowDir),
-                DICTIONARY_URI_PATTERN, DICTIONARY_EXT, workflowDir);
+        addDiffsForUris(diffs, withCarried(extractResourcesUris(workflowFileString, DICTIONARY_URI_PATTERN),
+                extractResourcesUris(archivedText(parserUris, PARSER_EXT, workflowDir), DICTIONARY_URI_PATTERN),
+                DICTIONARY_EXT, workflowDir), DICTIONARY_EXT, workflowDir);
         addDiffsForType(diffs, workflowFileString, BEHAVIOR_URI_PATTERN, BEHAVIOR_EXT, workflowDir);
         addDiffsForType(diffs, workflowFileString, HTTPCALLS_URI_PATTERN, HTTPCALLS_EXT, workflowDir);
         addDiffsForType(diffs, workflowFileString, LANGCHAIN_URI_PATTERN, LLM_EXT, workflowDir);
@@ -752,9 +753,13 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                                 isMerge);
 
                         // ... for dictionaries, named by the workflow's own steps or by
-                        // one of those parser documents
-                        List<URI> dictionaryUris = extractResourcesUris(
-                                workflowFileString + serializeForScan(parserConfigs), DICTIONARY_URI_PATTERN);
+                        // one of those parser documents. One only a parser document names
+                        // is imported when the archive carries it: a selective export may
+                        // have left it out, and the parser then keeps naming it as the
+                        // archive wrote it rather than failing the whole import.
+                        List<URI> dictionaryUris = withCarried(extractResourcesUris(workflowFileString, DICTIONARY_URI_PATTERN),
+                                extractResourcesUris(serializeForScan(parserConfigs), DICTIONARY_URI_PATTERN),
+                                DICTIONARY_EXT, workflowPath);
                         List<URI> newDictionaryUris = createOrUpdateResources(
                                 readResources(dictionaryUris, workflowPath, DICTIONARY_EXT, DictionaryConfiguration.class, isMerge),
                                 dictionaryUris, isMerge,
@@ -1165,18 +1170,30 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      */
     private List<URI> carriedParserUris(String workflowFileString, Path workflowPath)
             throws CallbackMatcher.CallbackMatcherException {
-        List<URI> carried = new ArrayList<>();
-        for (URI uri : extractResourcesUris(workflowFileString, PARSER_URI_PATTERN)) {
+        return withCarried(List.of(), extractResourcesUris(workflowFileString, PARSER_URI_PATTERN), PARSER_EXT,
+                workflowPath);
+    }
+
+    /**
+     * {@code required}, followed by those of {@code optional} the archive carries a
+     * file for and {@code required} does not already name.
+     */
+    private List<URI> withCarried(List<URI> required, List<URI> optional, String extension, Path workflowPath) {
+        List<URI> uris = new ArrayList<>(required);
+        for (URI uri : optional) {
+            if (uris.contains(uri)) {
+                continue;
+            }
             IResourceId resourceId = RestUtilities.extractResourceId(uri);
             if (resourceId != null && resourceId.getId() != null
-                    && Files.exists(createResourcePath(workflowPath, resourceId.getId(), PARSER_EXT))) {
-                carried.add(uri);
+                    && Files.exists(createResourcePath(workflowPath, resourceId.getId(), extension))) {
+                uris.add(uri);
             } else {
-                LOGGER.debugf("Archive carries no parser document for %s - the reference is kept as it is",
+                LOGGER.debugf("Archive carries no %s for %s - the reference is kept as it is", extension,
                         LogSanitizer.sanitize(uri.toString()));
             }
         }
-        return carried;
+        return uris;
     }
 
     /**
@@ -1216,9 +1233,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      * from: a dangling reference for everything that loads the document, the
      * {@code /parser/{parserId}} endpoint among them.
      * <p>
-     * A config that cannot be rewritten is passed through unchanged rather than
-     * dropped: the reference is then still wrong, but the resource is at least
-     * there, and the import reports nothing it did not do.
+     * A config that cannot be rewritten fails the import, which rolls back.
      */
     private <T> List<T> repointReferences(List<T> configs, List<URI> oldUris, List<URI> newUris) {
         if (configs == null || configs.isEmpty() || oldUris.isEmpty()) {
@@ -1240,9 +1255,11 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             String rewritten = replaceURIs(jsonSerialization.serialize(config), oldUris, newUris);
             return (T) jsonSerialization.deserialize(rewritten, config.getClass());
         } catch (Exception e) {
-            LOGGER.warnf("Could not repoint the references of a %s - it keeps the source's ids: %s",
-                    config.getClass().getSimpleName(), LogSanitizer.sanitize(e.getMessage()));
-            return config;
+            // Failing the import, not writing the document with the source's ids: a
+            // 201 for an agent whose parser names dictionaries this instance does not
+            // have would report something the import did not do.
+            throw new IllegalStateException("Could not repoint the references of a "
+                    + config.getClass().getSimpleName() + " at this instance's copies: " + e.getMessage(), e);
         }
     }
 

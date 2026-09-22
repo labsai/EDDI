@@ -16,6 +16,7 @@ import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.configs.dictionary.IDictionaryStore;
 import ai.labs.eddi.configs.dictionary.IRestDictionaryStore;
 import ai.labs.eddi.configs.dictionary.model.DictionaryConfiguration;
 import ai.labs.eddi.configs.parser.IParserStore;
@@ -90,6 +91,7 @@ class UpgradeExecutorParserTest {
     private IRestParserStore parserStore;
     private IRestDictionaryStore dictionaryStore;
     private IParserStore parserDocuments;
+    private IDictionaryStore dictionaryDocuments;
     private UpgradeExecutor executor;
 
     @BeforeEach
@@ -101,6 +103,7 @@ class UpgradeExecutorParserTest {
         parserStore = mock(IRestParserStore.class);
         dictionaryStore = mock(IRestDictionaryStore.class);
         parserDocuments = mock(IParserStore.class);
+        dictionaryDocuments = mock(IDictionaryStore.class);
         IJsonSerialization jsonSerialization = mock(IJsonSerialization.class);
 
         executor = new UpgradeExecutor(agentStore, workflowStore, mock(IRestPromptSnippetStore.class),
@@ -139,14 +142,18 @@ class UpgradeExecutorParserTest {
     @Test
     @DisplayName("a dictionary moved on this run drags its parser onto the new version, with the target's ids")
     void parserFollowsTheDictionaryItNames() throws Exception {
-        // The parser itself did not change — the preview says SKIP — but the
-        // dictionary it names did. Left alone, the target's parser would keep
-        // naming the version this run just superseded.
+        // The parser itself did not change, but the dictionary it names did. The
+        // matcher previews such a parser as UPDATE; the executor holds the same even
+        // when handed a SKIP, so the target's parser never keeps naming the version
+        // this run just superseded.
         givenPreview(DiffAction.UPDATE, DiffAction.SKIP);
 
         UpgradeResult result = withStoresInCdi(() -> executor.executeUpgrade(source(), AGENT_ID, null, null));
 
         assertTrue(result.failures().isEmpty(), "nothing should have failed, got: " + result.failures());
+        // The dictionary, the parser, and the workflow repointed at both.
+        assertEquals(3, result.updated(), "got " + result);
+        assertEquals(0, result.created());
 
         // The dictionary first: the parser is repointed at what that write produced.
         InOrder order = inOrder(dictionaryStore, parserStore);
@@ -171,6 +178,71 @@ class UpgradeExecutorParserTest {
         assertTrue(result.failures().isEmpty(), "got: " + result.failures());
         verify(parserStore, never()).updateParser(anyString(), anyInt(), any());
         verify(dictionaryStore, never()).updateRegularDictionary(anyString(), anyInt(), any());
+    }
+
+    @Test
+    @DisplayName("a dictionary only the parser document names is created, and the parser repointed at it")
+    void dictionaryNamedOnlyByTheParserIsCreated() throws Exception {
+        // Keyed under the parser document, not the workflow: it is created because
+        // the parser is written after it and names it — and nothing in the workflow
+        // is repointed for it, so no "no reference at" failure may follow.
+        givenPreviewWithDocumentDictionary(DiffAction.CREATE);
+        when(dictionaryDocuments.create(any())).thenReturn(resourceId("abcdefabcdefabcdefabcdef", 1));
+
+        UpgradeResult result = withStoresInCdi(() -> executor.executeUpgrade(sourceWithDocumentDictionary(),
+                AGENT_ID, null, null));
+
+        assertTrue(result.failures().isEmpty(), "got: " + result.failures());
+        assertEquals(1, result.created());
+        var written = ArgumentCaptor.forClass(ParserConfiguration.class);
+        verify(parserStore).updateParser(eq(PARSER_T), eq(2), written.capture());
+        String parserJson = mapper.writeValueAsString(written.getValue());
+        assertTrue(parserJson.contains(DICT + "abcdefabcdefabcdefabcdef?version=1"),
+                "the parser must name the dictionary created for it, was: " + parserJson);
+    }
+
+    @Test
+    @DisplayName("a dictionary only the parser document names is updated in place, without touching the workflow")
+    void dictionaryNamedOnlyByTheParserIsUpdated() throws Exception {
+        // Nothing in the workflow names it, so the update must not be handed to the
+        // workflow repointing — which would report "no reference at" for its key.
+        givenPreviewWithDocumentDictionary(DiffAction.UPDATE);
+
+        UpgradeResult result = withStoresInCdi(() -> executor.executeUpgrade(sourceWithDocumentDictionary(),
+                AGENT_ID, null, null));
+
+        assertTrue(result.failures().isEmpty(), "got: " + result.failures());
+        verify(dictionaryStore).updateRegularDictionary(eq(DICT_T), eq(2), any());
+        var written = ArgumentCaptor.forClass(ParserConfiguration.class);
+        verify(parserStore).updateParser(eq(PARSER_T), eq(2), written.capture());
+        assertTrue(mapper.writeValueAsString(written.getValue()).contains(DICT + DICT_T + "?version=3"));
+    }
+
+    @Test
+    @DisplayName("a parser the target's step does not name by URI is created when the source's step is adopted")
+    void parserIsCreatedForAnAdoptedStep() throws Exception {
+        // Both workflows have the parser step; only the target's has no config.uri.
+        // Adopting the source's step brings the reference, and the parser it names
+        // is created for it — instead of the adoption being refused over it.
+        var inlineStep = new WorkflowConfiguration.WorkflowStep();
+        inlineStep.setType(URI.create("eddi://ai.labs.parser"));
+        inlineStep.setExtensions(new LinkedHashMap<>(Map.of("dictionaries", new ArrayList<>(List.of(
+                new LinkedHashMap<>(Map.of("config", new LinkedHashMap<>(Map.of("uri", DICT + DICT_T + "?version=2")))))))));
+        var targetWorkflow = new WorkflowConfiguration();
+        targetWorkflow.setWorkflowSteps(new ArrayList<>(List.of(inlineStep)));
+        when(workflowStore.readWorkflow(WF_ID, 2)).thenReturn(targetWorkflow);
+        when(parserDocuments.create(any())).thenReturn(resourceId("0123456789abcdef01234567", 1));
+        givenPreviewForAdoption();
+
+        UpgradeResult result = withStoresInCdi(() -> executor.executeUpgrade(adoptableSource(), AGENT_ID, null, null));
+
+        assertTrue(result.failures().isEmpty(), "got: " + result.failures());
+        var workflow = ArgumentCaptor.forClass(WorkflowConfiguration.class);
+        verify(workflowStore).updateWorkflow(eq(WF_ID), eq(2), workflow.capture());
+        var step = workflow.getValue().getWorkflowSteps().getFirst();
+        assertEquals(PARSER + "0123456789abcdef01234567?version=1", step.getConfig().get("uri"));
+        assertTrue(String.valueOf(step.getExtensions()).contains(DICT + DICT_T + "?version=2"),
+                "the adopted step must name the target's own dictionary, was: " + step.getExtensions());
     }
 
     @Test
@@ -214,7 +286,10 @@ class UpgradeExecutorParserTest {
         UpgradeResult result = withStoresInCdi(() -> executor.executeUpgrade(source(), AGENT_ID, null, null));
 
         verify(parserDocuments, never()).create(any());
-        assertEquals(1, result.failures().size(), "the CREATE is refused as before, got: " + result.failures());
+        assertEquals(1, result.failures().size(), "got: " + result.failures());
+        assertTrue(result.failures().getFirst().reason().contains("could not be read"),
+                "the reason must say what happened — the step exists, so 'no step' would be wrong: "
+                        + result.failures().getFirst().reason());
     }
 
     // ==================== Fixtures ====================
@@ -250,6 +325,75 @@ class UpgradeExecutorParserTest {
                         "{\"words\":[]}", "{\"words\":[]}", -1));
         when(structuralMatcher.buildPreview(any(), eq(AGENT_ID), eq(true)))
                 .thenReturn(new ImportPreview("src-agent", "Agent", AGENT_ID, "Agent", diffs));
+    }
+
+    private void givenPreviewWithDocumentDictionary(DiffAction dictionaryAction) throws Exception {
+        var diffs = List.of(
+                new ResourceDiff("src-agent", "agent", "Agent", DiffAction.SKIP, AGENT_ID, 3,
+                        "targetAgent", null, null, -1),
+                new ResourceDiff("src-wf", "workflow", "Workflow", DiffAction.SKIP, WF_ID, 2, "position",
+                        null, null, 0),
+                new ResourceDiff("src-parser", "parser", "Parser", DiffAction.UPDATE, PARSER_T, 2, "type",
+                        parserNaming(DICT + DICT_S + "?version=1"), parserNaming(DICT + DICT_T + "?version=2"), -1),
+                dictionaryAction == DiffAction.CREATE
+                        ? new ResourceDiff(DICT_S, "regulardictionary", "Dictionary", DiffAction.CREATE, null, null,
+                                null, "{\"words\":[]}", null, -1)
+                        : new ResourceDiff(DICT_S, "regulardictionary", "Dictionary", dictionaryAction, DICT_T, 2,
+                                "type", "{\"words\":[]}", "{\"words\":[1]}", -1));
+        when(structuralMatcher.buildPreview(any(), eq(AGENT_ID), eq(true)))
+                .thenReturn(new ImportPreview("src-agent", "Agent", AGENT_ID, "Agent", diffs));
+    }
+
+    private IResourceSource sourceWithDocumentDictionary() {
+        var source = mock(IResourceSource.class);
+        var agentConfig = new AgentConfiguration();
+        agentConfig.setWorkflows(new ArrayList<>());
+        when(source.readAgent()).thenReturn(new AgentSourceData("src-agent", "Agent", agentConfig));
+        when(source.readSnippets()).thenReturn(List.of());
+
+        Map<String, ExtensionSourceData> extensions = new LinkedHashMap<>();
+        extensions.put("eddi://ai.labs.parser#0/config",
+                new ExtensionSourceData("src-parser", "Parser", "parser", "eddi://ai.labs.parser",
+                        parserNaming(DICT + DICT_S + "?version=1")));
+        extensions.put("eddi://ai.labs.parser#0/config" + WorkflowExtensions.DOCUMENT_MARKER
+                + "/extensions/dictionaries/0/config",
+                new ExtensionSourceData(DICT_S, "Dictionary", "regulardictionary", "eddi://ai.labs.parser",
+                        "{\"words\":[]}"));
+        when(source.readWorkflows()).thenReturn(List.of(new WorkflowSourceData(
+                "src-wf", "Workflow", 0, new WorkflowConfiguration(), extensions)));
+        return source;
+    }
+
+    private void givenPreviewForAdoption() throws Exception {
+        var diffs = List.of(
+                new ResourceDiff("src-agent", "agent", "Agent", DiffAction.SKIP, AGENT_ID, 3,
+                        "targetAgent", null, null, -1),
+                new ResourceDiff("src-wf", "workflow", "Workflow", DiffAction.UPDATE, WF_ID, 2, "position",
+                        null, null, 0),
+                new ResourceDiff("src-parser", "parser", "Parser", DiffAction.CREATE, null, null, null,
+                        parserNaming(DICT + DICT_S + "?version=1"), null, -1),
+                new ResourceDiff(DICT_S, "regulardictionary", "Dictionary", DiffAction.SKIP, DICT_T, 2, "type",
+                        "{\"words\":[]}", "{\"words\":[]}", -1));
+        when(structuralMatcher.buildPreview(any(), eq(AGENT_ID), eq(true)))
+                .thenReturn(new ImportPreview("src-agent", "Agent", AGENT_ID, "Agent", diffs));
+    }
+
+    /**
+     * A source whose parser step names its parser by URI and its dictionary inline.
+     */
+    private IResourceSource adoptableSource() {
+        var source = source();
+        var step = new WorkflowConfiguration.WorkflowStep();
+        step.setType(URI.create("eddi://ai.labs.parser"));
+        step.setConfig(new LinkedHashMap<>(Map.of("uri", PARSER + "1111222233334444aaaabbbb?version=1")));
+        step.setExtensions(new LinkedHashMap<>(Map.of("dictionaries", new ArrayList<>(List.of(
+                new LinkedHashMap<>(Map.of("config", new LinkedHashMap<>(Map.of("uri", DICT + DICT_S + "?version=1")))))))));
+        var workflow = new WorkflowConfiguration();
+        workflow.setWorkflowSteps(new ArrayList<>(List.of(step)));
+        Map<String, ExtensionSourceData> extensions = source.readWorkflows().getFirst().extensions();
+        when(source.readWorkflows()).thenReturn(List.of(new WorkflowSourceData(
+                "src-wf", "Workflow", 0, workflow, extensions)));
+        return source;
     }
 
     private static IResourceId resourceId(String id, int version) {
@@ -310,6 +454,9 @@ class UpgradeExecutorParserTest {
             var documents = (Instance<IParserStore>) Mockito.mock(Instance.class);
             when(cdi.select(IParserStore.class)).thenReturn(documents);
             when(documents.get()).thenReturn(parserDocuments);
+            var dictionaryDocs = (Instance<IDictionaryStore>) Mockito.mock(Instance.class);
+            when(cdi.select(IDictionaryStore.class)).thenReturn(dictionaryDocs);
+            when(dictionaryDocs.get()).thenReturn(dictionaryDocuments);
             return action.get();
         }
     }
