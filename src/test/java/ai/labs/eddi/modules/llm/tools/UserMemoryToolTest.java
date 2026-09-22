@@ -111,6 +111,85 @@ class UserMemoryToolTest {
         verify(store, never()).upsert(any());
     }
 
+    private static UserMemoryEntry stored(String key, String value, String category, Visibility visibility, String owner, List<String> groups) {
+        return new UserMemoryEntry("id-" + key, "user-1", key, value, category, visibility, owner, groups, "conv-0", false, 0, Instant.now(),
+                Instant.now());
+    }
+
+    /**
+     * Live-reproduced on Claude: a user at the cap wanted to correct a fact, and
+     * reject mode refused — although an update adds no row.
+     */
+    @Test
+    void rememberFact_updatingAnExistingFactAtTheCap_isAllowedEvenInRejectMode() throws Exception {
+        config.setMaxEntriesPerUser(3);
+        config.setOnCapReached("reject");
+        tool = new UserMemoryTool(store, "user-1", "agent-1", "conv-1", List.of(), config);
+        when(store.countEntries("user-1")).thenReturn(3L);
+        when(store.getAllEntries("user-1")).thenReturn(List.of(stored("color", "teal", "fact", Visibility.self, "agent-1", List.of()),
+                stored("city", "Vienna", "fact", Visibility.self, "agent-1", List.of()),
+                stored("pet", "Rex", "fact", Visibility.self, "agent-1", List.of())));
+
+        String update = tool.rememberFact("color", "red", "fact", "self");
+        String newFact = tool.rememberFact("food", "pasta", "fact", "self");
+
+        assertTrue(update.contains("✅ Remembered"), update);
+        assertTrue(newFact.contains("Memory capacity reached"), "a NEW fact is still refused at the cap: " + newFact);
+        verify(store, times(1)).upsert(any());
+    }
+
+    /**
+     * Live-reproduced on Claude with maxWritesPerTurn=2: the model re-saved the two
+     * facts it had already stored (it does not see its earlier tool calls), the
+     * re-saves spent the budget, and the new facts were refused — every turn.
+     */
+    @Test
+    void rememberFact_unchangedReSave_isNotAWriteAndSpendsNoBudget() throws Exception {
+        config.getGuardrails().setMaxWritesPerTurn(2);
+        tool = new UserMemoryTool(store, "user-1", "agent-1", "conv-1", List.of(), config);
+        when(store.getAllEntries("user-1")).thenReturn(List.of(stored("name", "Gregor", "fact", Visibility.self, "agent-1", List.of()),
+                stored("favorite_color", "teal", "preference", Visibility.self, "agent-1", List.of())));
+
+        String reName = tool.rememberFact("name", "Gregor", "fact", "self");
+        String reColor = tool.rememberFact("favorite_color", "teal", "preference", "self");
+        String city = tool.rememberFact("city", "Vienna", "fact", "self");
+        String dog = tool.rememberFact("dog", "Rex", "fact", "self");
+
+        assertTrue(reName.contains("Already remembered"), reName);
+        assertTrue(reColor.contains("Already remembered"), reColor);
+        assertTrue(city.contains("✅ Remembered"), city);
+        assertTrue(dog.contains("✅ Remembered"), dog);
+        verify(store, times(2)).upsert(any());
+    }
+
+    @Test
+    void rememberFact_changedValueOrVisibility_isAWrite() throws Exception {
+        when(store.getAllEntries("user-1")).thenReturn(List.of(stored("lang", "German", "preference", Visibility.self, "agent-1", List.of())));
+
+        assertTrue(tool.rememberFact("lang", "English", "preference", "self").contains("✅ Remembered"));
+        assertTrue(tool.rememberFact("lang", "German", "preference", "group").contains("✅ Remembered"), "self → group is a change");
+        verify(store, times(2)).upsert(any());
+    }
+
+    @Test
+    void rememberFact_sameGroupValueForAnotherGroup_isAWrite() throws Exception {
+        tool = new UserMemoryTool(store, "user-1", "agent-1", "conv-1", List.of("team-2"), config);
+        when(store.getAllEntries("user-1")).thenReturn(List.of(stored("goal", "ship", "fact", Visibility.group, "agent-1", List.of("team-1"))));
+
+        assertTrue(tool.rememberFact("goal", "ship", "fact", "group").contains("✅ Remembered"));
+    }
+
+    @Test
+    void rememberFact_writeLimitMessageTellsTheModelNotToRetry() throws Exception {
+        config.getGuardrails().setMaxWritesPerTurn(1);
+        tool = new UserMemoryTool(store, "user-1", "agent-1", "conv-1", List.of(), config);
+
+        tool.rememberFact("a", "1", "fact", "self");
+        String refused = tool.rememberFact("b", "2", "fact", "self");
+
+        assertTrue(refused.contains("Do not retry this turn"), refused);
+    }
+
     @Test
     void rememberFact_shouldDefaultVisibilityToSelfOnInvalidInput() throws Exception {
         when(store.countEntries("user-1")).thenReturn(0L);

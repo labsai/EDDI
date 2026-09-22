@@ -85,3 +85,12 @@ observed there, and carries a regression test.
   `usermemories` now keeps its value (which also keeps retries idempotent), and an unowned document
   is skipped instead of failed — it stays readable in `properties_migrated_v6`.
   [`PropertiesMigrationService.java`](../../src/main/java/ai/labs/eddi/configs/properties/mongo/PropertiesMigrationService.java)
+- **`rememberFact`: corrections refused at the cap, budget spent on re-saves.** With
+  `onCapReached: "reject"`, updating an existing fact was refused although an update adds no row
+  (tool trace: `rememberFact(color, red)` → "capacity reached"). And models re-save facts they
+  already stored — they do not see earlier tool calls — which spent `maxWritesPerTurn` on
+  re-saves and refused every new fact, turn after turn (reproduced on Claude). The tool now
+  resolves the write's target with the stores' upsert identity first: an unchanged re-save is
+  reported as "already remembered" without writing or spending budget, an update never counts
+  against the cap, and the limit message tells the model not to retry in the same turn.
+  [`UserMemoryTool.java`](../../src/main/java/ai/labs/eddi/modules/llm/tools/UserMemoryTool.java)
