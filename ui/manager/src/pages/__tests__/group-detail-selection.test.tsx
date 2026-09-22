@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
@@ -12,6 +12,10 @@ import { http, HttpResponse } from "msw";
  * Three defects on the Manager's group page, all of them things the Workforce
  * board — the other surface for the same data — already got right.
  */
+
+// The transcript auto-scrolls as a stream arrives; jsdom implements neither.
+window.HTMLElement.prototype.scrollIntoView = vi.fn();
+window.HTMLElement.prototype.scrollTo = vi.fn();
 
 function renderGroupDetail(search = "?version=1", id = "grp1") {
   return renderPage(
@@ -270,6 +274,131 @@ describe("GroupDetailPage — New Discussion", () => {
         "aria-current",
         "true",
       );
+    });
+  });
+});
+
+/**
+ * Rejecting a paused discussion has to leave the page on that discussion.
+ *
+ * The stream hook reports the state the backend puts on `group_complete`, and a
+ * HITL rejection ends a run as REJECTED. The page's settle effect used to list
+ * COMPLETED / AWAITING_APPROVAL / AWAITING_HUMAN_INPUT by hand, so REJECTED
+ * matched nothing: the transcript stayed on the live stream, no conversation
+ * was selected, the composer invited a *new* discussion, the Close action — the
+ * one action a rejected run offers — was unreachable, and the sidebar went on
+ * saying "Awaiting Approval" indefinitely, because the conversation-list poll
+ * only runs while a discussion is IN_PROGRESS/SYNTHESIZING and nothing
+ * invalidated it.
+ *
+ * None of the New Discussion cases above exercise the approve path, which is
+ * how the regression got in: `userClearedRef` is set on approve and only the
+ * settle effect clears it.
+ */
+describe("GroupDetailPage — rejecting a paused discussion", () => {
+  /** An approve/stream that ends the run as REJECTED, as the backend now does. */
+  function rejectionStream() {
+    // The document the page reads changes when the decision lands, exactly as it
+    // does against a real backend: AWAITING_APPROVAL until the resume commits,
+    // REJECTED afterwards. A fixture stuck on one or the other cannot show the
+    // bug, which is about the transition.
+    let decided = false;
+    server.use(
+      http.get("*/groups/:groupId/conversations", () =>
+        HttpResponse.json([
+          {
+            id: "gconv-paused",
+            groupId: "grp1",
+            userId: "manager-user",
+            state: "AWAITING_APPROVAL",
+            originalQuestion: "Fund the modernization grant?",
+            transcript: [],
+            memberConversationIds: {},
+            currentPhaseIndex: 1,
+            currentPhaseName: "Synthesis",
+            synthesizedAnswer: "Recommend funding.",
+            availableActions: [],
+            depth: 0,
+            taskList: null,
+            dynamicMembers: [],
+            createdAgentIds: [],
+            retainedAgentIds: [],
+            created: new Date(Date.now() - 600_000).toISOString(),
+            lastModified: new Date(Date.now() - 60_000).toISOString(),
+          },
+        ]),
+      ),
+      http.get("*/groups/:groupId/conversations/:convId", () =>
+        HttpResponse.json({
+          id: "gconv-paused",
+          groupId: "grp1",
+          userId: "manager-user",
+          state: decided ? "REJECTED" : "AWAITING_APPROVAL",
+          pausedAt: decided ? null : new Date(Date.now() - 60_000).toISOString(),
+          hitlPauseType: decided ? null : "PHASE",
+          pausedPhaseName: decided ? null : "Synthesis",
+          originalQuestion: "Fund the modernization grant?",
+          transcript: [],
+          memberConversationIds: {},
+          currentPhaseIndex: 1,
+          currentPhaseName: "Synthesis",
+          synthesizedAnswer: "Recommend funding.",
+          // What the backend computes for each state.
+          availableActions: decided ? ["close"] : [],
+          depth: 0,
+          taskList: null,
+          dynamicMembers: [],
+          createdAgentIds: [],
+          retainedAgentIds: [],
+          created: new Date(Date.now() - 600_000).toISOString(),
+          lastModified: new Date().toISOString(),
+        }),
+      ),
+      http.post("*/groups/:groupId/conversations/:gcId/approve/stream", () => {
+        decided = true;
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              encoder.encode(
+                'event: hitl_resume\ndata: {"verdict":"REJECTED","decidedBy":"manager-user"}\n\n',
+              ),
+            );
+            controller.enqueue(
+              encoder.encode(
+                'event: group_complete\ndata: {"state":"REJECTED","synthesizedAnswer":"Recommend funding."}\n\n',
+              ),
+            );
+            controller.close();
+          },
+        });
+        return new HttpResponse(stream, { headers: { "Content-Type": "text/event-stream" } });
+      }),
+    );
+  }
+
+  it("lands back on the rejected discussion, with its Close action reachable", async () => {
+    rejectionStream();
+    renderGroupDetail("?version=1&conversation=gconv-paused");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("reject-button")).toBeInTheDocument();
+    });
+    await userEvent.click(screen.getByTestId("reject-button"));
+    // No destructive HITL action fires on a single click.
+    await userEvent.click(await screen.findByTestId("alert-dialog-confirm"));
+
+    // The settle effect must re-select the discussion the stream just ended, or
+    // nothing on the page addresses it any more.
+    await waitFor(() => {
+      expect(screen.getByTestId("discussion-item-gconv-paused")).toHaveAttribute(
+        "aria-current",
+        "true",
+      );
+    });
+    // The one action a rejected run offers.
+    await waitFor(() => {
+      expect(screen.getByTestId("action-close")).toBeInTheDocument();
     });
   });
 });

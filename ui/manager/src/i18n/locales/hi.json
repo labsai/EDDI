@@ -2392,6 +2392,7 @@
       "SYNTHESIZING": "संश्लेषण जारी",
       "COMPLETED": "पूर्ण",
       "FAILED": "विफल",
+      "REJECTED": "अस्वीकृत",
       "ERROR": "त्रुटि",
       "AWAITING_APPROVAL": "अनुमोदन की प्रतीक्षा",
       "CANCELLED": "रद्द",

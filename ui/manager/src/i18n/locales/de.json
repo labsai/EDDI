@@ -2392,6 +2392,7 @@
       "SYNTHESIZING": "Wird zusammengefasst",
       "COMPLETED": "Abgeschlossen",
       "FAILED": "Fehlgeschlagen",
+      "REJECTED": "Abgelehnt",
       "ERROR": "Fehler",
       "AWAITING_APPROVAL": "Wartet auf Genehmigung",
       "CANCELLED": "Abgebrochen",

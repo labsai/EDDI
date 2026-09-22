@@ -2448,6 +2448,7 @@
       "SYNTHESIZING": "Synthesizing",
       "COMPLETED": "Completed",
       "FAILED": "Failed",
+      "REJECTED": "Rejected",
       "ERROR": "Error",
       "AWAITING_APPROVAL": "Awaiting Approval",
       "CANCELLED": "Cancelled",

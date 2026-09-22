@@ -2414,6 +2414,7 @@
       "SYNTHESIZING": "Sintetizando",
       "COMPLETED": "Completado",
       "FAILED": "Fallido",
+      "REJECTED": "Rechazada",
       "ERROR": "Error",
       "AWAITING_APPROVAL": "Pendiente de aprobación",
       "CANCELLED": "Cancelado",
