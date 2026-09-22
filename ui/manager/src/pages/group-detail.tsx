@@ -19,9 +19,13 @@ import {
 import { useGroupDiscussionStream } from "@/hooks/use-group-discussion-stream";
 import { useCancelGroupDiscussion, useSubmitHumanInput } from "@/hooks/use-hitl";
 import { DiscussionTranscript } from "@/components/groups/discussion-transcript";
+import { DiscussionPanel } from "@/components/groups/overview/discussion-panel";
+import { DiscussionInsights } from "@/components/groups/discussion-insights";
+import { DecisionRecordCard } from "@/components/groups/decision-record-card";
 import { DiscussionInput } from "@/components/groups/discussion-input";
 import { DiscussionActions } from "@/components/groups/discussion-actions";
 import { GroupConfigPanel } from "@/components/groups/group-config-panel";
+import { hasDisplayableDecision } from "@/lib/group-config";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -455,6 +459,11 @@ export function GroupDetailPage() {
 
   // Determine whether to show streaming or static transcript
   const isStreamActive = streamState.isStreaming || (streamState.state !== "CREATED" && !selectedConvId);
+  // The live stream's decision while it is running, the persisted one
+  // afterwards — same precedence the transcript already applies internally.
+  const displayDecision = isStreamActive
+    ? (streamState.decision ?? selectedConversation?.decision ?? null)
+    : (selectedConversation?.decision ?? null);
 
   // On a live pause/complete the settle effect switches to the persisted
   // conversation, whose detail may not be cached yet. Keep showing the live
@@ -765,22 +774,46 @@ export function GroupDetailPage() {
               </div>
             </div>
           )}
-          <div className="flex-1 min-h-0 overflow-hidden">
-            <DiscussionTranscript
-              conversation={isStreamActive ? null : (selectedConversation ?? null)}
-              streamState={isStreamActive || showStreamFallback ? streamState : undefined}
-              isLoading={convLoading && !!selectedConvId && !showStreamFallback}
-              discussionStyle={groupConfig.style as DiscussionStyle}
-              preConfiguredTasks={groupConfig.tasks}
-              rosterDisplayNames={rosterDisplayNames}
-              onApprove={handleApproveDiscussion}
-              onCancelDiscussion={handleCancelDiscussion}
-              isDeciding={cancelDiscussionMutation.isPending}
-              onSubmitHumanInput={handleSubmitHumanInput}
-              isSubmittingHumanInput={submitHumanInputMutation.isPending}
-              humanTurnTimeout={groupConfig.humanMemberConfig?.turnTimeout}
-            />
-          </div>
+          {/* The transcript is passed through untouched — DiscussionPanel only
+              adds the transcript / overview / split switch around it, so
+              approvals, human turns and the composer keep working unchanged. */}
+          <DiscussionPanel
+            className="flex-1 min-h-0 overflow-hidden"
+            surface="group-detail"
+            conversation={isStreamActive ? null : (selectedConversation ?? null)}
+            streamState={isStreamActive || showStreamFallback ? streamState : undefined}
+            configPhases={safeConfig.phases}
+            rosterDisplayNames={rosterDisplayNames}
+            style={groupConfig.style as DiscussionStyle}
+            outcome={
+              hasDisplayableDecision(displayDecision) ? (
+                <DecisionRecordCard decision={displayDecision} />
+              ) : undefined
+            }
+            extras={
+              <DiscussionInsights
+                conversation={selectedConversation ?? null}
+                retroRecorded={isStreamActive ? streamState.retroRecorded : undefined}
+                artifactUpdates={isStreamActive ? streamState.artifactUpdates : undefined}
+              />
+            }
+            transcript={
+              <DiscussionTranscript
+                conversation={isStreamActive ? null : (selectedConversation ?? null)}
+                streamState={isStreamActive || showStreamFallback ? streamState : undefined}
+                isLoading={convLoading && !!selectedConvId && !showStreamFallback}
+                discussionStyle={groupConfig.style as DiscussionStyle}
+                preConfiguredTasks={groupConfig.tasks}
+                rosterDisplayNames={rosterDisplayNames}
+                onApprove={handleApproveDiscussion}
+                onCancelDiscussion={handleCancelDiscussion}
+                isDeciding={cancelDiscussionMutation.isPending}
+                onSubmitHumanInput={handleSubmitHumanInput}
+                isSubmittingHumanInput={submitHumanInputMutation.isPending}
+                humanTurnTimeout={groupConfig.humanMemberConfig?.turnTimeout}
+              />
+            }
+          />
           {/* Post-COMPLETED lifecycle action bar — driven entirely by the
               backend's availableActions (never hardcoded). Hidden while a live
               stream is active and absent once the conversation is CLOSED (empty

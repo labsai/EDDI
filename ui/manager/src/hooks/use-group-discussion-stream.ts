@@ -23,6 +23,8 @@ import {
   type HumanInputRequestedPayload,
   type RetroRecordedPayload,
   type ArtifactUpdatedPayload,
+  type CostUpdatedPayload,
+  type StanceUpdatedPayload,
 } from "@/lib/api/groups";
 import type { GroupApprovalRequest } from "@/lib/api/hitl";
 
@@ -134,6 +136,35 @@ export interface GroupStreamState {
    * terminal; a discussion can write several artifacts across its run.
    */
   artifactUpdates: ArtifactUpdatedPayload[];
+  /**
+   * Ledger key → that key's CUMULATIVE cost in USD, from `cost_updated`.
+   *
+   * Keyed rather than summed-on-arrival on purpose: the backend records by
+   * replacement, and a PARALLEL phase's turns interleave, so adding deltas (or
+   * trusting a frame's own `totalCost` ordering) double-counts on a replay and
+   * races on a fan-out. Summing this map is order-independent — see
+   * `streamTotalCost`.
+   *
+   * Keys are NOT all agent ids: system spend uses `system:…` and a nested
+   * GROUP member uses `agentId:childConversationId`.
+   */
+  memberCosts: Map<string, number>;
+  /**
+   * agentId → the member's current one-line stance, from `stance_updated`.
+   * Live-only; the persisted equivalent is `conversation.memberStances`.
+   */
+  stances: Map<string, StanceUpdatedPayload>;
+}
+
+/**
+ * The discussion's total spend, summed from the per-key map.
+ *
+ * Deliberately derived rather than read off a frame: see `memberCosts`.
+ */
+export function streamTotalCost(state: GroupStreamState): number {
+  let total = 0;
+  for (const value of state.memberCosts.values()) total += value;
+  return total;
 }
 
 /** Shared empty state handed to consumers that have no stream yet. Never mutated. */
@@ -160,6 +191,8 @@ const initialState: GroupStreamState = {
   humanInputRequest: null,
   retroRecorded: [],
   artifactUpdates: [],
+  memberCosts: new Map(),
+  stances: new Map(),
 };
 
 /** A clean state with its own collection instances (the shared `initialState`
@@ -174,6 +207,8 @@ function freshState(): GroupStreamState {
     convergence: new Map(),
     retroRecorded: [],
     artifactUpdates: [],
+    memberCosts: new Map(),
+    stances: new Map(),
   };
 }
 
@@ -978,6 +1013,42 @@ function handleSSEEvent(
         setState((s) => ({ ...s, artifactUpdates: [...s.artifactUpdates, payload] }));
       } catch (e) {
         console.warn('[SSE] Failed to parse artifact_updated event:', e);
+      }
+      return false;
+    }
+
+    case "cost_updated": {
+      try {
+        const payload: CostUpdatedPayload = JSON.parse(event.data);
+        if (typeof payload.attributionKey !== "string" || !Number.isFinite(payload.attributedCost)) {
+          return false;
+        }
+        setState((s) => {
+          const next = new Map(s.memberCosts);
+          // set, never add: the value is cumulative for this key, so a frame
+          // redelivered after a reconnect must be idempotent.
+          next.set(payload.attributionKey, payload.attributedCost);
+          return { ...s, memberCosts: next };
+        });
+      } catch (e) {
+        console.warn('[SSE] Failed to parse cost_updated event:', e);
+      }
+      return false;
+    }
+
+    case "stance_updated": {
+      try {
+        const payload: StanceUpdatedPayload = JSON.parse(event.data);
+        if (typeof payload.agentId !== "string" || typeof payload.stance !== "string") {
+          return false;
+        }
+        setState((s) => {
+          const next = new Map(s.stances);
+          next.set(payload.agentId, payload);
+          return { ...s, stances: next };
+        });
+      } catch (e) {
+        console.warn('[SSE] Failed to parse stance_updated event:', e);
       }
       return false;
     }

@@ -522,6 +522,13 @@ export interface AgentGroupConfiguration {
   retroConfig?: RetroConfig | null;
   /** Transcript windowing for long-running discussions (I9). `null` = windowing off entirely. */
   contextWindow?: ContextWindowConfig | null;
+  /**
+   * The overview dashboard's one-line member stances. This is a DEFAULT, not a
+   * switch: `null` still produces stances, by lead-sentence extraction (free,
+   * and the member's own words). What the config adds is the LLM summarizer,
+   * which is better and billable — so opting in is opting into spend.
+   */
+  stanceSummary?: StanceSummaryConfig | null;
   /** Governs shared artifacts / blackboard-lite (I17). Absent = artifact tools not assembled. */
   artifactConfig?: ArtifactConfig | null;
   /**
@@ -577,6 +584,36 @@ export interface ContextWindowConfig {
   outputPricePer1M?: number | null;
 }
 export const CONTEXT_WINDOW_DEFAULT_MAX_RECENT_ENTRIES = 30;
+
+/**
+ * Governs the overview dashboard's member stances.
+ *
+ * Deliberately shaped like {@link ContextWindowConfig} — but with NO `enabled`
+ * flag. Stances always exist (extraction needs no configuration), so a boolean
+ * could only ever have meant "may this spend money?", which is already what
+ * naming a provider and model means.
+ */
+export interface StanceSummaryConfig {
+  /** Hard cap on a rendered stance. Backend default 160 when non-positive. */
+  maxChars: number;
+  /** Both required for the summarizer to run; otherwise every stance is extracted. */
+  llmProvider?: string | null;
+  llmModel?: string | null;
+  /** USD per 1M input/output tokens. `null` = unpriced ($0). */
+  inputPricePer1M?: number | null;
+  outputPricePer1M?: number | null;
+}
+export const STANCE_SUMMARY_DEFAULT_MAX_CHARS = 160;
+
+/** One member's current position in one line, as persisted on the conversation. */
+export interface MemberStance {
+  text: string;
+  /** Transcript size (exclusive) this was computed from. */
+  upToTranscriptIndex: number;
+  /** `true` = LLM paraphrase, `false` = the member's own lead sentence. */
+  llmGenerated: boolean;
+  updated: string;
+}
 
 /** The closed set of declarative artifact validators (I17). Declarative only — never arbitrary code. */
 export type ArtifactValidatorKind = "JSON_SCHEMA" | "REGEX" | "MAX_LENGTH";
@@ -936,6 +973,8 @@ export interface GroupConversation {
   memberCosts?: Record<string, number>;
   /** Accumulated cost of the whole discussion in USD (F5) — what I1's ceiling bounds. */
   totalCost?: number;
+  /** agentId → that member's one-line stance, for the overview dashboard. */
+  memberStances?: Record<string, MemberStance>;
   currentPhaseIndex: number;
   currentPhaseName: string | null;
   synthesizedAnswer: string | null;
@@ -1348,7 +1387,14 @@ export type GroupSSEEventType =
   | "retro_recorded"
   // A member created or updated a shared artifact (I17). NOT terminal. Carries
   // metadata only, never content.
-  | "artifact_updated";
+  | "artifact_updated"
+  // A cost attribution landed in the discussion ledger. NOT terminal — fires
+  // after every attribution, including system spend (the I9 window summarizer
+  // and the stance summarizer), whose key names no member.
+  | "cost_updated"
+  // A member's one-line stance was recomputed at a phase boundary. NOT
+  // terminal, and fires only when the stance TEXT actually changed.
+  | "stance_updated";
 //
 // `token` and `synthesis_complete` are declared in the backend's
 // GroupConversationEventSink but no producer emits them; they are deliberately
@@ -1477,6 +1523,49 @@ export interface RetroRecordedPayload {
   groupId: string;
   phaseName: string;
   lessonsStored: number;
+}
+
+/**
+ * Payload of `cost_updated`.
+ *
+ * `attributedCost` is the key's CUMULATIVE cost, never a delta — the backend
+ * ledger records by replacement, so a frame replayed after a reconnect is
+ * idempotent. Consumers must overwrite their stored value for
+ * `attributionKey` rather than adding to it.
+ *
+ * `totalCost` is a convenience. A PARALLEL phase's simultaneous member turns
+ * can interleave, so two frames' totals may arrive out of order; summing the
+ * per-key map is order-independent and is what `useGroupDiscussionStream`
+ * does.
+ */
+export interface CostUpdatedPayload {
+  /**
+   * The ledger key. NOT uniformly an agent id: a member turn uses its agentId,
+   * the discussion's own machinery uses a synthetic `system:…` key, and a
+   * nested GROUP member uses `agentId:childConversationId`. A consumer that
+   * indexes by member must tolerate a key matching no member.
+   */
+  attributionKey: string;
+  /** The member's display name, or `null` for a system key (which names none). */
+  displayName: string | null;
+  attributedCost: number;
+  totalCost: number;
+}
+
+/** Payload of `stance_updated`. */
+export interface StanceUpdatedPayload {
+  agentId: string;
+  displayName: string | null;
+  stance: string;
+  /**
+   * `true` when a configured summarizer wrote it, `false` when it is the
+   * lead-sentence extraction fallback. Surfaced because an extracted line is
+   * the member's own words and a generated one is a paraphrase — showing a
+   * paraphrase as a quote would misattribute it.
+   */
+  llmGenerated: boolean;
+  /** Transcript size (exclusive) the stance was computed from. */
+  upToTranscriptIndex: number;
 }
 
 /** Payload of `artifact_updated` (I17). `created` is `true` for a fresh artifact (v1), `false` for an accepted update. */
