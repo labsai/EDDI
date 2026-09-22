@@ -10,6 +10,7 @@ import ja from "@/i18n/locales/ja.json";
 import ko from "@/i18n/locales/ko.json";
 import pt from "@/i18n/locales/pt.json";
 import hi from "@/i18n/locales/hi.json";
+import { GROUP_CONVERSATION_STATES } from "@/lib/api/groups";
 
 /**
  * `config.test.ts` asserts that every locale has the same *keys* as English.
@@ -226,6 +227,36 @@ describe("i18n interpolation integrity", () => {
         if (a !== b) broken.push(`${key}: en[${a}] vs ${code}[${b}]`);
       }
       expect(broken, "a dropped {{var}} renders a sentence with a hole in it").toEqual([]);
+    });
+  }
+});
+
+/**
+ * Keys built from a template literal are invisible to every other gate.
+ *
+ * `npm run i18n:check` scans for literal `t("...")` calls, so it cannot see
+ * ``t(`groups.state.${state}`)`` — and eight render sites use exactly that
+ * shape (the group sidebar, four Workforce analytics surfaces, the session
+ * history, and the transcript export). When `REJECTED` was added to
+ * `GroupConversationState`, `groups.state` gained no entry for it in any of the
+ * eleven locales and every gate stayed green; the export would have written the
+ * raw token `REJECTED` into a downloaded transcript, and the rest would have
+ * silently fallen back to English.
+ *
+ * Driven off `GROUP_CONVERSATION_STATES`, which the union itself is derived
+ * from, so a state added later fails here rather than shipping untranslated.
+ */
+describe("i18n dynamic key completeness", () => {
+  for (const [code, locale] of Object.entries({ en, ...LOCALES })) {
+    it(`${code}.json translates every group conversation state`, () => {
+      const groups = (locale as Json).groups as Json | undefined;
+      const map = (groups?.state ?? {}) as Record<string, string>;
+
+      const missing = GROUP_CONVERSATION_STATES.filter(
+        (s) => typeof map[s] !== "string" || !map[s].trim(),
+      );
+
+      expect(missing).toEqual([]);
     });
   }
 });

@@ -2392,6 +2392,7 @@
       "SYNTHESIZING": "正在合成",
       "COMPLETED": "已完成",
       "FAILED": "已失败",
+      "REJECTED": "已否决",
       "ERROR": "错误",
       "AWAITING_APPROVAL": "等待审批",
       "CANCELLED": "已取消",

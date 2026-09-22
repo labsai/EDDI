@@ -38,6 +38,7 @@ import {
   type DiscussionStyle,
   type AgentGroupConfiguration,
   type GroupAttachmentRef,
+  type GroupConversationState,
 } from "@/lib/api/groups";
 import type { HitlVerdict } from "@/lib/api/hitl";
 import { STYLE_THEME } from "@/components/groups/discussion-transcript";
@@ -58,6 +59,32 @@ const STATE_CONFIG: Record<string, { label: string; color: string; dot: string }
   CANCELLED: { label: "Cancelled", color: "text-muted-foreground", dot: "bg-muted-foreground" },
   ERROR: { label: "Error", color: "text-destructive", dot: "bg-destructive" },
 };
+
+/**
+ * States in which a live stream has stopped producing, so the persisted
+ * conversation is the better thing to render and the sidebar needs a refetch.
+ *
+ * REJECTED is the reason this is a named list rather than three inline
+ * comparisons. The stream hook reports the state the backend puts on
+ * `group_complete`, and a HITL rejection ends a run as REJECTED — which matched
+ * none of the arms, so the page never switched off the live stream: the sidebar
+ * went on saying "Awaiting Approval" forever (the conversation-list poll only
+ * runs while a discussion is IN_PROGRESS/SYNTHESIZING, and nothing invalidated
+ * it), the composer invited a *new* discussion because no conversation was
+ * selected, and the Close action — the one action a rejected run offers — was
+ * unreachable. Only a manual click on the sidebar item recovered.
+ *
+ * FAILED and CANCELLED are deliberately absent: their detail lives on
+ * `streamState` (the error message, and the config-drift banner below), and
+ * switching to the persisted document would drop it. They ARE in the
+ * invalidation arm's reach via this list, which is all the sidebar needs.
+ */
+const STREAM_SETTLED_STATES: GroupConversationState[] = [
+  "COMPLETED",
+  "REJECTED",
+  "AWAITING_APPROVAL",
+  "AWAITING_HUMAN_INPUT",
+];
 
 /**
  * Map a lifecycle-action failure (followup / continue / close) to a friendly,
@@ -400,29 +427,22 @@ export function GroupDetailPage() {
     followupMutation.isPending ||
     closeMutation.isPending;
 
-  // Invalidate conversation list when stream starts (so the new entry appears in sidebar)
-  // AND when it completes (so the state updates to COMPLETED)
+  // Invalidate conversation list when stream starts (so the new entry appears in
+  // sidebar) AND whenever it reaches a state the sidebar renders differently.
   useEffect(() => {
     if (
       streamState.conversationId &&
       groupId &&
-      (streamState.state === "IN_PROGRESS" ||
-        streamState.state === "COMPLETED" ||
-        streamState.state === "AWAITING_APPROVAL" ||
-        streamState.state === "AWAITING_HUMAN_INPUT")
+      (streamState.state === "IN_PROGRESS" || STREAM_SETTLED_STATES.includes(streamState.state))
     ) {
       queryClient.invalidateQueries({ queryKey: ["groupConversations", groupId] });
     }
-    // When the stream settles (completed) or pauses (awaiting approval / a
-    // member's turn), switch the transcript to the persisted conversation so it
-    // shows the full pause metadata (pausedAt, timeout policy/countdown,
-    // per-task awaiting list, or — for a human turn — the rendered prompt).
-    if (
-      (streamState.state === "COMPLETED" ||
-        streamState.state === "AWAITING_APPROVAL" ||
-        streamState.state === "AWAITING_HUMAN_INPUT") &&
-      streamState.conversationId
-    ) {
+    // When the stream settles (completed, rejected) or pauses (awaiting approval
+    // / a member's turn), switch the transcript to the persisted conversation so
+    // it shows the full pause metadata (pausedAt, timeout policy/countdown,
+    // per-task awaiting list, or — for a human turn — the rendered prompt) and
+    // the lifecycle actions that state offers.
+    if (STREAM_SETTLED_STATES.includes(streamState.state) && streamState.conversationId) {
       userClearedRef.current = false; // the stream owns the selection now
       setSelectedConvId(streamState.conversationId);
     }

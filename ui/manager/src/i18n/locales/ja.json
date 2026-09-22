@@ -2392,6 +2392,7 @@
       "SYNTHESIZING": "統合中",
       "COMPLETED": "完了",
       "FAILED": "失敗",
+      "REJECTED": "却下",
       "ERROR": "エラー",
       "AWAITING_APPROVAL": "承認待ち",
       "CANCELLED": "キャンセル済み",

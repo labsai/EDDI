@@ -2480,6 +2480,7 @@
       "SYNTHESIZING": "جارٍ التجميع",
       "COMPLETED": "مكتمل",
       "FAILED": "فشل",
+      "REJECTED": "مرفوضة",
       "ERROR": "خطأ",
       "AWAITING_APPROVAL": "بانتظار الموافقة",
       "CANCELLED": "ملغى",

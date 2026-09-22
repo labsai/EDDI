@@ -2392,6 +2392,7 @@
       "SYNTHESIZING": "กำลังสังเคราะห์",
       "COMPLETED": "เสร็จสิ้น",
       "FAILED": "ล้มเหลว",
+      "REJECTED": "ถูกปฏิเสธ",
       "ERROR": "ข้อผิดพลาด",
       "AWAITING_APPROVAL": "รอการอนุมัติ",
       "CANCELLED": "ยกเลิก",
