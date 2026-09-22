@@ -565,38 +565,70 @@ class GroupConversationServiceHitlTest {
     }
 
     // =================================================================
-    // Resume: rejected decision → FAILED state
+    // Resume: rejected decision → REJECTED state
     // =================================================================
 
+    /**
+     * A rejection used to land the discussion in {@code FAILED}, and the Manager
+     * rendered a red "Failed" badge on it — which reads as a system error rather
+     * than as the recorded human decision it is. In a product whose selling point
+     * is the human in the loop, that conflation is the wrong way round: the run did
+     * exactly what it was asked.
+     */
     @Nested
     @DisplayName("Resume with rejection")
     class ResumeRejection {
 
-        @Test
-        @DisplayName("REJECTED verdict sets state to FAILED")
-        void rejectedVerdictSetsFailed() throws Exception {
+        private GroupConversation pausedConversation(String id) {
             var gc = new GroupConversation();
-            gc.setId("gc-reject");
+            gc.setId(id);
             gc.setGroupId(GROUP_ID);
             gc.setState(GroupConversationState.AWAITING_APPROVAL);
             gc.setPausedAtPhaseIndex(0);
             gc.setPausedPhaseName("Phase0");
             gc.setPausedAt(Instant.now());
             gc.setOriginalQuestion("Reject test?");
+            return gc;
+        }
 
-            doReturn(gc).when(conversationStore).read("gc-reject");
-
+        private GroupApprovalRequest rejection() {
             var request = new GroupApprovalRequest();
             var decision = new HitlDecision();
             decision.setVerdict(HitlVerdict.REJECTED);
             request.setDecision(decision);
+            return request;
+        }
 
-            GroupConversation result = service.resumeDiscussion("gc-reject", request, null);
+        @Test
+        @DisplayName("REJECTED verdict sets state to REJECTED, not FAILED")
+        void rejectedVerdictSetsRejected() throws Exception {
+            var gc = pausedConversation("gc-reject");
+            doReturn(gc).when(conversationStore).read("gc-reject");
 
-            assertEquals(GroupConversationState.FAILED, result.getState(),
-                    "Rejected verdict should set state to FAILED");
+            GroupConversation result = service.resumeDiscussion("gc-reject", rejection(), null);
+
+            assertEquals(GroupConversationState.REJECTED, result.getState(),
+                    "a declined recommendation is a decision, not a failure");
+            assertNotEquals(GroupConversationState.FAILED, result.getState());
             assertNull(result.getPausedAt(), "pausedAt should be cleared after rejection");
             verify(conversationStore).updateIfState(gc, GroupConversationState.AWAITING_APPROVAL);
+        }
+
+        /**
+         * REJECTED must permit exactly what FAILED permitted. The label is the only
+         * thing that changed; a state that read as terminal-and-closeable everywhere
+         * and then did not would be a worse bug than the one being fixed.
+         */
+        @Test
+        @DisplayName("REJECTED is terminal and closeable, exactly as FAILED is")
+        void rejectedIsTerminalAndCloseable() throws Exception {
+            var gc = pausedConversation("gc-reject-actions");
+            doReturn(gc).when(conversationStore).read("gc-reject-actions");
+
+            GroupConversation result = service.resumeDiscussion("gc-reject-actions", rejection(), null);
+
+            assertEquals(List.of("close"), result.getAvailableActions(),
+                    "a rejected discussion offers the same single action a failed one does");
         }
     }
 

@@ -205,6 +205,58 @@ class GroupLifecycleOpsTest {
         verify(sharedArtifactStore).deleteByGroupConversationId("gc-1");
     }
 
+    /**
+     * A human rejection is terminal in its own right ({@code REJECTED}, added so
+     * the Manager stops rendering a recorded decision as a red "Failed"), and an
+     * operator has to be able to close it for exactly the reason a {@code FAILED}
+     * one is closeable: close ends the member conversations and reclaims the
+     * ephemeral agents. Leaving it out of the CAS chain would have made every
+     * rejected discussion permanently uncloseable.
+     */
+    @Test
+    void closeGroupConversation_acceptsARejectedDiscussion() throws Exception {
+        var ops = ops();
+        var gc = gc();
+        gc.setState(GroupConversationState.REJECTED);
+        var closed = gc();
+        closed.setState(GroupConversationState.CLOSED);
+        when(conversationStore.read("gc-1")).thenReturn(gc, closed);
+        // Only the REJECTED -> CLOSED CAS succeeds; the others are tried and miss.
+        when(conversationStore.compareAndSetState(eq("gc-1"), any(), eq(GroupConversationState.CLOSED)))
+                .thenReturn(false);
+        when(conversationStore.compareAndSetState("gc-1", GroupConversationState.REJECTED, GroupConversationState.CLOSED))
+                .thenReturn(true);
+
+        assertDoesNotThrow(() -> ops.closeGroupConversation("gc-1"));
+
+        verify(conversationStore).compareAndSetState("gc-1", GroupConversationState.REJECTED, GroupConversationState.CLOSED);
+        verify(sharedArtifactStore).deleteByGroupConversationId("gc-1");
+    }
+
+    /**
+     * The message has to name the states the chain actually tries. It used to be a
+     * hand-written sentence beside three hand-written {@code if} blocks, which is
+     * how a state gets added to one and left out of the other.
+     */
+    @Test
+    void closeGroupConversation_refusalNamesEveryCloseableState() {
+        var ops = ops();
+        var gc = gc();
+        gc.setState(GroupConversationState.IN_PROGRESS);
+        try {
+            when(conversationStore.read("gc-1")).thenReturn(gc);
+        } catch (Exception e) {
+            throw new AssertionError(e);
+        }
+
+        var thrown = assertThrows(Exception.class, () -> ops.closeGroupConversation("gc-1"));
+
+        for (GroupConversationState state : GroupLifecycleOps.CLOSEABLE_STATES) {
+            assertTrue(thrown.getMessage().contains(state.name()),
+                    "the refusal must name " + state + ", which the CAS chain tries: " + thrown.getMessage());
+        }
+    }
+
     // =================================================================
     // failConversation
     // =================================================================

@@ -83,6 +83,19 @@ public class GroupLifecycleOps {
     private static final Logger LOGGER = Logger.getLogger(GroupLifecycleOps.class);
     private static final Environment DEFAULT_ENV = Environment.production;
 
+    /**
+     * The states {@code closeGroupConversation} may transition to {@code CLOSED},
+     * tried in order. Held as one list so the CAS chain and the rejection message
+     * can never disagree — they used to be three hand-written {@code if} blocks and
+     * a hard-coded sentence, which is how a new terminal state gets added to the
+     * chain and left out of the error.
+     */
+    static final List<GroupConversationState> CLOSEABLE_STATES = List.of(
+            GroupConversationState.COMPLETED,
+            GroupConversationState.FAILED,
+            GroupConversationState.REJECTED,
+            GroupConversationState.CANCELLED);
+
     private final IGroupConversationStore conversationStore;
     private final IAgentGroupStore groupStore;
     private final IConversationService conversationService;
@@ -479,23 +492,23 @@ public class GroupLifecycleOps {
         try {
             GroupConversation gc = conversationStore.read(groupConversationId);
 
-            // Atomic state transition: try COMPLETED → CLOSED, then FAILED → CLOSED,
-            // then CANCELLED → CLOSED. CANCELLED is closeable so an operator can reclaim
-            // the ephemeral agents of a discussion cancelled in a window where no running
-            // leg cleaned them up (CANCELLED has no follow-up/continue path otherwise).
-            boolean transitioned = conversationStore.compareAndSetState(
-                    groupConversationId, GroupConversationState.COMPLETED, GroupConversationState.CLOSED);
-            if (!transitioned) {
-                transitioned = conversationStore.compareAndSetState(
-                        groupConversationId, GroupConversationState.FAILED, GroupConversationState.CLOSED);
-            }
-            if (!transitioned) {
-                transitioned = conversationStore.compareAndSetState(
-                        groupConversationId, GroupConversationState.CANCELLED, GroupConversationState.CLOSED);
+            // Atomic state transition: try each closeable state → CLOSED in turn.
+            // CANCELLED is closeable so an operator can reclaim the ephemeral agents of a
+            // discussion cancelled in a window where no running leg cleaned them up
+            // (CANCELLED has no follow-up/continue path otherwise). REJECTED is closeable
+            // for exactly the reason FAILED is — it is the same terminal shape under a
+            // name that says a human decided rather than that the run broke.
+            boolean transitioned = false;
+            for (GroupConversationState from : CLOSEABLE_STATES) {
+                transitioned = conversationStore.compareAndSetState(groupConversationId, from, GroupConversationState.CLOSED);
+                if (transitioned) {
+                    break;
+                }
             }
             if (!transitioned) {
                 throw new GroupDiscussionException(
-                        "Cannot close: conversation is in %s state (expected COMPLETED, FAILED, or CANCELLED)".formatted(gc.getState()));
+                        "Cannot close: conversation is in %s state (expected one of %s)"
+                                .formatted(gc.getState(), CLOSEABLE_STATES));
             }
             counterGroupClose.increment();
 
@@ -663,6 +676,7 @@ public class GroupLifecycleOps {
     private static boolean isTerminalState(GroupConversationState state) {
         return state == GroupConversationState.COMPLETED
                 || state == GroupConversationState.FAILED
+                || state == GroupConversationState.REJECTED
                 || state == GroupConversationState.CANCELLED
                 || state == GroupConversationState.CLOSED;
     }
