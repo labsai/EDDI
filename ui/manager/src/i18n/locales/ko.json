@@ -2815,6 +2815,7 @@
       "convergenceStopped_other": "수렴 — 반복 {{count}}회 생략",
       "interactions": "누가 누구에게 말했나",
       "interactionsLabel": "누가 누구에게 말했나",
+      "addressedConnector": "의 대상:",
       "unaddressed": "아무도 언급하지 않음: {{names}}",
       "unknownMember": "알 수 없음",
       "bids": "누가 무엇에 입찰했나",

@@ -2815,6 +2815,7 @@
       "convergenceStopped_other": "収束 — {{count}} 回の繰り返しを省略",
       "interactions": "誰が誰に向けたか",
       "interactionsLabel": "誰が誰に向けたか",
+      "addressedConnector": "の宛先:",
       "unaddressed": "誰からも向けられず: {{names}}",
       "unknownMember": "不明",
       "bids": "誰が何に立候補したか",

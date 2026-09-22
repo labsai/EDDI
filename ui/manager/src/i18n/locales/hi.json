@@ -2815,6 +2815,7 @@
       "convergenceStopped_other": "अभिसरित — {{count}} पुनरावृत्तियाँ छोड़ी गईं",
       "interactions": "किसने किसे संबोधित किया",
       "interactionsLabel": "किसने किसे संबोधित किया",
+      "addressedConnector": "ने संबोधित किया:",
       "unaddressed": "किसी ने संबोधित नहीं किया: {{names}}",
       "unknownMember": "अज्ञात",
       "bids": "किसने किसके लिए बोली लगाई",

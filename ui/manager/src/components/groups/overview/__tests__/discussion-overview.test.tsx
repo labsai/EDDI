@@ -355,3 +355,48 @@ describe("DiscussionPanel", () => {
     expect(screen.getByTestId("discussion-view-split")).toHaveAttribute("aria-checked", "true");
   });
 });
+
+/**
+ * The text a screen reader announces: everything except `aria-hidden`
+ * subtrees. `textContent` alone would include the hidden arrow and make an
+ * assertion about spoken output pass whether or not the spoken connector exists.
+ */
+function spokenText(el: Element): string {
+  if (el.getAttribute("aria-hidden") === "true") return "";
+  let out = "";
+  el.childNodes.forEach((n) => {
+    if (n.nodeType === Node.TEXT_NODE) out += n.textContent ?? "";
+    else if (n.nodeType === Node.ELEMENT_NODE) out += ` ${spokenText(n as Element)} `;
+  });
+  return out.replace(/\s+/g, " ").trim();
+}
+
+describe("overview accessibility", () => {
+  it("roster toggle exposes whether the list is expanded, and which list", () => {
+    const ids = Array.from({ length: 10 }, (_, i) => `agent-${i}`);
+    const conv = conversation({
+      transcript: ids.map((id) => ({ ...entry(A, 0), speakerAgentId: id, speakerDisplayName: id })),
+      memberDisplayNames: Object.fromEntries(ids.map((id) => [id, id])),
+    });
+    renderWithProviders(<DiscussionOverview digest={buildDigest(conv, undefined, null, undefined, "ROUND_TABLE")} />);
+
+    const toggle = screen.getByTestId("overview-roster-toggle");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    const list = document.getElementById(toggle.getAttribute("aria-controls") ?? "");
+    expect(list).not.toBeNull();
+    expect(within(list!).getAllByTestId(/^overview-member-/)).toHaveLength(8);
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(within(list!).getAllByTestId(/^overview-member-/)).toHaveLength(10);
+  });
+
+  it("an interaction row states its direction in words, not only with an arrow", () => {
+    const conv = conversation({
+      transcript: [{ ...entry(A, 0, "CRITIQUE", "Row-level security is fine."), targetAgentId: B }],
+    });
+    renderWithProviders(<DiscussionOverview digest={buildDigest(conv, undefined, null, undefined, "PEER_REVIEW")} />);
+
+    expect(spokenText(screen.getByTestId(`overview-interaction-${A}`))).toBe("Architect addressed Security");
+  });
+});

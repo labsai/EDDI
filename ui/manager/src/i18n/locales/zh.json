@@ -2815,6 +2815,7 @@
       "convergenceStopped_other": "已收敛 — 跳过 {{count}} 次重复",
       "interactions": "谁回应了谁",
       "interactionsLabel": "谁回应了谁",
+      "addressedConnector": "回应了",
       "unaddressed": "无人回应：{{names}}",
       "unknownMember": "未知",
       "bids": "谁认领了什么",

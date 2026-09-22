@@ -2847,6 +2847,7 @@
       "convergenceStopped_many": "Convergido — {{count}} repeticiones omitidas",
       "interactions": "Quién se dirigió a quién",
       "interactionsLabel": "Quién se dirigió a quién",
+      "addressedConnector": "se dirigió a",
       "unaddressed": "Nadie se dirigió a: {{names}}",
       "unknownMember": "Desconocido",
       "bids": "Quién pujó por qué",

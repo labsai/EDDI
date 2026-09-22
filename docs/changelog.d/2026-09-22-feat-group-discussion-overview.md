@@ -510,3 +510,25 @@ named test.
 | 2026-09-22 | The interaction band is a list, not a graph | A force-directed diagram of five nodes is decoration and of twenty is unreadable; a list answers "who did this member take on" and "who went unchallenged" at any size with no layout engine. | EDDI Manager |
 | 2026-09-22 | DELPHI gets no interaction band | Naming who answered whom would undo the anonymity the method rests on — the reason its later rounds run ANONYMOUS. | EDDI Manager |
 ```
+
+## ♿ fix(manager): the overview's roster toggle and interaction rows, for screen readers (2026-09-22)
+
+**Repo:** EDDI (`feat/group-discussion-overview`)
+
+Two accessibility gaps flagged in review, both confirmed:
+
+- **The roster's show-all toggle didn't expose its state.** A screen reader user couldn't
+  tell whether the list was expanded. The toggle now carries `aria-expanded` and an
+  `aria-controls` pointing at the list, matching the task board's toggle. The id comes
+  from `useId` so it can't collide.
+- **An interaction row lost its direction when read aloud.** The arrow between speaker and
+  target is decorative (`aria-hidden`) and nothing replaced it, so the row was announced
+  as two names side by side, dropping the one fact the band exists to state. A visually
+  hidden connector now reads "Architect addressed Security". It is phrased per language
+  rather than translated word for word: most locales use a verb, but Japanese and Korean
+  put the verb last, so a bare verb there would announce the relationship backwards. They
+  use a possessive label instead ("Architect's addressees: Security").
+
+The connector test checks the text a screen reader actually announces, skipping
+`aria-hidden` subtrees. A plain `textContent` check would include the hidden arrow and
+pass whether or not the connector existed. Both tests fail with their fix reverted.

@@ -2943,6 +2943,7 @@
       "convergenceStopped_many": "تقارَب — تم تخطي {{count}} تكرارات",
       "interactions": "من خاطب من",
       "interactionsLabel": "من خاطب من",
+      "addressedConnector": "خاطب",
       "unaddressed": "لم يخاطبهم أحد: {{names}}",
       "unknownMember": "غير معروف",
       "bids": "من تقدّم لأي مهمة",

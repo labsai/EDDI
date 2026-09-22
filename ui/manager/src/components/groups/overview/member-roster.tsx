@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, Quote, Sparkles, UserX } from "lucide-react";
 import { cn, formatUsd } from "@/lib/utils";
@@ -33,6 +33,8 @@ const ROSTER_VISIBLE = 8;
 export function MemberRoster({ members, anonymous, className }: MemberRosterProps) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
+  // Ties the toggle to the list it controls, as the task board's toggle does.
+  const listId = useId();
   if (members.length === 0) return null;
 
   const hidden = Math.max(0, members.length - ROSTER_VISIBLE);
@@ -47,7 +49,7 @@ export function MemberRoster({ members, anonymous, className }: MemberRosterProp
       <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         {t("groups.overview.roster", "Who thinks what")}
       </h3>
-      <div className="grid grid-cols-1 gap-2 @[26rem]/roster:grid-cols-2 @[52rem]/roster:grid-cols-3">
+      <div id={listId} className="grid grid-cols-1 gap-2 @[26rem]/roster:grid-cols-2 @[52rem]/roster:grid-cols-3">
         {shown.map((member, index) => (
           <MemberCard key={member.agentId} member={member} index={index} anonymous={anonymous} />
         ))}
@@ -56,6 +58,8 @@ export function MemberRoster({ members, anonymous, className }: MemberRosterProp
         <button
           type="button"
           onClick={() => setExpanded((e) => !e)}
+          aria-expanded={expanded}
+          aria-controls={listId}
           className="mt-2 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
           data-testid="overview-roster-toggle"
         >

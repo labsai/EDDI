@@ -2815,6 +2815,7 @@
       "convergenceStopped_other": "Konvergiert — {{count}} Wiederholungen übersprungen",
       "interactions": "Wer wen angesprochen hat",
       "interactionsLabel": "Wer wen angesprochen hat",
+      "addressedConnector": "richtete sich an",
       "unaddressed": "Niemand angesprochen: {{names}}",
       "unknownMember": "Unbekannt",
       "bids": "Wer worauf geboten hat",

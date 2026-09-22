@@ -79,6 +79,10 @@ export function InteractionMap({ interactions, members, anonymous, className }: 
             <span className="inline-block text-muted-foreground rtl:-scale-x-100" aria-hidden="true">
               →
             </span>
+            {/* The arrow is decorative, so the relationship is spoken instead.
+                Without this a screen reader heard two names side by side and
+                lost the direction, which is the one thing this band states. */}
+            <span className="sr-only">{t("groups.overview.addressedConnector", "addressed")}</span>
             {group.targets.map((edge) => (
               <span
                 key={edge.toAgentId}

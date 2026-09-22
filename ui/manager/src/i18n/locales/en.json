@@ -2868,6 +2868,7 @@
       "convergenceStopped_other": "Converged — {{count}} repeats skipped",
       "interactions": "Who addressed whom",
       "interactionsLabel": "Who addressed whom",
+      "addressedConnector": "addressed",
       "unaddressed": "Nobody addressed: {{names}}",
       "unknownMember": "Unknown",
       "bids": "Who bid for what",
