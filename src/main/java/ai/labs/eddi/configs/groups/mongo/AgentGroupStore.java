@@ -59,6 +59,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         warnCostCeilingNeedsPricedMembers(groupConfiguration);
         warnOnModeratorlessPhases(groupConfiguration);
         warnOnSummarizerlessWindow(groupConfiguration);
+        warnOnHalfConfiguredStanceSummarizer(groupConfiguration);
         noteBuiltInToolPrerequisite(groupConfiguration);
         return super.create(groupConfiguration);
     }
@@ -79,6 +80,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         warnCostCeilingNeedsPricedMembers(groupConfiguration);
         warnOnModeratorlessPhases(groupConfiguration);
         warnOnSummarizerlessWindow(groupConfiguration);
+        warnOnHalfConfiguredStanceSummarizer(groupConfiguration);
         noteBuiltInToolPrerequisite(groupConfiguration);
         return super.update(id, version, groupConfiguration);
     }
@@ -525,6 +527,33 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
      * truncation fallback is well-defined behaviour, same warn-not-reject shape as
      * {@link #warnOnModeratorlessPhases}.
      */
+    /**
+     * A {@code stanceSummary} that names one half of the provider/model pair meant
+     * to spend on an LLM summarizer and will instead extract lead sentences forever
+     * — silently, because extraction is a supported outcome and therefore looks
+     * like success. Worth saying at save time, when the author can still add the
+     * missing half.
+     * <p>
+     * Naming <em>neither</em> is not warned about: that is the documented default
+     * (extraction), not a mistake. Same warn-not-reject shape as
+     * {@link #warnOnSummarizerlessWindow}.
+     */
+    private void warnOnHalfConfiguredStanceSummarizer(AgentGroupConfiguration groupConfiguration) {
+        var stance = groupConfiguration.getStanceSummary();
+        if (stance == null || stance.hasSummarizer()) {
+            return;
+        }
+        if (stance.llmProvider() != null || stance.llmModel() != null) {
+            LOGGER.warnf("Group '%s' sets stanceSummary.%s but not %s — stances will fall back to lead-sentence "
+                    + "extraction until both are named", LogSanitizer.sanitize(groupConfiguration.getName()),
+                    stance.llmProvider() != null ? "llmProvider" : "llmModel",
+                    stance.llmProvider() != null ? "llmModel" : "llmProvider");
+        } else if (stance.inputPricePer1M() != null || stance.outputPricePer1M() != null) {
+            LOGGER.warnf("Group '%s' sets stanceSummary prices but names no llmProvider/llmModel — nothing will be "
+                    + "billed because no summarizer runs", LogSanitizer.sanitize(groupConfiguration.getName()));
+        }
+    }
+
     private void warnOnSummarizerlessWindow(AgentGroupConfiguration groupConfiguration) {
         var window = groupConfiguration.getContextWindow();
         if (window == null || !window.enabled() || !Boolean.TRUE.equals(window.summarizeOverflow())) {

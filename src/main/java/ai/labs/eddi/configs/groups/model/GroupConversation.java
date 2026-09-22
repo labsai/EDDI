@@ -319,6 +319,51 @@ public class GroupConversation {
     public void setAnonymousSummaryUpToIndex(int anonymousSummaryUpToIndex) {
         this.anonymousSummaryUpToIndex = anonymousSummaryUpToIndex;
     }
+
+    /**
+     * agentId &rarr; that member's current one-line stance, for the overview
+     * dashboard's "who thinks what" band. Recomputed at phase boundaries by
+     * {@code StanceSummaryEngine}.
+     * <p>
+     * Derived state, not source of truth: every stance is reproducible from the
+     * transcript, nothing in the discussion reads it back, and a resume that found
+     * it empty would simply refill it at the next boundary. That is why its arrival
+     * does <b>not</b> bump {@link #CURRENT_SCHEMA_VERSION} — the bump rule at the
+     * top of this class is scoped to fields "resume-time logic depends on", and a
+     * display projection is the case that rule excludes. An older pod re-saving one
+     * of these documents drops the stances and loses nothing but a cache.
+     */
+    private Map<String, MemberStance> memberStances = new ConcurrentHashMap<>();
+
+    public Map<String, MemberStance> getMemberStances() {
+        return memberStances;
+    }
+
+    public void setMemberStances(Map<String, MemberStance> memberStances) {
+        this.memberStances = memberStances == null ? new ConcurrentHashMap<>() : new ConcurrentHashMap<>(memberStances);
+    }
+
+    /**
+     * One member's current position in one line.
+     *
+     * @param text
+     *            the stance, already trimmed to the configured maximum length
+     * @param upToTranscriptIndex
+     *            transcript size (exclusive) this stance was computed from. Lets a
+     *            boundary skip a member whose stance already covers everything they
+     *            have said — the difference between one summarizer call per member
+     *            per discussion and one per member per phase
+     * @param llmGenerated
+     *            {@code true} when a configured summarizer wrote it, {@code false}
+     *            when it is lead-sentence extraction. Surfaced to the UI because an
+     *            extracted line is the member's own words and a generated one is a
+     *            paraphrase — presenting a paraphrase as a quote would be a
+     *            misattribution
+     * @param updated
+     *            when it was computed
+     */
+    public record MemberStance(String text, int upToTranscriptIndex, boolean llmGenerated, Instant updated) {
+    }
     private SharedTaskList taskList;
     /** Agents dynamically added during the discussion (recruited or created). */
     private List<AgentGroupConfiguration.GroupMember> dynamicMembers = new CopyOnWriteArrayList<>();

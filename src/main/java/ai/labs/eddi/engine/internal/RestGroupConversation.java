@@ -976,6 +976,18 @@ public class RestGroupConversation implements IRestGroupConversation {
                 // Not terminal — artifacts are edited throughout the discussion.
                 sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_ARTIFACT_UPDATED, toJson(event));
             }
+
+            @Override
+            public void onCostUpdated(GroupConversationEventSink.CostUpdatedEvent event) {
+                // Not terminal — spend accrues for the whole run.
+                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_COST_UPDATED, toJson(event));
+            }
+
+            @Override
+            public void onStanceUpdated(GroupConversationEventSink.StanceUpdatedEvent event) {
+                // Not terminal — a stance is recomputed at every phase boundary.
+                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_STANCE_UPDATED, toJson(event));
+            }
         };
     }
 

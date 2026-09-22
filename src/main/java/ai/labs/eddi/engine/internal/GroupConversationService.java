@@ -37,6 +37,7 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.internal.groups.StanceSummaryEngine;
 import ai.labs.eddi.engine.internal.groups.DebateVerdictParser;
 import ai.labs.eddi.engine.internal.groups.FacilitatorEngine;
 import ai.labs.eddi.engine.internal.groups.GroupAttachmentBinder;
@@ -1154,10 +1155,31 @@ public class GroupConversationService implements IGroupConversationService {
                         RetroEngine.harvest(gc, config.getRetroConfig(), repeatEntries, userMemoryStore, phase.name(), listener);
                     }
 
+                    // Overview dashboard: refresh the one-line member stances from
+                    // everything said so far. BEFORE the persist, so the stances ride
+                    // the same write as the transcript that produced them and a
+                    // reloaded document shows the band immediately rather than blank
+                    // until the next boundary.
+                    var stanceUpdates = StanceSummaryEngine.updateStances(gc, config.getStanceSummary(), summarizationService);
+
                     gc.setLastModified(Instant.now());
                     conversationStore.update(gc);
 
                     if (listener != null) {
+                        for (var stance : stanceUpdates) {
+                            listener.onStanceUpdated(new GroupConversationEventSink.StanceUpdatedEvent(
+                                    stance.agentId(), gc.getMemberDisplayNames().get(stance.agentId()),
+                                    stance.stance().text(), stance.stance().llmGenerated(),
+                                    stance.stance().upToTranscriptIndex()));
+                            // A priced stance call is discussion spend like any other,
+                            // so the cost band must see it too — otherwise the totals
+                            // the dashboard shows drift from the ledger's.
+                            if (stance.cost() > 0.0) {
+                                listener.onCostUpdated(new GroupConversationEventSink.CostUpdatedEvent(
+                                        "system:stance:" + stance.agentId() + ":" + stance.stance().upToTranscriptIndex(),
+                                        null, stance.cost(), gc.getTotalCost()));
+                            }
+                        }
                         listener.onPhaseComplete(new GroupConversationEventSink.PhaseCompleteEvent(phaseIdx, phase.name()));
                     }
 
@@ -2217,7 +2239,7 @@ public class GroupConversationService implements IGroupConversationService {
     private TranscriptEntry executeGroupMemberTurn(GroupMember member, GroupConversation gc, String input, ProtocolConfig protocol, int phaseIdx,
                                                    DiscussionPhase phase, TranscriptEntryType entryType, String targetAgentId)
             throws GroupDiscussionException {
-        return memberTurnExecutor.executeGroupMemberTurn(member, gc, input, protocol, phaseIdx, phase, entryType, targetAgentId);
+        return memberTurnExecutor.executeGroupMemberTurn(member, gc, input, protocol, phaseIdx, phase, entryType, targetAgentId, null);
     }
 
     private TranscriptEntry handleAgentFailure(GroupMember member, int phaseIdx, DiscussionPhase phase, ProtocolConfig protocol, Throwable cause,

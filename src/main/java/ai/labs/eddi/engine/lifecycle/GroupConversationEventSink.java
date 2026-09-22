@@ -82,6 +82,24 @@ public final class GroupConversationEventSink {
      * queue until the executor drains it.
      */
     public static final String EVENT_ARTIFACT_UPDATED = "artifact_updated";
+    /**
+     * A member turn's dollar cost landed in the discussion's ledger. Fires after
+     * every turn that produced a cost attribution, so an observer can watch spend
+     * accrue instead of only learning the total once the document is persisted.
+     * <p>
+     * Emitted for <em>system</em> spend too (the I9 transcript summarizer, the
+     * stance summarizer), which is attributed to a synthetic ledger key rather than
+     * a member agent — {@link CostUpdatedEvent#attributionKey()} carries that key
+     * verbatim, so a consumer that indexes costs by member must tolerate a key that
+     * matches no member.
+     */
+    public static final String EVENT_COST_UPDATED = "cost_updated";
+    /**
+     * A member's one-line stance was (re)computed. Fires at phase boundaries, not
+     * per turn — a stance is a summary of everything that member has said so far,
+     * so recomputing it mid-phase would spend on a view nothing displays yet.
+     */
+    public static final String EVENT_STANCE_UPDATED = "stance_updated";
 
     // --- Event payloads ---
 
@@ -205,5 +223,53 @@ public final class GroupConversationEventSink {
      */
     public record ArtifactUpdatedEvent(String artifactId, String name, String type, long version, String editorAgentId,
             String status, boolean created) {
+    }
+
+    /**
+     * A cost attribution landed in the discussion ledger.
+     * <p>
+     * Carries the <em>cumulative</em> figures rather than the delta, exactly as
+     * {@code GroupCostLedger} stores them: that ledger records by replacement so a
+     * duplicate attribution for the same turn is idempotent, and a delta-carrying
+     * event would throw that property away — a reconnecting client that replayed
+     * one frame twice would double-count. A consumer overwrites its stored value
+     * for {@code attributionKey} and takes {@code totalCost} as given.
+     *
+     * @param attributionKey
+     *            the ledger key: a member's agentId for a member turn, a synthetic
+     *            {@code system:…} key for the discussion's own machinery, or
+     *            {@code agentId:childConversationId} for a nested GROUP member
+     * @param displayName
+     *            the member's display name, or {@code null} for a system key (which
+     *            names no member)
+     * @param attributedCost
+     *            that key's cumulative cost in USD
+     * @param totalCost
+     *            the discussion's re-summed total in USD
+     */
+    public record CostUpdatedEvent(String attributionKey, String displayName, double attributedCost, double totalCost) {
+    }
+
+    /**
+     * A member's one-line stance was (re)computed (the overview dashboard's "who
+     * thinks what" band).
+     *
+     * @param agentId
+     *            the member the stance belongs to
+     * @param displayName
+     *            human-readable name, for surfaces with no roster to hand
+     * @param stance
+     *            the one-line summary, already trimmed to the configured length
+     * @param llmGenerated
+     *            {@code true} when a configured summarizer produced it,
+     *            {@code false} when it is the lead-sentence extraction fallback —
+     *            the UI distinguishes the two, because an extracted line is the
+     *            member's own words and a generated one is not
+     * @param upToTranscriptIndex
+     *            how much of the transcript the stance covers (exclusive), so a
+     *            late-joining client can tell a fresh stance from a stale one
+     */
+    public record StanceUpdatedEvent(String agentId, String displayName, String stance, boolean llmGenerated,
+            int upToTranscriptIndex) {
     }
 }

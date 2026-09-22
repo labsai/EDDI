@@ -255,6 +255,10 @@ public interface IGroupConversationService {
         }
         default void onArtifactUpdated(GroupConversationEventSink.ArtifactUpdatedEvent event) {
         }
+        default void onCostUpdated(GroupConversationEventSink.CostUpdatedEvent event) {
+        }
+        default void onStanceUpdated(GroupConversationEventSink.StanceUpdatedEvent event) {
+        }
     }
 
     // --- Exceptions ---
