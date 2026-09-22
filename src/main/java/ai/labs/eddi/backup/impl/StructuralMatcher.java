@@ -18,6 +18,7 @@ import ai.labs.eddi.configs.dictionary.IRestDictionaryStore;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
 import ai.labs.eddi.configs.mcpcalls.IRestMcpCallsStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
+import ai.labs.eddi.configs.parser.IRestParserStore;
 import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
 import ai.labs.eddi.configs.rag.IRestRagStore;
 import ai.labs.eddi.configs.rules.IRestRuleSetStore;
@@ -242,8 +243,13 @@ public class StructuralMatcher {
 
             if (targetExt != null) {
                 // Matched by step type + occurrence
-                String srcContent = sourceExt.contentJson();
                 String tgtContent = targetExt.contentJson;
+                // A parser document names its dictionaries by id, and those ids differ
+                // between instances by construction. Compared as written, every parser
+                // that names a dictionary would read as changed on every sync.
+                String srcContent = AbstractBackupService.PARSER_EXT.equals(sourceExt.type())
+                        ? NestedReferences.repointAgainst(sourceExt.contentJson(), tgtContent, Map.of())
+                        : sourceExt.contentJson();
                 DiffAction extAction = contentEquals(secretNeutral(srcContent, tgtContent), tgtContent)
                         ? DiffAction.SKIP
                         : DiffAction.UPDATE;
@@ -422,6 +428,9 @@ public class StructuralMatcher {
         IResourceId resId = ref.resourceId();
 
         return switch (ref.type().resourceAuthority()) {
+            case "ai.labs.parser" -> restInterfaceFactory.get(
+                    IRestParserStore.class)
+                    .readParser(resId.getId(), resId.getVersion());
             case "ai.labs.dictionary" -> restInterfaceFactory.get(
                     IRestDictionaryStore.class)
                     .readRegularDictionary(resId.getId(), resId.getVersion(), "", "", 0, 0);

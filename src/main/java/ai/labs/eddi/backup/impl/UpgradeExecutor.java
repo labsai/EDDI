@@ -17,27 +17,39 @@ import ai.labs.eddi.backup.model.UpgradeResult;
 import ai.labs.eddi.backup.model.UpgradeResult.ResourceFailure;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.apicalls.IApiCallsStore;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.configs.dictionary.IDictionaryStore;
 import ai.labs.eddi.configs.dictionary.IRestDictionaryStore;
 import ai.labs.eddi.configs.dictionary.model.DictionaryConfiguration;
+import ai.labs.eddi.configs.llm.ILlmStore;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
+import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
 import ai.labs.eddi.configs.mcpcalls.IRestMcpCallsStore;
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
+import ai.labs.eddi.configs.output.IOutputStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
+import ai.labs.eddi.configs.parser.IParserStore;
+import ai.labs.eddi.configs.parser.IRestParserStore;
+import ai.labs.eddi.configs.parser.model.ParserConfiguration;
+import ai.labs.eddi.configs.propertysetter.IPropertySetterStore;
 import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
 import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
+import ai.labs.eddi.configs.rag.IRagStore;
 import ai.labs.eddi.configs.rag.IRestRagStore;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.configs.rules.IRuleSetStore;
 import ai.labs.eddi.configs.rules.IRestRuleSetStore;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
 import ai.labs.eddi.configs.snippets.IRestPromptSnippetStore;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
@@ -54,6 +66,7 @@ import java.net.URI;
 import java.util.*;
 import java.util.stream.Collectors;
 
+import static ai.labs.eddi.backup.impl.AbstractBackupService.PARSER_EXT;
 import static ai.labs.eddi.configs.descriptors.ResourceUtilities.createDocumentDescriptor;
 
 /**
@@ -177,7 +190,7 @@ public class UpgradeExecutor {
                     // extension change the preview had just shown the operator, and the
                     // response still said 200 OK.
                     Map<String, URI> extensionUpdates = processWorkflowExtensions(
-                            sourceWf, diffMap, selectedSourceIds, outcome);
+                            sourceWf, wfDiff, diffMap, selectedSourceIds, outcome);
 
                     // The workflow document itself changed — reordered steps, a
                     // changed step config, a condition — and the preview said so.
@@ -361,28 +374,63 @@ public class UpgradeExecutor {
      */
     private Map<String, URI> processWorkflowExtensions(
                                                        WorkflowSourceData sourceWf,
+                                                       ResourceDiff wfDiff,
                                                        Map<String, ResourceDiff> diffMap,
                                                        Set<String> selectedSourceIds,
                                                        Outcome outcome) {
 
         Map<String, URI> updates = new LinkedHashMap<>();
+        // Target resource id -> the URI this run wrote it at, for the parser
+        // documents that name those resources and are written after them.
+        Map<String, URI> writtenThisRun = new HashMap<>();
+        // Source resource id -> where that resource lives on the target now. The
+        // fallback for a parser document that has no target copy to pair with.
+        Map<String, URI> onTargetBySourceId = new HashMap<>();
+        // The target workflow's own references, read once and only if a resource
+        // turns out to be missing from the target.
+        Map<String, WorkflowExtensions.ExtensionRef> targetRefs = null;
 
-        for (Map.Entry<String, ExtensionSourceData> entry : sourceWf.extensions().entrySet()) {
+        for (Map.Entry<String, ExtensionSourceData> entry : parsersLast(sourceWf.extensions())) {
             String extensionKey = entry.getKey();
             ExtensionSourceData sourceExt = entry.getValue();
             ResourceDiff extDiff = diffMap.get(sourceExt.sourceId());
 
             if (extDiff == null)
                 continue;
+            if (extDiff.targetId() != null && extDiff.targetVersion() != null) {
+                URI onTarget = targetUriOf(sourceExt.type(), extDiff.targetId(), extDiff.targetVersion());
+                if (onTarget != null) {
+                    onTargetBySourceId.put(sourceExt.sourceId(), onTarget);
+                }
+            }
             if (!isSelected(selectedSourceIds, sourceExt.sourceId()))
                 continue;
-            if (extDiff.action() == DiffAction.SKIP) {
+
+            DiffAction action = extDiff.action();
+            if (PARSER_EXT.equals(sourceExt.type())) {
+                // The source's parser names the source's dictionaries. Written as it
+                // is, the target's parser would name ids that exist only on the source
+                // — so each one is swapped for the target's counterpart, on the version
+                // this run just wrote where it wrote one: first those the workflow
+                // itself names, then, by position, any only the parser names.
+                String repointed = NestedReferences.repointBySourceId(sourceExt.contentJson(), onTargetBySourceId);
+                repointed = NestedReferences.repointAgainst(repointed, extDiff.targetContent(), writtenThisRun);
+                sourceExt = new ExtensionSourceData(sourceExt.sourceId(), sourceExt.name(), sourceExt.type(),
+                        sourceExt.stepType(), repointed);
+                // Unchanged in itself, but naming a dictionary this run moved on: left
+                // alone it would keep pointing at the version just superseded.
+                if (action == DiffAction.SKIP
+                        && NestedReferences.namesAny(extDiff.targetContent(), writtenThisRun.keySet())) {
+                    action = DiffAction.UPDATE;
+                }
+            }
+            if (action == DiffAction.SKIP) {
                 outcome.skipped++;
                 continue;
             }
 
             try {
-                if (extDiff.action() == DiffAction.UPDATE && extDiff.targetId() != null) {
+                if (action == DiffAction.UPDATE && extDiff.targetId() != null) {
                     WrittenExtension written = updateExtension(sourceExt, extDiff.targetId(), extDiff.targetVersion(),
                             extDiff.targetContent());
                     if (written != null) {
@@ -395,6 +443,8 @@ public class UpgradeExecutor {
                             outcome.updated++;
                         }
                         updates.put(extensionKey, written.uri());
+                        writtenThisRun.put(extDiff.targetId(), written.uri());
+                        onTargetBySourceId.put(sourceExt.sourceId(), written.uri());
                         LOGGER.infof("Updated %s '%s' (target=%s, v%d→v%d)",
                                 LogSanitizer.sanitize(sourceExt.type()), LogSanitizer.sanitize(sourceExt.name()),
                                 LogSanitizer.sanitize(extDiff.targetId()), written.previousVersion(),
@@ -403,7 +453,21 @@ public class UpgradeExecutor {
                         outcome.failed(sourceExt.sourceId(), sourceExt.type(), sourceExt.name(),
                                 "the store did not accept the update");
                     }
-                } else if (extDiff.action() == DiffAction.CREATE) {
+                } else if (action == DiffAction.CREATE) {
+                    if (targetRefs == null) {
+                        targetRefs = targetReferences(wfDiff);
+                    }
+                    int failuresBeforeHeal = outcome.failures.size();
+                    URI healed = healDanglingReference(sourceExt, targetRefs.get(extensionKey), outcome);
+                    if (healed != null) {
+                        updates.put(extensionKey, healed);
+                        onTargetBySourceId.put(sourceExt.sourceId(), healed);
+                        continue;
+                    }
+                    if (outcome.failures.size() > failuresBeforeHeal) {
+                        // It was that case and the recreate failed; that failure says so.
+                        continue;
+                    }
                     // Deliberately NOT created. The only thing that would consume the
                     // new URI is updateWorkflowExtensionUris, which can repoint a
                     // reference the target workflow already has — and CREATE means, by
@@ -435,6 +499,112 @@ public class UpgradeExecutor {
         return updates;
     }
 
+    /**
+     * The URI of an existing target resource of this extension type, or null for a
+     * type with no store registered.
+     */
+    private URI targetUriOf(String extensionType, String targetId, int targetVersion) {
+        ExtensionStoreOps<?> ops;
+        try {
+            ops = resolveExtensionOps(extensionType);
+        } catch (IllegalArgumentException unregistered) {
+            // Reported where the resource is processed, as the wiring error it is;
+            // this lookup only feeds the parser repointing and must not preempt that.
+            return null;
+        }
+        return URI.create(ops.resourceUri() + targetId + ops.versionQueryParam() + targetVersion);
+    }
+
+    /**
+     * The target workflow's references keyed as the matcher keys them; empty when
+     * the workflow cannot be read, which leaves every CREATE a plain CREATE.
+     */
+    private Map<String, WorkflowExtensions.ExtensionRef> targetReferences(ResourceDiff wfDiff) {
+        Map<String, WorkflowExtensions.ExtensionRef> refs = new HashMap<>();
+        if (wfDiff == null || wfDiff.targetId() == null || wfDiff.targetVersion() == null) {
+            return refs;
+        }
+        try {
+            for (WorkflowExtensions.ExtensionRef ref : WorkflowExtensions
+                    .scan(workflowStore.readWorkflow(wfDiff.targetId(), wfDiff.targetVersion()))) {
+                refs.put(ref.key(), ref);
+            }
+        } catch (Exception e) {
+            LOGGER.debugf("Could not read target workflow %s to look for dangling references: %s",
+                    LogSanitizer.sanitize(wfDiff.targetId()), LogSanitizer.sanitize(e.getMessage()));
+        }
+        return refs;
+    }
+
+    /**
+     * Recreates a resource the target's workflow step names but the target no
+     * longer has, and returns its URI for the step to be repointed at — or null
+     * when this is not that case.
+     * <p>
+     * The matcher reports such a resource as CREATE, because it could not read the
+     * target's copy; the policy above refuses a CREATE, because there is usually no
+     * step to wire it into. Here there is one. The common way to get here is a
+     * parser document: archives written before parser documents travelled kept the
+     * source's parser id in the step, so every agent promoted that way names a
+     * parser its own instance never had.
+     * <p>
+     * Only a resource the store <em>confirms</em> is missing is recreated. A read
+     * that failed for any other reason — access, a timeout — would otherwise swap a
+     * live resource for a copy and orphan the original.
+     */
+    private URI healDanglingReference(ExtensionSourceData source, WorkflowExtensions.ExtensionRef targetRef,
+                                      Outcome outcome) {
+        if (targetRef == null || !targetRef.fileExtension().equals(source.type())) {
+            return null;
+        }
+        ExtensionStoreOps<Object> ops = resolveExtensionOps(source.type());
+        IResourceStore<Object> store = getStore(ops.storeClass());
+        try {
+            store.read(targetRef.resourceId().getId(), targetRef.resourceId().getVersion());
+            return null;
+        } catch (IResourceStore.ResourceNotFoundException missing) {
+            // The one case this is for — fall through and recreate it.
+        } catch (Exception e) {
+            LOGGER.debugf("Could not confirm whether %s is missing: %s",
+                    LogSanitizer.sanitize(String.valueOf(targetRef.extensionUri())), LogSanitizer.sanitize(e.getMessage()));
+            return null;
+        }
+
+        try {
+            IResourceId created = store.create(jsonSerialization.deserialize(source.contentJson(), ops.configClass()));
+            URI createdUri = URI.create(ops.resourceUri() + created.getId() + ops.versionQueryParam() + created.getVersion());
+            DocumentDescriptor descriptor = createDocumentDescriptor(createdUri);
+            descriptor.setName(source.name());
+            documentDescriptorStore.createDescriptor(created.getId(), created.getVersion(),
+                    resourceAccessGuard.stampNewDescriptor(descriptor));
+            outcome.created++;
+            LOGGER.infof("Recreated %s '%s': the target's workflow named %s, which it does not have",
+                    LogSanitizer.sanitize(source.type()), LogSanitizer.sanitize(source.name()),
+                    LogSanitizer.sanitize(String.valueOf(targetRef.extensionUri())));
+            return createdUri;
+        } catch (Exception e) {
+            LOGGER.warnf(e, "Failed to recreate %s '%s'", LogSanitizer.sanitize(source.type()),
+                    LogSanitizer.sanitize(source.name()));
+            outcome.failed(source.sourceId(), source.type(), source.name(), e);
+            return null;
+        }
+    }
+
+    /**
+     * The workflow's extensions with parser documents moved to the end, in their
+     * order otherwise. A parser document is repointed at the dictionaries this run
+     * writes, so it has to be written after them.
+     */
+    private static List<Map.Entry<String, ExtensionSourceData>> parsersLast(Map<String, ExtensionSourceData> extensions) {
+        List<Map.Entry<String, ExtensionSourceData>> ordered = new ArrayList<>(extensions.size());
+        List<Map.Entry<String, ExtensionSourceData>> parsers = new ArrayList<>();
+        for (Map.Entry<String, ExtensionSourceData> entry : extensions.entrySet()) {
+            (PARSER_EXT.equals(entry.getValue().type()) ? parsers : ordered).add(entry);
+        }
+        ordered.addAll(parsers);
+        return ordered;
+    }
+
     // ==================== Extension Store Registry ====================
 
     /**
@@ -446,43 +616,57 @@ public class UpgradeExecutor {
     @SuppressWarnings("unchecked")
     private <T> ExtensionStoreOps<T> resolveExtensionOps(String extensionType) {
         return (ExtensionStoreOps<T>) switch (extensionType) {
+            case "parser" -> new ExtensionStoreOps<>(
+                    ParserConfiguration.class,
+                    IParserStore.class,
+                    (id, version, config) -> getStore(IRestParserStore.class).updateParser(id, version, config),
+                    IRestParserStore.resourceURI,
+                    IRestParserStore.versionQueryParam);
             case "regulardictionary" -> new ExtensionStoreOps<>(
                     DictionaryConfiguration.class,
+                    IDictionaryStore.class,
                     (id, version, config) -> getStore(IRestDictionaryStore.class).updateRegularDictionary(id, version, config),
                     IRestDictionaryStore.resourceURI,
                     IRestDictionaryStore.versionQueryParam);
             case "behavior" -> new ExtensionStoreOps<>(
                     RuleSetConfiguration.class,
+                    IRuleSetStore.class,
                     (id, version, config) -> getStore(IRestRuleSetStore.class).updateRuleSet(id, version, config),
                     IRestRuleSetStore.resourceURI,
                     IRestRuleSetStore.versionQueryParam);
             case "httpcalls" -> new ExtensionStoreOps<>(
                     ApiCallsConfiguration.class,
+                    IApiCallsStore.class,
                     (id, version, config) -> getStore(IRestApiCallsStore.class).updateApiCalls(id, version, config),
                     IRestApiCallsStore.resourceURI,
                     IRestApiCallsStore.versionQueryParam);
             case "langchain" -> new ExtensionStoreOps<>(
                     LlmConfiguration.class,
+                    ILlmStore.class,
                     (id, version, config) -> getStore(IRestLlmStore.class).updateLlm(id, version, config),
                     IRestLlmStore.resourceURI,
                     IRestLlmStore.versionQueryParam);
             case "property" -> new ExtensionStoreOps<>(
                     PropertySetterConfiguration.class,
+                    IPropertySetterStore.class,
                     (id, version, config) -> getStore(IRestPropertySetterStore.class).updatePropertySetter(id, version, config),
                     IRestPropertySetterStore.resourceURI,
                     IRestPropertySetterStore.versionQueryParam);
             case "output" -> new ExtensionStoreOps<>(
                     OutputConfigurationSet.class,
+                    IOutputStore.class,
                     (id, version, config) -> getStore(IRestOutputStore.class).updateOutputSet(id, version, config),
                     IRestOutputStore.resourceURI,
                     IRestOutputStore.versionQueryParam);
             case "mcpcalls" -> new ExtensionStoreOps<>(
                     McpCallsConfiguration.class,
+                    IMcpCallsStore.class,
                     (id, version, config) -> getStore(IRestMcpCallsStore.class).updateMcpCalls(id, version, config),
                     IRestMcpCallsStore.resourceURI,
                     IRestMcpCallsStore.versionQueryParam);
             case "rag" -> new ExtensionStoreOps<>(
                     RagConfiguration.class,
+                    IRagStore.class,
                     (id, version, config) -> getStore(IRestRagStore.class).updateRag(id, version, config),
                     IRestRagStore.resourceURI,
                     IRestRagStore.versionQueryParam);
@@ -501,8 +685,9 @@ public class UpgradeExecutor {
     }
 
     /**
-     * Holds the configuration class, its store's update call and the URI pattern
-     * for a single extension type.
+     * Holds the configuration class, its stores and the URI pattern for a single
+     * extension type. {@code storeClass} is the in-process store, used to confirm a
+     * resource is gone and to recreate it — see {@link #healDanglingReference}.
      * <p>
      * The update call is a typed lambda so that dispatch happens here, in the one
      * table, instead of a second switch on the config class's <em>simple name</em>
@@ -511,6 +696,7 @@ public class UpgradeExecutor {
      */
     private record ExtensionStoreOps<T>(
             Class<T> configClass,
+            Class<? extends IResourceStore<T>> storeClass,
             ExtensionUpdate<T> update,
             String resourceUri,
             String versionQueryParam) {

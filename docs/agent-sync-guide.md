@@ -115,7 +115,7 @@ curl -X POST "http://localhost:7070/backup/import/sync/preview?sourceUrl=https:/
 
 `targetId` and `targetVersion` are `null` for a `CREATE`, and `matchStrategy` records how the match was found (e.g. `targetAgent`, `position`, `type`, `name` — `null` for `CREATE`).
 
-`resourceType` uses the config file extension labels, not the v6 URI names — the full set is `agent`, `workflow`, `langchain`, `httpcalls`, `behavior`, `regulardictionary`, `property`, `output`, `mcpcalls`, `rag`, `snippet`.
+`resourceType` uses the config file extension labels, not the v6 URI names — the full set is `agent`, `workflow`, `langchain`, `httpcalls`, `behavior`, `parser`, `regulardictionary`, `property`, `output`, `mcpcalls`, `rag`, `snippet`.
 
 **Actions explained:**
 
@@ -280,12 +280,20 @@ Agent Sync uses **structural matching** — not ID matching — to pair source a
 - **Secret scrubbing:** API keys and vault references are **never** transferred. The target instance uses its own secrets — and a value the source scrubbed is put back from the target's own configuration before anything is compared or written, so a credential neither leaks nor gets overwritten with a placeholder, and a config that differs *only* by the placeholder still counts as unchanged
 - **SSRF protection:** The remote URL is validated against this deployment's policy — HTTPS-only and no private address by default, relaxed per [Reaching the source instance](#reaching-the-source-instance) — and redirects are never followed, so a 3xx from the source surfaces as a failed read rather than re-sending the bearer token elsewhere. On a first promotion, the `Location` the source's export answers with is not followed either: only the archive's file name is taken from it, and the download goes to the already-approved base URL
 - **New extensions are refused, not orphaned:** an extension the target workflow has no step for cannot be referenced once written, so it is reported in `failures[]` instead of being created as an unreferenced resource. Add the step to the target workflow (or import the source workflow as a new one) and sync again
+- **A missing resource is recreated, not refused:** when the target's workflow *does* have the step but the resource it names no longer exists — the store confirms it is gone, not merely unreadable — the resource is created from the source and the step repointed at it
 
-## What a promotion does not carry
+## What a promotion carries, and what it does not
 
-Two things travel as references rather than as content, and the target has to
-supply them itself. Neither is reported by the sync — check both after a first
-promotion.
+Everything the agent's workflows reference travels as content, so a promoted
+agent works on the target without being rebuilt there: behavior rules, HTTP
+calls, LLM configs, property setters, outputs, MCP calls, knowledge-base (RAG)
+configurations with their ingestion sources, parser documents, dictionaries —
+including a dictionary that only a parser document names — and the prompt
+snippets the agent uses. Every reference between them is repointed at the
+target's own copies. A first promotion imports the source's own export archive,
+so it also lands the schedules and connection references that archive carries.
+
+Two things stay behind, by design or because they are not configuration:
 
 **Secrets.** An API key is stored as a vault reference (`${vault:<name>}`), and
 the reference is what travels: the value never leaves the source instance, by
@@ -296,15 +304,38 @@ entry on the target under the same name — `POST /secretstore/secrets/{tenantId
 *updated* rather than created keeps its own value: the export scrubber replaces
 the credential with a placeholder and the target's own value is put back before
 anything is compared or written, so a sync never overwrites a working key with a
-placeholder.
+placeholder. The same applies to the embedding model's key of a knowledge base.
 
-**Parser configurations.** `ai.labs.parser` is not in the backup registry
-(`AbstractBackupService`'s `*_EXT` constants), so neither an export nor a sync
-carries one, and a promoted agent's parser step keeps the reference it had on the
-source. The agent still deploys — the missing config is tolerated — but a parser
-customised on the source runs with defaults on the target. This is a gap in the
-backup subsystem rather than in sync: `strategy=create` and `strategy=merge` have
-always behaved the same way.
+**What a knowledge base has ingested.** The knowledge-base configuration and its
+ingestion sources travel; the chunks already embedded into the source's vector
+store do not — they are data, not configuration. A source with a `cron` gets its
+schedule on the target and fills the knowledge base on its first run. To answer
+from it straight away, start each source once — `POST /ragstore/rags/{id}/sources/{sourceId}/run?version=N`,
+or **Run now** in the knowledge-base editor — and re-ingest any document that was
+uploaded by hand (`POST /ragstore/rags/{id}/ingest`). See [RAG](rag.md#ingestion-sources).
+A target that shares the source's vector store needs neither: the store is
+addressed by the knowledge base's name, which travels unchanged.
+
+### Parser documents and older promotions
+
+Parser documents travel since this release. Two consequences for what was
+promoted before:
+
+- **An agent promoted earlier names a parser its instance never had.** Its parser
+  step kept the source's parser id. The next sync recreates that parser on the
+  target and repoints the step (it is counted under `created`). Nothing about the
+  agent's behaviour changes: the pipeline builds its parser from the workflow step
+  itself and never loads the document.
+- **An archive exported before this release carries no parser document.** It
+  imports exactly as it always did — the parser step is kept and its reference is
+  left as the archive wrote it, rather than the step being dropped or the import
+  refused.
+
+A dictionary that *only* a parser document names — not the workflow's parser step
+— lands with the first promotion, but a later sync does not carry changes to it:
+the sync matches what the workflow references, and that dictionary is not one of
+those. The dictionaries the running agent uses are the ones its workflow step
+names, and those are synced every time.
 
 ## Upgrade Strategy (ZIP Import)
 

@@ -925,6 +925,8 @@ The file naming convention is `{id}.{type}.json` where `{id}` matches the last p
     {llmId}.descriptor.json
     {dictionaryId}.regulardictionary.json → Regular dictionary (URI uses "dictionary")
     {dictionaryId}.descriptor.json
+    {parserId}.parser.json        → Parser document a parser step's config.uri names (optional: an archive without it imports with the reference left as written)
+    {parserId}.descriptor.json
     {mcpId}.mcpcalls.json         → MCP tool calls
     {mcpId}.descriptor.json
     {ragId}.rag.json              → RAG retrieval configuration
@@ -938,7 +940,7 @@ connections/
 ```
 
 > The authoritative list of file extensions is `AbstractBackupService`'s `*_EXT` constants —
-> thirteen of them. Check against that file rather than against this block if the two ever disagree.
+> fourteen of them. Check against that file rather than against this block if the two ever disagree.
 
 > **Important**: File extensions use legacy names (`behavior`, `httpcalls`, `langchain`) while URIs use v6 names (`rules`, `apicalls`, `llm`). The import service maps between them via `AbstractBackupService` constants.
 

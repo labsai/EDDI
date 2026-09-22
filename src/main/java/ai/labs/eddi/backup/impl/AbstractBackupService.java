@@ -16,6 +16,7 @@ abstract class AbstractBackupService {
     static final String AGENT_EXT = "agent";
     static final String WORKFLOW_EXT = "workflow";
     static final String DICTIONARY_EXT = "regulardictionary";
+    static final String PARSER_EXT = "parser";
     static final String BEHAVIOR_EXT = "behavior";
     static final String HTTPCALLS_EXT = "httpcalls";
     static final String LLM_EXT = "langchain";
@@ -39,6 +40,7 @@ abstract class AbstractBackupService {
 
     // ---- V6 canonical URI patterns ----
     static final Pattern DICTIONARY_URI_PATTERN = Pattern.compile("\"eddi://ai.labs.dictionary/dictionarystore/dictionaries/.*?\"");
+    static final Pattern PARSER_URI_PATTERN = Pattern.compile("\"eddi://ai.labs.parser/parserstore/parsers/.*?\"");
     static final Pattern BEHAVIOR_URI_PATTERN = Pattern.compile("\"eddi://ai.labs.rules/rulestore/rulesets/.*?\"");
     static final Pattern HTTPCALLS_URI_PATTERN = Pattern.compile("\"eddi://ai.labs.apicalls/apicallstore/apicalls/.*?\"");
     static final Pattern LANGCHAIN_URI_PATTERN = Pattern.compile("\"eddi://ai.labs.llm/llmstore/llms/.*?\"");

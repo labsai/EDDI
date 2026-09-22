@@ -119,6 +119,7 @@ The `IResourceSource` interface is the only transport abstraction. All downstrea
       <extId>.httpcalls.json           (HTTP calls)
       <extId>.behavior.json            (rules)
       <extId>.regulardictionary.json   (dictionary)
+      <extId>.parser.json              (parser document; absent from archives written before it travelled)
       <extId>.property.json            (property setter)
       <extId>.output.json              (output templates)
       <extId>.mcpcalls.json            (MCP calls)
@@ -129,7 +130,7 @@ The `IResourceSource` interface is the only transport abstraction. All downstrea
   schedules/
     <scheduleId>.schedule.json
   connections/
-    <connectionId>.connection.json   (ZIP import/export only — live sync does not carry connections)
+    <connectionId>.connection.json   (ZIP import/export, and a live sync's first promotion, which imports this archive — later syncs do not carry connections)
 ```
 
 ## API Endpoints

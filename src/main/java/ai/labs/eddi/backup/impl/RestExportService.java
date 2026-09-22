@@ -28,6 +28,7 @@ import ai.labs.eddi.configs.snippets.IPromptSnippetStore;
 import ai.labs.eddi.configs.snippets.model.PromptSnippet;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
+import ai.labs.eddi.configs.parser.IParserStore;
 import ai.labs.eddi.configs.propertysetter.IPropertySetterStore;
 import ai.labs.eddi.configs.dictionary.IDictionaryStore;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
@@ -76,6 +77,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IAgentStore agentStore;
     private final IWorkflowStore workflowStore;
+    private final IParserStore parserStore;
     private final IDictionaryStore regularDictionaryStore;
     private final IRuleSetStore behaviorStore;
     private final IApiCallsStore httpCallsStore;
@@ -141,7 +143,8 @@ public class RestExportService extends AbstractBackupService implements IRestExp
 
     @Inject
     public RestExportService(IDocumentDescriptorStore documentDescriptorStore, IAgentStore agentStore, IWorkflowStore workflowStore,
-            IDictionaryStore regularDictionaryStore, IRuleSetStore behaviorStore, IApiCallsStore httpCallsStore, ILlmStore llmStore,
+            IParserStore parserStore, IDictionaryStore regularDictionaryStore, IRuleSetStore behaviorStore,
+            IApiCallsStore httpCallsStore, ILlmStore llmStore,
             IPropertySetterStore propertySetterStore, IOutputStore outputStore, IMcpCallsStore mcpCallsStore, IRagStore ragStore,
             IPromptSnippetStore snippetStore, IJsonSerialization jsonSerialization, IZipArchive zipArchive,
             SecretScrubber secretScrubber, IScheduleStore scheduleStore, ResourceAccessGuard resourceAccessGuard,
@@ -152,6 +155,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
         this.documentDescriptorStore = documentDescriptorStore;
         this.agentStore = agentStore;
         this.workflowStore = workflowStore;
+        this.parserStore = parserStore;
         this.regularDictionaryStore = regularDictionaryStore;
         this.behaviorStore = behaviorStore;
         this.httpCallsStore = httpCallsStore;
@@ -311,8 +315,17 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                         WORKFLOW_EXT);
                 writeDocumentDescriptor(workflowPath, resourceId.getId(), resourceId.getVersion());
 
+                // Parsers first: a parser document carries its own dictionary
+                // references, and those dictionaries have to be found before the
+                // dictionary pass runs — a parser whose dictionaries stayed behind
+                // reaches the target pointing at ids that only exist on this instance.
+                Map<IResourceId, String> parserConfigs = convertConfigsToString(
+                        readExistingConfigs(parserStore, extractResourcesUris(workflowConfigString, PARSER_URI_PATTERN)));
+                writeSelectedConfigs(workflowPath, parserConfigs, PARSER_EXT, selectedIds);
+
                 Map<IResourceId, String> dictionaryConfigs = convertConfigsToString(
-                        readConfigs(regularDictionaryStore, extractResourcesUris(workflowConfigString, DICTIONARY_URI_PATTERN)));
+                        readConfigs(regularDictionaryStore,
+                                extractResourcesUris(withParsers(workflowConfigString, parserConfigs), DICTIONARY_URI_PATTERN)));
                 writeSelectedConfigs(workflowPath, dictionaryConfigs, DICTIONARY_EXT, selectedIds);
 
                 Map<IResourceId, String> behaviorConfigs = convertConfigsToString(
@@ -524,6 +537,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
 
     private void addExtensionResources(List<ExportableResource> resources, String wfJson,
                                        String parentWorkflowId) {
+        addExtensionResourcesForType(resources, wfJson, PARSER_URI_PATTERN, PARSER_EXT, parentWorkflowId);
         addExtensionResourcesForType(resources, wfJson, DICTIONARY_URI_PATTERN, "regulardictionary", parentWorkflowId);
         addExtensionResourcesForType(resources, wfJson, BEHAVIOR_URI_PATTERN, "behavior", parentWorkflowId);
         addExtensionResourcesForType(resources, wfJson, HTTPCALLS_URI_PATTERN, "httpcalls", parentWorkflowId);
@@ -833,6 +847,33 @@ public class RestExportService extends AbstractBackupService implements IRestExp
         return ret;
     }
 
+    /**
+     * Like {@link #readConfigs}, but a reference to a document that no longer
+     * exists is skipped instead of failing the export.
+     * <p>
+     * Used for parser documents only. The pipeline builds its parser from the
+     * workflow step itself and never loads the document, so an agent can run for
+     * years with its parser step naming one that is gone — and every agent imported
+     * from an archive written before parser documents travelled does exactly that,
+     * because the step kept the source instance's id. Refusing to export such an
+     * agent would turn a harmless dangling reference into one that blocks every
+     * backup and every promotion of it.
+     */
+    private static <T> Map<IResourceId, T> readExistingConfigs(IResourceStore<T> store, List<URI> configUris)
+            throws IResourceStore.ResourceStoreException {
+        Map<IResourceId, T> ret = new LinkedHashMap<>();
+        for (URI uri : configUris) {
+            IResourceId resourceId = RestUtilities.extractResourceId(uri);
+            try {
+                ret.put(resourceId, store.read(resourceId.getId(), resourceId.getVersion()));
+            } catch (IResourceStore.ResourceNotFoundException e) {
+                LOGGER.infof("Not exporting %s: it no longer exists, and the workflow's reference to it is kept as it is",
+                        LogSanitizer.sanitize(uri.toString()));
+            }
+        }
+        return ret;
+    }
+
     private void deleteFileIfExists(Path path) throws IOException {
         if (Files.exists(path)) {
             Files.delete(path);
@@ -872,6 +913,28 @@ public class RestExportService extends AbstractBackupService implements IRestExp
      */
     private Set<String> extractReferencedSnippetNames(List<String> configStrings) {
         return SnippetReferences.namesIn(configStrings);
+    }
+
+    /**
+     * The workflow document and every parser document it references, as one string
+     * to scan.
+     * <p>
+     * A dictionary can be referenced either inline from a parser <em>step</em> — in
+     * which case it is already in the workflow JSON — or from a parser
+     * <em>document</em> the step points at. Scanning only the workflow found the
+     * first kind and missed the second.
+     */
+    private static String withParsers(String workflowConfigString, Map<IResourceId, String> parserConfigs) {
+        if (parserConfigs == null || parserConfigs.isEmpty()) {
+            return workflowConfigString;
+        }
+        StringBuilder combined = new StringBuilder(workflowConfigString);
+        for (String parserConfig : parserConfigs.values()) {
+            if (parserConfig != null) {
+                combined.append(System.lineSeparator()).append(parserConfig);
+            }
+        }
+        return combined.toString();
     }
 
     /**

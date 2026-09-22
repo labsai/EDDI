@@ -411,10 +411,23 @@ public class RemoteApiResourceSource implements IResourceSource {
      * @return the archive bytes
      */
     public static byte[] exportAgentArchive(String baseUrl, String agentId, Integer agentVersion, String authToken) {
+        try (HttpClient client = configure(HttpClient.newBuilder()).build()) {
+            return exportAgentArchive(client, baseUrl, agentId, agentVersion, authToken);
+        }
+    }
+
+    /**
+     * Visible for testing, and the only reason this is split: the public form
+     * builds its own {@link HttpClient}, which opens a selector and so cannot run
+     * in a sandboxed build — and a client that cannot be substituted leaves the
+     * whole fetch path reachable only through an integration test.
+     */
+    static byte[] exportAgentArchive(HttpClient client, String baseUrl, String agentId, Integer agentVersion,
+                                     String authToken) {
         String normalized = normalizeBaseUrl(baseUrl);
         URI baseUri = URI.create(normalized.endsWith("/") ? normalized : normalized + "/");
 
-        try (HttpClient client = configure(HttpClient.newBuilder()).build()) {
+        try {
             // The version is always stated. The remote's export defaults it to 1
             // (@DefaultValue("1") on IRestExportService.exportAgent), so omitting it
             // for "latest" — which is what the API documents a null version as, and

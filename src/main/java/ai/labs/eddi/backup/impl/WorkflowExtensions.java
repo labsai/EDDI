@@ -21,6 +21,7 @@ import static ai.labs.eddi.backup.impl.AbstractBackupService.HTTPCALLS_EXT;
 import static ai.labs.eddi.backup.impl.AbstractBackupService.LLM_EXT;
 import static ai.labs.eddi.backup.impl.AbstractBackupService.MCPCALLS_EXT;
 import static ai.labs.eddi.backup.impl.AbstractBackupService.OUTPUT_EXT;
+import static ai.labs.eddi.backup.impl.AbstractBackupService.PARSER_EXT;
 import static ai.labs.eddi.backup.impl.AbstractBackupService.PROPERTY_EXT;
 import static ai.labs.eddi.backup.impl.AbstractBackupService.RAG_EXT;
 
@@ -85,6 +86,7 @@ final class WorkflowExtensions {
     private static final Map<String, ExtensionType> BY_AUTHORITY = new LinkedHashMap<>();
 
     static {
+        register("ai.labs.parser", PARSER_EXT, "/parserstore/parsers/");
         register("ai.labs.dictionary", DICTIONARY_EXT, "/dictionarystore/dictionaries/");
         register("ai.labs.rules", BEHAVIOR_EXT, "/rulestore/rulesets/");
         register("ai.labs.apicalls", HTTPCALLS_EXT, "/apicallstore/apicalls/");
@@ -211,7 +213,9 @@ final class WorkflowExtensions {
         ExtensionType type = typeOf(extensionUri);
         if (type == null) {
             // Not a resource type the backup package knows how to move (e.g. a
-            // parser config). Leaving it out keeps the key space identical on
+            // built-in parser dictionary such as ai.labs.parser.dictionaries.integer,
+            // which is a type, not a stored resource). Leaving it out keeps the key space
+            // identical on
             // both sides, which is what makes source and target join at all.
             return;
         }
