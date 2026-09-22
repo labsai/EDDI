@@ -5,6 +5,9 @@
 package ai.labs.eddi.configs.properties.mongo;
 
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
+import ai.labs.eddi.configs.properties.model.Property.Visibility;
+import org.mockito.ArgumentCaptor;
+import java.util.Optional;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import com.mongodb.MongoNamespace;
 import com.mongodb.client.FindIterable;
@@ -24,6 +27,7 @@ import java.util.Iterator;
 import java.util.List;
 
 import com.mongodb.client.ListCollectionNamesIterable;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.*;
 
 class PropertiesMigrationServiceTest {
@@ -230,13 +234,15 @@ class PropertiesMigrationServiceTest {
         }
 
         /**
-         * A document with no userId is skipped, which is also a failure to migrate its
-         * contents — so it must hold the rename back for the same reason.
+         * A document with no userId can never be migrated — not on this boot, not on
+         * any later one. Holding the rename back for it re-ran the whole migration on
+         * every startup, forever. It is skipped, and its contents survive in the backup
+         * collection the source is renamed to.
          */
         @Test
-        @DisplayName("a skipped document without a userId also holds the rename back")
+        @DisplayName("a document without a userId does not hold the rename back — retrying it can never succeed")
         @SuppressWarnings("unchecked")
-        void skippedDocumentAlsoHoldsTheRenameBack() throws Exception {
+        void unownedDocumentDoesNotHoldTheRenameBack() throws Exception {
             var service = new PropertiesMigrationService(database, userMemoryStore, "mongodb");
             // Build both iterables before stubbing: mockIterableOf() mocks internally, and
             // calling it inside a when(...) chain is nested stubbing, which Mockito
@@ -262,7 +268,46 @@ class PropertiesMigrationServiceTest {
             service.onStartup(startupEvent);
 
             verify(userMemoryStore, never()).upsert(any());
-            verify(legacyCollection, never()).renameCollection(any(MongoNamespace.class));
+            verify(legacyCollection).renameCollection(any(MongoNamespace.class));
+        }
+
+        /**
+         * Live-reproduced: a user's v6 value was replaced by the stale v5 one, and —
+         * because the source was never retired — again on every restart.
+         */
+        @Test
+        @DisplayName("a key the user already has in usermemories keeps its newer value")
+        @SuppressWarnings("unchecked")
+        void existingV6EntryIsNotOverwritten() throws Exception {
+            var service = new PropertiesMigrationService(database, userMemoryStore, "mongodb");
+            var iterable1 = mockIterableOf("properties");
+            var iterable2 = mockIterableOf();
+            when(database.listCollectionNames()).thenReturn(iterable1).thenReturn(iterable2);
+
+            MongoCollection<Document> legacyCollection = mock(MongoCollection.class);
+            when(database.getCollection("properties")).thenReturn(legacyCollection);
+            when(legacyCollection.countDocuments()).thenReturn(1L);
+            when(database.getName()).thenReturn("testdb");
+
+            var doc = new Document("_id", new ObjectId()).append("userId", "user-1").append("lang", "OLD-v5").append("color", "red");
+            FindIterable<Document> findIterable = mock(FindIterable.class);
+            MongoCursor<Document> cursor = mock(MongoCursor.class);
+            when(legacyCollection.find()).thenReturn(findIterable);
+            when(findIterable.iterator()).thenReturn(cursor);
+            when(cursor.hasNext()).thenReturn(true, false);
+            when(cursor.next()).thenReturn(doc);
+
+            var newer = new UserMemoryEntry("id-1", "user-1", "lang", "NEW-v6", "preference", Visibility.global, "agent-a", List.of(), null, false,
+                    0, null, null);
+            when(userMemoryStore.getByKey("user-1", "lang")).thenReturn(Optional.of(newer));
+            when(userMemoryStore.getByKey("user-1", "color")).thenReturn(Optional.empty());
+
+            service.onStartup(startupEvent);
+
+            var written = ArgumentCaptor.forClass(UserMemoryEntry.class);
+            verify(userMemoryStore).upsert(written.capture());
+            assertEquals("color", written.getValue().key(), "only the key the user does not have yet is migrated");
+            verify(legacyCollection).renameCollection(any(MongoNamespace.class));
         }
 
         @Test

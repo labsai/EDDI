@@ -78,3 +78,10 @@ observed there, and carries a regression test.
   already stored keep the `10` they were given; that bounds a dream cycle only past ten consolidated
   groups per user, which the per-category grouping rarely reaches.
   [`AgentConfiguration.java`](../../src/main/java/ai/labs/eddi/configs/agents/model/AgentConfiguration.java)
+- **The v5 → v6 properties migration overwrote newer data, on every restart.** It upserted each
+  legacy value over whatever the user already had — reproduced live: a v6 `NEW-v6-value` became
+  `OLD-v5-value` — and a single legacy document without a `userId` counted as a failure, so the
+  source was never retired and the clobbering repeated at each boot. A key the user already has in
+  `usermemories` now keeps its value (which also keeps retries idempotent), and an unowned document
+  is skipped instead of failed — it stays readable in `properties_migrated_v6`.
+  [`PropertiesMigrationService.java`](../../src/main/java/ai/labs/eddi/configs/properties/mongo/PropertiesMigrationService.java)

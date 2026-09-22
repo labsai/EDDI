@@ -92,12 +92,19 @@ public class PropertiesMigrationService {
         int userCount = 0;
         int entryCount = 0;
         int failedCount = 0;
+        int unownedDocuments = 0;
+        int keptNewerEntries = 0;
 
         for (Document doc : legacyCollection.find()) {
             String userId = doc.getString("userId");
             if (userId == null) {
-                LOGGER.warnf("[MIGRATION] Skipping document without userId: %s", doc.getObjectId("_id"));
-                failedCount++;
+                // Not a failure: a document with no owner can never be migrated, on this
+                // boot or any other. Counting it as one held the rename back forever,
+                // re-running the migration on every startup. Its contents stay readable
+                // in the backup collection the source is renamed to.
+                LOGGER.warnf("[MIGRATION] Skipping document without userId: %s — it remains in '%s' after the rename.",
+                        doc.getObjectId("_id"), BACKUP_COLLECTION);
+                unownedDocuments++;
                 continue;
             }
 
@@ -105,6 +112,21 @@ public class PropertiesMigrationService {
                 // Skip MongoDB internal fields and the userId field itself
                 if ("_id".equals(key) || "userId".equals(key))
                     continue;
+
+                // A user who already has this key in usermemories wrote it AFTER the v5
+                // data was frozen — or a previous (partial) run of this migration did.
+                // Either way the existing entry wins: upserting the legacy value over
+                // it replaced a newer answer with a stale one, on every retry.
+                try {
+                    if (userMemoryStore.getByKey(userId, key).isPresent()) {
+                        keptNewerEntries++;
+                        continue;
+                    }
+                } catch (Exception e) {
+                    failedCount++;
+                    LOGGER.warnf("[MIGRATION] Could not check key='%s' for userId='%s': %s", key, userId, e.getMessage());
+                    continue;
+                }
 
                 Object value = doc.get(key);
                 UserMemoryEntry entry = new UserMemoryEntry(null, // id — generated on insert
@@ -131,7 +153,8 @@ public class PropertiesMigrationService {
         }
 
         // Only retire the source once every key made it across. The loop is idempotent
-        // — upsert is keyed on (userId, key) — so leaving the collection in place lets
+        // — a key already present in usermemories is skipped — so leaving the
+        // collection in place lets
         // the next boot retry the entries that failed. Renaming on a partial run made
         // the migration a permanent no-op afterwards (collectionExists is then false),
         // so a transient Mongo error on three of four hundred users silently stranded
@@ -154,7 +177,8 @@ public class PropertiesMigrationService {
                 }
             }
             legacyCollection.renameCollection(new MongoNamespace(database.getName(), BACKUP_COLLECTION));
-            LOGGER.infof("[MIGRATION] Complete: migrated %d entries for %d users. " + "Old collection renamed to '%s'", entryCount, userCount,
+            LOGGER.infof("[MIGRATION] Complete: migrated %d entries for %d users (%d keys kept their newer usermemories value, "
+                    + "%d documents had no userId). Old collection renamed to '%s'", entryCount, userCount, keptNewerEntries, unownedDocuments,
                     BACKUP_COLLECTION);
         } catch (Exception e) {
             LOGGER.warnf("[MIGRATION] Migration data written but failed to rename collection: %s", e.getMessage());
