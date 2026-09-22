@@ -304,4 +304,67 @@ describe("DiscussionTranscript", () => {
 
     expect(screen.queryByTestId("transcript-window-summary")).not.toBeInTheDocument();
   });
+
+  // The pinned question header: "Show more" could not be undone without a reload.
+  //
+  // Expanding removed the line clamp and nothing replaced it, so a long brief grew
+  // the `shrink-0` header past the bottom of an `overflow-hidden` pane and took the
+  // "Show less" button with it. The transcript below is the scroll container, not the
+  // header, so nothing could be scrolled back to reach the toggle.
+  describe("long question header", () => {
+    const longQuestion = "A very long grant brief. ".repeat(40);
+
+    function renderLongQuestion() {
+      return renderWithProviders(
+        <DiscussionTranscript
+          conversation={{ ...mockConversation, originalQuestion: longQuestion }}
+          discussionStyle="ROUND_TABLE"
+        />,
+      );
+    }
+
+    it("clamps the question and offers a toggle", () => {
+      renderLongQuestion();
+
+      expect(screen.getByTestId("discussion-question")).toHaveClass("line-clamp-4");
+      expect(screen.getByTestId("discussion-question-toggle")).toHaveTextContent("Show more");
+    });
+
+    it("bounds the expanded question so its own toggle stays reachable", () => {
+      renderLongQuestion();
+
+      fireEvent.click(screen.getByTestId("discussion-question-toggle"));
+
+      const question = screen.getByTestId("discussion-question");
+      expect(question).not.toHaveClass("line-clamp-4");
+      // The property that was broken: expanded text is height-bounded AND scrolls
+      // itself, so the header cannot grow past the pane and hide the toggle.
+      expect(question.className).toMatch(/max-h-\[[^\]]+\]/);
+      expect(question).toHaveClass("overflow-y-auto");
+    });
+
+    it("can be collapsed again without a reload", () => {
+      renderLongQuestion();
+
+      const toggle = screen.getByTestId("discussion-question-toggle");
+      fireEvent.click(toggle);
+      expect(screen.getByTestId("discussion-question-toggle")).toHaveTextContent("Show less");
+
+      fireEvent.click(screen.getByTestId("discussion-question-toggle"));
+
+      expect(screen.getByTestId("discussion-question")).toHaveClass("line-clamp-4");
+      expect(screen.getByTestId("discussion-question-toggle")).toHaveTextContent("Show more");
+    });
+
+    it("leaves a short question unclamped and unbounded", () => {
+      renderWithProviders(
+        <DiscussionTranscript conversation={mockConversation} discussionStyle="ROUND_TABLE" />,
+      );
+
+      const question = screen.getByTestId("discussion-question");
+      expect(question).not.toHaveClass("line-clamp-4");
+      expect(question).not.toHaveClass("overflow-y-auto");
+      expect(screen.queryByTestId("discussion-question-toggle")).not.toBeInTheDocument();
+    });
+  });
 });
