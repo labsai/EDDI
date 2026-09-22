@@ -62,6 +62,10 @@ public class ConversationMemory implements IConversationMemory {
      * Transient — never serialized to MongoDB. Set once during Conversation.init().
      */
     private transient AgentConfiguration.UserMemoryConfig userMemoryConfig;
+    /**
+     * Transient like the config beside it; {@code null} = derive from the config.
+     */
+    private transient Boolean memoryToolsEnabled;
 
     public ConversationMemory(String conversationId, String agentId, Integer agentVersion, String userId) {
         this(agentId, agentVersion, userId);
@@ -267,6 +271,16 @@ public class ConversationMemory implements IConversationMemory {
     @Override
     public void setUserMemoryConfig(AgentConfiguration.UserMemoryConfig config) {
         this.userMemoryConfig = config;
+    }
+
+    @Override
+    public boolean isMemoryToolsEnabled() {
+        return memoryToolsEnabled != null ? memoryToolsEnabled : userMemoryConfig != null;
+    }
+
+    @Override
+    public void setMemoryToolsEnabled(boolean memoryToolsEnabled) {
+        this.memoryToolsEnabled = memoryToolsEnabled;
     }
 
     /**

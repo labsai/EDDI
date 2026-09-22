@@ -4,9 +4,11 @@
  */
 package ai.labs.eddi.engine.runtime.internal;
 
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.Property.Scope;
+import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.lifecycle.IConversation;
@@ -18,6 +20,7 @@ import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.IPropertiesHandler;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -115,6 +118,61 @@ class ConversationLongTermPersistenceTest {
         nextTurn().say("thanks", new LinkedHashMap<>());
 
         verify(userMemoryStore, times(1)).upsert(any(UserMemoryEntry.class));
+    }
+
+    // =================================================================
+    // Visibility at the persistence boundary
+    // =================================================================
+
+    private UserMemoryEntry persistedAfterTurn(Property property, Map<String, Context> context) throws Exception {
+        // One no-op workflow: a turn's context is written into the step as it enters
+        // each workflow, and a real turn always has at least one.
+        Conversation conversation = turnWith(workflowThat(() -> {
+        }));
+        memory.getConversationProperties().put(property.getName(), property);
+        conversation.say("turn", context);
+        ArgumentCaptor<UserMemoryEntry> entry = ArgumentCaptor.forClass(UserMemoryEntry.class);
+        verify(userMemoryStore).upsert(entry.capture());
+        return entry.getValue();
+    }
+
+    @Test
+    @DisplayName("a group-visible longTerm property carries the conversation's group id — without it no reader can ever match it")
+    void groupPropertyCarriesTheGroupId() throws Exception {
+        var property = new Property("sprint_goal", "ship billing", Scope.longTerm);
+        property.setVisibility(Visibility.group);
+        var context = new LinkedHashMap<String, Context>();
+        context.put("groupId", new Context(Context.ContextType.string, "team-1"));
+
+        UserMemoryEntry stored = persistedAfterTurn(property, context);
+
+        assertEquals(Visibility.group, stored.visibility());
+        assertEquals(List.of("team-1"), stored.groupIds());
+    }
+
+    @Test
+    @DisplayName("a group-visible property outside any group is stored as self — reachable by its owner, never wider")
+    void groupPropertyWithoutAGroupFallsBackToSelf() throws Exception {
+        var property = new Property("sprint_goal", "ship billing", Scope.longTerm);
+        property.setVisibility(Visibility.group);
+
+        UserMemoryEntry stored = persistedAfterTurn(property, new LinkedHashMap<>());
+
+        assertEquals(Visibility.self, stored.visibility());
+        assertEquals(List.of(), stored.groupIds());
+    }
+
+    @Test
+    @DisplayName("defaultVisibility applies to a property that sets none, with the memory tools OFF")
+    void defaultVisibilityAppliesWithoutMemoryTools() throws Exception {
+        var config = new AgentConfiguration.UserMemoryConfig();
+        config.setDefaultVisibility("self");
+        when(propertiesHandler.getUserMemoryConfig()).thenReturn(config);
+        when(propertiesHandler.isMemoryToolsEnabled()).thenReturn(false);
+
+        UserMemoryEntry stored = persistedAfterTurn(new Property("internal_note", "x", Scope.longTerm), new LinkedHashMap<>());
+
+        assertEquals(Visibility.self, stored.visibility(), "an agent's defaultVisibility must not require the LLM memory tool");
     }
 
     /** A workflow whose lifecycle does {@code action} and nothing else. */

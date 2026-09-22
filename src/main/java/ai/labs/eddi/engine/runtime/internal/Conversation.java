@@ -127,6 +127,9 @@ public class Conversation implements IConversation {
         if (memoryConfig != null) {
             conversationMemory.setUserMemoryConfig(memoryConfig);
         }
+        // Separate from the config: the config now arrives for every agent that
+        // declares one, but only enableMemoryTools may attach the LLM memory tool.
+        conversationMemory.setMemoryToolsEnabled(propertiesHandler.isMemoryToolsEnabled());
     }
 
     /**
@@ -729,6 +732,9 @@ public class Conversation implements IConversation {
         // and whatever is left is written back — a store failure halfway through the
         // loop therefore retries only the keys that were not written.
         Set<String> pending = new LinkedHashSet<>(conversationMemory.getPendingLongTermWrites());
+        // The groups this conversation belongs to — a group-visible property must
+        // carry them, or no reader (the writer included) can ever match it.
+        List<String> groupIds = ConversationGroups.resolveGroupIds(conversationMemory);
         try {
             for (Map.Entry<String, Property> propertyEntry : conversationMemory.getConversationProperties().entrySet()) {
                 Property property = propertyEntry.getValue();
@@ -743,7 +749,15 @@ public class Conversation implements IConversation {
                 }
                 // Apply visibility at persistence boundary only
                 Visibility vis = property.getVisibility() != null ? property.getVisibility() : configDefault;
-                UserMemoryEntry entry = UserMemoryEntry.fromProperty(property, userId, agentId, conversationId, vis);
+                if (vis == Visibility.group && groupIds.isEmpty()) {
+                    // Outside a group conversation a group entry would match no reader
+                    // at all. self is the only scope that keeps it reachable without
+                    // widening it.
+                    LOGGER.debugf("[MEMORY] longTerm property '%s' has group visibility but conversation '%s' belongs to no group — "
+                            + "storing it as self.", sanitize(propertyEntry.getKey()), sanitize(conversationId));
+                    vis = Visibility.self;
+                }
+                UserMemoryEntry entry = UserMemoryEntry.fromProperty(property, userId, agentId, conversationId, vis, groupIds);
                 store.upsert(entry);
                 pending.remove(propertyEntry.getKey());
             }

@@ -6,13 +6,12 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
-import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.memory.AttachmentContextExtractor;
+import ai.labs.eddi.engine.memory.ConversationGroups;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.MemoryKeys;
-import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.ConversationRecallTool;
 import ai.labs.eddi.modules.llm.tools.UserMemoryTool;
@@ -172,7 +171,7 @@ class ContextualToolsProvider implements ToolSourceProvider {
     }
 
     private void warnIfMemoryEnabledButBuiltInsAreOff(ToolAssemblyContext ctx) {
-        if (ctx.memory().getUserMemoryConfig() == null || userMemoryStore == null) {
+        if (!ctx.memory().isMemoryToolsEnabled() || ctx.memory().getUserMemoryConfig() == null || userMemoryStore == null) {
             return;
         }
         // Suppressed per agent, not per turn: this fires on every turn of a
@@ -196,8 +195,12 @@ class ContextualToolsProvider implements ToolSourceProvider {
      * context.
      */
     void addUserMemoryToolIfEnabled(List<Object> tools, IConversationMemory memory) {
+        // The config alone is not the switch: it is present for every agent that
+        // declares a userMemoryConfig block (its recall and visibility settings apply
+        // to the longTerm property path of every agent). Only enableMemoryTools
+        // grants the persistent cross-conversation WRITE capability this tool is.
         AgentConfiguration.UserMemoryConfig config = memory.getUserMemoryConfig();
-        if (config == null || userMemoryStore == null)
+        if (!memory.isMemoryToolsEnabled() || config == null || userMemoryStore == null)
             return;
 
         List<String> groupIds = resolveGroupIds(memory);
@@ -236,48 +239,7 @@ class ContextualToolsProvider implements ToolSourceProvider {
      * that genuinely does set a {@code groupId} property still works.
      */
     static List<String> resolveGroupIds(IConversationMemory memory) {
-        String contextKey = "context:groupId";
-
-        var currentStep = memory.getCurrentStep();
-        if (currentStep != null) {
-            String fromCurrent = contextValueAsString(currentStep.getLatestData(contextKey));
-            if (fromCurrent != null) {
-                return List.of(fromCurrent);
-            }
-        }
-
-        var allSteps = memory.getAllSteps();
-        if (allSteps != null) {
-            List<IData<Object>> priorEntries = allSteps.getAllLatestData(contextKey);
-            if (priorEntries != null) {
-                for (IData<Object> entry : priorEntries) {
-                    String value = contextValueAsString(entry);
-                    if (value != null) {
-                        return List.of(value);
-                    }
-                }
-            }
-        }
-
-        var props = memory.getConversationProperties();
-        if (props != null && props.get("groupId") instanceof Property p && p.getValueString() != null) {
-            return List.of(p.getValueString());
-        }
-        return List.of();
-    }
-
-    /** Unwraps a {@code context:*} data entry, which holds a {@link Context}. */
-    private static String contextValueAsString(IData<?> data) {
-        if (data == null || data.getResult() == null) {
-            return null;
-        }
-        Object result = data.getResult();
-        Object value = result instanceof Context ctx ? ctx.getValue() : result;
-        if (value == null) {
-            return null;
-        }
-        String asString = String.valueOf(value);
-        return asString.isBlank() ? null : asString;
+        return ConversationGroups.resolveGroupIds(memory);
     }
 
     /**

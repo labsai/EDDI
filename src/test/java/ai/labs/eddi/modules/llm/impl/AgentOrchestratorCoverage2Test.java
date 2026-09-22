@@ -217,6 +217,7 @@ class AgentOrchestratorCoverage2Test {
 
         var config = new AgentConfiguration.UserMemoryConfig();
         when(memory.getUserMemoryConfig()).thenReturn(config);
+        lenient().when(memory.isMemoryToolsEnabled()).thenReturn(true);
         when(memory.getConversationProperties()).thenReturn(conversationProperties);
         when(memory.getUserId()).thenReturn("user-1");
         when(conversationProperties.get("groupId")).thenReturn(null);

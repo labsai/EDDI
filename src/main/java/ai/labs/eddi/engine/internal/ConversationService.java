@@ -418,7 +418,7 @@ public class ConversationService implements IConversationService {
             bindCallerIdentity(startCaller);
             try {
                 conversation = latestAgent.startConversation(userId, context,
-                        createPropertiesHandler(userId, latestAgent.getUserMemoryConfig()), null);
+                        createPropertiesHandler(userId, latestAgent.getUserMemoryConfig(), latestAgent.isMemoryToolsEnabled()), null);
             } finally {
                 // Restore rather than clear — this can be a sub-agent conversation
                 // started from inside a parent's pipeline turn, whose bindings must
@@ -646,7 +646,8 @@ public class ConversationService implements IConversationService {
             }
 
             final IConversation conversation = agent.continueConversation(conversationMemory,
-                    createPropertiesHandler(conversationMemory.getUserId(), agent.getUserMemoryConfig()), returnConversationMemory -> {
+                    createPropertiesHandler(conversationMemory.getUserId(), agent.getUserMemoryConfig(), agent.isMemoryToolsEnabled()),
+                    returnConversationMemory -> {
                         SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemorySnapshot(returnConversationMemory,
                                 returnDetailed, returnCurrentStepOnly, returningFields);
                         memorySnapshot.setEnvironment(environment);
@@ -855,7 +856,8 @@ public class ConversationService implements IConversationService {
             }
 
             final IConversation conversation = agent.continueConversation(conversationMemory,
-                    createPropertiesHandler(conversationMemory.getUserId(), agent.getUserMemoryConfig()), returnConversationMemory -> {
+                    createPropertiesHandler(conversationMemory.getUserId(), agent.getUserMemoryConfig(), agent.isMemoryToolsEnabled()),
+                    returnConversationMemory -> {
                         SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemorySnapshot(returnConversationMemory,
                                 returnDetailed, returnCurrentStepOnly, returningFields);
                         memorySnapshot.setEnvironment(environment);
@@ -1195,6 +1197,11 @@ public class ConversationService implements IConversationService {
     // --- Internal helpers ---
 
     IPropertiesHandler createPropertiesHandler(final String userId, final AgentConfiguration.UserMemoryConfig memoryConfig) {
+        return createPropertiesHandler(userId, memoryConfig, memoryConfig != null);
+    }
+
+    IPropertiesHandler createPropertiesHandler(final String userId, final AgentConfiguration.UserMemoryConfig memoryConfig,
+                                               final boolean memoryToolsEnabled) {
         return new IPropertiesHandler() {
             @Override
             public IUserMemoryStore getUserMemoryStore() {
@@ -1204,6 +1211,11 @@ public class ConversationService implements IConversationService {
             @Override
             public AgentConfiguration.UserMemoryConfig getUserMemoryConfig() {
                 return memoryConfig;
+            }
+
+            @Override
+            public boolean isMemoryToolsEnabled() {
+                return memoryToolsEnabled;
             }
 
             @Override

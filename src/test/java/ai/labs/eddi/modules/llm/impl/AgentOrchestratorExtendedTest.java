@@ -203,6 +203,7 @@ class AgentOrchestratorExtendedTest {
         void addUserMemoryTool_enabled() {
             var memConfig = new AgentConfiguration.UserMemoryConfig();
             when(mockMemory.getUserMemoryConfig()).thenReturn(memConfig);
+            lenient().when(mockMemory.isMemoryToolsEnabled()).thenReturn(true);
             when(mockMemory.getUserId()).thenReturn("user-1");
             when(mockMemory.getAgentId()).thenReturn("agent-1");
             when(mockMemory.getConversationId()).thenReturn("conv-1");
@@ -237,6 +238,7 @@ class AgentOrchestratorExtendedTest {
         void addUserMemoryTool_withGroupId() {
             var memConfig = new AgentConfiguration.UserMemoryConfig();
             when(mockMemory.getUserMemoryConfig()).thenReturn(memConfig);
+            lenient().when(mockMemory.isMemoryToolsEnabled()).thenReturn(true);
             when(mockMemory.getUserId()).thenReturn("user-1");
             when(mockMemory.getAgentId()).thenReturn("agent-1");
             when(mockMemory.getConversationId()).thenReturn("conv-1");
@@ -261,6 +263,7 @@ class AgentOrchestratorExtendedTest {
         void allTools_includesUserMemory() {
             var memConfig = new AgentConfiguration.UserMemoryConfig();
             when(mockMemory.getUserMemoryConfig()).thenReturn(memConfig);
+            lenient().when(mockMemory.isMemoryToolsEnabled()).thenReturn(true);
             when(mockMemory.getUserId()).thenReturn("user-1");
             when(mockMemory.getAgentId()).thenReturn("agent-1");
             when(mockMemory.getConversationId()).thenReturn("conv-1");

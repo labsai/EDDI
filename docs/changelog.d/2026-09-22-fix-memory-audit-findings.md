@@ -48,3 +48,21 @@ observed there, and carries a regression test.
   the inline `setOnActions` parser reads it too (an unknown value fails configuration instead of
   silently becoming global).
   [`PrePostUtils.java`](../../src/main/java/ai/labs/eddi/modules/apicalls/impl/PrePostUtils.java)
+- **`userMemoryConfig` was dropped unless `enableMemoryTools` was on.** Its `defaultVisibility`
+  and recall settings govern the `longTerm` property path of every agent, but the loader only
+  kept the block for agents with memory tools — so `"defaultVisibility": "self"` on a rule-based
+  agent was silently stored as `global`. The config now applies whenever it is declared; a new,
+  separate `memoryToolsEnabled` switch (carried agent → properties handler → conversation memory)
+  is what attaches the `UserMemoryTool`, so declaring a config never grants the cross-conversation
+  write tool on its own.
+  [`AgentStoreClientLibrary.java`](../../src/main/java/ai/labs/eddi/engine/runtime/client/agents/AgentStoreClientLibrary.java),
+  [`ContextualToolsProvider.java`](../../src/main/java/ai/labs/eddi/modules/llm/impl/ContextualToolsProvider.java)
+- **`group`-visible `longTerm` properties were unreachable.** They were persisted with an empty
+  `groupIds`, and recall matches group entries by group-id overlap — so nobody, the writing agent
+  included, could read them. The persistence boundary now stamps the conversation's group (the
+  resolver moved from the LLM module to `ConversationGroups` so both write paths share it); a
+  `group` property in a conversation that belongs to no group is stored as `self`, the only scope
+  that keeps it reachable without widening it.
+  [`Conversation.java`](../../src/main/java/ai/labs/eddi/engine/runtime/internal/Conversation.java),
+  [`ConversationGroups.java`](../../src/main/java/ai/labs/eddi/engine/memory/ConversationGroups.java),
+  [`UserMemoryEntry.java`](../../src/main/java/ai/labs/eddi/configs/properties/model/UserMemoryEntry.java)
