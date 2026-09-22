@@ -39,6 +39,8 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -148,13 +150,13 @@ class GdprComplianceServiceTest {
         var snapshot = new ConversationMemorySnapshot();
         var vaulted = new Property("apiKey", "${vault:acme/agent.u0123456789abcdef.0123456789ab.apiKey}", Property.Scope.conversation);
         vaulted.setAutoVaulted(Boolean.TRUE);
-        snapshot.setConversationProperties(new java.util.LinkedHashMap<>(Map.of("apiKey", vaulted)));
+        snapshot.setConversationProperties(new LinkedHashMap<>(Map.of("apiKey", vaulted)));
         when(conversationMemoryStore.loadConversationMemorySnapshot("c1")).thenReturn(snapshot);
         when(cleaner.deleteForUser(eq("user-1"), any())).thenReturn(3);
 
         var result = withVault.deleteUserData("user-1");
 
-        var tenants = ArgumentCaptor.forClass(java.util.Collection.class);
+        var tenants = ArgumentCaptor.forClass(Collection.class);
         verify(cleaner).deleteForUser(eq("user-1"), tenants.capture());
         assertTrue(tenants.getValue().contains("acme"), "the tenant named by the conversation must be swept: " + tenants.getValue());
         assertEquals(3, result.autoVaultedSecretsDeleted());
