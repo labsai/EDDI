@@ -152,4 +152,124 @@ describe("GroupDetailPage — configuration on a narrow viewport", () => {
     await userEvent.click(trigger);
     expect(await screen.findByTestId("config-sheet")).toBeInTheDocument();
   });
+
+});
+
+/**
+ * "New Discussion" was a no-op on a group that had ever held one.
+ *
+ * The handler cleared the selection; the auto-select effect, which lists
+ * `selectedConvId` in its dependencies, immediately put the newest conversation
+ * back. Worse than cosmetic: attachments are accepted only on a NEW discussion
+ * (the backend rejects a continuation carrying any), so the upload control is
+ * not rendered while a conversation is selected — a group with any history
+ * could never accept a file again, with no error to explain it.
+ */
+describe("GroupDetailPage — New Discussion", () => {
+  it("auto-selects the newest discussion on a plain load", async () => {
+    renderGroupDetail();
+    const ids = await conversationIds();
+
+    await waitFor(() => {
+      expect(screen.getByTestId(`discussion-item-${ids[0]}`)).toHaveAttribute("aria-current", "true");
+    });
+  });
+
+  it("clears the selection and keeps it cleared", async () => {
+    renderGroupDetail();
+    const ids = await conversationIds();
+    await waitFor(() => {
+      expect(screen.getByTestId(`discussion-item-${ids[0]}`)).toHaveAttribute("aria-current", "true");
+    });
+
+    await userEvent.click(screen.getByTestId("new-discussion-btn"));
+
+    await waitFor(() => {
+      for (const id of ids) {
+        expect(screen.getByTestId(`discussion-item-${id}`)).not.toHaveAttribute("aria-current", "true");
+      }
+    });
+    // And it stays cleared — the effect used to re-run on the very change the
+    // handler made and undo it within a tick.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    for (const id of ids) {
+      expect(screen.getByTestId(`discussion-item-${id}`)).not.toHaveAttribute("aria-current", "true");
+    }
+  });
+
+  it("restores the attachment control, which is the property that was broken", async () => {
+    renderGroupDetail();
+    const ids = await conversationIds();
+    await waitFor(() => {
+      expect(screen.getByTestId(`discussion-item-${ids[0]}`)).toHaveAttribute("aria-current", "true");
+    });
+    // A continuation cannot carry files, so the affordance is absent here.
+    // Wait for the composer to settle into continue mode first: the detail
+    // query resolves a tick after the selection, and asserting before it lands
+    // would pass against the bug.
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText(/Continue this discussion/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("discussion-attach-btn")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId("new-discussion-btn"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("discussion-attach-btn")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("discussion-file-input")).toBeInTheDocument();
+  });
+
+  it("drops the conversation from the URL, so a reload does not restore it", async () => {
+    let search = "";
+    function LocationProbe() {
+      search = useLocation().search;
+      return null;
+    }
+    render(
+      <MemoryRouter initialEntries={["/manage/groups/grp1?version=1"]}>
+        <QueryClientProvider client={createTestQueryClient()}>
+          <Routes>
+            <Route
+              path="/manage/groups/:id"
+              element={
+                <>
+                  <GroupDetailPage />
+                  <LocationProbe />
+                </>
+              }
+            />
+          </Routes>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+    await conversationIds();
+    await waitFor(() => {
+      expect(new URLSearchParams(search).get("conversation")).not.toBeNull();
+    });
+
+    await userEvent.click(screen.getByTestId("new-discussion-btn"));
+
+    await waitFor(() => {
+      expect(new URLSearchParams(search).get("conversation")).toBeNull();
+    });
+  });
+
+  it("a deliberate pick after New Discussion selects again", async () => {
+    renderGroupDetail();
+    const ids = await conversationIds();
+    await userEvent.click(screen.getByTestId("new-discussion-btn"));
+    await waitFor(() => {
+      expect(screen.getByTestId("discussion-attach-btn")).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByTestId(`discussion-item-${ids[1] ?? ids[0]}`));
+
+    await waitFor(() => {
+      expect(screen.getByTestId(`discussion-item-${ids[1] ?? ids[0]}`)).toHaveAttribute(
+        "aria-current",
+        "true",
+      );
+    });
+  });
 });

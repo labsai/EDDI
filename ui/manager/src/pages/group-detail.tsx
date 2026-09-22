@@ -50,6 +50,8 @@ const STATE_CONFIG: Record<string, { label: string; color: string; dot: string }
   IN_PROGRESS: { label: "In Progress", color: "text-amber-500", dot: "bg-amber-500" },
   SYNTHESIZING: { label: "Synthesizing", color: "text-amber-500", dot: "bg-amber-500" },
   FAILED: { label: "Failed", color: "text-destructive", dot: "bg-destructive" },
+  // Muted, not destructive: a human declined the recommendation, nothing broke.
+  REJECTED: { label: "Rejected", color: "text-muted-foreground", dot: "bg-muted-foreground" },
   CREATED: DEFAULT_STATE,
   AWAITING_APPROVAL: { label: "Awaiting Approval", color: "text-orange-500", dot: "bg-orange-500" },
   AWAITING_HUMAN_INPUT: { label: "Awaiting Human Input", color: "text-primary", dot: "bg-primary" },
@@ -183,9 +185,25 @@ export function GroupDetailPage() {
   // (hitl_resume ack / FAILED) rather than optimistically.
   const pendingDecisionRef = useRef<HitlVerdict | null>(null);
 
+  /**
+   * Set when the user explicitly asked for an empty composer ("New Discussion"),
+   * cleared the moment a conversation is deliberately selected again.
+   *
+   * Without it "New Discussion" was a no-op: the handler cleared the selection,
+   * and the auto-select effect below — which lists `selectedConvId` in its
+   * dependencies — immediately put the newest conversation back. That is worse
+   * than cosmetic. Attachments are accepted only on a NEW discussion (the backend
+   * rejects a continuation carrying any), so the upload control is not rendered
+   * while a conversation is selected: a group that had ever held one discussion
+   * could never accept a file again, with no error to explain it.
+   */
+  const userClearedRef = useRef(false);
+
   // Auto-select the first conversation on load — but never override the
-  // conversation the stream is driving (its settle effect handles selection).
+  // conversation the stream is driving (its settle effect handles selection),
+  // and never undo an explicit "New Discussion".
   useEffect(() => {
+    if (userClearedRef.current) return;
     if (
       !selectedConvId &&
       !streamState.isStreaming &&
@@ -213,6 +231,7 @@ export function GroupDetailPage() {
     if (!selectedConversation) return t("common.loading", "Loading…");
     const state = selectedConversation.state;
     if (state === "CLOSED") return t("groups.inputDisabledClosed", "This discussion is closed");
+    if (state === "REJECTED") return t("groups.inputDisabledRejected", "This recommendation was rejected");
     if (state === "FAILED" || state === "CANCELLED") return t("groups.inputDisabledEnded", "This discussion has ended");
     if (state === "AWAITING_APPROVAL") return t("groups.inputDisabledApproval", "Awaiting approval…");
     if (state === "AWAITING_HUMAN_INPUT") return t("groups.inputDisabledHumanTurn", "Awaiting a member's turn…");
@@ -233,6 +252,10 @@ export function GroupDetailPage() {
     } else {
       // New discussion
       pendingDecisionRef.current = null;
+      // Same guard as handleNewDiscussion: the clear must survive until the
+      // stream owns the selection, or the auto-select effect wins the gap
+      // between here and startStream flipping isStreaming.
+      userClearedRef.current = true;
       setSelectedConvId(null);
       startStream(groupId, question, attachments);
       toast.info(t("groups.discussionStarted", "Discussion started — streaming live"));
@@ -242,6 +265,7 @@ export function GroupDetailPage() {
   const handleNewDiscussion = useCallback(() => {
     resetStream();
     pendingDecisionRef.current = null;
+    userClearedRef.current = true;
     setSelectedConvId(null);
   }, [resetStream, setSelectedConvId]);
 
@@ -253,6 +277,7 @@ export function GroupDetailPage() {
       // Feedback is driven off the resume outcome (see effect below), not fired
       // optimistically — the resume can fail (409 stale, 400 invalid decision).
       pendingDecisionRef.current = verdict;
+      userClearedRef.current = true; // hold the clear until the stream takes over
       setSelectedConvId(null); // switch the transcript to the live resumed stream
       approveAndStream(groupId, gcId, { decision: { verdict, note }, taskApprovals });
     },
@@ -398,6 +423,7 @@ export function GroupDetailPage() {
         streamState.state === "AWAITING_HUMAN_INPUT") &&
       streamState.conversationId
     ) {
+      userClearedRef.current = false; // the stream owns the selection now
       setSelectedConvId(streamState.conversationId);
     }
   }, [streamState.state, streamState.conversationId, groupId, queryClient, setSelectedConvId]);
@@ -419,6 +445,7 @@ export function GroupDetailPage() {
   function handleSelectConversation(convId: string) {
     if (streamState.isStreaming) abortStream();
     pendingDecisionRef.current = null; // abandon any un-acked prior decision
+    userClearedRef.current = false; // a deliberate pick re-arms the auto-select
     setSelectedConvId(convId);
     setHistoryOpen(false);
   }
