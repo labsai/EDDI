@@ -9,6 +9,8 @@ import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.net.URI;
 import java.util.ArrayList;
@@ -433,6 +435,17 @@ public class AgentConfiguration {
         private int maxEntriesPerUser = 500;
         private String onCapReached = "evict_oldest";
         private String recallOrder = "most_recent";
+        /**
+         * <b>Reserved — not applied.</b> Every visible entry is recalled at
+         * conversation start, whatever this lists.
+         * <p>
+         * It cannot be switched on retroactively: the store serializes the whole block,
+         * so this default is written into every stored agent that has a
+         * {@code userMemoryConfig}, and a stored {@code ["preference", "fact"]} is
+         * indistinguishable from an explicit one. Enforcing it would silently stop
+         * recalling {@code context}, {@code legacy} (migrated v5) and {@code property}
+         * entries for every such agent.
+         */
         private List<String> autoRecallCategories = List.of("preference", "fact");
         private Guardrails guardrails = new Guardrails();
         private DreamConfig dream = new DreamConfig();
@@ -823,9 +836,25 @@ public class AgentConfiguration {
          *             {@link #isMaxSummarizationCallsSet()} — see
          *             {@link #getMaxCostPerRun()} for the real budget.
          */
+        @JsonIgnore
         @Deprecated(since = "6.1.0", forRemoval = true)
         public int getMaxSummarizationCalls() {
             return maxSummarizationCalls;
+        }
+
+        /**
+         * The serialized form of {@link #getMaxSummarizationCalls()}: present only when
+         * the ceiling was explicitly configured. The plain getter serialized the
+         * default {@code 10} into every stored agent, and reading that document back
+         * called the setter — so after one save/load round trip every config counted as
+         * having "set" the deprecated ceiling, the opposite of what
+         * {@link #isMaxSummarizationCallsSet()} exists to distinguish.
+         */
+        @JsonProperty("maxSummarizationCalls")
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        @Deprecated(since = "6.1.0", forRemoval = true)
+        Integer getMaxSummarizationCallsIfSet() {
+            return maxSummarizationCallsSet ? maxSummarizationCalls : null;
         }
 
         /**
@@ -833,6 +862,7 @@ public class AgentConfiguration {
          *             this marks the ceiling as explicitly configured, which keeps it
          *             enforced as a backstop until the field is removed.
          */
+        @JsonProperty("maxSummarizationCalls")
         @Deprecated(since = "6.1.0", forRemoval = true)
         public void setMaxSummarizationCalls(int maxSummarizationCalls) {
             this.maxSummarizationCalls = maxSummarizationCalls;

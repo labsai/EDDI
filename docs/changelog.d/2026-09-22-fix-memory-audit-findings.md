@@ -66,3 +66,15 @@ observed there, and carries a regression test.
   [`Conversation.java`](../../src/main/java/ai/labs/eddi/engine/runtime/internal/Conversation.java),
   [`ConversationGroups.java`](../../src/main/java/ai/labs/eddi/engine/memory/ConversationGroups.java),
   [`UserMemoryEntry.java`](../../src/main/java/ai/labs/eddi/configs/properties/model/UserMemoryEntry.java)
+- **`autoRecallCategories` was never read — now documented as reserved.** Recall loads every
+  visible category. It is deliberately *not* switched on: the store serializes the whole
+  `userMemoryConfig` block, so the default `["preference", "fact"]` sits in every stored agent and
+  is indistinguishable from an explicit setting — enforcing it would silently stop recalling
+  `context`, `legacy` (migrated v5) and `property` entries for all of them.
+- **The deprecated `maxSummarizationCalls` ceiling applied to every stored agent.** The getter
+  wrote the default `10` into each saved agent, and reading it back called the setter, so after one
+  save every config counted as having set the ceiling — the opposite of what
+  `isMaxSummarizationCallsSet()` exists to tell apart. It is now serialized only when set. Agents
+  already stored keep the `10` they were given; that bounds a dream cycle only past ten consolidated
+  groups per user, which the per-category grouping rarely reaches.
+  [`AgentConfiguration.java`](../../src/main/java/ai/labs/eddi/configs/agents/model/AgentConfiguration.java)
