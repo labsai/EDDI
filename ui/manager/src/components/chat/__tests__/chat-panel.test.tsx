@@ -167,6 +167,82 @@ describe("ChatPanel", () => {
     });
   });
 
+  /**
+   * The restart control on the Manager's main 1:1 agent chat.
+   *
+   * It has always been here and has always worked — but nothing asserted it,
+   * while the drawer's equivalent (`drawer-new-conversation`) and the history
+   * panel's (`new-conversation-btn`) both had coverage. A control that exists
+   * and quietly does nothing is a real failure mode on this page: the group
+   * page's "New Discussion" was exactly that for months, because an effect put
+   * back the state the handler had just cleared.
+   */
+  describe("New Conversation", () => {
+    it("offers restart and end once a conversation is open", () => {
+      useChatStore.getState().setSelectedAgent("agent1", "Test Agent");
+      useChatStore.getState().setConversationId("conv1");
+
+      renderWithProviders(<ChatPanel />);
+
+      expect(screen.getByTestId("new-conversation")).toBeInTheDocument();
+      expect(screen.getByTestId("end-conversation")).toBeInTheDocument();
+    });
+
+    it("offers neither before a conversation exists", () => {
+      useChatStore.getState().setSelectedAgent("agent1", "Test Agent");
+
+      renderWithProviders(<ChatPanel />);
+
+      // Nothing to restart or end yet — the gate is deliberate, not an oversight.
+      expect(screen.queryByTestId("new-conversation")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("end-conversation")).not.toBeInTheDocument();
+    });
+
+    it("starts a fresh conversation and clears the transcript", async () => {
+      const user = userEvent.setup();
+      let started = 0;
+      server.use(
+        http.post("*/agents/agent1/start", () => {
+          started += 1;
+          return HttpResponse.json(null, {
+            status: 201,
+            headers: {
+              Location:
+                "eddi://ai.labs.conversation/conversationstore/conversations/conv-fresh",
+            },
+          });
+        }),
+        http.get("*/agents/conv-fresh", () =>
+          HttpResponse.json({ conversationSteps: [], conversationOutputs: [] }),
+        ),
+      );
+
+      useChatStore.getState().setSelectedAgent("agent1", "Test Agent");
+      useChatStore.getState().setConversationId("conv1");
+      useChatStore.getState().addMessage({
+        id: "m1",
+        role: "agent",
+        content: "Something from the conversation being left behind",
+        timestamp: Date.now(),
+      });
+
+      renderWithProviders(<ChatPanel />);
+      expect(
+        screen.getByText("Something from the conversation being left behind"),
+      ).toBeInTheDocument();
+
+      await user.click(screen.getByTestId("new-conversation"));
+
+      await waitFor(() => {
+        expect(useChatStore.getState().conversationId).toBe("conv-fresh");
+      });
+      expect(started).toBe(1);
+      expect(
+        screen.queryByText("Something from the conversation being left behind"),
+      ).not.toBeInTheDocument();
+    });
+  });
+
   it("supports sending a normal text message and quick replies", async () => {
     const user = userEvent.setup();
     
