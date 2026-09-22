@@ -223,8 +223,11 @@ bash .claude/skills/ship-pr/pr-threads.sh --show <threadId>   # full text
 The preview column is not the finding, though it is now close: the script drops the badge
 line *and* the collapsed `<details>` analysis block (which otherwise previews as
 `🏁 Script executed:` — that is how a Major finding hides) and prefers the bolded title.
-Still use `--show` before acting. **`[NO-REPLY]`** marks any thread with no comment from
-you -- including resolved ones, which is where the findings you already fixed go silent. `[outdated]` means the line moved, not that it was
+Still use `--show` before acting. **`[NO-REPLY]`** marks a thread with no comment from you
+*in the fetched window* -- including resolved ones, which is where the findings you already
+fixed go silent. It is a claim about evidence, not proof of absence: a thread over 100 comments
+whose last 100 hold no reply of yours is tagged **`[CHECK]`** instead, because an earlier one
+cannot be ruled out. `[outdated]` means the line moved, not that it was
 addressed — check the current code, then still reply. In `--all`, `resolved by` matters:
 bots resolve their own threads, so a shrinking count is not progress.
 
