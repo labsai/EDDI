@@ -335,12 +335,31 @@ public class GroupConversation {
      */
     private Map<String, MemberStance> memberStances = new ConcurrentHashMap<>();
 
+    /**
+     * Read-only view, mirroring {@link #getMemberDisplayNames()} — write through
+     * {@link #putMemberStance}.
+     * <p>
+     * A live unmodifiable <em>view</em> rather than a copy: the backing map is
+     * concurrent, so iterating the view is safe, and a snapshot would let a caller
+     * that held it read stale stances without any hint that it had.
+     */
     public Map<String, MemberStance> getMemberStances() {
-        return memberStances;
+        return Collections.unmodifiableMap(memberStances);
     }
 
     public void setMemberStances(Map<String, MemberStance> memberStances) {
         this.memberStances = memberStances == null ? new ConcurrentHashMap<>() : new ConcurrentHashMap<>(memberStances);
+    }
+
+    /**
+     * Records one member's stance. The single write path, because
+     * {@link #getMemberStances()} returns an unmodifiable view.
+     */
+    public void putMemberStance(String agentId, MemberStance stance) {
+        if (agentId == null || stance == null) {
+            return;
+        }
+        this.memberStances.put(agentId, stance);
     }
 
     /**

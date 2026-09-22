@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig.
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig.MemberUnavailablePolicy;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.StanceSummaryConfig;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.groups.model.GroupConversation.MemberStance;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
@@ -26,6 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -622,6 +624,35 @@ class StanceSummaryEngineTest {
             gc.setMemberStances(null);
             assertNotNull(gc.getMemberStances());
             assertTrue(gc.getMemberStances().isEmpty());
+        }
+
+        @Test
+        @DisplayName("the getter hands out a read-only view, so no caller can mutate the field")
+        void getterIsUnmodifiable() {
+            var gc = conversation();
+            assertThrows(UnsupportedOperationException.class,
+                    () -> gc.getMemberStances().put(AGENT_A, new MemberStance("x", 1, false, Instant.now())));
+        }
+
+        @Test
+        @DisplayName("putMemberStance is the write path, and ignores nulls")
+        void putIsTheWritePath() {
+            var gc = conversation();
+            gc.putMemberStance(AGENT_A, new MemberStance("A position.", 1, false, Instant.now()));
+            assertEquals("A position.", gc.getMemberStances().get(AGENT_A).text());
+
+            gc.putMemberStance(null, new MemberStance("x", 1, false, Instant.now()));
+            gc.putMemberStance(AGENT_B, null);
+            assertEquals(1, gc.getMemberStances().size());
+        }
+
+        @Test
+        @DisplayName("the view reflects later writes rather than freezing a snapshot")
+        void viewIsLive() {
+            var gc = conversation();
+            var view = gc.getMemberStances();
+            gc.putMemberStance(AGENT_A, new MemberStance("Later.", 1, false, Instant.now()));
+            assertEquals("Later.", view.get(AGENT_A).text());
         }
 
         @Test

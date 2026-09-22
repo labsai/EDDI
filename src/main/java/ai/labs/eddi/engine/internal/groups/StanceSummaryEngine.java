@@ -188,7 +188,7 @@ public final class StanceSummaryEngine {
             // Unchanged text still counts as covered — storing the refreshed
             // count is what stops the next boundary paying to learn the same
             // thing again.
-            gc.getMemberStances().put(agentId, result.stance());
+            gc.putMemberStance(agentId, result.stance());
             // Returned whenever the text changed OR the call cost something. The
             // cost arm is not redundant: a re-summary that lands on the same
             // wording still bills the ledger, and reporting only text changes
