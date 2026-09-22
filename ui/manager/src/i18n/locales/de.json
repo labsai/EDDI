@@ -850,7 +850,11 @@
     "cascadePartialFailure_one": "{{count}} Kaskaden-Update fehlgeschlagen",
     "cascadePartialFailure_other": "{{count}} Kaskaden-Updates fehlgeschlagen",
     "usedInAgents_one": "Wird in {{count}} Agent verwendet",
-    "usedInAgents_other": "Wird in {{count}} Agents verwendet"
+    "usedInAgents_other": "Wird in {{count}} Agents verwendet",
+    "savedNotLive": "Gespeichert — noch nicht aktiv",
+    "savedNotLiveDescription": "Der laufende Agent liefert weiterhin die bereitgestellte Version. Zum Aktivieren bereitstellen.",
+    "deployNow": "Bereitstellen",
+    "deployStarted": "Bereitstellung gestartet"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -2757,7 +2761,10 @@
       "finalAnswer": "Endgültige Antwort",
       "phase": "Phase"
     },
-    "deleteMembersConfigFailed": "Die Mitglieder der Gruppe konnten nicht gelesen werden — es wurde nichts gelöscht. Bitte erneut versuchen."
+    "deleteMembersConfigFailed": "Die Mitglieder der Gruppe konnten nicht gelesen werden — es wurde nichts gelöscht. Bitte erneut versuchen.",
+    "stateRejected": "Abgelehnt",
+    "inputDisabledRejected": "Diese Empfehlung wurde abgelehnt",
+    "debateVerdictNote": "Antwortet mit einem bewerteten Urteil (Sieger und Punkte) statt mit Fließtext: {{phases}}. Die Mitglieder haben zwei oder mehr Rollen und Argumente gehen voraus, daher wird der eigene Synthese-Prompt des Moderators nicht verwendet. Für Fließtext eine Eingabevorlage für die Phase setzen."
   },
   "taskBoard": {
     "title": "Aufgabenübersicht",
@@ -3638,7 +3645,9 @@
       "pausedRejected": "Diese Unterhaltung wartet auf eine menschliche Entscheidung — die Nachricht wurde deshalb nicht gesendet.",
       "reviewApprovals": "Offene Freigaben prüfen",
       "stop": "Erzeugung stoppen",
-      "streamEnded": "Die Verbindung endete, bevor die Antwort fertig war. Was angekommen ist, steht oben — zum erneuten Versuch noch einmal senden."
+      "streamEnded": "Die Verbindung endete, bevor die Antwort fertig war. Was angekommen ist, steht oben — zum erneuten Versuch noch einmal senden.",
+      "newConversation": "Neue Konversation",
+      "newConversationFailed": "Neue Konversation konnte nicht gestartet werden"
     },
     "chat": {
       "agentDetails": "Agenten-Details",
@@ -3961,7 +3970,8 @@
       "transcript": "Konversationstranskript",
       "tryDifferent": "Versuchen Sie einen anderen Suchbegriff",
       "untitled": "Konversation ohne Titel",
-      "loadListError": "Konversationen konnten nicht geladen werden"
+      "loadListError": "Konversationen konnten nicht geladen werden",
+      "rejected": "Abgelehnt"
     },
     "insights": "Insights",
     "memberCount": "{{count}} Mitglieder",

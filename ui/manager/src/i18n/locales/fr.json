@@ -864,7 +864,11 @@
     "cascadePartialFailure_other": "{{count}} mises à jour en cascade échouées",
     "usedInAgents_many": "Utilisé dans {{count}} agents",
     "usedInAgents_one": "Utilisé dans {{count}} agent",
-    "usedInAgents_other": "Utilisé dans {{count}} agents"
+    "usedInAgents_other": "Utilisé dans {{count}} agents",
+    "savedNotLive": "Enregistré — pas encore actif",
+    "savedNotLiveDescription": "L'agent en cours d'exécution sert toujours la version déployée. Déployez pour appliquer ce changement.",
+    "deployNow": "Déployer",
+    "deployStarted": "Déploiement lancé"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -2786,7 +2790,10 @@
       "finalAnswer": "Réponse finale",
       "phase": "Phase"
     },
-    "deleteMembersConfigFailed": "Impossible de lire les membres du groupe : rien n'a été supprimé. Réessayez."
+    "deleteMembersConfigFailed": "Impossible de lire les membres du groupe : rien n'a été supprimé. Réessayez.",
+    "stateRejected": "Rejetée",
+    "inputDisabledRejected": "Cette recommandation a été rejetée",
+    "debateVerdictNote": "Répond par un verdict chiffré (vainqueur et scores), pas en prose : {{phases}}. Les membres ont au moins deux rôles et les arguments précèdent, donc l'invite de synthèse du modérateur n'est pas utilisée. Définissez un modèle d'entrée sur la phase pour obtenir de la prose."
   },
   "taskBoard": {
     "title": "Tableau des tâches",
@@ -3673,7 +3680,9 @@
       "pausedRejected": "Cette conversation est en pause dans l'attente d'une décision humaine ; le message n'a donc pas été envoyé.",
       "reviewApprovals": "Examiner les approbations en attente",
       "stop": "Arrêter la génération",
-      "streamEnded": "La connexion s'est interrompue avant la fin de la réponse. Ce qui est arrivé figure ci-dessus ; renvoyez le message pour réessayer."
+      "streamEnded": "La connexion s'est interrompue avant la fin de la réponse. Ce qui est arrivé figure ci-dessus ; renvoyez le message pour réessayer.",
+      "newConversation": "Nouvelle conversation",
+      "newConversationFailed": "Impossible de démarrer une nouvelle conversation"
     },
     "chat": {
       "agentDetails": "Détails de l agent",
@@ -3998,7 +4007,8 @@
       "transcript": "Transcription de la conversation",
       "tryDifferent": "Essayez un autre terme de recherche",
       "untitled": "Conversation sans titre",
-      "loadListError": "Échec du chargement des conversations"
+      "loadListError": "Échec du chargement des conversations",
+      "rejected": "Rejetée"
     },
     "insights": "Analyses",
     "memberCount": "{{count}} membres",

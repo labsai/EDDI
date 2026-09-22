@@ -850,7 +850,11 @@
     "cascadePartialFailure_other": "{{count}} 个级联更新失败",
     "cascadePartialFailure_one": "{{count}} 个级联更新失败",
     "usedInAgents_other": "在 {{count}} 个 Agent 中使用",
-    "usedInAgents_one": "在 {{count}} 个 Agent 中使用"
+    "usedInAgents_one": "在 {{count}} 个 Agent 中使用",
+    "savedNotLive": "已保存 — 尚未生效",
+    "savedNotLiveDescription": "运行中的智能体仍在使用已部署的版本。请部署以使此更改生效。",
+    "deployNow": "部署",
+    "deployStarted": "部署已开始"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -2757,7 +2761,10 @@
       "finalAnswer": "最终答案",
       "phase": "阶段"
     },
-    "deleteMembersConfigFailed": "无法读取该群组的成员，因此未删除任何内容。请重试。"
+    "deleteMembersConfigFailed": "无法读取该群组的成员，因此未删除任何内容。请重试。",
+    "stateRejected": "已否决",
+    "inputDisabledRejected": "该建议已被否决",
+    "debateVerdictNote": "将以评分裁决（获胜方与分数）作答，而非散文：{{phases}}。成员拥有两个或更多角色且论证在前，因此不会使用主持人自己的综述提示词。若需散文，请为该阶段设置输入模板。"
   },
   "taskBoard": {
     "title": "任务看板",
@@ -3638,7 +3645,9 @@
       "pausedRejected": "该对话正在等待人工决定，因此消息未发送。",
       "reviewApprovals": "查看待处理的审批",
       "stop": "停止生成",
-      "streamEnded": "回复尚未完成，连接已中断。已收到的内容显示在上方，可再次发送重试。"
+      "streamEnded": "回复尚未完成，连接已中断。已收到的内容显示在上方，可再次发送重试。",
+      "newConversation": "新建对话",
+      "newConversationFailed": "无法开始新对话"
     },
     "chat": {
       "agentDetails": "智能体详情",
@@ -3961,7 +3970,8 @@
       "transcript": "对话记录",
       "tryDifferent": "请尝试其他搜索词",
       "untitled": "无标题对话",
-      "loadListError": "加载对话失败"
+      "loadListError": "加载对话失败",
+      "rejected": "已否决"
     },
     "insights": "洞察",
     "memberCount": "{{count}} 名成员",

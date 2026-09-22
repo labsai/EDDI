@@ -105,6 +105,17 @@ export type GroupConversationState =
   | "SYNTHESIZING"
   | "COMPLETED"
   | "FAILED"
+  /**
+   * A human rejected the discussion's recommendation at a HITL gate.
+   *
+   * Deliberately not FAILED — the run did not break, a person declined its
+   * result. Terminal and closeable exactly as FAILED is; only the meaning
+   * differs, and rendering a recorded decision as a red "Failed" badge told
+   * operators the system had gone wrong when it had done what it was asked.
+   * Documents written before the backend had this state carry FAILED for a
+   * rejection and are left alone.
+   */
+  | "REJECTED"
   | "CANCELLED"
   | "AWAITING_APPROVAL"
   /**
@@ -122,8 +133,8 @@ export type GroupConversationState =
  * Post-COMPLETED lifecycle operations the backend exposes on a group
  * conversation. Mirrors the identifiers returned by the backend's computed
  * `availableActions` field (GroupConversation.getAvailableActions):
- *   - COMPLETED             → ["followup", "continue", "close"]
- *   - FAILED / CANCELLED    → ["close"]
+ *   - COMPLETED                       → ["followup", "continue", "close"]
+ *   - FAILED / REJECTED / CANCELLED   → ["close"]
  *   - AWAITING_HUMAN_INPUT  → ["submitHumanInput"]
  *   - all other states      → []
  */
