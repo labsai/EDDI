@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import java.util.Optional;
 import ai.labs.eddi.backup.IZipArchive;
 import ai.labs.eddi.backup.model.UpgradeResult;
 import ai.labs.eddi.configs.agents.IAgentStore;
@@ -106,7 +107,7 @@ class RestImportServiceConnectionsTest {
         importService = new RestImportService(zipArchive, jsonSerialization, mock(IMigrationManager.class), documentDescriptorStore,
                 templateSyntaxMigrator, mock(StructuralMatcher.class), upgradeExecutor, mock(IScheduleStore.class),
                 mock(BackupMetrics.class), mock(ResourceAccessGuard.class), mock(SpaceContext.class), mock(RagSourceIngestionService.class),
-                true, false, "");
+                true, false, Optional.empty());
 
         when(jsonSerialization.deserialize(anyString(), eq(AgentConfiguration.class)))
                 .thenAnswer(inv -> mapper.readValue((String) inv.getArgument(0), AgentConfiguration.class));

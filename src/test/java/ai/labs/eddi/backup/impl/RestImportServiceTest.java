@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import java.util.Optional;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.spaces.SpaceContext;
@@ -70,7 +71,7 @@ class RestImportServiceTest {
                 migrationManager, documentDescriptorStore,
                 templateSyntaxMigrator, structuralMatcher, upgradeExecutor, mock(IScheduleStore.class), mock(BackupMetrics.class),
                 mock(ResourceAccessGuard.class), mock(SpaceContext.class), mock(RagSourceIngestionService.class),
-                true, false, "");
+                true, false, Optional.empty());
     }
 
     // ==================== Strategy Dispatch ====================

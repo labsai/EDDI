@@ -163,9 +163,9 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             RagSourceIngestionService ragSourceIngestionService,
             @ConfigProperty(name = SourceUrlValidator.REQUIRE_HTTPS_PROPERTY, defaultValue = "true") boolean requireHttpsSource,
             @ConfigProperty(name = SourceUrlValidator.ALLOW_PRIVATE_PROPERTY, defaultValue = "false") boolean allowPrivateSources,
-            @ConfigProperty(name = SourceUrlValidator.ALLOWED_SOURCES_PROPERTY, defaultValue = "") String allowedSources) {
+            @ConfigProperty(name = SourceUrlValidator.ALLOWED_SOURCES_PROPERTY) Optional<String> allowedSources) {
         this.syncSourcePolicy = new SyncSourcePolicy(requireHttpsSource, allowPrivateSources,
-                SourceUrlValidator.parseAllowedSources(allowedSources));
+                SourceUrlValidator.parseAllowedSources(allowedSources.orElse(null)));
         this.ragSourceIngestionService = ragSourceIngestionService;
         this.metrics = metrics;
         this.resourceAccessGuard = resourceAccessGuard;

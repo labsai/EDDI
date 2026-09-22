@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import java.util.Optional;
 import ai.labs.eddi.engine.schedule.IRestScheduleStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
@@ -107,7 +108,7 @@ class RestImportServiceRollbackAndCleanupTest {
                 mock(IMigrationManager.class), documentDescriptorStore,
                 mock(TemplateSyntaxMigrator.class), structuralMatcher, upgradeExecutor, mock(IScheduleStore.class), mock(BackupMetrics.class),
                 mock(ResourceAccessGuard.class), mock(SpaceContext.class), mock(RagSourceIngestionService.class),
-                true, false, "");
+                true, false, Optional.empty());
     }
 
     // ==================== D11 — rollback of a partial import ====================

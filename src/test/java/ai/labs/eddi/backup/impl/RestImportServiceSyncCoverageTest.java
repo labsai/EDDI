@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import java.util.Optional;
 import jakarta.ws.rs.BadRequestException;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
@@ -75,7 +76,7 @@ class RestImportServiceSyncCoverageTest {
                 migrationManager, documentDescriptorStore,
                 templateSyntaxMigrator, structuralMatcher, upgradeExecutor, mock(IScheduleStore.class), mock(BackupMetrics.class),
                 mock(ResourceAccessGuard.class), mock(SpaceContext.class), mock(RagSourceIngestionService.class),
-                true, false, "");
+                true, false, Optional.empty());
     }
 
     // =========================================================

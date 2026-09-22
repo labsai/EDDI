@@ -273,6 +273,17 @@ Full guide: [import-export-an-agent.md](import-export-an-agent.md).
 |---|---|---|
 | `eddi.backup.export.retention-minutes` | `60` | How long a finished export archive stays downloadable |
 | `eddi.backup.export.sweep-interval` | `15m` | How often the retention sweep runs on its own, independently of exports |
+| `eddi.backup.sync.require-https` | `true` | Whether live sync refuses a plain `http://` source. The caller's `X-Source-Authorization` bearer travels to that host, so HTTP hands it to anyone on the path — turn this off only between instances on a network you trust |
+| `eddi.backup.sync.allow-private-targets` | `false` | Whether live sync accepts a loopback, RFC 1918, ULA, CGNAT or link-local source. Off by default because a caller who can reach the sync endpoint could otherwise use this deployment to probe hosts behind it; on for a single-tenant deployment whose other instances are internal |
+| `eddi.backup.sync.allowed-sources` | *(empty)* | Comma-separated exact origins (`scheme://host[:port]`) that live sync accepts whatever the two settings above say. The narrow way to reach one internal staging instance without opening the endpoint to every internal address — **prefer this** |
+
+> These three decide what `POST /backup/import/sync*` will read an agent **from**.
+> The strict default is why two instances on one private network — staging and
+> production as neighbouring services — could not sync at all before 6.4.1.
+> Dev and test mode accept `http://` whatever `require-https` says, so a
+> `quarkus:dev` instance needs none of this. A refused URL answers `400` with a
+> message naming the setting that would allow it.
+> See [agent-sync-guide.md → Reaching the source instance](agent-sync-guide.md#reaching-the-source-instance).
 
 > `POST /backup/export/{agentId}` writes a ZIP under `tmp/archives/` and answers
 > with a `Location` header the client then GETs, so the file has to outlive the
