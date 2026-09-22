@@ -37,6 +37,9 @@ observed there, and carries a regression test.
   deletion (single and retention sweep), and on GDPR erasure, which sweeps the default tenant plus
   every tenant the user's conversations point into and reports `autoVaultedSecretsDeleted`. Legacy
   shared slots are never deleted by this — they may still back other users' conversations.
+  `ConfigReferenceGuard` accepts the new slot only when it is exactly this conversation's agent,
+  user (hash) and property under its tenant; the legacy `<agentId>.<name>` form stays accepted for
+  conversations vaulted before the change.
   [`AutoVaultedSecrets.java`](../../src/main/java/ai/labs/eddi/secrets/AutoVaultedSecrets.java),
   [`PropertySetterTask.java`](../../src/main/java/ai/labs/eddi/modules/properties/impl/PropertySetterTask.java),
   [`RestConversationStore.java`](../../src/main/java/ai/labs/eddi/engine/memory/rest/RestConversationStore.java),

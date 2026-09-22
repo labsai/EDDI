@@ -99,6 +99,25 @@ public class AutoVaultedSecrets {
         return keyName != null && CURRENT_FORMAT.matcher(keyName).matches();
     }
 
+    /**
+     * Whether {@code keyName} is exactly a slot {@link #newSlotName} could have
+     * produced for this agent, user and property — whatever its nonce. The
+     * credential-reference guard uses it to accept a conversation's own
+     * auto-vaulted reference and nothing else.
+     */
+    public static boolean isSlotFor(String keyName, String agentId, String userId, String propertyName) {
+        if (keyName == null || agentId == null || propertyName == null) {
+            return false;
+        }
+        String prefix = agentId + "." + userSegment(userId) + ".";
+        String suffix = "." + propertyName;
+        if (!keyName.startsWith(prefix) || !keyName.endsWith(suffix) || keyName.length() != prefix.length() + NONCE_LENGTH + suffix.length()) {
+            return false;
+        }
+        String nonce = keyName.substring(prefix.length(), prefix.length() + NONCE_LENGTH);
+        return nonce.chars().allMatch(c -> (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'));
+    }
+
     /** Whether a slot name is a current-format slot owned by the given user. */
     public static boolean belongsToUser(String keyName, String userId) {
         return isCurrentFormat(keyName) && keyName.contains("." + userSegment(userId) + ".");
