@@ -178,6 +178,33 @@ class AuthStartupGuardTest {
                 "nothing reads roles when nothing authenticates — a warning here would be noise");
     }
 
+    /**
+     * quarkus-oidc accepts a COMMA-SEPARATED list of paths and reads roles from
+     * every one of them. "realm_access/roles,groups" therefore collides exactly as
+     * badly as a bare "groups" -- while reading, at a glance, like the correct
+     * configuration with something harmless appended.
+     */
+    @Test
+    @DisplayName("a comma list that includes the workspaces claim is reported")
+    void commaListContainingTheGroupsClaim_isReported() throws Exception {
+        AuthStartupGuard guard = createGuard(true, false, LaunchMode.NORMAL,
+                Optional.of("realm_access/roles, groups"), "groups");
+
+        Optional<String> diagnostic = guard.rolesClaimDiagnostic();
+
+        assertTrue(diagnostic.isPresent(), "one colliding path in the list is enough to break every role check");
+        assertTrue(diagnostic.get().contains("eddi.workspaces.groups-claim"), diagnostic.get());
+    }
+
+    @Test
+    @DisplayName("a comma list of non-colliding paths is silent")
+    void commaListWithoutTheGroupsClaim_isSilent() throws Exception {
+        AuthStartupGuard guard = createGuard(true, false, LaunchMode.NORMAL,
+                Optional.of("realm_access/roles,resource_access/eddi-backend/roles"), "groups");
+
+        assertTrue(guard.rolesClaimDiagnostic().isEmpty());
+    }
+
     @Test
     @DisplayName("a custom workspaces groups claim moves the collision with it")
     void collisionFollowsACustomWorkspacesClaim() throws Exception {

@@ -78,10 +78,13 @@ export function debateVerdictSynthesisPhaseNames(
   >,
 ): string[] {
   const members = config.members ?? [];
+  // Untrimmed on purpose: `GroupContextBuilder.debatingRoles` is not, so to the
+  // runtime "PRO" and "PRO " are two sides. Trimming here would make them one
+  // and the note would go missing on a roster the runtime does judge.
   const roles = new Set(
     members
       .filter((m) => m && m.role && m.role.trim())
-      .map((m) => m.role!.trim().toUpperCase()),
+      .map((m) => m.role!.toUpperCase()),
   );
   // The judgment prompt scores one side against another; fewer than two sides
   // never takes this path.
@@ -101,7 +104,7 @@ export function debateVerdictSynthesisPhaseNames(
             (a.speakingOrder ?? Number.MAX_SAFE_INTEGER) -
             (b.speakingOrder ?? Number.MAX_SAFE_INTEGER),
         )[0];
-  if (speaker?.role && roles.has(speaker.role.trim().toUpperCase())) return [];
+  if (speaker?.role && roles.has(speaker.role.toUpperCase())) return [];
 
   const phases: DiscussionPhase[] =
     config.phases && config.phases.length > 0
@@ -114,7 +117,12 @@ export function debateVerdictSynthesisPhaseNames(
     if (!phase) continue;
     if (
       phase.type === "SYNTHESIS" &&
-      !phase.inputTemplate &&
+      // `== null`, not falsy: an empty-string inputTemplate counts as SET, which
+      // is what the runtime's `inputTemplate() != null` does. Treating "" as
+      // unset would report a phase that actually concludes in prose. The
+      // Manager's own editor writes undefined for a blank field, so this only
+      // differs for a config saved through REST, import or MCP.
+      phase.inputTemplate == null &&
       argumentsSoFar &&
       phase.participants?.toUpperCase() === "MODERATOR"
     ) {

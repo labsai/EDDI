@@ -138,8 +138,24 @@ hardcoding `COMPLETED`. `group_complete` is the terminal notification for every 
 and a rejection ends the run as `REJECTED` — rendering it as "Completed" for the seconds
 before the persisted conversation loads says the opposite of what happened.
 
+The page's settle effect — which switches the transcript from the live stream to the
+persisted conversation and refreshes the sidebar — listed its states by hand, so `REJECTED`
+matched nothing and a live rejection stranded the page: no conversation selected, the
+composer inviting a *new* discussion, the Close action unreachable, and the sidebar saying
+"Awaiting Approval" indefinitely (the conversation-list poll only runs while a discussion is
+IN_PROGRESS/SYNTHESIZING). Caught in review. That list is now a named constant with the
+reasoning attached, including why FAILED and CANCELLED are deliberately not in it.
+
+`GROUP_CONVERSATION_STATES` is now a runtime array in `lib/api/groups.ts` with the union
+derived from it, because several render sites key translations off the state name with a
+template literal — ``t(`groups.state.${state}`)`` — which `npm run i18n:check` cannot see.
+`groups.state.REJECTED` was missing from all eleven locales with every gate green; the
+transcript export would have written the raw token into a downloaded file.
+
 **Tests:** `discussion-rejected-state.test.tsx` — the label, the absence of the destructive
-badge, the declined synthesis staying visible, and the live-stream state.
+badge, the declined synthesis staying visible, and the live-stream label; a rejection driven
+through the approve path in `group-detail-selection.test.tsx`; and a locale sweep over
+`GROUP_CONVERSATION_STATES` in `i18n-quality.test.ts`.
 
 ---
 

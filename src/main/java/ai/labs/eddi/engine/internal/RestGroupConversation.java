@@ -857,10 +857,16 @@ public class RestGroupConversation implements IRestGroupConversation {
      * client-supplied value is still discarded either way.
      */
     private void setDecidedByFromIdentity(GroupApprovalRequest request) {
-        if (request.getDecision() != null && identity != null && identity.getPrincipal() != null) {
-            String name = identity.getPrincipal().getName();
-            request.getDecision().setDecidedBy(name == null || name.isBlank() ? null : name);
+        if (request.getDecision() == null) {
+            return;
         }
+        // Unconditional, so the caller's claim never survives ANY branch. Guarding
+        // the whole assignment on a non-null principal left the client-supplied
+        // value standing whenever there was no principal to overwrite it with --
+        // the one case where a self-asserted decider could have reached the
+        // ledger.
+        String name = identity == null || identity.getPrincipal() == null ? null : identity.getPrincipal().getName();
+        request.getDecision().setDecidedBy(name == null || name.isBlank() ? null : name);
     }
 
     // --- SSE Helpers ---

@@ -12,6 +12,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 import io.quarkus.scheduler.Scheduled;
 
+import java.util.Arrays;
 import java.util.Optional;
 
 /**
@@ -136,9 +137,12 @@ public class AuthStartupGuard {
                     + "QUARKUS_OIDC_ROLES_ROLE_CLAIM_PATH=realm_access/roles (Keycloak) or the equivalent path for your "
                     + "identity provider.");
         }
-        if (configured.trim().equals(groupsClaim)) {
-            return Optional.of("[SECURITY] quarkus.oidc.roles.role-claim-path is '" + configured.trim() + "', the same claim as "
-                    + "eddi.workspaces.groups-claim. Roles and workspace groups will be read from one list, so group membership "
+        // quarkus-oidc accepts a comma-separated list of paths and reads roles from
+        // every one of them, so "realm_access/roles,groups" collides just as badly
+        // as a bare "groups" -- and reads perfectly reassuring.
+        if (Arrays.stream(configured.split(",")).map(String::trim).anyMatch(groupsClaim::equals)) {
+            return Optional.of("[SECURITY] quarkus.oidc.roles.role-claim-path is '" + configured.trim() + "', which reads roles from '" + groupsClaim
+                    + "', the claim eddi.workspaces.groups-claim names. Roles and workspace groups will be read from one list, so group membership "
                     + "will be interpreted as roles and @RolesAllowed endpoints will answer 403. Point one of the two elsewhere "
                     + "(QUARKUS_OIDC_ROLES_ROLE_CLAIM_PATH=realm_access/roles for Keycloak).");
         }

@@ -618,15 +618,24 @@ class GroupConversationServiceHitlTest {
          * REJECTED must permit exactly what FAILED permitted. The label is the only
          * thing that changed; a state that read as terminal-and-closeable everywhere
          * and then did not would be a worse bug than the one being fixed.
+         * <p>
+         * This case guards the {@code availableActions} switch specifically, and it
+         * says so: asserting {@code ["close"]} alone would hold whether the coordinator
+         * wrote REJECTED or FAILED, so the state is asserted too. The closeability of
+         * REJECTED is proved where it lives, in
+         * {@code GroupLifecycleOpsTest.closeGroupConversation_acceptsARejectedDiscussion};
+         * its terminality in {@code GroupLifecycleOps.isTerminalState}'s callers.
          */
         @Test
-        @DisplayName("REJECTED is terminal and closeable, exactly as FAILED is")
+        @DisplayName("a REJECTED discussion offers the one action a FAILED one offers")
         void rejectedIsTerminalAndCloseable() throws Exception {
             var gc = pausedConversation("gc-reject-actions");
             doReturn(gc).when(conversationStore).read("gc-reject-actions");
 
             GroupConversation result = service.resumeDiscussion("gc-reject-actions", rejection(), null);
 
+            assertEquals(GroupConversationState.REJECTED, result.getState(),
+                    "otherwise this passes on a coordinator that still writes FAILED");
             assertEquals(List.of("close"), result.getAvailableActions(),
                     "a rejected discussion offers the same single action a failed one does");
         }
