@@ -923,15 +923,16 @@ class ConversationHistoryBuilderTest {
     class IncludeFirstAgentMessageTests {
 
         @Test
-        @DisplayName("includeFirstAgentMessage=false with skipSteps=0 — removes first message")
+        @DisplayName("includeFirstAgentMessage=false with skipSteps=0 — removes the greeting")
         void includeFirstAgentMessageFalse_removesFirst() {
             IConversationMemory memory = mock(IConversationMemory.class);
 
             var outputs = new ArrayList<ConversationOutput>();
-            var output0 = new ConversationOutput();
-            output0.put("input", "Hi");
-            output0.put("output", List.of("Welcome!"));
-            outputs.add(output0);
+            // A CONVERSATION_START turn: the agent greets, the user has said nothing
+            // yet, so message zero is the AGENT's — the shape this flag is written for.
+            var greeting = new ConversationOutput();
+            greeting.put("output", List.of("Welcome!"));
+            outputs.add(greeting);
 
             var output1 = new ConversationOutput();
             output1.put("input", "How are you?");
@@ -945,11 +946,10 @@ class ConversationHistoryBuilderTest {
                     memory, null, null, -1, false,
                     null, 0);
 
-            // First message (the greeting) should be removed
-            // Remaining: 1 user ("How are you?") + 1 AI ("I'm fine!") + possibly input "Hi"
-            // The exact count depends on ConversationLogGenerator behavior
-            // But it should have fewer messages than with includeFirstAgentMessage=true
-            assertFalse(messages.isEmpty());
+            assertEquals(2, messages.size());
+            assertInstanceOf(UserMessage.class, messages.getFirst(),
+                    "the greeting is gone, so the history starts on the user's turn");
+            assertInstanceOf(AiMessage.class, messages.getLast());
         }
 
         @Test
@@ -974,6 +974,91 @@ class ConversationHistoryBuilderTest {
 
             // Should have messages from steps 2-4 without greeting removal
             assertFalse(messages.isEmpty());
+        }
+    }
+
+    // ============ includeFirstAgentMessage: role-awareness ============
+
+    /**
+     * The flag strips EDDI's opening greeting so the history starts on a user turn.
+     * It used to remove message zero whatever its role, which is only the same
+     * thing for an agent that HAS a greeting. A group member built with no
+     * {@code ai.labs.output} step opens on the user's turn instead, so its one-turn
+     * history went out empty and Anthropic answered
+     * {@code invalid_request_error: messages: Field required}. Ollama accepts an
+     * empty message list, so a local smoke test passed on a config that could not
+     * work against the real provider.
+     */
+    @Nested
+    @DisplayName("includeFirstAgentMessage is role-aware")
+    class IncludeFirstAgentMessageRoleTests {
+
+        private ConversationOutput greeting(String text) {
+            var output = new ConversationOutput();
+            output.put("output", List.of(text));
+            return output;
+        }
+
+        private ConversationOutput turn(String input, String answer) {
+            var output = new ConversationOutput();
+            output.put("input", input);
+            output.put("output", List.of(answer));
+            return output;
+        }
+
+        private IConversationMemory memoryOf(ConversationOutput... outputs) {
+            IConversationMemory memory = mock(IConversationMemory.class);
+            when(memory.getConversationOutputs()).thenReturn(new ArrayList<>(List.of(outputs)));
+            return memory;
+        }
+
+        @Test
+        @DisplayName("false + an agent greeting — the greeting is dropped, as it always was")
+        void dropsTheGreeting() {
+            var memory = memoryOf(greeting("Hello, I am the probe agent."), turn("Say OK.", "OK"));
+
+            List<ChatMessage> messages = builder.buildMessages(memory, null, null, -1, false);
+
+            assertEquals(2, messages.size());
+            assertInstanceOf(UserMessage.class, messages.getFirst());
+            assertInstanceOf(AiMessage.class, messages.getLast());
+        }
+
+        @Test
+        @DisplayName("false + no greeting — the user's own turn survives")
+        void keepsTheUsersTurn() {
+            var memory = memoryOf(turn("Say OK.", "OK"));
+
+            List<ChatMessage> messages = builder.buildMessages(memory, null, null, -1, false);
+
+            assertEquals(2, messages.size(), "the user turn used to be deleted here");
+            assertInstanceOf(UserMessage.class, messages.getFirst());
+        }
+
+        @Test
+        @DisplayName("false + a single unanswered user turn — the list is never empty")
+        void neverSendsAnEmptyMessageList() {
+            var output = new ConversationOutput();
+            output.put("input", "Say OK.");
+
+            List<ChatMessage> messages = builder.buildMessages(memoryOf(output), null, null, -1, false);
+
+            assertFalse(messages.isEmpty(),
+                    "an empty list is what Anthropic rejects with 'messages: Field required'");
+            assertInstanceOf(UserMessage.class, messages.getFirst());
+        }
+
+        @Test
+        @DisplayName("token-aware windowing keeps the user's first turn too")
+        void tokenAwarePathKeepsTheUsersTurn() {
+            var memory = memoryOf(turn("Say OK.", "OK"));
+
+            List<ChatMessage> messages = builder.buildTokenAwareMessages(
+                    memory, null, null, 100_000, 2, false,
+                    new TokenCounterFactory.ApproximateTokenCountEstimator());
+
+            assertEquals(2, messages.size());
+            assertInstanceOf(UserMessage.class, messages.getFirst());
         }
     }
 }
