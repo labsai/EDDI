@@ -864,7 +864,11 @@
     "cascadePartialFailure_other": "{{count}} atualizaçãoões em cascata falharam",
     "usedInAgents_many": "Usado em {{count}} agents",
     "usedInAgents_one": "Usado em {{count}} agent",
-    "usedInAgents_other": "Usado em {{count}} agents"
+    "usedInAgents_other": "Usado em {{count}} agents",
+    "savedNotLive": "Guardado — ainda não ativo",
+    "savedNotLiveDescription": "O agente em execução continua a servir a versão implementada. Implemente para aplicar esta alteração.",
+    "deployNow": "Implementar",
+    "deployStarted": "Implementação iniciada"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -2786,7 +2790,10 @@
       "finalAnswer": "Resposta final",
       "phase": "Fase"
     },
-    "deleteMembersConfigFailed": "Não foi possível ler os membros do grupo, por isso nada foi eliminado. Tente novamente."
+    "deleteMembersConfigFailed": "Não foi possível ler os membros do grupo, por isso nada foi eliminado. Tente novamente.",
+    "stateRejected": "Rejeitada",
+    "inputDisabledRejected": "Esta recomendação foi rejeitada",
+    "debateVerdictNote": "Responde com um veredito pontuado (vencedor e pontuações), não em prosa: {{phases}}. Os membros têm dois ou mais papéis e os argumentos vêm antes, por isso o prompt de síntese do próprio moderador não é usado. Defina um modelo de entrada na fase para obter prosa."
   },
   "taskBoard": {
     "title": "Quadro de tarefas",
@@ -3673,7 +3680,9 @@
       "pausedRejected": "Esta conversa está em pausa à espera de uma decisão humana, por isso a mensagem não foi enviada.",
       "reviewApprovals": "Rever aprovações pendentes",
       "stop": "Parar a geração",
-      "streamEnded": "A ligação terminou antes de a resposta ficar completa. O que chegou está acima — envie novamente para tentar outra vez."
+      "streamEnded": "A ligação terminou antes de a resposta ficar completa. O que chegou está acima — envie novamente para tentar outra vez.",
+      "newConversation": "Nova conversa",
+      "newConversationFailed": "Não foi possível iniciar uma nova conversa"
     },
     "chat": {
       "agentDetails": "Detalhes do Agente",
@@ -3998,7 +4007,8 @@
       "transcript": "Transcrição da conversa",
       "tryDifferent": "Tente outro termo de pesquisa",
       "untitled": "Conversa sem título",
-      "loadListError": "Falha ao carregar as conversas"
+      "loadListError": "Falha ao carregar as conversas",
+      "rejected": "Rejeitada"
     },
     "insights": "Insights",
     "memberCount": "{{count}} membros",

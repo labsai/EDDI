@@ -45,6 +45,7 @@ import { VersionDiffDialog } from "@/components/editors/version-diff-dialog";
 import { getResource } from "@/lib/api/resources";
 import { useAgentContext } from "@/hooks/use-agent-context";
 import { useSaveAndDeploy } from "@/hooks/use-save-and-deploy";
+import { deployAgent } from "@/lib/api/agents";
 
 const ICON_MAP: Record<string, LucideIcon> = {
   GitBranch,
@@ -189,14 +190,42 @@ export function ResourceDetailPage() {
             },
             {
               onSuccess: (result) => {
-                toast.success(t("editor.saved"));
+                const newAgentVersion = result.newAgentVersion ?? cascadeContext.agentVersion;
+                /*
+                 * "Saved successfully" on its own is misleading here. This path
+                 * cascades resource -> workflow -> agent and stops: the running
+                 * agent keeps serving the version it was deployed with. Measured
+                 * on an eligibility gate with the ceiling lowered from 150,000 to
+                 * 50,000 and a case of 85,000 -- after a plain Save the gate still
+                 * passed, while the resource/workflow/agent versions had advanced
+                 * to v4/v5 with the deployment stuck at v3. Someone who reads
+                 * "Saved successfully" at face value has a config that is saved
+                 * and not live.
+                 *
+                 * The toast says so, and offers the one action that closes the
+                 * gap, so the fix costs a click rather than a support question.
+                 */
+                toast.success(t("editor.savedNotLive", "Saved — not yet live"), {
+                  description: t(
+                    "editor.savedNotLiveDescription",
+                    "The running agent still serves the deployed version. Deploy to make this change take effect.",
+                  ),
+                  action: {
+                    label: t("editor.deployNow", "Deploy"),
+                    onClick: () => {
+                      deployAgent("production", cascadeContext.agentId, newAgentVersion)
+                        .then(() => toast.success(t("editor.deployStarted", "Deployment started")))
+                        .catch((err) => toast.error(getErrorMessage(err)));
+                    },
+                  },
+                });
                 setSaveSuccess(true);
                 setCurrentVersion(result.newResourceVersion);
                 // Update cascade context so next save uses new versions
                 setCascadeContext({
                   ...cascadeContext,
                   workflowVersion: result.newWorkflowVersion ?? cascadeContext.workflowVersion,
-                  agentVersion: result.newAgentVersion ?? cascadeContext.agentVersion,
+                  agentVersion: newAgentVersion,
                 });
               },
               onError: (err) => toast.error(getErrorMessage(err)),

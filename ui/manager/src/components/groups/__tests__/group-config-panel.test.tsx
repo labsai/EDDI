@@ -200,6 +200,53 @@ describe("GroupConfigPanel", () => {
       expect(screen.getByTestId("group-moderatorless-warning")).toHaveTextContent("Synthesis");
     });
 
+    /**
+     * Two or more member roles plus argument phases put the SYNTHESIS on the
+     * debate-judgment prompt: it answers with a winner/scores JSON and the
+     * moderator's own synthesis instruction is not used. A grant board whose
+     * members carried PRO and CON found that out by running it.
+     */
+    it("notes that a debate synthesis answers with a scoring verdict", () => {
+      renderWithProviders(
+        <GroupConfigPanel
+          config={{
+            ...mockConfig,
+            style: "DEBATE",
+            moderatorAgentId: "chair",
+            members: [
+              { agentId: "a", displayName: "For", speakingOrder: 1, role: "PRO", memberType: "AGENT" },
+              { agentId: "b", displayName: "Against", speakingOrder: 2, role: "CON", memberType: "AGENT" },
+            ],
+          }}
+        />,
+      );
+
+      expect(screen.getByTestId("group-debate-verdict-note")).toHaveTextContent("Judgment");
+    });
+
+    it("says nothing about a verdict for a group with one side", () => {
+      renderWithProviders(
+        <GroupConfigPanel
+          config={{
+            ...mockConfig,
+            style: "DEBATE",
+            moderatorAgentId: "chair",
+            members: [
+              { agentId: "a", displayName: "For", speakingOrder: 1, role: "PRO", memberType: "AGENT" },
+              { agentId: "b", displayName: "Also for", speakingOrder: 2, role: "PRO", memberType: "AGENT" },
+            ],
+          }}
+        />,
+      );
+
+      expect(screen.queryByTestId("group-debate-verdict-note")).not.toBeInTheDocument();
+    });
+
+    it("says nothing about a verdict on an ordinary round table", () => {
+      renderWithProviders(<GroupConfigPanel config={mockConfig} />);
+      expect(screen.queryByTestId("group-debate-verdict-note")).not.toBeInTheDocument();
+    });
+
     it("stays quiet when a moderator is named", () => {
       renderWithProviders(<GroupConfigPanel config={mockConfig} />);
       expect(screen.queryByTestId("group-moderatorless-warning")).not.toBeInTheDocument();

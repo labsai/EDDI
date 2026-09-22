@@ -48,6 +48,8 @@ const STATE_VARIANT: Record<
   SYNTHESIZING: { label: "Synthesizing", variant: "warning" },
   CREATED: { label: "Created", variant: "secondary" },
   FAILED: { label: "Failed", variant: "destructive" },
+  // A recorded human decision, not a fault — neutral, never destructive.
+  REJECTED: { label: "Rejected", variant: "secondary" },
   CANCELLED: { label: "Cancelled", variant: "secondary" },
   AWAITING_APPROVAL: { label: "Awaiting Approval", variant: "warning" },
   AWAITING_HUMAN_INPUT: { label: "Awaiting Human Input", variant: "warning" },
@@ -61,6 +63,7 @@ function stateI18nKey(state: GroupConversationState): string {
     SYNTHESIZING: "Workforce.history.synthesizing",
     CREATED: "Workforce.history.created",
     FAILED: "Workforce.history.failed",
+    REJECTED: "Workforce.history.rejected",
     CANCELLED: "Workforce.history.cancelled",
     AWAITING_APPROVAL: "Workforce.history.awaitingApproval",
     AWAITING_HUMAN_INPUT: "Workforce.history.awaitingHumanInput",

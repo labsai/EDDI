@@ -890,7 +890,11 @@
     "cascadePartialFailure_one": "{{count}} cascade update failed",
     "cascadePartialFailure_other": "{{count}} cascade updates failed",
     "usedInAgents_one": "Used in {{count}} agent",
-    "usedInAgents_other": "Used in {{count}} agents"
+    "usedInAgents_other": "Used in {{count}} agents",
+    "savedNotLive": "Saved — not yet live",
+    "savedNotLiveDescription": "The running agent still serves the deployed version. Deploy to make this change take effect.",
+    "deployNow": "Deploy",
+    "deployStarted": "Deployment started"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -2810,7 +2814,10 @@
       "finalAnswer": "Final answer",
       "phase": "Phase"
     },
-    "deleteMembersConfigFailed": "Could not read the group's members, so nothing was deleted. Try again."
+    "deleteMembersConfigFailed": "Could not read the group's members, so nothing was deleted. Try again.",
+    "stateRejected": "Rejected",
+    "inputDisabledRejected": "This recommendation was rejected",
+    "debateVerdictNote": "Answers with a scoring verdict (winner and scores), not prose: {{phases}}. The members hold two or more roles and arguments come first, so the moderator's own synthesis prompt is not used. Set an input template on the phase for prose."
   },
   "taskBoard": {
     "title": "Task Board",
@@ -3638,7 +3645,9 @@
       "pausedRejected": "This conversation is paused waiting for a human decision, so the message was not sent.",
       "reviewApprovals": "Review pending approvals",
       "stop": "Stop generating",
-      "streamEnded": "The connection ended before the reply finished. What arrived is above — send again to retry."
+      "streamEnded": "The connection ended before the reply finished. What arrived is above — send again to retry.",
+      "newConversation": "New conversation",
+      "newConversationFailed": "Could not start a new conversation"
     },
     "chat": {
       "agentDetails": "Agent Details",
@@ -3961,7 +3970,8 @@
       "transcript": "Conversation transcript",
       "tryDifferent": "Try a different search term",
       "untitled": "Untitled Conversation",
-      "loadListError": "Failed to load conversations"
+      "loadListError": "Failed to load conversations",
+      "rejected": "Rejected"
     },
     "insights": "Insights",
     "memberCount": "{{count}} members",

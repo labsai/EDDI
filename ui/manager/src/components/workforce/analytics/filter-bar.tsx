@@ -148,6 +148,7 @@ const ALL_OUTCOMES: GroupConversationState[] = [
 const OUTCOME_LABELS: Record<GroupConversationState, string> = {
   COMPLETED: "Completed",
   FAILED: "Failed",
+  REJECTED: "Rejected",
   IN_PROGRESS: "In Progress",
   SYNTHESIZING: "Synthesizing",
   CREATED: "Created",
