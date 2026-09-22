@@ -408,13 +408,29 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
 
     // === Document conversion ===
 
-    private Bson buildUpsertFilter(UserMemoryEntry entry) {
+    /**
+     * The document an upsert of {@code entry} replaces.
+     * <p>
+     * Global entries are one shared document per {@code (userId, key)}. Self and
+     * group entries are one document per {@code (userId, key, sourceAgentId)} among
+     * the agent's <em>non-global</em> entries — the same identity PostgreSQL
+     * enforces with its partial unique index
+     * {@code (user_id, key, source_agent_id) WHERE visibility != 'global'}.
+     * <p>
+     * The visibility term is load-bearing. Without it a self write matched the
+     * global entry the same agent had created (a global entry keeps its creator in
+     * {@code sourceAgentId}), and the {@code $set} flipped the shared memory to
+     * {@code self} — every other agent silently lost it. A model saving "a private
+     * note" under a key it had once shared was enough to trigger it.
+     */
+    static Bson buildUpsertFilter(UserMemoryEntry entry) {
         if (entry.visibility() == Visibility.global) {
             // Global: single shared entry per (userId, key)
             return and(eq(FIELD_USER_ID, entry.userId()), eq(FIELD_KEY, entry.key()), eq(FIELD_VISIBILITY, Visibility.global.name()));
         }
-        // Self/Group: per-agent entries
-        return and(eq(FIELD_USER_ID, entry.userId()), eq(FIELD_KEY, entry.key()), eq(FIELD_SOURCE_AGENT_ID, entry.sourceAgentId()));
+        // Self/Group: per-agent entries, never the shared global one
+        return and(eq(FIELD_USER_ID, entry.userId()), eq(FIELD_KEY, entry.key()), eq(FIELD_SOURCE_AGENT_ID, entry.sourceAgentId()),
+                ne(FIELD_VISIBILITY, Visibility.global.name()));
     }
 
     private UserMemoryEntry documentToEntry(Document doc) {
