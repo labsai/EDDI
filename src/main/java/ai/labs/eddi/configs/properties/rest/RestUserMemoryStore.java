@@ -6,6 +6,7 @@ package ai.labs.eddi.configs.properties.rest;
 
 import ai.labs.eddi.configs.properties.IRestUserMemoryStore;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
+import ai.labs.eddi.configs.properties.UserMemoryWriteRules;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.security.OwnershipValidator;
@@ -106,21 +107,13 @@ public class RestUserMemoryStore implements IRestUserMemoryStore {
 
     @Override
     public Response upsertMemory(UserMemoryEntry entry) {
-        if (entry == null) {
-            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", "Request body is required")).build();
-        }
-        if (entry.userId() == null || entry.userId().isBlank()) {
-            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", "userId is required")).build();
-        }
-        if (entry.key() == null || entry.key().isBlank()) {
-            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", "key is required")).build();
-        }
-        if (entry.key().length() > 255) {
-            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", "key must not exceed 255 characters")).build();
+        String violation = UserMemoryWriteRules.validate(entry);
+        if (violation != null) {
+            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", violation)).build();
         }
         ownershipValidator.validateUserAccess(identity, entry.userId());
         try {
-            String id = userMemoryStore.upsert(entry);
+            String id = userMemoryStore.upsert(UserMemoryWriteRules.withDefaults(entry));
             return Response.ok(Map.of("id", id)).build();
         } catch (IResourceStore.ResourceStoreException e) {
             LOGGER.error("Failed to upsert memory entry", e);

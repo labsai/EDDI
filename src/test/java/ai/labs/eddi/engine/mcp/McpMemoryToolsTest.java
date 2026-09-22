@@ -150,38 +150,38 @@ class McpMemoryToolsTest {
     void upsertUserMemory_success() throws Exception {
         when(userMemoryStore.upsert(any())).thenReturn("new-id");
         when(jsonSerialization.serialize(any())).thenReturn("{\"status\":\"upserted\"}");
-        var result = tools.upsertUserMemory("user1", "lang", "en", "agent1", "preference", "self");
+        var result = tools.upsertUserMemory("user1", "lang", "en", "agent1", "preference", "self", null);
         assertNotNull(result);
         verify(userMemoryStore).upsert(any());
     }
 
     @Test
     void upsertUserMemory_nullUserId() {
-        var result = tools.upsertUserMemory(null, "key", "val", "agent", null, null);
+        var result = tools.upsertUserMemory(null, "key", "val", "agent", null, null, null);
         assertTrue(result.contains("userId is required"));
     }
 
     @Test
     void upsertUserMemory_nullKey() {
-        var result = tools.upsertUserMemory("user1", null, "val", "agent", null, null);
+        var result = tools.upsertUserMemory("user1", null, "val", "agent", null, null, null);
         assertTrue(result.contains("key is required"));
     }
 
     @Test
     void upsertUserMemory_nullValue() {
-        var result = tools.upsertUserMemory("user1", "key", null, "agent", null, null);
+        var result = tools.upsertUserMemory("user1", "key", null, "agent", null, null, null);
         assertTrue(result.contains("value is required"));
     }
 
     @Test
     void upsertUserMemory_nullAgentId() {
-        var result = tools.upsertUserMemory("user1", "key", "val", null, null, null);
+        var result = tools.upsertUserMemory("user1", "key", "val", null, null, null, null);
         assertTrue(result.contains("agentId is required"));
     }
 
     @Test
     void upsertUserMemory_invalidVisibility() {
-        var result = tools.upsertUserMemory("user1", "key", "val", "agent", null, "invalid");
+        var result = tools.upsertUserMemory("user1", "key", "val", "agent", null, "invalid", null);
         assertTrue(result.contains("Invalid visibility"));
     }
 

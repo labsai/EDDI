@@ -137,3 +137,15 @@ observed there, and carries a regression test.
   properties as before).
   [`ConversationMemory.java`](../../src/main/java/ai/labs/eddi/engine/memory/ConversationMemory.java),
   [`ConversationService.java`](../../src/main/java/ai/labs/eddi/engine/internal/ConversationService.java)
+- **REST and MCP memory writes: a 500, no limits, unreadable entries, all-required MCP args.**
+  `PUT /usermemorystore/memories` without `visibility` crashed with a NullPointerException (HTTP
+  500); REST accepted a 1 MB value and any category; MCP accepted a 300-character key REST rejects;
+  and both would store a `self`/`group` entry that no agent could ever read (no owning agent, no
+  group). Both paths now share `UserMemoryWriteRules`: `visibility` required, `self`/`group` need a
+  `sourceAgentId`, `group` needs `groupIds`, known categories only (`legacy`/`property` included),
+  keys ≤ 255 and values ≤ 64 KiB of JSON; an absent category is stored as `fact`. MCP
+  `upsert_user_memory` gained a `groupIds` argument, and the optional arguments of the memory tools
+  are finally declared `required = false` — every one used to be advertised as required.
+  [`UserMemoryWriteRules.java`](../../src/main/java/ai/labs/eddi/configs/properties/UserMemoryWriteRules.java),
+  [`RestUserMemoryStore.java`](../../src/main/java/ai/labs/eddi/configs/properties/rest/RestUserMemoryStore.java),
+  [`McpMemoryTools.java`](../../src/main/java/ai/labs/eddi/engine/mcp/McpMemoryTools.java)
