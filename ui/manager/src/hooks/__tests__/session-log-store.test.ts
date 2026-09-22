@@ -9,6 +9,15 @@ import {
 } from "@/hooks/session-log-store";
 import * as logsApi from "@/lib/api/logs";
 
+/*
+ * Read at module scope, which is the only moment that can answer the question.
+ * `beforeEach` drains the refcount, so by the time any test body runs a
+ * boot-time connection would already have been closed and the assertion would
+ * pass with the regression in.
+ */
+const STREAM_OPEN_AT_IMPORT = isStreamOpen();
+const SUBSCRIBERS_AT_IMPORT = subscriberCount();
+
 vi.mock("@/lib/api/logs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api/logs")>();
   return {
@@ -302,10 +311,10 @@ describe("useSessionLogStore", () => {
   // on skeleton loaders forever while the server was provably fine.
   describe("connection lifecycle", () => {
     it("importing the module opens no EventSource", () => {
-      // The import at the top of this file has already run — this assertion is
-      // the regression itself. A module-load `openStream()` fails it.
-      expect(isStreamOpen()).toBe(false);
-      expect(subscriberCount()).toBe(0);
+      // Sampled at import time (see the constants above) — this assertion IS the
+      // regression. A module-load `openStream()` fails it.
+      expect(STREAM_OPEN_AT_IMPORT).toBe(false);
+      expect(SUBSCRIBERS_AT_IMPORT).toBe(0);
     });
 
     it("connect() opens exactly one stream", () => {

@@ -79,10 +79,12 @@ describe("A rejected discussion", () => {
     expect(screen.getByText(/Recommend funding at the reduced tier/)).toBeInTheDocument();
   });
 
-  it("a live stream reports the state the backend sent, not COMPLETED", () => {
-    // group_complete is the terminal notification for every outcome, including a
-    // rejection. Hardcoding COMPLETED showed "Completed" for the seconds before
-    // the persisted conversation loaded — the opposite of what happened.
+  it("renders the label from a live stream too, not only a persisted document", () => {
+    // The stream path reads `streamState.state` rather than the conversation, so
+    // it needs the same label map. That the HOOK reports REJECTED at all is
+    // asserted where it belongs, in `use-group-discussion-stream.test.ts`
+    // ("reports the terminal state the backend sent") — this one would pass on a
+    // hook that still hardcoded COMPLETED.
     const streamState: GroupStreamState = {
       isStreaming: false,
       conversationId: "conv-rejected",
