@@ -2931,7 +2931,16 @@
       "spokenCount_zero": "لا مساهمات حتى الآن",
       "spokenCount_two": "مساهمتان حتى الآن",
       "spokenCount_few": "{{count}} مساهمات حتى الآن",
-      "spokenCount_many": "{{count}} مساهمة حتى الآن"
+      "spokenCount_many": "{{count}} مساهمة حتى الآن",
+      "phaseRepeatsTitle": "تُنفَّذ هذه المرحلة {{count}} مرات",
+      "roundScope": "الجولة {{n}} فقط",
+      "roundScopeTitle": "تغطي هذه الطريقة الجولة {{n}} فقط. الجولات السابقة موجودة في النص.",
+      "convergenceStopped_one": "تقارَب — تم تخطي تكرار واحد",
+      "convergenceStopped_other": "تقارَب — تم تخطي {{count}} تكرارات",
+      "convergenceStopped_zero": "تقارَب — تم تخطي {{count}} تكرارات",
+      "convergenceStopped_two": "تقارَب — تم تخطي {{count}} تكرارات",
+      "convergenceStopped_few": "تقارَب — تم تخطي {{count}} تكرارات",
+      "convergenceStopped_many": "تقارَب — تم تخطي {{count}} تكرارات"
     }
   },
   "taskBoard": {

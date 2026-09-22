@@ -2807,7 +2807,12 @@
       "viewMode": "चर्चा दृश्य",
       "viewOverview": "अवलोकन",
       "viewSplit": "दोनों",
-      "viewTranscript": "प्रतिलिपि"
+      "viewTranscript": "प्रतिलिपि",
+      "phaseRepeatsTitle": "यह चरण {{count}} बार चलता है",
+      "roundScope": "केवल दौर {{n}}",
+      "roundScopeTitle": "यह दृश्य केवल दौर {{n}} को कवर करता है। पिछले दौर प्रतिलिपि में हैं।",
+      "convergenceStopped_one": "अभिसरित — {{count}} पुनरावृत्ति छोड़ी गई",
+      "convergenceStopped_other": "अभिसरित — {{count}} पुनरावृत्तियाँ छोड़ी गईं"
     }
   },
   "taskBoard": {

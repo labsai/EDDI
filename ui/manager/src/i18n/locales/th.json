@@ -2807,7 +2807,12 @@
       "viewMode": "มุมมองการหารือ",
       "viewOverview": "ภาพรวม",
       "viewSplit": "ทั้งสอง",
-      "viewTranscript": "บทสนทนา"
+      "viewTranscript": "บทสนทนา",
+      "phaseRepeatsTitle": "ระยะนี้ทำงาน {{count}} ครั้ง",
+      "roundScope": "เฉพาะรอบที่ {{n}}",
+      "roundScopeTitle": "มุมมองนี้ครอบคลุมเฉพาะรอบที่ {{n}} รอบก่อนหน้าอยู่ในบทสนทนา",
+      "convergenceStopped_one": "บรรจบกัน — ข้ามการทำซ้ำ {{count}} ครั้ง",
+      "convergenceStopped_other": "บรรจบกัน — ข้ามการทำซ้ำ {{count}} ครั้ง"
     }
   },
   "taskBoard": {

@@ -2807,7 +2807,12 @@
       "viewMode": "토론 보기",
       "viewOverview": "개요",
       "viewSplit": "둘 다",
-      "viewTranscript": "전체 기록"
+      "viewTranscript": "전체 기록",
+      "phaseRepeatsTitle": "이 단계는 {{count}}회 실행됩니다",
+      "roundScope": "{{n}}라운드만",
+      "roundScopeTitle": "이 보기는 {{n}}라운드만 다룹니다. 이전 라운드는 전체 기록에 있습니다.",
+      "convergenceStopped_one": "수렴 — 반복 {{count}}회 생략",
+      "convergenceStopped_other": "수렴 — 반복 {{count}}회 생략"
     }
   },
   "taskBoard": {

@@ -2838,7 +2838,13 @@
       "viewSplit": "Ambas",
       "viewTranscript": "Transcrição",
       "turnCount_many": "{{count}} intervenções",
-      "spokenCount_many": "{{count}} contribuições até agora"
+      "spokenCount_many": "{{count}} contribuições até agora",
+      "phaseRepeatsTitle": "Esta fase é executada {{count}} vezes",
+      "roundScope": "Apenas a ronda {{n}}",
+      "roundScopeTitle": "Esta vista cobre apenas a ronda {{n}}. As rondas anteriores estão na transcrição.",
+      "convergenceStopped_one": "Convergiu — {{count}} repetição ignorada",
+      "convergenceStopped_other": "Convergiu — {{count}} repetições ignoradas",
+      "convergenceStopped_many": "Convergiu — {{count}} repetições ignoradas"
     }
   },
   "taskBoard": {

@@ -2807,7 +2807,12 @@
       "viewMode": "Diskussionsansicht",
       "viewOverview": "Übersicht",
       "viewSplit": "Beides",
-      "viewTranscript": "Transkript"
+      "viewTranscript": "Transkript",
+      "phaseRepeatsTitle": "Diese Phase läuft {{count}}-mal",
+      "roundScope": "Nur Runde {{n}}",
+      "roundScopeTitle": "Diese Ansicht zeigt nur Runde {{n}}. Frühere Runden stehen im Transkript.",
+      "convergenceStopped_one": "Konvergiert — {{count}} Wiederholung übersprungen",
+      "convergenceStopped_other": "Konvergiert — {{count}} Wiederholungen übersprungen"
     }
   },
   "taskBoard": {

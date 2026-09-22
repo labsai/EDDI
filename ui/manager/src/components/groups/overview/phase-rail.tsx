@@ -94,15 +94,31 @@ function PhaseCard({
         )}
       </div>
 
-      <p
-        className={cn(
-          "truncate text-xs font-medium",
-          phase.status === "pending" ? "text-muted-foreground" : "text-foreground",
+      <div className="flex items-baseline gap-1">
+        <p
+          className={cn(
+            "truncate text-xs font-medium",
+            phase.status === "pending" ? "text-muted-foreground" : "text-foreground",
+          )}
+          title={phase.name}
+        >
+          {phase.name}
+        </p>
+        {/* A repeating phase is the whole mechanic of ROUND_TABLE (whose
+            "Discussion" phase carries repeats = rounds - 1) and of DELPHI.
+            Without this, a phase that ran four times is indistinguishable from
+            one that ran once. */}
+        {phase.repeats !== null && phase.repeats > 1 && (
+          <span
+            className="shrink-0 text-[10px] text-muted-foreground"
+            title={t("groups.overview.phaseRepeatsTitle", "This phase runs {{count}} times", {
+              count: phase.repeats,
+            })}
+          >
+            ×{phase.repeats}
+          </span>
         )}
-        title={phase.name}
-      >
-        {phase.name}
-      </p>
+      </div>
 
       <SpeakerDots phase={phase} />
 
@@ -111,11 +127,19 @@ function PhaseCard({
           className="mt-1.5 truncate text-[11px] text-violet-600 dark:text-violet-400"
           title={phase.convergence.reason}
         >
-          {phase.convergence.agreementScore === null
-            ? t("groups.overview.convergenceNoScore", "Agreement not scored")
-            : t("groups.overview.convergenceScore", "Agreement {{pct}}%", {
-                pct: Math.round(phase.convergence.agreementScore * 100),
-              })}
+          {/* Once it has converged, the repeats it SKIPPED are the concrete
+              result — "stopped after 2 of 4" is what a DELPHI reader is
+              looking for, and the bare score does not carry it. */}
+          {phase.convergence.converged && phase.convergence.repeatsSkipped !== null
+            ? t("groups.overview.convergenceStopped", "Converged — {{count}} repeat skipped", {
+                count: phase.convergence.repeatsSkipped,
+                defaultValue_other: "Converged — {{count}} repeats skipped",
+              })
+            : phase.convergence.agreementScore === null
+              ? t("groups.overview.convergenceNoScore", "Agreement not scored")
+              : t("groups.overview.convergenceScore", "Agreement {{pct}}%", {
+                  pct: Math.round(phase.convergence.agreementScore * 100),
+                })}
         </p>
       )}
     </>

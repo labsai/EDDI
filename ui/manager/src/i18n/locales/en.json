@@ -2860,7 +2860,12 @@
       "viewMode": "Discussion view",
       "viewOverview": "Overview",
       "viewSplit": "Both",
-      "viewTranscript": "Transcript"
+      "viewTranscript": "Transcript",
+      "phaseRepeatsTitle": "This phase runs {{count}} times",
+      "roundScope": "Round {{n}} only",
+      "roundScopeTitle": "This view covers round {{n}} only. Earlier rounds are in the transcript.",
+      "convergenceStopped_one": "Converged — {{count}} repeat skipped",
+      "convergenceStopped_other": "Converged — {{count}} repeats skipped"
     }
   },
   "taskBoard": {

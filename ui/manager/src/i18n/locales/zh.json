@@ -2807,7 +2807,12 @@
       "viewMode": "讨论视图",
       "viewOverview": "概览",
       "viewSplit": "两者",
-      "viewTranscript": "逐字记录"
+      "viewTranscript": "逐字记录",
+      "phaseRepeatsTitle": "此阶段运行 {{count}} 次",
+      "roundScope": "仅第 {{n}} 轮",
+      "roundScopeTitle": "此视图仅涵盖第 {{n}} 轮。更早的轮次见逐字记录。",
+      "convergenceStopped_one": "已收敛 — 跳过 {{count}} 次重复",
+      "convergenceStopped_other": "已收敛 — 跳过 {{count}} 次重复"
     }
   },
   "taskBoard": {

@@ -2807,7 +2807,12 @@
       "viewMode": "議論ビュー",
       "viewOverview": "概要",
       "viewSplit": "両方",
-      "viewTranscript": "トランスクリプト"
+      "viewTranscript": "トランスクリプト",
+      "phaseRepeatsTitle": "このフェーズは {{count}} 回実行されます",
+      "roundScope": "ラウンド {{n}} のみ",
+      "roundScopeTitle": "このビューはラウンド {{n}} のみを対象とします。以前のラウンドはトランスクリプトにあります。",
+      "convergenceStopped_one": "収束 — {{count}} 回の繰り返しを省略",
+      "convergenceStopped_other": "収束 — {{count}} 回の繰り返しを省略"
     }
   },
   "taskBoard": {

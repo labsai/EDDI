@@ -155,8 +155,19 @@ function OverviewHeadline({ digest }: { digest: DiscussionDigest }) {
         )}
         {digest.style && <Badge variant="outline">{styleDisplay(digest.style, t).label}</Badge>}
         {digest.round > 1 && (
-          <span className="text-xs text-muted-foreground">
-            {t("groups.overview.round", "Round {{n}}", { n: digest.round })}
+          // Says outright that this is ONE round's view. The bands are scoped
+          // to the current round (phase indices restart each round, so mixing
+          // them would be wrong), and without this the reader cannot tell
+          // whether a low turn count means a quiet round or a lost one.
+          <span
+            className="text-xs text-muted-foreground"
+            title={t(
+              "groups.overview.roundScopeTitle",
+              "This view covers round {{n}} only. Earlier rounds are in the transcript.",
+              { n: digest.round },
+            )}
+          >
+            {t("groups.overview.roundScope", "Round {{n}} only", { n: digest.round })}
           </span>
         )}
         {elapsed !== null && <span className="text-xs text-muted-foreground">{formatDuration(elapsed)}</span>}

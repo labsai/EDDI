@@ -401,3 +401,36 @@ roster entry, and the synthesis band's three states.
 | 2026-09-22 | The I1 ceiling must be re-checked per member, not once per boundary | Each stance call adds to the ledger, so one decision up front let every member after the first spend past an exhausted budget. | EDDI |
 | 2026-09-22 | Overview mode unmounts the transcript, so anything rendered only inside it is GONE | The task board and the synthesised answer were both invisible in Overview until moved into the `extras`/`outcome` bands. Anything added to a transcript renderer in future needs the same question asked. | EDDI Manager |
 ```
+
+## 🐛 fix(manager): the overview was losing the mechanics of its two most-used styles (2026-09-22)
+
+**Repo:** EDDI (`feat/group-discussion-overview`)
+
+### Why
+
+Auditing the dashboard against every discussion style turned up information the digest
+*collected and then never rendered* — the same dead-surface class two reviewers had already
+flagged elsewhere, but here it cost the reader real signal rather than just carrying an unused
+field.
+
+- **A repeating phase looked identical to a single-pass one.** `ROUND_TABLE` puts
+  `repeats = rounds - 1` on its "Discussion" phase and `DELPHI` is built on repeats
+  end-to-end, so for the two most-used styles the rail was quietly flattening the mechanic
+  that defines them. `DigestPhase.repeats` was populated and read by nothing; it now renders
+  as a `×N` badge.
+- **Convergence showed the score but not the saving.** `convergence.repeatsSkipped` is the
+  concrete outcome a DELPHI reader is looking for — "it stopped after 2 of 4" — and only the
+  bare agreement percentage was shown. A converged phase now says how many repeats it skipped.
+- **A continuation's round scope was ambiguous.** The bands are correctly scoped to the
+  current round (phase indices restart each round, so mixing them would be wrong), but the
+  headline said only "Round 2". A reader could not tell whether a low turn count meant a quiet
+  round or a view that had lost the earlier ones. It now reads "Round 2 only", with the
+  transcript named as where the rest is.
+
+**Files:**
+[`phase-rail.tsx`](../../ui/manager/src/components/groups/overview/phase-rail.tsx),
+[`discussion-overview.tsx`](../../ui/manager/src/components/groups/overview/discussion-overview.tsx)
+
+```regression-note
+| 2026-09-22 | A repeating phase must render its repeat count | ROUND_TABLE and DELPHI are built on `repeats`; rendering the phase once made a four-pass deliberation indistinguishable from a single one, in the two styles most groups use. | EDDI Manager |
+```
