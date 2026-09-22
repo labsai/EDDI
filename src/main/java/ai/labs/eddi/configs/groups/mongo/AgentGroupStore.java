@@ -479,7 +479,14 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
                     && phase.inputTemplate() == null
                     && argumentsSoFar
                     && "MODERATOR".equalsIgnoreCase(phase.participants())) {
-                names.add(phase.name());
+                // Skipped rather than added: nothing validates a phase name as
+                // non-null, List.copyOf throws on a null element, and this method
+                // runs on every create and update -- so one unnamed phase would
+                // make the whole group unsaveable with an NPE. A phase with no
+                // name could not be named in the note anyway.
+                if (phase.name() != null) {
+                    names.add(phase.name());
+                }
             }
             if (phase.type() == PhaseType.ARGUE || phase.type() == PhaseType.REBUTTAL) {
                 argumentsSoFar = true;

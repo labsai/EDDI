@@ -329,6 +329,25 @@ class AgentGroupStoreTest {
         assertTrue(AgentGroupStore.debateVerdictSynthesisPhaseNames(c).isEmpty());
     }
 
+    /**
+     * Nothing validates a phase name as non-null, {@code List.copyOf} throws on a
+     * null element, and this helper runs on every create and update -- so one
+     * unnamed phase would have made the whole group unsaveable with an NPE raised
+     * from a advisory note.
+     */
+    @Test
+    void anUnnamedPhaseIsSkippedRatherThanCrashingTheSave() {
+        var phases = new java.util.ArrayList<DiscussionPhase>();
+        phases.add(typedPhase("Args", PhaseType.ARGUE, "ALL", null));
+        phases.add(typedPhase(null, PhaseType.SYNTHESIS, "MODERATOR", null));
+        phases.add(typedPhase("Wrap", PhaseType.SYNTHESIS, "MODERATOR", null));
+        var c = config(DiscussionStyle.CUSTOM, phases, "chair");
+        c.setMembers(List.of(new GroupMember("a", "A", 1, "PRO"), new GroupMember("b", "B", 2, "CON")));
+
+        assertEquals(List.of("Wrap"), AgentGroupStore.debateVerdictSynthesisPhaseNames(c),
+                "the unnamed phase is skipped; the named one is still reported");
+    }
+
     @Test
     void aRoundTableWithDebateRoles_isSilent() {
         // ROUND_TABLE expands to OPINION/CRITIQUE/REVISION phases, none of which

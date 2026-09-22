@@ -433,6 +433,30 @@ describe("debateVerdictSynthesisPhaseNames", () => {
     ).toEqual([]);
   });
 
+  /**
+   * The Java helper compares the UNTRIMMED moderatorAgentId with
+   * `moderator.equals(m.agentId())`. Trimming here first made the two mirrors
+   * disagree: with a moderator of " a " and a member "a", the Manager treated
+   * the member as the moderator and hid the note, while the backend treated the
+   * moderator as outside the roster and took the verdict path.
+   */
+  it("matches the moderator on the identifier the backend compares, untrimmed", () => {
+    const padded: Slice = {
+      ...debateBoard,
+      moderatorAgentId: " a ",
+      members: [member("a", "PRO", 1), member("b", "CON", 2)],
+    };
+
+    expect(debateVerdictSynthesisPhaseNames(padded)).toEqual(["Judgment"]);
+  });
+
+  it("still treats a whitespace-only moderator as none at all", () => {
+    // Blank means "no moderator named", which falls back to the first speaker.
+    expect(
+      debateVerdictSynthesisPhaseNames({ ...debateBoard, moderatorAgentId: "   " }),
+    ).toEqual([]);
+  });
+
   it("is silent for a ROUND_TABLE with debate roles — no arguments are produced", () => {
     expect(
       debateVerdictSynthesisPhaseNames({ ...debateBoard, style: "ROUND_TABLE", maxRounds: 2 }),

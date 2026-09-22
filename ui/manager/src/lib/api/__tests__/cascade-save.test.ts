@@ -568,3 +568,102 @@ describe("cascadeVersionUpdate", () => {
     ).rejects.toThrow("agent update failed");
   });
 });
+
+/**
+ * A cascade writes the version it just created into the PARENT document: the
+ * resource version into the workflow, the workflow version into the agent.
+ *
+ * The version came from `parseResourceUri`, which ends with
+ * `parseInt(url.searchParams.get("version") || "1", 10)` and so cannot tell
+ * "version 1" from "no version at all". A save whose response carried no
+ * `Location` header therefore resolved to **1** and the cascade wrote
+ * `?version=1` into the parent — silent data corruption, reported to the user
+ * as a successful save, leaving their agent pointing at the first revision.
+ *
+ * Failing loudly is the right answer: the save visibly did not work and can be
+ * retried, rather than being discovered later as an agent running old config.
+ */
+describe("a save that does not report its new version", () => {
+  /** What `api-client` produces when the response carries no Location header. */
+  const NO_LOCATION = {} as { location: string };
+
+  function workflowAndAgentSucceed() {
+    vi.mocked(getWorkflow).mockResolvedValue(
+      makeWorkflow("eddi://ai.labs.rules/rulestore/rulesets/res1?version=1"),
+    );
+    vi.mocked(updateWorkflow).mockResolvedValue({
+      location: "eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=2",
+    });
+    vi.mocked(getAgent).mockResolvedValue({
+      name: "agent",
+      workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=1"],
+    } as never);
+    vi.mocked(updateAgent).mockResolvedValue({
+      location: "eddi://ai.labs.agent/agentstore/agents/agent1?version=2",
+    });
+  }
+
+  it("fails the resource hop instead of writing ?version=1 into the workflow", async () => {
+    vi.mocked(updateResource).mockResolvedValue(NO_LOCATION);
+    workflowAndAgentSucceed();
+
+    await expect(cascadeSaveResource(RT, "res1", 1, {}, CONTEXT)).rejects.toThrow(/new version/i);
+
+    // The parent must be left alone entirely — a partial cascade is the bug.
+    expect(updateWorkflow).not.toHaveBeenCalled();
+    expect(updateAgent).not.toHaveBeenCalled();
+  });
+
+  it("fails the workflow hop instead of writing ?version=1 into the agent", async () => {
+    workflowAndAgentSucceed();
+    vi.mocked(updateResource).mockResolvedValue({
+      location: "eddi://ai.labs.rules/rulestore/rulesets/res1?version=2",
+    });
+    vi.mocked(updateWorkflow).mockResolvedValue(NO_LOCATION);
+
+    await expect(cascadeSaveResource(RT, "res1", 1, {}, CONTEXT)).rejects.toThrow(/new version/i);
+
+    expect(updateAgent).not.toHaveBeenCalled();
+  });
+
+  it("fails the agent hop rather than reporting version 1", async () => {
+    workflowAndAgentSucceed();
+    vi.mocked(updateResource).mockResolvedValue({
+      location: "eddi://ai.labs.rules/rulestore/rulesets/res1?version=2",
+    });
+    vi.mocked(updateAgent).mockResolvedValue(NO_LOCATION);
+
+    await expect(cascadeSaveResource(RT, "res1", 1, {}, CONTEXT)).rejects.toThrow(/new version/i);
+  });
+
+  it("fails cascadeVersionUpdate the same way", async () => {
+    workflowAndAgentSucceed();
+    vi.mocked(updateWorkflow).mockResolvedValue(NO_LOCATION);
+
+    await expect(cascadeVersionUpdate(RT, "res1", 1, 2, CONTEXT)).rejects.toThrow(/new version/i);
+
+    expect(updateAgent).not.toHaveBeenCalled();
+  });
+
+  it("a Location with no version parameter is treated as no version", async () => {
+    // Not the same as version=1: this is a Location we cannot read.
+    vi.mocked(updateResource).mockResolvedValue({
+      location: "eddi://ai.labs.rules/rulestore/rulesets/res1",
+    });
+    workflowAndAgentSucceed();
+
+    await expect(cascadeSaveResource(RT, "res1", 1, {}, CONTEXT)).rejects.toThrow(/new version/i);
+  });
+
+  it("still reads an explicit version=1 as version 1", async () => {
+    // The whole point is telling "1" apart from "absent" — 1 is a real version.
+    vi.mocked(updateResource).mockResolvedValue({
+      location: "eddi://ai.labs.rules/rulestore/rulesets/res1?version=1",
+    });
+    workflowAndAgentSucceed();
+
+    const result = await cascadeSaveResource(RT, "res1", 1, {}, CONTEXT);
+
+    expect(result.newResourceVersion).toBe(1);
+  });
+});

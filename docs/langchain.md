@@ -1567,7 +1567,7 @@ not a provider requirement.
 
 ### Anthropic First Message Error
 
-- **Problem**: Anthropic API rejects conversations starting with agent message
+- **Historical problem**: the Anthropic API rejected conversations starting with an agent message
 - **Solution**: Historical. The Messages API no longer documents a "first message must be
   the user's" rule, and an assistant-first history is accepted — so `includeFirstAgentMessage`
   is not the fix for a modern Anthropic failure. Leave it unset.

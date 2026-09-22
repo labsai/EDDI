@@ -94,7 +94,12 @@ export function debateVerdictSynthesisPhaseNames(
   // let a partisan score its own debate and falls back to prose. With no
   // moderator named, the engine substitutes the first member by speaking order,
   // which is usually a debater.
-  const moderatorId = config.moderatorAgentId?.trim();
+  // Trim only to decide whether an id was given; compare the ORIGINAL, because
+  // the Java helper does `moderator.equals(m.agentId())` on the untrimmed value.
+  // With a moderator of " a " and a member "a" the two disagreed: the Manager
+  // treated the member as the moderator and hid the note, while the backend
+  // treated the moderator as outside the roster and reported the verdict phase.
+  const moderatorId = config.moderatorAgentId?.trim() ? config.moderatorAgentId : undefined;
   const speaker = moderatorId
     ? members.find((m) => m && m.agentId === moderatorId)
     : [...members]
