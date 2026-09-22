@@ -2971,7 +2971,9 @@
     "syncError": "Échec de la synchronisation",
     "empty": "Connectez-vous à une instance source pour commencer la synchronisation des agents.",
     "autoMatched": "Correspondance automatique",
-    "previewFirst": "Aperçu des modifications avant synchronisation"
+    "previewFirst": "Aperçu des modifications avant synchronisation",
+    "syncPartial": "Synchronisation incomplète — certaines ressources n'ont pas été écrites",
+    "syncIdentical": "Déjà à jour — rien à écrire"
   },
   "sync": {
     "actionCreate": "Nouveau",

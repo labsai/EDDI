@@ -171,6 +171,51 @@ async function readJsonArray<T>(response: Response): Promise<T[]> {
 }
 
 /**
+ * An error carrying what the server actually said.
+ *
+ * `res.statusText` alone is the reason a rejected sync source URL reached the
+ * operator as "Failed to list remote agents: Bad Request". The backend's message
+ * for that names the exact setting to change; throwing the status text threw the
+ * only actionable part of the answer away.
+ */
+async function failureOf(response: Response, what: string): Promise<Error> {
+  const detail = await readErrorDetail(response);
+  return new Error(detail ? `${what}: ${detail}` : `${what}: ${response.statusText}`);
+}
+
+/**
+ * The server's explanation, from whichever shape it came in.
+ *
+ * Quarkus answers a mapped exception as JSON ({@code {"error": ...}}), an
+ * unmapped one as its own text page, and a reverse proxy may answer with HTML.
+ * Only a short, plain message is used — an HTML error page is not shown to the
+ * operator as if it were one.
+ */
+async function readErrorDetail(response: Response): Promise<string | null> {
+  let text: string;
+  try {
+    text = await response.text();
+  } catch {
+    return null;
+  }
+  if (!text) return null;
+
+  try {
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    for (const key of ["error", "message", "detail", "errorMessage"]) {
+      const value = parsed?.[key];
+      if (typeof value === "string" && value.trim()) return value.trim();
+    }
+  } catch {
+    // Not JSON — fall through to the plain-text check below.
+  }
+
+  const trimmed = text.trim();
+  if (!trimmed || trimmed.startsWith("<") || trimmed.length > 500) return null;
+  return trimmed;
+}
+
+/**
  * Parse an EDDI resource URI into its id and version.
  *
  * Accepted formats:
@@ -288,7 +333,7 @@ export async function importAgent(file: File): Promise<string> {
   });
 
   if (!res.ok) {
-    throw new Error(`Import failed: ${res.statusText}`);
+    throw await failureOf(res, "Import failed");
   }
 
   const location = res.headers.get("Location");
@@ -307,7 +352,7 @@ export async function previewImport(file: File): Promise<ImportPreview> {
   });
 
   if (!res.ok) {
-    throw new Error(`Preview failed: ${res.statusText}`);
+    throw await failureOf(res, "Preview failed");
   }
 
   return res.json();
@@ -346,7 +391,7 @@ export async function importAgentMerge(
   });
 
   if (!res.ok) {
-    throw new Error(`Merge import failed: ${res.statusText}`);
+    throw await failureOf(res, "Merge import failed");
   }
 
   const raw = res.headers.get("X-Schedules-Skipped");
@@ -440,7 +485,7 @@ export async function previewUpgrade(
     headers: { "Content-Type": "application/zip", ...api.getAuthHeader() },
     body: file,
   });
-  if (!res.ok) throw new Error(`Upgrade preview failed: ${res.statusText}`);
+  if (!res.ok) throw await failureOf(res, "Upgrade preview failed");
   return res.json();
 }
 
@@ -467,7 +512,7 @@ export async function importAgentUpgrade(
     headers: { "Content-Type": "application/zip", ...api.getAuthHeader() },
     body: file,
   });
-  if (!res.ok) throw new Error(`Upgrade import failed: ${res.statusText}`);
+  if (!res.ok) throw await failureOf(res, "Upgrade import failed");
   const result = await readJson<UpgradeResult>(res);
   return {
     outcome: outcomeOf(res.status, result),
@@ -490,7 +535,7 @@ export async function listRemoteAgents(
   const res = await fetch(`${api.getBaseUrl()}/backup/import/sync/agents?${params}`, {
     headers: mergedHeaders(sourceAuth),
   });
-  if (!res.ok) throw new Error(`Failed to list remote agents: ${res.statusText}`);
+  if (!res.ok) throw await failureOf(res, "Failed to list remote agents");
   return res.json();
 }
 
@@ -513,7 +558,7 @@ export async function previewSync(
     method: "POST",
     headers: mergedHeaders(sourceAuth),
   });
-  if (!res.ok) throw new Error(`Sync preview failed: ${res.statusText}`);
+  if (!res.ok) throw await failureOf(res, "Sync preview failed");
   return res.json();
 }
 
@@ -535,7 +580,7 @@ export async function previewSyncBatch(
     },
     body: JSON.stringify(mappings),
   });
-  if (!res.ok) throw new Error(`Batch preview failed: ${res.statusText}`);
+  if (!res.ok) throw await failureOf(res, "Batch preview failed");
   return res.json();
 }
 
@@ -562,7 +607,7 @@ export async function executeSync(
     method: "POST",
     headers: mergedHeaders(sourceAuth),
   });
-  if (!res.ok) throw new Error(`Sync execute failed: ${res.statusText}`);
+  if (!res.ok) throw await failureOf(res, "Sync execute failed");
   const result = await readJson<UpgradeResult>(res);
   return {
     outcome: outcomeOf(res.status, result),
@@ -597,7 +642,7 @@ export async function executeSyncBatch(
     const results = await readJsonArray<BatchSyncResult>(res);
     if (results.length > 0) return { partial: true, results };
   }
-  if (!res.ok) throw new Error(`Batch sync failed: ${res.statusText}`);
+  if (!res.ok) throw await failureOf(res, "Batch sync failed");
 
   const results = await readJsonArray<BatchSyncResult>(res);
   return {

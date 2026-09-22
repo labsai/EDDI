@@ -143,7 +143,7 @@ class StructuralMatcherTest {
             var descriptor = new DocumentDescriptor();
             descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/target1?version=1"));
             descriptor.setName("Target Agent");
-            when(documentDescriptorStore.readDescriptor("target1", null)).thenReturn(descriptor);
+            when(documentDescriptorStore.readCurrentDescriptor("target1")).thenReturn(descriptor);
             when(agentStore.readAgent("target1", 1)).thenReturn(targetAgentConfig);
 
             // Same serialization for both
@@ -170,7 +170,7 @@ class StructuralMatcherTest {
             var descriptor = new DocumentDescriptor();
             descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/target1?version=1"));
             descriptor.setName("Target Agent");
-            when(documentDescriptorStore.readDescriptor("target1", null)).thenReturn(descriptor);
+            when(documentDescriptorStore.readCurrentDescriptor("target1")).thenReturn(descriptor);
             when(agentStore.readAgent("target1", 1)).thenReturn(targetAgentConfig);
 
             // Different serialization

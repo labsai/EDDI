@@ -307,6 +307,121 @@ describe("SyncPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Sync complete")).toBeInTheDocument();
     });
+    expect(screen.getByTestId("sync-outcome")).toHaveAttribute("data-outcome", "ok");
+  });
+
+  it("reports a partially applied sync instead of reporting success", async () => {
+    // 207 Multi-Status: some resources were not written. The page used to render
+    // a green "Sync complete" for this — and for a 500 in which nothing was
+    // written at all — because it only checked that the mutation resolved.
+    server.use(
+      http.post("*/backup/import/sync/batch", () =>
+        HttpResponse.json(
+          [
+            {
+              sourceAgentId: "agent1",
+              targetAgentId: "agent1-local",
+              result: {
+                agentUri: "eddi://ai.labs.agent/agentstore/agents/agent1-local",
+                agentUpdated: false,
+                updated: 0,
+                created: 0,
+                skipped: 3,
+                failures: [
+                  {
+                    sourceId: "llm1",
+                    resourceType: "langchain",
+                    name: "GPT-4 Task",
+                    reason: "the store did not accept the update",
+                  },
+                ],
+              },
+              error: null,
+            },
+          ],
+          { status: 207 }
+        )
+      )
+    );
+
+    renderPage();
+    const user = await connectAndWaitForMapping();
+    await user.click(screen.getByTestId("sync-preview-all"));
+    await waitFor(() => {
+      expect(screen.getByTestId("sync-execute-btn")).not.toBeDisabled();
+    });
+    await user.click(screen.getByTestId("sync-execute-btn"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("sync-outcome")).toHaveAttribute("data-outcome", "partial");
+    });
+    expect(screen.queryByText("Sync complete")).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/the store did not accept the update/)
+    ).toBeInTheDocument();
+  });
+
+  it("reports a batch in which every agent failed", async () => {
+    // EDDI answers 500 when no mapping succeeded, and the body still carries the
+    // reasons — which is why the client resolves rather than throwing here.
+    server.use(
+      http.post("*/backup/import/sync/batch", () =>
+        HttpResponse.json(
+          [
+            {
+              sourceAgentId: "agent1",
+              targetAgentId: null,
+              result: null,
+              error: "the source instance could not supply agent agent1",
+            },
+          ],
+          { status: 500 }
+        )
+      )
+    );
+
+    renderPage();
+    const user = await connectAndWaitForMapping();
+    await user.click(screen.getByTestId("sync-preview-all"));
+    await waitFor(() => {
+      expect(screen.getByTestId("sync-execute-btn")).not.toBeDisabled();
+    });
+    await user.click(screen.getByTestId("sync-execute-btn"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("sync-outcome")).toHaveAttribute("data-outcome", "partial");
+    });
+    expect(
+      screen.getByText(/the source instance could not supply agent/)
+    ).toBeInTheDocument();
+  });
+
+  it("surfaces the server's own reason when connecting is refused", async () => {
+    // The backend explains exactly which setting to change; the page used to
+    // show "Failed to list remote agents: Bad Request" and nothing else.
+    server.use(
+      http.get("*/backup/import/sync/agents", () =>
+        HttpResponse.json(
+          {
+            error:
+              "Source URL must not point to a private IP address: http://10.0.0.5:7070."
+              + " Set eddi.backup.sync.allow-private-targets=true",
+          },
+          { status: 400 }
+        )
+      )
+    );
+
+    renderPage();
+    const user = userEvent.setup();
+    await user.type(screen.getByTestId("sync-url-input"), "http://10.0.0.5:7070");
+    await user.click(screen.getByTestId("sync-connect-btn"));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/eddi\.backup\.sync\.allow-private-targets=true/)
+      ).toBeInTheDocument();
+    });
   });
 
   // ─── Auto-match badge ──────────────────────────────────────────────────

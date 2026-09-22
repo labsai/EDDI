@@ -20,8 +20,14 @@ import {
   useExecuteSyncBatch,
 } from "@/hooks/use-backup";
 import { useInfiniteAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
-import type { DocumentDescriptor, ImportPreview, SyncMapping, SyncRequest } from "@/lib/api/backup";
-import { parseResourceUri } from "@/lib/api/backup";
+import type {
+  BatchSyncExecution,
+  DocumentDescriptor,
+  ImportPreview,
+  SyncMapping,
+  SyncRequest,
+} from "@/lib/api/backup";
+import { hasFailures, parseResourceUri } from "@/lib/api/backup";
 
 interface AgentMapping {
   remoteAgent: DocumentDescriptor;
@@ -294,20 +300,22 @@ export function SyncPage() {
               {checkedCount} {t("syncPage.agentsSelected", "agents selected")} ·{" "}
               {totalResources} {t("syncPage.totalResources", "resources")}
             </span>
-            {executeBatchMutation.isSuccess && (
-              <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
-                <CheckCircle className="h-3.5 w-3.5" />
-                {t("syncPage.syncSuccess", "Sync complete")}
-              </span>
-            )}
             {executeBatchMutation.isError && (
-              <span className="inline-flex items-center gap-1 text-destructive">
+              <span
+                className="inline-flex items-center gap-1 text-destructive"
+                data-testid="sync-outcome-error"
+              >
                 <AlertCircle className="h-3.5 w-3.5" />
                 {(executeBatchMutation.error as Error)?.message ||
                   t("syncPage.syncError", "Sync failed")}
               </span>
             )}
           </div>
+
+          {/* What the sync actually did — never inferred from "the request resolved" */}
+          {executeBatchMutation.data && (
+            <SyncOutcome execution={executeBatchMutation.data} />
+          )}
         </section>
       )}
 
@@ -319,6 +327,69 @@ export function SyncPage() {
             {t("syncPage.empty", "Connect to a source instance to begin syncing agents.")}
           </p>
         </section>
+      )}
+    </div>
+  );
+}
+
+/**
+ * What the sync wrote, per agent.
+ *
+ * The page used to render a green "Sync complete" whenever the mutation
+ * resolved. `executeSyncBatch` deliberately resolves on HTTP 500 as well —
+ * that status means *every* mapping failed and the body carries the reasons,
+ * which are worth showing — so a sync that wrote nothing at all reported
+ * success. The outcome is read from the results themselves.
+ */
+function SyncOutcome({ execution }: { execution: BatchSyncExecution }) {
+  const { t } = useTranslation();
+  const { partial, results } = execution;
+
+  const wrote = results.reduce(
+    (sum, r) => sum + (r.result?.updated ?? 0) + (r.result?.created ?? 0),
+    0
+  );
+  const failedAgents = results.filter((r) => r.error || hasFailures(r.result));
+
+  return (
+    <div
+      className="border-t border-border px-5 py-3 space-y-2"
+      data-testid="sync-outcome"
+      data-outcome={partial ? "partial" : "ok"}
+    >
+      <div className="flex items-center gap-1.5 text-xs font-medium">
+        {partial ? (
+          <>
+            <AlertCircle className="h-3.5 w-3.5 text-destructive" />
+            <span className="text-destructive">
+              {t("syncPage.syncPartial", "Sync incomplete — some resources were not written")}
+            </span>
+          </>
+        ) : (
+          <>
+            <CheckCircle className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+            <span className="text-emerald-600 dark:text-emerald-400">
+              {wrote > 0
+                ? t("syncPage.syncSuccess", "Sync complete")
+                : t("syncPage.syncIdentical", "Already up to date — nothing to write")}
+            </span>
+          </>
+        )}
+      </div>
+
+      {failedAgents.length > 0 && (
+        <ul className="space-y-1 text-xs text-muted-foreground">
+          {failedAgents.map((r) => (
+            <li key={r.sourceAgentId} data-testid={`sync-failure-${r.sourceAgentId}`}>
+              <span className="font-medium text-foreground">{r.sourceAgentId}</span>
+              {": "}
+              {r.error ||
+                r.result?.failures
+                  .map((f) => `${f.name || f.resourceType} — ${f.reason}`)
+                  .join("; ")}
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );

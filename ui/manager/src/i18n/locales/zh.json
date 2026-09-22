@@ -2941,7 +2941,9 @@
     "syncError": "同步失败",
     "empty": "连接到源实例以开始智能体同步。",
     "autoMatched": "自动匹配",
-    "previewFirst": "同步前预览变更"
+    "previewFirst": "同步前预览变更",
+    "syncPartial": "同步未完成 — 部分资源未写入",
+    "syncIdentical": "已是最新 — 无需写入"
   },
   "sync": {
     "actionCreate": "新建",

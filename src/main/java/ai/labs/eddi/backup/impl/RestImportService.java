@@ -5,6 +5,7 @@
 package ai.labs.eddi.backup.impl;
 
 import ai.labs.eddi.backup.IRestImportService;
+import ai.labs.eddi.backup.impl.SourceUrlValidator.SyncSourcePolicy;
 import ai.labs.eddi.backup.IZipArchive;
 import ai.labs.eddi.backup.model.ImportPreview;
 import ai.labs.eddi.backup.model.ImportPreview.DiffAction;
@@ -76,6 +77,7 @@ import jakarta.inject.Inject;
 import io.quarkus.runtime.LaunchMode;
 import io.quarkus.security.ForbiddenException;
 import jakarta.ws.rs.BadRequestException;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.MediaType;
@@ -84,6 +86,8 @@ import org.bson.Document;
 import org.jboss.logging.Logger;
 
 import java.io.*;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -141,6 +145,13 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     private final ResourceAccessGuard resourceAccessGuard;
     private final SpaceContext spaceContext;
 
+    /**
+     * What this deployment accepts as a live-sync source — see
+     * {@link SourceUrlValidator.SyncSourcePolicy}. Resolved once at construction
+     * because it is deployment configuration, never per-request input.
+     */
+    private final SyncSourcePolicy syncSourcePolicy;
+
     private static final Logger LOGGER = Logger.getLogger(RestImportService.class);
 
     @Inject
@@ -149,7 +160,12 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             IDocumentDescriptorStore documentDescriptorStore, TemplateSyntaxMigrator templateSyntaxMigrator,
             StructuralMatcher structuralMatcher, UpgradeExecutor upgradeExecutor, IScheduleStore scheduleStore,
             BackupMetrics metrics, ResourceAccessGuard resourceAccessGuard, SpaceContext spaceContext,
-            RagSourceIngestionService ragSourceIngestionService) {
+            RagSourceIngestionService ragSourceIngestionService,
+            @ConfigProperty(name = SourceUrlValidator.REQUIRE_HTTPS_PROPERTY, defaultValue = "true") boolean requireHttpsSource,
+            @ConfigProperty(name = SourceUrlValidator.ALLOW_PRIVATE_PROPERTY, defaultValue = "false") boolean allowPrivateSources,
+            @ConfigProperty(name = SourceUrlValidator.ALLOWED_SOURCES_PROPERTY, defaultValue = "") String allowedSources) {
+        this.syncSourcePolicy = new SyncSourcePolicy(requireHttpsSource, allowPrivateSources,
+                SourceUrlValidator.parseAllowedSources(allowedSources));
         this.ragSourceIngestionService = ragSourceIngestionService;
         this.metrics = metrics;
         this.resourceAccessGuard = resourceAccessGuard;
@@ -2610,8 +2626,26 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return mode == LaunchMode.DEVELOPMENT || mode == LaunchMode.TEST;
     }
 
+    /**
+     * Applies this deployment's {@link SyncSourcePolicy} to a caller-supplied
+     * source URL.
+     * <p>
+     * Dev and test mode still accept {@code http://} whatever the policy says, so
+     * that a developer running {@code quarkus:dev} does not have to configure
+     * anything. Every other relaxation is the operator's explicit decision.
+     */
     private void validateSourceUrl(String sourceUrl) {
-        SourceUrlValidator.validate(sourceUrl, isDevMode());
+        SyncSourcePolicy effective = isDevMode()
+                ? new SyncSourcePolicy(false, syncSourcePolicy.allowPrivateTargets(), syncSourcePolicy.allowedSources())
+                : syncSourcePolicy;
+        try {
+            SourceUrlValidator.validate(sourceUrl, effective);
+        } catch (IllegalArgumentException e) {
+            // A refused source URL is the caller's input, not a server fault. It used
+            // to reach the client as a 500 with no body, which the Manager rendered as
+            // "Internal Server Error" and left the operator with nothing to act on.
+            throw new BadRequestException(e.getMessage(), e);
+        }
     }
 
     @Override
@@ -2674,9 +2708,14 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                                 String targetAgentId, String selectedResources, String workflowOrder,
                                 String sourceAuth) {
         validateSourceUrl(sourceUrl);
+        Set<String> selectedSet = parseSelectedResources(selectedResources);
+
+        if (isNullOrEmpty(targetAgentId) || targetAgentId.isBlank()) {
+            return upgradeResponse(syncNewAgent(sourceUrl, sourceAgentId, sourceVersion, sourceAuth, selectedSet));
+        }
+
         try (var source = new RemoteApiResourceSource(
                 sourceUrl, sourceAgentId, sourceVersion, sourceAuth, jsonSerialization)) {
-            Set<String> selectedSet = parseSelectedResources(selectedResources);
             List<String> wfOrder = parseWorkflowOrder(workflowOrder);
 
             return upgradeResponse(upgradeExecutor.executeUpgrade(source, targetAgentId, selectedSet, wfOrder));
@@ -2686,6 +2725,122 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             LOGGER.errorf(e, "Sync execution failed for agent %s from %s",
                     LogSanitizer.sanitize(sourceAgentId), LogSanitizer.sanitize(sourceUrl));
             throw new InternalServerErrorException("Sync failed: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * First promotion of an agent this instance does not have yet: fetch the
+     * source's own export archive and import it with {@code strategy=create}.
+     * <p>
+     * Without this, a sync with no {@code targetAgentId} — which the API documents
+     * as "create new", and which is what the Manager sends whenever it cannot match
+     * a local agent by name — went straight into {@link UpgradeExecutor}, whose
+     * every path assumes a target to upgrade. It read the agent {@code null},
+     * answered 500, and left behind the workflow it had already created: one orphan
+     * per attempt, each pointing at resource ids that only exist on the other
+     * instance.
+     * <p>
+     * Routing it through the archive importer rather than writing a second create
+     * path is deliberate — see {@link RemoteApiResourceSource#exportAgentArchive}.
+     *
+     * @return what landed, in the same shape a sync onto an existing agent answers
+     */
+    private UpgradeResult syncNewAgent(String sourceUrl, String sourceAgentId, Integer sourceVersion,
+                                       String sourceAuth, Set<String> selectedSet) {
+        metrics.upgradeAttempted();
+        byte[] archive;
+        try {
+            archive = RemoteApiResourceSource.exportAgentArchive(sourceUrl, sourceAgentId, sourceVersion, sourceAuth);
+        } catch (Exception e) {
+            metrics.upgradeFailed();
+            LOGGER.errorf(e, "Could not fetch agent %s from %s for a first-time sync",
+                    LogSanitizer.sanitize(sourceAgentId), LogSanitizer.sanitize(sourceUrl));
+            throw new InternalServerErrorException("Sync failed: the source instance could not supply agent "
+                    + sourceAgentId + ": " + e.getMessage(), e);
+        }
+
+        File targetDir = new File(FileUtilities.buildPath(tmpPath.toString(), UUID.randomUUID().toString()));
+        try {
+            Response imported = importAgentZipFile(new ByteArrayInputStream(archive), targetDir, false, selectedSet);
+            URI createdAgentUri = locationOf(imported);
+            LOGGER.infof("Sync created agent %s from %s", LogSanitizer.sanitize(String.valueOf(createdAgentUri)),
+                    LogSanitizer.sanitize(sourceUrl));
+            // A create writes every document in the archive, so there is nothing to
+            // report as updated or skipped — and no per-resource failures either: the
+            // importer rolls the whole archive back rather than leaving part of it.
+            UpgradeResult result = new UpgradeResult(createdAgentUri, true, 0, countImportedDocuments(archive), 0, List.of());
+            metrics.upgradeCompleted(result.updated(), result.created(), result.skipped(), 0);
+            return result;
+        } catch (WebApplicationException e) {
+            metrics.upgradeFailed();
+            throw e;
+        } catch (Exception e) {
+            metrics.upgradeFailed();
+            LOGGER.errorf(e, "First-time sync of agent %s from %s failed",
+                    LogSanitizer.sanitize(sourceAgentId), LogSanitizer.sanitize(sourceUrl));
+            throw new InternalServerErrorException("Sync failed: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * The {@code Location} of an import answer, as a URI.
+     *
+     * @throws InternalServerErrorException
+     *             when the import reported success but named no agent — answering
+     *             201 with a null {@code agentUri} would tell the caller an agent
+     *             exists that they cannot then address.
+     */
+    private URI locationOf(Response response) {
+        String location = response == null ? null : response.getHeaderString("Location");
+        if (location == null || location.isBlank()) {
+            throw new InternalServerErrorException("The agent was imported but the import named no agent URI.");
+        }
+        return URI.create(location);
+    }
+
+    /**
+     * How many configuration documents an archive carries — what a create sync
+     * reports as {@code created}.
+     * <p>
+     * Descriptors are not counted: they are bookkeeping for the documents beside
+     * them, and counting both would report twice the number of resources the
+     * operator previewed.
+     */
+    private int countImportedDocuments(byte[] archive) {
+        int count = 0;
+        try (var zip = new ZipInputStream(new ByteArrayInputStream(archive))) {
+            for (ZipEntry entry = zip.getNextEntry(); entry != null; entry = zip.getNextEntry()) {
+                String name = entry.getName();
+                if (!entry.isDirectory() && name.endsWith(".json") && !name.endsWith(DESCRIPTOR_FILE_ENDING)) {
+                    count++;
+                }
+            }
+        } catch (IOException e) {
+            LOGGER.debugf("Could not count the documents in the imported archive: %s", LogSanitizer.sanitize(e.getMessage()));
+        }
+        return count;
+    }
+
+    /**
+     * One mapping of a batch: an upgrade of the named target, or a first promotion
+     * when the mapping names none.
+     * <p>
+     * The batch has to make the same choice the single-agent endpoint makes.
+     * Sending every mapping into {@link UpgradeExecutor} meant a batch containing
+     * one new agent — the Manager's "Create new", which it selects by default for
+     * anything it cannot match by name — failed that row, and a batch of nothing
+     * but new agents failed wholesale with 500.
+     */
+    private UpgradeResult syncOneAgent(String sourceUrl, SyncRequest request, String sourceAuth) throws Exception {
+        if (isNullOrEmpty(request.targetAgentId()) || request.targetAgentId().isBlank()) {
+            return syncNewAgent(sourceUrl, request.sourceAgentId(), request.sourceAgentVersion(), sourceAuth,
+                    request.selectedResources());
+        }
+        try (var source = new RemoteApiResourceSource(
+                sourceUrl, request.sourceAgentId(), request.sourceAgentVersion(),
+                sourceAuth, jsonSerialization)) {
+            return upgradeExecutor.executeUpgrade(source, request.targetAgentId(),
+                    request.selectedResources(), request.workflowOrder());
         }
     }
 
@@ -2707,12 +2862,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 throw new InternalServerErrorException("Batch sync was interrupted after "
                         + results.size() + " of " + requests.size() + " agent(s).");
             }
-            try (var source = new RemoteApiResourceSource(
-                    sourceUrl, request.sourceAgentId(), request.sourceAgentVersion(),
-                    sourceAuth, jsonSerialization)) {
-                UpgradeResult result = upgradeExecutor.executeUpgrade(
-                        source, request.targetAgentId(),
-                        request.selectedResources(), request.workflowOrder());
+            try {
+                UpgradeResult result = syncOneAgent(sourceUrl, request, sourceAuth);
                 if (result.hasFailures()) {
                     failed++;
                 }

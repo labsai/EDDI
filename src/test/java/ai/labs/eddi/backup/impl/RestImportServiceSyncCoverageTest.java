@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import jakarta.ws.rs.BadRequestException;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.spaces.SpaceContext;
@@ -73,7 +74,8 @@ class RestImportServiceSyncCoverageTest {
                 zipArchive, jsonSerialization,
                 migrationManager, documentDescriptorStore,
                 templateSyntaxMigrator, structuralMatcher, upgradeExecutor, mock(IScheduleStore.class), mock(BackupMetrics.class),
-                mock(ResourceAccessGuard.class), mock(SpaceContext.class), mock(RagSourceIngestionService.class));
+                mock(ResourceAccessGuard.class), mock(SpaceContext.class), mock(RagSourceIngestionService.class),
+                true, false, "");
     }
 
     // =========================================================
@@ -87,35 +89,35 @@ class RestImportServiceSyncCoverageTest {
         @Test
         @DisplayName("rejects null source URL")
         void rejectsNullSourceUrl() {
-            assertThrows(IllegalArgumentException.class,
+            assertThrows(BadRequestException.class,
                     () -> importService.listRemoteAgents(null, null));
         }
 
         @Test
         @DisplayName("rejects empty source URL")
         void rejectsEmptySourceUrl() {
-            assertThrows(IllegalArgumentException.class,
+            assertThrows(BadRequestException.class,
                     () -> importService.listRemoteAgents("", null));
         }
 
         @Test
         @DisplayName("rejects non-HTTP scheme (ftp)")
         void rejectsNonHttpScheme() {
-            assertThrows(IllegalArgumentException.class,
+            assertThrows(BadRequestException.class,
                     () -> importService.listRemoteAgents("ftp://remote.server.com", null));
         }
 
         @Test
         @DisplayName("rejects loopback address")
         void rejectsLoopback() {
-            assertThrows(IllegalArgumentException.class,
+            assertThrows(BadRequestException.class,
                     () -> importService.listRemoteAgents("http://localhost:8080", null));
         }
 
         @Test
         @DisplayName("rejects 127.x.x.x loopback")
         void rejects127Loopback() {
-            assertThrows(IllegalArgumentException.class,
+            assertThrows(BadRequestException.class,
                     () -> importService.listRemoteAgents("http://127.0.0.1:1", null));
         }
 
@@ -171,7 +173,7 @@ class RestImportServiceSyncCoverageTest {
         @Test
         @DisplayName("rejects invalid source URL — non-HTTP scheme")
         void rejectsInvalidSourceUrl() {
-            assertThrows(IllegalArgumentException.class,
+            assertThrows(BadRequestException.class,
                     () -> importService.previewSync("ftp://bad.server.com",
                             "aabbccddeeff112233445566",
                             1, "aabbccddeeff112233445567", null));
@@ -180,7 +182,7 @@ class RestImportServiceSyncCoverageTest {
         @Test
         @DisplayName("rejects null source URL")
         void rejectsNullSourceUrl() {
-            assertThrows(IllegalArgumentException.class,
+            assertThrows(BadRequestException.class,
                     () -> importService.previewSync(null,
                             "aabbccddeeff112233445566", 1,
                             "aabbccddeeff112233445567", null));
@@ -189,7 +191,7 @@ class RestImportServiceSyncCoverageTest {
         @Test
         @DisplayName("rejects localhost")
         void rejectsLocalhost() {
-            assertThrows(IllegalArgumentException.class,
+            assertThrows(BadRequestException.class,
                     () -> importService.previewSync("https://localhost:8443",
                             "aabbccddeeff112233445566", 1,
                             "aabbccddeeff112233445567", null));
@@ -257,7 +259,7 @@ class RestImportServiceSyncCoverageTest {
         @Test
         @DisplayName("rejects non-HTTP scheme")
         void rejectsInvalidSourceUrl() {
-            assertThrows(IllegalArgumentException.class,
+            assertThrows(BadRequestException.class,
                     () -> importService.executeSync("ftp://bad.server.com",
                             "aabbccddeeff112233445566", 1,
                             "aabbccddeeff112233445567", null, null, null));
@@ -266,7 +268,7 @@ class RestImportServiceSyncCoverageTest {
         @Test
         @DisplayName("rejects blank source URL")
         void rejectsBlankSourceUrl() {
-            assertThrows(IllegalArgumentException.class,
+            assertThrows(BadRequestException.class,
                     () -> importService.executeSync("   ",
                             "aabbccddeeff112233445566", 1,
                             "aabbccddeeff112233445567", null, null, null));
@@ -275,7 +277,7 @@ class RestImportServiceSyncCoverageTest {
         @Test
         @DisplayName("rejects IPv6 loopback")
         void rejectsIpv6Loopback() {
-            assertThrows(IllegalArgumentException.class,
+            assertThrows(BadRequestException.class,
                     () -> importService.executeSync("https://[::1]:8443",
                             "aabbccddeeff112233445566", 1,
                             "aabbccddeeff112233445567", null, null, null));
@@ -364,7 +366,7 @@ class RestImportServiceSyncCoverageTest {
             var requests = List.of(new SyncRequest(
                     "aabbccddeeff112233445566", 1,
                     "aabbccddeeff112233445567", Set.of(), List.of()));
-            assertThrows(IllegalArgumentException.class,
+            assertThrows(BadRequestException.class,
                     () -> importService.executeSyncBatch("ftp://bad.server.com", requests, null));
         }
 
@@ -374,7 +376,7 @@ class RestImportServiceSyncCoverageTest {
             var requests = List.of(new SyncRequest(
                     "aabbccddeeff112233445566", 1,
                     "aabbccddeeff112233445567", Set.of(), List.of()));
-            assertThrows(IllegalArgumentException.class,
+            assertThrows(BadRequestException.class,
                     () -> importService.executeSyncBatch("http://127.0.0.1:1", requests, null));
         }
 
@@ -481,7 +483,7 @@ class RestImportServiceSyncCoverageTest {
             // previewSyncBatch first validates the URL, then checks for null/empty mappings
             // We need a URL that passes validation for this test
             // Using ftp:// to trigger validation before null check
-            assertThrows(IllegalArgumentException.class,
+            assertThrows(BadRequestException.class,
                     () -> importService.previewSyncBatch("ftp://bad.server.com", null, null));
         }
 
@@ -490,7 +492,7 @@ class RestImportServiceSyncCoverageTest {
         void emptyMappingsReturnsEmptyAfterValidation() {
             // Since SourceUrlValidator blocks all test-friendly URLs, verify
             // that the URL validation is called for this endpoint too
-            assertThrows(IllegalArgumentException.class,
+            assertThrows(BadRequestException.class,
                     () -> importService.previewSyncBatch("ftp://bad.server.com", List.of(), null));
         }
     }

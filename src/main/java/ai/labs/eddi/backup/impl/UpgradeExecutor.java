@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import ai.labs.eddi.engine.security.spaces.DescriptorAccess;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.backup.IResourceSource;
 import ai.labs.eddi.backup.IResourceSource.*;
@@ -207,7 +208,7 @@ public class UpgradeExecutor {
                     || (workflowOrder != null && !workflowOrder.isEmpty());
 
             URI agentUri = agentNeedsUpdate
-                    ? updateAgentConfig(targetAgentId, updatedWorkflowUris, newWorkflowUris, workflowOrder)
+                    ? updateAgentConfig(targetAgentId, updatedWorkflowUris, newWorkflowUris, workflowOrder, outcome)
                     : currentAgentUri(targetAgentId);
 
             if (!agentNeedsUpdate) {
@@ -269,6 +270,8 @@ public class UpgradeExecutor {
             if (diff.action() == DiffAction.UPDATE && diff.targetId() != null) {
                 // Update existing snippet
                 snippetStore.updateSnippet(diff.targetId(), diff.targetVersion(), sourceSnippet.snippet());
+                bumpDescriptorOrFail(diff.targetId(), diff.targetVersion(), "snippet",
+                        sourceSnippet.sourceId(), sourceSnippet.name(), outcome);
                 outcome.updated++;
                 LOGGER.infof("Updated snippet '%s' (target=%s, v%d→v%d)",
                         LogSanitizer.sanitize(sourceSnippet.name()), LogSanitizer.sanitize(diff.targetId()), diff.targetVersion(),
@@ -323,6 +326,8 @@ public class UpgradeExecutor {
                     URI updatedUri = updateExtension(sourceExt, extDiff.targetId(), extDiff.targetVersion(),
                             extDiff.targetContent());
                     if (updatedUri != null) {
+                        bumpDescriptorOrFail(extDiff.targetId(), extDiff.targetVersion(), sourceExt.type(),
+                                sourceExt.sourceId(), sourceExt.name(), outcome);
                         updates.put(extensionKey, updatedUri);
                         outcome.updated++;
                         LOGGER.infof("Updated %s '%s' (target=%s, v%d→v%d)",
@@ -641,6 +646,8 @@ public class UpgradeExecutor {
             if (changed) {
                 Response resp = workflowStore.updateWorkflow(workflowId, workflowVersion, configToWrite);
                 if (resp != null && resp.getStatus() == 200) {
+                    bumpDescriptorOrFail(workflowId, workflowVersion, "workflow",
+                            sourceWf.sourceId(), sourceWf.name(), outcome);
                     return URI.create(IRestWorkflowStore.resourceURI + workflowId
                             + IRestWorkflowStore.versionQueryParam + (workflowVersion + 1));
                 }
@@ -745,7 +752,8 @@ public class UpgradeExecutor {
     private URI updateAgentConfig(String agentId,
                                   Map<String, URI> updatedWorkflowUris,
                                   List<URI> newWorkflowUris,
-                                  List<String> workflowOrder) {
+                                  List<String> workflowOrder,
+                                  Outcome outcome) {
         try {
             int currentVersion = readLatestVersion(agentId);
             AgentConfiguration agentConfig = agentStore.readAgent(agentId, currentVersion);
@@ -772,6 +780,7 @@ public class UpgradeExecutor {
             // Update the agent
             Response resp = agentStore.updateAgent(agentId, currentVersion, agentConfig);
             if (resp.getStatus() == 200) {
+                bumpDescriptorOrFail(agentId, currentVersion, "agent", agentId, null, outcome);
                 URI updatedUri = URI.create(IRestAgentStore.resourceURI + agentId + "?version=" + (currentVersion + 1));
                 LOGGER.infof("Agent '%s' upgraded successfully (v%d→v%d)", LogSanitizer.sanitize(agentId), currentVersion,
                         currentVersion + 1);
@@ -818,10 +827,19 @@ public class UpgradeExecutor {
      * The latest version of a resource per its descriptor, or {@code null} when
      * that cannot be established — an unreadable descriptor, one with no resource
      * URI, or one whose URI carries no resource id.
+     * <p>
+     * Resolved through {@link IDocumentDescriptorStore#readCurrentDescriptor},
+     * never {@code readDescriptor(id, null)}: the descriptor store is historized
+     * and its read requires a version, so passing null always threw and this method
+     * always answered null. {@link #readLatestVersion} then substituted 1, so every
+     * upgrade after the first one read and wrote the target's <em>version 1</em> —
+     * the store refused it, and the sync reported "the store did not accept the
+     * update" forever. See {@link StructuralMatcher}'s counterpart for the matching
+     * half of the same defect.
      */
     private Integer resolveLatestVersion(String resourceId) {
         try {
-            DocumentDescriptor desc = documentDescriptorStore.readDescriptor(resourceId, null);
+            DocumentDescriptor desc = documentDescriptorStore.readCurrentDescriptor(resourceId);
             if (desc != null && desc.getResource() != null) {
                 IResourceId resId = RestUtilities.extractResourceId(desc.getResource());
                 if (resId != null)
@@ -831,6 +849,85 @@ public class UpgradeExecutor {
             LOGGER.debugf(e, "Could not find latest version for %s", LogSanitizer.sanitize(resourceId));
         }
         return null;
+    }
+
+    // ==================== Descriptor Bookkeeping ====================
+
+    /**
+     * Moves a resource's {@link DocumentDescriptor} onto the version this run just
+     * wrote.
+     * <p>
+     * Every other write path in EDDI gets this for free: a {@code PUT} through the
+     * HTTP API passes
+     * {@link ai.labs.eddi.engine.runtime.rest.interceptors.DocumentDescriptorFilter},
+     * which bumps the descriptor on the way out. An upgrade calls the same stores
+     * <em>in-process</em>, through CDI proxies, so no JAX-RS filter ever runs and
+     * the descriptors stayed behind on the version the resources had before the
+     * sync.
+     * <p>
+     * That is not cosmetic. The descriptor is what
+     * {@link ai.labs.eddi.engine.runtime.service.WorkflowStoreService#getWorkflowDocumentDescriptor}
+     * reads when an agent is deployed, so a synced agent version could be written
+     * successfully and then refuse to deploy with "Resource not found", and it is
+     * what {@link #resolveLatestVersion} reads, so the next sync aimed at the old
+     * version. It is also the row the Manager lists, so the UI kept showing the
+     * pre-sync version.
+     *
+     * @throws Exception
+     *             when the descriptor cannot be moved — deliberately propagated so
+     *             the caller records a failure. A resource whose descriptor was not
+     *             bumped is written but unreachable, which is precisely the state
+     *             this method exists to prevent, and reporting success for it is
+     *             how the original defect stayed invisible.
+     */
+    private void bumpDescriptor(String resourceId, int previousVersion) throws Exception {
+        DocumentDescriptor descriptor = documentDescriptorStore.readDescriptor(resourceId, previousVersion);
+        if (descriptor == null) {
+            throw new IllegalStateException("No descriptor for " + resourceId + " at version " + previousVersion);
+        }
+        descriptor.setLastModifiedOn(new Date());
+        descriptor.setResource(withVersion(descriptor.getResource(), previousVersion + 1));
+        // Mirrors DocumentDescriptorFilter: carrying the descriptor object forward
+        // already carries ownership, and rebuilding lets a descriptor written before
+        // the access index existed acquire one the first time it is touched.
+        DescriptorAccess.rebuildIndex(descriptor);
+        documentDescriptorStore.updateDescriptor(resourceId, previousVersion, descriptor);
+    }
+
+    /**
+     * Same as {@link #bumpDescriptor}, but records a failure instead of throwing.
+     *
+     * @return true when the descriptor now names the new version
+     */
+    private boolean bumpDescriptorOrFail(String resourceId, int previousVersion, String resourceType,
+                                         String sourceId, String name, Outcome outcome) {
+        try {
+            bumpDescriptor(resourceId, previousVersion);
+            return true;
+        } catch (Exception e) {
+            LOGGER.warnf(e, "Wrote %s '%s' but could not move its descriptor to v%d",
+                    LogSanitizer.sanitize(resourceType), LogSanitizer.sanitize(resourceId), previousVersion + 1);
+            outcome.failed(sourceId, resourceType, name,
+                    "the new version was written but its descriptor still names v" + previousVersion
+                            + ", so the deployment cannot load it: " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * The same resource URI, carrying {@code version}. Mirrors
+     * {@code DocumentDescriptorFilter.createNewVersionOfResource} — a descriptor's
+     * resource URI is how every reader learns which version is current.
+     */
+    private static URI withVersion(URI resource, int version) {
+        if (resource == null) {
+            return null;
+        }
+        String uri = resource.toString();
+        uri = uri.contains("version=")
+                ? uri.substring(0, uri.lastIndexOf('=') + 1) + version
+                : uri + "?version=" + version;
+        return URI.create(uri);
     }
 
     /**

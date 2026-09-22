@@ -130,12 +130,6 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     private static final String EXPORT_SCRATCH_ROOT = "export";
 
     /**
-     * Matches snippet references in template strings: {{snippets.name}} or
-     * {snippets.name}. Captures the snippet name (group 1).
-     */
-    private static final Pattern SNIPPET_REF_PATTERN = Pattern.compile("snippets\\.([a-zA-Z0-9_\\-]+)");
-
-    /**
      * {@code ${connection:name}} or {@code ${connection:tenant/name}}, wherever it
      * sits.
      */
@@ -877,16 +871,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
      * @return set of snippet names referenced by any config
      */
     private Set<String> extractReferencedSnippetNames(List<String> configStrings) {
-        Set<String> names = new LinkedHashSet<>();
-        for (String config : configStrings) {
-            if (config == null || config.isEmpty())
-                continue;
-            Matcher matcher = SNIPPET_REF_PATTERN.matcher(config);
-            while (matcher.find()) {
-                names.add(matcher.group(1));
-            }
-        }
-        return names;
+        return SnippetReferences.namesIn(configStrings);
     }
 
     /**

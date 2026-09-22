@@ -106,7 +106,8 @@ class RestImportServiceRollbackAndCleanupTest {
                 zipArchive, jsonSerialization,
                 mock(IMigrationManager.class), documentDescriptorStore,
                 mock(TemplateSyntaxMigrator.class), structuralMatcher, upgradeExecutor, mock(IScheduleStore.class), mock(BackupMetrics.class),
-                mock(ResourceAccessGuard.class), mock(SpaceContext.class), mock(RagSourceIngestionService.class));
+                mock(ResourceAccessGuard.class), mock(SpaceContext.class), mock(RagSourceIngestionService.class),
+                true, false, "");
     }
 
     // ==================== D11 — rollback of a partial import ====================

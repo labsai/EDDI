@@ -5205,6 +5205,25 @@ const MOCK_EXPORT_PREVIEW = {
   ],
 };
 
+/**
+ * What EDDI's `UpgradeResult` looks like on the wire: a per-resource tally and
+ * the failures, if any. `hasFailures`/`wroteAnything` are derived methods on the
+ * Java record, not components, so they are deliberately absent here.
+ */
+const MOCK_UPGRADE_RESULT = {
+  agentUri: "eddi://ai.labs.agent/agentstore/agents/agent1?version=2",
+  agentUpdated: true,
+  updated: 2,
+  created: 0,
+  skipped: 3,
+  failures: [] as Array<{
+    sourceId: string;
+    resourceType: string;
+    name: string | null;
+    reason: string;
+  }>,
+};
+
 const MOCK_IMPORT_PREVIEW = {
   sourceAgentId: "agent1",
   sourceAgentName: "Support Agent",
@@ -5293,14 +5312,33 @@ export const backupSyncHandlers = [
     );
   }),
 
-  // Sync execute (single)
+  // Sync execute (single) — 201 and an UpgradeResult, as EDDI answers when a
+  // sync wrote something. The status is what the client branches on: 200 means
+  // the two instances already agreed, 207 that some resources failed.
   http.post("*/backup/import/sync", () => {
-    return new HttpResponse(null, { status: 202 });
+    return HttpResponse.json(MOCK_UPGRADE_RESULT, {
+      status: 201,
+      headers: { Location: MOCK_UPGRADE_RESULT.agentUri },
+    });
   }),
 
-  // Sync execute (batch)
-  http.post("*/backup/import/sync/batch", () => {
-    return new HttpResponse(null, { status: 202 });
+  // Sync execute (batch) — one BatchSyncResult per request, in request order.
+  // This used to answer 202 with no body at all, a shape the backend never
+  // produces, so every assertion about what a sync *did* was really an
+  // assertion about an empty response.
+  http.post("*/backup/import/sync/batch", async ({ request }) => {
+    const requests = (await request.json()) as Array<{
+      sourceAgentId: string;
+      targetAgentId: string | null;
+    }>;
+    return HttpResponse.json(
+      requests.map((r) => ({
+        sourceAgentId: r.sourceAgentId,
+        targetAgentId: r.targetAgentId,
+        result: MOCK_UPGRADE_RESULT,
+        error: null,
+      }))
+    );
   }),
 
   // ── User Conversation Store ──

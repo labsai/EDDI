@@ -83,7 +83,7 @@ class UpgradeExecutorTest {
     private UpgradeExecutor executor;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         agentStore = Mockito.mock(IRestAgentStore.class);
         workflowStore = Mockito.mock(IRestWorkflowStore.class);
         snippetStore = Mockito.mock(IRestPromptSnippetStore.class);
@@ -93,6 +93,23 @@ class UpgradeExecutorTest {
 
         executor = new UpgradeExecutor(agentStore, workflowStore,
                 snippetStore, jsonSerialization, structuralMatcher, descriptorStore, mock(BackupMetrics.class), mock(ResourceAccessGuard.class));
+
+        // Every resource the executor writes gets its DocumentDescriptor moved onto
+        // the new version — that is what makes the written version loadable — so a
+        // descriptor has to answer for any (id, version) a test writes. Without this
+        // the executor correctly reports "written but its descriptor still names vN".
+        lenient().when(descriptorStore.readDescriptor(anyString(), anyInt()))
+                .thenAnswer(invocation -> descriptorAt(invocation.getArgument(0), invocation.getArgument(1)));
+    }
+
+    /**
+     * A descriptor whose resource URI names {@code version} — the shape
+     * {@code bumpDescriptor} reads and rewrites.
+     */
+    private static DocumentDescriptor descriptorAt(String resourceId, Integer version) {
+        var descriptor = new DocumentDescriptor();
+        descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/" + resourceId + "?version=" + version));
+        return descriptor;
     }
 
     // ==================== Snippet Processing ====================
@@ -332,7 +349,7 @@ class UpgradeExecutorTest {
 
             var descriptor = new DocumentDescriptor();
             descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/target-1?version=1"));
-            when(descriptorStore.readDescriptor(eq("target-1"), isNull())).thenReturn(descriptor);
+            when(descriptorStore.readCurrentDescriptor("target-1")).thenReturn(descriptor);
 
             // Agent with 3 workflows
             var agentConfig = new AgentConfiguration();
@@ -398,7 +415,7 @@ class UpgradeExecutorTest {
             // Setup agent descriptor
             var descriptor = new DocumentDescriptor();
             descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/target-1?version=1"));
-            when(descriptorStore.readDescriptor(eq("target-1"), isNull())).thenReturn(descriptor);
+            when(descriptorStore.readCurrentDescriptor("target-1")).thenReturn(descriptor);
 
             // Mock LLM store via CDI (getStore now uses CDI.current().select())
             var llmStore = Mockito.mock(IRestLlmStore.class);
@@ -561,7 +578,7 @@ class UpgradeExecutorTest {
 
             var descriptor = new DocumentDescriptor();
             descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/target-1?version=1"));
-            when(descriptorStore.readDescriptor(eq("target-1"), isNull())).thenReturn(descriptor);
+            when(descriptorStore.readCurrentDescriptor("target-1")).thenReturn(descriptor);
 
             var ragDirectStore = Mockito.mock(IRagStore.class);
             var ragRestStore = Mockito.mock(IRestRagStore.class);
@@ -645,7 +662,7 @@ class UpgradeExecutorTest {
 
             var descriptor = new DocumentDescriptor();
             descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/target-1?version=1"));
-            when(descriptorStore.readDescriptor(eq("target-1"), isNull())).thenReturn(descriptor);
+            when(descriptorStore.readCurrentDescriptor("target-1")).thenReturn(descriptor);
 
             var llmStore = Mockito.mock(IRestLlmStore.class);
             when(jsonSerialization.deserialize(eq("{\"model\":\"gpt-4\"}"), any()))
@@ -724,7 +741,7 @@ class UpgradeExecutorTest {
 
             var descriptor = new DocumentDescriptor();
             descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/target-1?version=1"));
-            when(descriptorStore.readDescriptor(eq("target-1"), isNull())).thenReturn(descriptor);
+            when(descriptorStore.readCurrentDescriptor("target-1")).thenReturn(descriptor);
 
             var llmStore = Mockito.mock(IRestLlmStore.class);
             when(jsonSerialization.deserialize(eq("{\"model\":\"gpt-4\"}"), any()))
@@ -876,7 +893,7 @@ class UpgradeExecutorTest {
 
             var descriptor = new DocumentDescriptor();
             descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/target-1?version=1"));
-            when(descriptorStore.readDescriptor(eq("target-1"), isNull())).thenReturn(descriptor);
+            when(descriptorStore.readCurrentDescriptor("target-1")).thenReturn(descriptor);
 
             // The target still runs the two steps the other way round.
             when(workflowStore.readWorkflow(WF_ID, 1)).thenReturn(twoStepWorkflow(false));
@@ -941,7 +958,7 @@ class UpgradeExecutorTest {
 
             var descriptor = new DocumentDescriptor();
             descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/target-1?version=1"));
-            when(descriptorStore.readDescriptor(eq("target-1"), isNull())).thenReturn(descriptor);
+            when(descriptorStore.readCurrentDescriptor("target-1")).thenReturn(descriptor);
 
             // The target has the behavior step but no LLM step at all.
             var targetWfConfig = new WorkflowConfiguration();
@@ -1009,7 +1026,7 @@ class UpgradeExecutorTest {
 
             var descriptor = new DocumentDescriptor();
             descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/target-1?version=1"));
-            when(descriptorStore.readDescriptor(eq("target-1"), isNull())).thenReturn(descriptor);
+            when(descriptorStore.readCurrentDescriptor("target-1")).thenReturn(descriptor);
 
             var agentConfig = new AgentConfiguration();
             agentConfig.setWorkflows(new ArrayList<>());
@@ -1036,7 +1053,7 @@ class UpgradeExecutorTest {
 
         var descriptor = new DocumentDescriptor();
         descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/" + targetAgentId + "?version=" + version));
-        when(descriptorStore.readDescriptor(eq(targetAgentId), isNull())).thenReturn(descriptor);
+        when(descriptorStore.readCurrentDescriptor(targetAgentId)).thenReturn(descriptor);
 
         var agentConfig = new AgentConfiguration();
         agentConfig.setWorkflows(new ArrayList<>());
@@ -1227,7 +1244,7 @@ class UpgradeExecutorTest {
             var descriptor = new DocumentDescriptor();
             descriptor.setResource(URI.create(
                     "eddi://ai.labs.agent/agentstore/agents/target-1?version=14"));
-            when(descriptorStore.readDescriptor(eq("target-1"), isNull())).thenReturn(descriptor);
+            when(descriptorStore.readCurrentDescriptor("target-1")).thenReturn(descriptor);
 
             UpgradeResult result = executor.executeUpgrade(source, "target-1", null, null);
 
@@ -1443,7 +1460,7 @@ class UpgradeExecutorTest {
             // Return descriptor with null resource
             var descriptor = new DocumentDescriptor();
             descriptor.setResource(null);
-            when(descriptorStore.readDescriptor(eq("target-1"), isNull())).thenReturn(descriptor);
+            when(descriptorStore.readCurrentDescriptor("target-1")).thenReturn(descriptor);
 
             var agentConfig = new AgentConfiguration();
             agentConfig.setWorkflows(new ArrayList<>());

@@ -17,9 +17,11 @@ import org.jboss.logging.Logger;
 
 import java.io.IOException;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.*;
 
@@ -57,6 +59,12 @@ public class RemoteApiResourceSource implements IResourceSource {
     private static final Logger LOGGER = Logger.getLogger(RemoteApiResourceSource.class);
 
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(30);
+    /**
+     * Downloading an archive is a bulk transfer, not a config read, so it gets its
+     * own budget: a large agent over a slow link must not fail on the per-request
+     * timeout that a single JSON document is sized for.
+     */
+    private static final Duration ARCHIVE_DOWNLOAD_TIMEOUT = Duration.ofMinutes(5);
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
 
     private final String baseUrl;
@@ -206,14 +214,31 @@ public class RemoteApiResourceSource implements IResourceSource {
         return workflowDataList;
     }
 
+    /**
+     * The snippets <em>this agent</em> references, as {@link IResourceSource}
+     * specifies — not every snippet the remote instance holds.
+     * <p>
+     * The remote store has no per-agent snippet listing, so the names come from the
+     * agent's own configuration documents, exactly as {@code RestExportService}
+     * decides what to put in an archive. Reading the whole store instead offered
+     * the operator every snippet on the source as a CREATE, so promoting one agent
+     * proposed copying a staging instance's entire snippet library — unreleased
+     * drafts and other teams' snippets included — into production.
+     */
     @Override
     public List<SnippetSourceData> readSnippets() {
         if (snippetDataList != null)
             return snippetDataList;
         snippetDataList = new ArrayList<>();
 
+        Set<String> referencedNames = SnippetReferences.namesIn(configDocumentsForSnippetScan());
+        if (referencedNames.isEmpty()) {
+            return snippetDataList;
+        }
+
         try {
-            // List all snippet descriptors from the remote instance
+            // The store is listed in full because that is the only listing there is;
+            // what is downloaded and offered is then narrowed to the referenced names.
             String descriptorsJson = httpGet("/snippetstore/snippets/descriptors?index=0&limit=0");
             DocumentDescriptor[] descriptors = jsonSerialization.deserialize(descriptorsJson, DocumentDescriptor[].class);
             if (descriptors == null)
@@ -225,10 +250,18 @@ public class RemoteApiResourceSource implements IResourceSource {
                     if (resId == null)
                         continue;
 
+                    // Skip the download when the descriptor already proves it is not one
+                    // of ours. A descriptor with no name still has to be read, because
+                    // the name that matters lives on the snippet itself.
+                    String descriptorName = desc.getName();
+                    if (descriptorName != null && !descriptorName.isBlank() && !referencedNames.contains(descriptorName)) {
+                        continue;
+                    }
+
                     String snippetJson = httpGet("/snippetstore/snippets/" + resId.getId() + "?version=" + resId.getVersion());
                     PromptSnippet snippet = jsonSerialization.deserialize(snippetJson, PromptSnippet.class);
 
-                    if (snippet != null && snippet.getName() != null) {
+                    if (snippet != null && snippet.getName() != null && referencedNames.contains(snippet.getName())) {
                         snippetDataList.add(new SnippetSourceData(
                                 resId.getId(), snippet.getName(), snippet));
                     }
@@ -243,6 +276,43 @@ public class RemoteApiResourceSource implements IResourceSource {
         }
 
         return snippetDataList;
+    }
+
+    /**
+     * Everything a snippet reference could be written in: the agent document and,
+     * for every workflow, the workflow document and each of its extension configs.
+     */
+    private List<String> configDocumentsForSnippetScan() {
+        List<String> documents = new ArrayList<>();
+        try {
+            AgentSourceData agent = readAgent();
+            if (agent != null) {
+                documents.add(serializeQuietly(agent.config()));
+            }
+            for (WorkflowSourceData workflow : readWorkflows()) {
+                documents.add(serializeQuietly(workflow.config()));
+                for (ExtensionSourceData extension : workflow.extensions().values()) {
+                    documents.add(extension.contentJson());
+                }
+            }
+        } catch (Exception e) {
+            // A source that cannot be read at all fails loudly elsewhere; here it just
+            // means no snippet can be attributed to this agent.
+            LOGGER.warnf("Could not scan agent %s for snippet references: %s",
+                    LogSanitizer.sanitize(agentId), LogSanitizer.sanitize(e.getMessage()));
+        }
+        return documents;
+    }
+
+    private String serializeQuietly(Object config) {
+        if (config == null) {
+            return null;
+        }
+        try {
+            return jsonSerialization.serialize(config);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     // ==================== Static Utility ====================
@@ -299,6 +369,121 @@ public class RemoteApiResourceSource implements IResourceSource {
         } catch (Exception e) {
             throw new RuntimeException("Failed to list agents from remote instance " + baseUrl + ": " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * Asks the remote instance to export an agent and downloads the archive.
+     * <p>
+     * This is how a live sync creates an agent the target does not have yet. The
+     * alternative — writing every resource from {@link #readAgent()} and friends
+     * with a second set of create calls — would have been a parallel implementation
+     * of {@code RestImportService}'s create path that quietly did less: no
+     * schedules, no connections, no capability registration, no rollback. Fetching
+     * the source's own archive and handing it to the importer that already exists
+     * means a first promotion over the wire lands exactly what the same archive
+     * would have landed by hand.
+     * <p>
+     * <b>The {@code Location} the export answers with is deliberately not
+     * followed.</b> Only its last path segment — the archive's file name — is
+     * taken, and the download is issued against the base URL that
+     * {@link SourceUrlValidator} already approved. A source instance that answered
+     * with an absolute URL of its choosing would otherwise decide where this
+     * deployment sends the caller's bearer token, which is the SSRF the validator
+     * exists to prevent.
+     *
+     * @return the archive bytes
+     */
+    public static byte[] exportAgentArchive(String baseUrl, String agentId, Integer agentVersion, String authToken) {
+        String normalized = normalizeBaseUrl(baseUrl);
+        URI baseUri = URI.create(normalized.endsWith("/") ? normalized : normalized + "/");
+
+        try (HttpClient client = configure(HttpClient.newBuilder()).build()) {
+            String exportPath = "backup/export/" + encodePathSegment(agentId)
+                    + (agentVersion != null ? "?agentVersion=" + agentVersion : "");
+
+            // codeql[java/ssrf] False Positive: connecting to the operator-approved
+            // remote EDDI instance is the feature
+            HttpResponse<Void> exportResponse = client.send(
+                    authorized(HttpRequest.newBuilder().uri(baseUri.resolve(exportPath)).timeout(REQUEST_TIMEOUT), authToken)
+                            .POST(HttpRequest.BodyPublishers.noBody()).build(),
+                    HttpResponse.BodyHandlers.discarding());
+
+            if (exportResponse.statusCode() < 200 || exportResponse.statusCode() >= 300) {
+                throw new RuntimeException("Remote instance refused to export agent " + agentId
+                        + " (status " + exportResponse.statusCode() + ")");
+            }
+
+            String archiveName = archiveNameFrom(exportResponse.headers().firstValue("Location").orElse(null));
+            if (archiveName == null) {
+                throw new RuntimeException("Remote instance exported agent " + agentId
+                        + " but named no archive to download");
+            }
+
+            // codeql[java/ssrf] False Positive: same approved base URL as above
+            HttpResponse<byte[]> download = client.send(
+                    authorized(HttpRequest.newBuilder()
+                            .uri(baseUri.resolve("backup/export/" + encodePathSegment(archiveName)))
+                            .timeout(ARCHIVE_DOWNLOAD_TIMEOUT), authToken).GET().build(),
+                    HttpResponse.BodyHandlers.ofByteArray());
+
+            if (download.statusCode() != 200) {
+                throw new RuntimeException("Could not download the exported archive for agent " + agentId
+                        + " (status " + download.statusCode() + ")");
+            }
+            byte[] body = download.body();
+            if (body == null || body.length == 0) {
+                throw new RuntimeException("The exported archive for agent " + agentId + " came back empty");
+            }
+            return body;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Interrupted while exporting agent " + agentId + " from " + baseUrl, e);
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to export agent " + agentId + " from " + baseUrl + ": " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * The archive's file name from the export's {@code Location}, and nothing else
+     * from it.
+     * <p>
+     * Any path traversal the remote might put there ({@code ../../etc/passwd}, an
+     * absolute path, a nested directory) is discarded with the rest of the path:
+     * only a plain final segment is accepted.
+     *
+     * @return the file name, or null when the header names none that is usable
+     */
+    static String archiveNameFrom(String locationHeader) {
+        if (locationHeader == null || locationHeader.isBlank()) {
+            return null;
+        }
+        String path = locationHeader;
+        int query = path.indexOf('?');
+        if (query >= 0) {
+            path = path.substring(0, query);
+        }
+        int lastSlash = path.lastIndexOf('/');
+        String name = lastSlash >= 0 ? path.substring(lastSlash + 1) : path;
+        name = name.trim();
+        // A segment that is not a plain file name is a remote trying to steer this
+        // request somewhere else.
+        if (name.isEmpty() || name.contains("..") || name.contains("\\") || !name.endsWith(".zip")) {
+            return null;
+        }
+        return name;
+    }
+
+    private static HttpRequest.Builder authorized(HttpRequest.Builder builder, String authToken) {
+        if (authToken != null && !authToken.isBlank()) {
+            builder.header("Authorization", authToken);
+        }
+        return builder;
+    }
+
+    private static String encodePathSegment(String segment) {
+        return URLEncoder.encode(segment, StandardCharsets.UTF_8).replace("+", "%20");
     }
 
     // ==================== Internal Helpers ====================

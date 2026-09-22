@@ -114,7 +114,8 @@ class RestImportServiceScheduleFailureTest {
                 mock(IMigrationManager.class), documentDescriptorStore,
                 templateSyntaxMigrator, mock(StructuralMatcher.class),
                 mock(UpgradeExecutor.class), scheduleStore, metrics,
-                mock(ResourceAccessGuard.class), spaceContext, mock(RagSourceIngestionService.class));
+                mock(ResourceAccessGuard.class), spaceContext, mock(RagSourceIngestionService.class),
+                true, false, "");
 
         when(jsonSerialization.deserialize(anyString(), eq(AgentConfiguration.class)))
                 .thenAnswer(inv -> mapper.readValue((String) inv.getArgument(0), AgentConfiguration.class));

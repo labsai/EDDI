@@ -29,6 +29,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
+import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.utils.RestUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -484,22 +485,38 @@ public class StructuralMatcher {
 
     private String readDescriptorName(String resourceId) {
         try {
-            DocumentDescriptor desc = documentDescriptorStore.readDescriptor(resourceId, null);
+            DocumentDescriptor desc = documentDescriptorStore.readCurrentDescriptor(resourceId);
             return desc != null ? desc.getName() : null;
         } catch (Exception e) {
             return null;
         }
     }
 
+    /**
+     * The version the target resource is actually at, or null when it cannot be
+     * established.
+     * <p>
+     * Must go through {@link IDocumentDescriptorStore#readCurrentDescriptor}, which
+     * resolves the current version first. The obvious-looking
+     * {@code readDescriptor(resourceId, null)} cannot work: the descriptor store is
+     * historized and its read does {@code checkNotNull(version)}, so a null version
+     * <em>always</em> threw and the swallowed exception left every caller with
+     * {@link #readLatestVersionOrDefault}'s fallback of 1. That is what made a sync
+     * work exactly once per target: the second run still diffed against version 1,
+     * showed the operator the pre-sync content as "target", and then wrote against
+     * version 1 — which the store rejects once the first sync has moved the
+     * resource to version 2 ("the store did not accept the update").
+     */
     private Integer readLatestVersion(String resourceId) {
         try {
-            DocumentDescriptor desc = documentDescriptorStore.readDescriptor(resourceId, null);
+            DocumentDescriptor desc = documentDescriptorStore.readCurrentDescriptor(resourceId);
             if (desc != null && desc.getResource() != null) {
                 IResourceId resId = RestUtilities.extractResourceId(desc.getResource());
                 return resId != null ? resId.getVersion() : null;
             }
         } catch (Exception e) {
-            // ignore
+            LOGGER.debugf("Could not establish the current version of %s: %s",
+                    LogSanitizer.sanitize(resourceId), LogSanitizer.sanitize(e.getMessage()));
         }
         return null;
     }

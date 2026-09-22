@@ -68,7 +68,8 @@ class RestImportServiceBranchCoverageTest {
                 zipArchive, jsonSerialization,
                 migrationManager, documentDescriptorStore,
                 templateSyntaxMigrator, structuralMatcher, upgradeExecutor, mock(IScheduleStore.class), mock(BackupMetrics.class),
-                mock(ResourceAccessGuard.class), mock(SpaceContext.class), mock(RagSourceIngestionService.class));
+                mock(ResourceAccessGuard.class), mock(SpaceContext.class), mock(RagSourceIngestionService.class),
+                true, false, "");
     }
 
     // =========================================================
@@ -307,14 +308,14 @@ class RestImportServiceBranchCoverageTest {
         @Test
         @DisplayName("null sourceUrl throws IllegalArgumentException")
         void nullSourceUrl() {
-            assertThrows(IllegalArgumentException.class,
+            assertThrows(BadRequestException.class,
                     () -> importService.previewSyncBatch(null, null, null));
         }
 
         @Test
         @DisplayName("blank sourceUrl throws IllegalArgumentException")
         void blankSourceUrl() {
-            assertThrows(IllegalArgumentException.class,
+            assertThrows(BadRequestException.class,
                     () -> importService.previewSyncBatch("  ", null, null));
         }
     }
@@ -330,28 +331,28 @@ class RestImportServiceBranchCoverageTest {
         @Test
         @DisplayName("executeSync with null URL throws IllegalArgumentException")
         void executeSyncNullUrl() {
-            assertThrows(IllegalArgumentException.class,
+            assertThrows(BadRequestException.class,
                     () -> importService.executeSync(null, "src", 1, "tgt", null, null, null));
         }
 
         @Test
         @DisplayName("executeSyncBatch with null URL throws IllegalArgumentException")
         void executeSyncBatchNullUrl() {
-            assertThrows(IllegalArgumentException.class,
+            assertThrows(BadRequestException.class,
                     () -> importService.executeSyncBatch(null, List.of(), null));
         }
 
         @Test
         @DisplayName("previewSync with null URL throws IllegalArgumentException")
         void previewSyncNullUrl() {
-            assertThrows(IllegalArgumentException.class,
+            assertThrows(BadRequestException.class,
                     () -> importService.previewSync(null, "src", 1, "tgt", null));
         }
 
         @Test
         @DisplayName("listRemoteAgents with null URL throws IllegalArgumentException")
         void listRemoteAgentsNullUrl() {
-            assertThrows(IllegalArgumentException.class,
+            assertThrows(BadRequestException.class,
                     () -> importService.listRemoteAgents(null, null));
         }
     }
