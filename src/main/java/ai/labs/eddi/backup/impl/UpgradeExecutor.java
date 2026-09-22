@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import ai.labs.eddi.engine.runtime.rest.interceptors.DocumentDescriptorFilter;
+import ai.labs.eddi.engine.runtime.service.WorkflowStoreService;
 import ai.labs.eddi.engine.security.spaces.DescriptorAccess;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.backup.IResourceSource;
@@ -1003,18 +1005,16 @@ public class UpgradeExecutor {
      * wrote.
      * <p>
      * Every other write path in EDDI gets this for free: a {@code PUT} through the
-     * HTTP API passes
-     * {@link ai.labs.eddi.engine.runtime.rest.interceptors.DocumentDescriptorFilter},
-     * which bumps the descriptor on the way out. An upgrade calls the same stores
-     * <em>in-process</em>, through CDI proxies, so no JAX-RS filter ever runs and
-     * the descriptors stayed behind on the version the resources had before the
-     * sync.
+     * HTTP API passes {@link DocumentDescriptorFilter}, which bumps the descriptor
+     * on the way out. An upgrade calls the same stores <em>in-process</em>, through
+     * CDI proxies, so no JAX-RS filter ever runs and the descriptors stayed behind
+     * on the version the resources had before the sync.
      * <p>
      * That is not cosmetic. The descriptor is what
-     * {@link ai.labs.eddi.engine.runtime.service.WorkflowStoreService#getWorkflowDocumentDescriptor}
-     * reads when an agent is deployed, so a synced agent version could be written
-     * successfully and then refuse to deploy with "Resource not found", and it is
-     * what {@link #resolveLatestVersion} reads, so the next sync aimed at the old
+     * {@link WorkflowStoreService#getWorkflowDocumentDescriptor} reads when an
+     * agent is deployed, so a synced agent version could be written successfully
+     * and then refuse to deploy with "Resource not found", and it is what
+     * {@link #resolveLatestVersion} reads, so the next sync aimed at the old
      * version. It is also the row the Manager lists, so the UI kept showing the
      * pre-sync version.
      *
