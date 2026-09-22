@@ -293,8 +293,11 @@ public class DreamService {
         try {
             LOGGER.infof("[DREAM] Starting dream cycle for user='%s', agent='%s'", LogSanitizer.sanitize(userId), LogSanitizer.sanitize(agentId));
 
-            // Load entries once — shared across pruning and contradiction detection
-            List<UserMemoryEntry> allEntries = scopeToOwningAgent(userMemoryStore.getAllEntries(userId), agentId, dreamConfig);
+            // Load entries once — shared across pruning and contradiction detection.
+            // The unscoped set is kept for contradiction detection (read-only); every
+            // phase that CHANGES entries works on the agent-scoped view.
+            List<UserMemoryEntry> userEntries = userMemoryStore.getAllEntries(userId);
+            List<UserMemoryEntry> allEntries = scopeToOwningAgent(userEntries, agentId, dreamConfig);
 
             // 1. Prune stale entries (deterministic, zero LLM cost)
             if (dreamConfig.getPruneStaleAfterDays() > 0) {
@@ -303,13 +306,20 @@ public class DreamService {
 
             // After pruning, reload once — shared by contradiction detection and
             // summarization
-            List<UserMemoryEntry> currentEntries = pruned > 0
-                    ? scopeToOwningAgent(userMemoryStore.getAllEntries(userId), agentId, dreamConfig)
-                    : allEntries;
+            if (pruned > 0) {
+                userEntries = userMemoryStore.getAllEntries(userId);
+            }
+            List<UserMemoryEntry> currentEntries = pruned > 0 ? scopeToOwningAgent(userEntries, agentId, dreamConfig) : allEntries;
 
-            // 2. Detect contradictions (read-only — does not modify entries)
+            // 2. Detect contradictions (read-only — does not modify entries). Unlike
+            // pruning and summarization, detection may look past this agent's own
+            // entries: the contradiction that matters most is the one the docs lead
+            // with — agent A stored "English", agent B stored "German" — and the
+            // ownership scope made it undetectable by default. Reading is safe here
+            // because nothing is changed and no foreign value is logged or sent
+            // anywhere; only keys this agent itself holds are considered.
             if (dreamConfig.isDetectContradictions()) {
-                contradictions = detectContradictions(userId, currentEntries);
+                contradictions = detectContradictions(userId, userEntries, agentId, dreamConfig.isCrossAgentMaintenance());
             }
 
             // 3. Summarize interactions (LLM-driven consolidation)
@@ -374,26 +384,42 @@ public class DreamService {
     }
 
     /**
-     * Detect contradictory entries. V1: Simple key-based duplicate detection (same
-     * key, different values). V2 (future): LLM-driven semantic contradiction
-     * detection.
+     * Detect contradictory entries: the same key holding different values. V1 is
+     * key-based; semantic (LLM) detection is future work.
+     * <p>
+     * Only keys the firing agent itself holds are considered unless
+     * {@code crossAgent} — so agent A's cycle reports A's "language" disagreeing
+     * with B's, but never a disagreement between B and C that A has no stake in.
+     * Values are logged at DEBUG only: another agent's {@code self} memory is not
+     * this cycle's to write into an INFO log.
      */
-    private int detectContradictions(String userId, List<UserMemoryEntry> allEntries) {
-        var keyValues = new HashMap<String, UserMemoryEntry>();
+    private int detectContradictions(String userId, List<UserMemoryEntry> entries, String agentId, boolean crossAgent) {
+        Map<String, List<UserMemoryEntry>> byKey = entries.stream()
+                .filter(e -> e.key() != null)
+                .collect(Collectors.groupingBy(UserMemoryEntry::key, LinkedHashMap::new, Collectors.toList()));
         int contradictions = 0;
 
-        for (UserMemoryEntry entry : allEntries) {
-            if (keyValues.containsKey(entry.key())) {
-                UserMemoryEntry existing = keyValues.get(entry.key());
-                if (!Objects.equals(existing.value(), entry.value())) {
+        for (var keyGroup : byKey.entrySet()) {
+            List<UserMemoryEntry> sameKey = keyGroup.getValue();
+            if (sameKey.size() < 2) {
+                continue;
+            }
+            if (!crossAgent && sameKey.stream().noneMatch(e -> agentId != null && agentId.equals(e.sourceAgentId()))) {
+                continue;
+            }
+            UserMemoryEntry previous = null;
+            for (UserMemoryEntry entry : sameKey) {
+                if (previous != null && !Objects.equals(previous.value(), entry.value())) {
                     contradictions++;
                     contradictionsFoundCounter.increment();
-                    LOGGER.infof("[DREAM] Contradiction found for user='%s', key='%s': '%s' vs '%s'", LogSanitizer.sanitize(userId), entry.key(),
-                            existing.value(),
+                    LOGGER.infof("[DREAM] Contradiction found for user='%s', key='%s' between agents '%s' (%s) and '%s' (%s)",
+                            LogSanitizer.sanitize(userId), LogSanitizer.sanitize(entry.key()), LogSanitizer.sanitize(previous.sourceAgentId()),
+                            previous.visibility(), LogSanitizer.sanitize(entry.sourceAgentId()), entry.visibility());
+                    LOGGER.debugf("[DREAM] Contradiction values for key='%s': '%s' vs '%s'", LogSanitizer.sanitize(entry.key()), previous.value(),
                             entry.value());
                 }
+                previous = entry;
             }
-            keyValues.put(entry.key(), entry);
         }
 
         return contradictions;

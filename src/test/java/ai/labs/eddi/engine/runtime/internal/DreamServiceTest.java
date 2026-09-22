@@ -622,6 +622,38 @@ class DreamServiceTest {
         verify(store).deleteEntry("2");
     }
 
+    /**
+     * The documentation's own example — agent A stored "English", agent B stored
+     * "German" — was undetectable under the default ownership scope. Detection is
+     * read-only, so it may see B's entry for a key A holds.
+     */
+    @Test
+    void contradictions_acrossAgents_detectedByDefault() throws Exception {
+        Instant now = Instant.now();
+        when(store.getAllEntries("user-1")).thenReturn(List.of(
+                new UserMemoryEntry("1", "user-1", "language", "English", "preference", Visibility.global, "agent-1", List.of(), "c1", false, 0, now,
+                        now),
+                new UserMemoryEntry("2", "user-1", "language", "German", "preference", Visibility.self, "agent-2", List.of(), "c2", false, 0, now,
+                        now)));
+        dreamConfig.setPruneStaleAfterDays(0);
+
+        var result = dreamService.process("user-1", "agent-1", dreamConfig);
+
+        assertEquals(1, result.contradictionsFound());
+        verify(store, never()).deleteEntry(anyString()); // detection never changes anything
+    }
+
+    @Test
+    void contradictions_betweenTwoOtherAgents_notThisCyclesToReport() throws Exception {
+        Instant now = Instant.now();
+        when(store.getAllEntries("user-1")).thenReturn(List.of(
+                new UserMemoryEntry("1", "user-1", "city", "Vienna", "fact", Visibility.self, "agent-2", List.of(), "c1", false, 0, now, now),
+                new UserMemoryEntry("2", "user-1", "city", "Paris", "fact", Visibility.self, "agent-3", List.of(), "c2", false, 0, now, now)));
+        dreamConfig.setPruneStaleAfterDays(0);
+
+        assertEquals(0, dreamService.process("user-1", "agent-1", dreamConfig).contradictionsFound());
+    }
+
     @Test
     void contradictions_sameKeyAndValue_noDuplicate() throws Exception {
         Instant now = Instant.now();

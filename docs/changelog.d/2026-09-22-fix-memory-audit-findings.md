@@ -106,3 +106,10 @@ observed there, and carries a regression test.
   schedule without a `userId` was accepted and then failed on every fire until it dead-lettered.
   Dream schedules no longer need a message and are rejected up front without a real user.
   [`RestScheduleStore.java`](../../src/main/java/ai/labs/eddi/engine/schedule/rest/RestScheduleStore.java)
+- **Dream could not detect the contradiction the docs describe.** "Agent A stored English,
+  agent B stored German" was invisible by default, because the whole cycle was scoped to the firing
+  agent's own entries. Detection is read-only, so it now considers every entry for a key the firing
+  agent holds (a disagreement between two *other* agents is still not its to report) while pruning
+  and summarization keep the ownership scope. Contradicting values are logged at DEBUG only —
+  another agent's `self` memory does not belong in an INFO log.
+  [`DreamService.java`](../../src/main/java/ai/labs/eddi/engine/runtime/internal/DreamService.java)
