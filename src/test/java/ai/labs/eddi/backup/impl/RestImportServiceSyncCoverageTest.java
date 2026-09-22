@@ -6,6 +6,7 @@ package ai.labs.eddi.backup.impl;
 
 import java.util.Optional;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.WebApplicationException;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.spaces.SpaceContext;
@@ -123,29 +124,30 @@ class RestImportServiceSyncCoverageTest {
         }
 
         /**
-         * A remote instance that cannot be listed becomes a 500 that says so and keeps
-         * the original as its cause. The connect failure, the expired token and the
-         * wrong port all arrive here, and the operator only gets to tell them apart if
-         * the reason survives the wrapping.
+         * A remote instance that cannot be listed becomes a 502 whose body says so. The
+         * connect failure, the expired token and the wrong port all arrive here, and
+         * the operator only gets to tell them apart if the reason survives — which it
+         * did not: this was an {@code InternalServerErrorException}, and Quarkus
+         * answers one of those with an empty 500, so the message never left the JVM.
          */
         @Test
-        @DisplayName("a remote instance that will not answer becomes a 500 that keeps the reason")
-        void unreachableRemoteBecomesAServerError() {
-            var cause = new RuntimeException("Failed to list agents: connection refused");
+        @DisplayName("a remote instance that will not answer becomes a 502 that keeps the reason")
+        void unreachableRemoteBecomesABadGateway() {
+            var cause = new RemoteApiResourceSource.RemoteReadException(
+                    "Failed to list agents: connection refused");
 
-            InternalServerErrorException thrown;
+            WebApplicationException thrown;
             try (var statics = mockStatic(RemoteApiResourceSource.class)) {
                 statics.when(() -> RemoteApiResourceSource.listRemoteAgentDescriptors(
                         eq(PUBLIC_SOURCE_URL), eq("Bearer stale"), any())).thenThrow(cause);
 
-                thrown = assertThrows(InternalServerErrorException.class,
+                thrown = assertThrows(WebApplicationException.class,
                         () -> importService.listRemoteAgents(PUBLIC_SOURCE_URL, "Bearer stale"));
             }
 
-            assertEquals(500, thrown.getResponse().getStatus());
-            assertTrue(thrown.getMessage().contains("connection refused"),
-                    "the reason must survive, was: " + thrown.getMessage());
-            assertSame(cause, thrown.getCause());
+            assertEquals(502, thrown.getResponse().getStatus());
+            assertTrue(String.valueOf(thrown.getResponse().getEntity()).contains("connection refused"),
+                    "the reason has to be in the body, was: " + thrown.getResponse().getEntity());
         }
 
         /** The list a reachable instance hands over reaches the caller unchanged. */
@@ -199,23 +201,60 @@ class RestImportServiceSyncCoverageTest {
         }
 
         /**
-         * A remote instance that cannot be read is this deployment's problem to report:
-         * the failure becomes a 500 that still names what went wrong and keeps the
-         * original as its cause, so the server log has the stack and the operator has
-         * the reason.
+         * A remote instance that cannot be read is <em>the other</em> deployment's
+         * problem, and is reported as one: 502, with the reason in the body.
+         * <p>
+         * It used to be an {@code InternalServerErrorException}, which Quarkus answers
+         * with an <b>empty</b> 500 — the message never left the JVM. So the commonest
+         * thing that goes wrong with a sync, a source that is down or addressed
+         * wrongly, reached the operator as "Internal Server Error" and nothing else.
          */
         @Test
-        @DisplayName("a matcher failure becomes a 500 that keeps the reason and the cause")
-        void matcherFailureBecomesAServerError() {
-            var cause = new RuntimeException("remote instance closed the connection");
+        @DisplayName("a remote that cannot be read becomes a 502 carrying the reason")
+        void remoteFailureBecomesABadGateway() {
+            var cause = new RemoteApiResourceSource.RemoteReadException("remote instance closed the connection");
             when(structuralMatcher.buildPreview(any(), eq(TARGET_A), eq(true))).thenThrow(cause);
 
-            var thrown = assertThrows(InternalServerErrorException.class, this::preview);
+            var thrown = assertThrows(WebApplicationException.class, this::preview);
+
+            assertEquals(502, thrown.getResponse().getStatus());
+            assertTrue(String.valueOf(thrown.getResponse().getEntity()).contains("remote instance closed the connection"),
+                    "the reason has to be in the body the client reads, was: " + thrown.getResponse().getEntity());
+        }
+
+        /**
+         * The other half of that distinction. A failure this deployment caused is still
+         * a 500 — blaming the source for a local fault sends the operator to restart an
+         * instance that was never the problem — but it carries a body now, which the
+         * empty {@code InternalServerErrorException} never did.
+         */
+        @Test
+        @DisplayName("a local failure stays a 500, and says what happened")
+        void localFailureStaysAServerError() {
+            when(structuralMatcher.buildPreview(any(), eq(TARGET_A), eq(true)))
+                    .thenThrow(new IllegalStateException("the local store is not accepting writes"));
+
+            var thrown = assertThrows(WebApplicationException.class, this::preview);
 
             assertEquals(500, thrown.getResponse().getStatus());
-            assertTrue(thrown.getMessage().contains("remote instance closed the connection"),
-                    "the reason must survive the wrapping, was: " + thrown.getMessage());
-            assertSame(cause, thrown.getCause(), "the original must stay reachable for the server log");
+            assertTrue(String.valueOf(thrown.getResponse().getEntity()).contains("the local store is not accepting writes"),
+                    "the reason has to be in the body, was: " + thrown.getResponse().getEntity());
+        }
+
+        /**
+         * The remote failure is usually wrapped by the time it gets here, so the whole
+         * cause chain is what decides.
+         */
+        @Test
+        @DisplayName("a wrapped remote failure is still a 502")
+        void wrappedRemoteFailureIsStillABadGateway() {
+            when(structuralMatcher.buildPreview(any(), eq(TARGET_A), eq(true)))
+                    .thenThrow(new RuntimeException("preview failed",
+                            new RemoteApiResourceSource.RemoteReadException("connection refused")));
+
+            var thrown = assertThrows(WebApplicationException.class, this::preview);
+
+            assertEquals(502, thrown.getResponse().getStatus());
         }
 
         /**
@@ -286,21 +325,20 @@ class RestImportServiceSyncCoverageTest {
 
         /**
          * Same split as the preview, and it matters more here because a sync writes: an
-         * upgrade that blew up mid-flight is a 500 naming the reason, with the original
-         * kept as the cause.
+         * upgrade that blew up mid-flight is a 500 — this instance's own failure, not
+         * the source's — naming the reason in a body the caller can read.
          */
         @Test
-        @DisplayName("an upgrade failure becomes a 500 that keeps the reason and the cause")
+        @DisplayName("an upgrade failure becomes a 500 that keeps the reason")
         void upgradeFailureBecomesAServerError() {
             var cause = new IllegalStateException("the target agent changed under the sync");
             when(upgradeExecutor.executeUpgrade(any(), eq(TARGET_A), any(), any())).thenThrow(cause);
 
-            var thrown = assertThrows(InternalServerErrorException.class, this::sync);
+            var thrown = assertThrows(WebApplicationException.class, this::sync);
 
             assertEquals(500, thrown.getResponse().getStatus());
-            assertTrue(thrown.getMessage().contains("the target agent changed under the sync"),
-                    "the reason must survive the wrapping, was: " + thrown.getMessage());
-            assertSame(cause, thrown.getCause());
+            assertTrue(String.valueOf(thrown.getResponse().getEntity()).contains("the target agent changed under the sync"),
+                    "the reason has to be in the body, was: " + thrown.getResponse().getEntity());
         }
 
         /**

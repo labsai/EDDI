@@ -97,6 +97,10 @@ export function SyncPage() {
       targetAgentId: m.localTargetId,
     }));
 
+    // The previous run's outcome describes resources this preview is about to
+    // replace; leaving it on screen reads as the result of what is about to happen.
+    executeBatchMutation.reset();
+
     previewBatchMutation.mutate(
       { sourceUrl: syncUrl, mappings: syncMappings, sourceAuth: syncAuth },
       {
@@ -117,7 +121,7 @@ export function SyncPage() {
   }
 
   function handleSyncSelected() {
-    const selected = mappings.filter((m) => m.checked && m.preview);
+    const selected = mappings.filter((m) => m.checked && m.preview && !m.preview.error);
     if (selected.length === 0) return;
 
     const requests: SyncRequest[] = selected.map((m) => ({
@@ -131,16 +135,31 @@ export function SyncPage() {
     executeBatchMutation.mutate(
       { sourceUrl: syncUrl, requests, sourceAuth: syncAuth },
       {
-        onSuccess: () => {
-          // Clear previews
-          setMappings((prev) => prev.map((m) => ({ ...m, preview: null })));
+        onSuccess: (execution) => {
+          // A mapping that had no local target now has one — the agent this run
+          // created. Without adopting it, the next Preview + Sync sends
+          // targetAgentId: null again and creates a SECOND copy of the same agent.
+          const createdBySource = new Map<string, string>();
+          for (const result of execution.results) {
+            if (!result.targetAgentId && result.result?.agentUri) {
+              const { id } = parseResourceUri(result.result.agentUri);
+              if (id) createdBySource.set(result.sourceAgentId, id);
+            }
+          }
+          setMappings((prev) =>
+            prev.map((m) => ({
+              ...m,
+              localTargetId: m.localTargetId ?? createdBySource.get(m.remoteId) ?? null,
+              preview: null,
+            }))
+          );
         },
       }
     );
   }
 
   const checkedCount = mappings.filter((m) => m.checked).length;
-  const hasPreviewedSelection = mappings.some((m) => m.checked && m.preview);
+  const hasPreviewedSelection = mappings.some((m) => m.checked && m.preview && !m.preview.error);
   const totalResources = mappings
     .filter((m) => m.checked && m.preview)
     .reduce((sum, m) => sum + (m.preview?.resources.length ?? 0), 0);
@@ -265,7 +284,17 @@ export function SyncPage() {
 
                   {/* Preview status */}
                   <div className="shrink-0 w-24 text-end">
-                    {m.preview && (
+                    {m.preview?.error && (
+                      <span
+                        className="inline-flex items-center gap-1 text-xs text-destructive"
+                        title={m.preview.error}
+                        data-testid={`sync-preview-error-${m.remoteId}`}
+                      >
+                        <AlertCircle className="h-3.5 w-3.5" />
+                        {t("syncPage.previewFailed", "Preview failed")}
+                      </span>
+                    )}
+                    {m.preview && !m.preview.error && (
                       <button
                         onClick={() =>
                           setExpandedAgent(
@@ -345,8 +374,12 @@ function SyncOutcome({ execution }: { execution: BatchSyncExecution }) {
   const { t } = useTranslation();
   const { partial, results } = execution;
 
+  // "Nothing to write" has to mean the agent was untouched too: a run that only
+  // reordered workflows writes no resource but does burn an agent version, and
+  // calling that "already up to date" is wrong.
   const wrote = results.reduce(
-    (sum, r) => sum + (r.result?.updated ?? 0) + (r.result?.created ?? 0),
+    (sum, r) =>
+      sum + (r.result?.updated ?? 0) + (r.result?.created ?? 0) + (r.result?.agentUpdated ? 1 : 0),
     0
   );
   const failedAgents = results.filter((r) => r.error || hasFailures(r.result));

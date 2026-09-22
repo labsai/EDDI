@@ -69,6 +69,15 @@ public class AgentSyncIT extends BaseIntegrationIT {
     private String sourceBehaviorId;
     private String targetAgentId;
 
+    /**
+     * Where the source's documents are, tracked rather than looked up: every write
+     * below bumps a version by exactly one, and reading it back through the very
+     * descriptors this change repairs would make the fixture depend on the thing
+     * under test.
+     */
+    private int sourceAgentVersion = 1;
+    private int sourceBehaviorVersion = 1;
+
     public static class SyncTestProfile implements QuarkusTestProfile {
         @Override
         public Map<String, String> getConfigOverrides() {
@@ -218,13 +227,10 @@ public class AgentSyncIT extends BaseIntegrationIT {
      * behavior set is the one whose content it edits.
      */
     private void createSourceAgent() {
-        sourceBehaviorId = idOf(create("""
-                {"behaviorGroups":[{"name":"main","behaviorRules":[
-                  {"name":"greeting","actions":["greet"],"conditions":[]}]}]}""",
-                "/rulestore/rulesets"));
+        sourceBehaviorId = idOf(create(behaviorDocument("greeting"), "/rulestore/rulesets"));
         String outputUri = create("""
                 {"outputSet":[{"action":"greet","timesOccurred":0,"outputs":[
-                  {"type":"text","valueAlternatives":["Hello"]}]}]}""",
+                  {"valueAlternatives":[{"type":"text","text":"Hello"}]}]}]}""",
                 "/outputstore/outputsets");
 
         String workflowUri = create(String.format("""
@@ -241,17 +247,16 @@ public class AgentSyncIT extends BaseIntegrationIT {
      * Rewrites the source behavior set and moves the workflow and agent onto it.
      */
     private void changeSourceBehavior(String marker) {
-        int behaviorVersion = currentVersionOf(sourceBehaviorId);
-        given().body(String.format("""
-                {"behaviorGroups":[{"name":"main","behaviorRules":[
-                  {"name":"greeting_%s","actions":["greet"],"conditions":[]}]}]}""", marker))
+        int behaviorVersion = sourceBehaviorVersion;
+        given().body(behaviorDocument("greeting_" + marker))
                 .contentType(ContentType.JSON)
                 .put("/rulestore/rulesets/" + sourceBehaviorId + VERSION_STRING + behaviorVersion)
                 .then().statusCode(200);
+        sourceBehaviorVersion++;
 
         // The agent runs what its workflow points at, so the reference has to move
         // with the content — the same two writes the Manager makes on an edit.
-        int agentVersion = currentVersionOf(sourceAgentId);
+        int agentVersion = sourceAgentVersion;
         String workflowUri = given().get("/agentstore/agents/" + sourceAgentId + VERSION_STRING + agentVersion)
                 .jsonPath().getString("workflows[0]");
         String workflowId = agentIdOf(workflowUri);
@@ -270,6 +275,20 @@ public class AgentSyncIT extends BaseIntegrationIT {
                 .contentType(ContentType.JSON)
                 .put("/agentstore/agents/" + sourceAgentId + VERSION_STRING + agentVersion)
                 .then().statusCode(200);
+        sourceAgentVersion++;
+    }
+
+    /**
+     * A rule set naming one rule. The occurrence condition is the fixture the
+     * engine tests use — a rule with no condition at all is not what this test is
+     * about, and not what an agent looks like.
+     */
+    private static String behaviorDocument(String ruleName) {
+        return String.format("""
+                {"behaviorGroups":[{"name":"main","behaviorRules":[
+                  {"name":"%s","actions":["greet"],"conditions":[
+                    {"type":"occurrence","configs":{"maxTimesOccurred":"0","behaviorRuleName":"%s"}}]}]}]}""",
+                ruleName, ruleName);
     }
 
     private String behaviorUri() {
@@ -286,16 +305,16 @@ public class AgentSyncIT extends BaseIntegrationIT {
         return response.getHeader("location");
     }
 
-    /** The version a resource is currently at, per its descriptor. */
-    private int currentVersionOf(String resourceId) {
+    /**
+     * The version the TARGET agent is at, per its descriptor — read deliberately
+     * rather than tracked. The descriptor is what a deployment resolves, and a sync
+     * that writes a version its descriptor does not name is exactly the failure
+     * this test exists to catch.
+     */
+    private int currentVersionOf(String agentId) {
         String resource = given().get("/agentstore/agents/descriptors?index=0&limit=100")
-                .jsonPath().getString("find { it.resource.contains('" + resourceId + "') }.resource");
-        if (resource == null) {
-            // Not an agent — ask the store that owns it via its own descriptor listing.
-            resource = given().get("/rulestore/rulesets/descriptors?index=0&limit=100")
-                    .jsonPath().getString("find { it.resource.contains('" + resourceId + "') }.resource");
-        }
-        assertNotNull(resource, "no descriptor for " + resourceId);
+                .jsonPath().getString("find { it.resource.contains('" + agentId + "') }.resource");
+        assertNotNull(resource, "no descriptor for agent " + agentId);
         return versionOf(resource);
     }
 

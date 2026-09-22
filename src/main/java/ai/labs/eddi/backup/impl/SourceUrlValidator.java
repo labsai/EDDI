@@ -181,8 +181,26 @@ public final class SourceUrlValidator {
         if (uri == null || uri.getScheme() == null || uri.getHost() == null) {
             return "";
         }
-        String origin = uri.getScheme().toLowerCase(Locale.ROOT) + "://" + uri.getHost().toLowerCase(Locale.ROOT);
-        return uri.getPort() == -1 ? origin : origin + ":" + uri.getPort();
+        String scheme = uri.getScheme().toLowerCase(Locale.ROOT);
+        String host = uri.getHost().toLowerCase(Locale.ROOT);
+        // A trailing dot names the same host to DNS and a different string to an
+        // exact comparison, which would refuse an origin the operator did name.
+        if (host.length() > 1 && host.endsWith(".")) {
+            host = host.substring(0, host.length() - 1);
+        }
+        String origin = scheme + "://" + host;
+        // https://x and https://x:443 are the same origin. Comparing them as
+        // different strings fails closed, but an operator who writes one and is
+        // refused for the other has no way to tell why.
+        int port = uri.getPort();
+        if (port == -1 || port == defaultPortOf(scheme)) {
+            return origin;
+        }
+        return origin + ":" + port;
+    }
+
+    private static int defaultPortOf(String scheme) {
+        return "https".equals(scheme) ? 443 : 80;
     }
 
     /**
@@ -219,14 +237,33 @@ public final class SourceUrlValidator {
         return Set.copyOf(origins);
     }
 
+    /**
+     * Reduces every configured entry with {@link #originOf}, the same function the
+     * request URL goes through.
+     * <p>
+     * Both sides have to be normalised by the same rules or the comparison decides
+     * on spelling: an operator who writes {@code http://host:80} and a caller who
+     * writes {@code http://host} name one origin, and lower-casing alone made them
+     * two. It also means a policy constructed directly — by a test, or by future
+     * code that does not go through {@link #parseAllowedSources} — behaves
+     * identically to one read from configuration.
+     */
     private static Set<String> normalizeOrigins(Set<String> origins) {
         if (origins == null || origins.isEmpty()) {
             return Set.of();
         }
         Set<String> normalized = new LinkedHashSet<>();
         for (String origin : origins) {
-            if (origin != null && !origin.isBlank()) {
-                normalized.add(origin.trim().toLowerCase(Locale.ROOT));
+            if (origin == null || origin.isBlank()) {
+                continue;
+            }
+            try {
+                String reduced = originOf(URI.create(origin.trim()));
+                if (!reduced.isEmpty()) {
+                    normalized.add(reduced);
+                }
+            } catch (IllegalArgumentException e) {
+                LOGGER.warnf("Ignoring unparseable allowed sync source '%s'", sanitize(origin));
             }
         }
         return Set.copyOf(normalized);

@@ -1416,12 +1416,20 @@ class UpgradeExecutorTest {
 
     // ==================== readLatestVersion edge cases ====================
 
+    /**
+     * What happens when the agent's current version cannot be established.
+     * <p>
+     * These three used to assert that it "defaults to 1" — which is what the defect
+     * did, and what made it invisible: writing against version 1 is correct for an
+     * agent that has never been synced, and a 409 for every agent that has. The
+     * contract now is that a version that cannot be established is not guessed at.
+     */
     @Nested
-    @DisplayName("readLatestVersion edge cases")
-    class ReadLatestVersionEdgeCases {
+    @DisplayName("an agent version that cannot be established")
+    class UnknownAgentVersion {
 
         @Test
-        @DisplayName("should default to 1 when descriptor is null")
+        @DisplayName("a descriptor that is absent is not taken to mean version 1")
         void nullDescriptorDefaultsTo1() throws Exception {
             var source = createSource(List.of(), List.of());
 
@@ -1431,23 +1439,19 @@ class UpgradeExecutorTest {
             var preview = new ImportPreview("src-1", "Source Agent", "target-1", "Target Agent", diffs);
             when(structuralMatcher.buildPreview(any(), eq("target-1"), eq(true))).thenReturn(preview);
 
-            // Return null descriptor
-            when(descriptorStore.readDescriptor(eq("target-1"), isNull())).thenReturn(null);
+            when(descriptorStore.readCurrentDescriptor("target-1")).thenReturn(null);
 
-            // readLatestVersion should default to 1
-            var agentConfig = new AgentConfiguration();
-            agentConfig.setWorkflows(new ArrayList<>());
-            when(agentStore.readAgent("target-1", 1)).thenReturn(agentConfig);
-            when(agentStore.updateAgent(eq("target-1"), eq(1), any())).thenReturn(Response.ok().build());
+            var thrown = assertThrows(RuntimeException.class,
+                    () -> executor.executeUpgrade(source, "target-1", null, List.of("wf-1")));
 
-            URI result = executor.executeUpgrade(source, "target-1", null, List.of("wf-1")).agentUri();
-
-            assertNotNull(result);
-            assertTrue(result.toString().contains("version=2")); // 1 + 1
+            assertTrue(thrown.getMessage().contains("could not be established"),
+                    "the reason has to say the version is unknown, was: " + thrown.getMessage());
+            // Nothing is written against a guessed version.
+            verify(agentStore, never()).updateAgent(eq("target-1"), anyInt(), any());
         }
 
         @Test
-        @DisplayName("should default to 1 when descriptor.getResource() is null")
+        @DisplayName("a descriptor naming no resource is not taken to mean version 1")
         void nullResourceDefaultsTo1() throws Exception {
             var source = createSource(List.of(), List.of());
 
@@ -1457,24 +1461,21 @@ class UpgradeExecutorTest {
             var preview = new ImportPreview("src-1", "Source Agent", "target-1", "Target Agent", diffs);
             when(structuralMatcher.buildPreview(any(), eq("target-1"), eq(true))).thenReturn(preview);
 
-            // Return descriptor with null resource
             var descriptor = new DocumentDescriptor();
             descriptor.setResource(null);
             when(descriptorStore.readCurrentDescriptor("target-1")).thenReturn(descriptor);
 
-            var agentConfig = new AgentConfiguration();
-            agentConfig.setWorkflows(new ArrayList<>());
-            when(agentStore.readAgent("target-1", 1)).thenReturn(agentConfig);
-            when(agentStore.updateAgent(eq("target-1"), eq(1), any())).thenReturn(Response.ok().build());
+            var thrown = assertThrows(RuntimeException.class,
+                    () -> executor.executeUpgrade(source, "target-1", null, List.of("wf-1")));
 
-            URI result = executor.executeUpgrade(source, "target-1", null, List.of("wf-1")).agentUri();
-
-            assertNotNull(result);
-            assertTrue(result.toString().contains("version=2")); // 1 + 1
+            assertTrue(thrown.getMessage().contains("could not be established"),
+                    "the reason has to say the version is unknown, was: " + thrown.getMessage());
+            // Nothing is written against a guessed version.
+            verify(agentStore, never()).updateAgent(eq("target-1"), anyInt(), any());
         }
 
         @Test
-        @DisplayName("should default to 1 when readDescriptor throws exception")
+        @DisplayName("a descriptor store that fails is not taken to mean version 1")
         void exceptionDefaultsTo1() throws Exception {
             var source = createSource(List.of(), List.of());
 
@@ -1484,18 +1485,16 @@ class UpgradeExecutorTest {
             var preview = new ImportPreview("src-1", "Source Agent", "target-1", "Target Agent", diffs);
             when(structuralMatcher.buildPreview(any(), eq("target-1"), eq(true))).thenReturn(preview);
 
-            when(descriptorStore.readDescriptor(eq("target-1"), isNull()))
-                    .thenThrow(new RuntimeException("descriptor not found"));
+            when(descriptorStore.readCurrentDescriptor("target-1"))
+                    .thenThrow(new RuntimeException("descriptor store unavailable"));
 
-            var agentConfig = new AgentConfiguration();
-            agentConfig.setWorkflows(new ArrayList<>());
-            when(agentStore.readAgent("target-1", 1)).thenReturn(agentConfig);
-            when(agentStore.updateAgent(eq("target-1"), eq(1), any())).thenReturn(Response.ok().build());
+            var thrown = assertThrows(RuntimeException.class,
+                    () -> executor.executeUpgrade(source, "target-1", null, List.of("wf-1")));
 
-            URI result = executor.executeUpgrade(source, "target-1", null, List.of("wf-1")).agentUri();
-
-            assertNotNull(result);
-            assertTrue(result.toString().contains("version=2"));
+            assertTrue(thrown.getMessage().contains("could not be established"),
+                    "the reason has to say the version is unknown, was: " + thrown.getMessage());
+            // Nothing is written against a guessed version.
+            verify(agentStore, never()).updateAgent(eq("target-1"), anyInt(), any());
         }
     }
 

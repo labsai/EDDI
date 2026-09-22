@@ -20,8 +20,10 @@ import ai.labs.eddi.configs.llm.IRestLlmStore;
 import ai.labs.eddi.configs.snippets.IRestPromptSnippetStore;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
+import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import jakarta.enterprise.inject.Instance;
 import jakarta.enterprise.inject.spi.CDI;
@@ -140,11 +142,50 @@ class UpgradeExecutorDescriptorTest {
         UpgradeResult result = withLlmStoreInCdi(() -> executor.executeUpgrade(sourceWithOneLlm(), AGENT_ID, null, null));
 
         assertFalse(result.failures().isEmpty(), "a resource nothing can load must be reported");
+        // The workflow still counts — its own descriptor moved — but the extension
+        // whose descriptor did not must not: it was written and not delivered, and
+        // counting it says the sync did something it did not.
+        assertEquals(1, result.updated(),
+                "only the workflow should count, not the extension nothing can resolve");
         assertTrue(result.failures().stream()
                 .anyMatch(f -> LLM_ID.equals(f.sourceId()) || "langchain".equals(f.resourceType())),
                 "the failure should name the resource, got: " + result.failures());
         assertTrue(result.failures().getFirst().reason().contains("descriptor"),
                 "the reason should say what is wrong, got: " + result.failures().getFirst().reason());
+    }
+
+    @Test
+    @DisplayName("a target ahead of its descriptor heals instead of wedging")
+    void healsWhenTheStoreIsAheadOfTheDescriptor() throws Exception {
+        // The state a failed descriptor write leaves behind: the resource is at v3,
+        // its descriptor still names v2. Version resolution reads the descriptor, so
+        // the sync plans a write against v2 — which the store refuses with a 409
+        // naming the real current version. Without acting on that, every later sync
+        // reports "the store did not accept the update" for ever.
+        givenTargetAt(3);
+        when(llmStore.updateLlm(eq(LLM_ID), eq(2), any()))
+                .thenThrow(RestUtilities.createConflictException(
+                        "eddi://ai.labs.llm/llmstore/llms/",
+                        new IResourceId() {
+                            @Override
+                            public String getId() {
+                                return LLM_ID;
+                            }
+
+                            @Override
+                            public Integer getVersion() {
+                                return 3;
+                            }
+                        }));
+        when(llmStore.updateLlm(eq(LLM_ID), eq(3), any())).thenReturn(Response.ok().build());
+
+        UpgradeResult result = withLlmStoreInCdi(() -> executor.executeUpgrade(sourceWithOneLlm(), AGENT_ID, null, null));
+
+        assertTrue(result.failures().isEmpty(),
+                "the retry should have carried the write, got: " + result.failures());
+        verify(llmStore).updateLlm(eq(LLM_ID), eq(3), any());
+        // And the descriptor is moved from the version that was actually written.
+        assertDescriptorMovedTo(LLM_ID, 3, 4);
     }
 
     // ==================== Fixtures ====================

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -1024,6 +1025,11 @@ class RestImportServiceUncoveredBranchTest {
      * a null into one.
      */
     private static Object defaultValueFor(Class<?> type) {
+        if (type == Optional.class) {
+            // An absent optional, not a null one: the constructor unwraps it, so a
+            // null here is an NPE before the instance exists.
+            return Optional.empty();
+        }
         if (!type.isPrimitive()) {
             return null;
         }
@@ -1031,7 +1037,10 @@ class RestImportServiceUncoveredBranchTest {
             return false;
         }
         if (type == char.class) {
-            return ' ';
+            // (char) 0 rather than a '\u0000' literal: the formatter decodes the escape
+            // into a real NUL byte, which makes git treat the file as binary and stop
+            // normalising its line endings.
+            return (char) 0;
         }
         if (type == long.class) {
             return 0L;

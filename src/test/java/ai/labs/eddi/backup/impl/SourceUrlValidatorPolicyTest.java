@@ -28,7 +28,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @DisplayName("SourceUrlValidator — configurable policy")
 class SourceUrlValidatorPolicyTest {
 
-    private static final String PUBLIC_HTTP = "http://example.com:7070";
+    /**
+     * TEST-NET-3 (RFC 5737), not a name: the address checks resolve the host, and a
+     * DNS lookup in a unit test is a dependency on the network this suite must not
+     * have. It is not a private address, so the policy treats it as any public one.
+     */
+    private static final String PUBLIC_HTTP = "http://203.0.113.10:7070";
     private static final String PRIVATE_HTTPS = "https://10.0.0.5:7443";
 
     @Nested
@@ -116,6 +121,17 @@ class SourceUrlValidatorPolicyTest {
         }
 
         @Test
+        @DisplayName("the scheme's default port is the same origin as none at all")
+        void defaultPortIsTheSameOrigin() {
+            // An operator who writes one form and is refused for the other has no way
+            // to tell why, and both name the same host.
+            assertDoesNotThrow(() -> SourceUrlValidator.validate("https://10.0.0.5:443",
+                    new SyncSourcePolicy(true, false, Set.of("https://10.0.0.5"))));
+            assertDoesNotThrow(() -> SourceUrlValidator.validate("http://10.0.0.5",
+                    new SyncSourcePolicy(true, false, Set.of("http://10.0.0.5:80"))));
+        }
+
+        @Test
         @DisplayName("a different port is a different origin and is still refused")
         void portIsPartOfTheOrigin() {
             assertThrows(IllegalArgumentException.class,
@@ -134,8 +150,8 @@ class SourceUrlValidatorPolicyTest {
         @Test
         @DisplayName("case and surrounding whitespace do not decide whether an origin matches")
         void originComparisonIsNormalized() {
-            assertDoesNotThrow(() -> SourceUrlValidator.validate("https://Staging.Example.COM",
-                    new SyncSourcePolicy(true, false, Set.of("  HTTPS://staging.example.com  "))));
+            assertDoesNotThrow(() -> SourceUrlValidator.validate("https://203.0.113.10",
+                    new SyncSourcePolicy(true, false, Set.of("  HTTPS://203.0.113.10  "))));
         }
     }
 

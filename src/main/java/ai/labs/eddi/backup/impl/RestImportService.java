@@ -1541,7 +1541,37 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             LOGGER.warn("Created snippet carries no resource URI — it cannot be rolled back if the import fails");
             return;
         }
-        transaction.recordCreated(IPromptSnippetStore.class, RestUtilities.extractResourceId(URI.create(createdUri)));
+        IResourceId resourceId = RestUtilities.extractResourceId(URI.create(createdUri));
+        transaction.recordCreated(IPromptSnippetStore.class, resourceId);
+        writeSnippetDescriptor(resourceId, URI.create(createdUri));
+    }
+
+    /**
+     * Writes the descriptor for a snippet an import created.
+     * <p>
+     * An import creates through the store in-process, so
+     * {@code DocumentDescriptorFilter} never runs, and for a snippet that is not
+     * cosmetic: {@code PromptSnippetService} enumerates snippets <em>by
+     * descriptor</em>, so a snippet without one never resolves in a template, and
+     * the matcher lists them the same way, so the next import offers the same
+     * snippet as new and writes another copy.
+     * <p>
+     * A failure here is logged rather than thrown: the snippet itself landed, the
+     * import's other resources are fine, and rolling the whole archive back over
+     * bookkeeping would be a worse outcome than a snippet the operator has to
+     * re-save.
+     */
+    private void writeSnippetDescriptor(IResourceId resourceId, URI resourceUri) {
+        if (resourceId == null || resourceId.getId() == null) {
+            return;
+        }
+        try {
+            documentDescriptorStore.createDescriptor(resourceId.getId(), resourceId.getVersion(),
+                    resourceAccessGuard.stampNewDescriptor(createDocumentDescriptor(resourceUri)));
+        } catch (Exception e) {
+            LOGGER.warnf("Imported snippet %s has no descriptor, so it will not resolve in templates: %s",
+                    LogSanitizer.sanitize(resourceId.getId()), LogSanitizer.sanitize(e.getMessage()));
+        }
     }
 
     /**
@@ -2656,7 +2686,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         } catch (Exception e) {
             LOGGER.errorf("Failed to list remote agents from %s: %s",
                     LogSanitizer.sanitize(sourceUrl), LogSanitizer.sanitize(e.getMessage()));
-            throw new InternalServerErrorException("Failed to connect to remote instance: " + e.getMessage(), e);
+            throw syncFailure("Could not list agents on " + sourceUrl, e);
         }
     }
 
@@ -2672,7 +2702,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         } catch (Exception e) {
             LOGGER.errorf(e, "Sync preview failed for agent %s from %s",
                     LogSanitizer.sanitize(sourceAgentId), LogSanitizer.sanitize(sourceUrl));
-            throw new InternalServerErrorException("Sync preview failed: " + e.getMessage(), e);
+            throw syncFailure("Sync preview failed", e);
         }
     }
 
@@ -2724,7 +2754,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         } catch (Exception e) {
             LOGGER.errorf(e, "Sync execution failed for agent %s from %s",
                     LogSanitizer.sanitize(sourceAgentId), LogSanitizer.sanitize(sourceUrl));
-            throw new InternalServerErrorException("Sync failed: " + e.getMessage(), e);
+            throw syncFailure("Sync failed", e);
         }
     }
 
@@ -2742,6 +2772,13 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      * <p>
      * Routing it through the archive importer rather than writing a second create
      * path is deliberate — see {@link RemoteApiResourceSource#exportAgentArchive}.
+     * <p>
+     * {@code workflowOrder} has no meaning here and is not taken: it reorders an
+     * existing agent's workflow list, and a created agent's order is the source's
+     * own. {@code selectedResources} is passed on but reaches only the archive's
+     * schedules: {@code createOrUpdateResources} creates every config in a create,
+     * by design — an agent missing the extensions its workflow references would not
+     * run. To promote part of an agent, sync onto an existing one.
      *
      * @return what landed, in the same shape a sync onto an existing agent answers
      */
@@ -2755,8 +2792,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             metrics.upgradeFailed();
             LOGGER.errorf(e, "Could not fetch agent %s from %s for a first-time sync",
                     LogSanitizer.sanitize(sourceAgentId), LogSanitizer.sanitize(sourceUrl));
-            throw new InternalServerErrorException("Sync failed: the source instance could not supply agent "
-                    + sourceAgentId + ": " + e.getMessage(), e);
+            throw syncFailure("The source instance could not supply agent " + sourceAgentId, e);
         }
 
         File targetDir = new File(FileUtilities.buildPath(tmpPath.toString(), UUID.randomUUID().toString()));
@@ -2778,8 +2814,57 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             metrics.upgradeFailed();
             LOGGER.errorf(e, "First-time sync of agent %s from %s failed",
                     LogSanitizer.sanitize(sourceAgentId), LogSanitizer.sanitize(sourceUrl));
-            throw new InternalServerErrorException("Sync failed: " + e.getMessage(), e);
+            throw syncFailure("Sync failed", e);
         }
+    }
+
+    /**
+     * A sync failure the caller can read.
+     * <p>
+     * Two things had to change here. These used to be an
+     * {@code InternalServerErrorException}, which Quarkus answers with <b>an empty
+     * 500</b> — the message never left the JVM, so the commonest thing that goes
+     * wrong with a sync, a source that is down or addressed wrongly, reached the
+     * operator as "Internal Server Error" and nothing else. And every failure got
+     * the same status, so "the other instance is unreachable" and "this instance
+     * could not write" were indistinguishable.
+     * <p>
+     * A {@link RemoteApiResourceSource.RemoteReadException} anywhere in the cause
+     * chain means the source could not be read: {@code 502 Bad Gateway}, because
+     * this deployment is fine and the one it was told to read is not. Anything else
+     * is this deployment's own failure and stays a {@code 500} — with a body.
+     */
+    private WebApplicationException syncFailure(String what, Exception cause) {
+        String reason = cause.getMessage() == null || cause.getMessage().isBlank()
+                ? cause.getClass().getSimpleName()
+                : cause.getMessage();
+        Response.Status status = causedByRemoteRead(cause)
+                ? Response.Status.BAD_GATEWAY
+                : Response.Status.INTERNAL_SERVER_ERROR;
+        // The message is set explicitly as well as the entity: a batch records
+        // getMessage() per row, and the Response-only constructor derives that from
+        // the status ("HTTP 502 Bad Gateway"), which is exactly the row where the
+        // reason matters most.
+        return new WebApplicationException(what + ": " + reason,
+                Response.status(status)
+                        .entity(Map.of("error", what + ": " + reason))
+                        .type(MediaType.APPLICATION_JSON)
+                        .build());
+    }
+
+    /**
+     * Whether this failure, or anything that caused it, was a failed remote read.
+     */
+    private static boolean causedByRemoteRead(Throwable failure) {
+        for (Throwable current = failure; current != null; current = current.getCause()) {
+            if (current instanceof RemoteApiResourceSource.RemoteReadException) {
+                return true;
+            }
+            if (current.getCause() == current) {
+                break;
+            }
+        }
+        return false;
     }
 
     /**
@@ -2799,12 +2884,17 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     }
 
     /**
-     * How many configuration documents an archive carries — what a create sync
+     * How many configuration documents the archive carried — what a create sync
      * reports as {@code created}.
      * <p>
      * Descriptors are not counted: they are bookkeeping for the documents beside
      * them, and counting both would report twice the number of resources the
-     * operator previewed.
+     * operator previewed. This counts what the archive <em>carried</em> rather than
+     * what the import wrote, and the two differ for the documents an import may
+     * legitimately skip — a connection whose name already exists here, a snippet
+     * already present under the same name, a schedule the selection left out. The
+     * importer reports those skips in its own headers; the number here is the size
+     * of the promotion, not a per-document receipt.
      */
     private int countImportedDocuments(byte[] archive) {
         int count = 0;

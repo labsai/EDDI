@@ -169,6 +169,14 @@ the status code — checking `response.ok` alone reports a half-applied sync as 
 | `201 Created` | Everything landed and something was written. |
 | `207 Multi-Status` | **Partially applied** — `failures[]` in the body names every resource that could not be written. |
 
+Two failures are reported apart from those, because they are not this instance's
+fault and the operator can act on both:
+
+| Status | Meaning |
+|--------|---------|
+| `400 Bad Request` | The source URL is malformed, or this deployment's policy refuses it. The body names the setting that would allow it — see [Reaching the source instance](#reaching-the-source-instance) |
+| `502 Bad Gateway` | The source instance could not be read: down, addressed wrongly, or refusing the token. The body carries the underlying reason |
+
 The body of a single sync is an `UpgradeResult`:
 
 ```json
@@ -272,6 +280,31 @@ Agent Sync uses **structural matching** — not ID matching — to pair source a
 - **Secret scrubbing:** API keys and vault references are **never** transferred. The target instance uses its own secrets — and a value the source scrubbed is put back from the target's own configuration before anything is compared or written, so a credential neither leaks nor gets overwritten with a placeholder, and a config that differs *only* by the placeholder still counts as unchanged
 - **SSRF protection:** The remote URL is validated against this deployment's policy — HTTPS-only and no private address by default, relaxed per [Reaching the source instance](#reaching-the-source-instance) — and redirects are never followed, so a 3xx from the source surfaces as a failed read rather than re-sending the bearer token elsewhere. On a first promotion, the `Location` the source's export answers with is not followed either: only the archive's file name is taken from it, and the download goes to the already-approved base URL
 - **New extensions are refused, not orphaned:** an extension the target workflow has no step for cannot be referenced once written, so it is reported in `failures[]` instead of being created as an unreferenced resource. Add the step to the target workflow (or import the source workflow as a new one) and sync again
+
+## What a promotion does not carry
+
+Two things travel as references rather than as content, and the target has to
+supply them itself. Neither is reported by the sync — check both after a first
+promotion.
+
+**Secrets.** An API key is stored as a vault reference (`${vault:<name>}`), and
+the reference is what travels: the value never leaves the source instance, by
+design. A promoted agent therefore carries a reference to a vault entry the
+target may not have, and the first LLM call fails when it does not. Create the
+entry on the target under the same name — `POST /secretstore/secrets/{tenantId}/{keyName}`
+— or edit the promoted config to name one it already has. An agent that is
+*updated* rather than created keeps its own value: the export scrubber replaces
+the credential with a placeholder and the target's own value is put back before
+anything is compared or written, so a sync never overwrites a working key with a
+placeholder.
+
+**Parser configurations.** `ai.labs.parser` is not in the backup registry
+(`AbstractBackupService`'s `*_EXT` constants), so neither an export nor a sync
+carries one, and a promoted agent's parser step keeps the reference it had on the
+source. The agent still deploys — the missing config is tolerated — but a parser
+customised on the source runs with defaults on the target. This is a gap in the
+backup subsystem rather than in sync: `strategy=create` and `strategy=merge` have
+always behaved the same way.
 
 ## Upgrade Strategy (ZIP Import)
 

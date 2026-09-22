@@ -24,6 +24,8 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Reads agent resource data from a remote EDDI instance's REST API. Produces
@@ -65,7 +67,20 @@ public class RemoteApiResourceSource implements IResourceSource {
      * timeout that a single JSON document is sized for.
      */
     private static final Duration ARCHIVE_DOWNLOAD_TIMEOUT = Duration.ofMinutes(5);
+
+    /**
+     * The largest export archive a first-time sync will take from a remote.
+     * <p>
+     * The body is read into memory before it is imported, so without a bound a
+     * source that is compromised — or simply wrong about what it is serving —
+     * decides how much heap this instance allocates. 256 MB is far above any real
+     * agent archive (a large one is single-digit MB) and far below a heap.
+     */
+    private static final long MAX_ARCHIVE_BYTES = 256L * 1024 * 1024;
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
+
+    /** The {@code "resource": "eddi://…"} field of a descriptor listing entry. */
+    private static final Pattern RESOURCE_FIELD = Pattern.compile("\"resource\"\s*:\s*\"([^\"]+)\"");
 
     private final String baseUrl;
     private final String agentId;
@@ -181,7 +196,7 @@ public class RemoteApiResourceSource implements IResourceSource {
             agentData = new AgentSourceData(agentId, agentName, config);
             return agentData;
         } catch (Exception e) {
-            throw new RuntimeException("Failed to read agent from remote instance " + baseUrl + ": " + e.getMessage(), e);
+            throw new RemoteReadException("Failed to read agent from remote instance " + baseUrl + ": " + e.getMessage(), e);
         }
     }
 
@@ -199,7 +214,7 @@ public class RemoteApiResourceSource implements IResourceSource {
                 // Per-workflow failures are tolerated, a cancellation is not: carrying on
                 // would keep hitting the remote instance after the thread was asked to stop
                 // and report a truncated read as a complete one.
-                throw new RuntimeException("Interrupted while reading workflows from remote " + baseUrl);
+                throw new RemoteReadException("Interrupted while reading workflows from remote " + baseUrl);
             }
             try {
                 WorkflowSourceData wfData = readSingleWorkflow(workflowUris.get(i), i);
@@ -354,7 +369,7 @@ public class RemoteApiResourceSource implements IResourceSource {
 
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() != 200) {
-                throw new RuntimeException("Remote instance returned status " + response.statusCode());
+                throw new RemoteReadException("Remote instance returned status " + response.statusCode());
             }
 
             DocumentDescriptor[] descriptors = jsonSerialization.deserialize(
@@ -365,9 +380,9 @@ public class RemoteApiResourceSource implements IResourceSource {
             // asked this thread to stop, and a lost flag means the next blocking call
             // simply carries on.
             Thread.currentThread().interrupt();
-            throw new RuntimeException("Interrupted while listing agents from remote instance " + baseUrl, e);
+            throw new RemoteReadException("Interrupted while listing agents from remote instance " + baseUrl, e);
         } catch (Exception e) {
-            throw new RuntimeException("Failed to list agents from remote instance " + baseUrl + ": " + e.getMessage(), e);
+            throw new RemoteReadException("Failed to list agents from remote instance " + baseUrl + ": " + e.getMessage(), e);
         }
     }
 
@@ -398,8 +413,15 @@ public class RemoteApiResourceSource implements IResourceSource {
         URI baseUri = URI.create(normalized.endsWith("/") ? normalized : normalized + "/");
 
         try (HttpClient client = configure(HttpClient.newBuilder()).build()) {
-            String exportPath = "backup/export/" + encodePathSegment(agentId)
-                    + (agentVersion != null ? "?agentVersion=" + agentVersion : "");
+            // The version is always stated. The remote's export defaults it to 1
+            // (@DefaultValue("1") on IRestExportService.exportAgent), so omitting it
+            // for "latest" — which is what the API documents a null version as, and
+            // what the preview resolves it to — would quietly promote the agent's
+            // OLDEST configuration while the preview showed its newest.
+            int version = agentVersion != null
+                    ? agentVersion
+                    : latestAgentVersion(client, baseUri, agentId, authToken);
+            String exportPath = "backup/export/" + encodePathSegment(agentId) + "?agentVersion=" + version;
 
             // codeql[java/ssrf] False Positive: connecting to the operator-approved
             // remote EDDI instance is the feature
@@ -409,13 +431,13 @@ public class RemoteApiResourceSource implements IResourceSource {
                     HttpResponse.BodyHandlers.discarding());
 
             if (exportResponse.statusCode() < 200 || exportResponse.statusCode() >= 300) {
-                throw new RuntimeException("Remote instance refused to export agent " + agentId
+                throw new RemoteReadException("Remote instance refused to export agent " + agentId
                         + " (status " + exportResponse.statusCode() + ")");
             }
 
             String archiveName = archiveNameFrom(exportResponse.headers().firstValue("Location").orElse(null));
             if (archiveName == null) {
-                throw new RuntimeException("Remote instance exported agent " + agentId
+                throw new RemoteReadException("Remote instance exported agent " + agentId
                         + " but named no archive to download");
             }
 
@@ -427,22 +449,89 @@ public class RemoteApiResourceSource implements IResourceSource {
                     HttpResponse.BodyHandlers.ofByteArray());
 
             if (download.statusCode() != 200) {
-                throw new RuntimeException("Could not download the exported archive for agent " + agentId
+                throw new RemoteReadException("Could not download the exported archive for agent " + agentId
                         + " (status " + download.statusCode() + ")");
+            }
+            long declared = download.headers().firstValueAsLong("Content-Length").orElse(-1);
+            if (declared > MAX_ARCHIVE_BYTES) {
+                throw new RemoteReadException("The exported archive for agent " + agentId + " is "
+                        + declared + " bytes, more than this instance will import (" + MAX_ARCHIVE_BYTES + ")");
             }
             byte[] body = download.body();
             if (body == null || body.length == 0) {
-                throw new RuntimeException("The exported archive for agent " + agentId + " came back empty");
+                throw new RemoteReadException("The exported archive for agent " + agentId + " came back empty");
+            }
+            if (body.length > MAX_ARCHIVE_BYTES) {
+                // A remote that declared no length, or lied about it.
+                throw new RemoteReadException("The exported archive for agent " + agentId + " is "
+                        + body.length + " bytes, more than this instance will import (" + MAX_ARCHIVE_BYTES + ")");
             }
             return body;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new RuntimeException("Interrupted while exporting agent " + agentId + " from " + baseUrl, e);
+            throw new RemoteReadException("Interrupted while exporting agent " + agentId + " from " + baseUrl, e);
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {
-            throw new RuntimeException("Failed to export agent " + agentId + " from " + baseUrl + ": " + e.getMessage(), e);
+            throw new RemoteReadException("Failed to export agent " + agentId + " from " + baseUrl + ": " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * The version the remote instance's descriptor says an agent is currently at.
+     * <p>
+     * The static export path cannot use the instance method
+     * {@code resolveLatestAgentVersion}, and must not guess: see the call site for
+     * what guessing cost.
+     */
+    private static int latestAgentVersion(HttpClient client, URI baseUri, String agentId, String authToken) {
+        try {
+            // codeql[java/ssrf] False Positive: the operator-approved remote instance
+            HttpResponse<String> response = client.send(
+                    authorized(HttpRequest.newBuilder()
+                            .uri(baseUri.resolve("agentstore/agents/descriptors?index=0&limit=0"))
+                            .timeout(REQUEST_TIMEOUT)
+                            .header("Accept", "application/json"), authToken).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() != 200) {
+                throw new RemoteReadException("Could not list agents on " + baseUri
+                        + " to find the latest version of " + agentId + " (status " + response.statusCode() + ")");
+            }
+            for (String resource : agentResourceUris(response.body())) {
+                IResourceId resourceId = RestUtilities.extractResourceId(URI.create(resource));
+                if (resourceId != null && agentId.equals(resourceId.getId())) {
+                    return resourceId.getVersion();
+                }
+            }
+            throw new RemoteReadException("Remote instance " + baseUri + " has no agent " + agentId);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RemoteReadException("Interrupted while resolving the latest version of agent " + agentId, e);
+        } catch (RemoteReadException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RemoteReadException("Could not determine the latest version of agent " + agentId
+                    + " on " + baseUri + ": " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * The {@code resource} URI of every descriptor in a listing.
+     * <p>
+     * Read with a regex rather than the serializer because this path is static and
+     * has no {@link IJsonSerialization} to hand — and because all it needs is the
+     * one field.
+     */
+    private static List<String> agentResourceUris(String descriptorsJson) {
+        List<String> uris = new ArrayList<>();
+        if (descriptorsJson == null) {
+            return uris;
+        }
+        Matcher matcher = RESOURCE_FIELD.matcher(descriptorsJson);
+        while (matcher.find()) {
+            uris.add(matcher.group(1));
+        }
+        return uris;
     }
 
     /**
@@ -555,7 +644,7 @@ public class RemoteApiResourceSource implements IResourceSource {
             String json = httpGet("/agentstore/agents/descriptors?index=0&limit=0");
             descriptors = jsonSerialization.deserialize(json, DocumentDescriptor[].class);
         } catch (Exception e) {
-            throw new RuntimeException("Could not determine the latest version of agent " + agentId
+            throw new RemoteReadException("Could not determine the latest version of agent " + agentId
                     + " on " + baseUrl + ": " + e.getMessage(), e);
         }
 
@@ -643,7 +732,7 @@ public class RemoteApiResourceSource implements IResourceSource {
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
             if (response.statusCode() != 200) {
-                throw new RuntimeException("Remote " + baseUrl + path + " returned status " + response.statusCode());
+                throw new RemoteReadException("Remote " + baseUrl + path + " returned status " + response.statusCode());
             }
 
             return response.body();
@@ -652,9 +741,9 @@ public class RemoteApiResourceSource implements IResourceSource {
             // failures and carries on, so a swallowed interrupt meant a cancelled or
             // shutting-down batch sync kept issuing HTTP calls to the remote instance.
             Thread.currentThread().interrupt();
-            throw new RuntimeException("Interrupted while reading " + baseUrl + path, e);
+            throw new RemoteReadException("Interrupted while reading " + baseUrl + path, e);
         } catch (IOException e) {
-            throw new RuntimeException("Failed to connect to remote " + baseUrl + path + ": " + e.getMessage(), e);
+            throw new RemoteReadException("Failed to connect to remote " + baseUrl + path + ": " + e.getMessage(), e);
         }
     }
 
@@ -678,5 +767,25 @@ public class RemoteApiResourceSource implements IResourceSource {
         }
 
         return normalized;
+    }
+
+    /**
+     * A failure to read the <em>other</em> instance.
+     * <p>
+     * Every failure this class raises is one: unreachable, refusing the token,
+     * answering a status or a body that cannot be used. Naming the category lets
+     * the endpoints answer {@code 502 Bad Gateway} for it and keep {@code 500} for
+     * what this deployment itself got wrong — a distinction an operator needs and a
+     * single {@code RuntimeException} could not carry.
+     */
+    public static class RemoteReadException extends RuntimeException {
+
+        public RemoteReadException(String message) {
+            super(message);
+        }
+
+        public RemoteReadException(String message, Throwable cause) {
+            super(message, cause);
+        }
     }
 }

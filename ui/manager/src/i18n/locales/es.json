@@ -2973,7 +2973,8 @@
     "autoMatched": "Correspondencia automática",
     "previewFirst": "Vista previa de los cambios antes de sincronizar",
     "syncPartial": "Sincronización incompleta: algunos recursos no se escribieron",
-    "syncIdentical": "Ya está actualizado: nada que escribir"
+    "syncIdentical": "Ya está actualizado: nada que escribir",
+    "previewFailed": "Error en la vista previa"
   },
   "sync": {
     "actionCreate": "Nuevo",
