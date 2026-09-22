@@ -341,11 +341,14 @@ export function buildDigest(
   // has not reached yet show members as having already spoken in them. The
   // backend records exactly where the current round starts for this reason.
   //
-  // Only applied to the persisted document: the live stream's transcript is
-  // already this round's, since a continue-stream starts from the round
-  // boundary.
-  const roundStart =
-    !isLive && conversation?.transcript === wholeTranscript ? (conversation?.roundStartTranscriptIndex ?? 0) : 0;
+  // A live continuation needs this just as much: `continueStream` deliberately
+  // PRESERVES the previous rounds and `group_start` appends the new question,
+  // so the stream's own `roundStartIndex` is the boundary while streaming.
+  const roundStart = isLive
+    ? (streamState?.roundStartIndex ?? 0)
+    : conversation?.transcript === wholeTranscript
+      ? (conversation?.roundStartTranscriptIndex ?? 0)
+      : 0;
   const transcript: TranscriptEntry[] =
     roundStart > 0 && roundStart < wholeTranscript.length ? wholeTranscript.slice(roundStart) : wholeTranscript;
 
@@ -440,7 +443,12 @@ export function buildDigest(
     if (entry.speakerDisplayName && !displayNames[id]) displayNames[id] = entry.speakerDisplayName;
     if (STANCE_BEARING.has(entry.type) && entry.content?.trim()) newestStanceEntry.set(id, entry);
   }
-  for (const id of Object.keys(rosterDisplayNames ?? {})) {
+  // Every known member, not just the ones the optional roster prop names:
+  // `displayNames` already merges the persisted `memberDisplayNames`, which is
+  // the ONLY source the Workforce history viewer has. Reading the prop alone
+  // made a member who was silent this round vanish from the roster and the
+  // matrix entirely, instead of showing `silent`/`absent` cells.
+  for (const id of Object.keys(displayNames)) {
     if (!memberOrder.includes(id)) memberOrder.push(id);
   }
 
@@ -525,7 +533,7 @@ export function buildDigest(
   return {
     isLive,
     state,
-    question: conversation?.originalQuestion ?? null,
+    question: currentQuestion(transcript) ?? conversation?.originalQuestion ?? null,
     style: style ?? null,
     round: conversation?.round ?? 1,
     phases,
@@ -542,6 +550,23 @@ export function buildDigest(
       null,
     isEmpty: phases.length === 0 && members.length === 0,
   };
+}
+
+/**
+ * The question this round is answering.
+ *
+ * A continuation records its follow-up as a `QUESTION` entry rather than
+ * rewriting `originalQuestion` (which stays the conversation's title), so a
+ * round-2 overview headed by `originalQuestion` shows the first round's prompt
+ * above a summary of answers to a different one. The transcript handed in is
+ * already sliced to the current round, so its newest QUESTION is this round's.
+ */
+function currentQuestion(transcript: TranscriptEntry[]): string | null {
+  for (let i = transcript.length - 1; i >= 0; i--) {
+    const entry = transcript[i];
+    if (entry?.type === "QUESTION" && entry.content?.trim()) return entry.content.trim();
+  }
+  return null;
 }
 
 /**

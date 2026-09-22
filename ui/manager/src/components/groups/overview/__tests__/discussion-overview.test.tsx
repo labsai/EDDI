@@ -130,6 +130,31 @@ describe("DiscussionOverview", () => {
     expect(screen.getByTestId("test-extras")).toBeInTheDocument();
   });
 
+  it("shows the synthesised answer even with no structured decision", () => {
+    // Most ROUND_TABLE and PEER_REVIEW runs produce no DecisionRecord, and the
+    // callers pass only a decision card — so without this the conclusion was
+    // reachable only by switching back to the transcript.
+    const digest = digestFor("ROUND_TABLE", { synthesizedAnswer: "### Verdict\nAdopt pgvector." });
+    renderWithProviders(<DiscussionOverview digest={digest} />);
+
+    expect(screen.getByTestId("overview-synthesis")).toBeInTheDocument();
+    expect(screen.getByText("Adopt pgvector.")).toBeInTheDocument();
+  });
+
+  it("shows the decision and the synthesis together, neither replacing the other", () => {
+    const digest = digestFor("DEBATE", { synthesizedAnswer: "The reasoning." });
+    renderWithProviders(
+      <DiscussionOverview digest={digest} outcome={<div data-testid="test-outcome">verdict</div>} />,
+    );
+    expect(screen.getByTestId("test-outcome")).toBeInTheDocument();
+    expect(screen.getByTestId("overview-synthesis")).toBeInTheDocument();
+  });
+
+  it("renders no outcome band at all when there is neither", () => {
+    renderWithProviders(<DiscussionOverview digest={digestFor("ROUND_TABLE")} />);
+    expect(screen.queryByTestId("overview-synthesis")).not.toBeInTheDocument();
+  });
+
   it("invokes onSelectPhase from a phase card that has content", () => {
     const onSelectPhase = vi.fn();
     renderWithProviders(

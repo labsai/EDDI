@@ -91,6 +91,7 @@ function stream(overrides: Partial<GroupStreamState> = {}): GroupStreamState {
     artifactUpdates: [],
     memberCosts: new Map(),
     stances: new Map(),
+    roundStartIndex: 0,
     ...overrides,
   } as GroupStreamState;
 }
@@ -262,6 +263,41 @@ describe("buildDigest — continuation rounds", () => {
     expect(digest.members.map((m) => m.agentId)).toEqual([B]);
     // Round 1's ERROR must not mark round 2's cell failed.
     expect(digest.matrix[B]?.[0]?.kind).toBe("spoke");
+  });
+
+  it("slices a LIVE continuation at the stream's own boundary", () => {
+    // continueStream deliberately preserves earlier rounds and group_start
+    // appends the new question, so a live continuation needs the slice just as
+    // much as a reloaded one.
+    const live = stream({
+      roundStartIndex: 2,
+      transcript: [
+        entry(A, 0, "OPINION", "Round one."),
+        entry(A, 1, "ERROR", "round one failure"),
+        entry(A, 0, "QUESTION", "Round two question?"),
+        entry(B, 0, "OPINION", "Round two."),
+      ],
+    });
+    const digest = buildDigest(null, live, PHASES);
+
+    expect(digest.members.map((m) => m.agentId)).toEqual([B]);
+    expect(digest.matrix[B]?.[0]?.kind).toBe("spoke");
+    expect(digest.question).toBe("Round two question?");
+  });
+
+  it("shows the current round's question, not the first round's", () => {
+    const conv = conversation({
+      round: 2,
+      roundStartTranscriptIndex: 1,
+      originalQuestion: "The original question?",
+      transcript: [entry(A, 0, "OPINION", "Round one."), entry(A, 0, "QUESTION", "The follow-up?")],
+    });
+    expect(buildDigest(conv, undefined, PHASES).question).toBe("The follow-up?");
+  });
+
+  it("falls back to originalQuestion when the round carries no question entry", () => {
+    const conv = conversation({ transcript: [entry(A, 0)] });
+    expect(buildDigest(conv, undefined, PHASES).question).toBe("Should we migrate to pgvector?");
   });
 
   it("leaves a first round untouched", () => {
@@ -516,6 +552,22 @@ describe("buildDigest — members", () => {
     const member = buildDigest(conv, undefined, PHASES).members[0];
     expect(member?.hasDissented).toBe(true);
     expect(member?.status).toBe("dissented");
+  });
+
+  it("keeps a member who was silent this round, from the persisted name map alone", () => {
+    // The Workforce history viewer passes no roster prop, so reading only that
+    // prop made a silent member vanish from the roster AND the matrix rather
+    // than showing silent/absent cells.
+    const conv = conversation({
+      state: "COMPLETED",
+      transcript: [entry(A, 0)],
+      memberDisplayNames: { [A]: "Architect", [B]: "Security" },
+    });
+    const digest = buildDigest(conv, undefined, PHASES);
+
+    expect(digest.members.map((m) => m.agentId)).toEqual([A, B]);
+    expect(digest.members.find((m) => m.agentId === B)?.turnCount).toBe(0);
+    expect(digest.matrix[B]?.[0]?.kind).toBe("silent");
   });
 
   it("prefers the conversation's display names over the roster's", () => {

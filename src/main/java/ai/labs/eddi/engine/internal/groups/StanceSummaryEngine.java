@@ -111,8 +111,15 @@ public final class StanceSummaryEngine {
      * @param cost
      *            USD spent producing it — {@code 0.0} for extraction, and for a
      *            summarizer whose config carries no prices
+     * @param textChanged
+     *            whether the stance's text actually differs from the one stored
+     *            before. A result can be reported with {@code false} here purely
+     *            because it cost money: {@code stance_updated} keys off this,
+     *            {@code cost_updated} keys off {@link #cost()}, and conflating them
+     *            made every paid re-summary emit a stance change that had not
+     *            happened
      */
-    public record StanceResult(String agentId, MemberStance stance, double cost) {
+    public record StanceResult(String agentId, MemberStance stance, double cost, boolean textChanged) {
     }
 
     /**
@@ -160,8 +167,11 @@ public final class StanceSummaryEngine {
         // enforceCeiling) is the right question: declining optional work is not
         // the same event as a phase running out of budget, and must not append a
         // SKIPPED entry or set the outcome flag.
-        boolean withinBudget = !GroupCostLedger.wouldExceedCeiling(gc, protocol);
-        boolean useLlm = config != null && config.hasSummarizer() && summarizationService != null && withinBudget;
+        // Re-checked per member inside the loop, not once up front: each call
+        // adds to the ledger, so a boundary that starts just under the ceiling
+        // would otherwise run the LLM for every remaining member after the
+        // first one blew it.
+        boolean summarizerAvailable = config != null && config.hasSummarizer() && summarizationService != null;
 
         var results = new ArrayList<StanceResult>();
         for (var contribution : groupBySpeaker(transcript).entrySet()) {
@@ -179,24 +189,27 @@ public final class StanceSummaryEngine {
                 continue;
             }
 
+            boolean useLlm = summarizerAvailable && !GroupCostLedger.wouldExceedCeiling(gc, protocol);
             StanceResult result = useLlm
                     ? summarize(gc, agentId, entries, covered, config, summarizationService, maxChars)
-                    : new StanceResult(agentId, extract(entries, covered, maxChars), 0.0);
+                    : new StanceResult(agentId, extract(entries, covered, maxChars), 0.0, false);
             if (result == null || result.stance() == null) {
                 continue;
             }
             // Unchanged text still counts as covered — storing the refreshed
             // count is what stops the next boundary paying to learn the same
             // thing again.
+            boolean textChanged = existing == null || !result.stance().text().equals(existing.text());
             gc.putMemberStance(agentId, result.stance());
-            // Returned whenever the text changed OR the call cost something. The
-            // cost arm is not redundant: a re-summary that lands on the same
-            // wording still bills the ledger, and reporting only text changes
-            // left that spend with no `cost_updated` frame — the live total then
-            // drifts below the ledger's, which is the drift this event exists to
-            // prevent. Callers decide which arm they are acting on.
-            if (existing == null || !result.stance().text().equals(existing.text()) || result.cost() > 0.0) {
-                results.add(result);
+            // Returned when the text changed OR the call cost something, and the
+            // result says which. The two are genuinely independent: a re-summary
+            // landing on the same wording still bills the ledger (so it needs a
+            // cost_updated frame, or the live total drifts below it), while
+            // `stance_updated` must fire only on a real change, as its contract
+            // says. Collapsing them made every paid re-summary emit a spurious
+            // stance_updated.
+            if (textChanged || result.cost() > 0.0) {
+                results.add(new StanceResult(result.agentId(), result.stance(), result.cost(), textChanged));
             }
         }
         return results;
@@ -226,16 +239,16 @@ public final class StanceSummaryEngine {
             if (text == null) {
                 LOGGER.warnf("Group %s: stance summarization returned nothing for member %s — extracting instead",
                         LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(agentId));
-                return new StanceResult(agentId, extract(entries, coverage, maxChars), 0.0);
+                return new StanceResult(agentId, extract(entries, coverage, maxChars), 0.0, false);
             }
             double cost = TokenPricing.cost(config.inputPricePer1M(), config.outputPricePer1M(),
                     Map.of("inputTokens", result.inputTokens(), "outputTokens", result.outputTokens()));
             GroupCostLedger.recordSystemCost(gc, "system:stance:" + agentId + ":" + coverage, cost);
-            return new StanceResult(agentId, new MemberStance(text, coverage, true, Instant.now()), cost);
+            return new StanceResult(agentId, new MemberStance(text, coverage, true, Instant.now()), cost, false);
         } catch (Exception e) {
             LOGGER.warnf("Group %s: stance summarization failed for member %s (%s) — extracting instead",
                     LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(agentId), e.getMessage());
-            return new StanceResult(agentId, extract(entries, coverage, maxChars), 0.0);
+            return new StanceResult(agentId, extract(entries, coverage, maxChars), 0.0, false);
         }
     }
 
@@ -357,8 +370,13 @@ public final class StanceSummaryEngine {
             return text;
         }
         // maxChars is the hard cap INCLUDING the ellipsis — a caller that sized a
-        // layout to maxChars must not be handed maxChars + 1.
-        String cut = text.substring(0, Math.max(1, maxChars - 1));
+        // layout to maxChars must not be handed maxChars + 1. At a cap of 1
+        // there is no room for both a character and the ellipsis, so the
+        // ellipsis alone is the only truncation that honours it.
+        if (maxChars == 1) {
+            return "…";
+        }
+        String cut = text.substring(0, maxChars - 1);
         int lastSpace = cut.lastIndexOf(' ');
         if (lastSpace > maxChars / 2) {
             cut = cut.substring(0, lastSpace);

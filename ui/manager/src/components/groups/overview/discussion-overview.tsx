@@ -1,6 +1,8 @@
 import { type ReactNode, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CircleDollarSign, Layers, MessageSquare, Users } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Badge } from "@/components/ui/badge";
 import { cn, formatDuration, formatUsd } from "@/lib/utils";
 import { styleDisplay } from "@/lib/discussion-styles";
@@ -75,7 +77,17 @@ export function DiscussionOverview({
   const band = (name: OverviewBand): ReactNode => {
     switch (name) {
       case "outcome":
-        return outcome ? <div key="outcome">{outcome}</div> : null;
+        // The synthesised answer belongs here, not only in the transcript. A
+        // completed discussion that produced no STRUCTURED decision (most
+        // ROUND_TABLE and PEER_REVIEW runs) otherwise showed no conclusion at
+        // all in Overview — the one thing the reader came for was reachable
+        // only by switching back.
+        return outcome || digest.synthesizedAnswer ? (
+          <div key="outcome" className="space-y-3">
+            {outcome}
+            {digest.synthesizedAnswer && <SynthesisCard answer={digest.synthesizedAnswer} />}
+          </div>
+        ) : null;
       case "phases":
         return <PhaseRail key="phases" phases={digest.phases} onSelectPhase={onSelectPhase} />;
       case "roster":
@@ -100,6 +112,30 @@ export function DiscussionOverview({
       <OverviewHeadline digest={digest} />
       {bandOrder(digest.style).map((name) => band(name))}
     </div>
+  );
+}
+
+/**
+ * The synthesised answer, rendered as Markdown.
+ *
+ * Shown alongside a structured decision rather than instead of it: the decision
+ * card carries the tally and the minority report, the synthesis carries the
+ * reasoning, and neither substitutes for the other.
+ */
+function SynthesisCard({ answer }: { answer: string }) {
+  const { t } = useTranslation();
+  return (
+    <section
+      className="rounded-lg border border-primary/30 bg-primary/5 p-3"
+      data-testid="overview-synthesis"
+    >
+      <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-primary">
+        {t("groups.overview.synthesis", "Conclusion")}
+      </h3>
+      <div className="prose prose-sm dark:prose-invert max-w-none text-sm text-foreground">
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{answer}</ReactMarkdown>
+      </div>
+    </section>
   );
 }
 

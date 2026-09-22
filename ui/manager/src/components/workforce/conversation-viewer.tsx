@@ -772,7 +772,20 @@ function ConversationViewer({
         // transcript instead, so the rail shows the phases that ran — only
         // phases never reached are missing, and a finished discussion has none.
         outcome={decisionCard ?? undefined}
-        extras={<DiscussionInsights conversation={conversation} />}
+        extras={
+          <>
+            {/* The viewer renders this inside the scroll box below, which
+                Overview mode unmounts — so TASK_FORCE history would lose its
+                task board entirely. */}
+            {(conversation.taskList?.tasks?.length ?? 0) > 0 && (
+              <PersistedTaskBoard
+                taskList={conversation.taskList!}
+                memberDisplayNames={conversation.memberDisplayNames}
+              />
+            )}
+            <DiscussionInsights conversation={conversation} />
+          </>
+        }
         transcript={
           <div
             ref={scrollRef}

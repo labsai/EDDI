@@ -671,11 +671,33 @@ function WorkforceBoard() {
                 ) : undefined
               }
               extras={
-                <DiscussionInsights
-                  conversation={selectedConversation}
-                  retroRecorded={isStreaming ? streamState.retroRecorded : undefined}
-                  artifactUpdates={isStreaming ? streamState.artifactUpdates : undefined}
-                />
+                <>
+                  {/* Reuses the states computed above rather than deciding
+                      again. The board normally renders these inside the
+                      transcript header, which Overview mode unmounts — so a
+                      TASK_FORCE discussion would lose the surface its style
+                      recipe puts first. */}
+                  {showPersistedTaskBoard && (
+                    <PersistedTaskBoard
+                      taskList={persistedTaskList!}
+                      memberDisplayNames={selectedConversation?.memberDisplayNames}
+                    />
+                  )}
+                  {showLiveTaskBoard && (
+                    <TaskBoard
+                      taskPlan={streamState.taskPlan}
+                      tasksInProgress={streamState.tasksInProgress}
+                      tasksCompleted={streamState.tasksCompleted}
+                      taskVerifications={streamState.taskVerifications}
+                      isStreaming={isStreaming}
+                    />
+                  )}
+                  <DiscussionInsights
+                    conversation={selectedConversation}
+                    retroRecorded={isStreaming ? streamState.retroRecorded : undefined}
+                    artifactUpdates={isStreaming ? streamState.artifactUpdates : undefined}
+                  />
+                </>
               }
               transcript={
                 <BoardTranscript

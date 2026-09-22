@@ -1175,10 +1175,15 @@ public class GroupConversationService implements IGroupConversationService {
 
                     if (listener != null) {
                         for (var stance : stanceUpdates) {
-                            listener.onStanceUpdated(new GroupConversationEventSink.StanceUpdatedEvent(
-                                    stance.agentId(), gc.getMemberDisplayNames().get(stance.agentId()),
-                                    stance.stance().text(), stance.stance().llmGenerated(),
-                                    stance.stance().coveredContributions()));
+                            // Only on a real change: a result can be here purely
+                            // because it cost money, and the event's contract
+                            // says it fires when the text changes.
+                            if (stance.textChanged()) {
+                                listener.onStanceUpdated(new GroupConversationEventSink.StanceUpdatedEvent(
+                                        stance.agentId(), gc.getMemberDisplayNames().get(stance.agentId()),
+                                        stance.stance().text(), stance.stance().llmGenerated(),
+                                        stance.stance().coveredContributions()));
+                            }
                             // A priced stance call is discussion spend like any
                             // other, so the cost band must see it too — otherwise
                             // the total the dashboard shows drifts below the

@@ -317,3 +317,87 @@ overlay back, and (backend) the per-member coverage skip and the ceiling gate.
 | 2026-09-22 | A continuation round restarts phaseIndex at 0 — slice at roundStartTranscriptIndex | Without the slice, round 1's turns render in round 2's cells and a round-1 failure marks a round-2 cell failed. Guarded by `use-discussion-digest.test.ts` "does not merge a previous round's turns into this round's phases". | EDDI Manager |
 | 2026-09-22 | The live cost map overlays the persisted one, never replaces it | A stream carries only the keys it announced this session; swapping dropped earlier rounds and unspoken members, so Continue on a $4.10 discussion showed $0.02. Guarded by "keeps persisted keys the live stream has not re-announced". | EDDI Manager |
 ```
+
+## 🐛 fix(groups): second review round — continuation rounds, missing bands, per-member ceiling (2026-09-22)
+
+**Repo:** EDDI (`feat/group-discussion-overview`)
+
+### Why
+
+A second reviewer (Copilot) found eleven further defects on the branch, clustered in three
+places the first round had touched but not finished: **continuation rounds**, **content the
+Overview simply did not render**, and the **cost ceiling**. All eleven were confirmed against
+the code before being fixed.
+
+### The ceiling and the cost/stance events
+
+- **The budget was decided once per boundary, not per member.** If the first member's call
+  pushed `totalCost` past the ceiling, every remaining member still took the LLM path — so a
+  boundary could add N paid calls after the budget was exhausted. Re-checked before each
+  member now.
+- **`stance_updated` fired when nothing had changed.** Fixing the earlier "cost with no frame"
+  bug had put cost-only results into the same list the stance event iterates, so every paid
+  re-summary announced a stance change that had not happened. `StanceResult` now carries
+  `textChanged`; the stance event keys off it and the cost event off `cost()`, because the two
+  are genuinely independent.
+- **`clean(text, 1)` returned two characters**, violating its own documented hard cap — one
+  retained character plus the ellipsis. A cap of 1 now yields the ellipsis alone.
+
+### Continuation rounds, again
+
+The first round's fix sliced the *persisted* transcript at `roundStartTranscriptIndex` but
+forced the offset to zero while live — on the assumption that a continue-stream starts at the
+round boundary. **It does not.** `continueStream` deliberately preserves `s.transcript` and the
+`group_start` handler *appends* the new question, so a live continuation carried every round in
+one array and re-created exactly the cross-round contamination the slice exists to prevent.
+`GroupStreamState` now tracks its own `roundStartIndex`, set at `group_start`.
+
+**The headline also showed the wrong question.** A continuation records its follow-up as a
+`QUESTION` entry rather than rewriting `originalQuestion` (which stays the title), so round 2+
+displayed the *first* round's prompt above a summary of answers to a different one. The digest
+now resolves the newest `QUESTION` in the current round, falling back to `originalQuestion`.
+
+### Content the Overview did not render
+
+- **No synthesised answer.** The outcome band rendered only the caller's node, and all three
+  callers pass a decision card. Most ROUND_TABLE and PEER_REVIEW runs produce no structured
+  decision — so an ordinary completed discussion showed **no conclusion at all** in Overview,
+  reachable only by switching back to the transcript. Now rendered as its own card, *alongside*
+  a decision rather than instead of it: the decision carries the tally and minority report, the
+  synthesis carries the reasoning.
+- **No task board, on any of the three surfaces.** It lives inside the transcript renderers,
+  which Overview mode unmounts — so TASK_FORCE, the one style whose recipe puts `extras`
+  first, lost its principal working surface. Added to all three `extras` nodes, reusing each
+  surface's already-computed live/persisted/placeholder state rather than deciding again.
+- **Members silent in the current round disappeared.** Roster-only members were collected from
+  the optional `rosterDisplayNames` prop alone, but the Workforce history viewer passes none —
+  so a member with no turn this round vanished from the roster *and* the matrix instead of
+  showing `silent`/`absent` cells. Now taken from the merged display-name map, which includes
+  the persisted `memberDisplayNames`.
+- **`group-detail` nulled the conversation while streaming**, copying what the transcript needs
+  — which defeated the persisted/live cost overlay the previous round had just introduced.
+  `continueStream` seeds neither its cost nor its stance map from the stored document, so a
+  continuation dropped the earlier round's spend and positions. The panel now always receives
+  the persisted document; only the transcript keeps the nulling.
+
+### Verified by running it
+
+The Overview was re-opened in the Manager's mock mode after the fixes. The Conclusion band is
+present where there was previously nothing, the matrix rows align, the moderator reads "No
+position of their own" rather than the false "has not spoken yet", and the headline's turn
+count now agrees with the rail (7, not 8 — the `QUESTION` row is excluded on both sides).
+
+### Tests
+
+Backend 748 across the group suites and repo guards; frontend 76 in the two overview suites,
+with new cases for the live round boundary, the current-round question, the silent-member
+roster entry, and the synthesis band's three states.
+
+**Files:** as above, plus
+[`use-group-discussion-stream.ts`](../../ui/manager/src/hooks/use-group-discussion-stream.ts).
+
+```regression-note
+| 2026-09-22 | A LIVE continuation keeps every round in one transcript — slice at the stream's own roundStartIndex | `continueStream` preserves `s.transcript` and `group_start` appends; assuming the live transcript was already round-scoped re-created the cross-round contamination the persisted slice prevents. Guarded by "slices a LIVE continuation at the stream's own boundary". | EDDI Manager |
+| 2026-09-22 | The I1 ceiling must be re-checked per member, not once per boundary | Each stance call adds to the ledger, so one decision up front let every member after the first spend past an exhausted budget. | EDDI |
+| 2026-09-22 | Overview mode unmounts the transcript, so anything rendered only inside it is GONE | The task board and the synthesised answer were both invisible in Overview until moved into the `extras`/`outcome` bands. Anything added to a transcript renderer in future needs the same question asked. | EDDI Manager |
+```

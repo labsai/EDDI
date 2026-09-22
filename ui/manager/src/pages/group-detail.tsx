@@ -21,6 +21,7 @@ import { useCancelGroupDiscussion, useSubmitHumanInput } from "@/hooks/use-hitl"
 import { DiscussionTranscript } from "@/components/groups/discussion-transcript";
 import { DiscussionPanel } from "@/components/groups/overview/discussion-panel";
 import { DiscussionInsights } from "@/components/groups/discussion-insights";
+import { TaskBoard, PersistedTaskBoard } from "@/components/groups/task-board";
 import { DecisionRecordCard } from "@/components/groups/decision-record-card";
 import { DiscussionInput } from "@/components/groups/discussion-input";
 import { DiscussionActions } from "@/components/groups/discussion-actions";
@@ -461,6 +462,24 @@ export function GroupDetailPage() {
   const isStreamActive = streamState.isStreaming || (streamState.state !== "CREATED" && !selectedConvId);
   // The live stream's decision while it is running, the persisted one
   // afterwards — same precedence the transcript already applies internally.
+  // The task board for the overview's `extras` band. Live plan while
+  // streaming, the stored list otherwise; null when there is neither.
+  const persistedTaskBoard =
+    isStreamActive && streamState.taskPlan ? (
+      <TaskBoard
+        taskPlan={streamState.taskPlan}
+        tasksInProgress={streamState.tasksInProgress}
+        tasksCompleted={streamState.tasksCompleted}
+        taskVerifications={streamState.taskVerifications}
+        isStreaming={streamState.isStreaming}
+      />
+    ) : (selectedConversation?.taskList?.tasks?.length ?? 0) > 0 ? (
+      <PersistedTaskBoard
+        taskList={selectedConversation!.taskList!}
+        memberDisplayNames={selectedConversation?.memberDisplayNames}
+      />
+    ) : null;
+
   const displayDecision = isStreamActive
     ? (streamState.decision ?? selectedConversation?.decision ?? null)
     : (selectedConversation?.decision ?? null);
@@ -780,7 +799,12 @@ export function GroupDetailPage() {
           <DiscussionPanel
             className="flex-1 min-h-0 overflow-hidden"
             surface="group-detail"
-            conversation={isStreamActive ? null : (selectedConversation ?? null)}
+            // The PERSISTED document, even while streaming — unlike the
+            // transcript below. The digest overlays live frames onto it per
+            // key, and `continueStream` seeds neither its cost nor its stance
+            // map from the stored document, so nulling this made a
+            // continuation drop the previous round's spend and positions.
+            conversation={selectedConversation ?? null}
             streamState={isStreamActive || showStreamFallback ? streamState : undefined}
             configPhases={safeConfig.phases}
             rosterDisplayNames={rosterDisplayNames}
@@ -791,11 +815,18 @@ export function GroupDetailPage() {
               ) : undefined
             }
             extras={
-              <DiscussionInsights
-                conversation={selectedConversation ?? null}
-                retroRecorded={isStreamActive ? streamState.retroRecorded : undefined}
-                artifactUpdates={isStreamActive ? streamState.artifactUpdates : undefined}
-              />
+              <>
+                {/* The task board lives inside DiscussionTranscript, which is
+                    unmounted in Overview mode — so without this a TASK_FORCE
+                    discussion loses the very surface the style recipe puts
+                    first. */}
+                {persistedTaskBoard}
+                <DiscussionInsights
+                  conversation={selectedConversation ?? null}
+                  retroRecorded={isStreamActive ? streamState.retroRecorded : undefined}
+                  artifactUpdates={isStreamActive ? streamState.artifactUpdates : undefined}
+                />
+              </>
             }
             transcript={
               <DiscussionTranscript

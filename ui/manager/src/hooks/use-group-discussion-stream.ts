@@ -154,6 +154,16 @@ export interface GroupStreamState {
    * Live-only; the persisted equivalent is `conversation.memberStances`.
    */
   stances: Map<string, StanceUpdatedPayload>;
+  /**
+   * Index in `transcript` where the CURRENT round's entries begin — the live
+   * counterpart of `GroupConversation.roundStartTranscriptIndex`.
+   *
+   * A continuation deliberately KEEPS the previous rounds (`continueStream`
+   * preserves `s.transcript`, and the `group_start` handler appends the new
+   * question), so anything bucketing by `phaseIndex` — which the backend
+   * restarts at 0 each round — needs this to avoid merging rounds.
+   */
+  roundStartIndex: number;
 }
 
 
@@ -183,6 +193,7 @@ const initialState: GroupStreamState = {
   artifactUpdates: [],
   memberCosts: new Map(),
   stances: new Map(),
+  roundStartIndex: 0,
 };
 
 /** A clean state with its own collection instances (the shared `initialState`
@@ -199,6 +210,7 @@ function freshState(): GroupStreamState {
     artifactUpdates: [],
     memberCosts: new Map(),
     stances: new Map(),
+    roundStartIndex: 0,
   };
 }
 
@@ -530,6 +542,11 @@ function handleSSEEvent(
           transcript: s.conversationId
             ? [...s.transcript, questionEntry]
             : [questionEntry],
+          // Where this round starts: the new question's own index for a
+          // continuation, 0 for a fresh discussion. Without it the digest
+          // buckets every round's turns into the current round's phases,
+          // because the backend restarts phaseIndex at 0 each round.
+          roundStartIndex: s.conversationId ? s.transcript.length : 0,
         }));
       } catch (e) {
         console.warn('[SSE] Failed to parse group_start event:', e);
