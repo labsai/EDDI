@@ -94,3 +94,9 @@ observed there, and carries a regression test.
   reported as "already remembered" without writing or spending budget, an update never counts
   against the cap, and the limit message tells the model not to retry in the same turn.
   [`UserMemoryTool.java`](../../src/main/java/ai/labs/eddi/modules/llm/tools/UserMemoryTool.java)
+- **Dream and the rolling summary could not select an Ollama (or Bedrock/Azure/Vertex) model.**
+  `SummarizationService` always wrote the model as `modelName`; the Ollama builder reads `model`
+  (Bedrock, HuggingFace and Vertex read `modelId`, Azure `deploymentName`), so every Dream cycle on
+  Ollama failed with `model is required`. The model now goes under the provider's key, and an
+  unset `llmModel` no longer overwrites the inherited model with `null`.
+  [`SummarizationService.java`](../../src/main/java/ai/labs/eddi/modules/llm/impl/SummarizationService.java)
