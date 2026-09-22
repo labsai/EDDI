@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal.groups;
 
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.StanceSummaryConfig;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.MemberStance;
@@ -80,6 +81,23 @@ public final class StanceSummaryEngine {
             TranscriptEntryType.PROPOSAL, TranscriptEntryType.BARGAIN, TranscriptEntryType.HUMAN_INPUT,
             TranscriptEntryType.BID, TranscriptEntryType.FOLLOW_UP, TranscriptEntryType.RETRO);
 
+    /**
+     * Stance-bearing types whose content is a <b>JSON contract</b> rather than
+     * prose — a ballot ({@code VoteTallyEngine}), a bid ({@code TaskBidEngine}),
+     * harvested lessons ({@code RetroEngine}), a task plan and its results.
+     * <p>
+     * They stay in {@link #STANCE_BEARING} because they are legitimate input for
+     * the summarizer, which can read them. They are excluded from
+     * <em>extraction</em>, because the lead "sentence" of a ballot is
+     * <code>{"choice":"pgvector","confidence":0.8,"reasoning":"It is cheaper.</code>
+     * — displayed to the reader as that member's own words. Worse, being the newest
+     * entry it would replace the member's real prose position after every VOTE or
+     * RETRO phase.
+     */
+    private static final Set<TranscriptEntryType> JSON_CONTRACT = EnumSet.of(
+            TranscriptEntryType.VOTE, TranscriptEntryType.BID, TranscriptEntryType.RETRO,
+            TranscriptEntryType.PLAN, TranscriptEntryType.TASK_RESULT, TranscriptEntryType.VERIFICATION);
+
     private StanceSummaryEngine() {
     }
 
@@ -101,14 +119,19 @@ public final class StanceSummaryEngine {
      * Recomputes stances for every member with something new to say, and writes
      * them onto {@code gc}.
      * <p>
-     * Call at phase boundaries. Members whose stored stance already covers the
-     * whole transcript are skipped, so a member silent through a phase costs
-     * nothing — that skip is the difference between one summarizer call per member
-     * per discussion and one per member per phase.
+     * Call at phase boundaries. A member whose stored stance already covers all of
+     * their own contributions is skipped, so a member who stayed silent through a
+     * phase costs nothing — that skip is the difference between one summarizer call
+     * per member per discussion and one per member per phase.
      *
      * @param config
      *            may be {@code null}, which means extraction for everyone (the
      *            documented default, not a degraded mode)
+     * @param protocol
+     *            the discussion's protocol, for the I1 cost ceiling. A blown budget
+     *            downgrades the LLM path to extraction rather than stopping the
+     *            phase — declining optional work is not the same event as running
+     *            out of budget mid-phase
      * @param summarizationService
      *            may be {@code null} (not available), which also means extraction
      * @return one result per member whose stance changed, in stable member order,
@@ -116,7 +139,7 @@ public final class StanceSummaryEngine {
      *         {@code null}
      */
     public static List<StanceResult> updateStances(GroupConversation gc, StanceSummaryConfig config,
-                                                   SummarizationService summarizationService) {
+                                                   ProtocolConfig protocol, SummarizationService summarizationService) {
         if (gc == null) {
             return List.of();
         }
@@ -129,7 +152,16 @@ public final class StanceSummaryEngine {
         }
 
         int maxChars = config != null ? config.maxChars() : StanceSummaryConfig.DEFAULT_MAX_CHARS;
-        boolean useLlm = config != null && config.hasSummarizer() && summarizationService != null;
+        // I1: the summarizer is OPTIONAL spend, so it obeys the discussion's
+        // ceiling the same way the I9 window summarizer, the convergence judge
+        // and the dissent round do. Without this gate the boundary runs one
+        // priced call per member AFTER the budget is gone and before the next
+        // phase's pre-wave check can fire. wouldExceedCeiling (not
+        // enforceCeiling) is the right question: declining optional work is not
+        // the same event as a phase running out of budget, and must not append a
+        // SKIPPED entry or set the outcome flag.
+        boolean withinBudget = !GroupCostLedger.wouldExceedCeiling(gc, protocol);
+        boolean useLlm = config != null && config.hasSummarizer() && summarizationService != null && withinBudget;
 
         var results = new ArrayList<StanceResult>();
         for (var contribution : groupBySpeaker(transcript).entrySet()) {
@@ -137,25 +169,33 @@ public final class StanceSummaryEngine {
             List<TranscriptEntry> entries = contribution.getValue();
 
             MemberStance existing = gc.getMemberStances().get(agentId);
-            // The whole transcript length, not this member's entry count: the
-            // stored index is compared against the transcript the stance was
-            // computed from, and a member who said nothing this phase has the
-            // same entries as before and therefore nothing to recompute.
-            if (existing != null && existing.upToTranscriptIndex() >= transcript.size()) {
+            // Coverage counts THIS MEMBER's own contributions, not the transcript
+            // length. Keying it to the transcript meant any member speaking
+            // invalidated every member's stance, so a 6-member discussion paid
+            // for 6 summarizer calls at every boundary and the documented
+            // "a member who stayed silent costs nothing" was never true.
+            int covered = entries.size();
+            if (existing != null && existing.coveredContributions() >= covered) {
                 continue;
             }
 
             StanceResult result = useLlm
-                    ? summarize(gc, agentId, entries, transcript.size(), config, summarizationService, maxChars)
-                    : new StanceResult(agentId, extract(entries, transcript.size(), maxChars), 0.0);
+                    ? summarize(gc, agentId, entries, covered, config, summarizationService, maxChars)
+                    : new StanceResult(agentId, extract(entries, covered, maxChars), 0.0);
             if (result == null || result.stance() == null) {
                 continue;
             }
             // Unchanged text still counts as covered — storing the refreshed
-            // index is what stops the next boundary paying to learn the same
+            // count is what stops the next boundary paying to learn the same
             // thing again.
             gc.getMemberStances().put(agentId, result.stance());
-            if (existing == null || !result.stance().text().equals(existing.text())) {
+            // Returned whenever the text changed OR the call cost something. The
+            // cost arm is not redundant: a re-summary that lands on the same
+            // wording still bills the ledger, and reporting only text changes
+            // left that spend with no `cost_updated` frame — the live total then
+            // drifts below the ledger's, which is the drift this event exists to
+            // prevent. Callers decide which arm they are acting on.
+            if (existing == null || !result.stance().text().equals(existing.text()) || result.cost() > 0.0) {
                 results.add(result);
             }
         }
@@ -206,7 +246,13 @@ public final class StanceSummaryEngine {
      */
     private static MemberStance extract(List<TranscriptEntry> entries, int coverage, int maxChars) {
         for (int i = entries.size() - 1; i >= 0; i--) {
-            String text = clean(leadSentence(entries.get(i).content()), maxChars);
+            var entry = entries.get(i);
+            // Skip the JSON-contract types and fall through to the newest prose
+            // entry, rather than quoting a ballot's opening brace at the reader.
+            if (entry.type() != null && JSON_CONTRACT.contains(entry.type())) {
+                continue;
+            }
+            String text = clean(leadSentence(entry.content()), maxChars);
             if (text != null) {
                 return new MemberStance(text, coverage, false, Instant.now());
             }
@@ -242,9 +288,20 @@ public final class StanceSummaryEngine {
             if (i + 1 < trimmed.length() && (trimmed.charAt(i + 1) == '.')) {
                 continue;
             }
-            // "e.g." / "i.e." — a single letter standing alone before the dot.
+            // An abbreviation ("e.g.", "Dr.") — a lone letter before the dot AND
+            // a lower-case continuation after it. The second half matters:
+            // without it "Weigh option B. Option A is worse." cut nothing,
+            // because the standalone B read as an abbreviation.
             if (c == '.' && i >= 1 && Character.isLetter(trimmed.charAt(i - 1))
-                    && (i == 1 || !Character.isLetterOrDigit(trimmed.charAt(i - 2)))) {
+                    && (i == 1 || !Character.isLetterOrDigit(trimmed.charAt(i - 2)))
+                    && startsLowerCase(trimmed, i + 1)) {
+                continue;
+            }
+            // A candidate sentence with no letter in it is a list marker, not a
+            // sentence. "1. We should adopt pgvector." would otherwise be shown
+            // to the reader as that member's own words, reading just "1." — and
+            // LLM replies open with a numbered list constantly.
+            if (!hasLetter(trimmed, 0, i)) {
                 continue;
             }
             int next = i + 1;
@@ -256,6 +313,26 @@ public final class StanceSummaryEngine {
             }
         }
         return trimmed;
+    }
+
+    /**
+     * Whether the next non-space character at or after {@code from} is lower case.
+     */
+    private static boolean startsLowerCase(String text, int from) {
+        int i = from;
+        while (i < text.length() && Character.isWhitespace(text.charAt(i))) {
+            i++;
+        }
+        return i < text.length() && Character.isLowerCase(text.charAt(i));
+    }
+
+    private static boolean hasLetter(String text, int fromInclusive, int toExclusive) {
+        for (int i = fromInclusive; i < toExclusive; i++) {
+            if (Character.isLetter(text.charAt(i))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

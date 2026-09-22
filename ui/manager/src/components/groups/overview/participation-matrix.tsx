@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, MessageSquare, Minus, X } from "lucide-react";
+import { AlertTriangle, Dot, MessageSquare, Minus, X } from "lucide-react";
 import type { TFunction } from "i18next";
 import { cn } from "@/lib/utils";
 import type { CellKind, DigestCell, DigestMember, DigestPhase } from "@/hooks/use-discussion-digest";
@@ -9,7 +9,6 @@ interface ParticipationMatrixProps {
   members: DigestMember[];
   matrix: Record<string, DigestCell[]>;
   anonymous?: boolean;
-  onSelectCell?: (agentId: string, phaseIndex: number) => void;
   className?: string;
 }
 
@@ -35,7 +34,6 @@ export function ParticipationMatrix({
   members,
   matrix,
   anonymous,
-  onSelectCell,
   className,
 }: ParticipationMatrixProps) {
   const { t } = useTranslation();
@@ -62,9 +60,13 @@ export function ParticipationMatrix({
         }}
       >
         <div role="row" className="contents">
-          <span role="columnheader" className="sr-only">
-            {t("groups.overview.memberColumn", "Member")}
-          </span>
+          {/* The corner cell must occupy its grid track, so it cannot be
+              `sr-only` — that is `position: absolute`, which takes the element
+              OUT of grid flow. Every row then shifted one column left and each
+              member's name landed where their last phase cell belonged.
+              An empty corner is the conventional shape for a matrix anyway; the
+              grid's accessible name lives on the section's aria-label. */}
+          <span role="columnheader" aria-label={t("groups.overview.memberColumn", "Member")} />
           {phases.map((phase) => (
             <span
               key={phase.index}
@@ -100,7 +102,6 @@ export function ParticipationMatrix({
                   cell={cells[phaseIndex] ?? { kind: "absent", entryCount: 0 }}
                   memberName={name}
                   phaseName={phase.name}
-                  onSelect={onSelectCell ? () => onSelectCell(member.agentId, phase.index) : undefined}
                 />
               ))}
             </div>
@@ -119,6 +120,9 @@ const CELL_STYLES: Record<CellKind, string> = {
   failed: "bg-destructive/15 text-destructive",
   abstained: "bg-secondary text-muted-foreground",
   pending: "border border-dashed border-primary/50",
+  // Expected and never arrived — distinguishable from `absent` at a glance,
+  // because "the run dropped this member's turn" is worth noticing.
+  silent: "border border-dotted border-border-strong bg-secondary/40 text-muted-foreground",
   absent: "bg-secondary/40",
 };
 
@@ -134,6 +138,8 @@ function cellLabel(kind: CellKind, t: TFunction): string {
       return t("groups.overview.cellAbstained", "abstained");
     case "pending":
       return t("groups.overview.cellPending", "pending");
+    case "silent":
+      return t("groups.overview.cellSilent", "expected, said nothing");
     case "absent":
       return t("groups.overview.cellAbsent", "not in this phase");
   }
@@ -149,6 +155,8 @@ function CellGlyph({ kind }: { kind: CellKind }) {
       return <X className="h-3 w-3" aria-hidden="true" />;
     case "abstained":
       return <Minus className="h-3 w-3" aria-hidden="true" />;
+    case "silent":
+      return <Dot className="h-3 w-3" aria-hidden="true" />;
     default:
       return null;
   }
@@ -158,12 +166,10 @@ function MatrixCell({
   cell,
   memberName,
   phaseName,
-  onSelect,
 }: {
   cell: DigestCell;
   memberName: string;
   phaseName: string;
-  onSelect?: () => void;
 }) {
   const { t } = useTranslation();
   const label = t("groups.overview.cellSummary", "{{member}}, {{phase}}: {{state}}", {
@@ -172,34 +178,21 @@ function MatrixCell({
     state: cellLabel(cell.kind, t),
   });
 
-  const shell = cn("flex h-6 items-center justify-center rounded", CELL_STYLES[cell.kind]);
-  const interactive = !!onSelect && cell.entryCount > 0;
-
-  if (!interactive) {
-    return (
-      <span role="cell" className={shell} title={label} aria-label={label}>
-        <CellGlyph kind={cell.kind} />
-      </span>
-    );
-  }
   return (
-    <span role="cell" className="contents">
-      <button
-        type="button"
-        onClick={onSelect}
-        title={label}
-        aria-label={label}
-        className={cn(shell, "w-full transition-opacity hover:opacity-70")}
-      >
-        <CellGlyph kind={cell.kind} />
-      </button>
+    <span
+      role="cell"
+      className={cn("flex h-6 items-center justify-center rounded", CELL_STYLES[cell.kind])}
+      title={label}
+      aria-label={label}
+    >
+      <CellGlyph kind={cell.kind} />
     </span>
   );
 }
 
 function Legend() {
   const { t } = useTranslation();
-  const kinds: CellKind[] = ["spoke", "dissent", "failed", "abstained", "pending", "absent"];
+  const kinds: CellKind[] = ["spoke", "dissent", "failed", "abstained", "pending", "silent", "absent"];
   return (
     <ul className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
       {kinds.map((kind) => (

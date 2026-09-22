@@ -348,11 +348,16 @@ public class GroupConversation {
      *
      * @param text
      *            the stance, already trimmed to the configured maximum length
-     * @param upToTranscriptIndex
-     *            transcript size (exclusive) this stance was computed from. Lets a
-     *            boundary skip a member whose stance already covers everything they
-     *            have said — the difference between one summarizer call per member
-     *            per discussion and one per member per phase
+     * @param coveredContributions
+     *            how many of THIS member's own stance-bearing entries the stance
+     *            reflects. A boundary skips a member whose stored stance already
+     *            covers all of them, which is the difference between one summarizer
+     *            call per member per discussion and one per member per phase.
+     *            <p>
+     *            Deliberately not the transcript length: keyed to that, any member
+     *            speaking invalidated every member's stance, so a six-member
+     *            discussion paid for six calls at every boundary and "a member who
+     *            stayed silent costs nothing" was never true
      * @param llmGenerated
      *            {@code true} when a configured summarizer wrote it, {@code false}
      *            when it is lead-sentence extraction. Surfaced to the UI because an
@@ -362,7 +367,7 @@ public class GroupConversation {
      * @param updated
      *            when it was computed
      */
-    public record MemberStance(String text, int upToTranscriptIndex, boolean llmGenerated, Instant updated) {
+    public record MemberStance(String text, int coveredContributions, boolean llmGenerated, Instant updated) {
     }
     private SharedTaskList taskList;
     /** Agents dynamically added during the discussion (recruited or created). */

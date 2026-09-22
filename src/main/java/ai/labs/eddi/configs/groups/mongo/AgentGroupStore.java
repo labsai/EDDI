@@ -527,6 +527,17 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
      * truncation fallback is well-defined behaviour, same warn-not-reject shape as
      * {@link #warnOnModeratorlessPhases}.
      */
+    private void warnOnSummarizerlessWindow(AgentGroupConfiguration groupConfiguration) {
+        var window = groupConfiguration.getContextWindow();
+        if (window == null || !window.enabled() || !Boolean.TRUE.equals(window.summarizeOverflow())) {
+            return;
+        }
+        if (window.llmProvider() == null || window.llmModel() == null) {
+            LOGGER.warnf("Group '%s' enables contextWindow summarization but names no llmProvider/llmModel — "
+                    + "overflow will fall back to a plain truncation marker", LogSanitizer.sanitize(groupConfiguration.getName()));
+        }
+    }
+
     /**
      * A {@code stanceSummary} that names one half of the provider/model pair meant
      * to spend on an LLM summarizer and will instead extract lead sentences forever
@@ -551,17 +562,6 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         } else if (stance.inputPricePer1M() != null || stance.outputPricePer1M() != null) {
             LOGGER.warnf("Group '%s' sets stanceSummary prices but names no llmProvider/llmModel — nothing will be "
                     + "billed because no summarizer runs", LogSanitizer.sanitize(groupConfiguration.getName()));
-        }
-    }
-
-    private void warnOnSummarizerlessWindow(AgentGroupConfiguration groupConfiguration) {
-        var window = groupConfiguration.getContextWindow();
-        if (window == null || !window.enabled() || !Boolean.TRUE.equals(window.summarizeOverflow())) {
-            return;
-        }
-        if (window.llmProvider() == null || window.llmModel() == null) {
-            LOGGER.warnf("Group '%s' enables contextWindow summarization but names no llmProvider/llmModel — "
-                    + "overflow will fall back to a plain truncation marker", LogSanitizer.sanitize(groupConfiguration.getName()));
         }
     }
 

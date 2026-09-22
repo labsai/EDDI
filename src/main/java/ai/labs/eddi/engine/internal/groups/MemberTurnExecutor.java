@@ -198,8 +198,8 @@ public class MemberTurnExecutor {
      * {@code attributionKey} and sums its own map is order-independent, and
      * {@code totalCost} is a convenience for consumers that do not.
      */
-    static void announceCost(GroupConversation gc, String attributionKey, String displayName,
-                             GroupDiscussionEventListener listener) {
+    public static void announceCost(GroupConversation gc, String attributionKey, String displayName,
+                                    GroupDiscussionEventListener listener) {
         if (listener == null || attributionKey == null) {
             return;
         }

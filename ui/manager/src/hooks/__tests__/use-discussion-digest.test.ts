@@ -219,12 +219,82 @@ describe("buildDigest — matrix", () => {
     expect(buildDigest(only, undefined, PHASES).matrix[A]?.[0]?.kind).toBe("abstained");
   });
 
+  it("distinguishes a dropped turn from an exclusion", () => {
+    // Phase 0's selector is ALL, so a finished phase with nothing from this
+    // member means their turn was dropped (maxTurns, a cost ceiling, a
+    // SYNTHESIZE_NOW jump) — not that they were never part of it.
+    const conv = conversation({
+      state: "COMPLETED",
+      transcript: [entry(A, 0), entry(MOD, 1, "SYNTHESIS")],
+    });
+    const digest = buildDigest(conv, undefined, PHASES, { [B]: "Security" });
+
+    expect(digest.matrix[B]?.[0]?.kind).toBe("silent");
+    // Phase 1's selector is MODERATOR — unknown for B, so `absent` is honest.
+    expect(digest.matrix[B]?.[1]?.kind).toBe("absent");
+  });
+
   it("is dense over members × phases", () => {
     const conv = conversation({ transcript: [entry(A, 0), entry(B, 1)] });
     const digest = buildDigest(conv, undefined, PHASES);
     for (const member of digest.members) {
       expect(digest.matrix[member.agentId]).toHaveLength(digest.phases.length);
     }
+  });
+});
+
+describe("buildDigest — continuation rounds", () => {
+  it("does not merge a previous round's turns into this round's phases", () => {
+    // A continuation round restarts phaseIndex at 0, so bucketing the whole
+    // transcript by phase index put round 1's turns in round 2's cells.
+    const conv = conversation({
+      round: 2,
+      roundStartTranscriptIndex: 2,
+      transcript: [
+        entry(A, 0, "OPINION", "Round one."),
+        entry(A, 1, "ERROR", "round one failure"),
+        entry(B, 0, "OPINION", "Round two."),
+      ],
+    });
+    const digest = buildDigest(conv, undefined, PHASES);
+
+    expect(digest.totalEntries).toBe(1);
+    expect(digest.members.map((m) => m.agentId)).toEqual([B]);
+    // Round 1's ERROR must not mark round 2's cell failed.
+    expect(digest.matrix[B]?.[0]?.kind).toBe("spoke");
+  });
+
+  it("leaves a first round untouched", () => {
+    const conv = conversation({
+      roundStartTranscriptIndex: 0,
+      transcript: [entry(A, 0), entry(B, 0)],
+    });
+    expect(buildDigest(conv, undefined, PHASES).totalEntries).toBe(2);
+  });
+
+  it("ignores an out-of-range round start rather than blanking the view", () => {
+    const conv = conversation({
+      roundStartTranscriptIndex: 99,
+      transcript: [entry(A, 0)],
+    });
+    expect(buildDigest(conv, undefined, PHASES).totalEntries).toBe(1);
+  });
+});
+
+describe("buildDigest — headline counts", () => {
+  it("counts turns with the same filter the phase rail uses", () => {
+    // Counting raw rows put QUESTION/CONVERGENCE/FACILITATION in the headline,
+    // so it disagreed with the rail directly beneath it.
+    const conv = conversation({
+      transcript: [
+        entry(A, 0, "QUESTION", "The user's question."),
+        entry(A, 0, "OPINION", "A real turn."),
+        entry(A, 0, "CONVERGENCE", "score 0.8"),
+      ],
+    });
+    const digest = buildDigest(conv, undefined, PHASES);
+    expect(digest.totalEntries).toBe(1);
+    expect(digest.phases[0]?.entryCount).toBe(1);
   });
 });
 
@@ -267,6 +337,22 @@ describe("buildDigest — cost", () => {
     expect(digest.members[0]?.cost).toBeNull();
   });
 
+  it("keeps persisted keys the live stream has not re-announced", () => {
+    // A stream carries only what it announced THIS session. Swapping the maps
+    // dropped an earlier round's system keys and every member yet to speak —
+    // pressing Continue on a $4.10 discussion showed $0.02.
+    const conv = conversation({
+      transcript: [entry(A, 0), entry(B, 0)],
+      memberCosts: { [A]: 4.0, "system:summarizer:full:12": 0.1 },
+    });
+    const live = stream({ memberCosts: new Map([[B, 0.02]]), transcript: [entry(A, 0), entry(B, 0)] });
+
+    const digest = buildDigest(conv, live, PHASES);
+    expect(digest.totalCost).toBeCloseTo(4.12);
+    expect(digest.members.find((m) => m.agentId === A)?.cost).toBeCloseTo(4.0);
+    expect(digest.members.find((m) => m.agentId === B)?.cost).toBeCloseTo(0.02);
+  });
+
   it("prefers the live ledger while streaming", () => {
     const conv = conversation({ transcript: [entry(A, 0)], memberCosts: { [A]: 0.1 } });
     const live = stream({ memberCosts: new Map([[A, 0.9]]), transcript: [entry(A, 0)] });
@@ -289,7 +375,7 @@ describe("buildDigest — stances", () => {
       memberStances: {
         [A]: {
           text: "Favours pgvector.",
-          upToTranscriptIndex: 1,
+          coveredContributions: 1,
           llmGenerated: false,
           updated: "2026-09-22T10:01:00Z",
         },
@@ -304,7 +390,7 @@ describe("buildDigest — stances", () => {
     const live = stream({
       transcript: [entry(A, 0)],
       stances: new Map([
-        [A, { agentId: A, displayName: A, stance: "Backs the migration.", llmGenerated: true, upToTranscriptIndex: 1 }],
+        [A, { agentId: A, displayName: A, stance: "Backs the migration.", llmGenerated: true, coveredContributions: 1 }],
       ]),
     });
     const member = buildDigest(null, live, PHASES).members[0];
@@ -316,13 +402,13 @@ describe("buildDigest — stances", () => {
     const conv = conversation({
       transcript: [entry(A, 0)],
       memberStances: {
-        [A]: { text: "Old.", upToTranscriptIndex: 1, llmGenerated: false, updated: "2026-09-22T10:00:00Z" },
+        [A]: { text: "Old.", coveredContributions: 1, llmGenerated: false, updated: "2026-09-22T10:00:00Z" },
       },
     });
     const live = stream({
       transcript: [entry(A, 0)],
       stances: new Map([
-        [A, { agentId: A, displayName: A, stance: "New.", llmGenerated: false, upToTranscriptIndex: 2 }],
+        [A, { agentId: A, displayName: A, stance: "New.", llmGenerated: false, coveredContributions: 2 }],
       ]),
     });
     expect(buildDigest(conv, live, PHASES).members[0]?.stance).toBe("New.");
@@ -331,6 +417,77 @@ describe("buildDigest — stances", () => {
   it("leaves the stance null for a member who has not spoken", () => {
     const digest = buildDigest(conversation(), undefined, PHASES, { [A]: "Architect" });
     expect(digest.members[0]?.stance).toBeNull();
+  });
+
+  it("extracts a stance locally when none was supplied", () => {
+    // Every conversation written before this feature carries no stances, and a
+    // live one has none until its first phase boundary. Without the fallback
+    // the roster reads "has not spoken yet" beside a matrix showing their turns.
+    const conv = conversation({
+      transcript: [entry(A, 0, "OPINION", "We should adopt pgvector. It halves the ops surface.")],
+    });
+    const member = buildDigest(conv, undefined, PHASES).members[0];
+    expect(member?.stance).toBe("We should adopt pgvector.");
+    expect(member?.stanceIsQuote).toBe(true);
+  });
+
+  it("extracts from the newest stance-bearing entry", () => {
+    const conv = conversation({
+      transcript: [
+        entry(A, 0, "OPINION", "First position."),
+        entry(A, 0, "REVISION", "Revised position."),
+      ],
+    });
+    expect(buildDigest(conv, undefined, PHASES).members[0]?.stance).toBe("Revised position.");
+  });
+
+  it("does not extract from an abstention or a failure", () => {
+    // An abstention's content is a refusal to add anything; using it would
+    // replace the member's real position with "I have nothing to add".
+    const conv = conversation({
+      transcript: [
+        entry(A, 0, "OPINION", "The real position."),
+        entry(A, 0, "ABSTAINED", "Nothing to add."),
+        entry(A, 0, "ERROR", "timed out"),
+      ],
+    });
+    expect(buildDigest(conv, undefined, PHASES).members[0]?.stance).toBe("The real position.");
+  });
+
+  it("does not mistake a decimal or an abbreviation for a sentence end", () => {
+    const decimals = conversation({
+      transcript: [entry(A, 0, "OPINION", "It costs $1.50 per seat. That is fine.")],
+    });
+    expect(buildDigest(decimals, undefined, PHASES).members[0]?.stance).toBe("It costs $1.50 per seat.");
+
+    const abbrev = conversation({
+      transcript: [entry(A, 0, "OPINION", "Use a managed store, e.g. pgvector. It is simpler.")],
+    });
+    expect(buildDigest(abbrev, undefined, PHASES).members[0]?.stance).toBe(
+      "Use a managed store, e.g. pgvector.",
+    );
+  });
+
+  it("caps an extracted stance so the roster stays one line", () => {
+    const conv = conversation({
+      transcript: [entry(A, 0, "OPINION", "word ".repeat(200))],
+    });
+    const stance = buildDigest(conv, undefined, PHASES).members[0]?.stance;
+    expect(stance).toBeTruthy();
+    expect(stance!.length).toBeLessThanOrEqual(160);
+    expect(stance!.endsWith("…")).toBe(true);
+  });
+
+  it("prefers a supplied stance over the local extraction", () => {
+    const conv = conversation({
+      transcript: [entry(A, 0, "OPINION", "The raw sentence.")],
+      memberStances: {
+        [A]: { text: "A model's paraphrase.", coveredContributions: 1, llmGenerated: true, updated: "2026-09-22T10:01:00Z" },
+      },
+    });
+    const member = buildDigest(conv, undefined, PHASES).members[0];
+    expect(member?.stance).toBe("A model's paraphrase.");
+    expect(member?.stanceIsQuote).toBe(false);
   });
 });
 

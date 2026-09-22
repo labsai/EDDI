@@ -220,3 +220,100 @@ collapse (which was a real bug, not a seeded one).
 ```regression-note
 | 2026-09-22 | Matrix cells: a phase not yet reached must read `pending`, not `absent` | `absent` means "the selector excluded them"; using it for "not yet" told readers a debate's PRO side had gone quiet during a CON-only phase. Guarded by `use-discussion-digest.test.ts` "distinguishes a member excluded from a phase from one still expected". | EDDI Manager |
 ```
+
+## 🐛 fix(groups): review remediation for the discussion overview (2026-09-22)
+
+**Repo:** EDDI (`feat/group-discussion-overview`)
+
+### Why
+
+A high-effort adversarial review of the two commits above found eleven defects worth fixing,
+five of them producing **wrong numbers** and four making the dashboard **assert things that
+are not true**. Each is recorded here because most were invisible to the tests that existed —
+several were guarded by assertions that would have passed with the bug in.
+
+### Wrong numbers
+
+- **The documented "a silent member costs nothing" skip was never implemented.** Coverage was
+  keyed to the *transcript length*, which grows whenever anyone speaks, so the skip only fired
+  for a phase nobody spoke in. A six-member discussion re-summarised all six at every
+  boundary — the exact "one call per member per phase" the Javadoc, the docs and the changelog
+  all claimed to avoid. `MemberStance.upToTranscriptIndex` is now `coveredContributions`,
+  counting that member's own stance-bearing entries.
+- **The stance summariser escaped the I1 cost ceiling.** Every other optional spender (the I9
+  window summariser, the convergence judge, the dissent round) checks
+  `wouldExceedCeiling`; this one did not, so a boundary ran one priced call per member *after*
+  the budget was gone and before the next phase's pre-wave check could fire. Past the ceiling
+  it now downgrades to extraction — `wouldExceedCeiling`, not `enforceCeiling`, because
+  declining optional work is not the same event as a phase running out of budget.
+- **A re-summary landing on the same wording billed the ledger and emitted no
+  `cost_updated`.** Results were reported on text change alone; they are now reported when the
+  text changed *or* the call cost something.
+- **The I9 window summariser's spend was never announced**, though four places (two Javadocs,
+  the docs and the changelog) said system spend is emitted "after every attribution". Any
+  windowed discussion's live total sat below the ledger's for its whole run.
+  `updateWindowSummary` now returns the ledger key it billed, for the caller to announce.
+- **The live cost map replaced the persisted one instead of overlaying it.** A stream carries
+  only the keys it announced *this session*, so pressing Continue on a $4.10 discussion made
+  the headline read $0.02 until the document was refetched. Now merged per key — correct
+  precisely because each frame carries that key's *cumulative* cost.
+
+### The dashboard stating something false
+
+- **Continuation rounds were conflated.** The backend restarts `phaseIndex` at 0 each round,
+  so bucketing the whole transcript by phase index put round 1's turns in round 2's cells, let
+  a round-1 ERROR mark a round-2 cell "failed", and showed members as having already spoken in
+  phases the current round had not reached. The digest now slices at
+  `roundStartTranscriptIndex`.
+- **`leadSentence` returned `"1."`** for the numbered list LLM replies open with constantly —
+  rendered as that member's position, attributed as *their own words*. A candidate sentence
+  containing no letter is now rejected. Conversely the abbreviation rule swallowed
+  `"Weigh option B. Option A is worse."`, so it now also requires a lower-case continuation.
+- **Extraction quoted JSON.** `VOTE`, `BID`, `RETRO`, `PLAN`, `TASK_RESULT` and `VERIFICATION`
+  carry a JSON contract; the lead "sentence" of a ballot is `{"choice":"pgvector",` — and being
+  the newest entry it *replaced* the member's real prose position after every vote or retro.
+  Excluded from extraction on both sides; the summariser still reads them.
+- **"Has not spoken yet" was shown beside a turn count.** A moderator's only contribution is a
+  SYNTHESIS, which is not a position of its own, so it had no stance while plainly having
+  spoken. Now two messages.
+- **A dropped turn was labelled "not in this phase".** `absent` means the selector excluded
+  the member; a finished `ALL` phase with nothing from them means their turn was dropped
+  (`maxTurns`, a ceiling, a `SYNTHESIZE_NOW` jump). New `silent` cell kind, shown only where
+  the selector is *known* to have included them.
+- **The headline's "Turns" counted rows the rail excluded** (QUESTION, CONVERGENCE,
+  FACILITATION, system SKIPPED), so the two disagreed. Same filter now.
+
+### Also
+
+- **A vacuous negative assertion.** `verify(never()).summarizeWithUsage(anyString(), …)` could
+  not fail: a half-configured summariser passes a **null** model, and `anyString()` does not
+  match null. Replaced with `verifyNoInteractions`.
+- **Dead API surface removed** — `DigestPhase.expectedSpeakers` (always null),
+  `streamTotalCost` (no consumer), and the `onSelectPhase`/`onSelectMember`/`onSelectCell`
+  props no surface passed. The phase interaction that was worth keeping is now owned by
+  `DiscussionPanel` itself (picking a phase switches to the transcript, where turns are)
+  rather than being an optional callback nobody supplied — a click target that silently does
+  nothing is worse than none.
+- **An orphaned Javadoc**: the new save-time warning had been inserted between
+  `warnOnSummarizerlessWindow`'s doc comment and its body.
+- **Literal NUL bytes** were in `use-discussion-digest.ts` (a matrix key separator written as
+  a raw character rather than an escape), which made `file` report the source as binary.
+- The question in the headline is now **clamped to three lines**. `originalQuestion` is not
+  always a question — the grant-board fixture pastes an entire application — and rendering it
+  whole pushed the rail, roster and matrix below the fold, which is the wall of text this view
+  exists to replace. Found by running the UI, not by a test.
+
+### Tests
+
+Backend 48 (up from 39), frontend 42 in the digest suite (up from 30). Four further mutation
+checks, each caught by exactly the intended test: dropping the round slice, swapping the cost
+overlay back, and (backend) the per-member coverage skip and the ceiling gate.
+
+**Files:** as the two entries above, plus
+[`GroupContextBuilder.java`](../../src/main/java/ai/labs/eddi/engine/internal/groups/GroupContextBuilder.java).
+
+```regression-note
+| 2026-09-22 | Stance coverage must count a member's OWN contributions, not transcript length | Keyed to the transcript, any member speaking invalidated every member's stance: a six-member discussion re-summarised all six at every boundary. Guarded by `StanceSummaryEngineTest` "a member is NOT re-summarized because somebody else spoke". | EDDI |
+| 2026-09-22 | A continuation round restarts phaseIndex at 0 — slice at roundStartTranscriptIndex | Without the slice, round 1's turns render in round 2's cells and a round-1 failure marks a round-2 cell failed. Guarded by `use-discussion-digest.test.ts` "does not merge a previous round's turns into this round's phases". | EDDI Manager |
+| 2026-09-22 | The live cost map overlays the persisted one, never replaces it | A stream carries only the keys it announced this session; swapping dropped earlier rounds and unspoken members, so Continue on a $4.10 discussion showed $0.02. Guarded by "keeps persisted keys the live stream has not re-announced". | EDDI Manager |
+```

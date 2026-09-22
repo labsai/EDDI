@@ -265,11 +265,11 @@ public final class GroupConversationEventSink {
      *            {@code false} when it is the lead-sentence extraction fallback —
      *            the UI distinguishes the two, because an extracted line is the
      *            member's own words and a generated one is not
-     * @param upToTranscriptIndex
-     *            how much of the transcript the stance covers (exclusive), so a
-     *            late-joining client can tell a fresh stance from a stale one
+     * @param coveredContributions
+     *            how many of that member's own contributions the stance reflects,
+     *            so a late-joining client can tell a fresh stance from a stale one
      */
     public record StanceUpdatedEvent(String agentId, String displayName, String stance, boolean llmGenerated,
-            int upToTranscriptIndex) {
+            int coveredContributions) {
     }
 }

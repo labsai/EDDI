@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.engine.internal.groups;
 
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig.MemberFailurePolicy;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig.MemberUnavailablePolicy;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.StanceSummaryConfig;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
@@ -30,6 +33,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -85,7 +89,7 @@ class StanceSummaryEngineTest {
             gc.getTranscript().add(entry(AGENT_A, "We should adopt pgvector. It halves our operational surface.",
                     TranscriptEntryType.OPINION));
 
-            var results = StanceSummaryEngine.updateStances(gc, null, null);
+            var results = StanceSummaryEngine.updateStances(gc, null, null, null);
 
             assertEquals(1, results.size());
             var stance = gc.getMemberStances().get(AGENT_A);
@@ -100,7 +104,7 @@ class StanceSummaryEngineTest {
             var gc = conversation();
             gc.getTranscript().add(entry(AGENT_A, "Adopt it.", TranscriptEntryType.OPINION));
 
-            StanceSummaryEngine.updateStances(gc, null, null);
+            StanceSummaryEngine.updateStances(gc, null, null, null);
 
             assertTrue(gc.getMemberCosts().isEmpty(), "no LLM ran, so nothing may be billed");
             assertEquals(0.0, gc.getTotalCost());
@@ -113,7 +117,7 @@ class StanceSummaryEngineTest {
             gc.getTranscript().add(entry(AGENT_A, "Initially I favour Milvus.", TranscriptEntryType.OPINION));
             gc.getTranscript().add(entry(AGENT_A, "On reflection pgvector is better.", TranscriptEntryType.REVISION));
 
-            StanceSummaryEngine.updateStances(gc, null, null);
+            StanceSummaryEngine.updateStances(gc, null, null, null);
 
             assertEquals("On reflection pgvector is better.", gc.getMemberStances().get(AGENT_A).text());
         }
@@ -126,9 +130,13 @@ class StanceSummaryEngineTest {
             var halfConfig = new StanceSummaryConfig(160, "openai", null, null, null);
             var service = summarizerReturning("generated", 10, 10);
 
-            StanceSummaryEngine.updateStances(gc, halfConfig, service);
+            StanceSummaryEngine.updateStances(gc, halfConfig, null, service);
 
-            verify(service, never()).summarizeWithUsage(anyString(), anyString(), anyString(), anyString());
+            // verifyNoInteractions, not verify(never()) with anyString(): a
+            // half-configured summarizer passes a NULL model, which anyString()
+            // does not match — the negative assertion would hold even if the
+            // call were made.
+            verifyNoInteractions(service);
             assertFalse(gc.getMemberStances().get(AGENT_A).llmGenerated());
         }
     }
@@ -147,7 +155,7 @@ class StanceSummaryEngineTest {
             gc.getTranscript().add(entry(AGENT_A, "Skipped.", TranscriptEntryType.SKIPPED));
             gc.getTranscript().add(entry(AGENT_A, "Agreement score 0.8.", TranscriptEntryType.CONVERGENCE));
 
-            var results = StanceSummaryEngine.updateStances(gc, null, null);
+            var results = StanceSummaryEngine.updateStances(gc, null, null, null);
 
             assertTrue(results.isEmpty());
             assertTrue(gc.getMemberStances().isEmpty());
@@ -160,7 +168,7 @@ class StanceSummaryEngineTest {
             gc.getTranscript().add(entry(AGENT_A, "pgvector is the right call.", TranscriptEntryType.OPINION));
             gc.getTranscript().add(entry(AGENT_A, "I have nothing to add.", TranscriptEntryType.ABSTAINED));
 
-            StanceSummaryEngine.updateStances(gc, null, null);
+            StanceSummaryEngine.updateStances(gc, null, null, null);
 
             assertEquals("pgvector is the right call.", gc.getMemberStances().get(AGENT_A).text());
         }
@@ -172,7 +180,7 @@ class StanceSummaryEngineTest {
             gc.getTranscript().add(entry(AGENT_A, "Adopt pgvector.", TranscriptEntryType.OPINION));
             gc.getTranscript().add(entry(AGENT_B, "Reject it on security grounds.", TranscriptEntryType.CRITIQUE));
 
-            StanceSummaryEngine.updateStances(gc, null, null);
+            StanceSummaryEngine.updateStances(gc, null, null, null);
 
             assertEquals("Adopt pgvector.", gc.getMemberStances().get(AGENT_A).text());
             assertEquals("Reject it on security grounds.", gc.getMemberStances().get(AGENT_B).text());
@@ -190,7 +198,7 @@ class StanceSummaryEngineTest {
             gc.getTranscript().add(entry(AGENT_A, "A long argument about vector stores.", TranscriptEntryType.OPINION));
             var service = summarizerReturning("Favours pgvector, conditional on a dual-write window.", 100, 20);
 
-            var results = StanceSummaryEngine.updateStances(gc, pricedConfig(), service);
+            var results = StanceSummaryEngine.updateStances(gc, pricedConfig(), null, service);
 
             assertEquals(1, results.size());
             var stance = gc.getMemberStances().get(AGENT_A);
@@ -206,7 +214,7 @@ class StanceSummaryEngineTest {
             // 1M input @ $1 + 0.5M output @ $2 = $2.00
             var service = summarizerReturning("Favours pgvector.", 1_000_000, 500_000);
 
-            var results = StanceSummaryEngine.updateStances(gc, pricedConfig(), service);
+            var results = StanceSummaryEngine.updateStances(gc, pricedConfig(), null, service);
 
             assertEquals(2.0, gc.getTotalCost(), 1e-9);
             assertEquals(2.0, gc.getMemberCosts().get("system:stance:" + AGENT_A + ":1"), 1e-9);
@@ -220,7 +228,7 @@ class StanceSummaryEngineTest {
             gc.getTranscript().add(entry(AGENT_A, "An argument.", TranscriptEntryType.OPINION));
             var config = new StanceSummaryConfig(160, "openai", "gpt-4o-mini", null, null);
 
-            StanceSummaryEngine.updateStances(gc, config, summarizerReturning("Favours pgvector.", 1_000_000, 1_000_000));
+            StanceSummaryEngine.updateStances(gc, config, null, summarizerReturning("Favours pgvector.", 1_000_000, 1_000_000));
 
             assertTrue(gc.getMemberStances().get(AGENT_A).llmGenerated());
             assertEquals(0.0, gc.getTotalCost());
@@ -240,7 +248,7 @@ class StanceSummaryEngineTest {
             when(service.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
                     .thenThrow(new RuntimeException("model unavailable"));
 
-            var results = StanceSummaryEngine.updateStances(gc, pricedConfig(), service);
+            var results = StanceSummaryEngine.updateStances(gc, pricedConfig(), null, service);
 
             assertEquals(1, results.size());
             var stance = gc.getMemberStances().get(AGENT_A);
@@ -255,7 +263,7 @@ class StanceSummaryEngineTest {
             var gc = conversation();
             gc.getTranscript().add(entry(AGENT_A, "Adopt pgvector. Now.", TranscriptEntryType.OPINION));
 
-            StanceSummaryEngine.updateStances(gc, pricedConfig(), summarizerReturning("   ", 10, 1));
+            StanceSummaryEngine.updateStances(gc, pricedConfig(), null, summarizerReturning("   ", 10, 1));
 
             assertEquals("Adopt pgvector.", gc.getMemberStances().get(AGENT_A).text());
             assertFalse(gc.getMemberStances().get(AGENT_A).llmGenerated());
@@ -272,7 +280,7 @@ class StanceSummaryEngineTest {
                     .thenThrow(new RuntimeException("boom"))
                     .thenReturn(new SummarizationResult("Opposes the migration.", 10, 5));
 
-            StanceSummaryEngine.updateStances(gc, pricedConfig(), service);
+            StanceSummaryEngine.updateStances(gc, pricedConfig(), null, service);
 
             assertEquals("First position.", gc.getMemberStances().get(AGENT_A).text());
             assertEquals("Opposes the migration.", gc.getMemberStances().get(AGENT_B).text());
@@ -290,8 +298,8 @@ class StanceSummaryEngineTest {
             gc.getTranscript().add(entry(AGENT_A, "A position.", TranscriptEntryType.OPINION));
             var service = summarizerReturning("Favours pgvector.", 10, 5);
 
-            StanceSummaryEngine.updateStances(gc, pricedConfig(), service);
-            var second = StanceSummaryEngine.updateStances(gc, pricedConfig(), service);
+            StanceSummaryEngine.updateStances(gc, pricedConfig(), null, service);
+            var second = StanceSummaryEngine.updateStances(gc, pricedConfig(), null, service);
 
             verify(service, times(1)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString());
             assertTrue(second.isEmpty(), "no change means no stance_updated frame");
@@ -302,10 +310,10 @@ class StanceSummaryEngineTest {
         void newEntryReopensRecomputation() {
             var gc = conversation();
             gc.getTranscript().add(entry(AGENT_A, "A position.", TranscriptEntryType.OPINION));
-            StanceSummaryEngine.updateStances(gc, null, null);
+            StanceSummaryEngine.updateStances(gc, null, null, null);
 
             gc.getTranscript().add(entry(AGENT_A, "A revised position.", TranscriptEntryType.REVISION));
-            var results = StanceSummaryEngine.updateStances(gc, null, null);
+            var results = StanceSummaryEngine.updateStances(gc, null, null, null);
 
             assertEquals(1, results.size());
             assertEquals("A revised position.", gc.getMemberStances().get(AGENT_A).text());
@@ -316,27 +324,150 @@ class StanceSummaryEngineTest {
         void unchangedTextProducesNoEvent() {
             var gc = conversation();
             gc.getTranscript().add(entry(AGENT_A, "A position.", TranscriptEntryType.OPINION));
-            StanceSummaryEngine.updateStances(gc, null, null);
+            StanceSummaryEngine.updateStances(gc, null, null, null);
 
             // Someone else speaks: A's coverage is stale, but A's own words did not change.
             gc.getTranscript().add(entry(AGENT_B, "Another position.", TranscriptEntryType.OPINION));
-            var results = StanceSummaryEngine.updateStances(gc, null, null);
+            var results = StanceSummaryEngine.updateStances(gc, null, null, null);
 
             assertEquals(1, results.size(), "only B changed");
             assertEquals(AGENT_B, results.get(0).agentId());
         }
 
         @Test
+        @DisplayName("a member is NOT re-summarized because somebody else spoke")
+        void otherMemberSpeakingDoesNotResummarize() {
+            // The property the whole cost story rests on. Keyed to the
+            // transcript length instead of the member's own contributions, B
+            // speaking invalidated A's stance and a six-member discussion paid
+            // for six calls at every boundary.
+            var gc = conversation();
+            gc.getTranscript().add(entry(AGENT_A, "A's position.", TranscriptEntryType.OPINION));
+            var service = summarizerReturning("Favours pgvector.", 10, 5);
+            StanceSummaryEngine.updateStances(gc, pricedConfig(), null, service);
+
+            gc.getTranscript().add(entry(AGENT_B, "B's position.", TranscriptEntryType.OPINION));
+            StanceSummaryEngine.updateStances(gc, pricedConfig(), null, service);
+
+            // Twice total: once for A, once for B — never a second time for A.
+            verify(service, times(2)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString());
+        }
+
+        @Test
+        @DisplayName("a re-summary that lands on the same wording still reports its cost")
+        void unchangedTextStillReportsCost() {
+            // Otherwise the spend reaches the ledger with no cost_updated frame
+            // and the live total drifts below it — the drift the event exists
+            // to prevent.
+            var gc = conversation();
+            gc.getTranscript().add(entry(AGENT_A, "First.", TranscriptEntryType.OPINION));
+            var service = summarizerReturning("Favours pgvector.", 1_000_000, 0);
+            StanceSummaryEngine.updateStances(gc, pricedConfig(), null, service);
+
+            gc.getTranscript().add(entry(AGENT_A, "Second.", TranscriptEntryType.OPINION));
+            var results = StanceSummaryEngine.updateStances(gc, pricedConfig(), null, service);
+
+            assertEquals(1, results.size(), "same wording, but it was paid for");
+            assertTrue(results.get(0).cost() > 0.0);
+        }
+
+        @Test
         @DisplayName("an empty transcript yields nothing at all")
         void emptyTranscript() {
             var gc = conversation();
-            assertTrue(StanceSummaryEngine.updateStances(gc, null, null).isEmpty());
+            assertTrue(StanceSummaryEngine.updateStances(gc, null, null, null).isEmpty());
         }
 
         @Test
         @DisplayName("a null conversation is tolerated")
         void nullConversation() {
-            assertTrue(StanceSummaryEngine.updateStances(null, null, null).isEmpty());
+            assertTrue(StanceSummaryEngine.updateStances(null, null, null, null).isEmpty());
+        }
+    }
+
+    @Nested
+    @DisplayName("the cost ceiling bounds the summarizer too")
+    class CostCeiling {
+
+        private static ProtocolConfig ceiling(Double max) {
+            return new ProtocolConfig(60, MemberFailurePolicy.SKIP, 2, MemberUnavailablePolicy.SKIP, 50, max,
+                    ProtocolConfig.CostPolicy.SYNTHESIZE_NOW);
+        }
+
+        @Test
+        @DisplayName("a blown budget downgrades to extraction instead of spending again")
+        void blownBudgetExtracts() {
+            // Every other optional spender (the I9 window summarizer, the
+            // convergence judge, the dissent round) checks this. Without it the
+            // boundary runs one priced call per member AFTER the budget is gone
+            // and before the next phase's pre-wave check can fire.
+            var gc = conversation();
+            gc.getTranscript().add(entry(AGENT_A, "A position. With detail.", TranscriptEntryType.OPINION));
+            GroupCostLedger.recordSystemCost(gc, "earlier:spend", 5.0);
+            var service = summarizerReturning("Generated.", 10, 5);
+
+            StanceSummaryEngine.updateStances(gc, pricedConfig(), ceiling(1.0), service);
+
+            verifyNoInteractions(service);
+            assertEquals("A position.", gc.getMemberStances().get(AGENT_A).text());
+            assertFalse(gc.getMemberStances().get(AGENT_A).llmGenerated());
+        }
+
+        @Test
+        @DisplayName("a budget with room left still runs the summarizer")
+        void budgetWithRoomRuns() {
+            var gc = conversation();
+            gc.getTranscript().add(entry(AGENT_A, "A position.", TranscriptEntryType.OPINION));
+            GroupCostLedger.recordSystemCost(gc, "earlier:spend", 0.5);
+
+            StanceSummaryEngine.updateStances(gc, pricedConfig(), ceiling(10.0), summarizerReturning("Generated.", 10, 5));
+
+            assertTrue(gc.getMemberStances().get(AGENT_A).llmGenerated());
+        }
+
+        @Test
+        @DisplayName("a null protocol means unlimited, as it does everywhere else")
+        void nullProtocolIsUnlimited() {
+            var gc = conversation();
+            gc.getTranscript().add(entry(AGENT_A, "A position.", TranscriptEntryType.OPINION));
+
+            StanceSummaryEngine.updateStances(gc, pricedConfig(), null, summarizerReturning("Generated.", 10, 5));
+
+            assertTrue(gc.getMemberStances().get(AGENT_A).llmGenerated());
+        }
+    }
+
+    @Nested
+    @DisplayName("extraction never quotes a JSON contract")
+    class JsonContracts {
+
+        @Test
+        @DisplayName("a ballot does not replace the member's prose position")
+        void ballotDoesNotReplacePosition() {
+            // VOTE/BID/RETRO/PLAN/TASK_RESULT/VERIFICATION carry JSON. Extracting
+            // from the newest one showed the reader an opening brace as that
+            // member's "own words", and wiped their real position after every
+            // VOTE or RETRO phase.
+            var gc = conversation();
+            gc.getTranscript().add(entry(AGENT_A, "pgvector is the right call.", TranscriptEntryType.OPINION));
+            gc.getTranscript().add(entry(AGENT_A,
+                    "{\"choice\":\"pgvector\",\"confidence\":0.8,\"reasoning\":\"It is cheaper.\"}",
+                    TranscriptEntryType.VOTE));
+
+            StanceSummaryEngine.updateStances(gc, null, null, null);
+
+            assertEquals("pgvector is the right call.", gc.getMemberStances().get(AGENT_A).text());
+        }
+
+        @Test
+        @DisplayName("a member with only JSON contributions gets no extracted stance")
+        void onlyJsonYieldsNothing() {
+            var gc = conversation();
+            gc.getTranscript().add(entry(AGENT_A, "{\"taskId\":\"t1\"}", TranscriptEntryType.BID));
+
+            StanceSummaryEngine.updateStances(gc, null, null, null);
+
+            assertNull(gc.getMemberStances().get(AGENT_A));
         }
     }
 
@@ -371,6 +502,26 @@ class StanceSummaryEngineTest {
         void ellipsisSurvives() {
             assertEquals("Well... it depends on the index.",
                     StanceSummaryEngine.leadSentence("Well... it depends on the index. Truly."));
+        }
+
+        @Test
+        @DisplayName("a numbered-list marker is not a sentence")
+        void listMarkerIsNotASentence() {
+            // LLM replies open with "1." constantly; cutting there showed the
+            // reader a stance reading literally "1.", attributed as the
+            // member's own words.
+            assertEquals("1. We should adopt pgvector.",
+                    StanceSummaryEngine.leadSentence("1. We should adopt pgvector. It is cheaper."));
+            assertEquals("2) Reject it.", StanceSummaryEngine.leadSentence("2) Reject it. On cost grounds."));
+        }
+
+        @Test
+        @DisplayName("a standalone capital letter still ends a sentence")
+        void standaloneCapitalEndsSentence() {
+            // The abbreviation rule must not swallow this: "B." here is the end
+            // of the sentence, not "e.g.".
+            assertEquals("Weigh option B.",
+                    StanceSummaryEngine.leadSentence("Weigh option B. Option A is worse."));
         }
 
         @Test
@@ -480,10 +631,13 @@ class StanceSummaryEngineTest {
             gc.getTranscript().add(entry(AGENT_A, "One.", TranscriptEntryType.OPINION));
             gc.getTranscript().add(entry(AGENT_B, "Two.", TranscriptEntryType.OPINION));
 
-            StanceSummaryEngine.updateStances(gc, null, null);
+            StanceSummaryEngine.updateStances(gc, null, null, null);
 
-            assertEquals(2, gc.getMemberStances().get(AGENT_A).upToTranscriptIndex());
-            assertEquals(2, gc.getMemberStances().get(AGENT_B).upToTranscriptIndex());
+            // One contribution each — NOT the transcript length of 2. Keyed to
+            // the transcript, B speaking would invalidate A's stance and every
+            // boundary would re-bill every member.
+            assertEquals(1, gc.getMemberStances().get(AGENT_A).coveredContributions());
+            assertEquals(1, gc.getMemberStances().get(AGENT_B).coveredContributions());
         }
     }
 

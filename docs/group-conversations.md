@@ -229,14 +229,24 @@ said:
 - **There is no `enabled` flag**, unlike `contextWindow`. Stances exist either
   way, so the only thing a flag could have meant is "may this spend money?" —
   which is already what naming a provider and a model means.
-- Stances are recomputed at **phase boundaries**, and only for members whose
-  stored stance no longer covers the whole transcript. A member who stayed
-  silent through a phase costs nothing.
+- Stances are recomputed at **phase boundaries**, and only for a member whose
+  stored stance no longer covers **their own** contributions. A member who
+  stayed silent through a phase costs nothing — coverage is counted per member,
+  not against the transcript length, or one member speaking would re-bill
+  everyone.
+- The summarizer is **optional spend and obeys `maxCostPerDiscussion`**, like
+  the window summarizer and the convergence judge. Past the ceiling it
+  downgrades to extraction rather than stopping the phase.
 - A summarizer failure **degrades to lead-sentence extraction**, never to a
   blank roster, and never fails the discussion.
 - The UI distinguishes the two producers — an extracted line is shown as a
   quotation, a generated one as a summary — because presenting a paraphrase the
   way a quotation is presented would misattribute it.
+- Extraction skips the entry types that carry a **JSON contract** (`VOTE`,
+  `BID`, `RETRO`, `PLAN`, `TASK_RESULT`, `VERIFICATION`) and quotes the newest
+  prose entry instead — the lead "sentence" of a ballot is an opening brace, and
+  it would otherwise replace a member's real position after every vote. The LLM
+  summarizer still reads them.
 - The optional prices attribute stance spend to the same cost ledger
   `maxCostPerDiscussion` bounds, under a `system:stance:*` key.
 - Naming only one of `llmProvider`/`llmModel` (or prices with neither) produces

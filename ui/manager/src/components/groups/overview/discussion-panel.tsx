@@ -29,9 +29,6 @@ interface DiscussionPanelProps {
   extras?: ReactNode;
   /** The overview's `outcome` band — the decision card and synthesised answer. */
   outcome?: ReactNode;
-  /** Invoked when the reader clicks a phase or a matrix cell in the overview. */
-  onSelectPhase?: (phaseIndex: number) => void;
-  onSelectMember?: (agentId: string) => void;
   className?: string;
 }
 
@@ -61,8 +58,6 @@ export function DiscussionPanel({
   style,
   extras,
   outcome,
-  onSelectPhase,
-  onSelectMember,
   className,
 }: DiscussionPanelProps) {
   const { t } = useTranslation();
@@ -84,25 +79,18 @@ export function DiscussionPanel({
     style,
   });
 
-  // Reading the overview switches to the transcript so the chosen phase is
-  // actually visible — following a link into a view that does not contain the
-  // thing linked to is the classic version of this bug.
-  const selectPhase = useCallback(
-    (phaseIndex: number) => {
-      if (view === "overview") handleChange("transcript");
-      onSelectPhase?.(phaseIndex);
-    },
-    [view, handleChange, onSelectPhase],
-  );
+  // Picking a phase in the overview shows its turns — which means switching to
+  // the transcript, since that is where turns are. Owned here rather than
+  // exposed as a prop no surface passed: an optional callback nobody supplies
+  // is a click target that silently does nothing.
+  //
+  // In `split` the transcript is already on screen, so the view stays put.
+  const selectPhase = useCallback(() => {
+    if (view === "overview") handleChange("transcript");
+  }, [view, handleChange]);
 
   const overview = (
-    <DiscussionOverview
-      digest={digest}
-      extras={extras}
-      outcome={outcome}
-      onSelectPhase={onSelectPhase ? selectPhase : undefined}
-      onSelectMember={onSelectMember}
-    />
+    <DiscussionOverview digest={digest} extras={extras} outcome={outcome} onSelectPhase={selectPhase} />
   );
 
   return (

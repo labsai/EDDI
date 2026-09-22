@@ -89,8 +89,8 @@ describe("DiscussionOverview", () => {
   it("marks an extracted stance as the member's own words and a generated one as a summary", () => {
     const digest = digestFor("ROUND_TABLE", {
       memberStances: {
-        [A]: { text: "Quoted line.", upToTranscriptIndex: 2, llmGenerated: false, updated: "2026-09-22T10:01:00Z" },
-        [B]: { text: "Paraphrased line.", upToTranscriptIndex: 2, llmGenerated: true, updated: "2026-09-22T10:01:00Z" },
+        [A]: { text: "Quoted line.", coveredContributions: 2, llmGenerated: false, updated: "2026-09-22T10:01:00Z" },
+        [B]: { text: "Paraphrased line.", coveredContributions: 2, llmGenerated: true, updated: "2026-09-22T10:01:00Z" },
       },
     });
     renderWithProviders(<DiscussionOverview digest={digest} />);
@@ -250,20 +250,35 @@ describe("DiscussionPanel", () => {
   it("returns to the transcript when a phase is picked from the overview", () => {
     // Following a link into a view that does not contain the thing linked to
     // is the classic version of this bug.
-    const onSelectPhase = vi.fn();
     setStoredDiscussionView("test", "overview");
     renderWithProviders(
       <DiscussionPanel
         surface="test"
         conversation={conversation()}
         transcript={<div data-testid="the-transcript">turns</div>}
-        onSelectPhase={onSelectPhase}
+      />,
+    );
+    expect(screen.queryByTestId("the-transcript")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("overview-phase-0"));
+
+    expect(screen.getByTestId("the-transcript")).toBeInTheDocument();
+    expect(getStoredDiscussionView("test")).toBe("transcript");
+  });
+
+  it("stays put when a phase is picked in split, where the transcript is already shown", () => {
+    setStoredDiscussionView("test", "split");
+    renderWithProviders(
+      <DiscussionPanel
+        surface="test"
+        conversation={conversation()}
+        transcript={<div data-testid="the-transcript">turns</div>}
       />,
     );
     fireEvent.click(screen.getByTestId("overview-phase-0"));
 
-    expect(onSelectPhase).toHaveBeenCalledWith(0);
-    expect(screen.getByTestId("the-transcript")).toBeInTheDocument();
+    expect(screen.getByTestId("discussion-split")).toBeInTheDocument();
+    expect(getStoredDiscussionView("test")).toBe("split");
   });
 
   it("exposes the switch as a radiogroup with arrow-key navigation", () => {

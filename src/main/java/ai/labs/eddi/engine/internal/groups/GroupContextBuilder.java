@@ -562,16 +562,23 @@ public class GroupContextBuilder {
      * same labels the scope filter itself produces — so the stored anonymous
      * summary can never de-anonymize a peer. Summarizer spend is attributed to the
      * discussion's cost ledger (I1) when the window config carries prices.
+     *
+     * @return the ledger key this call billed, for the caller to announce as a
+     *         {@code cost_updated} frame, or {@code null} when nothing was billed
+     *         (no summarization ran, it failed, or the window carries no prices).
+     *         Returned rather than announced here because this builder holds no
+     *         listener reference — the same reason I17's artifact writes ride a
+     *         queue instead of calling the listener from the tool that made them.
      */
-    public void updateWindowSummary(GroupConversation gc, DiscussionPhase phase, ContextWindowConfig window,
-                                    SummarizationService summarizationService) {
+    public String updateWindowSummary(GroupConversation gc, DiscussionPhase phase, ContextWindowConfig window,
+                                      SummarizationService summarizationService) {
         if (window == null || !window.enabled() || !Boolean.TRUE.equals(window.summarizeOverflow())
                 || gc == null || phase == null || phase.type() != PhaseType.OPINION) {
-            return;
+            return null;
         }
         ContextScope scope = phase.contextScope();
         if (scope != ContextScope.FULL && scope != ContextScope.ANONYMOUS) {
-            return;
+            return null;
         }
         boolean anonymous = scope == ContextScope.ANONYMOUS;
 
@@ -586,17 +593,17 @@ public class GroupContextBuilder {
         int coverThrough = summaryBoundary(transcript, window.maxRecentEntries());
         int alreadyCovered = anonymous ? gc.getAnonymousSummaryUpToIndex() : gc.getSummaryUpToIndex();
         if (coverThrough <= alreadyCovered) {
-            return;
+            return null;
         }
         if (summarizationService == null || window.llmProvider() == null || window.llmModel() == null) {
             LOGGER.warnf("Group %s: contextWindow.summarizeOverflow is on but no summarizer %s — falling back to plain truncation",
                     LogSanitizer.sanitize(gc.getId()), summarizationService == null ? "service is available" : "llmProvider/llmModel is configured");
-            return;
+            return null;
         }
 
         String newSlice = renderForSummarizer(transcript.subList(alreadyCovered, coverThrough), anonymous);
         if (newSlice.isBlank()) {
-            return;
+            return null;
         }
         String previousSummary = anonymous ? gc.getAnonymousTranscriptSummary() : gc.getTranscriptSummary();
         String content = previousSummary != null && !previousSummary.isBlank()
@@ -609,7 +616,7 @@ public class GroupContextBuilder {
             if (result.summary().isBlank()) {
                 LOGGER.warnf("Group %s: window summarization returned empty — keeping previous state, will retry next boundary",
                         LogSanitizer.sanitize(gc.getId()));
-                return;
+                return null;
             }
             if (anonymous) {
                 gc.setAnonymousTranscriptSummary(result.summary());
@@ -623,10 +630,16 @@ public class GroupContextBuilder {
             // while distinct extensions sum.
             double cost = TokenPricing.cost(window.inputPricePer1M(), window.outputPricePer1M(),
                     Map.of("inputTokens", result.inputTokens(), "outputTokens", result.outputTokens()));
-            GroupCostLedger.recordSystemCost(gc, "system:summarizer:" + (anonymous ? "anon" : "full") + ":" + coverThrough, cost);
+            String costKey = "system:summarizer:" + (anonymous ? "anon" : "full") + ":" + coverThrough;
+            GroupCostLedger.recordSystemCost(gc, costKey, cost);
+            // recordSystemCost drops a non-positive or non-finite cost, so an
+            // unpriced window bills nothing — report no key rather than inviting
+            // a $0 frame the UI would have to filter out again.
+            return cost > 0.0 ? costKey : null;
         } catch (Exception e) {
             LOGGER.warnf("Group %s: window summarization failed (%s) — falling back to plain truncation for this window",
                     LogSanitizer.sanitize(gc.getId()), e.getMessage());
+            return null;
         }
     }
 

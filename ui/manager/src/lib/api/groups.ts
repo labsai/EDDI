@@ -608,8 +608,8 @@ export const STANCE_SUMMARY_DEFAULT_MAX_CHARS = 160;
 /** One member's current position in one line, as persisted on the conversation. */
 export interface MemberStance {
   text: string;
-  /** Transcript size (exclusive) this was computed from. */
-  upToTranscriptIndex: number;
+  /** How many of that member's own contributions this reflects. */
+  coveredContributions: number;
   /** `true` = LLM paraphrase, `false` = the member's own lead sentence. */
   llmGenerated: boolean;
   updated: string;
@@ -1564,8 +1564,8 @@ export interface StanceUpdatedPayload {
    * paraphrase as a quote would misattribute it.
    */
   llmGenerated: boolean;
-  /** Transcript size (exclusive) the stance was computed from. */
-  upToTranscriptIndex: number;
+  /** How many of that member's own contributions the stance reflects. */
+  coveredContributions: number;
 }
 
 /** Payload of `artifact_updated` (I17). `created` is `true` for a fresh artifact (v1), `false` for an accepted update. */

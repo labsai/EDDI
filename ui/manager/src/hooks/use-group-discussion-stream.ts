@@ -156,16 +156,6 @@ export interface GroupStreamState {
   stances: Map<string, StanceUpdatedPayload>;
 }
 
-/**
- * The discussion's total spend, summed from the per-key map.
- *
- * Deliberately derived rather than read off a frame: see `memberCosts`.
- */
-export function streamTotalCost(state: GroupStreamState): number {
-  let total = 0;
-  for (const value of state.memberCosts.values()) total += value;
-  return total;
-}
 
 /** Shared empty state handed to consumers that have no stream yet. Never mutated. */
 const initialState: GroupStreamState = {

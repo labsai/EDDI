@@ -7,7 +7,6 @@ interface MemberRosterProps {
   members: DigestMember[];
   /** Hide identities (DELPHI). See `rosterIsAnonymous`. */
   anonymous?: boolean;
-  onSelectMember?: (agentId: string) => void;
   className?: string;
 }
 
@@ -21,7 +20,7 @@ interface MemberRosterProps {
  * flattened: the two are different kinds of claim, and rendering a paraphrase
  * in a way that reads as a quote would put words in an agent's mouth.
  */
-export function MemberRoster({ members, anonymous, onSelectMember, className }: MemberRosterProps) {
+export function MemberRoster({ members, anonymous, className }: MemberRosterProps) {
   const { t } = useTranslation();
   if (members.length === 0) return null;
 
@@ -36,13 +35,7 @@ export function MemberRoster({ members, anonymous, onSelectMember, className }: 
       </h3>
       <div className="grid grid-cols-1 gap-2 @[26rem]/roster:grid-cols-2 @[52rem]/roster:grid-cols-3">
         {members.map((member, index) => (
-          <MemberCard
-            key={member.agentId}
-            member={member}
-            index={index}
-            anonymous={anonymous}
-            onSelect={onSelectMember}
-          />
+          <MemberCard key={member.agentId} member={member} index={index} anonymous={anonymous} />
         ))}
       </div>
     </section>
@@ -53,12 +46,10 @@ function MemberCard({
   member,
   index,
   anonymous,
-  onSelect,
 }: {
   member: DigestMember;
   index: number;
   anonymous?: boolean;
-  onSelect?: (agentId: string) => void;
 }) {
   const { t } = useTranslation();
 
@@ -98,7 +89,14 @@ function MemberCard({
         </p>
       ) : (
         <p className="text-xs italic text-muted-foreground">
-          {t("groups.overview.noStanceYet", "Has not spoken yet")}
+          {/* Two different facts, and conflating them misreports the member.
+              A moderator's only contribution is a SYNTHESIS — it summarises
+              everyone else rather than stating a position of its own — so it
+              has no stance while plainly having spoken, and "has not spoken
+              yet" next to its turn count is simply false. */}
+          {member.turnCount > 0
+            ? t("groups.overview.noStanceOfOwn", "No position of their own")
+            : t("groups.overview.noStanceYet", "Has not spoken yet")}
         </p>
       )}
 
@@ -114,19 +112,11 @@ function MemberCard({
     </>
   );
 
-  const shell = "rounded-lg border border-border bg-secondary/30 p-2.5 text-start";
-
-  return onSelect ? (
-    <button
-      type="button"
-      onClick={() => onSelect(member.agentId)}
-      className={cn(shell, "w-full transition-colors hover:border-primary/60 hover:bg-primary/5")}
+  return (
+    <div
+      className="rounded-lg border border-border bg-secondary/30 p-2.5 text-start"
       data-testid={`overview-member-${member.agentId}`}
     >
-      {body}
-    </button>
-  ) : (
-    <div className={shell} data-testid={`overview-member-${member.agentId}`}>
       {body}
     </div>
   );

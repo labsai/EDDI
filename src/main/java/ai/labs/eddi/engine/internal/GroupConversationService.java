@@ -889,7 +889,15 @@ public class GroupConversationService implements IGroupConversationService {
                     // blew its budget must not pay for one more LLM call the next
                     // executor's own gate is about to stop anyway.
                     if (!GroupCostLedger.wouldExceedCeiling(gc, protocol)) {
-                        contextBuilder.updateWindowSummary(gc, phase, config.getContextWindow(), summarizationService);
+                        var windowCostKey = contextBuilder.updateWindowSummary(gc, phase, config.getContextWindow(),
+                                summarizationService);
+                        // I9 spend is discussion spend, and the cost_updated
+                        // contract says "after every attribution, including
+                        // system spend". Without this the live total sits below
+                        // the ledger for the whole of any windowed discussion.
+                        if (windowCostKey != null) {
+                            MemberTurnExecutor.announceCost(gc, windowCostKey, null, listener);
+                        }
                     }
 
                     // I2: mark where this repeat's entries begin. TranscriptEntry
@@ -1160,7 +1168,7 @@ public class GroupConversationService implements IGroupConversationService {
                     // the same write as the transcript that produced them and a
                     // reloaded document shows the band immediately rather than blank
                     // until the next boundary.
-                    var stanceUpdates = StanceSummaryEngine.updateStances(gc, config.getStanceSummary(), summarizationService);
+                    var stanceUpdates = StanceSummaryEngine.updateStances(gc, config.getStanceSummary(), protocol, summarizationService);
 
                     gc.setLastModified(Instant.now());
                     conversationStore.update(gc);
@@ -1170,14 +1178,17 @@ public class GroupConversationService implements IGroupConversationService {
                             listener.onStanceUpdated(new GroupConversationEventSink.StanceUpdatedEvent(
                                     stance.agentId(), gc.getMemberDisplayNames().get(stance.agentId()),
                                     stance.stance().text(), stance.stance().llmGenerated(),
-                                    stance.stance().upToTranscriptIndex()));
-                            // A priced stance call is discussion spend like any other,
-                            // so the cost band must see it too — otherwise the totals
-                            // the dashboard shows drift from the ledger's.
+                                    stance.stance().coveredContributions()));
+                            // A priced stance call is discussion spend like any
+                            // other, so the cost band must see it too — otherwise
+                            // the total the dashboard shows drifts below the
+                            // ledger's. Keyed on cost, NOT on whether the text
+                            // changed: a re-summary that lands on the same wording
+                            // still bills.
                             if (stance.cost() > 0.0) {
-                                listener.onCostUpdated(new GroupConversationEventSink.CostUpdatedEvent(
-                                        "system:stance:" + stance.agentId() + ":" + stance.stance().upToTranscriptIndex(),
-                                        null, stance.cost(), gc.getTotalCost()));
+                                MemberTurnExecutor.announceCost(gc,
+                                        "system:stance:" + stance.agentId() + ":" + stance.stance().coveredContributions(),
+                                        null, listener);
                             }
                         }
                         listener.onPhaseComplete(new GroupConversationEventSink.PhaseCompleteEvent(phaseIdx, phase.name()));

@@ -25,8 +25,12 @@ interface DiscussionOverviewProps {
   extras?: ReactNode;
   /** The outcome band's content — the decision card and synthesised answer. */
   outcome?: ReactNode;
+  /**
+   * Invoked when the reader picks a phase, to show them its actual turns.
+   * Supplied by `DiscussionPanel` (it switches to the transcript); the phase
+   * cards are inert without it rather than offering a click that does nothing.
+   */
   onSelectPhase?: (phaseIndex: number) => void;
-  onSelectMember?: (agentId: string) => void;
   className?: string;
 }
 
@@ -47,7 +51,6 @@ export function DiscussionOverview({
   extras,
   outcome,
   onSelectPhase,
-  onSelectMember,
   className,
 }: DiscussionOverviewProps) {
   const { t } = useTranslation();
@@ -76,14 +79,7 @@ export function DiscussionOverview({
       case "phases":
         return <PhaseRail key="phases" phases={digest.phases} onSelectPhase={onSelectPhase} />;
       case "roster":
-        return (
-          <MemberRoster
-            key="roster"
-            members={digest.members}
-            anonymous={anonymous}
-            onSelectMember={onSelectMember}
-          />
-        );
+        return <MemberRoster key="roster" members={digest.members} anonymous={anonymous} />;
       case "matrix":
         return (
           <ParticipationMatrix
@@ -92,7 +88,6 @@ export function DiscussionOverview({
             members={digest.members}
             matrix={digest.matrix}
             anonymous={anonymous}
-            onSelectCell={onSelectPhase ? (_agentId, phaseIndex) => onSelectPhase(phaseIndex) : undefined}
           />
         );
       case "extras":
@@ -131,8 +126,17 @@ function OverviewHeadline({ digest }: { digest: DiscussionDigest }) {
         {elapsed !== null && <span className="text-xs text-muted-foreground">{formatDuration(elapsed)}</span>}
       </div>
 
+      {/* Clamped, because `originalQuestion` is not always a question. A group
+          is routinely asked to assess a whole document — the grant-board demo
+          pastes an entire application — and rendering it in full pushed the
+          rail, the roster and the matrix below the fold, which is precisely the
+          wall of text this view exists to replace. Full text on hover. */}
       {digest.question && (
-        <p className="mb-2 text-sm leading-relaxed text-foreground" data-testid="overview-question">
+        <p
+          className="mb-2 line-clamp-3 text-sm leading-relaxed text-foreground"
+          title={digest.question}
+          data-testid="overview-question"
+        >
           {digest.question}
         </p>
       )}
