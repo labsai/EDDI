@@ -31,9 +31,28 @@ silently. If the work is stacked, retarget once the parent merges, or accept tha
 build is the only gate and say so. Rebase onto `origin/main` only if the branch was never
 pushed — otherwise merge `origin/main` in, since a rebase would need a banned force-push.
 
-**Changelog.** AGENTS.md §2 rule 8: the `docs/changelog.md` entry ships on the *same branch*
-as the work, directly under the `---` closing the header. If `ChangelogRotationTest` fails,
-run `python scripts/rotate-changelog.py`; never raise the 250 KB cap.
+**Changelog — a fragment, never the live file.** AGENTS.md §2 rule 8 changed: write a **new
+file** `docs/changelog.d/YYYY-MM-DD-<slug>.md` (today's date, slug unique to your branch) and
+commit it on the *same branch* as the work.
+
+> **Do not edit `docs/changelog.md` by hand.** CI's **`Changelog Discipline`** job diffs that
+> file against the base and **fails the PR** if the diff adds a line matching
+> `^\+## .*\(YYYY-MM-DD\)` or a dated register row `^\+\| YYYY-MM-DD \|`. Editing the header
+> or fixing a typo in a past entry is still fine — adding an *entry in place* is the one thing
+> it rejects, because every open PR inserting at the same point in the same file is a conflict
+> git cannot merge. That is not hypothetical: two entries collided on this very branch earlier.
+
+Inside the fragment, write exactly what used to go at the top of the live file — one or more
+`## <title> (YYYY-MM-DD)` entries — but give every relative link **one extra `../`**, since a
+fragment sits a directory deeper. `Decision Log` and `Regression Notes` rows go in a fenced
+` ```decision-log ` or ` ```regression-note ` block and the collator files them.
+`ChangelogFragmentTest` grades all of this, so a malformed fragment fails your build rather
+than the nightly collator's.
+
+Rotation is no longer your job: `changelog-collate.yml` runs nightly, merges fragments **by
+date** (an old PR lands among its contemporaries, not on top) and trims the live file to
+200 KB. `ChangelogRotationTest` still fails the build at 250 KB — the 50 KB gap is headroom so
+the session that tips it over is not the one made to rotate it. **Never raise the cap.**
 
 **Build.** `./mvnw compile` runs the `validate` phase, so Checkstyle (`UnusedImports` is
 `severity=error`) and `formatter:validate` fire there. Then the repo-wide guards a targeted
@@ -419,7 +438,8 @@ expensive version of this.
 git diff origin/main...HEAD --stat    # what actually merges
 ```
 
-Fix the `docs/changelog.md` entry in a commit (rule 8: it must describe what merged), then
+Fix **your fragment** under `docs/changelog.d/` in a commit (rule 8: it must describe what
+merged — and never `docs/changelog.md` itself, which `Changelog Discipline` rejects), then
 `gh pr edit --body-file` to match.
 
 Report: what was fixed, what was pushed back on and why, what was left open for a human,
