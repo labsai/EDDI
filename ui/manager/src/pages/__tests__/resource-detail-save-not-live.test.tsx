@@ -163,7 +163,11 @@ describe("ResourceDetailPage — a plain Save says it is not live", () => {
       expect(deployed).toHaveLength(1);
     });
     // The agent version the cascade just wrote (Location header: version=7),
-    // not the stale one the URL carried.
+    // not the stale one the URL carried. The action is withheld entirely when
+    // the cascade reports no agent version, so it can never deploy a revision
+    // that does not contain this edit — unreachable through the cascade today
+    // (it always reaches the agent when a cascade context exists), which is why
+    // there is no case for it here.
     expect(deployed[0]).toContain("/deploy/agent1");
     expect(deployed[0]).toContain("version=7");
   });

@@ -1,6 +1,7 @@
 import { useState, useCallback, useMemo, useEffect } from "react";
 import { useParams, Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
 import {
@@ -65,6 +66,7 @@ export function ResourceDetailPage() {
   const [searchParams] = useSearchParams();
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const rt = getResourceType(type ?? "");
   const Icon = ICON_MAP[rt?.icon ?? ""] ?? FileCode;
@@ -190,7 +192,7 @@ export function ResourceDetailPage() {
             },
             {
               onSuccess: (result) => {
-                const newAgentVersion = result.newAgentVersion ?? cascadeContext.agentVersion;
+                const newAgentVersion = result.newAgentVersion;
                 /*
                  * "Saved successfully" on its own is misleading here. This path
                  * cascades resource -> workflow -> agent and stops: the running
@@ -204,20 +206,37 @@ export function ResourceDetailPage() {
                  *
                  * The toast says so, and offers the one action that closes the
                  * gap, so the fix costs a click rather than a support question.
+                 *
+                 * The action is offered ONLY when the cascade actually produced a
+                 * new agent version. Falling back to the version the URL carried
+                 * would deploy a revision that does not contain this edit, while
+                 * the toast beside it promises the change will take effect -- a
+                 * worse failure than the silence this replaced, because it looks
+                 * like it worked.
                  */
                 toast.success(t("editor.savedNotLive", "Saved — not yet live"), {
                   description: t(
                     "editor.savedNotLiveDescription",
                     "The running agent still serves the deployed version. Deploy to make this change take effect.",
                   ),
-                  action: {
-                    label: t("editor.deployNow", "Deploy"),
-                    onClick: () => {
-                      deployAgent("production", cascadeContext.agentId, newAgentVersion)
-                        .then(() => toast.success(t("editor.deployStarted", "Deployment started")))
-                        .catch((err) => toast.error(getErrorMessage(err)));
-                    },
-                  },
+                  action: newAgentVersion
+                    ? {
+                        label: t("editor.deployNow", "Deploy"),
+                        onClick: () => {
+                          deployAgent("production", cascadeContext.agentId, newAgentVersion)
+                            .then(() => {
+                              // Same caches the Save & Deploy flow refreshes: the
+                              // agent list and the chat's deployed-agent picker
+                              // both render a deployment state that has just
+                              // changed underneath them.
+                              queryClient.invalidateQueries({ queryKey: ["agents"] });
+                              queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
+                              toast.success(t("editor.deployStarted", "Deployment started"));
+                            })
+                            .catch((err) => toast.error(getErrorMessage(err)));
+                        },
+                      }
+                    : undefined,
                 });
                 setSaveSuccess(true);
                 setCurrentVersion(result.newResourceVersion);
@@ -225,7 +244,7 @@ export function ResourceDetailPage() {
                 setCascadeContext({
                   ...cascadeContext,
                   workflowVersion: result.newWorkflowVersion ?? cascadeContext.workflowVersion,
-                  agentVersion: newAgentVersion,
+                  agentVersion: newAgentVersion ?? cascadeContext.agentVersion,
                 });
               },
               onError: (err) => toast.error(getErrorMessage(err)),
@@ -272,7 +291,7 @@ export function ResourceDetailPage() {
         // Invalid JSON — shouldn't happen, ConfigEditorLayout validates
       }
     },
-    [id, currentVersion, cascadeSave, cascadeContext, rt, t]
+    [id, currentVersion, cascadeSave, cascadeContext, rt, t, queryClient]
   );
 
   const handleSaveAndDeploy = useCallback(

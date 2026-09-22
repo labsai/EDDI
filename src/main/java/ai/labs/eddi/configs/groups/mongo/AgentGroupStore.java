@@ -488,14 +488,22 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         return List.copyOf(names);
     }
 
-    /** The distinct, upper-cased, non-blank member roles — a debate's "sides". */
+    /**
+     * The distinct, upper-cased, non-blank member roles — a debate's "sides".
+     * <p>
+     * Deliberately NOT trimmed, because {@code GroupContextBuilder.debatingRoles}
+     * is not: to the runtime, {@code "PRO"} and {@code "PRO "} are two sides.
+     * Trimming here would make them one, so a roster the runtime judges as a debate
+     * would save without the note this method exists to produce — a mirror that
+     * disagrees with what it mirrors is worse than no mirror.
+     */
     private static Set<String> distinctMemberRoles(AgentGroupConfiguration config) {
         if (config.getMembers() == null) {
             return Set.of();
         }
         return config.getMembers().stream()
                 .filter(m -> m != null && m.role() != null && !m.role().isBlank())
-                .map(m -> m.role().trim().toUpperCase(Locale.ROOT))
+                .map(m -> m.role().toUpperCase(Locale.ROOT))
                 .collect(Collectors.toSet());
     }
 
@@ -519,7 +527,8 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
                     .min(Comparator.comparing(m -> m.speakingOrder() == null ? Integer.MAX_VALUE : m.speakingOrder()))
                     .orElse(null);
         }
-        return speaker != null && speaker.role() != null && roles.contains(speaker.role().trim().toUpperCase(Locale.ROOT));
+        // Untrimmed, matching debatingRoles above and the runtime it mirrors.
+        return speaker != null && speaker.role() != null && roles.contains(speaker.role().toUpperCase(Locale.ROOT));
     }
 
     /** This config's phases, preset-expanded when it declares none of its own. */

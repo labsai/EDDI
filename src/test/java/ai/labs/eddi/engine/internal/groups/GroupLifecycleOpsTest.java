@@ -237,6 +237,12 @@ class GroupLifecycleOpsTest {
      * The message has to name the states the chain actually tries. It used to be a
      * hand-written sentence beside three hand-written {@code if} blocks, which is
      * how a state gets added to one and left out of the other.
+     * <p>
+     * Asserted against a LITERAL list, not against {@code CLOSEABLE_STATES}.
+     * Iterating the same constant the message is built from passes for any contents
+     * -- it pins the {@code .formatted(...)} wiring and nothing else. Pinning the
+     * contents is the point: dropping a state from the chain has to fail here, and
+     * the literal is what notices.
      */
     @Test
     void closeGroupConversation_refusalNamesEveryCloseableState() {
@@ -251,8 +257,13 @@ class GroupLifecycleOpsTest {
 
         var thrown = assertThrows(Exception.class, () -> ops.closeGroupConversation("gc-1"));
 
-        for (GroupConversationState state : GroupLifecycleOps.CLOSEABLE_STATES) {
-            assertTrue(thrown.getMessage().contains(state.name()),
+        assertEquals(
+                List.of(GroupConversationState.COMPLETED, GroupConversationState.FAILED,
+                        GroupConversationState.REJECTED, GroupConversationState.CANCELLED),
+                GroupLifecycleOps.CLOSEABLE_STATES,
+                "a terminal state that can be closed must be in the chain, in this order");
+        for (var state : List.of("COMPLETED", "FAILED", "REJECTED", "CANCELLED")) {
+            assertTrue(thrown.getMessage().contains(state),
                     "the refusal must name " + state + ", which the CAS chain tries: " + thrown.getMessage());
         }
     }

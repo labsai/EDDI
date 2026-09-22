@@ -142,6 +142,18 @@ only thing that changed:
 Documents written before this carry `FAILED` for a rejection and are **left alone**: nothing
 in them distinguishes the two, so a migration could only guess.
 
+**Rolling downgrade is one-way.** Jackson serializes the enum by name, so a document written
+by this version and read by an older EDDI fails `valueOf`. Upgrading a cluster is safe;
+rolling back a node that has already served a rejection is not, until those documents age
+out. The same goes for a Manager older than its backend: `GroupConversationState` is a
+closed union there too.
+
+The cadence reconciler in `TeamCadenceService` was the one place the new state had to be
+routed by hand — it switches on the enum with a `default` arm rather than exhaustively, so
+`REJECTED` fell through to "still running" and wedged the standing team's claim for
+`eddi.groups.cadence.claim-ttl` (default 24 h). Caught in review; it is the only such switch
+in `src/main`, and it now carries a comment saying so.
+
 ### Also
 
 [`RestGroupConversation.setDecidedByFromIdentity`](../../src/main/java/ai/labs/eddi/engine/internal/RestGroupConversation.java)
