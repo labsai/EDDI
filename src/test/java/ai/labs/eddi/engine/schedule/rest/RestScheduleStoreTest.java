@@ -150,6 +150,50 @@ class RestScheduleStoreTest {
         assertEquals(400, response.getStatus());
     }
 
+    private static ScheduleConfiguration dreamSchedule(String userId) {
+        var schedule = new ScheduleConfiguration();
+        schedule.setAgentId("agent-1");
+        schedule.setAgentVersion(1);
+        schedule.setName("nightly-dream");
+        schedule.setCronExpression("0 3 * * *");
+        schedule.setUserId(userId);
+        schedule.setMetadata(Map.of("dreamType", "dream_consolidation"));
+        return schedule;
+    }
+
+    /**
+     * The Dream schedule exactly as {@code docs/user-memory.md} documents it — no
+     * {@code message}, because a Dream fire dispatches to DreamService, not to a
+     * conversation. It was rejected with "message is required for CRON triggers".
+     */
+    @Test
+    void create_dreamScheduleWithoutMessage_isAccepted() throws Exception {
+        when(identity.hasRole("eddi-admin")).thenReturn(true);
+        when(scheduleStore.createSchedule(any())).thenReturn("dream-id");
+
+        Response response = rest.createSchedule(dreamSchedule("user-1"));
+
+        assertEquals(201, response.getStatus(), String.valueOf(response.getEntity()));
+    }
+
+    /**
+     * Without a real userId a Dream schedule falls back to the scheduler
+     * placeholder, which DreamService refuses on every fire — accepted at create
+     * time, it failed silently until it dead-lettered.
+     */
+    @Test
+    void create_dreamScheduleWithoutUserId_isRejectedUpFront() throws Exception {
+        when(identity.hasRole("eddi-admin")).thenReturn(true);
+
+        Response missing = rest.createSchedule(dreamSchedule(null));
+        Response placeholder = rest.createSchedule(dreamSchedule("system:scheduler"));
+
+        // The body is the store's generic validation message; the reason is logged
+        assertEquals(400, missing.getStatus());
+        assertEquals(400, placeholder.getStatus());
+        verify(scheduleStore, never()).createSchedule(any());
+    }
+
     @Test
     void create_rejectsHeartbeatWithoutInterval() {
         var schedule = new ScheduleConfiguration();

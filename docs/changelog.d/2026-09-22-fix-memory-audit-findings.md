@@ -100,3 +100,9 @@ observed there, and carries a regression test.
   Ollama failed with `model is required`. The model now goes under the provider's key, and an
   unset `llmModel` no longer overwrites the inherited model with `null`.
   [`SummarizationService.java`](../../src/main/java/ai/labs/eddi/modules/llm/impl/SummarizationService.java)
+- **The documented Dream schedule was rejected, and a user-less one accepted.** The schedule JSON
+  in `docs/user-memory.md` has no `message` — a Dream fire dispatches to `DreamService`, not to a
+  conversation — and failed with "message is required for CRON triggers". Conversely a Dream
+  schedule without a `userId` was accepted and then failed on every fire until it dead-lettered.
+  Dream schedules no longer need a message and are rejected up front without a real user.
+  [`RestScheduleStore.java`](../../src/main/java/ai/labs/eddi/engine/schedule/rest/RestScheduleStore.java)
