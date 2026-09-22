@@ -162,12 +162,33 @@ function parseVersionFromLocation(location: string | undefined | null): number |
   if (!location) {
     return null;
   }
-  const match = /[?&]version=(\d+)/.exec(location);
-  if (!match) {
+  let raw: string | null;
+  try {
+    /*
+     * Normalised exactly as `parseResourceUri` does it, and for the same two
+     * reasons: `eddi://` is not a special scheme, and a Location header may be
+     * a relative path with no origin at all — `new URL(location)` on its own
+     * throws on the second, which would turn every relative Location into a
+     * failed save.
+     */
+    const normalised = location.startsWith("eddi://")
+      ? location.replace("eddi://", "http://")
+      : location;
+    raw = new URL(normalised, "http://dummy").searchParams.get("version");
+  } catch {
     return null;
   }
-  const version = Number.parseInt(match[1]!, 10);
-  return Number.isNaN(version) ? null : version;
+  /*
+   * The WHOLE value must be digits. A prefix match accepted `version=2.5` and
+   * `version=2abc` as 2, so the cascade would have written a version into the
+   * parent that the server never reported — the same class of silent wrong
+   * reference this strict parser exists to prevent, one layer in.
+   */
+  if (raw === null || !/^\d+$/.test(raw)) {
+    return null;
+  }
+  const version = Number(raw);
+  return Number.isSafeInteger(version) ? version : null;
 }
 
 /**

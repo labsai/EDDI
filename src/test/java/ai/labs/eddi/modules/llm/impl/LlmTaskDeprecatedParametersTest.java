@@ -9,6 +9,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -57,8 +59,8 @@ class LlmTaskDeprecatedParametersTest {
     @DisplayName("LlmTask keeps no mutable state for the warning")
     void taskStaysStateless() {
         for (Field field : LlmTask.class.getDeclaredFields()) {
-            assertTrue(field.getName().toLowerCase().contains("warn") == false
-                    || java.lang.reflect.Modifier.isStatic(field.getModifiers()),
+            assertTrue(!field.getName().toLowerCase().contains("warn")
+                    || Modifier.isStatic(field.getModifiers()),
                     "an ILifecycleTask is a singleton shared by every conversation and must be stateless "
                             + "(AGENTS.md §4.1 rule 2); found instance field '" + field.getName() + "'");
         }
@@ -109,7 +111,7 @@ class LlmTaskDeprecatedParametersTest {
         assertDoesNotThrow(() -> LlmTask.warnOnDeprecatedParameters(new LlmConfiguration(null)));
         assertDoesNotThrow(() -> LlmTask.warnOnDeprecatedParameters(new LlmConfiguration(List.of())));
 
-        var ragged = new java.util.ArrayList<LlmConfiguration.Task>();
+        var ragged = new ArrayList<LlmConfiguration.Task>();
         ragged.add(null);
         ragged.add(task("answer", null));
         ragged.add(task("answer", Map.of(KEY, "false")));

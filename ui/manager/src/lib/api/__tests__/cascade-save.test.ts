@@ -655,6 +655,40 @@ describe("a save that does not report its new version", () => {
     await expect(cascadeSaveResource(RT, "res1", 1, {}, CONTEXT)).rejects.toThrow(/new version/i);
   });
 
+  /**
+   * The parser matched a numeric PREFIX, so `version=2.5` and `version=2abc`
+   * both produced 2 — writing a version into the parent that the server never
+   * reported, which is the exact failure the strict parse exists to prevent.
+   */
+  it.each(["version=2.5", "version=2abc", "version=", "version=abc", "version=-1"])(
+    "rejects a malformed %s rather than reading a prefix",
+    async (query) => {
+      vi.mocked(updateResource).mockResolvedValue({
+        location: `eddi://ai.labs.rules/rulestore/rulesets/res1?${query}`,
+      });
+      workflowAndAgentSucceed();
+
+      await expect(cascadeSaveResource(RT, "res1", 1, {}, CONTEXT)).rejects.toThrow(/new version/i);
+    },
+  );
+
+  /**
+   * A Location header may be a relative path with no origin. `new URL(location)`
+   * alone throws on those, which would turn every relative Location into a
+   * failed save — so the parser normalises with a dummy base, as
+   * `parseResourceUri` does.
+   */
+  it("reads a relative Location header", async () => {
+    vi.mocked(updateResource).mockResolvedValue({
+      location: "/rulestore/rulesets/res1?version=4",
+    });
+    workflowAndAgentSucceed();
+
+    const result = await cascadeSaveResource(RT, "res1", 1, {}, CONTEXT);
+
+    expect(result.newResourceVersion).toBe(4);
+  });
+
   it("still reads an explicit version=1 as version 1", async () => {
     // The whole point is telling "1" apart from "absent" — 1 is a real version.
     vi.mocked(updateResource).mockResolvedValue({

@@ -27,6 +27,7 @@ import ai.labs.eddi.datastore.IResourceStorageFactory;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -337,7 +338,7 @@ class AgentGroupStoreTest {
      */
     @Test
     void anUnnamedPhaseIsSkippedRatherThanCrashingTheSave() {
-        var phases = new java.util.ArrayList<DiscussionPhase>();
+        var phases = new ArrayList<DiscussionPhase>();
         phases.add(typedPhase("Args", PhaseType.ARGUE, "ALL", null));
         phases.add(typedPhase(null, PhaseType.SYNTHESIS, "MODERATOR", null));
         phases.add(typedPhase("Wrap", PhaseType.SYNTHESIS, "MODERATOR", null));
