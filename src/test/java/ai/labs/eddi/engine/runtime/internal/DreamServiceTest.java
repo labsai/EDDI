@@ -495,12 +495,14 @@ class DreamServiceTest {
 
         var entries = makeEntries(6, "fact", "agent-1");
         when(store.getAllEntries("user-1")).thenReturn(entries);
-        when(summarizationService.summarizeWithUsage(anyString(), eq(customPrompt), anyString(), anyString(), any()))
+        when(summarizationService.summarizeWithUsage(anyString(), startsWith(customPrompt), anyString(), anyString(), any()))
                 .thenReturn(llmResult("[{\"key\": \"s\", \"value\": \"v\"}]"));
 
         dreamService.process("user-1", "agent-1", dreamConfig);
 
-        verify(summarizationService).summarizeWithUsage(anyString(), eq(customPrompt), anyString(), anyString(), any());
+        // The custom prompt leads; the size bounds (target, "fewer than N") are
+        // appended to it, so a custom prompt cannot lose them.
+        verify(summarizationService).summarizeWithUsage(anyString(), startsWith(customPrompt), anyString(), anyString(), any());
     }
 
     @Test
@@ -639,13 +641,16 @@ class DreamServiceTest {
     }
 
     @Test
-    void summarize_llmReturnsTooMany_cappedToTarget() throws Exception {
+    void summarize_llmReturnsAboveTarget_keptWholeNeverTruncated() throws Exception {
         enableSummarization();
         dreamConfig.setSummarizeTargetEntries(2);
         var entries = makeEntries(8, "fact", "agent-1");
         when(store.getAllEntries("user-1")).thenReturn(entries);
+        when(store.upsert(any(UserMemoryEntry.class))).thenReturn("new-a", "new-b", "new-c", "new-d");
 
-        // LLM returns 4 (< 8 originals, but > 2 target) → capped to 2
+        // LLM returns 4 (< 8 originals, but > 2 target). Truncating to 2 would
+        // delete all 8 originals while keeping only half of what the model
+        // preserved — so all 4 are written.
         String llmResponse = "[{\"key\":\"a\",\"value\":\"1\"},{\"key\":\"b\",\"value\":\"2\"}," +
                 "{\"key\":\"c\",\"value\":\"3\"},{\"key\":\"d\",\"value\":\"4\"}]";
         when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
@@ -654,9 +659,131 @@ class DreamServiceTest {
         var result = dreamService.process("user-1", "agent-1", dreamConfig);
 
         assertTrue(result.isSuccess());
-        assertEquals(6, result.entriesSummarized()); // 8 - 2 (capped) = 6
-        verify(store, times(2)).upsert(any(UserMemoryEntry.class)); // only 2 inserted
+        assertEquals(4, result.entriesSummarized()); // 8 deleted - 4 created
+        verify(store, times(4)).upsert(any(UserMemoryEntry.class));
         verify(store, times(8)).deleteEntry(anyString());
+    }
+
+    @Test
+    void summarize_targetIsPartOfThePrompt() throws Exception {
+        enableSummarization();
+        dreamConfig.setSummarizeTargetEntries(2);
+        when(store.getAllEntries("user-1")).thenReturn(makeEntries(6, "fact", "agent-1"));
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(llmResult(""));
+
+        dreamService.process("user-1", "agent-1", dreamConfig);
+
+        var instructions = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(summarizationService).summarizeWithUsage(anyString(), instructions.capture(), anyString(), anyString(), any());
+        assertTrue(instructions.getValue().contains("at most 2 entries"), instructions.getValue());
+        assertTrue(instructions.getValue().contains("fewer than 6"), instructions.getValue());
+    }
+
+    /**
+     * Regression for the live-reproduced data loss: the model reused an original's
+     * key, the upsert overwrote that original IN PLACE (the store returned its id),
+     * and the "delete every original" step then deleted the consolidated entry too
+     * — six memories in, zero out, fire reported COMPLETED.
+     */
+    @Test
+    void summarize_consolidatedKeyReusesOriginal_thatOriginalIsNotDeleted() throws Exception {
+        enableSummarization();
+        var entries = makeEntries(6, "fact", "agent-1"); // ids id-0..id-5, keys key-0..key-5
+        when(store.getAllEntries("user-1")).thenReturn(entries);
+        // key-0 lands on original id-0 (same agent, non-global) → store reports id-0
+        when(store.upsert(any(UserMemoryEntry.class))).thenReturn("id-0", "new-1");
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(llmResult("[{\"key\":\"key-0\",\"value\":\"merged A\"},{\"key\":\"summary\",\"value\":\"merged B\"}]"));
+
+        var result = dreamService.process("user-1", "agent-1", dreamConfig);
+
+        assertTrue(result.isSuccess());
+        verify(store, never()).deleteEntry("id-0");
+        for (int i = 1; i < 6; i++) {
+            verify(store).deleteEntry("id-" + i);
+        }
+        assertEquals(4, result.entriesSummarized()); // 5 deleted - 1 created; id-0 reused in place
+    }
+
+    @Test
+    void summarize_consolidatedKeyWouldOverwriteMemoryOutsideGroup_groupSkippedUntouched() throws Exception {
+        enableSummarization();
+        var entries = new ArrayList<>(makeEntries(6, "fact", "agent-1"));
+        Instant now = Instant.now();
+        // Same agent, same (non-global) identity, but a DIFFERENT category → a
+        // different group
+        entries.add(new UserMemoryEntry("pref-1", "user-1", "diet", "vegetarian", "preference", Visibility.self, "agent-1", List.of(),
+                "conv-1", false, 0, now, now));
+        when(store.getAllEntries("user-1")).thenReturn(entries);
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(llmResult("[{\"key\":\"diet\",\"value\":\"merged facts\"}]"));
+
+        var result = dreamService.process("user-1", "agent-1", dreamConfig);
+
+        assertTrue(result.isSuccess());
+        assertEquals(0, result.entriesSummarized());
+        verify(store, never()).upsert(any(UserMemoryEntry.class));
+        verify(store, never()).deleteEntry(anyString());
+    }
+
+    @Test
+    void summarize_globalConsolidationWouldOverwriteAnotherAgentsGlobal_groupSkipped() throws Exception {
+        enableSummarization();
+        Instant now = Instant.now();
+        var entries = new ArrayList<UserMemoryEntry>();
+        for (int i = 0; i < 6; i++) {
+            entries.add(new UserMemoryEntry("id-" + i, "user-1", "key-" + i, "v" + i, "fact", Visibility.global, "agent-1", List.of(), "conv-1",
+                    false, 0, now, now));
+        }
+        // Another agent's shared memory — out of this cycle's scope, must stay
+        // untouched
+        entries.add(new UserMemoryEntry("foreign", "user-1", "language", "German", "preference", Visibility.global, "agent-2", List.of(),
+                "conv-2", false, 0, now, now));
+        when(store.getAllEntries("user-1")).thenReturn(entries);
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(llmResult("[{\"key\":\"language\",\"value\":\"English\"}]"));
+
+        dreamService.process("user-1", "agent-1", dreamConfig);
+
+        verify(store, never()).upsert(any(UserMemoryEntry.class));
+        verify(store, never()).deleteEntry(anyString());
+    }
+
+    @Test
+    void summarize_duplicateConsolidatedKeys_mergedNotOverwritten() throws Exception {
+        enableSummarization();
+        when(store.getAllEntries("user-1")).thenReturn(makeEntries(6, "fact", "agent-1"));
+        when(store.upsert(any(UserMemoryEntry.class))).thenReturn("new-1");
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(llmResult("[{\"key\":\"pets\",\"value\":\"has a dog\"},{\"key\":\"pets\",\"value\":\"has a cat\"}]"));
+
+        dreamService.process("user-1", "agent-1", dreamConfig);
+
+        var captor = org.mockito.ArgumentCaptor.forClass(UserMemoryEntry.class);
+        verify(store, times(1)).upsert(captor.capture());
+        assertEquals("has a dog; has a cat", captor.getValue().value());
+    }
+
+    @Test
+    void summarize_insertFailsAfterReusingOriginal_originalRestoredNothingDeleted() throws Exception {
+        enableSummarization();
+        var entries = makeEntries(6, "fact", "agent-1");
+        when(store.getAllEntries("user-1")).thenReturn(entries);
+        when(store.upsert(any(UserMemoryEntry.class)))
+                .thenReturn("id-0") // overwrote original id-0 in place
+                .thenThrow(new IResourceStore.ResourceStoreException("DB down")) // second consolidated entry fails
+                .thenReturn("id-0"); // the restore
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(llmResult("[{\"key\":\"key-0\",\"value\":\"merged\"},{\"key\":\"other\",\"value\":\"x\"}]"));
+
+        var result = dreamService.process("user-1", "agent-1", dreamConfig);
+
+        assertEquals(0, result.entriesSummarized());
+        verify(store, never()).deleteEntry(anyString());
+        var captor = org.mockito.ArgumentCaptor.forClass(UserMemoryEntry.class);
+        verify(store, times(3)).upsert(captor.capture());
+        assertEquals("value-0", captor.getAllValues().get(2).value(), "the overwritten original must be written back");
     }
 
     @Test
@@ -873,8 +1000,10 @@ class DreamServiceTest {
         assertTrue(result.isSuccess());
         assertEquals(1, result.entriesPruned());
         assertEquals(5, result.entriesSummarized()); // 6 fresh - 1 consolidated = 5
-        // 1st call = initial load, 2nd call = reload for summarization (pruned > 0)
-        verify(store, times(2)).getAllEntries("user-1");
+        // 1st call = initial load, 2nd call = reload for summarization (pruned > 0),
+        // 3rd call = the consolidated group's write-target check, which needs the
+        // UNSCOPED set (another agent's global entry is a collision too)
+        verify(store, times(3)).getAllEntries("user-1");
     }
 
     @Test

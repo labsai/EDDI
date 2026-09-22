@@ -425,7 +425,13 @@ public class DreamService {
      * <li>New entries are inserted BEFORE originals are deleted</li>
      * <li>If insert fails, originals are preserved</li>
      * <li>If LLM returns empty/garbage, the group is skipped</li>
-     * <li>If LLM returns more entries than input, the group is skipped</li>
+     * <li>If LLM returns as many entries as the input or more, the group is
+     * skipped; an answer above {@code summarizeTargetEntries} is kept whole, never
+     * truncated</li>
+     * <li>A consolidated entry whose key lands on one of the group's originals
+     * overwrites it in place and that original is NOT deleted afterwards; a key
+     * that would land on a memory outside the group skips the group untouched</li>
+     * <li>Consolidated entries sharing a key are merged, not overwritten</li>
      * <li>Cost bounded by {@code maxCostPerRun} (estimated from token usage), plus
      * the deprecated {@code maxSummarizationCalls} when a config sets it</li>
      * <li>A <em>permanent</em> LLM failure (auth, endpoint, unknown model) aborts
@@ -494,7 +500,7 @@ public class DreamService {
             SummarizationService.SummarizationResult llmResult;
             try {
                 llmResult = summarizationService.summarizeWithUsage(
-                        content, config.getSummarizationPrompt(),
+                        content, consolidationInstructions(config, groupEntries.size()),
                         config.getLlmProvider(), config.getLlmModel(),
                         config.getParameters());
             } catch (Exception e) {
@@ -521,8 +527,11 @@ public class DreamService {
             llmCallsMade++;
             estimatedCostAccumulated += estimateCost(llmResult, content.length());
 
-            // 4. Parse response (handles markdown fences, validates output)
-            List<ConsolidatedEntry> consolidated = parseConsolidatedEntries(llmResult.summary());
+            // 4. Parse response (handles markdown fences, validates output). Two
+            // consolidated entries with the same key would upsert onto the same
+            // document, the second silently overwriting the first — so they are
+            // merged here, never dropped.
+            List<ConsolidatedEntry> consolidated = mergeDuplicateKeys(parseConsolidatedEntries(llmResult.summary()));
 
             if (consolidated.isEmpty()) {
                 LOGGER.warnf("[DREAM] Summarization returned empty/invalid result for " +
@@ -537,10 +546,15 @@ public class DreamService {
                 continue;
             }
 
-            // 6. Cap at target (guaranteed >= 1 by DreamConfig validation)
+            // 6. summarizeTargetEntries is communicated to the model in the prompt
+            // (consolidationInstructions). An answer above it is NOT truncated: the
+            // originals are deleted below, so cutting the list would silently throw
+            // away facts the model preserved. More entries than the target but fewer
+            // than the originals is still a reduction, and it is kept whole.
             int target = Math.max(1, config.getSummarizeTargetEntries());
             if (consolidated.size() > target) {
-                consolidated = consolidated.subList(0, target);
+                LOGGER.debugf("[DREAM] Group '%s' consolidated to %d entries (target %d) — kept whole, never truncated.",
+                        LogSanitizer.sanitize(group.getKey()), consolidated.size(), target);
             }
 
             // 7. SAFETY: Insert new entries FIRST
@@ -549,37 +563,83 @@ public class DreamService {
             // memory belongs to exactly one agent, so it may only ever be merged
             // with entries of that same agent — buildGroups guarantees that by
             // splitting self-scoped groups per sourceAgentId.
-            List<String> insertedIds = new ArrayList<>();
-            try {
-                Visibility mergedVisibility = mostRestrictiveVisibility(groupEntries);
-                Set<String> distinctAgents = groupEntries.stream()
-                        .map(UserMemoryEntry::sourceAgentId)
-                        .filter(Objects::nonNull)
-                        .collect(Collectors.toSet());
-                String sourceAgent = distinctAgents.size() == 1
-                        ? distinctAgents.iterator().next()
-                        : groupEntries.getFirst().sourceAgentId();
-                // Defence in depth: should a future grouping change ever hand us a
-                // self-scoped group spanning several agents, skip it rather than
-                // widen it — a privacy boundary must fail closed.
-                if (distinctAgents.size() > 1 && mergedVisibility == Visibility.self) {
-                    LOGGER.errorf("[DREAM] Refusing to merge self-scoped entries from %d agents for user='%s', "
-                            + "group='%s' — that would expose one agent's private memories to the others.",
-                            distinctAgents.size(), LogSanitizer.sanitize(userId), LogSanitizer.sanitize(group.getKey()));
-                    continue;
-                }
-                Instant earliestCreated = groupEntries.stream()
-                        .map(UserMemoryEntry::createdAt)
-                        .filter(Objects::nonNull)
-                        .min(Instant::compareTo).orElse(Instant.now());
-                // Merge groupIds from all originals to preserve group-scoped reachability
-                List<String> mergedGroupIds = groupEntries.stream()
-                        .map(UserMemoryEntry::groupIds)
-                        .filter(Objects::nonNull)
-                        .flatMap(Collection::stream)
-                        .distinct()
-                        .collect(Collectors.toList());
+            Visibility mergedVisibility = mostRestrictiveVisibility(groupEntries);
+            Set<String> distinctAgents = groupEntries.stream()
+                    .map(UserMemoryEntry::sourceAgentId)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toSet());
+            String sourceAgent = distinctAgents.size() == 1
+                    ? distinctAgents.iterator().next()
+                    : groupEntries.getFirst().sourceAgentId();
+            // Defence in depth: should a future grouping change ever hand us a
+            // self-scoped group spanning several agents, skip it rather than
+            // widen it — a privacy boundary must fail closed.
+            if (distinctAgents.size() > 1 && mergedVisibility == Visibility.self) {
+                LOGGER.errorf("[DREAM] Refusing to merge self-scoped entries from %d agents for user='%s', "
+                        + "group='%s' — that would expose one agent's private memories to the others.",
+                        distinctAgents.size(), LogSanitizer.sanitize(userId), LogSanitizer.sanitize(group.getKey()));
+                continue;
+            }
 
+            // A consolidated entry is written with an UPSERT, so its key decides which
+            // existing document it lands on. Models naturally reuse an original's key
+            // ("coffee" for a merged coffee preference), and the upsert then overwrites
+            // that original in place — which the previous "delete every original"
+            // step went on to delete as well, wiping the consolidated entry with it.
+            // Resolve every target up front: an original may be reused (and is then
+            // exempt from deletion); anything OUTSIDE this group — another category,
+            // another agent's global entry — must not be touched, so the group is
+            // skipped instead.
+            Map<String, UserMemoryEntry> originalsById = groupEntries.stream()
+                    .filter(e -> e.id() != null)
+                    .collect(Collectors.toMap(UserMemoryEntry::id, e -> e, (a, b) -> a, LinkedHashMap::new));
+            Map<String, UserMemoryEntry> reusedOriginals = new LinkedHashMap<>();
+            String collidingKey;
+            try {
+                List<UserMemoryEntry> userEntries = userMemoryStore.getAllEntries(userId);
+                collidingKey = null;
+                for (var entry : consolidated) {
+                    UserMemoryEntry existing = findUpsertTarget(userEntries, entry.key(), mergedVisibility, sourceAgent);
+                    if (existing == null) {
+                        continue;
+                    }
+                    if (existing.id() != null && originalsById.containsKey(existing.id())) {
+                        reusedOriginals.put(existing.id(), existing);
+                    } else {
+                        collidingKey = entry.key();
+                        break;
+                    }
+                }
+            } catch (Exception e) {
+                LOGGER.warnf("[DREAM] Could not resolve consolidation targets for user='%s', group='%s': %s. Originals preserved.",
+                        LogSanitizer.sanitize(userId), LogSanitizer.sanitize(group.getKey()), e.getMessage());
+                continue;
+            }
+            if (collidingKey != null) {
+                LOGGER.warnf("[DREAM] Consolidated key '%s' for user='%s', group='%s' would overwrite a memory outside this group. "
+                        + "Skipping the group — nothing was changed.", LogSanitizer.sanitize(collidingKey), LogSanitizer.sanitize(userId),
+                        LogSanitizer.sanitize(group.getKey()));
+                continue;
+            }
+
+            Instant earliestCreated = groupEntries.stream()
+                    .map(UserMemoryEntry::createdAt)
+                    .filter(Objects::nonNull)
+                    .min(Instant::compareTo).orElse(Instant.now());
+            // Merge groupIds from all originals to preserve group-scoped reachability
+            List<String> mergedGroupIds = groupEntries.stream()
+                    .map(UserMemoryEntry::groupIds)
+                    .filter(Objects::nonNull)
+                    .flatMap(Collection::stream)
+                    .distinct()
+                    .collect(Collectors.toList());
+
+            // Ids of documents this cycle CREATED (to delete on rollback) and of
+            // originals it OVERWROTE in place (to restore on rollback, and to keep
+            // when the originals are deleted).
+            List<String> createdIds = new ArrayList<>();
+            Set<String> overwrittenOriginalIds = new LinkedHashSet<>();
+            try {
                 for (var entry : consolidated) {
                     String id = userMemoryStore.upsert(new UserMemoryEntry(
                             null, userId, entry.key(), entry.value(),
@@ -587,27 +647,29 @@ public class DreamService {
                             mergedVisibility, sourceAgent, mergedGroupIds,
                             "dream-consolidation", false, 0,
                             earliestCreated, Instant.now()));
-                    insertedIds.add(id);
+                    if (id != null && reusedOriginals.containsKey(id)) {
+                        overwrittenOriginalIds.add(id);
+                    } else {
+                        createdIds.add(id);
+                    }
                 }
             } catch (Exception e) {
                 LOGGER.warnf("[DREAM] Failed to insert consolidated entries for " +
-                        "user='%s', group='%s': %s. Originals preserved, rolling back %d inserts.",
-                        LogSanitizer.sanitize(userId), LogSanitizer.sanitize(group.getKey()), e.getMessage(), insertedIds.size());
-                // Rollback: delete any partially-inserted consolidated entries
-                for (String insertedId : insertedIds) {
-                    try {
-                        userMemoryStore.deleteEntry(insertedId);
-                    } catch (Exception rollbackEx) {
-                        LOGGER.warnf("[DREAM] Rollback delete failed for '%s': %s",
-                                insertedId, rollbackEx.getMessage());
-                    }
-                }
+                        "user='%s', group='%s': %s. Rolling back %d insert(s) and restoring %d overwritten original(s).",
+                        LogSanitizer.sanitize(userId), LogSanitizer.sanitize(group.getKey()), e.getMessage(), createdIds.size(),
+                        overwrittenOriginalIds.size());
+                rollback(createdIds, overwrittenOriginalIds, reusedOriginals);
                 continue; // Insert failed → don't delete anything
             }
 
-            // 8. Delete originals (only after ALL inserts succeeded)
+            // 8. Delete originals (only after ALL inserts succeeded) — except those
+            // that now HOLD a consolidated entry: deleting them would delete the
+            // consolidation itself.
             int actualDeleted = 0;
             for (var original : groupEntries) {
+                if (original.id() != null && overwrittenOriginalIds.contains(original.id())) {
+                    continue;
+                }
                 try {
                     userMemoryStore.deleteEntry(original.id());
                     actualDeleted++;
@@ -618,8 +680,9 @@ public class DreamService {
                 }
             }
 
-            // Track actual reduction (not intent) for accurate metrics
-            int reduced = actualDeleted - consolidated.size();
+            // Track actual reduction (not intent) for accurate metrics: entries
+            // removed minus entries newly created. Reused originals are neither.
+            int reduced = actualDeleted - createdIds.size();
             if (reduced > 0) {
                 totalConsolidated += reduced;
                 entriesSummarizedCounter.increment(reduced);
@@ -837,6 +900,84 @@ public class DreamService {
             LOGGER.warnf("[DREAM] Failed to parse LLM consolidation response: %s",
                     e.getMessage());
             return List.of();
+        }
+    }
+
+    /**
+     * The consolidation instructions for one group: the configured (or default)
+     * prompt plus the size bounds. {@code summarizeTargetEntries} used to be
+     * enforced only AFTER the call, by truncating the model's answer — the model
+     * was never told the number, so a faithful answer with one entry too many lost
+     * a fact. It is part of the request instead, and nothing is truncated.
+     */
+    static String consolidationInstructions(AgentConfiguration.DreamConfig config, int originalCount) {
+        int target = Math.max(1, config.getSummarizeTargetEntries());
+        return config.getSummarizationPrompt() + "\n\nYou are given " + originalCount + " entries. Consolidate them into at most "
+                + target + " entr" + (target == 1 ? "y" : "ies")
+                + ", and in any case fewer than " + originalCount + ". Every important detail must survive in some entry.";
+    }
+
+    /**
+     * Collapses consolidated entries that share a key into one, joining their
+     * values. They would otherwise upsert onto the same document, the later one
+     * silently overwriting the earlier.
+     */
+    static List<ConsolidatedEntry> mergeDuplicateKeys(List<ConsolidatedEntry> entries) {
+        Map<String, String> byKey = new LinkedHashMap<>();
+        for (ConsolidatedEntry entry : entries) {
+            byKey.merge(entry.key(), entry.value(), (a, b) -> a.equals(b) ? a : a + "; " + b);
+        }
+        return byKey.entrySet().stream()
+                .map(e -> new ConsolidatedEntry(e.getKey(), truncate(e.getValue(), MAX_VALUE_LENGTH)))
+                .toList();
+    }
+
+    /**
+     * The existing entry an upsert of {@code key} with the given visibility and
+     * owner would overwrite, or {@code null} when it would insert. Mirrors the
+     * stores' upsert identity: one shared document per {@code (userId, key)} for
+     * {@code global}; one document per {@code (userId, key, sourceAgentId)} among
+     * the non-global entries otherwise.
+     */
+    static UserMemoryEntry findUpsertTarget(List<UserMemoryEntry> userEntries, String key, Visibility visibility, String sourceAgentId) {
+        for (UserMemoryEntry existing : userEntries) {
+            if (!Objects.equals(key, existing.key())) {
+                continue;
+            }
+            boolean existingIsGlobal = existing.visibility() == Visibility.global;
+            boolean sameIdentity = visibility == Visibility.global
+                    ? existingIsGlobal
+                    : !existingIsGlobal && Objects.equals(sourceAgentId, existing.sourceAgentId());
+            if (sameIdentity) {
+                return existing;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Undoes a partially written consolidation: deletes the documents it created
+     * and writes back the originals it had overwritten in place.
+     */
+    private void rollback(List<String> createdIds, Set<String> overwrittenOriginalIds, Map<String, UserMemoryEntry> reusedOriginals) {
+        for (String createdId : createdIds) {
+            if (createdId == null) {
+                continue;
+            }
+            try {
+                userMemoryStore.deleteEntry(createdId);
+            } catch (Exception rollbackEx) {
+                LOGGER.warnf("[DREAM] Rollback delete failed for '%s': %s", createdId, rollbackEx.getMessage());
+            }
+        }
+        for (String originalId : overwrittenOriginalIds) {
+            UserMemoryEntry original = reusedOriginals.get(originalId);
+            try {
+                userMemoryStore.upsert(original);
+            } catch (Exception rollbackEx) {
+                LOGGER.errorf("[DREAM] Rollback could not restore overwritten original '%s' (key='%s'): %s", originalId,
+                        LogSanitizer.sanitize(original.key()), rollbackEx.getMessage());
+            }
         }
     }
 

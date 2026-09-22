@@ -280,8 +280,8 @@ class DreamServiceExtendedTest {
     class TargetCappingTests {
 
         @Test
-        @DisplayName("consolidated entries capped to target count")
-        void consolidatedCapped() throws Exception {
+        @DisplayName("an answer above the target is kept whole — truncating it would lose facts once the originals are deleted")
+        void consolidatedAboveTargetKeptWhole() throws Exception {
             dreamConfig.setSummarizeTargetEntries(1);
             dreamConfig.setSummarizeGroupBy("all");
             dreamConfig.setPreserveAgentProvenance(false);
@@ -290,15 +290,15 @@ class DreamServiceExtendedTest {
             when(store.getAllEntries("user-1")).thenReturn(entries);
             when(store.upsert(any(UserMemoryEntry.class))).thenReturn("new-id");
 
-            // LLM returns 3 entries but target is 1 → should cap to 1
+            // LLM returns 3 entries (target 1, but fewer than the 5 originals) → all 3
+            // written
             String llmResponse = "[{\"key\": \"s1\", \"value\": \"v1\"}, {\"key\": \"s2\", \"value\": \"v2\"}, {\"key\": \"s3\", \"value\": \"v3\"}]";
             when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                     .thenReturn(new SummarizationResult(llmResponse, 100, 50));
 
             var result = dreamService.process("user-1", "agent-1", dreamConfig);
             assertTrue(result.isSuccess());
-            // Only 1 upsert should happen (capped to target)
-            verify(store, times(1)).upsert(any(UserMemoryEntry.class));
+            verify(store, times(3)).upsert(any(UserMemoryEntry.class));
         }
     }
 
