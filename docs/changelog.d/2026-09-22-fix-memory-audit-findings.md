@@ -149,3 +149,11 @@ observed there, and carries a regression test.
   [`UserMemoryWriteRules.java`](../../src/main/java/ai/labs/eddi/configs/properties/UserMemoryWriteRules.java),
   [`RestUserMemoryStore.java`](../../src/main/java/ai/labs/eddi/configs/properties/rest/RestUserMemoryStore.java),
   [`McpMemoryTools.java`](../../src/main/java/ai/labs/eddi/engine/mcp/McpMemoryTools.java)
+- **Recall and summary turn numbers were one too high.** Both labelled a turn by its output index
+  + 1, and index 0 is the conversation's opening step — so the user's first message was "Turn 2"
+  (reproduced on Claude), and a model asked for "turn 3" got something other than what the user
+  meant. Turn N is now step N: the opening step is turn 0, the user's first message turn 1; ranges
+  are inclusive, reversed ranges are normalised, and the opening step no longer renders an empty
+  user line.
+  [`ConversationRecallTool.java`](../../src/main/java/ai/labs/eddi/modules/llm/tools/ConversationRecallTool.java),
+  [`ConversationSummarizer.java`](../../src/main/java/ai/labs/eddi/modules/llm/impl/ConversationSummarizer.java)

@@ -78,23 +78,27 @@ public class ConversationRecallTool {
         int fromTurn;
         int toTurn;
 
+        // Turn N is conversation step N: turn 0 is the opening (CONVERSATION_START)
+        // step, turn 1 the user's first message. Labels used to be step + 1, so the
+        // user's first message was "turn 2" — the model and the user never agreed on
+        // what "turn 3" meant. Ranges are inclusive; toTurn is kept exclusive below.
         if (rangeMatcher.find()) {
-            fromTurn = Integer.parseInt(rangeMatcher.group(1));
-            toTurn = Integer.parseInt(rangeMatcher.group(2));
-
-            // Convert from 1-indexed (human) to 0-indexed (internal)
-            fromTurn = Math.max(1, fromTurn) - 1;
-            toTurn = Math.min(toTurn, summaryThroughStep);
-
-            // Ensure range is within summarized section
-            fromTurn = Math.min(fromTurn, summaryThroughStep - 1);
+            int first = Integer.parseInt(rangeMatcher.group(1));
+            int last = Integer.parseInt(rangeMatcher.group(2));
+            if (last < first) {
+                int swap = first;
+                first = last;
+                last = swap;
+            }
+            fromTurn = Math.min(first, summaryThroughStep - 1);
+            toTurn = Math.min(last + 1, summaryThroughStep);
         } else {
             // Try single-turn pattern: "turn 5" or just "5"
             Matcher singleMatcher = SINGLE_TURN_PATTERN.matcher(query);
             if (singleMatcher.find()) {
                 int turn = Integer.parseInt(singleMatcher.group(1));
-                fromTurn = Math.max(0, Math.min(turn - 1, summaryThroughStep - 1));
-                toTurn = Math.min(fromTurn + 1, summaryThroughStep);
+                fromTurn = Math.min(turn, summaryThroughStep - 1);
+                toTurn = fromTurn + 1;
             } else {
                 // No range or turn specified — return the last N summarized turns
                 toTurn = summaryThroughStep;
@@ -109,18 +113,18 @@ public class ConversationRecallTool {
 
         // Render the requested turns
         var sb = new StringBuilder();
-        sb.append("**Recalled conversation turns ").append(fromTurn + 1).append("-").append(toTurn).append(":**\n\n");
+        sb.append("**Recalled conversation turns ").append(fromTurn).append("-").append(toTurn - 1).append(":**\n\n");
 
         for (int i = fromTurn; i < toTurn && i < conversationOutputs.size(); i++) {
             var output = conversationOutputs.get(i);
             var input = output.get("input", String.class);
             var outputText = ConversationOutputUtils.extractOutputText(output);
 
-            if (input != null) {
-                sb.append("**Turn ").append(i + 1).append(" — User:** ").append(input).append('\n');
+            if (input != null && !input.isBlank()) {
+                sb.append("**Turn ").append(i).append(" — User:** ").append(input).append('\n');
             }
             if (outputText != null && !outputText.isEmpty()) {
-                sb.append("**Turn ").append(i + 1).append(" — Agent:** ").append(outputText).append('\n');
+                sb.append("**Turn ").append(i).append(" — Agent:** ").append(outputText).append('\n');
             }
             sb.append('\n');
         }
