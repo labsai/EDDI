@@ -1,5 +1,13 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { useSessionLogStore, _connectForTesting } from "@/hooks/session-log-store";
+import {
+  useSessionLogStore,
+  _connectForTesting,
+  connect,
+  disconnect,
+  subscriberCount,
+  isStreamOpen,
+} from "@/hooks/session-log-store";
+import * as logsApi from "@/lib/api/logs";
 
 vi.mock("@/lib/api/logs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api/logs")>();
@@ -12,6 +20,9 @@ vi.mock("@/lib/api/logs", async (importOriginal) => {
 describe("useSessionLogStore", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Drain any subscription a previous test leaked: a non-zero refcount would
+    // make "connect() opens exactly one" pass without opening anything.
+    while (subscriberCount() > 0) disconnect();
     // Reset store state between tests
     useSessionLogStore.setState({
       entries: [],
@@ -279,4 +290,101 @@ describe("useSessionLogStore", () => {
 
     connection.close();
   });
+
+  // ── Lazy, reference-counted connection (D1) ──────────────────────
+  //
+  // This module used to connect on import, and `main.tsx` imported it for that
+  // side effect — so every Manager tab held an open
+  // /administration/logs/stream SSE connection on every page for its whole
+  // lifetime. EDDI serves HTTP/1.1, where Chrome allows six concurrent
+  // connections per origin across the entire profile, and a live group
+  // discussion opens another. Two or three tabs saturated the cap: pages hung
+  // on skeleton loaders forever while the server was provably fine.
+  describe("connection lifecycle", () => {
+    it("importing the module opens no EventSource", () => {
+      // The import at the top of this file has already run — this assertion is
+      // the regression itself. A module-load `openStream()` fails it.
+      expect(isStreamOpen()).toBe(false);
+      expect(subscriberCount()).toBe(0);
+    });
+
+    it("connect() opens exactly one stream", () => {
+      const spy = vi.spyOn(logsApi, "createLogEventSource");
+
+      const release = connect();
+
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(subscriberCount()).toBe(1);
+      release();
+      spy.mockRestore();
+    });
+
+    it("a second connect() reuses the open stream", () => {
+      const spy = vi.spyOn(logsApi, "createLogEventSource");
+
+      const first = connect();
+      const second = connect();
+
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(subscriberCount()).toBe(2);
+      first();
+      second();
+      spy.mockRestore();
+    });
+
+    it("closes only after the last consumer leaves", () => {
+      const first = connect();
+      const source = _sourceOf();
+      const closeSpy = vi.spyOn(source!, "close");
+      const second = connect();
+
+      first();
+      expect(closeSpy).not.toHaveBeenCalled();
+      expect(useSessionLogStore.getState().connected).toBe(false); // never opened in jsdom
+
+      second();
+      expect(closeSpy).toHaveBeenCalledTimes(1);
+      expect(subscriberCount()).toBe(0);
+    });
+
+    it("a release function is idempotent, so a double-invoked effect cleanup is safe", () => {
+      const release = connect();
+      const other = connect();
+
+      release();
+      release();
+      release();
+
+      // Only one subscription was ever released, so the other consumer still
+      // holds the stream open. React 19 double-invokes effect cleanups in
+      // StrictMode, which is exactly this shape.
+      expect(subscriberCount()).toBe(1);
+      other();
+      expect(subscriberCount()).toBe(0);
+    });
+
+    it("disconnect() on an idle store is a no-op", () => {
+      expect(() => disconnect()).not.toThrow();
+      expect(subscriberCount()).toBe(0);
+    });
+
+    it("reconnects after the last consumer left", () => {
+      const spy = vi.spyOn(logsApi, "createLogEventSource");
+
+      connect()();
+      const release = connect();
+
+      expect(spy).toHaveBeenCalledTimes(2);
+      release();
+      spy.mockRestore();
+    });
+  });
 });
+
+/** The live EventSource, read through the testing hook without re-counting. */
+function _sourceOf() {
+  const probe = _connectForTesting();
+  const source = probe.getEventSource();
+  probe.close();
+  return source;
+}
