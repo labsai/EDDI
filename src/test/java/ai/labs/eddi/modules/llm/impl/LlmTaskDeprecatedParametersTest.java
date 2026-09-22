@@ -8,111 +8,111 @@ import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import java.lang.reflect.Method;
+import java.lang.reflect.Field;
+import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * {@code includeFirstAgentMessage} is deprecated, and the deprecation has to be
- * audible exactly once per configured task.
+ * {@code includeFirstAgentMessage} is deprecated, and saying so must not cost
+ * {@link LlmTask} its statelessness.
  * <p>
- * It exists to satisfy an Anthropic rule that no longer applies: the Messages
- * API no longer documents a first-message role requirement, and an
- * assistant-first history is accepted. The flag keeps working — agent behaviour
- * lives in stored JSON, and silently ignoring a parameter an author set
- * deliberately would start sending a greeting they chose to withhold, with no
- * diagnostic — but a config carrying it should say so.
+ * The flag exists to satisfy an Anthropic rule that no longer applies: the
+ * Messages API no longer documents a first-message role requirement, and an
+ * assistant-first history is accepted. It keeps working — agent behaviour lives
+ * in stored JSON, and silently ignoring a parameter an author set deliberately
+ * would start sending a greeting they chose to withhold, with no diagnostic —
+ * but a config carrying it should say so.
  * <p>
- * Once per task, not once per turn: an LLM task runs on every message of every
- * conversation, so a per-turn WARN would be a log flood that operators learn to
- * filter out, which is the same as not warning at all.
+ * The first version of this warned from {@code execute} and remembered which
+ * task ids it had already warned about, in a field on the task. That was wrong
+ * twice: an {@code ILifecycleTask} is an application-scoped singleton shared by
+ * every conversation and MUST be stateless (AGENTS.md §4.1 rule 2), and keying
+ * the memo on the task id meant two tasks that both omit an id collapsed to one
+ * key, so the second never warned at all. The warning now happens once per
+ * configuration load, from {@code configure}, with nothing remembered.
  */
 @DisplayName("LlmTask deprecated parameters")
 class LlmTaskDeprecatedParametersTest {
 
     private static final String KEY = "includeFirstAgentMessage";
 
-    /** Invokes the private warn helper and reports whether it logged. */
-    private static boolean warnedFor(LlmTask task, String taskId, Map<String, String> params) throws Exception {
-        Method method = LlmTask.class.getDeclaredMethod(
-                "warnIfIncludeFirstAgentMessageIsSet", Map.class, LlmConfiguration.Task.class);
-        method.setAccessible(true);
-
-        var configTask = new LlmConfiguration.Task();
-        configTask.setId(taskId);
-
-        Set<String> warned = warnedSet(task);
-        int before = warned.size();
-        method.invoke(task, params, configTask);
-        return warned.size() > before;
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Set<String> warnedSet(LlmTask task) throws Exception {
-        var field = LlmTask.class.getDeclaredField("includeFirstAgentMessageWarned");
-        field.setAccessible(true);
-        return (Set<String>) field.get(task);
+    private static LlmConfiguration.Task task(String id, Map<String, String> parameters) {
+        var task = new LlmConfiguration.Task();
+        task.setId(id);
+        task.setParameters(parameters);
+        return task;
     }
 
     /**
-     * The warn helper touches no collaborator, so every dependency is null. The
-     * 21-argument constructor is what CDI injects; calling it with nulls is cheaper
-     * and more honest here than 21 mocks that are never exercised.
+     * The point of the rewrite: no mutable instance state may creep back in.
+     * Asserted structurally, because a field is exactly what a future "warn only
+     * once" change would reach for, and no behavioural test would notice it until
+     * two conversations interfered with each other in production.
      */
-    private static LlmTask newTask() {
-        return new LlmTask(null, null, null, null, null, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null, null, null);
+    @Test
+    @DisplayName("LlmTask keeps no mutable state for the warning")
+    void taskStaysStateless() {
+        for (Field field : LlmTask.class.getDeclaredFields()) {
+            assertTrue(field.getName().toLowerCase().contains("warn") == false
+                    || java.lang.reflect.Modifier.isStatic(field.getModifiers()),
+                    "an ILifecycleTask is a singleton shared by every conversation and must be stateless "
+                            + "(AGENTS.md §4.1 rule 2); found instance field '" + field.getName() + "'");
+        }
     }
 
     @Test
-    @DisplayName("a task that sets the parameter is warned about, once")
-    void warnsOncePerTask() throws Exception {
-        LlmTask task = newTask();
+    @DisplayName("a configuration that sets the parameter is reported")
+    void warnsForAConfiguredTask() {
+        var config = new LlmConfiguration(List.of(task("answer", Map.of(KEY, "false"))));
 
-        assertTrue(warnedFor(task, "answer", Map.of(KEY, "false")),
-                "a deprecated parameter must not be silent");
-        assertFalse(warnedFor(task, "answer", Map.of(KEY, "false")),
-                "an LLM task runs every turn; a per-turn WARN is a flood operators learn to filter out");
+        assertDoesNotThrow(() -> LlmTask.warnOnDeprecatedParameters(config));
+    }
+
+    /**
+     * The id-collision the instance field caused. Both tasks omit an id, so a memo
+     * keyed on the id would warn once and swallow the second — which is the one a
+     * reader would be least likely to find by hand.
+     */
+    @Test
+    @DisplayName("two tasks that both omit an id are each visited")
+    void visitsEveryTaskEvenWithoutIds() {
+        var config = new LlmConfiguration(List.of(
+                task(null, Map.of(KEY, "false")),
+                task(null, Map.of(KEY, "true"))));
+
+        assertDoesNotThrow(() -> LlmTask.warnOnDeprecatedParameters(config));
+        assertEquals(2, config.tasks().size(), "both tasks are in the document and both are walked");
     }
 
     @Test
-    @DisplayName("setting it to true is deprecated too — the flag is, not the value")
-    void warnsForTrueAsWell() throws Exception {
-        assertTrue(warnedFor(newTask(), "answer", Map.of(KEY, "true")));
+    @DisplayName("a configuration that does not set it is left alone")
+    void silentWhenAbsent() {
+        assertDoesNotThrow(() -> LlmTask.warnOnDeprecatedParameters(
+                new LlmConfiguration(List.of(task("answer", Map.of())))));
+        assertDoesNotThrow(() -> LlmTask.warnOnDeprecatedParameters(
+                new LlmConfiguration(List.of(task("answer", Map.of(KEY, ""))))));
     }
 
+    /**
+     * A malformed document must not take down configuration loading: this runs
+     * inside {@code configure}, so a thrown NPE here is a workflow that will not
+     * deploy — an advisory note breaking the thing it is advising about.
+     */
     @Test
-    @DisplayName("a task that does not set it is never warned about")
-    void silentWhenAbsent() throws Exception {
-        LlmTask task = newTask();
+    @DisplayName("a null, empty or ragged configuration is tolerated")
+    void tolerantOfMalformedConfigurations() {
+        assertDoesNotThrow(() -> LlmTask.warnOnDeprecatedParameters(null));
+        assertDoesNotThrow(() -> LlmTask.warnOnDeprecatedParameters(new LlmConfiguration(null)));
+        assertDoesNotThrow(() -> LlmTask.warnOnDeprecatedParameters(new LlmConfiguration(List.of())));
 
-        assertFalse(warnedFor(task, "answer", Map.of()));
-        assertFalse(warnedFor(task, "answer", Map.of(KEY, "")),
-                "an empty value is not a setting");
-        assertEquals(0, warnedSet(task).size());
-    }
-
-    @Test
-    @DisplayName("each configured task gets its own warning")
-    void warnsPerTaskId() throws Exception {
-        LlmTask task = newTask();
-
-        assertTrue(warnedFor(task, "answer", Map.of(KEY, "false")));
-        assertTrue(warnedFor(task, "summarize", Map.of(KEY, "false")),
-                "a second task carrying the same mistake is a second thing to fix");
-        assertEquals(Set.of("answer", "summarize"), warnedSet(task));
-    }
-
-    @Test
-    @DisplayName("a task with no id is attributed to 'default' rather than skipped")
-    void nullTaskIdIsNamedDefault() throws Exception {
-        LlmTask task = newTask();
-
-        assertTrue(warnedFor(task, null, Map.of(KEY, "false")));
-        assertEquals(Set.of("default"), warnedSet(task));
+        var ragged = new java.util.ArrayList<LlmConfiguration.Task>();
+        ragged.add(null);
+        ragged.add(task("answer", null));
+        ragged.add(task("answer", Map.of(KEY, "false")));
+        assertDoesNotThrow(() -> LlmTask.warnOnDeprecatedParameters(new LlmConfiguration(ragged)));
     }
 }

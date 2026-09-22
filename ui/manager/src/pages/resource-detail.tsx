@@ -61,6 +61,12 @@ const ICON_MAP: Record<string, LucideIcon> = {
 };
 
 
+/**
+ * One id for the "saved — not yet live" toast, so only the most recent save's
+ * Deploy action is ever on screen. See where it is used for why that matters.
+ */
+const SAVE_NOT_LIVE_TOAST_ID = "resource-save-not-live";
+
 export function ResourceDetailPage() {
   const { type, id } = useParams<{ type: string; id: string }>();
   const [searchParams] = useSearchParams();
@@ -215,6 +221,15 @@ export function ResourceDetailPage() {
                  * like it worked.
                  */
                 toast.success(t("editor.savedNotLive", "Saved — not yet live"), {
+                  /*
+                   * A STABLE id, so a second save replaces the first toast rather
+                   * than stacking beside it. Each toast's action closes over the
+                   * agent version its own save produced, so two live toasts meant
+                   * clicking the older one deployed the older configuration --
+                   * overwriting the newer one in production, from a control that
+                   * looked like it was about the save just made.
+                   */
+                  id: SAVE_NOT_LIVE_TOAST_ID,
                   description: t(
                     "editor.savedNotLiveDescription",
                     "The running agent still serves the deployed version. Deploy to make this change take effect.",

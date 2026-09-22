@@ -96,7 +96,6 @@ This is the standard way to use the Langchain task - just connect to an LLM and 
         "systemMessage": "You are a helpful assistant",
         "prompt": "",
         "logSizeLimit": "-1",
-        "includeFirstAgentMessage": "true",
         "convertToObject": "false",
         "addToOutput": "true"
       }

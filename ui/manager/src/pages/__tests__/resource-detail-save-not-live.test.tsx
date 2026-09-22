@@ -184,6 +184,51 @@ describe("ResourceDetailPage — a plain Save says it is not live", () => {
     expect(deployed[0]).toContain("version=7");
   });
 
+  /**
+   * Two saves must not leave two Deploy actions on screen.
+   *
+   * Each toast's action closes over the agent version ITS save produced, so a
+   * stale toast beside a fresh one is a button that silently deploys the older
+   * configuration over the newer one in production — from a control that reads
+   * as being about the save just made. A stable toast id makes the second save
+   * replace the first rather than stack beside it.
+   */
+  it("replaces the previous prompt, so only the latest version can be deployed", async () => {
+    const deployed: string[] = [];
+    stubCascade((url) => deployed.push(url));
+    renderEditor();
+    const user = userEvent.setup();
+
+    await saveAChange(user);
+    await screen.findByRole("button", { name: "Deploy" });
+
+    // A second save, reporting a newer agent version.
+    server.use(
+      http.put("*/agentstore/agents/:id", () =>
+        new HttpResponse(null, {
+          status: 200,
+          headers: { Location: "eddi://ai.labs.agent/agentstore/agents/agent1?version=9" },
+        }),
+      ),
+    );
+    await user.selectOptions(screen.getByTestId("model-type-select"), "ollama");
+    await waitFor(() => {
+      expect(screen.getByTestId("dirty-indicator")).toBeInTheDocument();
+    });
+    await user.click(screen.getByTestId("save-btn"));
+
+    // Exactly one prompt, and it deploys the NEWER version.
+    await waitFor(() => {
+      expect(screen.getAllByRole("button", { name: "Deploy" })).toHaveLength(1);
+    });
+    await user.click(screen.getByRole("button", { name: "Deploy" }));
+
+    await waitFor(() => {
+      expect(deployed).toHaveLength(1);
+    });
+    expect(deployed[0]).toContain("version=9");
+  });
+
   it("surfaces a failed deploy instead of claiming it worked", async () => {
     stubCascade();
     server.use(
