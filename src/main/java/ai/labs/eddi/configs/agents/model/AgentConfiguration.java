@@ -945,6 +945,24 @@ public class AgentConfiguration {
     public static class StrictWriteDiscipline {
         private boolean enabled = false;
         private String onFailure = "digest";
+        /**
+         * Keep running the remaining workflow tasks after a task failed (its output
+         * already rolled back and replaced by the digest / {@code task_failed_*}
+         * action). Off by default — the turn then ends in {@code ERROR}, as it always
+         * has. On, a later task can answer in the SAME turn: an output set keyed on
+         * {@code task_failed_<taskId>} renders a fallback, an LLM task placed after a
+         * failed HTTP call sees the digest. Without it a failing task returned an empty
+         * reply and a fallback rule could only react on the following turn.
+         */
+        private boolean continueOnFailure = false;
+
+        public boolean isContinueOnFailure() {
+            return continueOnFailure;
+        }
+
+        public void setContinueOnFailure(boolean continueOnFailure) {
+            this.continueOnFailure = continueOnFailure;
+        }
 
         public boolean isEnabled() {
             return enabled;

@@ -113,3 +113,15 @@ observed there, and carries a regression test.
   and summarization keep the ownership scope. Contradicting values are logged at DEBUG only —
   another agent's `self` memory does not belong in an INFO log.
   [`DreamService.java`](../../src/main/java/ai/labs/eddi/engine/runtime/internal/DreamService.java)
+- **Strict write discipline: no same-turn fallback, a noisy digest, and a silent `keep_all`.**
+  Reproduced live with a failing LLM task: every such turn returned an empty reply in `ERROR`, a
+  rule on `task_failed_ai.labs.llm` could only answer on the *next* turn (and the one after failed
+  again), the "concise" digest carried `dev.langchain4j.exception.ModelNotFoundException` and the
+  provider's raw JSON body, and `keep_all` emitted no `task_failed_*` action at all although the
+  documentation promises it whenever the discipline is on. New opt-in
+  `strictWriteDiscipline.continueOnFailure` keeps running the remaining tasks after the failure is
+  recorded, so an output keyed on `task_failed_<taskId>` — or an LLM task after a failed HTTP call —
+  answers in the same turn; the default still stops the pipeline as before. The digest now strips
+  exception class names and reduces a JSON error body to its `message`, and `keep_all` emits the
+  action on top of the actions the task itself added.
+  [`LifecycleManager.java`](../../src/main/java/ai/labs/eddi/engine/lifecycle/internal/LifecycleManager.java)
