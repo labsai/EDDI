@@ -72,6 +72,8 @@ Properties also have a **visibility** dimension that controls which agents can s
 
 Visibility is orthogonal to scope — a property can be `longTerm` + `self` (persists across sessions, visible only to the owning agent) or `longTerm` + `global` (persists and visible to all agents).
 
+A property without `visibility` gets the agent's `userMemoryConfig.defaultVisibility` (`self` when the block is declared, `global` when there is none) — with or without `enableMemoryTools`. A `group` property carries the conversation's group id (from the `groupId` context a group conversation injects); in a conversation that belongs to no group it is stored as `self`, since a group entry without a group id could never be read.
+
 ---
 
 ## Setting Properties

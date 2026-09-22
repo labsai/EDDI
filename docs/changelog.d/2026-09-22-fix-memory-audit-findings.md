@@ -160,3 +160,23 @@ observed there, and carries a regression test.
   user line.
   [`ConversationRecallTool.java`](../../src/main/java/ai/labs/eddi/modules/llm/tools/ConversationRecallTool.java),
   [`ConversationSummarizer.java`](../../src/main/java/ai/labs/eddi/modules/llm/impl/ConversationSummarizer.java)
+
+### Documentation
+
+`docs/user-memory.md` (what `enableMemoryTools` gates, `onCapReached`, re-save semantics, the upsert
+identity, group memory, write validation, the Dream schedule's `message`/`userId`, consolidation
+safety, cross-agent contradiction detection, the real `eddi.dream.*` metric names — the page listed
+`dream.*` — and the migration's skip rules), `docs/memory-policy.md` (`continueOnFailure`, a
+same-turn-fallback example, the digest's shape, `keep_all`'s action), `docs/conversation-memory.md`
+(undo/redo and properties), `docs/properties.md` (default visibility and group scope),
+`docs/secrets-vault.md` (per-write slots and their cleanup), `docs/langchain.md` (turn numbering) and
+`AGENTS.md` §5.3, which claimed every matching rule in a group fires — by default only the first one
+does (`executionStrategy: executeUntilFirstSuccess`).
+
+### Known limitation, deliberately left
+
+Memories written during the `CONVERSATION_START` turn carry no `sourceConversationId`: the
+conversation id is minted by the first store, after that turn has run. Pre-assigning it would change
+both conversation stores' "an id means update, and fail if the document is gone" guard, which exists
+for concurrent-erasure races; the field is provenance only (nothing reads it), so the trade is not
+worth making here.

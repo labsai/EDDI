@@ -60,7 +60,8 @@ ${vault:tenantId/keyName}
 
 In an HTTP call, a vault reference is resolved **only where the configuration wrote it**: in the
 template of that URL, header, body or query parameter, or as the value of a property the template
-names that EDDI itself auto-vaulted (`Bearer {properties.apiKey}` holding `${vault:<agentId>.apiKey}`).
+names that EDDI itself auto-vaulted (`Bearer {properties.apiKey}` holding
+`${vault:<agentId>.u<userHash>.<nonce>.apiKey}`).
 The same
 applies to `${eddivault:…}`, `${connection:…}` and `${caller:…}`. A reference that arrives through
 conversation data — user input, a model reply, an API response, client context — refuses the call
@@ -78,8 +79,17 @@ string `${vault:<agentId>.apiKey}` is one anything that can write a property cou
 `valueString` of `{memory.current.input}` and a user who types it, a model reply, an API response
 copied into a property. The property therefore carries an `autoVaulted` marker, written by the
 auto-vaulting code and by nothing else, and the reference is resolved only when that marker is
-present. On top of it the reference must still name this agent and the property the template reads,
-**under this conversation's own tenant**.
+present. On top of it the reference must still name this agent, this user and the property the
+template reads, **under this conversation's own tenant**.
+
+Every auto-vaulted write gets **its own slot**, `<agentId>.u<userHash>.<nonce>.<property>` — the
+user hash is a truncated SHA-256 of the user id (the id itself never enters the vault), the nonce
+makes each write unique. The slot used to be `<agentId>.<property>`, one per agent, so every user and
+conversation of the agent shared it and the last writer's secret was what everyone's reference
+resolved to. Because slots are no longer overwritten they are deleted explicitly: when the property
+is overwritten, when its conversation is permanently deleted, and on GDPR erasure (which reports
+`autoVaultedSecretsDeleted`). A legacy `<agentId>.<property>` reference in an older conversation is
+still accepted, and never deleted by this cleanup — it may back other users' conversations.
 
 A property with no marker is refused, which includes one stored in a conversation that began before
 this marker existed: an unmarked property and one written from conversation data are the same thing

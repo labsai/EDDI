@@ -740,7 +740,7 @@ This is because `ConversationProperties.put()` stores `property.getValueString()
 
 #### Every rule MUST have an `actionmatcher` on `lastStep`
 
-Behavior rules within a group ALL fire if their conditions match. Rules with only `inputmatcher` conditions are dangerous — they match globally regardless of conversation state.
+Within a group, rules are evaluated in order and — by default (`executionStrategy: executeUntilFirstSuccess`) — **only the first rule whose conditions match fires**; the rest of the group is skipped. Put independent rules in separate groups, or set `"executionStrategy": "executeAll"` on the group to let every matching rule fire. Either way, rules with only `inputmatcher` conditions are dangerous — they match globally regardless of conversation state.
 
 ```
 ❌ DANGEROUS: Rule fires on ANY step if user somehow sends matching expression
