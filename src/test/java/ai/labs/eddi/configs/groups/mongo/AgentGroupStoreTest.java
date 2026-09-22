@@ -195,6 +195,151 @@ class AgentGroupStoreTest {
     }
 
     // =================================================================
+    // B2 — debate roles silently turn a synthesis into a scoring verdict
+    // =================================================================
+
+    /**
+     * A grant board whose members carried {@code role: PRO} and {@code role: CON}
+     * had its chair answer {@code {"winner":"CON","scores":{...}}} instead of the
+     * recommendation its system prompt asked for. Nothing in the configuration says
+     * that two distinct member roles plus argument phases switch the synthesis onto
+     * the debate-judgment prompt, and the only way to find out was to run it.
+     * <p>
+     * The predicate mirrors {@code GroupContextBuilder.isDebateJudgment}; these
+     * cases pin each of its conditions at config time.
+     */
+    private AgentGroupConfiguration debateBoard(String moderator, List<GroupMember> members) {
+        var c = config(DiscussionStyle.DEBATE, null, moderator);
+        c.setMembers(members);
+        return c;
+    }
+
+    private DiscussionPhase typedPhase(String name, PhaseType type, String participants, String inputTemplate) {
+        return new DiscussionPhase(name, type, participants, TurnOrder.SEQUENTIAL,
+                ContextScope.FULL, false, inputTemplate, 1, false);
+    }
+
+    @Test
+    void debateWithTwoSidesAndAnOutsideChair_isReported() {
+        var board = debateBoard("chair", List.of(
+                new GroupMember("a", "A", 1, "PRO"),
+                new GroupMember("b", "B", 2, "CON")));
+
+        assertEquals(List.of("Judgment"), AgentGroupStore.debateVerdictSynthesisPhaseNames(board),
+                "the DEBATE preset's Judgment phase answers with winner/scores JSON, not the chair's own prose");
+    }
+
+    @Test
+    void oneRoleOnly_isSilent() {
+        // The judgment prompt scores one side against another; with no second side
+        // the runtime refuses to invent a winner and concludes in prose.
+        var board = debateBoard("chair", List.of(
+                new GroupMember("a", "A", 1, "PRO"),
+                new GroupMember("b", "B", 2, "PRO")));
+
+        assertTrue(AgentGroupStore.debateVerdictSynthesisPhaseNames(board).isEmpty());
+    }
+
+    @Test
+    void noRolesAtAll_isSilent() {
+        var board = debateBoard("chair", List.of(
+                new GroupMember("a", "A", 1, null),
+                new GroupMember("b", "B", 2, "  ")));
+
+        assertTrue(AgentGroupStore.debateVerdictSynthesisPhaseNames(board).isEmpty());
+    }
+
+    @Test
+    void aChairThatIsItselfADebater_isSilent() {
+        // A partisan may not score its own debate; the runtime falls back to prose.
+        var board = debateBoard("a", List.of(
+                new GroupMember("a", "A", 1, "PRO"),
+                new GroupMember("b", "B", 2, "CON")));
+
+        assertTrue(AgentGroupStore.debateVerdictSynthesisPhaseNames(board).isEmpty());
+    }
+
+    @Test
+    void noModerator_fallsBackToTheFirstSpeakerWhoIsUsuallyADebater() {
+        var board = debateBoard(null, List.of(
+                new GroupMember("b", "B", 2, "CON"),
+                new GroupMember("a", "A", 1, "PRO")));
+
+        assertTrue(AgentGroupStore.debateVerdictSynthesisPhaseNames(board).isEmpty(),
+                "the engine substitutes the first member by speakingOrder, and that member is a debater");
+    }
+
+    @Test
+    void anExplicitInputTemplateSuppressesTheVerdict() {
+        // The documented opt-out: the config author's own instruction always wins.
+        var phases = List.of(
+                typedPhase("Args", PhaseType.ARGUE, "ALL", null),
+                typedPhase("Wrap", PhaseType.SYNTHESIS, "MODERATOR", "Summarise the board's recommendation."));
+        var c = config(DiscussionStyle.CUSTOM, phases, "chair");
+        c.setMembers(List.of(new GroupMember("a", "A", 1, "PRO"), new GroupMember("b", "B", 2, "CON")));
+
+        assertTrue(AgentGroupStore.debateVerdictSynthesisPhaseNames(c).isEmpty());
+    }
+
+    @Test
+    void aSynthesisWithNoArgumentsBeforeIt_isSilent() {
+        var phases = List.of(
+                typedPhase("Opinions", PhaseType.OPINION, "ALL", null),
+                typedPhase("Wrap", PhaseType.SYNTHESIS, "MODERATOR", null));
+        var c = config(DiscussionStyle.CUSTOM, phases, "chair");
+        c.setMembers(List.of(new GroupMember("a", "A", 1, "PRO"), new GroupMember("b", "B", 2, "CON")));
+
+        assertTrue(AgentGroupStore.debateVerdictSynthesisPhaseNames(c).isEmpty(),
+                "a phase cannot judge arguments that no earlier phase produced");
+    }
+
+    @Test
+    void argumentsAfterTheSynthesisDoNotCount() {
+        // Order matters: only ARGUE/REBUTTAL phases BEFORE the synthesis can put
+        // arguments on the transcript it reads.
+        var phases = List.of(
+                typedPhase("Wrap", PhaseType.SYNTHESIS, "MODERATOR", null),
+                typedPhase("Args", PhaseType.ARGUE, "ALL", null));
+        var c = config(DiscussionStyle.CUSTOM, phases, "chair");
+        c.setMembers(List.of(new GroupMember("a", "A", 1, "PRO"), new GroupMember("b", "B", 2, "CON")));
+
+        assertTrue(AgentGroupStore.debateVerdictSynthesisPhaseNames(c).isEmpty());
+    }
+
+    @Test
+    void aRebuttalCountsAsArgumentsToo() {
+        var phases = List.of(
+                typedPhase("Rebut", PhaseType.REBUTTAL, "ALL", null),
+                typedPhase("Wrap", PhaseType.SYNTHESIS, "MODERATOR", null));
+        var c = config(DiscussionStyle.CUSTOM, phases, "chair");
+        c.setMembers(List.of(new GroupMember("a", "A", 1, "PRO"), new GroupMember("b", "B", 2, "CON")));
+
+        assertEquals(List.of("Wrap"), AgentGroupStore.debateVerdictSynthesisPhaseNames(c));
+    }
+
+    @Test
+    void aSynthesisOpenToEveryone_isNotGuessedAt() {
+        // Only a MODERATOR-restricted phase has a speaker resolvable from config.
+        var phases = List.of(
+                typedPhase("Args", PhaseType.ARGUE, "ALL", null),
+                typedPhase("Wrap", PhaseType.SYNTHESIS, "ALL", null));
+        var c = config(DiscussionStyle.CUSTOM, phases, "chair");
+        c.setMembers(List.of(new GroupMember("a", "A", 1, "PRO"), new GroupMember("b", "B", 2, "CON")));
+
+        assertTrue(AgentGroupStore.debateVerdictSynthesisPhaseNames(c).isEmpty());
+    }
+
+    @Test
+    void aRoundTableWithDebateRoles_isSilent() {
+        // ROUND_TABLE expands to OPINION/CRITIQUE/REVISION phases, none of which
+        // produce arguments — the roles alone are not enough.
+        var c = config(DiscussionStyle.ROUND_TABLE, null, "chair");
+        c.setMembers(List.of(new GroupMember("a", "A", 1, "PRO"), new GroupMember("b", "B", 2, "CON")));
+
+        assertTrue(AgentGroupStore.debateVerdictSynthesisPhaseNames(c).isEmpty());
+    }
+
+    // =================================================================
     // I14 — VOTE phase validation: independence enforced, not advised
     // =================================================================
 
