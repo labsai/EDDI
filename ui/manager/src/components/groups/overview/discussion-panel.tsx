@@ -115,7 +115,14 @@ export function DiscussionPanel({
       </div>
 
       <div className="min-h-0 flex-1">
-        {view === "transcript" && <div className="h-full">{transcript}</div>}
+        {/* A flex column, not a plain block: every transcript renderer here
+            sizes its own scroll box with `flex-1 min-h-0`, which is inert
+            outside a flex container — the box would collapse to its content
+            height and the overflow above it would clip with nothing to
+            scroll. */}
+        {view === "transcript" && (
+          <div className="flex h-full min-h-0 flex-col">{transcript}</div>
+        )}
 
         {view === "overview" && (
           <div className="h-full overflow-y-auto p-4" data-testid="discussion-panel-overview">
