@@ -3,13 +3,26 @@ import { createLogEventSource, type LogEntry, getRecentLogs } from "@/lib/api/lo
 import type { BearerEventSource } from "@/lib/bearer-event-source";
 
 /**
- * Session-level log store.
- * Connects to the log SSE stream on first import and buffers entries
- * so that the Logs page has data from the start of the Manager session,
- * not just from when the user first navigates there.
+ * Session-level log store — a buffer of unfiltered log entries, shared by every
+ * consumer that wants a live tail.
  *
- * Usage: import this file as a side-effect in main.tsx:
- *   import '@/hooks/session-log-store';
+ * **The stream is lazy and reference-counted.** This module used to connect on
+ * import, and `main.tsx` imported it for that side effect, so every Manager tab
+ * held an open `/administration/logs/stream` SSE connection for its whole
+ * lifetime — on every page, whether or not anyone ever opened the Logs page.
+ * EDDI serves HTTP/1.1, where Chrome allows **six** concurrent connections per
+ * origin across the entire profile, and a live group discussion opens another.
+ * Two or three Manager tabs saturated the cap: pages hung on skeleton loaders
+ * forever, intermittently, while the server was provably fine. It looks exactly
+ * like a dead backend and is not.
+ *
+ * What was lost by making it lazy is small: the buffer no longer accumulates
+ * from app boot. It never needed to — {@link connect} seeds from
+ * `getRecentLogs` on open, so arriving at the Logs page still shows history.
+ *
+ * Usage: call {@link connect} on mount and the returned release (or
+ * {@link disconnect}) on unmount. The second caller reuses the open stream; the
+ * socket closes when the last one leaves.
  */
 
 const MAX_SESSION_ENTRIES = 1000;
@@ -26,11 +39,12 @@ export const useSessionLogStore = create<SessionLogState>(() => ({
   seeded: false,
 }));
 
-// ─── Auto-connect SSE on module load ─────────────────────────────────────────
+// ─── Lazy, reference-counted SSE ─────────────────────────────────────────────
 
 let eventSource: BearerEventSource | null = null;
+let refCount = 0;
 
-function connect() {
+function openStream() {
   try {
     eventSource = createLogEventSource(); // no filters — capture everything
 
@@ -60,8 +74,7 @@ function connect() {
     // unbounded `setTimeout(connect, 5000)`, which meant a stream the backend
     // will never serve — `/administration/logs` answers 403 without the
     // `eddi-admin` role — was re-requested every five seconds for the entire
-    // session. This module connects at app boot, so that happened whether or not
-    // anyone ever opened the Logs page.
+    // session.
     eventSource.onerror = () => {
       useSessionLogStore.setState({ connected: false });
     };
@@ -72,7 +85,7 @@ function connect() {
 
     eventSource.onopen = async () => {
       useSessionLogStore.setState({ connected: true });
-      
+
       if (useSessionLogStore.getState().entries.length === 0) {
         try {
           const recentLogs = await getRecentLogs({ limit: 200 });
@@ -80,7 +93,7 @@ function connect() {
             const merged = [...s.entries, ...recentLogs];
             const seen = new Set<string>();
             const unique: LogEntry[] = [];
-            
+
             for (const entry of merged) {
               const key = `${entry.timestamp}-${entry.message}`;
               if (!seen.has(key)) {
@@ -88,9 +101,9 @@ function connect() {
                 unique.push(entry);
               }
             }
-            
+
             unique.sort((a, b) => b.timestamp - a.timestamp);
-            
+
             return {
               entries:
                 unique.length > MAX_SESSION_ENTRIES
@@ -112,19 +125,58 @@ function connect() {
   }
 }
 
-// Only auto-connect if we're in the browser (not in SSR / test)
-if (typeof window !== "undefined" && typeof EventSource !== "undefined") {
-  // Delay slightly so MSW has time to start in dev mode
-  setTimeout(connect, 2000);
+function closeStream() {
+  eventSource?.close();
+  eventSource = null;
+  useSessionLogStore.setState({ connected: false });
+}
+
+/**
+ * Subscribe to the unfiltered log stream, opening it if nobody else has.
+ *
+ * @returns a release function — calling it is exactly {@link disconnect}, and
+ *          calling it twice releases only once, so it is safe as a `useEffect`
+ *          cleanup under React 19's double-invoked effects.
+ */
+export function connect(): () => void {
+  refCount += 1;
+  if (refCount === 1) {
+    openStream();
+  }
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    disconnect();
+  };
+}
+
+/** Release one subscription; closes the stream when the last one leaves. */
+export function disconnect(): void {
+  if (refCount === 0) return;
+  refCount -= 1;
+  if (refCount === 0) {
+    closeStream();
+  }
+}
+
+/** Open subscriptions. Exported for tests and diagnostics. */
+export function subscriberCount(): number {
+  return refCount;
+}
+
+/**
+ * Whether a socket is currently held. Exported so a test can assert the thing
+ * that actually regressed — that merely importing this module opens nothing.
+ */
+export function isStreamOpen(): boolean {
+  return eventSource !== null;
 }
 
 export function _connectForTesting() {
-  connect();
+  const release = connect();
   return {
-    close: () => {
-      eventSource?.close();
-      eventSource = null;
-    },
+    close: () => release(),
     getEventSource: () => eventSource,
   };
 }
