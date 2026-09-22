@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, Quote, Sparkles, UserX } from "lucide-react";
 import { cn, formatUsd } from "@/lib/utils";
@@ -20,9 +21,22 @@ interface MemberRosterProps {
  * flattened: the two are different kinds of claim, and rendering a paraphrase
  * in a way that reads as a quote would put words in an agent's mouth.
  */
+/**
+ * How many stance cards to show before collapsing.
+ *
+ * A standing team can have twenty members, and twenty stance cards are the wall
+ * of text this whole view exists to replace. Eight fills the widest grid
+ * (three columns) without dominating the page.
+ */
+const ROSTER_VISIBLE = 8;
+
 export function MemberRoster({ members, anonymous, className }: MemberRosterProps) {
   const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(false);
   if (members.length === 0) return null;
+
+  const hidden = Math.max(0, members.length - ROSTER_VISIBLE);
+  const shown = expanded || hidden === 0 ? members : members.slice(0, ROSTER_VISIBLE);
 
   return (
     <section
@@ -34,10 +48,24 @@ export function MemberRoster({ members, anonymous, className }: MemberRosterProp
         {t("groups.overview.roster", "Who thinks what")}
       </h3>
       <div className="grid grid-cols-1 gap-2 @[26rem]/roster:grid-cols-2 @[52rem]/roster:grid-cols-3">
-        {members.map((member, index) => (
+        {shown.map((member, index) => (
           <MemberCard key={member.agentId} member={member} index={index} anonymous={anonymous} />
         ))}
       </div>
+      {hidden > 0 && (
+        <button
+          type="button"
+          onClick={() => setExpanded((e) => !e)}
+          className="mt-2 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+          data-testid="overview-roster-toggle"
+        >
+          {expanded
+            ? t("groups.overview.rosterShowFewer", "Show fewer")
+            : t("groups.overview.rosterShowAll", "Show all {{count}} members", {
+                count: members.length,
+              })}
+        </button>
+      )}
     </section>
   );
 }

@@ -10,6 +10,8 @@ import type { DiscussionDigest } from "@/hooks/use-discussion-digest";
 import { PhaseRail } from "./phase-rail";
 import { MemberRoster } from "./member-roster";
 import { ParticipationMatrix } from "./participation-matrix";
+import { InteractionMap } from "./interaction-map";
+import { BidBoard } from "./bid-board";
 import { bandOrder, rosterIsAnonymous, type OverviewBand } from "./style-recipe";
 
 interface DiscussionOverviewProps {
@@ -33,6 +35,8 @@ interface DiscussionOverviewProps {
    * cards are inert without it rather than offering a click that does nothing.
    */
   onSelectPhase?: (phaseIndex: number) => void;
+  /** Switch the bands to another round. Omitted renders a static label instead. */
+  onSelectRound?: (round: number) => void;
   className?: string;
 }
 
@@ -53,6 +57,7 @@ export function DiscussionOverview({
   extras,
   outcome,
   onSelectPhase,
+  onSelectRound,
   className,
 }: DiscussionOverviewProps) {
   const { t } = useTranslation();
@@ -92,6 +97,17 @@ export function DiscussionOverview({
         return <PhaseRail key="phases" phases={digest.phases} onSelectPhase={onSelectPhase} />;
       case "roster":
         return <MemberRoster key="roster" members={digest.members} anonymous={anonymous} />;
+      case "interactions":
+        return (
+          <InteractionMap
+            key="interactions"
+            interactions={digest.interactions}
+            members={digest.members}
+            anonymous={anonymous}
+          />
+        );
+      case "bids":
+        return <BidBoard key="bids" bids={digest.bids} members={digest.members} />;
       case "matrix":
         return (
           <ParticipationMatrix
@@ -109,7 +125,7 @@ export function DiscussionOverview({
 
   return (
     <div className={cn("space-y-4", className)} data-testid="discussion-overview">
-      <OverviewHeadline digest={digest} />
+      <OverviewHeadline digest={digest} onSelectRound={onSelectRound} />
       {bandOrder(digest.style).map((name) => band(name))}
     </div>
   );
@@ -140,7 +156,13 @@ function SynthesisCard({ answer }: { answer: string }) {
 }
 
 /** The always-present top band: the question, and the four numbers worth a glance. */
-function OverviewHeadline({ digest }: { digest: DiscussionDigest }) {
+function OverviewHeadline({
+  digest,
+  onSelectRound,
+}: {
+  digest: DiscussionDigest;
+  onSelectRound?: (round: number) => void;
+}) {
   const { t } = useTranslation();
   const elapsed = useElapsed(digest.startedAt, digest.endedAt, digest.isLive);
 
@@ -154,20 +176,35 @@ function OverviewHeadline({ digest }: { digest: DiscussionDigest }) {
           </Badge>
         )}
         {digest.style && <Badge variant="outline">{styleDisplay(digest.style, t).label}</Badge>}
-        {digest.round > 1 && (
-          // Says outright that this is ONE round's view. The bands are scoped
-          // to the current round (phase indices restart each round, so mixing
-          // them would be wrong), and without this the reader cannot tell
-          // whether a low turn count means a quiet round or a lost one.
-          <span
-            className="text-xs text-muted-foreground"
-            title={t(
-              "groups.overview.roundScopeTitle",
-              "This view covers round {{n}} only. Earlier rounds are in the transcript.",
-              { n: digest.round },
-            )}
-          >
-            {t("groups.overview.roundScope", "Round {{n}} only", { n: digest.round })}
+        {/* A selector rather than a label. The bands are necessarily scoped to
+            ONE round (phase indices restart each round, so mixing them would be
+            wrong), which previously meant earlier rounds were simply
+            unreachable here — a reader comparing round 1 to round 2 had to
+            leave for the transcript. */}
+        {digest.roundCount > 1 && onSelectRound && (
+          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <span>{t("groups.overview.roundLabel", "Round")}</span>
+            <select
+              value={digest.selectedRound}
+              onChange={(e) => onSelectRound(Number(e.target.value))}
+              className="h-6 rounded-md border border-input bg-background px-1.5 text-xs text-foreground"
+              data-testid="overview-round-select"
+              aria-label={t("groups.overview.roundSelect", "Show a different round")}
+            >
+              {Array.from({ length: digest.roundCount }, (_, i) => (
+                <option key={i + 1} value={i + 1}>
+                  {t("groups.overview.roundOption", "{{n}} of {{total}}", {
+                    n: i + 1,
+                    total: digest.roundCount,
+                  })}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {digest.roundCount > 1 && !onSelectRound && (
+          <span className="text-xs text-muted-foreground">
+            {t("groups.overview.roundScope", "Round {{n}} only", { n: digest.selectedRound })}
           </span>
         )}
         {elapsed !== null && <span className="text-xs text-muted-foreground">{formatDuration(elapsed)}</span>}

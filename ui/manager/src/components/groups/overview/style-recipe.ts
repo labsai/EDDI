@@ -7,12 +7,34 @@ import type { DiscussionStyle } from "@/lib/api/groups";
  * - `phases` — the phase rail, the discussion's spine
  * - `roster` — "who thinks what", one card per member
  * - `matrix` — the members × phases grid
+ * - `interactions` — who addressed whom, for the directional styles
+ * - `bids` — who bid for what, for TASK_FORCE's contract-net phase
  * - `extras` — whatever the caller passes through (task board, negotiation
- *   ledger, artifacts, retro badges), rendered by components that already exist
+ *   ledger, artifacts, retro badges)
+ *
+ * Every band self-hides when it has no data, so a recipe can list one a style
+ * will rarely produce: `interactions` is empty for broadcast-only styles and
+ * `bids` for anything but TASK_FORCE, and listing them everywhere costs nothing
+ * while making a CUSTOM group that happens to target its peers render properly.
  */
-export type OverviewBand = "outcome" | "phases" | "roster" | "matrix" | "extras";
+export type OverviewBand =
+  | "outcome"
+  | "phases"
+  | "roster"
+  | "interactions"
+  | "bids"
+  | "matrix"
+  | "extras";
 
-const DEFAULT_ORDER: readonly OverviewBand[] = ["outcome", "phases", "roster", "matrix", "extras"];
+const DEFAULT_ORDER: readonly OverviewBand[] = [
+  "outcome",
+  "phases",
+  "roster",
+  "interactions",
+  "bids",
+  "matrix",
+  "extras",
+];
 
 /**
  * Per-style band ordering.
@@ -33,18 +55,23 @@ const DEFAULT_ORDER: readonly OverviewBand[] = ["outcome", "phases", "roster", "
 const ORDER_BY_STYLE: Partial<Record<DiscussionStyle, readonly OverviewBand[]>> = {
   // Positions matter more than progress: the reader wants the verdict, then
   // who argued what, and only then the stage the debate reached.
-  DEBATE: ["outcome", "roster", "phases", "matrix", "extras"],
+  DEBATE: ["outcome", "roster", "interactions", "phases", "matrix", "bids", "extras"],
   // The challenger/defender split is the story; the rail is nearly uniform.
-  DEVIL_ADVOCATE: ["outcome", "roster", "phases", "matrix", "extras"],
+  // The challenger/defender exchange IS the method, so it leads the roster.
+  DEVIL_ADVOCATE: ["outcome", "interactions", "roster", "phases", "matrix", "bids", "extras"],
+  // Same reasoning: a peer review is a set of directed critiques.
+  PEER_REVIEW: ["outcome", "interactions", "roster", "phases", "matrix", "bids", "extras"],
   // The board is the discussion. Roster last — members are assignees here, and
   // "who holds which task" is the task board's job, not a stance card's.
-  TASK_FORCE: ["outcome", "extras", "phases", "matrix", "roster"],
+  TASK_FORCE: ["outcome", "extras", "bids", "phases", "matrix", "interactions", "roster"],
   // The ledger of proposals and concessions is the substance; the roster's
   // stance lines read as each party's current position against it.
-  NEGOTIATION: ["outcome", "extras", "roster", "phases", "matrix"],
+  NEGOTIATION: ["outcome", "extras", "roster", "interactions", "phases", "matrix", "bids"],
   // Convergence is a per-phase score, so the rail carries the real signal —
   // and the roster is anonymised, which makes it the weakest band here.
-  DELPHI: ["outcome", "phases", "roster", "matrix", "extras"],
+  // No interactions band: DELPHI is deliberately non-directional, and naming
+  // who answered whom would undo the anonymity the method rests on.
+  DELPHI: ["outcome", "phases", "roster", "matrix", "bids", "extras"],
 };
 
 /** The band order for a style, falling back to the default for unknown values. */

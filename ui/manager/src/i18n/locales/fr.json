@@ -2844,7 +2844,20 @@
       "roundScopeTitle": "Cette vue ne couvre que le tour {{n}}. Les tours précédents sont dans la transcription.",
       "convergenceStopped_one": "Convergé — {{count}} répétition ignorée",
       "convergenceStopped_other": "Convergé — {{count}} répétitions ignorées",
-      "convergenceStopped_many": "Convergé — {{count}} répétitions ignorées"
+      "convergenceStopped_many": "Convergé — {{count}} répétitions ignorées",
+      "interactions": "Qui s'est adressé à qui",
+      "interactionsLabel": "Qui s'est adressé à qui",
+      "unaddressed": "Personne ne s'est adressé à : {{names}}",
+      "unknownMember": "Inconnu",
+      "bids": "Qui a postulé à quoi",
+      "bidsLabel": "Candidatures par tâche",
+      "rosterShowFewer": "Afficher moins",
+      "roundLabel": "Tour",
+      "roundSelect": "Afficher un autre tour",
+      "roundOption": "{{n}} sur {{total}}",
+      "rosterShowAll_one": "Afficher le {{count}} membre",
+      "rosterShowAll_other": "Afficher les {{count}} membres",
+      "rosterShowAll_many": "Afficher les {{count}} membres"
     }
   },
   "taskBoard": {

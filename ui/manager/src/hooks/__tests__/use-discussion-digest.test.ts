@@ -28,6 +28,7 @@ function entry(
   phaseIndex: number,
   type: TranscriptEntryType = "OPINION",
   content = "Something.",
+  targetAgentId: string | null = null,
 ): TranscriptEntry {
   return {
     speakerAgentId: agentId,
@@ -38,7 +39,7 @@ function entry(
     type,
     timestamp: "2026-09-22T10:00:00Z",
     errorReason: null,
-    targetAgentId: null,
+    targetAgentId,
   };
 }
 
@@ -314,6 +315,142 @@ describe("buildDigest — continuation rounds", () => {
       transcript: [entry(A, 0)],
     });
     expect(buildDigest(conv, undefined, PHASES).totalEntries).toBe(1);
+  });
+});
+
+describe("buildDigest — interactions", () => {
+  it("records who addressed whom, heaviest pair first", () => {
+    const conv = conversation({
+      transcript: [
+        entry(A, 0, "CRITIQUE", "One.", B),
+        entry(A, 0, "CRITIQUE", "Two.", B),
+        entry(B, 0, "CRITIQUE", "Back.", A),
+      ],
+    });
+    const d = buildDigest(conv, undefined, PHASES);
+    expect(d.interactions).toEqual([
+      { fromAgentId: A, toAgentId: B, count: 2 },
+      { fromAgentId: B, toAgentId: A, count: 1 },
+    ]);
+  });
+
+  it("is empty for a broadcast-only discussion, so the band hides", () => {
+    const conv = conversation({ transcript: [entry(A, 0), entry(B, 0)] });
+    expect(buildDigest(conv, undefined, PHASES).interactions).toEqual([]);
+  });
+
+  it("ignores a turn targeting its own speaker", () => {
+    const conv = conversation({ transcript: [entry(A, 0, "CRITIQUE", "Self.", A)] });
+    expect(buildDigest(conv, undefined, PHASES).interactions).toEqual([]);
+  });
+
+  it("does not count bookkeeping rows as interactions", () => {
+    const conv = conversation({
+      transcript: [entry(A, 0, "CONVERGENCE", "score", B), entry(A, 0, "QUESTION", "q", B)],
+    });
+    expect(buildDigest(conv, undefined, PHASES).interactions).toEqual([]);
+  });
+});
+
+describe("buildDigest — bids", () => {
+  it("flattens each member's bid sheet", () => {
+    const sheet = JSON.stringify({
+      bids: [
+        { subject: "Migration", confidence: 0.8, estimatedComplexity: "M", rationale: "I own the schema." },
+        { subject: "Rollback", confidence: 0.4 },
+      ],
+    });
+    const conv = conversation({ transcript: [entry(A, 0, "BID", sheet)] });
+    const d = buildDigest(conv, undefined, PHASES);
+
+    expect(d.bids).toHaveLength(2);
+    expect(d.bids[0]).toMatchObject({ agentId: A, subject: "Migration", confidence: 0.8 });
+    expect(d.bids[1]).toMatchObject({ subject: "Rollback" });
+  });
+
+  it("is empty when no BID phase ran", () => {
+    const conv = conversation({ transcript: [entry(A, 0)] });
+    expect(buildDigest(conv, undefined, PHASES).bids).toEqual([]);
+  });
+
+  it("survives a malformed bid sheet rather than throwing", () => {
+    const conv = conversation({ transcript: [entry(A, 0, "BID", "not json at all")] });
+    expect(() => buildDigest(conv, undefined, PHASES)).not.toThrow();
+  });
+});
+
+describe("buildDigest — round selection", () => {
+  const threeRounds = () =>
+    conversation({
+      round: 3,
+      roundStartTranscriptIndex: 4,
+      transcript: [
+        entry("user", 0, "QUESTION", "Q1?"),
+        entry(A, 0, "OPINION", "R1 answer."),
+        entry("user", 0, "QUESTION", "Q2?"),
+        entry(B, 0, "OPINION", "R2 answer."),
+        entry("user", 0, "QUESTION", "Q3?"),
+        entry(A, 0, "OPINION", "R3 answer."),
+      ],
+    });
+
+  it("counts rounds from the QUESTION entries the backend writes", () => {
+    expect(buildDigest(threeRounds(), undefined, PHASES).roundCount).toBe(3);
+  });
+
+  it("defaults to the newest round", () => {
+    const d = buildDigest(threeRounds(), undefined, PHASES);
+    expect(d.selectedRound).toBe(3);
+    expect(d.question).toBe("Q3?");
+    expect(d.members.map((m) => m.agentId)).toEqual([A]);
+  });
+
+  it("can be asked for an earlier round", () => {
+    const d = buildDigest(threeRounds(), undefined, PHASES, undefined, null, 2);
+    expect(d.selectedRound).toBe(2);
+    expect(d.question).toBe("Q2?");
+    expect(d.members.map((m) => m.agentId)).toEqual([B]);
+    expect(d.totalEntries).toBe(1);
+  });
+
+  it("clamps an out-of-range request instead of rendering nothing", () => {
+    expect(buildDigest(threeRounds(), undefined, PHASES, undefined, null, 99).selectedRound).toBe(3);
+    expect(buildDigest(threeRounds(), undefined, PHASES, undefined, null, 0).selectedRound).toBe(1);
+  });
+
+  it("discards recovered boundaries that disagree with the stored one", () => {
+    // The recovery assumes QUESTION entries mark round starts. Rather than
+    // trusting that blindly, the list is validated against the boundary the
+    // backend actually stored — here a QUESTION sits mid-transcript with no
+    // matching stored index, so the view stays one round instead of splitting
+    // on a marker this code does not understand.
+    const conv = conversation({
+      roundStartTranscriptIndex: 0,
+      transcript: [entry(A, 0), entry(A, 0, "CONVERGENCE", "score"), entry(A, 0, "QUESTION", "stray")],
+    });
+    const d = buildDigest(conv, undefined, PHASES);
+    expect(d.roundCount).toBe(1);
+    expect(d.phases[0]?.entryCount).toBe(1);
+  });
+
+  it("still scopes to the current round when the recovery fails", () => {
+    // Fallback shape: the stored boundary alone, so the bands stay correct even
+    // though the switcher can only offer "before" and "now".
+    const conv = conversation({
+      roundStartTranscriptIndex: 2,
+      transcript: [entry(A, 0), entry(A, 0), entry(B, 0, "OPINION", "This round.")],
+    });
+    const d = buildDigest(conv, undefined, PHASES);
+    expect(d.roundCount).toBe(2);
+    expect(d.totalEntries).toBe(1);
+    expect(d.members.map((m) => m.agentId)).toEqual([B]);
+  });
+
+  it("reports a single round for an ordinary discussion", () => {
+    const conv = conversation({ transcript: [entry(A, 0)] });
+    const d = buildDigest(conv, undefined, PHASES);
+    expect(d.roundCount).toBe(1);
+    expect(d.selectedRound).toBe(1);
   });
 });
 

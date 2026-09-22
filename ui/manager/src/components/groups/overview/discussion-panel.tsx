@@ -62,6 +62,10 @@ export function DiscussionPanel({
 }: DiscussionPanelProps) {
   const { t } = useTranslation();
   const [view, setView] = useState<DiscussionViewMode>(() => getStoredDiscussionView(surface));
+  // `undefined` means "the newest", so a discussion that gains a round while
+  // this is open follows it instead of pinning the reader to the round that was
+  // newest when they arrived. Picking one explicitly opts out of that.
+  const [selectedRound, setSelectedRound] = useState<number | undefined>(undefined);
 
   const handleChange = useCallback(
     (next: DiscussionViewMode) => {
@@ -77,6 +81,7 @@ export function DiscussionPanel({
     configPhases,
     rosterDisplayNames,
     style,
+    selectedRound,
   });
 
   // Picking a phase in the overview shows its turns — which means switching to
@@ -90,7 +95,13 @@ export function DiscussionPanel({
   }, [view, handleChange]);
 
   const overview = (
-    <DiscussionOverview digest={digest} extras={extras} outcome={outcome} onSelectPhase={selectPhase} />
+    <DiscussionOverview
+      digest={digest}
+      extras={extras}
+      outcome={outcome}
+      onSelectPhase={selectPhase}
+      onSelectRound={setSelectedRound}
+    />
   );
 
   return (

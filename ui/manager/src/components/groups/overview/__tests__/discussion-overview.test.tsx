@@ -179,14 +179,43 @@ describe("style-recipe", () => {
     // The backend enum can grow ahead of this build; an unknown style must
     // still render something sensible.
     expect(bandOrder("SOMETHING_NEW")).toEqual(bandOrder(null));
-    expect(bandOrder(undefined)).toEqual(["outcome", "phases", "roster", "matrix", "extras"]);
+    expect(bandOrder(undefined)).toEqual([
+      "outcome",
+      "phases",
+      "roster",
+      "interactions",
+      "bids",
+      "matrix",
+      "extras",
+    ]);
   });
 
-  it("includes every band exactly once in every recipe", () => {
+  it("never repeats a band, and always carries the core four", () => {
+    // Not "every band in every recipe": DELPHI deliberately omits one (below).
+    // What must hold is that no band renders twice and the four that carry the
+    // discussion are always present.
     const styles = ["ROUND_TABLE", "PEER_REVIEW", "DEVIL_ADVOCATE", "DELPHI", "DEBATE", "TASK_FORCE", "NEGOTIATION", "CUSTOM"];
     for (const style of styles) {
-      expect([...bandOrder(style)].sort()).toEqual(["extras", "matrix", "outcome", "phases", "roster"]);
+      const order = bandOrder(style);
+      expect(new Set(order).size, `${style} repeats a band`).toBe(order.length);
+      for (const core of ["outcome", "phases", "roster", "matrix"]) {
+        expect(order, `${style} is missing ${core}`).toContain(core);
+      }
     }
+  });
+
+  it("omits the interactions band for DELPHI only", () => {
+    // Naming who answered whom would undo the anonymity the method rests on —
+    // which is the whole reason DELPHI runs its later rounds ANONYMOUS.
+    expect(bandOrder("DELPHI")).not.toContain("interactions");
+    for (const style of ["PEER_REVIEW", "DEVIL_ADVOCATE", "DEBATE", "ROUND_TABLE", "CUSTOM"]) {
+      expect(bandOrder(style), style).toContain("interactions");
+    }
+  });
+
+  it("leads the directional styles with who addressed whom", () => {
+    expect(bandOrder("PEER_REVIEW")[1]).toBe("interactions");
+    expect(bandOrder("DEVIL_ADVOCATE")[1]).toBe("interactions");
   });
 
   it("anonymises only DELPHI", () => {

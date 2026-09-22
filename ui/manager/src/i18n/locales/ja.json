@@ -2812,7 +2812,19 @@
       "roundScope": "ラウンド {{n}} のみ",
       "roundScopeTitle": "このビューはラウンド {{n}} のみを対象とします。以前のラウンドはトランスクリプトにあります。",
       "convergenceStopped_one": "収束 — {{count}} 回の繰り返しを省略",
-      "convergenceStopped_other": "収束 — {{count}} 回の繰り返しを省略"
+      "convergenceStopped_other": "収束 — {{count}} 回の繰り返しを省略",
+      "interactions": "誰が誰に向けたか",
+      "interactionsLabel": "誰が誰に向けたか",
+      "unaddressed": "誰からも向けられず: {{names}}",
+      "unknownMember": "不明",
+      "bids": "誰が何に立候補したか",
+      "bidsLabel": "タスク別の立候補",
+      "rosterShowFewer": "表示を減らす",
+      "roundLabel": "ラウンド",
+      "roundSelect": "別のラウンドを表示",
+      "roundOption": "{{total}} 中 {{n}}",
+      "rosterShowAll_one": "{{count}} 人すべてを表示",
+      "rosterShowAll_other": "{{count}} 人すべてを表示"
     }
   },
   "taskBoard": {

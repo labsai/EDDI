@@ -2812,7 +2812,19 @@
       "roundScope": "Nur Runde {{n}}",
       "roundScopeTitle": "Diese Ansicht zeigt nur Runde {{n}}. Frühere Runden stehen im Transkript.",
       "convergenceStopped_one": "Konvergiert — {{count}} Wiederholung übersprungen",
-      "convergenceStopped_other": "Konvergiert — {{count}} Wiederholungen übersprungen"
+      "convergenceStopped_other": "Konvergiert — {{count}} Wiederholungen übersprungen",
+      "interactions": "Wer wen angesprochen hat",
+      "interactionsLabel": "Wer wen angesprochen hat",
+      "unaddressed": "Niemand angesprochen: {{names}}",
+      "unknownMember": "Unbekannt",
+      "bids": "Wer worauf geboten hat",
+      "bidsLabel": "Gebote nach Aufgabe",
+      "rosterShowFewer": "Weniger anzeigen",
+      "roundLabel": "Runde",
+      "roundSelect": "Andere Runde anzeigen",
+      "roundOption": "{{n}} von {{total}}",
+      "rosterShowAll_one": "Alle {{count}} Mitglied anzeigen",
+      "rosterShowAll_other": "Alle {{count}} Mitglieder anzeigen"
     }
   },
   "taskBoard": {

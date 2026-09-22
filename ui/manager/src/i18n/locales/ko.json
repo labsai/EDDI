@@ -2812,7 +2812,19 @@
       "roundScope": "{{n}}라운드만",
       "roundScopeTitle": "이 보기는 {{n}}라운드만 다룹니다. 이전 라운드는 전체 기록에 있습니다.",
       "convergenceStopped_one": "수렴 — 반복 {{count}}회 생략",
-      "convergenceStopped_other": "수렴 — 반복 {{count}}회 생략"
+      "convergenceStopped_other": "수렴 — 반복 {{count}}회 생략",
+      "interactions": "누가 누구에게 말했나",
+      "interactionsLabel": "누가 누구에게 말했나",
+      "unaddressed": "아무도 언급하지 않음: {{names}}",
+      "unknownMember": "알 수 없음",
+      "bids": "누가 무엇에 입찰했나",
+      "bidsLabel": "작업별 입찰",
+      "rosterShowFewer": "간략히 보기",
+      "roundLabel": "라운드",
+      "roundSelect": "다른 라운드 보기",
+      "roundOption": "{{total}}개 중 {{n}}",
+      "rosterShowAll_one": "멤버 {{count}}명 모두 보기",
+      "rosterShowAll_other": "멤버 {{count}}명 모두 보기"
     }
   },
   "taskBoard": {

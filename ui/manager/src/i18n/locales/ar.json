@@ -2940,7 +2940,23 @@
       "convergenceStopped_zero": "تقارَب — تم تخطي {{count}} تكرارات",
       "convergenceStopped_two": "تقارَب — تم تخطي {{count}} تكرارات",
       "convergenceStopped_few": "تقارَب — تم تخطي {{count}} تكرارات",
-      "convergenceStopped_many": "تقارَب — تم تخطي {{count}} تكرارات"
+      "convergenceStopped_many": "تقارَب — تم تخطي {{count}} تكرارات",
+      "interactions": "من خاطب من",
+      "interactionsLabel": "من خاطب من",
+      "unaddressed": "لم يخاطبهم أحد: {{names}}",
+      "unknownMember": "غير معروف",
+      "bids": "من تقدّم لأي مهمة",
+      "bidsLabel": "العروض حسب المهمة",
+      "rosterShowFewer": "عرض أقل",
+      "roundLabel": "الجولة",
+      "roundSelect": "عرض جولة أخرى",
+      "roundOption": "{{n}} من {{total}}",
+      "rosterShowAll_one": "عرض عضو واحد",
+      "rosterShowAll_other": "عرض كل الأعضاء ({{count}})",
+      "rosterShowAll_zero": "عرض كل الأعضاء ({{count}})",
+      "rosterShowAll_two": "عرض كل الأعضاء ({{count}})",
+      "rosterShowAll_few": "عرض كل الأعضاء ({{count}})",
+      "rosterShowAll_many": "عرض كل الأعضاء ({{count}})"
     }
   },
   "taskBoard": {

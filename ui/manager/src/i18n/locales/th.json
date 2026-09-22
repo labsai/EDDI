@@ -2812,7 +2812,19 @@
       "roundScope": "เฉพาะรอบที่ {{n}}",
       "roundScopeTitle": "มุมมองนี้ครอบคลุมเฉพาะรอบที่ {{n}} รอบก่อนหน้าอยู่ในบทสนทนา",
       "convergenceStopped_one": "บรรจบกัน — ข้ามการทำซ้ำ {{count}} ครั้ง",
-      "convergenceStopped_other": "บรรจบกัน — ข้ามการทำซ้ำ {{count}} ครั้ง"
+      "convergenceStopped_other": "บรรจบกัน — ข้ามการทำซ้ำ {{count}} ครั้ง",
+      "interactions": "ใครพูดถึงใคร",
+      "interactionsLabel": "ใครพูดถึงใคร",
+      "unaddressed": "ไม่มีใครพูดถึง: {{names}}",
+      "unknownMember": "ไม่ทราบ",
+      "bids": "ใครเสนอตัวทำอะไร",
+      "bidsLabel": "การเสนอตัวตามงาน",
+      "rosterShowFewer": "แสดงน้อยลง",
+      "roundLabel": "รอบ",
+      "roundSelect": "แสดงรอบอื่น",
+      "roundOption": "{{n}} จาก {{total}}",
+      "rosterShowAll_one": "แสดงสมาชิกทั้ง {{count}} คน",
+      "rosterShowAll_other": "แสดงสมาชิกทั้ง {{count}} คน"
     }
   },
   "taskBoard": {

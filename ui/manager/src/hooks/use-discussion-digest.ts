@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import type { ConvergenceProgress, GroupStreamState } from "./use-group-discussion-stream";
+import { readEntryBody } from "@/lib/group-entry-body";
 import type {
   DecisionRecord,
   DiscussionPhase,
@@ -116,6 +117,31 @@ export interface DigestCell {
   entryCount: number;
 }
 
+/**
+ * One member addressing another — the structure of the directional styles.
+ *
+ * PEER_REVIEW and DEVIL_ADVOCATE are *about* who critiqued or challenged whom
+ * (their phases set `targetEachPeer`), and `TranscriptEntry.targetAgentId`
+ * carries it on every turn. Without this the matrix could say "Security spoke
+ * in Critique" but never "Security critiqued the Architect", which is the
+ * content of those styles rather than a detail of them.
+ */
+export interface DigestInteraction {
+  fromAgentId: string;
+  toAgentId: string;
+  /** How many turns went this way. */
+  count: number;
+}
+
+/** One member's bid for one task (I18's contract-net-lite). */
+export interface DigestBid {
+  agentId: string;
+  subject: string;
+  confidence: number | null;
+  estimatedComplexity: string | null;
+  rationale: string | null;
+}
+
 export interface DiscussionDigest {
   /** `true` while an SSE stream is feeding this digest. */
   isLive: boolean;
@@ -127,6 +153,14 @@ export interface DiscussionDigest {
   members: DigestMember[];
   /** `matrix[agentId][phaseIndex]`. Always dense over `members` × `phases`. */
   matrix: Record<string, DigestCell[]>;
+  /** Directed member-to-member turns, strongest first. Empty for broadcast-only styles. */
+  interactions: DigestInteraction[];
+  /** Bids cast this round, for TASK_FORCE's contract-net phase. */
+  bids: DigestBid[];
+  /** How many rounds this discussion has had. `1` for most. */
+  roundCount: number;
+  /** Which round the bands describe — 1-based, defaults to the newest. */
+  selectedRound: number;
   /** Total spend in USD, or `null` when nothing has been attributed. */
   totalCost: number | null;
   totalEntries: number;
@@ -304,6 +338,8 @@ interface DigestInput {
   /** agentId → display name, for surfaces with a roster but no conversation yet. */
   rosterDisplayNames?: Record<string, string>;
   style?: DiscussionStyle | null;
+  /** Which round to describe, 1-based. Defaults to the newest. */
+  selectedRound?: number;
 }
 
 /**
@@ -311,10 +347,10 @@ interface DigestInput {
  * calling surface happens to have. Memoised on its inputs.
  */
 export function useDiscussionDigest(input: DigestInput): DiscussionDigest {
-  const { conversation, streamState, configPhases, rosterDisplayNames, style } = input;
+  const { conversation, streamState, configPhases, rosterDisplayNames, style, selectedRound } = input;
   return useMemo(
-    () => buildDigest(conversation, streamState, configPhases, rosterDisplayNames, style),
-    [conversation, streamState, configPhases, rosterDisplayNames, style],
+    () => buildDigest(conversation, streamState, configPhases, rosterDisplayNames, style, selectedRound),
+    [conversation, streamState, configPhases, rosterDisplayNames, style, selectedRound],
   );
 }
 
@@ -324,6 +360,7 @@ export function buildDigest(
   configPhases?: DiscussionPhase[] | null,
   rosterDisplayNames?: Record<string, string>,
   style?: DiscussionStyle | null,
+  selectedRound?: number,
 ): DiscussionDigest {
   const isLive = !!streamState?.isStreaming;
   // A live stream's transcript is the newer view while it is running; once it
@@ -334,23 +371,21 @@ export function buildDigest(
   const wholeTranscript: TranscriptEntry[] =
     isLive && streamTranscript.length > 0 ? streamTranscript : (conversation?.transcript ?? streamTranscript);
 
-  // A continuation round restarts `phaseIndex` at 0 (the backend's phase loop
-  // begins at 0 for every round), so bucketing the WHOLE transcript by phase
-  // index silently merges rounds: round 1's turns land in round 2's cells, a
-  // round-1 ERROR marks a round-2 cell "failed", and phases the current round
-  // has not reached yet show members as having already spoken in them. The
-  // backend records exactly where the current round starts for this reason.
-  //
-  // A live continuation needs this just as much: `continueStream` deliberately
-  // PRESERVES the previous rounds and `group_start` appends the new question,
-  // so the stream's own `roundStartIndex` is the boundary while streaming.
-  const roundStart = isLive
-    ? (streamState?.roundStartIndex ?? 0)
-    : conversation?.transcript === wholeTranscript
-      ? (conversation?.roundStartTranscriptIndex ?? 0)
-      : 0;
+  // A continuation restarts `phaseIndex` at 0 (the backend's phase loop begins
+  // at 0 every round), so bucketing the WHOLE transcript by phase index merges
+  // rounds: round 1's turns land in round 2's cells, a round-1 ERROR marks a
+  // round-2 cell "failed", and phases this round has not reached show members
+  // as having already spoken in them.
+  const boundaries = roundBoundaries(wholeTranscript, conversation, streamState, isLive);
+  const roundCount = boundaries.length;
+  // Newest round by default; a caller can ask for an earlier one.
+  const selected = Math.min(Math.max(selectedRound ?? roundCount, 1), roundCount);
+  const sliceStart = boundaries[selected - 1] ?? 0;
+  const sliceEnd = boundaries[selected] ?? wholeTranscript.length;
   const transcript: TranscriptEntry[] =
-    roundStart > 0 && roundStart < wholeTranscript.length ? wholeTranscript.slice(roundStart) : wholeTranscript;
+    sliceStart > 0 || sliceEnd < wholeTranscript.length
+      ? wholeTranscript.slice(sliceStart, sliceEnd)
+      : wholeTranscript;
 
   const state: GroupConversationState =
     (isLive ? streamState?.state : conversation?.state) ?? conversation?.state ?? streamState?.state ?? "CREATED";
@@ -524,6 +559,22 @@ export function buildDigest(
     );
   }
 
+  // Directed turns. Counted per ordered pair and sorted heaviest-first so the
+  // band leads with the exchange that actually carried the phase.
+  const edges = new Map<string, DigestInteraction>();
+  for (const entry of transcript) {
+    if (isSystemEntry(entry) || NON_MEMBER_TYPES.has(entry.type)) continue;
+    if (!entry.targetAgentId || entry.targetAgentId === entry.speakerAgentId) continue;
+    const key = `${entry.speakerAgentId}\u0000${entry.targetAgentId}`;
+    const found = edges.get(key);
+    if (found) found.count += 1;
+    else
+      edges.set(key, { fromAgentId: entry.speakerAgentId, toAgentId: entry.targetAgentId, count: 1 });
+  }
+  const interactions = [...edges.values()].sort((a, b) => b.count - a.count);
+
+  const bids = collectBids(transcript);
+
   const totalCost = costs.size > 0 ? sumAll(costs) : null;
   // The same filter every phase's `entryCount` applies. Counting raw rows put
   // QUESTION, CONVERGENCE, FACILITATION and system SKIPPED entries in the
@@ -539,6 +590,10 @@ export function buildDigest(
     phases,
     members,
     matrix,
+    interactions,
+    bids,
+    roundCount,
+    selectedRound: selected,
     totalCost,
     totalEntries: totalTurns,
     startedAt: conversation?.created ?? streamState?.startedAt ?? null,
@@ -550,6 +605,74 @@ export function buildDigest(
       null,
     isEmpty: phases.length === 0 && members.length === 0,
   };
+}
+
+/**
+ * Where each round's entries begin, as indices into the whole transcript.
+ *
+ * The authority is the boundary the backend stores for the CURRENT round
+ * (`roundStartTranscriptIndex`, or the stream's `roundStartIndex`). That is
+ * always correct but describes one round, which is all the bands need — the
+ * round *switcher* additionally needs the earlier boundaries, and those are not
+ * persisted.
+ *
+ * They are recovered from `QUESTION` entries, which the backend writes at the
+ * start of every round and nowhere else (`GroupConversationService` for the
+ * first, `GroupLifecycleOps` for each continuation, both immediately after
+ * setting the stored index). Rather than trusting that invariant blindly, the
+ * recovered list is **validated against the stored boundary**: its last entry
+ * must be the round start the backend recorded. If it is not — a QUESTION
+ * written somewhere this code does not know about, or entries filtered before
+ * they reached us — the recovery is discarded and only the stored boundary is
+ * used, which narrows the switcher rather than slicing the view wrongly.
+ *
+ * Always returns at least `[0]`, so callers can index it unconditionally.
+ */
+function roundBoundaries(
+  transcript: TranscriptEntry[],
+  conversation: GroupConversation | null | undefined,
+  streamState: GroupStreamState | undefined,
+  isLive: boolean,
+): number[] {
+  const known = isLive ? (streamState?.roundStartIndex ?? 0) : (conversation?.roundStartTranscriptIndex ?? 0);
+  const safeKnown = known > 0 && known < transcript.length ? known : 0;
+
+  const questions: number[] = [];
+  for (let i = 0; i < transcript.length; i++) {
+    if (transcript[i]?.type === "QUESTION") questions.push(i);
+  }
+
+  const consistent =
+    questions.length > 0 && questions[0] === 0 && questions[questions.length - 1] === safeKnown;
+  if (consistent) return questions;
+
+  return safeKnown > 0 ? [0, safeKnown] : [0];
+}
+
+/**
+ * Bids cast in this round, flattened across members.
+ *
+ * Reuses `readEntryBody` rather than re-parsing: a BID's content is the same
+ * JSON contract the transcript renderers already decode, and a second parser
+ * would be a second thing to keep in step with the backend.
+ */
+function collectBids(transcript: TranscriptEntry[]): DigestBid[] {
+  const out: DigestBid[] = [];
+  for (const entry of transcript) {
+    if (entry.type !== "BID" || !entry.speakerAgentId) continue;
+    const body = readEntryBody(entry);
+    if (body.kind !== "payload" || body.payload.kind !== "BID") continue;
+    for (const bid of body.payload.bids) {
+      out.push({
+        agentId: entry.speakerAgentId,
+        subject: bid.subject,
+        confidence: bid.confidence,
+        estimatedComplexity: bid.estimatedComplexity,
+        rationale: bid.rationale,
+      });
+    }
+  }
+  return out;
 }
 
 /**

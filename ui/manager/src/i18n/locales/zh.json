@@ -2812,7 +2812,19 @@
       "roundScope": "仅第 {{n}} 轮",
       "roundScopeTitle": "此视图仅涵盖第 {{n}} 轮。更早的轮次见逐字记录。",
       "convergenceStopped_one": "已收敛 — 跳过 {{count}} 次重复",
-      "convergenceStopped_other": "已收敛 — 跳过 {{count}} 次重复"
+      "convergenceStopped_other": "已收敛 — 跳过 {{count}} 次重复",
+      "interactions": "谁回应了谁",
+      "interactionsLabel": "谁回应了谁",
+      "unaddressed": "无人回应：{{names}}",
+      "unknownMember": "未知",
+      "bids": "谁认领了什么",
+      "bidsLabel": "按任务列出的认领",
+      "rosterShowFewer": "收起",
+      "roundLabel": "轮次",
+      "roundSelect": "显示其他轮次",
+      "roundOption": "第 {{n}} / {{total}} 轮",
+      "rosterShowAll_one": "显示全部 {{count}} 位成员",
+      "rosterShowAll_other": "显示全部 {{count}} 位成员"
     }
   },
   "taskBoard": {

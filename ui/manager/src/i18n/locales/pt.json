@@ -2844,7 +2844,20 @@
       "roundScopeTitle": "Esta vista cobre apenas a ronda {{n}}. As rondas anteriores estão na transcrição.",
       "convergenceStopped_one": "Convergiu — {{count}} repetição ignorada",
       "convergenceStopped_other": "Convergiu — {{count}} repetições ignoradas",
-      "convergenceStopped_many": "Convergiu — {{count}} repetições ignoradas"
+      "convergenceStopped_many": "Convergiu — {{count}} repetições ignoradas",
+      "interactions": "Quem se dirigiu a quem",
+      "interactionsLabel": "Quem se dirigiu a quem",
+      "unaddressed": "Ninguém se dirigiu a: {{names}}",
+      "unknownMember": "Desconhecido",
+      "bids": "Quem se candidatou a quê",
+      "bidsLabel": "Candidaturas por tarefa",
+      "rosterShowFewer": "Mostrar menos",
+      "roundLabel": "Ronda",
+      "roundSelect": "Mostrar outra ronda",
+      "roundOption": "{{n}} de {{total}}",
+      "rosterShowAll_one": "Mostrar {{count}} membro",
+      "rosterShowAll_other": "Mostrar os {{count}} membros",
+      "rosterShowAll_many": "Mostrar os {{count}} membros"
     }
   },
   "taskBoard": {

@@ -2865,7 +2865,19 @@
       "roundScope": "Round {{n}} only",
       "roundScopeTitle": "This view covers round {{n}} only. Earlier rounds are in the transcript.",
       "convergenceStopped_one": "Converged — {{count}} repeat skipped",
-      "convergenceStopped_other": "Converged — {{count}} repeats skipped"
+      "convergenceStopped_other": "Converged — {{count}} repeats skipped",
+      "interactions": "Who addressed whom",
+      "interactionsLabel": "Who addressed whom",
+      "unaddressed": "Nobody addressed: {{names}}",
+      "unknownMember": "Unknown",
+      "bids": "Who bid for what",
+      "bidsLabel": "Bids by task",
+      "rosterShowFewer": "Show fewer",
+      "roundLabel": "Round",
+      "roundSelect": "Show a different round",
+      "roundOption": "{{n}} of {{total}}",
+      "rosterShowAll_one": "Show all {{count}} member",
+      "rosterShowAll_other": "Show all {{count}} members"
     }
   },
   "taskBoard": {

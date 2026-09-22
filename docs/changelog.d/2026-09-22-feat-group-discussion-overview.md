@@ -434,3 +434,79 @@ field.
 ```regression-note
 | 2026-09-22 | A repeating phase must render its repeat count | ROUND_TABLE and DELPHI are built on `repeats`; rendering the phase once made a four-pass deliberation indistinguishable from a single one, in the two styles most groups use. | EDDI Manager |
 ```
+
+## ✨ feat(manager): directional turns, bids, a round switcher and a bounded roster (2026-09-22)
+
+**Repo:** EDDI (`feat/group-discussion-overview`)
+
+### Why
+
+A sweep of the dashboard against every style, every length and every purpose found four
+things it did not cover. Three were signal the discussion produces and the view discarded.
+
+**Who addressed whom.** PEER_REVIEW and DEVIL_ADVOCATE are *directional* — a critique lands
+on someone, a challenge is aimed at a position — and `TranscriptEntry.targetAgentId` carries
+that on every such turn. The dashboard collected it and threw it away, so it could say
+"Security spoke during Critique" but never "Security critiqued the Architect", which is the
+content of those styles rather than a detail of them. New `interactions` band, grouped by
+speaker and led by the heaviest exchange, plus a "nobody addressed" line — in a peer review
+that names the contribution which drew no scrutiny, which is exactly what a reviewer of the
+review is looking for.
+
+Rendered as a list rather than a graph on purpose: a force-directed diagram of five nodes is
+decoration and at twenty is unreadable, while a list answers the two real questions at any
+size and needs no layout engine. **DELPHI omits this band** — naming who answered whom would
+undo the anonymity the method rests on, which is the whole reason its later rounds run
+`ANONYMOUS`.
+
+**Who bid for what.** TASK_FORCE's contract-net phase (I18) produces `BID` entries that
+nothing rendered. The task board shows who *holds* a task; this shows who *wanted* it, and the
+difference matters: a task three members bid on and a task nobody bid on look identical in an
+assignment list, and the second is the one worth acting on. Grouped by task, because
+contention is per task. Reuses `readEntryBody` rather than adding a second parser for the same
+JSON contract.
+
+**Earlier rounds were unreachable.** The bands are necessarily scoped to one round (phase
+indices restart each round), which left a reader comparing round 1 to round 2 no option but to
+leave for the transcript. There is now a round selector.
+
+Recovering the earlier boundaries needed care, because only the *current* round's start is
+persisted. They are read from the `QUESTION` entries the backend writes at every round start —
+but **validated against the stored boundary** rather than trusted: the recovered list's last
+entry must equal the round start the backend recorded, and if it does not, the recovery is
+discarded in favour of the stored boundary alone. That narrows the switcher instead of slicing
+the view wrongly, and it is not hypothetical — the validation was added because a test with a
+stray `QUESTION` row split a single-round discussion in two.
+
+**The roster had no bound.** Twenty members meant twenty stance cards, which is the wall of
+text this view exists to replace. Collapsed past eight.
+
+### Screen sizes, languages, dark mode
+
+Verified in the running Manager rather than asserted: **390 / 768 / 1600px × German (longest
+strings) and Arabic (RTL) × light and dark**. No horizontal page scroll and no band overflow
+in any combination; the container queries step the rail 2 → 3 → 5 columns and the roster
+1 → 3 as the *pane* widens, not the window. The interaction band's arrow carries
+`rtl:-scale-x-100`, the idiom three existing components already use — an arrow that keeps
+pointing right in Arabic reverses the sentence.
+
+### Tests
+
+Frontend 92 across the two overview suites, including the interaction pairs, bid flattening,
+round selection and clamping, and the boundary-validation fallback. The style-recipe invariant
+was rewritten: "every band in every recipe" is no longer true now that DELPHI deliberately
+omits one, so it asserts no repeats plus the core four, with the DELPHI omission as its own
+named test.
+
+**Files:**
+[`interaction-map.tsx`](../../ui/manager/src/components/groups/overview/interaction-map.tsx),
+[`bid-board.tsx`](../../ui/manager/src/components/groups/overview/bid-board.tsx),
+[`use-discussion-digest.ts`](../../ui/manager/src/hooks/use-discussion-digest.ts),
+[`style-recipe.ts`](../../ui/manager/src/components/groups/overview/style-recipe.ts),
+[`member-roster.tsx`](../../ui/manager/src/components/groups/overview/member-roster.tsx)
+
+```decision-log
+| 2026-09-22 | Round boundaries are recovered from QUESTION entries but validated against the stored index | Only the current round's start is persisted. Trusting the QUESTION invariant blindly split a discussion on a stray marker; validating and falling back narrows the switcher instead of slicing the view wrongly. | EDDI Manager |
+| 2026-09-22 | The interaction band is a list, not a graph | A force-directed diagram of five nodes is decoration and of twenty is unreadable; a list answers "who did this member take on" and "who went unchallenged" at any size with no layout engine. | EDDI Manager |
+| 2026-09-22 | DELPHI gets no interaction band | Naming who answered whom would undo the anonymity the method rests on — the reason its later rounds run ANONYMOUS. | EDDI Manager |
+```

@@ -2812,7 +2812,19 @@
       "roundScope": "केवल दौर {{n}}",
       "roundScopeTitle": "यह दृश्य केवल दौर {{n}} को कवर करता है। पिछले दौर प्रतिलिपि में हैं।",
       "convergenceStopped_one": "अभिसरित — {{count}} पुनरावृत्ति छोड़ी गई",
-      "convergenceStopped_other": "अभिसरित — {{count}} पुनरावृत्तियाँ छोड़ी गईं"
+      "convergenceStopped_other": "अभिसरित — {{count}} पुनरावृत्तियाँ छोड़ी गईं",
+      "interactions": "किसने किसे संबोधित किया",
+      "interactionsLabel": "किसने किसे संबोधित किया",
+      "unaddressed": "किसी ने संबोधित नहीं किया: {{names}}",
+      "unknownMember": "अज्ञात",
+      "bids": "किसने किसके लिए बोली लगाई",
+      "bidsLabel": "कार्य के अनुसार बोलियाँ",
+      "rosterShowFewer": "कम दिखाएँ",
+      "roundLabel": "दौर",
+      "roundSelect": "दूसरा दौर दिखाएँ",
+      "roundOption": "{{total}} में से {{n}}",
+      "rosterShowAll_one": "सभी {{count}} सदस्य दिखाएँ",
+      "rosterShowAll_other": "सभी {{count}} सदस्य दिखाएँ"
     }
   },
   "taskBoard": {
