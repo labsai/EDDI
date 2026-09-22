@@ -89,9 +89,10 @@ class ConfigurationReferenceCoverageTest {
 
     /**
      * A constant being used as a property name: injected, looked up, or read
-     * through {@code getConfig()}. {@code %s} is the constant's identifier, which
-     * may be qualified ({@code SourceUrlValidator.REQUIRE_HTTPS_PROPERTY}) when the
-     * use is not in the file that declares it.
+     * through {@code getConfig()}. {@code %s} is the identifier to look for — bare
+     * inside the declaring file, and qualified with the declaring class
+     * ({@code SourceUrlValidator.REQUIRE_HTTPS_PROPERTY}) anywhere else, so a
+     * same-named constant in an unrelated class cannot vouch for this one.
      */
     private static final String CONFIG_USE = "(?:@ConfigProperty\\(\\s*name\\s*=\\s*|getOptionalValue\\(\\s*|getValue\\(\\s*)(?:\\w+\\.)*%s\\b";
 
@@ -317,15 +318,30 @@ class ConfigurationReferenceCoverageTest {
      */
     private static void recordConstants(String body, TreeMap<String, String> into, String source,
                                         Collection<String> allSources) {
+        String declaringClass = classNameOf(source);
         Matcher m = CONSTANT.matcher(body);
         while (m.find()) {
             String identifier = m.group(1);
             String property = m.group(2);
-            Pattern use = Pattern.compile(String.format(CONFIG_USE, Pattern.quote(identifier)));
-            if (allSources.stream().anyMatch(candidate -> use.matcher(candidate).find())) {
+            Pattern hereUse = Pattern.compile(String.format(CONFIG_USE, Pattern.quote(identifier)));
+            // Qualified elsewhere: TIMEOUT_PROPERTY declared by two classes must not
+            // let a use of A.TIMEOUT_PROPERTY vouch for B's.
+            Pattern elsewhereUse = Pattern.compile(
+                    String.format(CONFIG_USE, Pattern.quote(declaringClass + "." + identifier)));
+            boolean used = hereUse.matcher(body).find()
+                    || allSources.stream().anyMatch(candidate -> elsewhereUse.matcher(candidate).find());
+            if (used) {
                 into.putIfAbsent(property, source);
             }
         }
+    }
+
+    /**
+     * {@code ai/labs/.../SourceUrlValidator.java} to {@code SourceUrlValidator}.
+     */
+    private static String classNameOf(String relativePath) {
+        String name = relativePath.substring(relativePath.lastIndexOf('/') + 1);
+        return name.endsWith(".java") ? name.substring(0, name.length() - ".java".length()) : name;
     }
 
     private static void record(Matcher matcher, TreeMap<String, String> into, String source) {

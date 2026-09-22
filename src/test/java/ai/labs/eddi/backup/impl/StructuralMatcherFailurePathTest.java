@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.lenient;
 import ai.labs.eddi.backup.IResourceSource;
 import ai.labs.eddi.backup.IResourceSource.AgentSourceData;
 import ai.labs.eddi.backup.IResourceSource.ExtensionSourceData;
@@ -101,6 +104,14 @@ class StructuralMatcherFailurePathTest {
 
         matcher = new StructuralMatcher(agentStore, documentDescriptorStore, snippetStore,
                 workflowStore, restInterfaceFactory, jsonSerialization);
+
+        // The matcher resolves the target's current version from its descriptor and
+        // refuses to guess when it cannot — previewing version 1 of a target that
+        // may be at any version is what showed operators pre-sync content labelled
+        // "target". These fixtures are about matching, not versioning, so every
+        // resource simply reports version 1.
+        lenient().when(documentDescriptorStore.readCurrentDescriptor(anyString()))
+                .thenAnswer(invocation -> descriptorAtVersionOne(invocation.getArgument(0)));
 
         when(snippetStore.readSnippetDescriptors(anyString(), anyInt(), anyInt()))
                 .thenReturn(Collections.emptyList());
@@ -289,25 +300,66 @@ class StructuralMatcherFailurePathTest {
     }
 
     /**
-     * The version shown beside the agent row is best-effort. A descriptor store
-     * that throws must cost the version number, not the whole preview.
+     * A descriptor store that throws costs nothing at all now: the STORE is asked
+     * for the current version first, and the descriptor is only a fallback. That is
+     * a stronger guarantee than the one this test used to make ("costs the version
+     * number, not the preview"), and it is the right one — the version is what the
+     * target's content is read at, so a best-effort answer there is a preview of
+     * the wrong content.
      */
     @Test
-    @DisplayName("a descriptor store that throws costs the version, not the preview")
-    void descriptorFailureLeavesTheVersionUnknown() throws Exception {
+    @DisplayName("a descriptor store that throws costs nothing — the store is the authority")
+    void descriptorFailureIsAbsorbedByTheStore() throws Exception {
         var targetConfig = new AgentConfiguration();
         targetConfig.setWorkflows(List.of());
         when(agentStore.readAgent(eq(TARGET_AGENT_ID), anyInt())).thenReturn(targetConfig);
+        when(agentStore.getCurrentResourceId(TARGET_AGENT_ID)).thenReturn(resourceIdAt(TARGET_AGENT_ID, 7));
         doAnswer(throwing(new IResourceStore.ResourceStoreException("descriptor unreadable")))
-                .when(documentDescriptorStore).readDescriptor(eq(TARGET_AGENT_ID), isNull());
+                .when(documentDescriptorStore).readCurrentDescriptor(TARGET_AGENT_ID);
 
         ImportPreview preview = matcher.buildPreview(sourceWithNoWorkflows(), TARGET_AGENT_ID, true);
 
         ResourceDiff agentDiff = diffOf(preview, "src-1");
         assertNotNull(agentDiff);
         assertEquals(TARGET_AGENT_ID, agentDiff.targetId());
-        assertNull(agentDiff.targetVersion(),
-                "an unknown version must be reported as unknown, not guessed");
+        assertEquals(7, agentDiff.targetVersion(), "the store's answer is what the row must state");
+        verify(agentStore).readAgent(TARGET_AGENT_ID, 7);
+    }
+
+    /**
+     * And when neither the store nor the descriptor can name the version, the
+     * preview is refused rather than computed against a guess. Guessing 1 is what
+     * showed operators pre-sync content labelled "target" and let the executor
+     * write partial versions before the agent write finally refused.
+     */
+    @Test
+    @DisplayName("a version nothing can name refuses the preview instead of guessing")
+    void unknownVersionRefusesThePreview() throws Exception {
+        when(agentStore.getCurrentResourceId(TARGET_AGENT_ID))
+                .thenThrow(new RuntimeException("store unavailable"));
+        doAnswer(throwing(new IResourceStore.ResourceStoreException("descriptor unreadable")))
+                .when(documentDescriptorStore).readCurrentDescriptor(TARGET_AGENT_ID);
+
+        var thrown = assertThrows(InternalServerErrorException.class,
+                () -> matcher.buildPreview(sourceWithNoWorkflows(), TARGET_AGENT_ID, true));
+
+        assertTrue(thrown.getMessage().contains("current version"), thrown.getMessage());
+        verify(agentStore, never()).readAgent(eq(TARGET_AGENT_ID), anyInt());
+    }
+
+    /** An {@link IResourceId} naming {@code version} of {@code id}. */
+    private static IResourceStore.IResourceId resourceIdAt(String id, int version) {
+        return new IResourceStore.IResourceId() {
+            @Override
+            public String getId() {
+                return id;
+            }
+
+            @Override
+            public Integer getVersion() {
+                return version;
+            }
+        };
     }
 
     /** Sneaky-throws a checked store exception the way the REST proxy does. */
@@ -402,5 +454,12 @@ class StructuralMatcherFailurePathTest {
                 return List.of();
             }
         };
+    }
+
+    /** A descriptor naming version 1 of {@code resourceId}. */
+    private static DocumentDescriptor descriptorAtVersionOne(String resourceId) {
+        var descriptor = new DocumentDescriptor();
+        descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/" + resourceId + "?version=1"));
+        return descriptor;
     }
 }

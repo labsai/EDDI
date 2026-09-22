@@ -206,13 +206,13 @@ async function readErrorDetail(response: Response): Promise<string | null> {
  * tolerance the batch summary died on `results.some is not a function` — an
  * unhandled TypeError in place of an error the caller could report.
  */
-function parseJsonArray<T>(body: string): T[] {
-  if (!body) return [];
+function parseJsonArray<T>(body: string): T[] | null {
+  if (!body) return null;
   try {
     const parsed = JSON.parse(body) as unknown;
-    return Array.isArray(parsed) ? (parsed as T[]) : [];
+    return Array.isArray(parsed) ? (parsed as T[]) : null;
   } catch {
-    return [];
+    return null;
   }
 }
 
@@ -668,11 +668,17 @@ export async function executeSyncBatch(
   // 500 when EVERY mapping failed, and the body is still the per-agent list.
   if (res.status === 500) {
     const failed = parseJsonArray<BatchSyncResult>(body);
-    if (failed.length > 0) return { partial: true, results: failed };
+    if (failed?.length) return { partial: true, results: failed };
   }
   if (!res.ok) throw new Error(`Batch sync failed: ${detailOf(body) ?? res.statusText}`);
 
   const results = parseJsonArray<BatchSyncResult>(body);
+  if (!results) {
+    // A 2xx whose body is not the per-agent list says nothing about what was
+    // written. Reading it as an empty list reported a proxy's HTML page, or a
+    // truncated response, as a clean "already up to date".
+    throw new Error("Batch sync failed: the response was not a list of per-agent results");
+  }
   return {
     partial: res.status === 207 || results.some((r) => r.error || hasFailures(r.result)),
     results,

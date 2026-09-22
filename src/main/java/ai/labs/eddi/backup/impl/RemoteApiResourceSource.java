@@ -15,6 +15,8 @@ import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.utils.RestUtilities;
 import org.jboss.logging.Logger;
 
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -426,8 +428,13 @@ public class RemoteApiResourceSource implements IResourceSource {
             // codeql[java/ssrf] False Positive: connecting to the operator-approved
             // remote EDDI instance is the feature
             HttpResponse<Void> exportResponse = client.send(
-                    authorized(HttpRequest.newBuilder().uri(baseUri.resolve(exportPath)).timeout(REQUEST_TIMEOUT), authToken)
-                            .POST(HttpRequest.BodyPublishers.noBody()).build(),
+                    // Not REQUEST_TIMEOUT: that budget is sized for reading one JSON
+                    // document, and this POST makes the remote read every workflow and
+                    // extension, scrub secrets, gather snippets and schedules and zip
+                    // the lot before it answers. A large agent legitimately takes
+                    // longer than a config read.
+                    authorized(HttpRequest.newBuilder().uri(baseUri.resolve(exportPath)).timeout(ARCHIVE_DOWNLOAD_TIMEOUT),
+                            authToken).POST(HttpRequest.BodyPublishers.noBody()).build(),
                     HttpResponse.BodyHandlers.discarding());
 
             if (exportResponse.statusCode() < 200 || exportResponse.statusCode() >= 300) {
@@ -442,11 +449,15 @@ public class RemoteApiResourceSource implements IResourceSource {
             }
 
             // codeql[java/ssrf] False Positive: same approved base URL as above
-            HttpResponse<byte[]> download = client.send(
+            // ofInputStream, not ofByteArray: the byte-array handler blocks until the
+            // WHOLE body is in memory, so a size check after it runs is a check on an
+            // allocation that has already happened. The stream is read to the cap and
+            // no further.
+            HttpResponse<InputStream> download = client.send(
                     authorized(HttpRequest.newBuilder()
                             .uri(baseUri.resolve("backup/export/" + encodePathSegment(archiveName)))
                             .timeout(ARCHIVE_DOWNLOAD_TIMEOUT), authToken).GET().build(),
-                    HttpResponse.BodyHandlers.ofByteArray());
+                    HttpResponse.BodyHandlers.ofInputStream());
 
             if (download.statusCode() != 200) {
                 throw new RemoteReadException("Could not download the exported archive for agent " + agentId
@@ -457,14 +468,9 @@ public class RemoteApiResourceSource implements IResourceSource {
                 throw new RemoteReadException("The exported archive for agent " + agentId + " is "
                         + declared + " bytes, more than this instance will import (" + MAX_ARCHIVE_BYTES + ")");
             }
-            byte[] body = download.body();
-            if (body == null || body.length == 0) {
+            byte[] body = readAtMost(download.body(), agentId);
+            if (body.length == 0) {
                 throw new RemoteReadException("The exported archive for agent " + agentId + " came back empty");
-            }
-            if (body.length > MAX_ARCHIVE_BYTES) {
-                // A remote that declared no length, or lied about it.
-                throw new RemoteReadException("The exported archive for agent " + agentId + " is "
-                        + body.length + " bytes, more than this instance will import (" + MAX_ARCHIVE_BYTES + ")");
             }
             return body;
         } catch (InterruptedException e) {
@@ -532,6 +538,34 @@ public class RemoteApiResourceSource implements IResourceSource {
             uris.add(matcher.group(1));
         }
         return uris;
+    }
+
+    /**
+     * Reads the archive, refusing to allocate more than {@link #MAX_ARCHIVE_BYTES}.
+     * <p>
+     * The bound is enforced <em>while</em> reading. A remote that declares no
+     * {@code Content-Length}, or declares one and then sends more, cannot make this
+     * instance hold an unbounded body in memory before the guard is reached: the
+     * read stops one byte past the cap and the stream is closed.
+     */
+    private static byte[] readAtMost(InputStream body, String agentId) throws IOException {
+        if (body == null) {
+            return new byte[0];
+        }
+        try (body; ByteArrayOutputStream buffer = new ByteArrayOutputStream()) {
+            byte[] chunk = new byte[8192];
+            long total = 0;
+            int read;
+            while ((read = body.read(chunk)) != -1) {
+                total += read;
+                if (total > MAX_ARCHIVE_BYTES) {
+                    throw new RemoteReadException("The exported archive for agent " + agentId
+                            + " is larger than this instance will import (" + MAX_ARCHIVE_BYTES + " bytes)");
+                }
+                buffer.write(chunk, 0, read);
+            }
+            return buffer.toByteArray();
+        }
     }
 
     /**

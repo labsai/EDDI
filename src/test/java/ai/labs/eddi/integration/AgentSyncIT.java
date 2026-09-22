@@ -155,9 +155,9 @@ public class AgentSyncIT extends BaseIntegrationIT {
         Response preview = given().post("/backup/import/sync/preview?sourceUrl=" + SOURCE_URL
                 + "&sourceAgentId=" + sourceAgentId + "&targetAgentId=" + targetAgentId);
         preview.then().statusCode(200);
-        Integer behaviorTargetVersion = preview.jsonPath()
+        int behaviorTargetVersion = preview.jsonPath()
                 .getInt("resources.find { it.resourceType == 'behavior' }.targetVersion");
-        assertTrue(behaviorTargetVersion != null && behaviorTargetVersion > 1,
+        assertTrue(behaviorTargetVersion > 1,
                 "the preview must read the target's current version, got " + behaviorTargetVersion);
     }
 
@@ -330,7 +330,22 @@ public class AgentSyncIT extends BaseIntegrationIT {
         return withoutQuery.substring(withoutQuery.lastIndexOf('/') + 1);
     }
 
+    /**
+     * The version a resource URI ends with.
+     * <p>
+     * A URI that carries none is a failure of this test's own fixtures, and saying
+     * so beats an unexplained {@link NumberFormatException} from inside an
+     * assertion helper.
+     */
     private static int versionOf(String uri) {
-        return Integer.parseInt(uri.substring(uri.lastIndexOf('=') + 1));
+        assertNotNull(uri, "no resource URI to read a version from");
+        int marker = uri.lastIndexOf('=');
+        assertTrue(marker >= 0 && marker < uri.length() - 1, "resource URI carries no version: " + uri);
+        String version = uri.substring(marker + 1);
+        try {
+            return Integer.parseInt(version);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("resource URI ends in '" + version + "', which is not a version: " + uri, e);
+        }
     }
 }

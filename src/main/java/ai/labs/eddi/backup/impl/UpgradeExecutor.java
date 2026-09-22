@@ -273,8 +273,15 @@ public class UpgradeExecutor {
     private void processSnippet(SnippetSourceData sourceSnippet, ResourceDiff diff, Outcome outcome) {
         try {
             if (diff.action() == DiffAction.UPDATE && diff.targetId() != null) {
-                // Update existing snippet
-                snippetStore.updateSnippet(diff.targetId(), diff.targetVersion(), sourceSnippet.snippet());
+                // Update existing snippet. The store answers a non-200 without
+                // throwing, and advancing the descriptor past a write that did not
+                // happen points every reader at a version that does not exist.
+                Response updated = snippetStore.updateSnippet(diff.targetId(), diff.targetVersion(), sourceSnippet.snippet());
+                if (updated == null || updated.getStatus() != 200) {
+                    outcome.failed(sourceSnippet.sourceId(), "snippet", sourceSnippet.name(),
+                            "the store did not accept the update");
+                    return;
+                }
                 if (bumpDescriptorOrFail(diff.targetId(), diff.targetVersion(), "snippet",
                         sourceSnippet.sourceId(), sourceSnippet.name(), outcome)) {
                     outcome.updated++;
@@ -755,12 +762,16 @@ public class UpgradeExecutor {
             if (changed) {
                 Response resp = workflowStore.updateWorkflow(workflowId, workflowVersion, configToWrite);
                 if (resp != null && resp.getStatus() == 200) {
-                    // A workflow whose descriptor still names the old version cannot be
-                    // deployed — WorkflowStoreService resolves it by descriptor — so it
-                    // is reported and not counted, though its new URI is still returned
-                    // so the agent points at what was actually written.
-                    bumpDescriptorOrFail(workflowId, workflowVersion, "workflow",
-                            sourceWf.sourceId(), sourceWf.name(), outcome);
+                    // A workflow is the one resource a deployment resolves through its
+                    // DESCRIPTOR (WorkflowStoreService.getWorkflowDocumentDescriptor), so
+                    // pointing the agent at a version whose descriptor did not move
+                    // would trade a deployable agent for an undeployable one. The write
+                    // stands and is reported; the agent keeps its last resolvable
+                    // reference until a later sync repairs the descriptor.
+                    if (!bumpDescriptorOrFail(workflowId, workflowVersion, "workflow",
+                            sourceWf.sourceId(), sourceWf.name(), outcome)) {
+                        return null;
+                    }
                     return URI.create(IRestWorkflowStore.resourceURI + workflowId
                             + IRestWorkflowStore.versionQueryParam + (workflowVersion + 1));
                 }
@@ -960,6 +971,18 @@ public class UpgradeExecutor {
      * half of the same defect.
      */
     private Integer resolveLatestVersion(String resourceId) {
+        try {
+            // The store is the authority; the descriptor is a projection of it, and
+            // the two disagree exactly when something has gone wrong — which is when
+            // writing against the right version matters most.
+            IResourceId current = agentStore.getCurrentResourceId(resourceId);
+            if (current != null && current.getVersion() != null) {
+                return current.getVersion();
+            }
+        } catch (Exception e) {
+            LOGGER.debugf("Store could not name the current version of %s: %s",
+                    LogSanitizer.sanitize(resourceId), LogSanitizer.sanitize(e.getMessage()));
+        }
         try {
             DocumentDescriptor desc = documentDescriptorStore.readCurrentDescriptor(resourceId);
             if (desc != null && desc.getResource() != null) {
