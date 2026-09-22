@@ -12,6 +12,7 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
@@ -99,6 +100,12 @@ public class RestConversationStore implements IRestConversationStore {
     // (CDI overwrites it with the real registry in production).
     @Inject
     MeterRegistry meterRegistry = new SimpleMeterRegistry();
+
+    /**
+     * Optional so the unit tests that construct this store directly need no vault.
+     */
+    @Inject
+    Instance<AutoVaultedSecrets> autoVaultedSecretsInstance;
 
     private static final Logger log = Logger.getLogger(RestConversationStore.class);
 
@@ -409,6 +416,8 @@ public class RestConversationStore implements IRestConversationStore {
             }
 
             deleteAttachmentsForConversation(conversationId);
+
+            deleteAutoVaultedSecretsForConversation(conversationId);
             conversationMemoryStore.deleteConversationMemorySnapshot(conversationId);
             conversationDescriptorStore.deleteAllDescriptor(conversationId);
             log.info(format("Conversation has been permanently deleted (conversationId=%s)", sanitize(conversationId)));
@@ -518,12 +527,14 @@ public class RestConversationStore implements IRestConversationStore {
                     documentDescriptorStore.deleteAllDescriptor(endedConversationId);
                     conversationDescriptorStore.deleteAllDescriptor(endedConversationId);
                     deleteAttachmentsForConversation(endedConversationId);
+                    deleteAutoVaultedSecretsForConversation(endedConversationId);
                     conversationMemoryStore.deleteConversationMemorySnapshot(endedConversationId);
                     amountOfEndedConversations++;
                 }
             } catch (ResourceNotFoundException e) {
                 conversationDescriptorStore.deleteAllDescriptor(endedConversationId);
                 deleteAttachmentsForConversation(endedConversationId);
+                deleteAutoVaultedSecretsForConversation(endedConversationId);
                 conversationMemoryStore.deleteConversationMemorySnapshot(endedConversationId);
                 log.debug(format("Cleaned up orphaned conversation memory without descriptor (id=%s)", endedConversationId));
             }
@@ -597,6 +608,31 @@ public class RestConversationStore implements IRestConversationStore {
      * Delete any binary attachments stored for a conversation. Silently skips if no
      * attachment storage is configured.
      */
+    /**
+     * Deletes the vault slots the conversation's {@code scope: "secret"} properties
+     * point to. Each auto-vaulted write owns its own slot (see
+     * {@link AutoVaultedSecrets}), so once the conversation is gone nothing can
+     * resolve them any more — left in place they would be orphaned plaintext
+     * credentials. Must run BEFORE the snapshot is deleted: the snapshot is where
+     * the references live. Best effort, like the attachment cleanup beside it.
+     */
+    private void deleteAutoVaultedSecretsForConversation(String conversationId) {
+        if (autoVaultedSecretsInstance == null || !autoVaultedSecretsInstance.isResolvable()) {
+            return;
+        }
+        try {
+            var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            if (snapshot != null) {
+                int deleted = autoVaultedSecretsInstance.get().deleteForConversation(snapshot.getConversationProperties(), snapshot.getUserId());
+                if (deleted > 0) {
+                    log.debug(format("Deleted %d auto-vaulted secret(s) for conversation %s", deleted, sanitize(conversationId)));
+                }
+            }
+        } catch (Exception e) {
+            log.warn(format("Failed to delete auto-vaulted secrets for conversation %s: %s", sanitize(conversationId), e.getMessage()));
+        }
+    }
+
     private void deleteAttachmentsForConversation(String conversationId) {
         if (attachmentStorageInstance.isResolvable()) {
             try {

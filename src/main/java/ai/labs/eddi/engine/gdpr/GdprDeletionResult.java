@@ -48,6 +48,9 @@ import java.util.List;
  *            number of shared artifacts removed
  * @param schedulesDeleted
  *            number of schedules removed
+ * @param autoVaultedSecretsDeleted
+ *            vault slots holding the user's {@code scope: "secret"} property
+ *            values (see {@code AutoVaultedSecrets})
  * @param failedSteps
  *            names of the cascade steps that threw; empty on a clean run
  * @param completedAt
@@ -69,8 +72,22 @@ public record GdprDeletionResult(
         long groupConversationsDeleted,
         long sharedArtifactsDeleted,
         long schedulesDeleted,
+        long autoVaultedSecretsDeleted,
         List<String> failedSteps,
         Instant completedAt) {
+
+    /**
+     * Compatibility constructor for the shape before
+     * {@code autoVaultedSecretsDeleted} was added; reports it as 0.
+     */
+    public GdprDeletionResult(String userId, long memoriesDeleted, long conversationsDeleted, long conversationMappingsDeleted,
+            long logsPseudonymized, long auditEntriesPseudonymized, long attachmentsDeleted, long journalEntriesDeleted,
+            long checkpointsDeleted, long groupConversationsDeleted, long sharedArtifactsDeleted, long schedulesDeleted,
+            List<String> failedSteps, Instant completedAt) {
+        this(userId, memoriesDeleted, conversationsDeleted, conversationMappingsDeleted, logsPseudonymized, auditEntriesPseudonymized,
+                attachmentsDeleted, journalEntriesDeleted, checkpointsDeleted, groupConversationsDeleted, sharedArtifactsDeleted,
+                schedulesDeleted, 0, failedSteps, completedAt);
+    }
 
     /**
      * Compatibility constructor for the original seven-component shape, so existing
@@ -80,7 +97,7 @@ public record GdprDeletionResult(
     public GdprDeletionResult(String userId, long memoriesDeleted, long conversationsDeleted, long conversationMappingsDeleted,
             long logsPseudonymized, long auditEntriesPseudonymized, Instant completedAt) {
         this(userId, memoriesDeleted, conversationsDeleted, conversationMappingsDeleted, logsPseudonymized, auditEntriesPseudonymized,
-                0, 0, 0, 0, 0, 0, List.of(), completedAt);
+                0, 0, 0, 0, 0, 0, 0, List.of(), completedAt);
     }
 
     public GdprDeletionResult {

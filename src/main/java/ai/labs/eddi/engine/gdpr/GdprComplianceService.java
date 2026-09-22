@@ -22,6 +22,7 @@ import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.runtime.IDatabaseLogs;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -75,6 +76,7 @@ public class GdprComplianceService {
     private final Instance<GroupConversationStore> groupConversationStoreInstance;
     private final Instance<ISharedArtifactStore> sharedArtifactStoreInstance;
     private final IScheduleStore scheduleStore;
+    private final Instance<AutoVaultedSecrets> autoVaultedSecretsInstance;
     private final ICache<String, UserConversation> userConversationCache;
     /**
      * Art. 18 restriction flags, short-TTL — <strong>off unless a deployment
@@ -109,6 +111,7 @@ public class GdprComplianceService {
             Instance<GroupConversationStore> groupConversationStoreInstance,
             Instance<ISharedArtifactStore> sharedArtifactStoreInstance,
             IScheduleStore scheduleStore,
+            Instance<AutoVaultedSecrets> autoVaultedSecretsInstance,
             ICacheFactory cacheFactory,
             @ConfigProperty(name = RESTRICTION_CACHE_TTL_PROPERTY,
                             defaultValue = RESTRICTION_CACHE_TTL_DEFAULT) long restrictionCacheTtlSeconds) {
@@ -125,6 +128,7 @@ public class GdprComplianceService {
         this.groupConversationStoreInstance = groupConversationStoreInstance;
         this.sharedArtifactStoreInstance = sharedArtifactStoreInstance;
         this.scheduleStore = scheduleStore;
+        this.autoVaultedSecretsInstance = autoVaultedSecretsInstance;
         this.userConversationCache = cacheFactory.getCache(USER_CONVERSATION_CACHE_NAME);
         this.restrictionCache = restrictionCacheTtlSeconds <= 0
                 ? null
@@ -133,6 +137,31 @@ public class GdprComplianceService {
             LOGGER.infof("[GDPR] Art. 18 restriction caching is off (%s=%d); every check reads the store.",
                     RESTRICTION_CACHE_TTL_PROPERTY, restrictionCacheTtlSeconds);
         }
+    }
+
+    /**
+     * Test seam: the constructor shape before the auto-vaulted secret cleanup was
+     * wired in — no vault, so that erasure step is skipped.
+     */
+    GdprComplianceService(IUserMemoryStore userMemoryStore,
+            IConversationMemoryStore conversationMemoryStore,
+            IUserConversationStore userConversationStore,
+            IDatabaseLogs databaseLogs,
+            IAuditStore auditStore,
+            AuditLedgerService auditLedgerService,
+            Instance<IAttachmentStore> attachmentStorageInstance,
+            IHitlToolJournalStore hitlToolJournalStore,
+            IConversationDescriptorStore conversationDescriptorStore,
+            IConversationCheckpointStore checkpointStore,
+            Instance<GroupConversationStore> groupConversationStoreInstance,
+            Instance<ISharedArtifactStore> sharedArtifactStoreInstance,
+            IScheduleStore scheduleStore,
+            ICacheFactory cacheFactory,
+            long restrictionCacheTtlSeconds) {
+        this(userMemoryStore, conversationMemoryStore, userConversationStore, databaseLogs, auditStore,
+                auditLedgerService, attachmentStorageInstance, hitlToolJournalStore, conversationDescriptorStore,
+                checkpointStore, groupConversationStoreInstance, sharedArtifactStoreInstance, scheduleStore, null,
+                cacheFactory, restrictionCacheTtlSeconds);
     }
 
     /**
@@ -390,6 +419,37 @@ public class GdprComplianceService {
                     checkpointsDeleted, pseudonym);
         }
 
+        // 4b-bis. Delete the vault slots holding the user's scope:"secret" property
+        // values. Each auto-vaulted write owns its own slot, named after a hash of
+        // the user (AutoVaultedSecrets), so the default tenant is swept for them —
+        // together with any other tenant the user's conversations point into, which
+        // is why this runs BEFORE the snapshots that name those tenants are gone.
+        long autoVaultedSecretsDeleted = 0;
+        if (autoVaultedSecretsInstance != null && autoVaultedSecretsInstance.isResolvable()) {
+            Set<String> tenants = new LinkedHashSet<>();
+            for (String convId : conversationIds) {
+                try {
+                    var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(convId);
+                    if (snapshot != null && snapshot.getConversationProperties() != null) {
+                        snapshot.getConversationProperties().values().stream()
+                                .map(AutoVaultedSecrets::tenantOf)
+                                .filter(Objects::nonNull)
+                                .forEach(tenants::add);
+                    }
+                } catch (Exception e) {
+                    recordFailure(failedSteps, "autoVaultedSecrets", e, pseudonym);
+                }
+            }
+            try {
+                autoVaultedSecretsDeleted = autoVaultedSecretsInstance.get().deleteForUser(userId, tenants);
+                if (autoVaultedSecretsDeleted > 0) {
+                    LOGGER.infof("[GDPR] Deleted %d auto-vaulted secrets [%s]", autoVaultedSecretsDeleted, pseudonym);
+                }
+            } catch (Exception e) {
+                recordFailure(failedSteps, "autoVaultedSecrets", e, pseudonym);
+            }
+        }
+
         // 4c. Delete conversation memory snapshots
         long conversationsDeleted = 0;
         try {
@@ -502,7 +562,7 @@ public class GdprComplianceService {
                 conversationsDeleted, mappingsDeleted, logsPseudonymized,
                 auditPseudonymized, attachmentsDeleted, journalEntriesDeleted,
                 checkpointsDeleted, groupConversationsDeleted, sharedArtifactsDeleted,
-                schedulesDeleted, failedSteps, Instant.now());
+                schedulesDeleted, autoVaultedSecretsDeleted, failedSteps, Instant.now());
 
         if (result.complete()) {
             LOGGER.infof("[GDPR] Erasure cascade complete [%s]: "
@@ -531,6 +591,7 @@ public class GdprComplianceService {
         auditDetails.put("groupConversationsDeleted", groupConversationsDeleted);
         auditDetails.put("sharedArtifactsDeleted", sharedArtifactsDeleted);
         auditDetails.put("schedulesDeleted", schedulesDeleted);
+        auditDetails.put("autoVaultedSecretsDeleted", autoVaultedSecretsDeleted);
         auditDetails.put("logsPseudonymized", logsPseudonymized);
         auditDetails.put("auditPseudonymized", auditPseudonymized);
         auditDetails.put("complete", result.complete());

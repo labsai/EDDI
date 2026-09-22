@@ -28,3 +28,23 @@ observed there, and carries a regression test.
   is no longer truncated to `summarizeTargetEntries` — truncation dropped facts the model had
   preserved while the originals were deleted anyway; the target is now part of the prompt.
   [`DreamService.java`](../../src/main/java/ai/labs/eddi/engine/runtime/internal/DreamService.java)
+- **`scope: "secret"` values of different users shared one vault slot.** The slot was
+  `<agentId>.<propertyName>`, so after Bob entered his API key Alice's conversation resolved to
+  Bob's (reproduced live: both references identical, the vault checksum switched to Bob's value).
+  Every auto-vaulted write now gets its own slot, `<agentId>.u<sha256(userId)[:16]>.<nonce>.<name>`
+  — nothing can collide, and the user id itself never enters the vault. Since slots are no longer
+  overwritten they are deleted explicitly: on overwrite of the property, on permanent conversation
+  deletion (single and retention sweep), and on GDPR erasure, which sweeps the default tenant plus
+  every tenant the user's conversations point into and reports `autoVaultedSecretsDeleted`. Legacy
+  shared slots are never deleted by this — they may still back other users' conversations.
+  [`AutoVaultedSecrets.java`](../../src/main/java/ai/labs/eddi/secrets/AutoVaultedSecrets.java),
+  [`PropertySetterTask.java`](../../src/main/java/ai/labs/eddi/modules/properties/impl/PropertySetterTask.java),
+  [`RestConversationStore.java`](../../src/main/java/ai/labs/eddi/engine/memory/rest/RestConversationStore.java),
+  [`GdprComplianceService.java`](../../src/main/java/ai/labs/eddi/engine/gdpr/GdprComplianceService.java)
+- **A property's `visibility` was ignored.** `PropertySetterTask` and `PrePostUtils` built every
+  property as `new Property(name, value, scope)`, so `"visibility": "self"` on a `longTerm`
+  property was stored under the agent default — `global` for most agents, and agent B read agent
+  A's "private" properties live. The instruction's visibility is now carried on every branch, and
+  the inline `setOnActions` parser reads it too (an unknown value fails configuration instead of
+  silently becoming global).
+  [`PrePostUtils.java`](../../src/main/java/ai/labs/eddi/modules/apicalls/impl/PrePostUtils.java)

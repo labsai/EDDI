@@ -105,6 +105,7 @@ public class McpGdprTools {
             map.put("groupConversationsDeleted", result.groupConversationsDeleted());
             map.put("sharedArtifactsDeleted", result.sharedArtifactsDeleted());
             map.put("schedulesDeleted", result.schedulesDeleted());
+            map.put("autoVaultedSecretsDeleted", result.autoVaultedSecretsDeleted());
             map.put("completedAt", result.completedAt().toString());
             if (!result.complete()) {
                 LOGGER.warnf("MCP delete_user_data: erasure cascade incomplete — failed steps: %s",

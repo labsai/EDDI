@@ -20,7 +20,9 @@ import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;
 import ai.labs.eddi.modules.properties.IPropertySetter;
 import ai.labs.eddi.modules.properties.model.SetOnActions;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.secrets.ISecretProvider;
+import ai.labs.eddi.secrets.model.SecretReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -32,6 +34,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -198,7 +201,8 @@ class PropertySetterTaskSecretScrubTest {
         task.execute(memory, secretPropertySetter(NORMALIZED_INPUT));
 
         var stored = memory.getConversationProperties().get("apiKey");
-        assertEquals("${vault:agent-1.apiKey}", stored.getValueString());
+        assertTrue(stored.getValueString().matches("\\$\\{vault:agent-1\\.u[0-9a-f]{16}\\.[0-9a-f]{12}\\.apiKey}"),
+                "a per-write slot of this user: " + stored.getValueString());
         // Scope alone says nothing: a secret instruction stores its reference as a
         // plain conversation property, exactly like a template that copied user input
         // into one. The marker is the only thing that separates the two, and
@@ -230,7 +234,7 @@ class PropertySetterTaskSecretScrubTest {
         task.execute(memory, propertySetter);
 
         var stored = memory.getConversationProperties().get("apiKey");
-        assertEquals("${vault:agent-1.apiKey}", stored.getValueString(), "byte-identical to what autoVaultSecret writes");
+        assertEquals("${vault:agent-1.apiKey}", stored.getValueString(), "a vault-reference-shaped value, stored verbatim");
         assertNull(stored.getAutoVaulted(), "nothing but autoVaultSecret may mark a property");
     }
 
@@ -290,5 +294,47 @@ class PropertySetterTaskSecretScrubTest {
 
         assertEquals("ok", step.<String>getData("input:initial").getResult(),
                 "a two-character input must not be wiped because it happens to appear inside the secret");
+    }
+
+    // =================================================================
+    // Slot isolation — the slot used to be <agentId>.<name>, shared by every
+    // user and conversation of the agent: the last writer's secret was what
+    // everyone's reference resolved to.
+    // =================================================================
+
+    @Test
+    @DisplayName("two users of the same agent get different vault slots — neither can resolve the other's secret")
+    void twoUsersOfOneAgentNeverShareASlot() throws Exception {
+        stepWithParsedInput();
+        task.execute(memory, secretPropertySetter(NORMALIZED_INPUT));
+        String alice = memory.getConversationProperties().get("apiKey").getValueString();
+
+        memory = new ConversationMemory("aabbccddeeff112233445577", "agent-1", 1, "user-2");
+        stepWithParsedInput();
+        task.execute(memory, secretPropertySetter(NORMALIZED_INPUT));
+        String bob = memory.getConversationProperties().get("apiKey").getValueString();
+
+        assertNotEquals(alice, bob);
+        var refs = org.mockito.ArgumentCaptor.forClass(SecretReference.class);
+        org.mockito.Mockito.verify(secretProvider, org.mockito.Mockito.times(2)).store(refs.capture(), anyString(), anyString(), any());
+        assertNotEquals(refs.getAllValues().get(0).keyName(), refs.getAllValues().get(1).keyName());
+        assertTrue(AutoVaultedSecrets.belongsToUser(refs.getAllValues().get(0).keyName(), "user-1"));
+        assertTrue(AutoVaultedSecrets.belongsToUser(refs.getAllValues().get(1).keyName(), "user-2"));
+        assertFalse(AutoVaultedSecrets.belongsToUser(refs.getAllValues().get(0).keyName(), "user-2"));
+    }
+
+    @Test
+    @DisplayName("overwriting a secret property deletes the slot it pointed to before")
+    void overwriteDeletesThePreviousSlot() throws Exception {
+        stepWithParsedInput();
+        task.execute(memory, secretPropertySetter(NORMALIZED_INPUT));
+        String first = memory.getConversationProperties().get("apiKey").getValueString();
+
+        stepWithParsedInput();
+        task.execute(memory, secretPropertySetter(NORMALIZED_INPUT));
+        String second = memory.getConversationProperties().get("apiKey").getValueString();
+
+        assertNotEquals(first, second);
+        org.mockito.Mockito.verify(secretProvider).delete(SecretReference.parse(first));
     }
 }
