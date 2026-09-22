@@ -301,7 +301,15 @@ public class TeamCadenceService {
             // there first — this caller must treat the workspace as busy and let
             // the next fire read fresh state.
             case COMPLETED -> writebackCompleted(workspace, gc);
-            case FAILED, CANCELLED -> writebackFailure(workspace, gc);
+            // REJECTED belongs here, with the other terminal outcomes, and not in
+            // the default arm: a human declining a cadence run's recommendation
+            // ends it just as finally as a failure. Landing in `reclaimIfStale`
+            // instead wedged the whole standing team -- the claim is held, every
+            // later fire is skipped as "still running", and the pulled tasks stay
+            // IN_PROGRESS on the backlog until claim-ttl (default PT24H) elapses,
+            // or forever on a non-positive TTL. This is the only remaining switch
+            // over the enum in src/main; keep it exhaustive by hand.
+            case FAILED, REJECTED, CANCELLED -> writebackFailure(workspace, gc);
             // IN_PROGRESS, SYNTHESIZING, AWAITING_* — still running, unless the claim
             // has been held past its TTL. See reclaimIfStale.
             default -> reclaimIfStale(workspace, gc);
