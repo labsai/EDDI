@@ -3782,6 +3782,54 @@ export const secretsHandlers = [
     return HttpResponse.json(filtered);
   }),
 
+  // Update a secret's agent grant. Registered BEFORE the generic secret PUT so
+  // the more specific path wins; it echoes the requested list back and reports no
+  // affected agents, which is the "widening a grant" case. A test that needs the
+  // "these deployed agents lose access" warning overrides this via server.use().
+  http.put(
+    "*/secretstore/secrets/:tenantId/:keyName/grant",
+    async ({ params, request }) => {
+      const tenantId = params.tenantId as string;
+      const keyName = params.keyName as string;
+      const body = (await request.json()) as {
+        allowedAgents?: string[];
+        description?: string;
+      };
+      const existing = MOCK_SECRETS.find(
+        (s) => s.tenantId === tenantId && s.keyName === keyName,
+      );
+      if (!existing) {
+        return HttpResponse.json({ error: "Secret not found" }, { status: 404 });
+      }
+      // An empty array is truthy, so a bare falsiness check accepted `[]` — which
+      // the backend rejects, because everywhere else an empty list means "every
+      // agent". A mock that accepts it hides exactly the regression that matters.
+      if (!Array.isArray(body.allowedAgents) || body.allowedAgents.length === 0) {
+        return HttpResponse.json(
+          { error: "allowedAgents is required and must not be empty" },
+          { status: 400 },
+        );
+      }
+      const url = new URL(request.url);
+      return HttpResponse.json({
+        reference:
+          tenantId === "default"
+            ? `\${vault:${keyName}}`
+            : `\${vault:${tenantId}/${keyName}}`,
+        tenantId,
+        keyName,
+        dryRun: url.searchParams.get("dryRun") === "true",
+        allowedAgents: body.allowedAgents,
+        previousAllowedAgents: existing.allowedAgents,
+        grantsAllAgents: body.allowedAgents.includes("*"),
+        description: body.description ?? existing.description,
+        createdAt: existing.createdAt,
+        lastRotatedAt: existing.lastRotatedAt,
+        agentsLosingAccess: [],
+      });
+    },
+  ),
+
   // Store secret (tenant-scoped)
   http.put("*/secretstore/secrets/:tenantId/:keyName", ({ params }) => {
     const tenantId = params.tenantId as string;

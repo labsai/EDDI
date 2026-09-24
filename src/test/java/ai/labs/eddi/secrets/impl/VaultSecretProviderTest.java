@@ -241,8 +241,10 @@ class VaultSecretProviderTest {
         // The row's dekId is the bare tenant id — everything written before
         // generations existed — and that reads as generation 1.
         verify(persistence).findDek(TENANT_ID, EncryptedDek.FIRST_GENERATION);
-        // Verify lastAccessedAt update was attempted
-        verify(persistence, atLeastOnce()).upsertSecret(any(EncryptedSecret.class));
+        // lastAccessedAt is recorded with a single-field write, never by re-upserting
+        // the row read above (which could revert a concurrent grant edit or rotation)
+        verify(persistence).touchLastAccessed(eq(TENANT_ID), eq(KEY_NAME), any());
+        verify(persistence, never()).upsertSecret(any(EncryptedSecret.class));
     }
 
     // ─── 8. resolve — secret not found ───

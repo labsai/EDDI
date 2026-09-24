@@ -537,6 +537,7 @@ Full guide: [secrets-vault.md](secrets-vault.md).
 eddi_vault_resolve_count_total              # Secret resolutions
 eddi_vault_store_count_total                # Secrets written
 eddi_vault_rotate_count_total               # Key rotations
+eddi_vault_grant_update_count_total         # allowedAgents edited without the value (PUT .../grant)
 eddi_vault_delete_count_total               # Secrets deleted
 eddi_vault_errors_count_total               # Vault operation failures
 eddi_vault_cache_hits_total                 # Resolved-secret cache hits

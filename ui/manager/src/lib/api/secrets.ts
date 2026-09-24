@@ -25,6 +25,70 @@ export interface SecretStoreResponse {
   keyName: string;
 }
 
+/** The wildcard that grants a secret to every agent. */
+export const ALL_AGENTS = "*";
+
+/**
+ * Whether a grant list leaves the secret open to every agent.
+ *
+ * Three shapes mean that and the backend treats all three alike: the wildcard,
+ * an empty list, and an absent one. Wherever this gets decided by hand one of the
+ * three is forgotten, and a secret then reads as narrow while behaving as open.
+ */
+export function grantsAllAgents(allowedAgents?: string[] | null): boolean {
+  return (
+    !allowedAgents ||
+    allowedAgents.length === 0 ||
+    allowedAgents.includes(ALL_AGENTS)
+  );
+}
+
+/**
+ * A deployed agent that references a secret and would not be on its new grant
+ * list. It keeps running — the grant is checked when an agent is deployed, not
+ * when a secret is resolved — but its next deployment is refused while
+ * `eddi.vault.grant-enforcement=enforce`.
+ */
+export interface AffectedAgent {
+  agentId: string;
+  agentVersion: number | null;
+  environment: string;
+}
+
+/** The body a grant edit sends. Note the absence of a `value` field. */
+export interface SecretGrantRequest {
+  /** Required — never omitted, see `updateSecretGrant`. `["*"]` = every agent. */
+  allowedAgents: string[];
+  /** Omitted to leave the existing description alone. */
+  description?: string;
+}
+
+export interface SecretGrantResponse {
+  reference: string;
+  tenantId: string;
+  keyName: string;
+  dryRun: boolean;
+  allowedAgents: string[];
+  previousAllowedAgents: string[];
+  grantsAllAgents: boolean;
+  /** Omitted rather than null when unset — EDDI's REST mapper drops null fields. */
+  description?: string;
+  /** Echoed back unchanged — a grant edit is not a rotation. Omitted when null. */
+  createdAt?: string;
+  lastRotatedAt?: string;
+  agentsLosingAccess: AffectedAgent[];
+  /**
+   * False when the backend could not list every environment, so the list above may
+   * be short. Absent on an older backend, which is why callers test `=== false`
+   * rather than falsiness — an absent flag is not a failed scan.
+   */
+  agentsLosingAccessComplete?: boolean;
+  /** Which node's deployments the list covers. */
+  agentsLosingAccessScope?: string;
+  /** Only present when `agentsLosingAccess` is non-empty. */
+  warning?: string;
+}
+
 /** Response of a per-tenant DEK rotation (safe, no restart). */
 export interface RotateDekResponse {
   tenantId: string;
@@ -155,6 +219,43 @@ export async function storeSecret(
     await throwVaultError(res, "store secret");
   }
   return res.json();
+}
+
+/**
+ * Change which agents may use a secret, without re-supplying its value.
+ *
+ * `PUT /{tenantId}/{keyName}/grant`. Distinct from `storeSecret` in the one way
+ * that matters: it carries no value, so it cannot be the reason a secret gets
+ * overwritten or blanked. It is also the only way to widen a grant at all once a
+ * key is vaulted, because the plaintext `storeSecret` insists on is by then gone.
+ *
+ * `allowedAgents` is always sent, even when it is `["*"]`. The backend rejects an
+ * omitted list rather than defaulting it, precisely so a dropped field cannot
+ * open a narrowed secret to everything.
+ *
+ * @param dryRun writes nothing and returns what the change *would* do — this is
+ *   what feeds the "these deployed agents lose access" warning before the
+ *   operator commits rather than after.
+ */
+export async function updateSecretGrant(args: {
+  tenantId: string;
+  keyName: string;
+  allowedAgents: string[];
+  description?: string;
+  dryRun?: boolean;
+}): Promise<SecretGrantResponse> {
+  const body: SecretGrantRequest = { allowedAgents: args.allowedAgents };
+  // Undefined means "keep the existing description"; an empty string clears it,
+  // so `!== undefined` rather than a truthiness check.
+  if (args.description !== undefined) body.description = args.description;
+
+  // Through ApiClient rather than the raw `fetch` the rest of this module still
+  // uses (AGENTS.md names that as debt): it attaches auth, and turns the backend's
+  // `{"error": …}` body into the error message with the status kept.
+  const tenant = encodeURIComponent(args.tenantId);
+  const key = encodeURIComponent(args.keyName);
+  const query = args.dryRun ? "?dryRun=true" : "";
+  return api.put<SecretGrantResponse>(`${BASE}/${tenant}/${key}/grant${query}`, body);
 }
 
 /** Delete a secret from the vault. */

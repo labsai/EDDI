@@ -349,6 +349,7 @@
     "PUT /rulestore/rulesets/{id}",
     "PUT /schedulestore/schedules/{scheduleId}",
     "PUT /secretstore/secrets/{tenantId}/{keyName}",
+    "PUT /secretstore/secrets/{tenantId}/{keyName}/grant",
     "PUT /snippetstore/snippets/{id}",
     "PUT /usermemorystore/memories",
     "PUT /variablestore/variables/{tenantId}/{key}",

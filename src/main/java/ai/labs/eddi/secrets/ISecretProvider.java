@@ -63,6 +63,45 @@ public interface ISecretProvider {
     void store(SecretReference reference, String plaintext, String description, List<String> allowedAgents) throws SecretProviderException;
 
     /**
+     * Change which agents may use an existing secret, without touching its value.
+     * <p>
+     * <b>Why this is separate from {@link #store}.</b> {@code store} was the only
+     * write path there was, and it needs the plaintext. Once a key is in the vault
+     * the operator no longer has the plaintext — that is the point of vaulting it —
+     * so widening a grant through {@code store} meant recovering the value from a
+     * backup or rotating the key. This method takes no plaintext parameter at all,
+     * so it cannot read, re-encrypt or re-write the value even by accident; the
+     * property holds by signature rather than by convention, and implementations
+     * must keep it that way (see
+     * {@link ai.labs.eddi.secrets.persistence.ISecretPersistence#updateSecretGrant},
+     * which names only the two fields it may write).
+     * <p>
+     * A grant edit is <b>not</b> a rotation: {@code lastRotatedAt} and
+     * {@code createdAt} keep their values, so nothing in the metadata afterwards
+     * suggests the secret itself changed.
+     *
+     * @param reference
+     *            the secret whose grant to replace
+     * @param allowedAgents
+     *            the replacement grant list, canonicalised through
+     *            {@link SecretMetadata#canonicalGrant} on the way in so that every
+     *            shape meaning "all agents" is stored as the documented
+     *            {@code ["*"]}
+     * @param description
+     *            the new description, or {@code null} to keep the existing one.
+     *            Clearing it is done by passing an empty string
+     * @return the secret's metadata as it now stands
+     * @throws SecretNotFoundException
+     *             if the secret does not exist. A grant edit never creates one — a
+     *             typo in the key name has to fail rather than produce a valueless
+     *             entry
+     * @throws SecretProviderException
+     *             if the update fails
+     */
+    SecretMetadata updateGrant(SecretReference reference, List<String> allowedAgents, String description)
+            throws SecretNotFoundException, SecretProviderException;
+
+    /**
      * Delete a secret from the backend.
      *
      * @param reference

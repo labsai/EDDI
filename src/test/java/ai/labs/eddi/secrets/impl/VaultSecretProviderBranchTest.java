@@ -320,7 +320,7 @@ class VaultSecretProviderBranchTest {
     class UpdateLastAccessedTests {
 
         @Test
-        @DisplayName("successful resolve calls updateLastAccessed via upsertSecret")
+        @DisplayName("successful resolve records access with a single-field write, never a whole-row upsert")
         void successfulResolveUpdatesLastAccessed() throws Exception {
             VaultSecretProvider provider = createAvailableProvider();
 
@@ -335,8 +335,10 @@ class VaultSecretProviderBranchTest {
             String result = provider.resolve(new SecretReference(TENANT_ID, KEY_NAME));
             assertEquals(plaintext, result);
 
-            // updateLastAccessed should have called upsertSecret
-            verify(persistence).upsertSecret(any(EncryptedSecret.class));
+            // A whole-row upsert here would write back whatever the row held when
+            // resolve() read it, reverting a grant edit or rotation made meanwhile.
+            verify(persistence).touchLastAccessed(eq(TENANT_ID), eq(KEY_NAME), any());
+            verify(persistence, never()).upsertSecret(any(EncryptedSecret.class));
         }
     }
 

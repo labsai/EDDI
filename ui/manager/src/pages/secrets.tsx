@@ -22,6 +22,7 @@ import {
   ShieldAlert,
   KeySquare,
   RotateCw,
+  ShieldCheck,
 } from "lucide-react";
 import {
   useSecrets,
@@ -33,8 +34,9 @@ import {
   useRotateKek,
   useResetTenant,
 } from "@/hooks/use-secrets";
-import type { SecretMetadata } from "@/lib/api/secrets";
+import { grantsAllAgents, type SecretMetadata } from "@/lib/api/secrets";
 import { AlertDialog } from "@/components/ui/alert-dialog";
+import { EditGrantDialog } from "@/components/secrets/edit-grant-dialog";
 import { getErrorMessage } from "@/lib/api-client";
 
 const DEFAULT_TENANT = "default";
@@ -55,6 +57,10 @@ export function SecretsPage() {
   const [newDescription, setNewDescription] = useState("");
   const [valueVisible, setValueVisible] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<SecretMetadata | null>(null);
+  /* The secret whose allowedAgents list is being edited. Held as the whole
+   * metadata record, not just the key name, so the dialog prefills from the row
+   * the operator clicked rather than re-fetching it. */
+  const [grantTarget, setGrantTarget] = useState<SecretMetadata | null>(null);
   const [rotateTarget, setRotateTarget] = useState<SecretMetadata | null>(null);
   const [rotateValue, setRotateValue] = useState("");
   const [rotateVisible, setRotateVisible] = useState(false);
@@ -490,13 +496,25 @@ export function SecretsPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-1">
-                        {(s.allowedAgents ?? ["*"]).map((a) => (
+                      {/* The grant is editable in place: clicking what it says
+                          now is how you change it. A grant that is only readable
+                          is what pushed operators towards ["*"] for everything. */}
+                      <button
+                        type="button"
+                        onClick={() => setGrantTarget(s)}
+                        className="flex flex-wrap gap-1 rounded-md px-1 py-0.5 transition-colors hover:bg-secondary/60"
+                        data-testid={`edit-grant-${s.keyName}`}
+                        title={t("secrets.editGrant", "Edit which agents may use this secret")}
+                      >
+                        {(grantsAllAgents(s.allowedAgents)
+                          ? ["*"]
+                          : s.allowedAgents
+                        ).map((a) => (
                           <span
                             key={a}
                             className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${
                               a === "*"
-                                ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                                ? "bg-warning/10 text-warning"
                                 : "bg-primary/10 text-primary"
                             }`}
                           >
@@ -507,10 +525,20 @@ export function SecretsPage() {
                             )}
                           </span>
                         ))}
-                      </div>
+                      </button>
                     </td>
                     <td className="px-4 py-3 text-end">
                       <div className="flex items-center justify-end gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setGrantTarget(s)}
+                          className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/10"
+                          data-testid={`edit-grant-action-${s.keyName}`}
+                          aria-label={t("secrets.editGrantKey", { key: s.keyName, defaultValue: `Edit access for ${s.keyName}` })}
+                        >
+                          <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
+                          {t("secrets.access", "Access")}
+                        </button>
                         <button
                           onClick={() => { setRotateTarget(s); setRotateValue(""); setRotateVisible(false); }}
                           className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-amber-600 dark:text-amber-400 transition-colors hover:bg-amber-500/10"
@@ -1149,6 +1177,12 @@ export function SecretsPage() {
           </div>
         </div>
       )}
+
+      {/* ─── Agent grant editor — changes allowedAgents, never the value ─── */}
+      <EditGrantDialog
+        secret={grantTarget}
+        onClose={() => setGrantTarget(null)}
+      />
 
       {/* ─── Delete confirmation dialog ─── */}
       {deleteTarget && (
