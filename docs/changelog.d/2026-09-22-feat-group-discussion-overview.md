@@ -532,3 +532,31 @@ Two accessibility gaps flagged in review, both confirmed:
 The connector test checks the text a screen reader actually announces, skipping
 `aria-hidden` subtrees. A plain `textContent` check would include the hidden arrow and
 pass whether or not the connector existed. Both tests fail with their fix reverted.
+
+## 🐛 fix(manager): a past round and an approved resume, in the overview (2026-09-24)
+
+**Repo:** EDDI (`feat/group-discussion-overview`)
+
+Three findings from review, all confirmed against the code:
+
+- **A past round read as still running.** `state`, `currentPhaseIndex` and the stream's
+  convergence map all describe the newest round. When an earlier round was selected while
+  a later one ran, its phases past the live phase index showed as "pending" even with
+  turns in them, and a member who stayed silent showed as "pending" instead of "silent".
+  An earlier round now counts as ended, reusing the existing terminal handling.
+- **A past round showed the live round's convergence.** The digest read convergence by
+  phase index alone. No record of an earlier round's check survives in the transcript or
+  the stored document, so a past round now shows none rather than a wrong one.
+- **Approving a paused discussion dropped its history from the Overview.** Approval clears
+  the selection so the transcript follows the resumed stream, and that also disabled the
+  stored-conversation query the Overview reads. The stream is seeded from none of the
+  stored document, and after a reload the store holds nothing from before the pause, so
+  the paused rounds' spend and every stance vanished until the stream settled.
+  `group-detail.tsx` now snapshots the paused conversation at approval and feeds it to
+  the Overview and the insights panel. It is used only while the stream is still on that
+  conversation's id, so "New Discussion" or a fresh start can't surface a stale snapshot.
+  It is a snapshot rather than a second query, because those figures change only through
+  live frames the digest already overlays.
+
+Four new digest tests and one page test cover these. All but the "live round still
+running" control fail with their fix reverted.

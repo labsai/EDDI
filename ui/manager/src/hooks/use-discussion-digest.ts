@@ -396,6 +396,10 @@ export function buildDigest(
   const roundCount = boundaries.length;
   // Newest round by default; a caller can ask for an earlier one.
   const selected = Math.min(Math.max(selectedRound ?? roundCount, 1), roundCount);
+  // An earlier round has ended even while a later one is running. `state`,
+  // `currentPhaseIndex` and the stream's convergence map all describe the
+  // NEWEST round, so none of them may be read for this one.
+  const historical = selected < roundCount;
   const sliceStart = boundaries[selected - 1] ?? 0;
   const sliceEnd = boundaries[selected] ?? wholeTranscript.length;
   const transcript: TranscriptEntry[] =
@@ -431,10 +435,10 @@ export function buildDigest(
   const phaseCount = Math.max(
     configPhases?.length ?? 0,
     phaseNames.size > 0 ? Math.max(...phaseNames.keys()) + 1 : 0,
-    isLive && streamState?.currentPhase ? streamState.currentPhase.index + 1 : 0,
+    isLive && !historical && streamState?.currentPhase ? streamState.currentPhase.index + 1 : 0,
   );
 
-  const terminal = TERMINAL_STATES.has(state);
+  const terminal = historical || TERMINAL_STATES.has(state);
 
   const phases: DigestPhase[] = [];
   for (let i = 0; i < phaseCount; i++) {
@@ -463,7 +467,9 @@ export function buildDigest(
       status,
       spokenBy,
       entryCount: entries.filter((e) => !isSystemEntry(e) && !NON_MEMBER_TYPES.has(e.type)).length,
-      convergence: streamState?.convergence?.get(i) ?? null,
+      // Only the stream knows convergence, and only for the newest round; no
+      // record of an earlier round's check survives, so a past round shows none.
+      convergence: historical ? null : (streamState?.convergence?.get(i) ?? null),
       repeats: config?.repeats ?? null,
       requiresApproval: config?.requiresApproval === true,
     });

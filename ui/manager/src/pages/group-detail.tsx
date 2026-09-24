@@ -43,6 +43,7 @@ import {
   type DiscussionStyle,
   type AgentGroupConfiguration,
   type GroupAttachmentRef,
+  type GroupConversation,
   type GroupConversationState,
 } from "@/lib/api/groups";
 import type { HitlVerdict } from "@/lib/api/hitl";
@@ -209,6 +210,20 @@ export function GroupDetailPage() {
   const { streamState, startStream, continueStream, approveAndStream, abortStream, resetStream } =
     useGroupDiscussionStream(groupId);
 
+  /**
+   * The paused conversation as it stood when the user approved it.
+   *
+   * Approval clears the selection so the transcript follows the resumed stream,
+   * and that disables the persisted-conversation query too. The stream is seeded
+   * from none of the stored document, and after a reload the store holds nothing
+   * from before the pause. So without this the Overview lost the paused rounds'
+   * spend and every member's stance until the stream settled. It is a snapshot,
+   * not a query: those figures only change through the live frames the digest
+   * already overlays, so polling a transcript-sized document for them would buy
+   * nothing.
+   */
+  const [resumedConversation, setResumedConversation] = useState<GroupConversation | null>(null);
+
   const deleteConvMutation = useDeleteGroupConversation();
   const cancelDiscussionMutation = useCancelGroupDiscussion();
   const submitHumanInputMutation = useSubmitHumanInput();
@@ -310,10 +325,11 @@ export function GroupDetailPage() {
       // optimistically — the resume can fail (409 stale, 400 invalid decision).
       pendingDecisionRef.current = verdict;
       userClearedRef.current = true; // hold the clear until the stream takes over
+      setResumedConversation(selectedConversation?.id === gcId ? selectedConversation : null);
       setSelectedConvId(null); // switch the transcript to the live resumed stream
       approveAndStream(groupId, gcId, { decision: { verdict, note }, taskApprovals });
     },
-    [groupId, approveAndStream, setSelectedConvId],
+    [groupId, approveAndStream, setSelectedConvId, selectedConversation],
   );
 
   // Toast the decision outcome once the resumed stream confirms (hitl_resume) or
@@ -507,6 +523,13 @@ export function GroupDetailPage() {
 
   // Determine whether to show streaming or static transcript
   const isStreamActive = streamState.isStreaming || (streamState.state !== "CREATED" && !selectedConvId);
+  // What the overview and insights build on: the selected document, or, while
+  // an approved discussion resumes with nothing selected, the snapshot taken at
+  // approval. Matched on the stream's id, so "New Discussion" or a fresh start
+  // (both of which move the stream off it) cannot surface a stale snapshot.
+  const panelConversation =
+    selectedConversation ??
+    (resumedConversation && resumedConversation.id === streamState.conversationId ? resumedConversation : null);
   // The task board for the overview's `extras` band. Live plan while
   // streaming, the stored list otherwise; null when there is neither.
   const persistedTaskBoard =
@@ -851,7 +874,7 @@ export function GroupDetailPage() {
             // key, and `continueStream` seeds neither its cost nor its stance
             // map from the stored document, so nulling this made a
             // continuation drop the previous round's spend and positions.
-            conversation={selectedConversation ?? null}
+            conversation={panelConversation}
             streamState={isStreamActive || showStreamFallback ? streamState : undefined}
             configPhases={safeConfig.phases}
             rosterDisplayNames={rosterDisplayNames}
@@ -869,7 +892,7 @@ export function GroupDetailPage() {
                     first. */}
                 {persistedTaskBoard}
                 <DiscussionInsights
-                  conversation={selectedConversation ?? null}
+                  conversation={panelConversation}
                   retroRecorded={isStreamActive ? streamState.retroRecorded : undefined}
                   artifactUpdates={isStreamActive ? streamState.artifactUpdates : undefined}
                 />

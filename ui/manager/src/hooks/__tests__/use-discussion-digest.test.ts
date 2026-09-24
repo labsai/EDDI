@@ -461,6 +461,64 @@ describe("buildDigest — round selection", () => {
     expect(d.members.map((m) => m.agentId)).toEqual([B]);
   });
 
+  describe("an earlier round while a later one is live", () => {
+    // Round 1 ran both phases, with B silent in the opinion phase; round 2 is
+    // streaming and has just entered phase 0. `state`, `currentPhaseIndex` and
+    // the convergence map all describe round 2.
+    const live = () =>
+      stream({
+        state: "IN_PROGRESS",
+        currentPhase: { index: 0, name: "Opinions" } as GroupStreamState["currentPhase"],
+        roundStartIndex: 3,
+        convergence: new Map([
+          [
+            0,
+            {
+              phaseIndex: 0,
+              phaseName: "Opinions",
+              repeat: 0,
+              agreementScore: 0.9,
+              converged: true,
+              repeatsSkipped: 1,
+              reason: "round 2's check",
+            },
+          ],
+        ]),
+        transcript: [
+          entry("user", 0, "QUESTION", "Q1?"),
+          entry(A, 0, "OPINION", "R1 answer."),
+          entry(MOD, 1, "SYNTHESIS", "R1 synthesis."),
+          entry("user", 0, "QUESTION", "Q2?"),
+          entry(A, 0, "OPINION", "R2 answer."),
+        ],
+      });
+    const roster = { [A]: "Architect", [B]: "Security", [MOD]: "Moderator" };
+
+    it("marks the past round's phases done rather than active or pending", () => {
+      const d = buildDigest(null, live(), PHASES, roster, null, 1);
+      expect(d.roundCount).toBe(2);
+      expect(d.phases.map((p) => p.status)).toEqual(["done", "done"]);
+    });
+
+    it("shows a member who never spoke in a past ALL phase as silent, not pending", () => {
+      const d = buildDigest(null, live(), PHASES, roster, null, 1);
+      expect(d.matrix[B]?.[0]?.kind).toBe("silent");
+    });
+
+    it("does not show the live round's convergence on the past round's phase", () => {
+      expect(buildDigest(null, live(), PHASES, roster, null, 1).phases[0]?.convergence).toBeNull();
+      expect(buildDigest(null, live(), PHASES, roster, null, 2).phases[0]?.convergence?.reason).toBe(
+        "round 2's check",
+      );
+    });
+
+    it("leaves the live round itself running", () => {
+      const d = buildDigest(null, live(), PHASES, roster, null, 2);
+      expect(d.phases[0]?.status).toBe("active");
+      expect(d.matrix[B]?.[0]?.kind).toBe("pending");
+    });
+  });
+
   it("reports a single round for an ordinary discussion", () => {
     const conv = conversation({ transcript: [entry(A, 0)] });
     const d = buildDigest(conv, undefined, PHASES);

@@ -402,3 +402,101 @@ describe("GroupDetailPage — rejecting a paused discussion", () => {
     });
   });
 });
+
+/**
+ * Approval clears the selection so the transcript follows the resumed stream,
+ * which also disabled the persisted-conversation query the Overview reads. The
+ * stream is seeded from none of the stored document and a fresh page load holds
+ * nothing from before the pause, so the Overview lost the paused rounds' spend
+ * and every member's stance until the stream settled.
+ */
+describe("GroupDetailPage — the overview while an approved discussion resumes", () => {
+  const MEMBER = "agent-finance";
+
+  let resumed = false;
+
+  function pausedWithHistory() {
+    resumed = false;
+    const paused = {
+      id: "gconv-paused",
+      groupId: "grp1",
+      userId: "manager-user",
+      state: "AWAITING_APPROVAL",
+      pausedAt: new Date(Date.now() - 60_000).toISOString(),
+      hitlPauseType: "PHASE",
+      pausedPhaseName: "Synthesis",
+      originalQuestion: "Fund the modernization grant?",
+      transcript: [
+        {
+          speakerAgentId: MEMBER,
+          speakerDisplayName: "Finance",
+          content: "Fund it, but in two tranches.",
+          phaseIndex: 0,
+          phaseName: "Opinions",
+          type: "OPINION",
+          timestamp: new Date(Date.now() - 120_000).toISOString(),
+          errorReason: null,
+          targetAgentId: null,
+        },
+      ],
+      memberConversationIds: {},
+      memberDisplayNames: { [MEMBER]: "Finance" },
+      memberCosts: { [MEMBER]: 0.42 },
+      memberStances: {
+        [MEMBER]: {
+          text: "Backs funding, split into two tranches.",
+          coveredContributions: 1,
+          llmGenerated: true,
+          updated: new Date(Date.now() - 90_000).toISOString(),
+        },
+      },
+      currentPhaseIndex: 1,
+      currentPhaseName: "Synthesis",
+      synthesizedAnswer: null,
+      availableActions: [],
+      depth: 0,
+      taskList: null,
+      dynamicMembers: [],
+      createdAgentIds: [],
+      retainedAgentIds: [],
+      created: new Date(Date.now() - 600_000).toISOString(),
+      lastModified: new Date(Date.now() - 60_000).toISOString(),
+    };
+    server.use(
+      http.get("*/groups/:groupId/conversations", () => HttpResponse.json([paused])),
+      http.get("*/groups/:groupId/conversations/:convId", () => HttpResponse.json(paused)),
+      // Resumes and stays open: the discussion is still running, which is the
+      // window in which the Overview had nothing to read.
+      http.post("*/groups/:groupId/conversations/:gcId/approve/stream", () => {
+        resumed = true;
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              encoder.encode('event: hitl_resume\ndata: {"verdict":"APPROVED","decidedBy":"manager-user"}\n\n'),
+            );
+          },
+        });
+        return new HttpResponse(stream, { headers: { "Content-Type": "text/event-stream" } });
+      }),
+    );
+  }
+
+  it("keeps the paused rounds' stances and spend", async () => {
+    pausedWithHistory();
+    renderGroupDetail("?version=1&conversation=gconv-paused");
+
+    const approve = await screen.findByTestId("approve-button");
+    await waitFor(() => expect(approve).toBeEnabled());
+    await userEvent.click(approve);
+    await userEvent.click(await screen.findByTestId("alert-dialog-confirm"));
+
+    // The resume is in flight, so the selection has been handed to the stream.
+    await waitFor(() => expect(resumed).toBe(true));
+
+    await userEvent.click(screen.getByTestId("discussion-view-overview"));
+    expect(await screen.findByText("Backs funding, split into two tranches.")).toBeInTheDocument();
+    // Once as the headline total, once against the member.
+    expect(screen.getAllByText("$0.42").length).toBeGreaterThan(0);
+  });
+});
