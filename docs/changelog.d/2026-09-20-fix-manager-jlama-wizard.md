@@ -84,6 +84,24 @@ this PR caught the mismatch after the merge, so `applyTo` now routes both settin
 through `applyPath`, and `LanguageModelBuildersTest` gained a case asserting that an
 unusable path for either setting falls back to the default rather than propagating.
 
+**Review round 3 (2026-09-24):** two more CodeRabbit findings, both minor.
+
+- `ModelParameterValues.applyPath`'s rejection warning logged the sanitized-but-not-redacted
+  configured path (`sanitize(raw)` only strips control characters — see
+  `src/main/java/ai/labs/eddi/utils/LogSanitizer.java` — it does not remove the printable
+  path itself). An invalid `modelCachePath` or `workingDirectory` could therefore place a
+  username's home directory or an internal project path into the warning log (CWE-532).
+  The log line now names the rejected parameter key only and omits the value; the other
+  `ModelParameterValues` warnings (`applyBoolean`, `booleanValue`, `rejected`) and
+  `JlamaLanguageModelBuilder.applyWorkingQuantizedType` were swept for the same pattern —
+  none of them carry filesystem paths, so they were left as-is.
+- The `jlamaNoteTuning` copy claimed the container-cached model is "re-downloaded on every
+  restart." A container restart (`docker restart`, a crash restart) preserves its writable
+  layer, so the cache actually survives a restart; it is lost only when the container is
+  removed or replaced (a redeploy, `docker rm`, a Kubernetes pod recreation). Reworded the
+  English fallback in `agent-wizard.tsx` and all 11 locale translations to say the model
+  "may be re-downloaded after the container is removed or replaced."
+
 ### Design decisions
 
 - **Omit the field rather than disable it.** A disabled or ignored Base URL input still
@@ -124,6 +142,10 @@ unusable path for either setting falls back to the default rather than propagati
 - Repo-wide guards green: `ImportStyleTest`, `DocumentationLinksTest`,
   `StrictBoundaryShippedConfigsTest`, `RuleSetStoreShippedRulesetsTest`,
   `ChangelogRotationTest`, `BuildQualityGatesTest`.
+- Round 3: `.\mvnw.cmd compile` (Checkstyle + `formatter:validate` clean); `.\mvnw.cmd test
+  "-Dtest=LanguageModelBuildersTest,ModelParameterValuesTest,JlamaRuntimeSupportTest,ChangelogFragmentTest"` —
+  all Jlama- and `applyPath`-specific cases pass (same pre-existing loopback-socket
+  failures as above, unrelated to this change).
 - Manager: `npm run typecheck`, `npm run lint`, `npm run i18n:check`, `npm run build`
   and the full suite (413 files, 6556 tests) all pass.
 - **The six new UI tests were mutation-checked.** Reverting the suggestions, the

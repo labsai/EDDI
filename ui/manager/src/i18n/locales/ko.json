@@ -453,7 +453,7 @@
     "baseUrlHintCloud": "프록시, 프라이빗 배포 또는 Azure OpenAI 엔드포인트를 사용하는 경우에만 필요합니다",
     "jlamaNoteTitle": "Jlama는 EDDI 내부에서 실행됩니다",
     "jlamaNoteBody": "가리킬 모델 서버가 없습니다. EDDI가 자체 프로세스에 모델을 로드하고 처음 사용할 때 Hugging Face에서 가중치를 내려받으므로 첫 메시지에는 시간이 걸릴 수 있습니다.",
-    "jlamaNoteTuning": "EDDI를 컨테이너에서 실행하나요? 생성 후 에이전트의 LLM 설정을 열어 modelCachePath를 마운트된 볼륨으로 지정하세요. 기본 캐시는 컨테이너의 임시 계층에 있어 재시작할 때마다 모델을 다시 내려받습니다. quantizeModelAtRuntime, workingDirectory, workingQuantizedType도 그곳에서 조정할 수 있습니다.",
+    "jlamaNoteTuning": "EDDI를 컨테이너에서 실행하나요? 생성 후 에이전트의 LLM 설정을 열어 modelCachePath를 마운트된 볼륨으로 지정하세요. 기본 캐시는 컨테이너의 임시 계층에 있어 컨테이너를 제거하거나 교체한 후 모델을 다시 내려받을 수 있습니다. quantizeModelAtRuntime, workingDirectory, workingQuantizedType도 그곳에서 조정할 수 있습니다.",
     "baseUrlHintLocal": "필수 — 로컬 모델 서버가 실행 중인 URL",
     "modelHint": "제공자가 지원하는 모델 이름을 입력하거나 제안에서 하나를 선택하세요",
     "modelHintJlama": "owner/name 형식의 Hugging Face 저장소 ID여야 합니다(예: tjake/Llama-3.2-1B-Instruct-JQ4). 모델 이름만으로는 확인할 수 없어 에이전트가 첫 메시지에서 실패합니다.",
