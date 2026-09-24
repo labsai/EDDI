@@ -34,6 +34,10 @@
 set -euo pipefail
 
 # ─── --show <threadId>: full text of one thread ──────────────────────────────
+# Two calls, not one: --slurp (needed to merge paginated pages) and --jq are
+# mutually exclusive in gh, so the scalar header comes from a plain query and
+# the comments -- which can run past 50 -- come from a --paginate'd one, each
+# page formatted and printed as it arrives instead of merged in jq.
 if [ "${1:-}" = "--show" ]; then
   TID="${2:?usage: pr-threads.sh --show <threadId>}"
   gh api graphql -F id="$TID" -f query='query($id:ID!){
@@ -41,15 +45,20 @@ if [ "${1:-}" = "--show" ]; then
       ... on PullRequestReviewThread{
         isResolved isOutdated path line originalLine
         resolvedBy{login}
-        comments(first:50){nodes{author{login} createdAt body}}
       }
     }
   }' --jq '.data.node
     | "path:     " + (.path // "?") + ":" + ((.line // .originalLine // 0)|tostring)
     + "\nresolved: " + (if .isResolved then "yes, by " + (.resolvedBy.login // "?") else "no" end)
-      + (if .isOutdated then "  (outdated — the line moved; check current code)" else "" end)
-    + "\n"
-    + ([.comments.nodes[] | "───── " + (.author.login // "?") + " " + .createdAt + " ─────\n" + .body] | join("\n\n"))'
+      + (if .isOutdated then "  (outdated — the line moved; check current code)" else "" end)'
+  echo
+  gh api graphql --paginate -F id="$TID" -f query='query($id:ID!,$endCursor:String){
+    node(id:$id){
+      ... on PullRequestReviewThread{
+        comments(first:50,after:$endCursor){pageInfo{hasNextPage endCursor} nodes{author{login} createdAt body}}
+      }
+    }
+  }' --jq '.data.node.comments.nodes[] | "───── " + (.author.login // "?") + " " + .createdAt + " ─────\n" + .body + "\n"'
   exit 0
 fi
 
@@ -158,7 +167,8 @@ if [ "$SILENT_RESOLVED" -gt 0 ]; then
   echo "!! $SILENT_RESOLVED RESOLVED thread(s) have no reply from you -- outstanding, not done."
   echo "   A bot resolves its own thread as soon as your push makes it outdated, so the"
   echo "   findings you actually fixed are the ones most likely to close unanswered."
-  echo "   List them:  bash $0 $PR --all | sed 's/ *PRRT_.*//;' | grep -n '\[NO-REPLY\]'"
+  printf "   List them:  bash %q %q %q --all | sed 's/ *PRRT_.*//;' | grep -n '\\[NO-REPLY\\]'\n" \
+    "$0" "$PR" "$REPO"
 fi
 echo "read one in full:  bash $0 --show <threadId>"
 echo "reminder: nitpicks, duplicates and outside-diff-range findings live in review"
