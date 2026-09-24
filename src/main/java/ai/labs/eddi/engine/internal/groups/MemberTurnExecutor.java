@@ -165,6 +165,37 @@ public class MemberTurnExecutor {
     }
 
     /**
+     * Fires {@code cost_updated} for one ledger key, so an observer watches spend
+     * accrue instead of learning the total only when the document is persisted.
+     * <p>
+     * <b>Call only AFTER the ledger write has returned.</b> {@code GroupCostLedger}
+     * records under {@code memberCosts}' own monitor, and emitting from inside it
+     * would hold that monitor across an SSE callback — letting one backpressured
+     * client stall every concurrent member turn's cost attribution, which is the
+     * exact failure {@link #announceArtifactChanges} exists to avoid.
+     * <p>
+     * A PARALLEL phase's simultaneous turns can interleave here, so the
+     * {@code totalCost} carried by two frames may arrive out of order. That is why
+     * the event carries the key's <em>cumulative</em> cost: a consumer that keys by
+     * {@code attributionKey} and sums its own map is order-independent, and
+     * {@code totalCost} is a convenience for consumers that do not.
+     */
+    public static void announceCost(GroupConversation gc, String attributionKey, String displayName,
+                                    GroupDiscussionEventListener listener) {
+        if (listener == null || attributionKey == null) {
+            return;
+        }
+        Double attributed = gc.getMemberCosts().get(attributionKey);
+        if (attributed == null) {
+            // No attribution landed — AUDIT_COST absent is a normal outcome (see
+            // GroupCostLedger's coverage note), and a $0 frame would be noise.
+            return;
+        }
+        listener.onCostUpdated(new GroupConversationEventSink.CostUpdatedEvent(
+                attributionKey, displayName, attributed, gc.getTotalCost()));
+    }
+
+    /**
      * I17: fires {@code artifact_updated} for every write queued during the turn.
      * Public (not just the per-turn finally) because the discussion loop calls it
      * once more when the leg ends, so a write accepted by a timed-out member's
@@ -228,7 +259,7 @@ public class MemberTurnExecutor {
 
         // --- GROUP member: delegate to a nested sub-group discussion ---
         if (member.memberType() == AgentGroupConfiguration.MemberType.GROUP) {
-            return executeGroupMemberTurn(member, gc, input, protocol, phaseIdx, phase, entryType, targetAgentId);
+            return executeGroupMemberTurn(member, gc, input, protocol, phaseIdx, phase, entryType, targetAgentId, listener);
         }
 
         // --- HUMAN member (I6): defense in depth, never the main path ---
@@ -423,6 +454,8 @@ public class MemberTurnExecutor {
                     // conversation's smaller one — silently shrinking totalCost and
                     // loosening I1's ceiling.
                     GroupCostLedger.accumulateMemberCost(gc, convKey, snapshot);
+                    // Outside the ledger's monitor by construction — see announceCost.
+                    announceCost(gc, convKey, member.displayName(), listener);
 
                     responseFuture.complete(response);
                 });
@@ -707,7 +740,8 @@ public class MemberTurnExecutor {
      * this member's response in the parent group.
      */
     public TranscriptEntry executeGroupMemberTurn(GroupMember member, GroupConversation gc, String input, ProtocolConfig protocol, int phaseIdx,
-                                                  DiscussionPhase phase, TranscriptEntryType entryType, String targetAgentId)
+                                                  DiscussionPhase phase, TranscriptEntryType entryType, String targetAgentId,
+                                                  GroupDiscussionEventListener listener)
             throws GroupDiscussionException {
         try {
             // member.agentId() is actually a groupId for GROUP members
@@ -744,6 +778,10 @@ public class MemberTurnExecutor {
             // before the AWAITING_APPROVAL branch below, so a nested pause that gets
             // cancelled still counts the real spend its members already incurred.
             GroupCostLedger.accumulateNestedGroupCost(gc, member, subConversation);
+            // Same key GroupCostLedger derived, so the frame names the child
+            // discussion rather than collapsing every child onto the agent id.
+            announceCost(gc, subConversation.getId() != null ? member.agentId() + ":" + subConversation.getId() : member.agentId(),
+                    member.displayName(), listener);
 
             // Phase 5d: Nested group HITL guard — if the sub-group paused for
             // approval, don't extract a partial answer. Nested HITL is not

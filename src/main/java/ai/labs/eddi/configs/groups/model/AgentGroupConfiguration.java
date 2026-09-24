@@ -184,6 +184,27 @@ public class AgentGroupConfiguration {
     }
 
     /**
+     * One-line "where this member stands" summaries for the overview dashboard.
+     * <p>
+     * This is a <b>default, not a switch</b> (see the collaboration-surface note in
+     * the root {@code AGENTS.md}): a {@code null} config still produces stances —
+     * by lead-sentence extraction from each member's newest contribution, which
+     * costs nothing and quotes the member's own words. What the config adds is the
+     * LLM summarizer, which reads everything a member has said and is therefore
+     * both better and billable. Opting in is opting into spend, not into the
+     * feature.
+     */
+    private StanceSummaryConfig stanceSummary;
+
+    public StanceSummaryConfig getStanceSummary() {
+        return stanceSummary;
+    }
+
+    public void setStanceSummary(StanceSummaryConfig stanceSummary) {
+        this.stanceSummary = stanceSummary;
+    }
+
+    /**
      * Bounds what a FULL/ANONYMOUS-scope member turn renders from the transcript
      * (I9). Without it, every such turn re-feeds the entire transcript to every
      * member — ~quadratic cost as the discussion grows. When the scope-filtered
@@ -242,6 +263,71 @@ public class AgentGroupConfiguration {
             llmModel = llmModel == null || llmModel.isBlank() ? null : llmModel;
             inputPricePer1M = inputPricePer1M == null || inputPricePer1M < 0 ? null : inputPricePer1M;
             outputPricePer1M = outputPricePer1M == null || outputPricePer1M < 0 ? null : outputPricePer1M;
+        }
+    }
+
+    /**
+     * Governs the one-line member stances shown by the overview dashboard's "who
+     * thinks what" band.
+     * <p>
+     * Deliberately shaped like {@link ContextWindowConfig}: same provider/model
+     * pair, same optional price fields feeding the same I1 ledger, same
+     * warn-don't-reject treatment at save time. A stance summarizer is the second
+     * piece of discussion machinery that spends on the group's behalf, and making
+     * the two configs diverge would mean two things to learn instead of one.
+     * <p>
+     * <b>There is no {@code enabled} flag</b>, unlike {@code ContextWindowConfig}.
+     * Stances always exist — the extraction fallback needs no configuration and no
+     * LLM — so a boolean would only ever have meant "may this spend money?", which
+     * is already what naming a provider and model means. A flag that could be
+     * {@code true} with no model (or {@code false} with one) would be two ways to
+     * say the same thing and one way to contradict it.
+     *
+     * @param maxChars
+     *            hard cap on a rendered stance, applied to the extraction fallback
+     *            and to the summarizer's output alike — the band lays out one line
+     *            per member and an essay breaks it. Non-positive falls back to
+     *            {@link #DEFAULT_MAX_CHARS}
+     * @param llmProvider
+     *            provider for the stance calls (e.g. "openai"). Without it (or
+     *            {@code llmModel}) every stance comes from lead-sentence
+     *            extraction, which is a supported outcome rather than a degraded
+     *            one
+     * @param llmModel
+     *            model name for the stance calls
+     * @param inputPricePer1M
+     *            optional USD price per 1M input tokens, so stance spend counts
+     *            toward the discussion's I1 ledger. Null or negative = unpriced
+     *            ($0), same semantics as {@link ContextWindowConfig}
+     * @param outputPricePer1M
+     *            optional USD price per 1M output tokens, same semantics
+     */
+    public record StanceSummaryConfig(int maxChars, String llmProvider, String llmModel,
+            Double inputPricePer1M, Double outputPricePer1M) {
+
+        public static final int DEFAULT_MAX_CHARS = 160;
+
+        /**
+         * Normalizes at the one choke point every reader passes through, the same shape
+         * {@link ContextWindowConfig} uses. Blank identifiers ARE absent: a
+         * whitespace-only provider reaching the summarization service would bypass the
+         * documented extraction fallback and throw instead.
+         */
+        public StanceSummaryConfig {
+            if (maxChars <= 0) {
+                maxChars = DEFAULT_MAX_CHARS;
+            }
+            llmProvider = llmProvider == null || llmProvider.isBlank() ? null : llmProvider;
+            llmModel = llmModel == null || llmModel.isBlank() ? null : llmModel;
+            inputPricePer1M = inputPricePer1M == null || inputPricePer1M < 0 ? null : inputPricePer1M;
+            outputPricePer1M = outputPricePer1M == null || outputPricePer1M < 0 ? null : outputPricePer1M;
+        }
+
+        /**
+         * Whether a summarizer is fully configured; otherwise stances are extracted.
+         */
+        public boolean hasSummarizer() {
+            return llmProvider != null && llmModel != null;
         }
     }
 

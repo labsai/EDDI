@@ -21,6 +21,9 @@ import { MembersSheet } from "@/components/workforce/members-sheet";
 import { ExportMenu } from "@/components/workforce/export-menu";
 import { DiscussionActions } from "@/components/groups/discussion-actions";
 import { DiscussionInsights } from "@/components/groups/discussion-insights";
+import { DiscussionPanel } from "@/components/groups/overview/discussion-panel";
+import { DecisionRecordCard } from "@/components/groups/decision-record-card";
+import { hasDisplayableDecision } from "@/lib/group-config";
 import { HumanTurnBanner } from "@/components/groups/human-turn-banner";
 import { TaskBoard, PersistedTaskBoard } from "@/components/groups/task-board";
 import { Button } from "@/components/ui/button";
@@ -358,14 +361,17 @@ function WorkforceBoard() {
         // with member agents only when a discussion starts and rejects a
         // continuation carrying any. `BoardInput` hides the affordance in this
         // mode, so there should be none to drop.
-        continueStream(boardId, selectedConvId, question);
+        // The stored document seeds the stream: the continue endpoint replays
+        // nothing, so after a reload the live view would otherwise hold only
+        // the new round.
+        continueStream(boardId, selectedConvId, question, selectedConversation);
         toast.success(t("groups.continueStreamStarted", "Continuation started — streaming live"));
       } else {
         setSelectedConvId(null);
         startStream(boardId, question, attachments);
       }
     },
-    [boardId, inputMode, selectedConvId, continueStream, startStream, setSelectedConvId, t],
+    [boardId, inputMode, selectedConvId, selectedConversation, continueStream, startStream, setSelectedConvId, t],
   );
 
   const handleSelectConversation = useCallback(
@@ -654,27 +660,26 @@ function WorkforceBoard() {
           {/* Transcript area — BoardTranscript owns the scroll box so it can
               keep itself pinned to the newest message while streaming. */}
           {displayTranscript.length > 0 || showAnyTaskBoard ? (
-            <BoardTranscript
-              transcript={displayTranscript}
-              boardId={boardId}
-              synthesizedAnswer={displaySynthesis}
-              isLive={isOngoing}
-              className="flex-1 min-h-0 ps-4 pe-4 pt-4 pb-4"
-              // Debate verdict / vote tally / agreement, with minority report.
-              decision={displayDecision}
-              memberDisplayNames={selectedConversation?.memberDisplayNames ?? rosterDisplayNames}
-              // A pre-configured plan is recorded as a one-line summary; the
-              // tasks it stands for live in the group's config.
-              preConfiguredTasks={groupConfig?.tasks}
-              // Per-phase convergence checks (I2) — live-stream state only.
-              convergence={viewingStream ? streamState.convergence : undefined}
-              // Task board + artifacts / negotiation ledger / windowing summary,
-              // plus the live retro + artifact-write badges. Same shared
-              // components the Manager transcript and history viewer use. Passed
-              // as a header so it scrolls with the transcript rather than
-              // sitting pinned.
-              header={
+            <DiscussionPanel
+              className="flex-1 min-h-0"
+              surface="workforce-board"
+              conversation={selectedConversation ?? null}
+              streamState={viewingStream ? streamState : undefined}
+              configPhases={groupConfig?.phases}
+              rosterDisplayNames={rosterDisplayNames}
+              style={groupConfig?.style}
+              outcome={
+                hasDisplayableDecision(displayDecision) ? (
+                  <DecisionRecordCard decision={displayDecision} />
+                ) : undefined
+              }
+              extras={
                 <>
+                  {/* Reuses the states computed above rather than deciding
+                      again. The board normally renders these inside the
+                      transcript header, which Overview mode unmounts — so a
+                      TASK_FORCE discussion would lose the surface its style
+                      recipe puts first. */}
                   {showPersistedTaskBoard && (
                     <PersistedTaskBoard
                       taskList={persistedTaskList!}
@@ -690,21 +695,67 @@ function WorkforceBoard() {
                       isStreaming={isStreaming}
                     />
                   )}
-                  {showTaskBoardPlaceholder && (
-                    <TaskBoard
-                      taskPlan={null}
-                      tasksInProgress={new Set<string>()}
-                      tasksCompleted={new Set<string>()}
-                      taskVerifications={new Map()}
-                      isStreaming={true}
-                    />
-                  )}
                   <DiscussionInsights
                     conversation={selectedConversation}
                     retroRecorded={isStreaming ? streamState.retroRecorded : undefined}
                     artifactUpdates={isStreaming ? streamState.artifactUpdates : undefined}
                   />
                 </>
+              }
+              transcript={
+                <BoardTranscript
+                  transcript={displayTranscript}
+                  boardId={boardId}
+                  synthesizedAnswer={displaySynthesis}
+                  isLive={isOngoing}
+                  className="flex-1 min-h-0 ps-4 pe-4 pt-4 pb-4"
+                  // Debate verdict / vote tally / agreement, with minority report.
+                  decision={displayDecision}
+                  memberDisplayNames={selectedConversation?.memberDisplayNames ?? rosterDisplayNames}
+                  // A pre-configured plan is recorded as a one-line summary; the
+                  // tasks it stands for live in the group's config.
+                  preConfiguredTasks={groupConfig?.tasks}
+                  // Per-phase convergence checks (I2) — live-stream state only.
+                  convergence={viewingStream ? streamState.convergence : undefined}
+                  // Task board + artifacts / negotiation ledger / windowing summary,
+                  // plus the live retro + artifact-write badges. Same shared
+                  // components the Manager transcript and history viewer use. Passed
+                  // as a header so it scrolls with the transcript rather than
+                  // sitting pinned.
+                  header={
+                    <>
+                      {showPersistedTaskBoard && (
+                        <PersistedTaskBoard
+                          taskList={persistedTaskList!}
+                          memberDisplayNames={selectedConversation?.memberDisplayNames}
+                        />
+                      )}
+                      {showLiveTaskBoard && (
+                        <TaskBoard
+                          taskPlan={streamState.taskPlan}
+                          tasksInProgress={streamState.tasksInProgress}
+                          tasksCompleted={streamState.tasksCompleted}
+                          taskVerifications={streamState.taskVerifications}
+                          isStreaming={isStreaming}
+                        />
+                      )}
+                      {showTaskBoardPlaceholder && (
+                        <TaskBoard
+                          taskPlan={null}
+                          tasksInProgress={new Set<string>()}
+                          tasksCompleted={new Set<string>()}
+                          taskVerifications={new Map()}
+                          isStreaming={true}
+                        />
+                      )}
+                      <DiscussionInsights
+                        conversation={selectedConversation}
+                        retroRecorded={isStreaming ? streamState.retroRecorded : undefined}
+                        artifactUpdates={isStreaming ? streamState.artifactUpdates : undefined}
+                      />
+                    </>
+                  }
+                />
               }
             />
           ) : (

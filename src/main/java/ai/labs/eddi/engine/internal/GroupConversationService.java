@@ -37,6 +37,7 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.internal.groups.StanceSummaryEngine;
 import ai.labs.eddi.engine.internal.groups.DebateVerdictParser;
 import ai.labs.eddi.engine.internal.groups.FacilitatorEngine;
 import ai.labs.eddi.engine.internal.groups.GroupAttachmentBinder;
@@ -888,7 +889,15 @@ public class GroupConversationService implements IGroupConversationService {
                     // blew its budget must not pay for one more LLM call the next
                     // executor's own gate is about to stop anyway.
                     if (!GroupCostLedger.wouldExceedCeiling(gc, protocol)) {
-                        contextBuilder.updateWindowSummary(gc, phase, config.getContextWindow(), summarizationService);
+                        var windowCostKey = contextBuilder.updateWindowSummary(gc, phase, config.getContextWindow(),
+                                summarizationService);
+                        // I9 spend is discussion spend, and the cost_updated
+                        // contract says "after every attribution, including
+                        // system spend". Without this the live total sits below
+                        // the ledger for the whole of any windowed discussion.
+                        if (windowCostKey != null) {
+                            MemberTurnExecutor.announceCost(gc, windowCostKey, null, listener);
+                        }
                     }
 
                     // I2: mark where this repeat's entries begin. TranscriptEntry
@@ -1154,10 +1163,39 @@ public class GroupConversationService implements IGroupConversationService {
                         RetroEngine.harvest(gc, config.getRetroConfig(), repeatEntries, userMemoryStore, phase.name(), listener);
                     }
 
+                    // Overview dashboard: refresh the one-line member stances from
+                    // everything said so far. BEFORE the persist, so the stances ride
+                    // the same write as the transcript that produced them and a
+                    // reloaded document shows the band immediately rather than blank
+                    // until the next boundary.
+                    var stanceUpdates = StanceSummaryEngine.updateStances(gc, config.getStanceSummary(), protocol, summarizationService);
+
                     gc.setLastModified(Instant.now());
                     conversationStore.update(gc);
 
                     if (listener != null) {
+                        for (var stance : stanceUpdates) {
+                            // Only on a real change: a result can be here purely
+                            // because it cost money, and the event's contract
+                            // says it fires when the text changes.
+                            if (stance.textChanged()) {
+                                listener.onStanceUpdated(new GroupConversationEventSink.StanceUpdatedEvent(
+                                        stance.agentId(), gc.getMemberDisplayNames().get(stance.agentId()),
+                                        stance.stance().text(), stance.stance().llmGenerated(),
+                                        stance.stance().coveredContributions()));
+                            }
+                            // A priced stance call is discussion spend like any
+                            // other, so the cost band must see it too — otherwise
+                            // the total the dashboard shows drifts below the
+                            // ledger's. Keyed on cost, NOT on whether the text
+                            // changed: a re-summary that lands on the same wording
+                            // still bills.
+                            if (stance.cost() > 0.0) {
+                                MemberTurnExecutor.announceCost(gc,
+                                        "system:stance:" + stance.agentId() + ":" + stance.stance().coveredContributions(),
+                                        null, listener);
+                            }
+                        }
                         listener.onPhaseComplete(new GroupConversationEventSink.PhaseCompleteEvent(phaseIdx, phase.name()));
                     }
 
@@ -2218,7 +2256,7 @@ public class GroupConversationService implements IGroupConversationService {
     private TranscriptEntry executeGroupMemberTurn(GroupMember member, GroupConversation gc, String input, ProtocolConfig protocol, int phaseIdx,
                                                    DiscussionPhase phase, TranscriptEntryType entryType, String targetAgentId)
             throws GroupDiscussionException {
-        return memberTurnExecutor.executeGroupMemberTurn(member, gc, input, protocol, phaseIdx, phase, entryType, targetAgentId);
+        return memberTurnExecutor.executeGroupMemberTurn(member, gc, input, protocol, phaseIdx, phase, entryType, targetAgentId, null);
     }
 
     private TranscriptEntry handleAgentFailure(GroupMember member, int phaseIdx, DiscussionPhase phase, ProtocolConfig protocol, Throwable cause,

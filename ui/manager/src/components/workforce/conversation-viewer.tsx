@@ -14,6 +14,7 @@ import { downloadFile, generateMarkdown } from "@/lib/group-transcript-export";
 import { AgentFailedNotice, StructuredEntryBody } from "@/components/groups/structured-entry-body";
 import { isStructuredBody, readEntryBody } from "@/lib/group-entry-body";
 import { DiscussionInsights } from "@/components/groups/discussion-insights";
+import { DiscussionPanel } from "@/components/groups/overview/discussion-panel";
 import { PersistedTaskBoard } from "@/components/groups/task-board";
 import { DecisionRecordCard } from "@/components/groups/decision-record-card";
 import { hasDisplayableDecision } from "@/lib/group-config";
@@ -761,113 +762,143 @@ function ConversationViewer({
       </div>
 
       {/* ── Transcript Body ────────────────────────────────────── */}
-      <div
-        ref={scrollRef}
-        role="log"
-        aria-label={t("Workforce.history.transcript", "Conversation transcript")}
-        className="flex-1 overflow-y-auto ps-5 pe-5 py-4 space-y-3"
-      >
-        {/* Persisted task board (TASK_FORCE plans and agent-filed tasks, I5/I18)
-            — the same component the Manager transcript and the live board
-            render. Placed first, like the Manager, so a task-force session
-            opens on WHAT was done before the discussion of it. */}
-        {(conversation.taskList?.tasks?.length ?? 0) > 0 && (
-          <PersistedTaskBoard
-            taskList={conversation.taskList!}
-            memberDisplayNames={conversation.memberDisplayNames}
-          />
-        )}
+      {/* Wrapped so the history viewer offers the same transcript /
+          overview / split switch as the Manager and the live board. The
+          scroll box below is passed through untouched — it keeps owning
+          its own scrolling and its export/copy affordances. */}
+      <DiscussionPanel
+        className="flex-1 min-h-0"
+        surface="workforce-history"
+        conversation={conversation}
+        // No group config on this surface: it opens a stored conversation by
+        // id and never fetches the group. The digest derives phases from the
+        // transcript instead, so the rail shows the phases that ran — only
+        // phases never reached are missing, and a finished discussion has none.
+        outcome={decisionCard ?? undefined}
+        extras={
+          <>
+            {/* The viewer renders this inside the scroll box below, which
+                Overview mode unmounts — so TASK_FORCE history would lose its
+                task board entirely. */}
+            {(conversation.taskList?.tasks?.length ?? 0) > 0 && (
+              <PersistedTaskBoard
+                taskList={conversation.taskList!}
+                memberDisplayNames={conversation.memberDisplayNames}
+              />
+            )}
+            <DiscussionInsights conversation={conversation} />
+          </>
+        }
+        transcript={
+          <div
+            ref={scrollRef}
+            role="log"
+            aria-label={t("Workforce.history.transcript", "Conversation transcript")}
+            className="flex-1 overflow-y-auto ps-5 pe-5 py-4 space-y-3"
+          >
+            {/* Persisted task board (TASK_FORCE plans and agent-filed tasks, I5/I18)
+                — the same component the Manager transcript and the live board
+                render. Placed first, like the Manager, so a task-force session
+                opens on WHAT was done before the discussion of it. */}
+            {(conversation.taskList?.tasks?.length ?? 0) > 0 && (
+              <PersistedTaskBoard
+                taskList={conversation.taskList!}
+                memberDisplayNames={conversation.memberDisplayNames}
+              />
+            )}
 
-        {/* Shared artifacts, negotiation ledger and windowing summary
-            (I17/I11/I9) — the same component the Manager transcript and the
-            live board render, so every surface showing a group discussion
-            shows the same state. This viewer reads the single-conversation
-            GET, which is the only response that carries `artifacts`. */}
-        <DiscussionInsights conversation={conversation} />
+            {/* Shared artifacts, negotiation ledger and windowing summary
+                (I17/I11/I9) — the same component the Manager transcript and the
+                live board render, so every surface showing a group discussion
+                shows the same state. This viewer reads the single-conversation
+                GET, which is the only response that carries `artifacts`. */}
+            <DiscussionInsights conversation={conversation} />
 
-        {processedEntries.map(({ entry, showPhaseHeader }, idx) => {
-          const phaseHeader = showPhaseHeader ? (
-            <PhaseSeparator
-              key={`phase-${entry.phaseIndex}`}
-              phaseName={entry.phaseName}
-              phaseType={entry.type}
-              index={idx}
-            />
-          ) : null;
-
-          switch (entry.type) {
-            case "QUESTION":
-              return (
-                <QuestionBubble
-                  key={`q-${idx}`}
-                  content={entry.content}
+            {processedEntries.map(({ entry, showPhaseHeader }, idx) => {
+              const phaseHeader = showPhaseHeader ? (
+                <PhaseSeparator
+                  key={`phase-${entry.phaseIndex}`}
+                  phaseName={entry.phaseName}
+                  phaseType={entry.type}
                   index={idx}
                 />
-              );
+              ) : null;
 
-            case "SYNTHESIS":
-              return (
-                <div key={`syn-${idx}`} className="space-y-3">
-                  {phaseHeader}
-                  {idx === lastSynthesisIdx && decisionCard}
-                  <SynthesisEntryCard entry={entry} index={idx} />
-                </div>
-              );
+              switch (entry.type) {
+                case "QUESTION":
+                  return (
+                    <QuestionBubble
+                      key={`q-${idx}`}
+                      content={entry.content}
+                      index={idx}
+                    />
+                  );
 
-            case "ERROR":
-              return (
-                <div key={`err-${idx}`}>
-                  {phaseHeader}
-                  <ErrorEntryCard entry={entry} index={idx} />
-                </div>
-              );
+                case "SYNTHESIS":
+                  return (
+                    <div key={`syn-${idx}`} className="space-y-3">
+                      {phaseHeader}
+                      {idx === lastSynthesisIdx && decisionCard}
+                      <SynthesisEntryCard entry={entry} index={idx} />
+                    </div>
+                  );
 
-            case "SKIPPED":
-              return (
-                <div key={`skip-${idx}`}>
-                  {phaseHeader}
-                  <SkippedEntryCard entry={entry} index={idx} />
-                </div>
-              );
+                case "ERROR":
+                  return (
+                    <div key={`err-${idx}`}>
+                      {phaseHeader}
+                      <ErrorEntryCard entry={entry} index={idx} />
+                    </div>
+                  );
 
-            default:
-              return (
-                <div key={`r-${idx}`}>
-                  {phaseHeader}
-                  <AgentEntryCard
-                    entry={entry}
-                    index={idx}
-                    memberDisplayNames={conversation.memberDisplayNames}
-                    preConfiguredTasks={preConfiguredTasks}
-                  />
-                </div>
-              );
-          }
-        })}
+                case "SKIPPED":
+                  return (
+                    <div key={`skip-${idx}`}>
+                      {phaseHeader}
+                      <SkippedEntryCard entry={entry} index={idx} />
+                    </div>
+                  );
 
-        {/* Structured decision when no synthesis element exists to anchor it */}
-        {lastSynthesisIdx < 0 && !showSynthesisFooter && decisionCard}
+                default:
+                  return (
+                    <div key={`r-${idx}`}>
+                      {phaseHeader}
+                      <AgentEntryCard
+                        entry={entry}
+                        index={idx}
+                        memberDisplayNames={conversation.memberDisplayNames}
+                        preConfiguredTasks={preConfiguredTasks}
+                      />
+                    </div>
+                  );
+              }
+            })}
 
-        {/* ── Footer: Synthesized Answer ──────────────────────── */}
-        {showSynthesisFooter && (
-          <>
-            {lastSynthesisIdx < 0 && decisionCard}
-            <SynthesizedAnswerFooter content={conversation.synthesizedAnswer!} />
-          </>
-        )}
+            {/* Structured decision when no synthesis element exists to anchor it */}
+            {lastSynthesisIdx < 0 && !showSynthesisFooter && decisionCard}
 
-        {/* Empty transcript */}
-        {conversation.transcript.length === 0 && (
-          <div className="flex items-center justify-center py-12">
-            <p className="text-sm text-muted-foreground">
-              {t(
-                "Workforce.history.emptyTranscript",
-                "No transcript entries yet",
-              )}
-            </p>
+            {/* ── Footer: Synthesized Answer ──────────────────────── */}
+            {showSynthesisFooter && (
+              <>
+                {lastSynthesisIdx < 0 && decisionCard}
+                <SynthesizedAnswerFooter content={conversation.synthesizedAnswer!} />
+              </>
+            )}
+
+            {/* Empty transcript */}
+            {conversation.transcript.length === 0 && (
+              <div className="flex items-center justify-center py-12">
+                <p className="text-sm text-muted-foreground">
+                  {t(
+                    "Workforce.history.emptyTranscript",
+                    "No transcript entries yet",
+                  )}
+                </p>
+              </div>
+            )}
           </div>
-        )}
-      </div>
+        }
+      />
     </div>
   );
 }

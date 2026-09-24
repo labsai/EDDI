@@ -205,6 +205,58 @@ marker and the next boundary catches up.
   last two rounds.
 
 
+## Member stances (the overview dashboard)
+
+The Manager and the Workforce board can render a discussion as an **overview**
+instead of a transcript — a phase rail, a members x phases matrix, and a roster
+of one-line positions. The roster's lines are *member stances*, and they always
+exist: by default each is the **lead sentence of that member's newest
+contribution**, which costs nothing and is the member's own words.
+
+`stanceSummary` upgrades that to an LLM summary of everything the member has
+said:
+
+```json
+"stanceSummary": {
+  "maxChars": 160,
+  "llmProvider": "openai",
+  "llmModel": "gpt-4o-mini",
+  "inputPricePer1M": 0.15,
+  "outputPricePer1M": 0.60
+}
+```
+
+- **There is no `enabled` flag**, unlike `contextWindow`. Stances exist either
+  way, so the only thing a flag could have meant is "may this spend money?" —
+  which is already what naming a provider and a model means.
+- Stances are recomputed at **phase boundaries**, and only for a member whose
+  stored stance no longer covers **their own** contributions. A member who
+  stayed silent through a phase costs nothing — coverage is counted per member,
+  not against the transcript length, or one member speaking would re-bill
+  everyone.
+- The summarizer is **optional spend and obeys `maxCostPerDiscussion`**, like
+  the window summarizer and the convergence judge. Past the ceiling it
+  downgrades to extraction rather than stopping the phase.
+- A summarizer failure **degrades to lead-sentence extraction**, never to a
+  blank roster, and never fails the discussion.
+- The UI distinguishes the two producers — an extracted line is shown as a
+  quotation, a generated one as a summary — because presenting a paraphrase the
+  way a quotation is presented would misattribute it.
+- Extraction skips the entry types that carry a **JSON contract** (`VOTE`,
+  `BID`, `RETRO`, `PLAN`, `TASK_RESULT`, `VERIFICATION`) and quotes the newest
+  prose entry instead — the lead "sentence" of a ballot is an opening brace, and
+  it would otherwise replace a member's real position after every vote. The LLM
+  summarizer still reads them.
+- The optional prices attribute stance spend to the same cost ledger
+  `maxCostPerDiscussion` bounds, under a `system:stance:*` key.
+- Naming only one of `llmProvider`/`llmModel` (or prices with neither) produces
+  a save-time warning: that config intends to spend and silently will not.
+
+Both surfaces stream two events for this view: `cost_updated` after every cost
+attribution (carrying the key's *cumulative* spend, so a redelivered frame is
+idempotent) and `stance_updated` whenever a stance's text changes.
+
+
 ## Voting
 
 A `VOTE` phase collects **explicit ballots** instead of another round of prose.
