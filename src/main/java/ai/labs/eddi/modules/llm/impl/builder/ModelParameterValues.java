@@ -200,8 +200,12 @@ final class ModelParameterValues {
         try {
             setter.accept(Path.of(raw));
         } catch (InvalidPathException e) {
-            LOGGER.warnv("LLM parameter ''{0}'' is not a usable filesystem path (''{1}'') — "
-                    + "falling back to the model default.", sanitize(key), sanitize(raw));
+            // The configured value itself is never logged: an invalid path can still
+            // carry a real filesystem path (a username's home directory, an internal
+            // project name) even though it fails Path.of, so echoing it back would leak
+            // that into the log for no diagnostic gain the key name doesn't already give.
+            LOGGER.warnv("LLM parameter ''{0}'' is not a usable filesystem path — "
+                    + "falling back to the model default.", sanitize(key));
         }
     }
 
