@@ -52,8 +52,7 @@ class RestImportServiceRagCronTest {
                 mock(TemplateSyntaxMigrator.class), mock(StructuralMatcher.class),
                 mock(UpgradeExecutor.class), mock(IScheduleStore.class), mock(BackupMetrics.class),
                 mock(ResourceAccessGuard.class), mock(SpaceContext.class),
-                mock(RagSourceIngestionService.class),
-                true, false, Optional.empty());
+                mock(RagSourceIngestionService.class), true, false, Optional.empty());
     }
 
     private static RagConfiguration knowledgeBaseWithCron(String cron) {
