@@ -9,6 +9,8 @@ import {
   type GroupConversationState,
   type GroupSSEEvent,
   type GroupStartPayload,
+  type RoundStartPayload,
+  type GroupConversation,
   type PhaseStartPayload,
   type SpeakerStartPayload,
   type SpeakerCompletePayload,
@@ -229,10 +231,47 @@ interface GroupStreamStore {
   streams: Record<string, GroupStreamState>;
   update: (groupId: string, updater: (s: GroupStreamState) => GroupStreamState) => void;
   startStream: (groupId: string, question: string, attachments?: GroupAttachmentRef[]) => Promise<void>;
-  continueStream: (groupId: string, gcId: string, question: string) => Promise<void>;
-  approveAndStream: (groupId: string, gcId: string, request: GroupApprovalRequest) => Promise<void>;
+  continueStream: (
+    groupId: string,
+    gcId: string,
+    question: string,
+    seed?: GroupConversation | null,
+  ) => Promise<void>;
+  approveAndStream: (
+    groupId: string,
+    gcId: string,
+    request: GroupApprovalRequest,
+    seed?: GroupConversation | null,
+  ) => Promise<void>;
   abortStream: (groupId: string) => void;
   resetStream: (groupId: string) => void;
+}
+
+/**
+ * Where a resumed or continued stream picks up from.
+ *
+ * Neither the approve nor the continue endpoint replays what came before it, so
+ * the store holds only what THIS page session saw stream: nothing after a
+ * reload, and another discussion's rows, costs and stances if the user watched
+ * one stream and then picked this one. The first dropped every earlier phase
+ * and round from the overview the moment a resumed turn arrived (the digest
+ * prefers a non-empty live transcript); the second showed a different
+ * discussion's turns and spend under this one.
+ *
+ * So a stream that was on another conversation starts from a clean state, and
+ * the persisted document (the complete record up to the pause or the previous
+ * round) supplies the transcript whenever it holds at least as much as the
+ * store does. The store only wins when it is AHEAD, which happens when the
+ * caller's copy was fetched before the last streamed rows.
+ */
+function resumeBase(s: GroupStreamState, gcId: string, seed?: GroupConversation | null): GroupStreamState {
+  const own = s.conversationId === gcId;
+  const base = own ? s : freshState();
+  const persisted = seed?.id === gcId ? (seed.transcript ?? []) : null;
+  if (persisted && persisted.length >= base.transcript.length) {
+    return { ...base, transcript: persisted, roundStartIndex: seed?.roundStartTranscriptIndex ?? 0 };
+  }
+  return base;
 }
 
 /** In-flight abort controllers, one per group. Kept outside the store because
@@ -281,12 +320,12 @@ export const useGroupStreamStore = create<GroupStreamStore>((set, get) => ({
    * the resumed progress over the same connection. Preserves the existing
    * transcript so a live pause→resume appends rather than restarts.
    */
-  approveAndStream: async (groupId, gcId, request) => {
+  approveAndStream: async (groupId, gcId, request, seed) => {
     const abort = swapController(groupId);
     const update = get().update;
 
     update(groupId, (s) => ({
-      ...s,
+      ...resumeBase(s, gcId, seed),
       isStreaming: true,
       state: "IN_PROGRESS",
       conversationId: gcId,
@@ -294,7 +333,7 @@ export const useGroupStreamStore = create<GroupStreamStore>((set, get) => ({
       hitlResume: null,
       humanInputRequest: null,
       error: null,
-      startedAt: s.startedAt ?? new Date().toISOString(),
+      startedAt: (s.conversationId === gcId ? s.startedAt : null) ?? new Date().toISOString(),
       activeSpeakers: new Set(),
     }));
 
@@ -311,19 +350,19 @@ export const useGroupStreamStore = create<GroupStreamStore>((set, get) => ({
    * Preserves the existing transcript so the new round appends rather than
    * replaces — same pattern as approveAndStream.
    */
-  continueStream: async (groupId, gcId, question) => {
+  continueStream: async (groupId, gcId, question, seed) => {
     const abort = swapController(groupId);
     const update = get().update;
 
     update(groupId, (s) => ({
-      ...s,
+      ...resumeBase(s, gcId, seed),
       isStreaming: true,
       state: "IN_PROGRESS",
       conversationId: gcId,
       error: null,
       errorKind: null,
-      startedAt: s.startedAt ?? new Date().toISOString(),
-      // Keep transcript (appended by group_start handler), but reset
+      startedAt: (s.conversationId === gcId ? s.startedAt : null) ?? new Date().toISOString(),
+      // Keep transcript (appended by the round_start handler), but reset
       // per-round derived fields so stale data doesn't leak into the UI.
       synthesizedAnswer: null,
       // `continueDiscussion` clears both of these server-side — a round that
@@ -481,17 +520,17 @@ export function useGroupDiscussionStream(groupId?: string) {
   );
 
   const continueStream = useCallback(
-    async (gid: string, gcId: string, question: string) => {
+    async (gid: string, gcId: string, question: string, seed?: GroupConversation | null) => {
       setStartedGroupId(gid);
-      await useGroupStreamStore.getState().continueStream(gid, gcId, question);
+      await useGroupStreamStore.getState().continueStream(gid, gcId, question, seed);
     },
     [],
   );
 
   const approveAndStream = useCallback(
-    async (gid: string, gcId: string, request: GroupApprovalRequest) => {
+    async (gid: string, gcId: string, request: GroupApprovalRequest, seed?: GroupConversation | null) => {
       setStartedGroupId(gid);
-      await useGroupStreamStore.getState().approveAndStream(gid, gcId, request);
+      await useGroupStreamStore.getState().approveAndStream(gid, gcId, request, seed);
     },
     [],
   );
@@ -510,6 +549,47 @@ export function useGroupDiscussionStream(groupId?: string) {
 // ─── Event Handler ──────────────────────────────────────────────
 
 /**
+ * Records the question that opens a round and where that round begins.
+ *
+ * `roundStartIndex` is the question's own index for an appended round and 0 for
+ * a fresh discussion. Without it the digest buckets every round's turns into the
+ * current round's phases, because the backend restarts phaseIndex at 0 each
+ * round.
+ *
+ * A resume that restarts at phase 0 re-announces the round it resumes, and a
+ * transcript seeded from the persisted document already ends with that
+ * question. Appending it again would duplicate the row AND count a round that
+ * never ran, so a question matching the transcript's last row is kept, not
+ * repeated.
+ */
+function openRound(
+  s: GroupStreamState,
+  conversationId: string | null | undefined,
+  question: string,
+  append: boolean,
+): GroupStreamState {
+  const opened = { ...s, conversationId: conversationId ?? s.conversationId, state: "IN_PROGRESS" as const };
+  const last = s.transcript[s.transcript.length - 1];
+  if (append && last?.type === "QUESTION" && last.content === question) return opened;
+  const questionEntry: TranscriptEntry = {
+    speakerAgentId: "user",
+    speakerDisplayName: "User",
+    content: question,
+    phaseIndex: -1,
+    phaseName: null,
+    type: "QUESTION" as TranscriptEntryType,
+    timestamp: new Date().toISOString(),
+    errorReason: null,
+    targetAgentId: null,
+  };
+  return {
+    ...opened,
+    transcript: append ? [...s.transcript, questionEntry] : [questionEntry],
+    roundStartIndex: append ? s.transcript.length : 0,
+  };
+}
+
+/**
  * Process a single SSE event from the group discussion stream.
  * Returns `true` when the stream is logically complete.
  */
@@ -521,35 +601,29 @@ function handleSSEEvent(
     case "group_start": {
       try {
         const payload: GroupStartPayload = JSON.parse(event.data);
-        const questionEntry: TranscriptEntry = {
-          speakerAgentId: "user",
-          speakerDisplayName: "User",
-          content: payload.question,
-          phaseIndex: -1,
-          phaseName: null,
-          type: "QUESTION" as TranscriptEntryType,
-          timestamp: new Date().toISOString(),
-          errorReason: null,
-          targetAgentId: null,
-        };
-        setState((s) => ({
-          ...s,
-          conversationId: payload.groupConversationId ?? payload.conversationId,
-          state: "IN_PROGRESS",
-          // Continuation (conversationId already set by continueStream) →
-          // append the new question to the existing transcript.
-          // New discussion → replace with just the question.
-          transcript: s.conversationId
-            ? [...s.transcript, questionEntry]
-            : [questionEntry],
-          // Where this round starts: the new question's own index for a
-          // continuation, 0 for a fresh discussion. Without it the digest
-          // buckets every round's turns into the current round's phases,
-          // because the backend restarts phaseIndex at 0 each round.
-          roundStartIndex: s.conversationId ? s.transcript.length : 0,
-        }));
+        // A conversation id already set means this stream is appending to a
+        // known conversation (a resume); otherwise it is a brand-new discussion
+        // and replaces whatever the store held.
+        setState((s) =>
+          openRound(s, payload.groupConversationId ?? payload.conversationId, payload.question, !!s.conversationId),
+        );
       } catch (e) {
         console.warn('[SSE] Failed to parse group_start event:', e);
+      }
+      return false;
+    }
+
+    // Continuation rounds (round 2 onwards) open with this, never with
+    // `group_start`. Unhandled, a live continuation recorded no question and
+    // never moved `roundStartIndex`, so the overview bucketed every round's
+    // turns into one round's phases, the exact merge the round boundary exists
+    // to prevent, and the transcript showed no question for the new round.
+    case "round_start": {
+      try {
+        const payload: RoundStartPayload = JSON.parse(event.data);
+        setState((s) => openRound(s, payload.groupConversationId, payload.question, true));
+      } catch (e) {
+        console.warn('[SSE] Failed to parse round_start event:', e);
       }
       return false;
     }

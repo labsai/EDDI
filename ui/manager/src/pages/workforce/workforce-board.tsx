@@ -361,14 +361,17 @@ function WorkforceBoard() {
         // with member agents only when a discussion starts and rejects a
         // continuation carrying any. `BoardInput` hides the affordance in this
         // mode, so there should be none to drop.
-        continueStream(boardId, selectedConvId, question);
+        // The stored document seeds the stream: the continue endpoint replays
+        // nothing, so after a reload the live view would otherwise hold only
+        // the new round.
+        continueStream(boardId, selectedConvId, question, selectedConversation);
         toast.success(t("groups.continueStreamStarted", "Continuation started — streaming live"));
       } else {
         setSelectedConvId(null);
         startStream(boardId, question, attachments);
       }
     },
-    [boardId, inputMode, selectedConvId, continueStream, startStream, setSelectedConvId, t],
+    [boardId, inputMode, selectedConvId, selectedConversation, continueStream, startStream, setSelectedConvId, t],
   );
 
   const handleSelectConversation = useCallback(

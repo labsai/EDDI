@@ -560,3 +560,34 @@ Three findings from review, all confirmed against the code:
 
 Four new digest tests and one page test cover these. All but the "live round still
 running" control fail with their fix reverted.
+
+## 🐛 fix(manager): a resumed or continued stream starts from the whole discussion (2026-09-24)
+
+**Repo:** EDDI (`feat/group-discussion-overview`)
+
+A review follow-up turned up a larger defect underneath it.
+
+- **Live continuations never recorded their round.** `/continue/stream` opens round 2 and
+  later with `round_start`, never with `group_start`, and the stream handled only
+  `group_start`. So a live continuation appended no question and never moved
+  `roundStartIndex`. The Overview bucketed every round's turns into one round's phases,
+  exactly the merge the round boundary was added to prevent, and the transcript showed no
+  question for the new round. The existing tests modelled a continuation with
+  `group_start`, a frame the backend does not send there, so they passed. `round_start`
+  is now handled, and `RoundStartPayload` is typed.
+- **A resumed or continued stream started from whatever the store held.** Neither
+  endpoint replays the discussion so far. After a reload the store is empty, so the first
+  resumed turn made the live transcript the only one, and the Overview lost every earlier
+  phase and round. If the user had just watched a different discussion stream, the store
+  still held that discussion's rows, costs and answer, and they appeared under this one.
+  `approveAndStream` and `continueStream` now take the stored document as a seed, and a
+  stream switching conversations starts from a clean state. The stored transcript wins
+  unless the store is ahead of it, which happens when the page's copy was fetched before
+  the last streamed rows. Both the Manager and the Workforce board pass the seed.
+- **A resume that restarts at phase 0 re-announces its round.** Against a seeded
+  transcript that would duplicate the question and count a round that never ran, so a
+  question matching the transcript's last row is not appended again.
+
+Six new stream tests. Each of the four changes (the `round_start` case, seeding, the
+duplicate guard, and "the store wins when ahead") was reverted in turn, and each revert
+fails at least one of them.

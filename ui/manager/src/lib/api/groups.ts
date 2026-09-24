@@ -1445,6 +1445,14 @@ export interface GroupStartPayload {
   memberAgentIds: string[];
 }
 
+/** Opens every continuation round (round 2 onwards) in place of `group_start`. */
+export interface RoundStartPayload {
+  groupConversationId: string;
+  round: number;
+  question: string;
+  phaseCount: number;
+}
+
 export interface PhaseStartPayload {
   phaseIndex: number;
   phaseName: string;

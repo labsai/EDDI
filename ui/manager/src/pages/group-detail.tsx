@@ -294,7 +294,10 @@ export function GroupDetailPage() {
       // the backend only shares files with member agents when a discussion
       // starts, and rejects a continuation carrying any. DiscussionInput hides
       // the affordance in this mode, so there should be none to drop.
-      continueStream(groupId, selectedConvId, question);
+      // The stored document seeds the stream: the continue endpoint replays
+      // nothing, so after a reload the live view would otherwise hold only the
+      // new round.
+      continueStream(groupId, selectedConvId, question, selectedConversation);
       toast.info(t("groups.continueStreamStarted", "Continuation started — streaming live"));
     } else {
       // New discussion
@@ -307,7 +310,7 @@ export function GroupDetailPage() {
       startStream(groupId, question, attachments);
       toast.info(t("groups.discussionStarted", "Discussion started — streaming live"));
     }
-  }, [groupId, inputMode, selectedConvId, continueStream, startStream, setSelectedConvId, t]);
+  }, [groupId, inputMode, selectedConvId, selectedConversation, continueStream, startStream, setSelectedConvId, t]);
 
   const handleNewDiscussion = useCallback(() => {
     resetStream();
@@ -325,9 +328,13 @@ export function GroupDetailPage() {
       // optimistically — the resume can fail (409 stale, 400 invalid decision).
       pendingDecisionRef.current = verdict;
       userClearedRef.current = true; // hold the clear until the stream takes over
-      setResumedConversation(selectedConversation?.id === gcId ? selectedConversation : null);
+      const paused = selectedConversation?.id === gcId ? selectedConversation : null;
+      setResumedConversation(paused);
       setSelectedConvId(null); // switch the transcript to the live resumed stream
-      approveAndStream(groupId, gcId, { decision: { verdict, note }, taskApprovals });
+      // Seeded for the same reason as the snapshot above: the approve endpoint
+      // replays nothing, so without it the first resumed turn made the live
+      // transcript the ONLY transcript, and every earlier phase left the view.
+      approveAndStream(groupId, gcId, { decision: { verdict, note }, taskApprovals }, paused);
     },
     [groupId, approveAndStream, setSelectedConvId, selectedConversation],
   );
