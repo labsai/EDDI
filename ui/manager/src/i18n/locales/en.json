@@ -3223,7 +3223,10 @@
     "syncError": "Sync failed",
     "empty": "Connect to a source instance to begin syncing agents.",
     "autoMatched": "auto-matched",
-    "previewFirst": "Preview changes before syncing"
+    "previewFirst": "Preview changes before syncing",
+    "syncPartial": "Sync incomplete — some resources were not written",
+    "syncIdentical": "Already up to date — nothing to write",
+    "previewFailed": "Preview failed"
   },
   "userConversations": {
     "title": "User Conversations",

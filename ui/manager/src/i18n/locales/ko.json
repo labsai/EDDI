@@ -2998,7 +2998,10 @@
     "syncError": "동기화 실패",
     "empty": "에이전트 동기화를 시작하려면 원본 인스턴스에 접속하세요.",
     "autoMatched": "자동 매칭됨",
-    "previewFirst": "동기화 전에 변경사항 미리보기"
+    "previewFirst": "동기화 전에 변경사항 미리보기",
+    "syncPartial": "동기화 미완료 — 일부 리소스가 기록되지 않았습니다",
+    "syncIdentical": "이미 최신 상태입니다 — 기록할 항목이 없습니다",
+    "previewFailed": "미리보기 실패"
   },
   "sync": {
     "actionCreate": "신규",

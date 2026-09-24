@@ -2998,7 +2998,10 @@
     "syncError": "同期エラー",
     "empty": "エージェント同期を開始するには、ソースインスタンスに接続してください。",
     "autoMatched": "自動マッチ",
-    "previewFirst": "同期前に変更をプレビュー"
+    "previewFirst": "同期前に変更をプレビュー",
+    "syncPartial": "同期は未完了です — 一部のリソースが書き込まれませんでした",
+    "syncIdentical": "すでに最新です — 書き込む項目はありません",
+    "previewFailed": "プレビューに失敗しました"
   },
   "sync": {
     "actionCreate": "新規",

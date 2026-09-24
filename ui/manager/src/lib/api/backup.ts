@@ -43,6 +43,16 @@ export interface ImportPreview {
   targetAgentId: string | null;
   targetAgentName: string | null;
   resources: ResourceDiff[];
+  /**
+   * Why this row could not be previewed, or null/absent when it could.
+   *
+   * A batch preview answers 200 even when a mapping failed — one unreachable
+   * source must not discard the rows that did work — so the failure travels in
+   * the row. A caller that ignores it renders an empty `resources` list as
+   * "nothing to promote", which is what an unreachable staging instance looked
+   * like in the Manager.
+   */
+  error?: string | null;
 }
 
 // ==================== Sync Types ====================
@@ -157,17 +167,77 @@ async function readJson<T>(response: Response): Promise<T | null> {
 }
 
 /**
- * A JSON body that must be a list, or an empty one.
+ * An error carrying what the server actually said.
+ *
+ * `res.statusText` alone is the reason a rejected sync source URL reached the
+ * operator as "Failed to list remote agents: Bad Request". The backend's message
+ * for that names the exact setting to change; throwing the status text threw the
+ * only actionable part of the answer away.
+ */
+async function failureOf(response: Response, what: string): Promise<Error> {
+  const detail = await readErrorDetail(response);
+  return new Error(detail ? `${what}: ${detail}` : `${what}: ${response.statusText}`);
+}
+
+/**
+ * The server's explanation, from whichever shape it came in.
+ *
+ * Quarkus answers a mapped exception as JSON ({@code {"error": ...}}), an
+ * unmapped one as its own text page, and a reverse proxy may answer with HTML.
+ * Only a short, plain message is used — an HTML error page is not shown to the
+ * operator as if it were one.
+ */
+async function readErrorDetail(response: Response): Promise<string | null> {
+  let text: string;
+  try {
+    text = await response.text();
+  } catch {
+    return null;
+  }
+  return detailOf(text);
+}
+
+/**
+ * A JSON body that must be a list, parsed from text already read.
  *
  * These calls bypass `ApiClient` because they send `application/zip` and custom
  * sync headers, so they also miss its guard against a non-JSON 2xx. A reverse
  * proxy answering 200 with an HTML page is the realistic case, and without this
- * the batch summary died on `results.some is not a function` — an unhandled
- * TypeError in place of an error the caller could report.
+ * tolerance the batch summary died on `results.some is not a function` — an
+ * unhandled TypeError in place of an error the caller could report.
  */
-async function readJsonArray<T>(response: Response): Promise<T[]> {
-  const parsed = await readJson<unknown>(response);
-  return Array.isArray(parsed) ? (parsed as T[]) : [];
+function parseJsonArray<T>(body: string): T[] | null {
+  if (!body) return null;
+  try {
+    const parsed = JSON.parse(body) as unknown;
+    return Array.isArray(parsed) ? (parsed as T[]) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The server's explanation inside a body already read, or null when the body
+ * carries none worth showing.
+ */
+function detailOf(text: string): string | null {
+  if (!text) return null;
+
+  try {
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    for (const key of ["error", "message", "detail", "errorMessage"]) {
+      const value = parsed?.[key];
+      if (typeof value === "string" && value.trim()) return value.trim();
+    }
+  } catch {
+    // Not JSON — fall through to the plain-text check below.
+  }
+
+  const trimmed = text.trim();
+  // An HTML error page is not a message; a long plain one is, so it is cut rather
+  // than dropped — dropping it left the operator with the status text alone.
+  if (!trimmed || trimmed.startsWith("<")) return null;
+  return trimmed.length > 500 ? `${trimmed.slice(0, 500)}…` : trimmed;
 }
 
 /**
@@ -288,7 +358,7 @@ export async function importAgent(file: File): Promise<string> {
   });
 
   if (!res.ok) {
-    throw new Error(`Import failed: ${res.statusText}`);
+    throw await failureOf(res, "Import failed");
   }
 
   const location = res.headers.get("Location");
@@ -307,7 +377,7 @@ export async function previewImport(file: File): Promise<ImportPreview> {
   });
 
   if (!res.ok) {
-    throw new Error(`Preview failed: ${res.statusText}`);
+    throw await failureOf(res, "Preview failed");
   }
 
   return res.json();
@@ -346,7 +416,7 @@ export async function importAgentMerge(
   });
 
   if (!res.ok) {
-    throw new Error(`Merge import failed: ${res.statusText}`);
+    throw await failureOf(res, "Merge import failed");
   }
 
   const raw = res.headers.get("X-Schedules-Skipped");
@@ -440,7 +510,7 @@ export async function previewUpgrade(
     headers: { "Content-Type": "application/zip", ...api.getAuthHeader() },
     body: file,
   });
-  if (!res.ok) throw new Error(`Upgrade preview failed: ${res.statusText}`);
+  if (!res.ok) throw await failureOf(res, "Upgrade preview failed");
   return res.json();
 }
 
@@ -467,7 +537,7 @@ export async function importAgentUpgrade(
     headers: { "Content-Type": "application/zip", ...api.getAuthHeader() },
     body: file,
   });
-  if (!res.ok) throw new Error(`Upgrade import failed: ${res.statusText}`);
+  if (!res.ok) throw await failureOf(res, "Upgrade import failed");
   const result = await readJson<UpgradeResult>(res);
   return {
     outcome: outcomeOf(res.status, result),
@@ -490,7 +560,7 @@ export async function listRemoteAgents(
   const res = await fetch(`${api.getBaseUrl()}/backup/import/sync/agents?${params}`, {
     headers: mergedHeaders(sourceAuth),
   });
-  if (!res.ok) throw new Error(`Failed to list remote agents: ${res.statusText}`);
+  if (!res.ok) throw await failureOf(res, "Failed to list remote agents");
   return res.json();
 }
 
@@ -513,7 +583,7 @@ export async function previewSync(
     method: "POST",
     headers: mergedHeaders(sourceAuth),
   });
-  if (!res.ok) throw new Error(`Sync preview failed: ${res.statusText}`);
+  if (!res.ok) throw await failureOf(res, "Sync preview failed");
   return res.json();
 }
 
@@ -535,7 +605,7 @@ export async function previewSyncBatch(
     },
     body: JSON.stringify(mappings),
   });
-  if (!res.ok) throw new Error(`Batch preview failed: ${res.statusText}`);
+  if (!res.ok) throw await failureOf(res, "Batch preview failed");
   return res.json();
 }
 
@@ -562,7 +632,7 @@ export async function executeSync(
     method: "POST",
     headers: mergedHeaders(sourceAuth),
   });
-  if (!res.ok) throw new Error(`Sync execute failed: ${res.statusText}`);
+  if (!res.ok) throw await failureOf(res, "Sync execute failed");
   const result = await readJson<UpgradeResult>(res);
   return {
     outcome: outcomeOf(res.status, result),
@@ -590,16 +660,25 @@ export async function executeSyncBatch(
     body: JSON.stringify(requests),
   });
 
-  // 500 when EVERY mapping failed, and the body is still the per-agent list.
-  // Read it before throwing: "all five agents failed" is the one case where the
-  // reasons matter most, and `res.statusText` alone carries none of them.
-  if (res.status === 500) {
-    const results = await readJsonArray<BatchSyncResult>(res);
-    if (results.length > 0) return { partial: true, results };
-  }
-  if (!res.ok) throw new Error(`Batch sync failed: ${res.statusText}`);
+  // The body is read exactly once: a Response body is a stream, and reading it
+  // here and again in `failureOf` left the error path with nothing but the status
+  // text — the case where the reasons matter most.
+  const body = await res.text();
 
-  const results = await readJsonArray<BatchSyncResult>(res);
+  // 500 when EVERY mapping failed, and the body is still the per-agent list.
+  if (res.status === 500) {
+    const failed = parseJsonArray<BatchSyncResult>(body);
+    if (failed?.length) return { partial: true, results: failed };
+  }
+  if (!res.ok) throw new Error(`Batch sync failed: ${detailOf(body) ?? res.statusText}`);
+
+  const results = parseJsonArray<BatchSyncResult>(body);
+  if (!results) {
+    // A 2xx whose body is not the per-agent list says nothing about what was
+    // written. Reading it as an empty list reported a proxy's HTML page, or a
+    // truncated response, as a clean "already up to date".
+    throw new Error("Batch sync failed: the response was not a list of per-agent results");
+  }
   return {
     partial: res.status === 207 || results.some((r) => r.error || hasFailures(r.result)),
     results,

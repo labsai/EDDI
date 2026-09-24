@@ -3028,7 +3028,10 @@
     "syncError": "Error de sincronización",
     "empty": "Conéctese a una instancia de origen para comenzar la sincronización de agentes.",
     "autoMatched": "Correspondencia automática",
-    "previewFirst": "Vista previa de los cambios antes de sincronizar"
+    "previewFirst": "Vista previa de los cambios antes de sincronizar",
+    "syncPartial": "Sincronización incompleta: algunos recursos no se escribieron",
+    "syncIdentical": "Ya está actualizado: nada que escribir",
+    "previewFailed": "Error en la vista previa"
   },
   "sync": {
     "actionCreate": "Nuevo",

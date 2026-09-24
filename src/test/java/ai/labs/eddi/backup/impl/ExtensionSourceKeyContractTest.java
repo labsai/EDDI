@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.backup.IResourceSource;
 import ai.labs.eddi.backup.IResourceSource.ExtensionSourceData;
 import ai.labs.eddi.backup.IResourceSource.WorkflowSourceData;
@@ -118,6 +119,21 @@ class ExtensionSourceKeyContractTest {
                 targetWorkflowStore, restInterfaceFactory, jsonSerialization);
 
         doReturn(Collections.emptyList()).when(snippetStore).readSnippetDescriptors(anyString(), anyInt(), anyInt());
+
+        // The matcher asks the STORE which version the target is at, and refuses to
+        // guess when nothing can say — this fixture is about extension keys, so the
+        // target simply sits at version 1.
+        doReturn(new IResourceId() {
+            @Override
+            public String getId() {
+                return TARGET_AGENT_ID;
+            }
+
+            @Override
+            public Integer getVersion() {
+                return 1;
+            }
+        }).when(targetAgentStore).getCurrentResourceId(TARGET_AGENT_ID);
 
         // The target agent: one workflow, shaped exactly like the source's.
         var targetAgent = new AgentConfiguration();

@@ -29,6 +29,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
+import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.utils.RestUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -187,7 +188,9 @@ public class StructuralMatcher {
                 ? DiffAction.SKIP
                 : DiffAction.UPDATE;
 
-        Integer targetVersion = readLatestVersion(targetAgentId);
+        // The same authority the content was read at, so the row states the version
+        // the operator is actually upgrading from.
+        Integer targetVersion = currentVersionOf(targetAgentId);
 
         return new ResourceDiff(
                 sourceAgent.sourceId(), "agent", sourceAgent.name(),
@@ -327,7 +330,17 @@ public class StructuralMatcher {
     private AgentConfiguration readTargetAgent(String agentId) {
         AgentConfiguration config;
         try {
-            int version = readLatestVersionOrDefault(agentId, 1);
+            Integer version = currentVersionOf(agentId);
+            if (version == null) {
+                // Falling back to 1 here previewed VERSION 1 of a target that may be
+                // at any version — the operator saw pre-sync content labelled
+                // "target", and the executor then wrote snippets, extensions and
+                // workflows before the agent write finally refused the unknown
+                // version, leaving those partial versions behind. An unresolvable
+                // target is reported instead of guessed at.
+                throw new InternalServerErrorException("Could not establish the current version of target agent "
+                        + agentId + ", so there is nothing to compare against.");
+            }
             config = agentStore.readAgent(agentId, version);
         } catch (NotFoundException e) {
             throw e;
@@ -484,22 +497,60 @@ public class StructuralMatcher {
 
     private String readDescriptorName(String resourceId) {
         try {
-            DocumentDescriptor desc = documentDescriptorStore.readDescriptor(resourceId, null);
+            DocumentDescriptor desc = documentDescriptorStore.readCurrentDescriptor(resourceId);
             return desc != null ? desc.getName() : null;
         } catch (Exception e) {
             return null;
         }
     }
 
+    /**
+     * The version the target resource is actually at, or null when it cannot be
+     * established.
+     * <p>
+     * Must go through {@link IDocumentDescriptorStore#readCurrentDescriptor}, which
+     * resolves the current version first. The obvious-looking
+     * {@code readDescriptor(resourceId, null)} cannot work: the descriptor store is
+     * historized and its read does {@code checkNotNull(version)}, so a null version
+     * <em>always</em> threw and the swallowed exception left every caller with
+     * {@link #readLatestVersionOrDefault}'s fallback of 1. That is what made a sync
+     * work exactly once per target: the second run still diffed against version 1,
+     * showed the operator the pre-sync content as "target", and then wrote against
+     * version 1 — which the store rejects once the first sync has moved the
+     * resource to version 2 ("the store did not accept the update").
+     */
+    /**
+     * The version the target agent is actually at.
+     * <p>
+     * The store is asked first and the descriptor only as a fallback, because the
+     * store is the authority: the descriptor is a projection of it, and the two
+     * disagree exactly when something went wrong — which is when getting this right
+     * matters. Reading the store also means a descriptor that cannot be read costs
+     * the version <em>number</em> shown beside the row, not the whole preview.
+     */
+    private Integer currentVersionOf(String agentId) {
+        try {
+            IResourceId current = agentStore.getCurrentResourceId(agentId);
+            if (current != null && current.getVersion() != null) {
+                return current.getVersion();
+            }
+        } catch (Exception e) {
+            LOGGER.debugf("Store could not name the current version of %s: %s",
+                    LogSanitizer.sanitize(agentId), LogSanitizer.sanitize(e.getMessage()));
+        }
+        return readLatestVersion(agentId);
+    }
+
     private Integer readLatestVersion(String resourceId) {
         try {
-            DocumentDescriptor desc = documentDescriptorStore.readDescriptor(resourceId, null);
+            DocumentDescriptor desc = documentDescriptorStore.readCurrentDescriptor(resourceId);
             if (desc != null && desc.getResource() != null) {
                 IResourceId resId = RestUtilities.extractResourceId(desc.getResource());
                 return resId != null ? resId.getVersion() : null;
             }
         } catch (Exception e) {
-            // ignore
+            LOGGER.debugf("Could not establish the current version of %s: %s",
+                    LogSanitizer.sanitize(resourceId), LogSanitizer.sanitize(e.getMessage()));
         }
         return null;
     }

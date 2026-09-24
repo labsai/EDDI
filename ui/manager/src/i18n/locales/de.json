@@ -3164,7 +3164,10 @@
     "syncError": "Synchronisierung fehlgeschlagen",
     "empty": "Verbinden Sie sich mit einer Quell-Instanz, um die Agenten-Synchronisierung zu starten.",
     "autoMatched": "Automatisch zugeordnet",
-    "previewFirst": "Änderungen vor dem Synchronisieren ansehen"
+    "previewFirst": "Änderungen vor dem Synchronisieren ansehen",
+    "syncPartial": "Synchronisierung unvollständig – einige Ressourcen wurden nicht geschrieben",
+    "syncIdentical": "Bereits aktuell – nichts zu schreiben",
+    "previewFailed": "Vorschau fehlgeschlagen"
   },
   "sync": {
     "actionCreate": "Neu",
