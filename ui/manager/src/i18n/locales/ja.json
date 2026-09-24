@@ -850,7 +850,11 @@
     "cascadePartialFailure_other": "{{count}} 件のカスケード更新が失敗しました",
     "cascadePartialFailure_one": "{{count}} 件のカスケード更新が失敗しました",
     "usedInAgents_other": "{{count}} 個の Agent で使用中",
-    "usedInAgents_one": "{{count}} 個の Agent で使用中"
+    "usedInAgents_one": "{{count}} 個の Agent で使用中",
+    "savedNotLive": "保存しました — まだ反映されていません",
+    "savedNotLiveDescription": "実行中のエージェントはデプロイ済みのバージョンを使用しています。この変更を反映するにはデプロイしてください。",
+    "deployNow": "デプロイ",
+    "deployStarted": "デプロイを開始しました"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -2437,6 +2441,7 @@
       "SYNTHESIZING": "統合中",
       "COMPLETED": "完了",
       "FAILED": "失敗",
+      "REJECTED": "却下",
       "ERROR": "エラー",
       "AWAITING_APPROVAL": "承認待ち",
       "CANCELLED": "キャンセル済み",
@@ -2806,7 +2811,10 @@
       "finalAnswer": "最終回答",
       "phase": "フェーズ"
     },
-    "deleteMembersConfigFailed": "グループのメンバーを読み取れなかったため、何も削除されていません。もう一度お試しください。"
+    "deleteMembersConfigFailed": "グループのメンバーを読み取れなかったため、何も削除されていません。もう一度お試しください。",
+    "stateRejected": "却下",
+    "inputDisabledRejected": "この提案は却下されました",
+    "debateVerdictNote": "散文ではなく採点による裁定（勝者とスコア）で回答します: {{phases}}。メンバーが2つ以上の役割を持ち、議論が先行するため、モデレーター自身の統合プロンプトは使用されません。散文が必要な場合はフェーズに入力テンプレートを設定してください。"
   },
   "taskBoard": {
     "title": "タスクボード",
@@ -3687,7 +3695,9 @@
       "pausedRejected": "この会話は人による判断を待って停止しているため、メッセージは送信されませんでした。",
       "reviewApprovals": "保留中の承認を確認",
       "stop": "生成を停止",
-      "streamEnded": "返信が完了する前に接続が終了しました。届いた分は上に表示されています。もう一度送信してやり直してください。"
+      "streamEnded": "返信が完了する前に接続が終了しました。届いた分は上に表示されています。もう一度送信してやり直してください。",
+      "newConversation": "新しい会話",
+      "newConversationFailed": "新しい会話を開始できませんでした"
     },
     "chat": {
       "agentDetails": "エージェントの詳細",
@@ -4010,7 +4020,8 @@
       "transcript": "会話の書き起こし",
       "tryDifferent": "別の検索語をお試しください",
       "untitled": "無題の会話",
-      "loadListError": "会話の読み込みに失敗しました"
+      "loadListError": "会話の読み込みに失敗しました",
+      "rejected": "却下"
     },
     "insights": "インサイト",
     "memberCount": "{{count}} 名のメンバー",

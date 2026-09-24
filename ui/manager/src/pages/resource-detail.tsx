@@ -1,6 +1,7 @@
 import { useState, useCallback, useMemo, useEffect } from "react";
 import { useParams, Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
 import {
@@ -45,6 +46,7 @@ import { VersionDiffDialog } from "@/components/editors/version-diff-dialog";
 import { getResource } from "@/lib/api/resources";
 import { useAgentContext } from "@/hooks/use-agent-context";
 import { useSaveAndDeploy } from "@/hooks/use-save-and-deploy";
+import { deployAgent } from "@/lib/api/agents";
 
 const ICON_MAP: Record<string, LucideIcon> = {
   GitBranch,
@@ -59,11 +61,18 @@ const ICON_MAP: Record<string, LucideIcon> = {
 };
 
 
+/**
+ * One id for the "saved — not yet live" toast, so only the most recent save's
+ * Deploy action is ever on screen. See where it is used for why that matters.
+ */
+const SAVE_NOT_LIVE_TOAST_ID = "resource-save-not-live";
+
 export function ResourceDetailPage() {
   const { type, id } = useParams<{ type: string; id: string }>();
   const [searchParams] = useSearchParams();
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const rt = getResourceType(type ?? "");
   const Icon = ICON_MAP[rt?.icon ?? ""] ?? FileCode;
@@ -189,14 +198,68 @@ export function ResourceDetailPage() {
             },
             {
               onSuccess: (result) => {
-                toast.success(t("editor.saved"));
+                const newAgentVersion = result.newAgentVersion;
+                /*
+                 * "Saved successfully" on its own is misleading here. This path
+                 * cascades resource -> workflow -> agent and stops: the running
+                 * agent keeps serving the version it was deployed with. Measured
+                 * on an eligibility gate with the ceiling lowered from 150,000 to
+                 * 50,000 and a case of 85,000 -- after a plain Save the gate still
+                 * passed, while the resource/workflow/agent versions had advanced
+                 * to v4/v5 with the deployment stuck at v3. Someone who reads
+                 * "Saved successfully" at face value has a config that is saved
+                 * and not live.
+                 *
+                 * The toast says so, and offers the one action that closes the
+                 * gap, so the fix costs a click rather than a support question.
+                 *
+                 * The action is offered ONLY when the cascade actually produced a
+                 * new agent version. Falling back to the version the URL carried
+                 * would deploy a revision that does not contain this edit, while
+                 * the toast beside it promises the change will take effect -- a
+                 * worse failure than the silence this replaced, because it looks
+                 * like it worked.
+                 */
+                toast.success(t("editor.savedNotLive", "Saved — not yet live"), {
+                  /*
+                   * A STABLE id, so a second save replaces the first toast rather
+                   * than stacking beside it. Each toast's action closes over the
+                   * agent version its own save produced, so two live toasts meant
+                   * clicking the older one deployed the older configuration --
+                   * overwriting the newer one in production, from a control that
+                   * looked like it was about the save just made.
+                   */
+                  id: SAVE_NOT_LIVE_TOAST_ID,
+                  description: t(
+                    "editor.savedNotLiveDescription",
+                    "The running agent still serves the deployed version. Deploy to make this change take effect.",
+                  ),
+                  action: newAgentVersion
+                    ? {
+                        label: t("editor.deployNow", "Deploy"),
+                        onClick: () => {
+                          deployAgent("production", cascadeContext.agentId, newAgentVersion)
+                            .then(() => {
+                              // Same caches the Save & Deploy flow refreshes: the
+                              // agent list and the chat's deployed-agent picker
+                              // both render a deployment state that has just
+                              // changed underneath them.
+                              queryClient.invalidateQueries({ queryKey: ["agents"] });
+                              queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
+                              toast.success(t("editor.deployStarted", "Deployment started"));
+                            })
+                            .catch((err) => toast.error(getErrorMessage(err)));
+                        },
+                      }
+                    : undefined,
+                });
                 setSaveSuccess(true);
                 setCurrentVersion(result.newResourceVersion);
                 // Update cascade context so next save uses new versions
                 setCascadeContext({
                   ...cascadeContext,
                   workflowVersion: result.newWorkflowVersion ?? cascadeContext.workflowVersion,
-                  agentVersion: result.newAgentVersion ?? cascadeContext.agentVersion,
+                  agentVersion: newAgentVersion ?? cascadeContext.agentVersion,
                 });
               },
               onError: (err) => toast.error(getErrorMessage(err)),
@@ -243,7 +306,7 @@ export function ResourceDetailPage() {
         // Invalid JSON — shouldn't happen, ConfigEditorLayout validates
       }
     },
-    [id, currentVersion, cascadeSave, cascadeContext, rt, t]
+    [id, currentVersion, cascadeSave, cascadeContext, rt, t, queryClient]
   );
 
   const handleSaveAndDeploy = useCallback(

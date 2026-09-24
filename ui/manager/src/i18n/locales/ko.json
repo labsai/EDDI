@@ -850,7 +850,11 @@
     "cascadePartialFailure_other": "{{count}}개의 캐스케이드 업데이트가 실패했습니다",
     "cascadePartialFailure_one": "{{count}}개의 캐스케이드 업데이트가 실패했습니다",
     "usedInAgents_other": "{{count}}개의 Agent에서 사용 중",
-    "usedInAgents_one": "{{count}}개의 Agent에서 사용 중"
+    "usedInAgents_one": "{{count}}개의 Agent에서 사용 중",
+    "savedNotLive": "저장됨 — 아직 반영되지 않음",
+    "savedNotLiveDescription": "실행 중인 에이전트는 여전히 배포된 버전을 제공합니다. 이 변경을 적용하려면 배포하세요.",
+    "deployNow": "배포",
+    "deployStarted": "배포를 시작했습니다"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -2437,6 +2441,7 @@
       "SYNTHESIZING": "합성 중",
       "COMPLETED": "완료",
       "FAILED": "실패",
+      "REJECTED": "거부됨",
       "ERROR": "오류",
       "AWAITING_APPROVAL": "승인 대기 중",
       "CANCELLED": "취소됨",
@@ -2806,7 +2811,10 @@
       "finalAnswer": "최종 답변",
       "phase": "단계"
     },
-    "deleteMembersConfigFailed": "그룹 구성원을 읽지 못해 아무것도 삭제되지 않았습니다. 다시 시도해 주세요."
+    "deleteMembersConfigFailed": "그룹 구성원을 읽지 못해 아무것도 삭제되지 않았습니다. 다시 시도해 주세요.",
+    "stateRejected": "거부됨",
+    "inputDisabledRejected": "이 권고안은 거부되었습니다",
+    "debateVerdictNote": "산문이 아니라 점수 판정(승자와 점수)으로 답합니다: {{phases}}. 구성원이 둘 이상의 역할을 가지고 논증이 앞서므로 중재자 자신의 종합 프롬프트는 사용되지 않습니다. 산문을 원하면 해당 단계에 입력 템플릿을 설정하세요."
   },
   "taskBoard": {
     "title": "작업 보드",
@@ -3687,7 +3695,9 @@
       "pausedRejected": "이 대화는 사람의 결정을 기다리며 멈춰 있어 메시지가 전송되지 않았습니다.",
       "reviewApprovals": "대기 중인 승인 검토",
       "stop": "생성 중지",
-      "streamEnded": "답변이 끝나기 전에 연결이 종료되었습니다. 도착한 내용은 위에 있습니다. 다시 보내 재시도하세요."
+      "streamEnded": "답변이 끝나기 전에 연결이 종료되었습니다. 도착한 내용은 위에 있습니다. 다시 보내 재시도하세요.",
+      "newConversation": "새 대화",
+      "newConversationFailed": "새 대화를 시작할 수 없습니다"
     },
     "chat": {
       "agentDetails": "에이전트 상세 정보",
@@ -4010,7 +4020,8 @@
       "transcript": "대화 기록",
       "tryDifferent": "다른 검색어를 시도해 보세요",
       "untitled": "제목 없는 대화",
-      "loadListError": "대화를 불러오지 못했습니다"
+      "loadListError": "대화를 불러오지 못했습니다",
+      "rejected": "거부됨"
     },
     "insights": "인사이트",
     "memberCount": "구성원 {{count}}명",

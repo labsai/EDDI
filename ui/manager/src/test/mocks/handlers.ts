@@ -4448,6 +4448,11 @@ export const scheduleHandlers = [
       groupId: "group1",
       userId: "manager-user",
       state: "COMPLETED",
+      // The backend computes this from `state` and always serializes it
+      // (GroupConversation.getAvailableActions, READ_ONLY). Omitting it here made
+      // the Manager read `[]` and disable the composer, so a fixture-backed test
+      // could not tell "continue this discussion" from "this discussion is over".
+      availableActions: ["followup", "continue", "close"],
       originalQuestion: "Should we expand into the European market this quarter?",
       transcript: [
         { speakerAgentId: "user", speakerDisplayName: "User", content: "Should we expand into the European market this quarter?", phaseIndex: -1, phaseName: null, type: "QUESTION", timestamp: new Date(now.getTime() - 600000).toISOString(), errorReason: null, targetAgentId: null },

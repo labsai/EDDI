@@ -1266,6 +1266,7 @@ public class LlmTask implements ILifecycleTask {
      * Extracts the current user input text from conversation memory. Used as the
      * query for RAG retrieval.
      */
+
     private String extractUserInput(IConversationMemory memory) {
         var currentStep = memory.getCurrentStep();
         IData<String> inputData = currentStep.getLatestData("input");
@@ -1649,6 +1650,7 @@ public class LlmTask implements ILifecycleTask {
                 LlmConfiguration llmConfiguration = resourceClientLibrary.getResource(uri, LlmConfiguration.class);
                 // Fail fast on cascade misconfiguration at deploy time (#validation).
                 CascadeConfigValidator.validate(llmConfiguration);
+                warnOnDeprecatedParameters(llmConfiguration);
                 return llmConfiguration;
             } catch (ServiceException e) {
                 LOGGER.error(e.getLocalizedMessage(), e);
@@ -1657,6 +1659,49 @@ public class LlmTask implements ILifecycleTask {
         }
 
         throw new WorkflowConfigurationException("No resource URI has been defined! [LlmConfiguration]");
+    }
+
+    /**
+     * Reports deprecated parameters once per configuration load, at the moment the
+     * configuration is read.
+     * <p>
+     * {@code includeFirstAgentMessage} is deprecated: it exists to satisfy an
+     * Anthropic rule that a conversation may not open on an assistant turn, and the
+     * Messages API no longer documents that rule. It is still honoured -- agent
+     * behaviour lives in stored JSON, and silently ignoring a parameter an author
+     * set on purpose would start sending a greeting they chose to withhold with no
+     * diagnostic.
+     * <p>
+     * <b>Here rather than in {@code execute}</b>, and static rather than instance.
+     * An {@link ILifecycleTask} is an application-scoped singleton shared by every
+     * conversation and MUST be stateless (AGENTS.md §4.1 rule 2), so the obvious
+     * "warn once, remember that we did" needs a field this class may not have.
+     * Keying such a field on the task id would have been wrong twice over: two
+     * tasks that both omit an id collapse to the same key, so the second one would
+     * never have warned at all.
+     * <p>
+     * Config load is the honest boundary anyway. It is where the mistake is
+     * fixable, it is already where deploy-time validation runs, and it visits every
+     * task in the document individually -- including two that share, or omit, an
+     * id.
+     */
+    static void warnOnDeprecatedParameters(LlmConfiguration llmConfiguration) {
+        // A record: the accessor is tasks(), not getTasks().
+        if (llmConfiguration == null || llmConfiguration.tasks() == null) {
+            return;
+        }
+        for (var task : llmConfiguration.tasks()) {
+            if (task == null || task.getParameters() == null) {
+                continue;
+            }
+            if (isNullOrEmpty(task.getParameters().get(KEY_INCLUDE_FIRST_AGENT_MESSAGE))) {
+                continue;
+            }
+            LOGGER.warnf("LLM task '%s' sets the deprecated parameter '%s'. It exists to satisfy an Anthropic "
+                    + "first-message rule that no longer applies, and it is honoured unchanged for now. Remove it from new "
+                    + "configurations; keep it only if this agent must genuinely withhold its opening greeting.",
+                    sanitize(task.getId() != null ? task.getId() : "<unnamed>"), KEY_INCLUDE_FIRST_AGENT_MESSAGE);
+        }
     }
 
     /**

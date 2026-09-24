@@ -10,6 +10,7 @@ import {
   isValidCostCeiling,
   memberPolicyLabel,
   moderatorlessPhaseNames,
+  debateVerdictSynthesisPhaseNames,
   uncoveredRolePhases,
   normalizeConvergence,
   normalizeGroupTaskConfig,
@@ -302,5 +303,163 @@ describe("memberPolicyLabel", () => {
 
   it("shows a value from a newer backend instead of hiding it", () => {
     expect(memberPolicyLabel(t, "QUARANTINE")).toBe("Quarantine");
+  });
+});
+
+/**
+ * Mirrors `AgentGroupStoreTest`'s cases on the backend helper, which in turn
+ * mirrors `GroupContextBuilder.isDebateJudgment`. A grant board whose members
+ * carried `role: PRO` and `role: CON` had its chair answer
+ * `{"winner":"CON","scores":{…}}` instead of the recommendation its system
+ * prompt specified. Nothing in the configuration said that two member roles
+ * plus argument phases switch the synthesis onto the judgment prompt.
+ */
+describe("debateVerdictSynthesisPhaseNames", () => {
+  type Slice = Parameters<typeof debateVerdictSynthesisPhaseNames>[0];
+
+  function member(agentId: string, role: string | null, speakingOrder = 1) {
+    return { agentId, displayName: agentId, speakingOrder, role };
+  }
+
+  function phase(
+    name: string,
+    type: "SYNTHESIS" | "ARGUE" | "REBUTTAL" | "OPINION",
+    participants: string,
+    inputTemplate: string | null = null,
+  ) {
+    return {
+      name,
+      type,
+      participants,
+      turnOrder: "SEQUENTIAL" as const,
+      contextScope: "FULL" as const,
+      targetEachPeer: false,
+      inputTemplate,
+      repeats: 1,
+    };
+  }
+
+  const debateBoard: Slice = {
+    moderatorAgentId: "chair",
+    phases: null,
+    style: "DEBATE",
+    maxRounds: 1,
+    members: [member("a", "PRO", 1), member("b", "CON", 2)],
+  };
+
+  it("reports the DEBATE preset's Judgment phase", () => {
+    expect(debateVerdictSynthesisPhaseNames(debateBoard)).toEqual(["Judgment"]);
+  });
+
+  it("is silent with only one side", () => {
+    expect(
+      debateVerdictSynthesisPhaseNames({
+        ...debateBoard,
+        members: [member("a", "PRO", 1), member("b", "PRO", 2)],
+      }),
+    ).toEqual([]);
+  });
+
+  it("is silent when no member carries a role", () => {
+    expect(
+      debateVerdictSynthesisPhaseNames({
+        ...debateBoard,
+        members: [member("a", null, 1), member("b", "  ", 2)],
+      }),
+    ).toEqual([]);
+  });
+
+  it("is silent when the chair is itself a debater", () => {
+    // A partisan may not score its own debate; the runtime falls back to prose.
+    expect(
+      debateVerdictSynthesisPhaseNames({ ...debateBoard, moderatorAgentId: "a" }),
+    ).toEqual([]);
+  });
+
+  it("is silent with no moderator, where the first speaker stands in", () => {
+    expect(
+      debateVerdictSynthesisPhaseNames({
+        ...debateBoard,
+        moderatorAgentId: null,
+        members: [member("b", "CON", 2), member("a", "PRO", 1)],
+      }),
+    ).toEqual([]);
+  });
+
+  it("is silenced by an explicit input template — the documented opt-out", () => {
+    expect(
+      debateVerdictSynthesisPhaseNames({
+        ...debateBoard,
+        style: "CUSTOM",
+        phases: [
+          phase("Args", "ARGUE", "ALL"),
+          phase("Wrap", "SYNTHESIS", "MODERATOR", "Summarise the board's recommendation."),
+        ],
+      }),
+    ).toEqual([]);
+  });
+
+  it("needs arguments BEFORE the synthesis", () => {
+    expect(
+      debateVerdictSynthesisPhaseNames({
+        ...debateBoard,
+        style: "CUSTOM",
+        phases: [phase("Opinions", "OPINION", "ALL"), phase("Wrap", "SYNTHESIS", "MODERATOR")],
+      }),
+    ).toEqual([]);
+    expect(
+      debateVerdictSynthesisPhaseNames({
+        ...debateBoard,
+        style: "CUSTOM",
+        phases: [phase("Wrap", "SYNTHESIS", "MODERATOR"), phase("Args", "ARGUE", "ALL")],
+      }),
+    ).toEqual([]);
+    expect(
+      debateVerdictSynthesisPhaseNames({
+        ...debateBoard,
+        style: "CUSTOM",
+        phases: [phase("Rebut", "REBUTTAL", "ALL"), phase("Wrap", "SYNTHESIS", "MODERATOR")],
+      }),
+    ).toEqual(["Wrap"]);
+  });
+
+  it("does not guess at a synthesis open to every participant", () => {
+    expect(
+      debateVerdictSynthesisPhaseNames({
+        ...debateBoard,
+        style: "CUSTOM",
+        phases: [phase("Args", "ARGUE", "ALL"), phase("Wrap", "SYNTHESIS", "ALL")],
+      }),
+    ).toEqual([]);
+  });
+
+  /**
+   * The Java helper compares the UNTRIMMED moderatorAgentId with
+   * `moderator.equals(m.agentId())`. Trimming here first made the two mirrors
+   * disagree: with a moderator of " a " and a member "a", the Manager treated
+   * the member as the moderator and hid the note, while the backend treated the
+   * moderator as outside the roster and took the verdict path.
+   */
+  it("matches the moderator on the identifier the backend compares, untrimmed", () => {
+    const padded: Slice = {
+      ...debateBoard,
+      moderatorAgentId: " a ",
+      members: [member("a", "PRO", 1), member("b", "CON", 2)],
+    };
+
+    expect(debateVerdictSynthesisPhaseNames(padded)).toEqual(["Judgment"]);
+  });
+
+  it("still treats a whitespace-only moderator as none at all", () => {
+    // Blank means "no moderator named", which falls back to the first speaker.
+    expect(
+      debateVerdictSynthesisPhaseNames({ ...debateBoard, moderatorAgentId: "   " }),
+    ).toEqual([]);
+  });
+
+  it("is silent for a ROUND_TABLE with debate roles — no arguments are produced", () => {
+    expect(
+      debateVerdictSynthesisPhaseNames({ ...debateBoard, style: "ROUND_TABLE", maxRounds: 2 }),
+    ).toEqual([]);
   });
 });

@@ -906,7 +906,11 @@
     "usedInAgents_one": "مستخدم في {{count}} Agent",
     "usedInAgents_two": "مستخدم في {{count}} Agents",
     "usedInAgents_zero": "مستخدم في {{count}} Agents",
-    "usedInAgents_other": "مستخدم في {{count}} Agents"
+    "usedInAgents_other": "مستخدم في {{count}} Agents",
+    "savedNotLive": "تم الحفظ — غير مُفعَّل بعد",
+    "savedNotLiveDescription": "لا يزال الوكيل قيد التشغيل يقدّم النسخة المنشورة. انشر لتفعيل هذا التغيير.",
+    "deployNow": "نشر",
+    "deployStarted": "بدأ النشر"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -2525,6 +2529,7 @@
       "SYNTHESIZING": "جارٍ التجميع",
       "COMPLETED": "مكتمل",
       "FAILED": "فشل",
+      "REJECTED": "مرفوضة",
       "ERROR": "خطأ",
       "AWAITING_APPROVAL": "بانتظار الموافقة",
       "CANCELLED": "ملغى",
@@ -2922,7 +2927,10 @@
       "finalAnswer": "الإجابة النهائية",
       "phase": "مرحلة"
     },
-    "deleteMembersConfigFailed": "تعذّرت قراءة أعضاء المجموعة، لذا لم يُحذف أي شيء. حاول مرة أخرى."
+    "deleteMembersConfigFailed": "تعذّرت قراءة أعضاء المجموعة، لذا لم يُحذف أي شيء. حاول مرة أخرى.",
+    "stateRejected": "مرفوضة",
+    "inputDisabledRejected": "تم رفض هذه التوصية",
+    "debateVerdictNote": "يجيب بحكم مُسجَّل بالنقاط (فائز ودرجات) بدلاً من نص: {{phases}}. الأعضاء يحملون دورين أو أكثر وتسبقه الحجج، لذا لا يُستخدم موجّه التلخيص الخاص بالمنسّق. اضبط قالب إدخال للمرحلة للحصول على نص."
   },
   "taskBoard": {
     "title": "لوحة المهام",
@@ -3827,7 +3835,9 @@
       "pausedRejected": "هذه المحادثة متوقفة بانتظار قرار بشري، لذا لم تُرسَل الرسالة.",
       "reviewApprovals": "مراجعة الموافقات المعلَّقة",
       "stop": "إيقاف التوليد",
-      "streamEnded": "انقطع الاتصال قبل اكتمال الرد. ما وصل معروض أعلاه — أعد الإرسال للمحاولة مجددًا."
+      "streamEnded": "انقطع الاتصال قبل اكتمال الرد. ما وصل معروض أعلاه — أعد الإرسال للمحاولة مجددًا.",
+      "newConversation": "محادثة جديدة",
+      "newConversationFailed": "تعذّر بدء محادثة جديدة"
     },
     "chat": {
       "agentDetails": "تفاصيل الوكيل",
@@ -4158,7 +4168,8 @@
       "transcript": "نص المحادثة",
       "tryDifferent": "جرّب مصطلح بحث آخر",
       "untitled": "محادثة بدون عنوان",
-      "loadListError": "فشل تحميل المحادثات"
+      "loadListError": "فشل تحميل المحادثات",
+      "rejected": "مرفوضة"
     },
     "insights": "الرؤى",
     "memberCount": "{{count}} عضواً",
