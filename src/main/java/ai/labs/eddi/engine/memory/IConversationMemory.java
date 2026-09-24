@@ -288,6 +288,71 @@ public interface IConversationMemory extends Serializable {
         // no-op by default
     }
 
+    // === Optimistic concurrency ===
+
+    /**
+     * The revision of the conversation document this memory was loaded from, or
+     * {@code ConversationMemorySnapshot.UNVERSIONED_REVISION} for a memory that was
+     * never loaded (a brand-new conversation) or one loaded from a document written
+     * before the field existed.
+     * <p>
+     * Carried on memory because the load establishes it and the store needs it: the
+     * write filters on this value and increments it, so a turn that started from a
+     * superseded snapshot is refused rather than silently applied over the newer
+     * one.
+     *
+     * @since 6.4.1
+     */
+    default long getRevision() {
+        return 0L;
+    }
+
+    /**
+     * Records the document revision this memory represents. Set by
+     * {@code ConversationMemoryUtilities.convertConversationMemorySnapshot} on
+     * load, and again by the store path after a successful write so a second write
+     * from the same live memory carries the revision it just created.
+     *
+     * @since 6.4.1
+     */
+    default void setRevision(long revision) {
+        // no-op by default
+    }
+
+    /**
+     * How many steps the stored conversation document held when this memory was
+     * loaded, or {@code ConversationMemorySnapshot.UNKNOWN_PERSISTED_STEP_COUNT}
+     * when that is not known.
+     * <p>
+     * This is what lets a write APPEND the new steps instead of rewriting the whole
+     * document: when the count is known and the memory now holds more steps than
+     * it, the difference is exactly what this turn added, and the persisted prefix
+     * is still the prefix of this memory.
+     * <p>
+     * It reports "unknown" for every case where that does not hold — a memory that
+     * was never loaded, a document whose step and output counts had drifted, and a
+     * history that was <em>rewritten</em> rather than extended:
+     * {@link #undoLastStep()} and {@link #redoLastStep()} both reset it. A rerun
+     * needs no reset because it re-executes the current step without starting a new
+     * one, so the count does not grow and the append condition fails on its own.
+     *
+     * @since 6.4.1
+     */
+    default int getPersistedStepCount() {
+        return -1;
+    }
+
+    /**
+     * Records the persisted step count. Set by
+     * {@code ConversationMemoryUtilities.convertConversationMemorySnapshot} on
+     * load, and again by the store path after a successful write.
+     *
+     * @since 6.4.1
+     */
+    default void setPersistedStepCount(int persistedStepCount) {
+        // no-op by default
+    }
+
     interface IConversationStepStack {
         <T> IData<T> getLatestData(String key);
 

@@ -147,6 +147,7 @@ eddi_conversation_processing_count_total    # Messages processed
 eddi_conversation_load_count_total          # Conversations loaded from DB
 eddi_conversation_undo_count_total          # Undo operations
 eddi_conversation_redo_count_total          # Redo operations
+eddi_conversation_store_conflict_count_total  # Writes refused: another writer changed the conversation first
 eddi_processing_conversation_count          # Currently active (gauge)
 
 eddi_conversation_start_duration_seconds    # Start latency (timer)

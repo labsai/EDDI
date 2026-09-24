@@ -12,6 +12,8 @@ import ai.labs.eddi.engine.security.ResolutionPrincipal;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 import java.time.Instant;
 import java.util.*;
 
@@ -47,6 +49,59 @@ public class ConversationMemorySnapshot {
      * {@code ConversationSchemaMigrations}.
      */
     private int schemaVersion = LEGACY_SCHEMA_VERSION;
+    /**
+     * The revision a document that predates the {@code _rev} field reads as. Also
+     * the initialiser, so a snapshot built from live memory that was never loaded
+     * (a brand-new conversation) claims it too and its first write inserts at
+     * revision 1.
+     */
+    public static final long UNVERSIONED_REVISION = 0L;
+    /**
+     * Optimistic-concurrency revision of the stored document, persisted as
+     * {@code _rev}.
+     * <p>
+     * On a snapshot that was <em>loaded</em> this is the revision the load saw; on
+     * a snapshot about to be <em>written</em> it is therefore the revision the
+     * write is derived from, so the stores filter on it and increment it. A
+     * zero-match means another writer committed first — see
+     * {@code ConcurrentConversationModificationException}.
+     * <p>
+     * A document written before this field existed deserializes to
+     * {@link #UNVERSIONED_REVISION} and upgrades on its next write, with no
+     * migration. That is why the stores match "expected
+     * {@link #UNVERSIONED_REVISION}" as "{@code _rev} is 0 <em>or</em> absent":
+     * MongoDB's {@code {_rev: 0}} does not match a document that has no
+     * {@code _rev} at all.
+     * <p>
+     * The revision guards the document <em>body</em> — the steps, outputs,
+     * properties and state that the two snapshot-store methods write. The narrow
+     * field-level updates ({@code setConversationState},
+     * {@code compareAndSetState}, {@code clearHitlBookmark}) deliberately do NOT
+     * bump it: those races are already arbitrated by the conversation-state CAS,
+     * and bumping here would convert existing, intentional state handovers (a
+     * watchdog parking a turn as EXECUTION_INTERRUPTED while that turn is still
+     * completing) into write conflicts.
+     */
+    private long revision = UNVERSIONED_REVISION;
+    /**
+     * The revision created by the most recent write that could have REWRITTEN the
+     * step history rather than extended it — every full-document write (insert,
+     * replace, conditional replace: undo, redo, rerun, a HITL pause or resume
+     * commit) stamps it with the revision it creates; an append leaves it alone.
+     * Persisted as {@code _histRev}.
+     * <p>
+     * It is what makes an append's conflict retry safe. A turn that loaded revision
+     * {@code r} may re-apply its push on top of a newer document only if every
+     * write since {@code r} was itself an append — that is, only while
+     * {@code _histRev <= r}. Otherwise the winner removed or reordered steps, or
+     * committed a pause, and pushing after it would corrupt the history or erase
+     * the pause. A document written before this field existed has none, which reads
+     * as {@link #UNVERSIONED_REVISION} and so never blocks a retry by itself.
+     * <p>
+     * Stamped by the stores; the value carried on a snapshot built from live memory
+     * is never trusted by an append (the append does not write this field).
+     */
+    private long historyRevision = UNVERSIONED_REVISION;
     private String conversationId;
     private String agentId;
     private Integer agentVersion;
@@ -86,6 +141,68 @@ public class ConversationMemorySnapshot {
     private Set<String> pendingLongTermWrites = new LinkedHashSet<>();
     private List<ConversationStepSnapshot> conversationSteps = new LinkedList<>();
     private Stack<ConversationStepSnapshot> redoCache = new Stack<>();
+    /**
+     * How many steps the stored document held when this conversation was loaded, or
+     * {@link #UNKNOWN_PERSISTED_STEP_COUNT} when that is not known.
+     * <p>
+     * Never persisted — {@code transient} and {@code @JsonIgnore}, and excluded
+     * from {@link #TOP_LEVEL_KEYS} for both reasons. It exists so a store can tell
+     * the common case ("this turn APPENDED steps to the document it loaded") from
+     * everything else ("this turn rewrote the history: an undo, a redo, a rerun, or
+     * a load whose steps and outputs had drifted"), and append the new steps
+     * instead of rewriting the whole document.
+     *
+     * @see ai.labs.eddi.engine.memory.IConversationMemory#getPersistedStepCount()
+     */
+    private transient int persistedStepCount = UNKNOWN_PERSISTED_STEP_COUNT;
+
+    /**
+     * "The persisted step count is not known", which forces a full-document write.
+     * The safe default in every direction: a snapshot that never came from a load,
+     * a document whose steps and outputs disagreed, and a memory whose history was
+     * rewritten rather than extended all report it.
+     */
+    public static final int UNKNOWN_PERSISTED_STEP_COUNT = -1;
+
+    /**
+     * Every top-level key a stored conversation document can carry.
+     * <p>
+     * An append-style write only {@code $set}s the keys the snapshot actually
+     * emits, and the serialization omits nulls
+     * ({@code SerializationCustomizer.configureObjectMapper} sets
+     * {@code JsonInclude.Include.NON_NULL}). Without this set, a field that went
+     * from a value to {@code null} during the turn — every HITL bookmark field does
+     * exactly that when {@code clearStaleToolPauseState} runs at the start of a
+     * fresh turn — would keep its stale value on disk, because {@code $set} merges
+     * where {@code replaceOne} replaces. The store {@code $unset}s this set minus
+     * the keys the snapshot emitted, which reproduces {@code replaceOne}'s shape
+     * exactly.
+     * <p>
+     * Derived from the declared instance fields rather than maintained by hand, so
+     * a new field is covered the moment it is added. The two Jackson renames are
+     * mapped explicitly; {@code ConversationMemorySnapshotTopLevelKeysTest} fails
+     * if a future {@code @JsonProperty} introduces a third one, because
+     * under-inclusion here is what would silently stop a field being cleared.
+     * Over-inclusion is harmless: {@code $unset} of an absent key is a no-op.
+     */
+    public static final Set<String> TOP_LEVEL_KEYS = computeTopLevelKeys();
+
+    private static Set<String> computeTopLevelKeys() {
+        Set<String> keys = new LinkedHashSet<>();
+        for (Field field : ConversationMemorySnapshot.class.getDeclaredFields()) {
+            int modifiers = field.getModifiers();
+            if (Modifier.isStatic(modifiers) || Modifier.isTransient(modifiers)) {
+                continue;
+            }
+            keys.add(switch (field.getName()) {
+                case "conversationId" -> "_id";
+                case "revision" -> "_rev";
+                case "historyRevision" -> "_histRev";
+                default -> field.getName();
+            });
+        }
+        return Set.copyOf(keys);
+    }
 
     @Override
     public boolean equals(Object o) {
@@ -110,6 +227,26 @@ public class ConversationMemorySnapshot {
 
     public void setSchemaVersion(int schemaVersion) {
         this.schemaVersion = schemaVersion;
+    }
+
+    @JsonProperty("_rev")
+    public long getRevision() {
+        return revision;
+    }
+
+    @JsonProperty("_rev")
+    public void setRevision(long revision) {
+        this.revision = revision;
+    }
+
+    @JsonProperty("_histRev")
+    public long getHistoryRevision() {
+        return historyRevision;
+    }
+
+    @JsonProperty("_histRev")
+    public void setHistoryRevision(long historyRevision) {
+        this.historyRevision = historyRevision;
     }
 
     @JsonProperty("_id")
@@ -501,5 +638,19 @@ public class ConversationMemorySnapshot {
 
     public void setRedoCache(Stack<ConversationStepSnapshot> redoCache) {
         this.redoCache = redoCache;
+    }
+
+    /**
+     * How many steps the document held when this conversation was loaded. See
+     * {@link #persistedStepCount}.
+     */
+    @JsonIgnore
+    public int getPersistedStepCount() {
+        return persistedStepCount;
+    }
+
+    @JsonIgnore
+    public void setPersistedStepCount(int persistedStepCount) {
+        this.persistedStepCount = persistedStepCount;
     }
 }
