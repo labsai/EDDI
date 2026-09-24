@@ -227,6 +227,9 @@ describe("DiscussionTranscript", () => {
       humanInputRequest: null,
       retroRecorded: [],
       artifactUpdates: [],
+      memberCosts: new Map(),
+      stances: new Map(),
+      roundStartIndex: 0,
     };
 
     renderWithProviders(
@@ -270,6 +273,9 @@ describe("DiscussionTranscript", () => {
       humanInputRequest: null,
       retroRecorded: [],
       artifactUpdates: [],
+      memberCosts: new Map(),
+      stances: new Map(),
+      roundStartIndex: 0,
     };
 
     renderWithProviders(
