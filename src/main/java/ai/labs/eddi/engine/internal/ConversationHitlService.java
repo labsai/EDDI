@@ -441,8 +441,9 @@ class ConversationHitlService {
                         // discard the resumed outcome (no persist, no schedule/notify).
                         boolean persisted = conversationService.storeConversationMemoryIfState(memory, environment, ConversationState.IN_PROGRESS);
                         if (!persisted) {
-                            LOGGER.infof("Resume of conversation %s not persisted: a concurrent end/cancel moved it off "
-                                    + "IN_PROGRESS — discarding the resumed outcome so the terminal state wins", conversationId);
+                            LOGGER.infof("Resume of conversation %s not persisted: a concurrent writer moved it off "
+                                    + "IN_PROGRESS or rewrote the document — discarding the resumed outcome so the "
+                                    + "committed write wins", conversationId);
                             return;
                         }
                         conversationService.cacheConversationState(conversationId, memory.getConversationState());

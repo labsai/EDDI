@@ -1,4 +1,3 @@
-import { parseResourceUri } from "./agents";
 import {
   updateResource,
   type ResourceTypeConfig,
@@ -55,7 +54,7 @@ export async function cascadeSaveResource(
   } else {
     // 1. Save the resource config
     const saveResult = await updateResource(rt, resourceId, resourceVersion, body);
-    newResourceVersion = parseVersionFromLocation(saveResult.location);
+    newResourceVersion = requireVersionFromLocation(saveResult.location, "resource");
   }
 
   if (!context) {
@@ -74,7 +73,7 @@ export async function cascadeSaveResource(
     context.workflowVersion,
     updatedWf
   );
-  const newWorkflowVersion = parseVersionFromLocation(wfResult.location);
+  const newWorkflowVersion = requireVersionFromLocation(wfResult.location, "workflow");
 
   // 3. Update the parent agent
   const oldWfUri = `eddi://ai.labs.workflow/workflowstore/workflows/${context.workflowId}?version=${context.workflowVersion}`;
@@ -92,7 +91,7 @@ export async function cascadeSaveResource(
     context.agentVersion,
     updatedAgent
   );
-  const newAgentVersion = parseVersionFromLocation(agentResult.location);
+  const newAgentVersion = requireVersionFromLocation(agentResult.location, "agent");
 
   return { newResourceVersion, newWorkflowVersion, newAgentVersion };
 }
@@ -126,7 +125,7 @@ export async function cascadeVersionUpdate(
     context.workflowVersion,
     updatedWf
   );
-  const newWorkflowVersion = parseVersionFromLocation(wfResult.location);
+  const newWorkflowVersion = requireVersionFromLocation(wfResult.location, "workflow");
 
   // 2. Update the parent agent
   const oldWfUri = `eddi://ai.labs.workflow/workflowstore/workflows/${context.workflowId}?version=${context.workflowVersion}`;
@@ -144,14 +143,75 @@ export async function cascadeVersionUpdate(
     context.agentVersion,
     updatedAgent
   );
-  const newAgentVersion = parseVersionFromLocation(agentResult.location);
+  const newAgentVersion = requireVersionFromLocation(agentResult.location, "agent");
 
   return { newWorkflowVersion, newAgentVersion };
 }
 
-/** Parse version number from a Location URI like `eddi://…?version=2` */
-function parseVersionFromLocation(location: string): number {
-  const { version } = parseResourceUri(location);
+/**
+ * The version in a Location URI like `eddi://…?version=2`, or `null` when there
+ * is none to read.
+ *
+ * Deliberately NOT `parseResourceUri`, which ends with
+ * `parseInt(url.searchParams.get("version") || "1", 10)` and so cannot tell
+ * "version 1" from "no version at all". Forty-odd call sites rely on that
+ * forgiving behaviour, so it stays as it is; the cascade needs the strict
+ * reading and gets its own.
+ */
+function parseVersionFromLocation(location: string | undefined | null): number | null {
+  if (!location) {
+    return null;
+  }
+  let raw: string | null;
+  try {
+    /*
+     * Normalised exactly as `parseResourceUri` does it, and for the same two
+     * reasons: `eddi://` is not a special scheme, and a Location header may be
+     * a relative path with no origin at all — `new URL(location)` on its own
+     * throws on the second, which would turn every relative Location into a
+     * failed save.
+     */
+    const normalised = location.startsWith("eddi://")
+      ? location.replace("eddi://", "http://")
+      : location;
+    raw = new URL(normalised, "http://dummy").searchParams.get("version");
+  } catch {
+    return null;
+  }
+  /*
+   * The WHOLE value must be digits. A prefix match accepted `version=2.5` and
+   * `version=2abc` as 2, so the cascade would have written a version into the
+   * parent that the server never reported — the same class of silent wrong
+   * reference this strict parser exists to prevent, one layer in.
+   */
+  if (raw === null || !/^\d+$/.test(raw)) {
+    return null;
+  }
+  const version = Number(raw);
+  return Number.isSafeInteger(version) ? version : null;
+}
+
+/**
+ * The version a save reported, or a thrown error naming what could not be read.
+ *
+ * A cascade writes the version it just created into the PARENT document: the
+ * resource version goes into the workflow, the workflow version into the agent.
+ * Guessing wrong is not a display bug, it is a wrong reference written to the
+ * database — and with the forgiving parser a missing `Location` header resolved
+ * to version 1, so a save that lost its header would have quietly pointed the
+ * parent at the very first revision while reporting success.
+ *
+ * Failing the save is the right answer: the user sees that it did not work and
+ * retries, instead of finding out later that their agent runs an old config.
+ */
+function requireVersionFromLocation(location: string | undefined | null, what: string): number {
+  const version = parseVersionFromLocation(location);
+  if (version === null) {
+    throw new Error(
+      `The ${what} was saved but the server did not report its new version, so the parent ` +
+        `reference cannot be updated safely. Nothing further was written — please retry.`,
+    );
+  }
   return version;
 }
 

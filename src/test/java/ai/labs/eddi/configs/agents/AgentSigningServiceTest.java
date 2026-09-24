@@ -793,6 +793,17 @@ class AgentSigningServiceTest {
             store.put(reference.tenantId() + ":" + reference.keyName(), plaintext);
         }
 
+        /**
+         * Unsupported on purpose. This double stores only plaintext by key — it has no
+         * grant list to update, and agent signing never touches one. Throwing beats
+         * returning a fabricated metadata record a later test might believe.
+         */
+        @Override
+        public SecretMetadata updateGrant(SecretReference reference, List<String> allowedAgents, String description)
+                throws SecretProviderException {
+            throw new SecretProviderException("InMemorySecretProvider does not model grants");
+        }
+
         @Override
         public void delete(SecretReference reference) throws SecretNotFoundException, SecretProviderException {
             String key = reference.tenantId() + ":" + reference.keyName();

@@ -80,4 +80,9 @@ COPY --from=build /src/docs/*.md                   /deployments/docs/
 
 EXPOSE 7070
 
-ENTRYPOINT ["java", "-Deddi.docs.path=/deployments/docs", "-jar", "/deployments/quarkus-run.jar"]
+# --add-modules=jdk.incubator.vector keeps the in-process `jlama` provider on its SIMD
+# path. Unlike the production image, this ENTRYPOINT is a bare `java` invocation with no
+# run-java.sh and no JAVA_OPTS_APPEND, so the flag has to be spelled out here or the demo
+# image silently runs Jlama on scalar tensor operations. See src/main/docker/Dockerfile
+# and JlamaRuntimeFlagsTest, which grades both images.
+ENTRYPOINT ["java", "--add-modules=jdk.incubator.vector", "-Deddi.docs.path=/deployments/docs", "-jar", "/deployments/quarkus-run.jar"]

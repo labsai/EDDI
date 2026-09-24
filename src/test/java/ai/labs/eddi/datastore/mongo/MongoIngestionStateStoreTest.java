@@ -7,6 +7,8 @@ package ai.labs.eddi.datastore.mongo;
 import ai.labs.eddi.modules.ingestion.IIngestionStateStore;
 import ai.labs.eddi.modules.ingestion.IngestionStateStoreContract;
 import ai.labs.eddi.modules.ingestion.mongo.MongoIngestionStateStore;
+import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.Updates;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 
@@ -30,5 +32,12 @@ class MongoIngestionStateStoreTest extends MongoTestBase implements IngestionSta
     @Override
     public IIngestionStateStore store() {
         return store;
+    }
+
+    @Override
+    public void forceDocumentOwner(String sourceId, String documentId, String runId) {
+        getDatabase().getCollection("rag_ingestion_documents").updateOne(
+                Filters.and(Filters.eq("sourceId", sourceId), Filters.eq("documentId", documentId)),
+                Updates.set("fencingRunId", runId));
     }
 }

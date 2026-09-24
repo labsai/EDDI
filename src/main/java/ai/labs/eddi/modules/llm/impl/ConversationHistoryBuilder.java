@@ -399,7 +399,16 @@ class ConversationHistoryBuilder {
         // because
         // after step-skipping the first message is mid-conversation, not the opening
         // greeting.
-        if (skipSteps == 0 && !includeFirstAgentMessage && !result.isEmpty()) {
+        //
+        // The AiMessage check carries the same rule as ConversationLogGenerator: only
+        // an AGENT message is ever dropped, because an agent with no
+        // `ai.labs.output` step opens on the USER's turn and deleting that emptied a
+        // one-turn history. Both callers pass skipSteps > 0 today, so this branch is
+        // currently unreachable and has no behavioural test of its own — the assertions
+        // live on the ConversationLogGenerator path both callers take at skipSteps 0.
+        // It is written correctly rather than left as a trap for the next caller.
+        if (skipSteps == 0 && !includeFirstAgentMessage && !result.isEmpty()
+                && result.getFirst() instanceof AiMessage) {
             result.removeFirst();
         }
 

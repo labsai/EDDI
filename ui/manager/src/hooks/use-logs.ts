@@ -10,7 +10,7 @@ import {
   type HistoryFilters,
 } from "@/lib/api/logs";
 import type { BearerEventSource } from "@/lib/bearer-event-source";
-import { useSessionLogStore } from "@/hooks/session-log-store";
+import { useSessionLogStore, connect as connectSessionLogStream } from "@/hooks/session-log-store";
 
 // ==================== Query Keys ====================
 
@@ -66,6 +66,20 @@ export function useLogStream(filters: LogFilters = {}) {
   const sessionEntries = useSessionLogStore((s) => s.entries);
   const sessionConnected = useSessionLogStore((s) => s.connected);
   const sessionSeeded = useSessionLogStore((s) => s.seeded);
+
+  /*
+   * Hold the unfiltered stream open only while this hook is mounted AND
+   * unfiltered. The store used to connect at import time from `main.tsx`, so
+   * every Manager tab kept an SSE connection open on every page for its whole
+   * lifetime — and EDDI serves HTTP/1.1, where Chrome allows six concurrent
+   * connections per origin across the entire profile. A couple of tabs
+   * saturated the cap and pages hung on skeleton loaders while the server was
+   * fine. The store refcounts, so two viewers share one socket.
+   */
+  useEffect(() => {
+    if (filtered) return;
+    return connectSessionLogStream();
+  }, [filtered]);
 
   // ── Filtered SSE path ────────────────────────────────────────
   const [filteredEntries, setFilteredEntries] = useState<LogEntry[]>([]);

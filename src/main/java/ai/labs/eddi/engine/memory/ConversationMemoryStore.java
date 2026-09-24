@@ -17,10 +17,14 @@ import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Indexes;
 import com.mongodb.client.model.Projections;
+import com.mongodb.client.model.Updates;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.bson.BsonDocument;
+import org.bson.BsonDocumentWriter;
 import org.bson.Document;
+import org.bson.codecs.EncoderContext;
 import org.bson.conversions.Bson;
 import org.bson.types.ObjectId;
 import org.jboss.logging.Logger;
@@ -28,6 +32,7 @@ import org.jboss.logging.Logger;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Set;
 
 import com.mongodb.client.FindIterable;
 import static ai.labs.eddi.engine.model.Context.ContextType.valueOf;
@@ -54,6 +59,40 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     private static final String KEY_AGENT_ID = "agentId";
     private static final String KEY_AGENT_VERSION = "agentVersion";
     private static final String KEY_CONVERSATION_STATE = "conversationState";
+    /**
+     * Optimistic-concurrency revision — see
+     * {@link ConversationMemorySnapshot#getRevision()}.
+     */
+    private static final String KEY_REVISION = "_rev";
+    /**
+     * The revision created by the last full-document (history-rewriting) write —
+     * see {@link ConversationMemorySnapshot#getHistoryRevision()}.
+     */
+    private static final String KEY_HISTORY_REVISION = "_histRev";
+    private static final String KEY_CONVERSATION_STEPS = "conversationSteps";
+    private static final String KEY_CONVERSATION_OUTPUTS = "conversationOutputs";
+    /**
+     * Keys the append path handles with a dedicated operator, so they must not also
+     * be {@code $set} or {@code $unset}: the two step/output arrays are pushed to,
+     * {@code _rev} is incremented, and {@code _id} is the filter (MongoDB refuses
+     * to update it).
+     */
+    private static final Set<String> APPEND_HANDLED_KEYS = Set.of(OBJECT_ID, KEY_REVISION, KEY_HISTORY_REVISION,
+            KEY_CONVERSATION_STEPS, KEY_CONVERSATION_OUTPUTS);
+    /**
+     * States a say turn's append must never be applied over — see
+     * {@link #appendPreconditions(long)}.
+     */
+    private static final List<String> NON_APPENDABLE_STATES = List.of(ENDED.name(),
+            ConversationState.AWAITING_HUMAN.name(), ConversationState.IN_PROGRESS.name());
+    /**
+     * How many times an append re-applies itself on a newer revision before giving
+     * up and reporting the conflict. Bounded rather than unbounded so a
+     * pathological write-storm on one conversation cannot pin a pipeline thread;
+     * the loop only repeats when another writer commits between this attempt's
+     * filter and its write, which needs a genuinely concurrent writer each time.
+     */
+    private static final int MAX_APPEND_ATTEMPTS = 5;
     private final MongoCollection<Document> conversationCollectionDocument;
     private final MongoCollection<ConversationMemorySnapshot> conversationCollectionObject;
 
@@ -72,19 +111,43 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     public String storeConversationMemorySnapshot(ConversationMemorySnapshot snapshot) throws IResourceStore.ResourceStoreException {
         String conversationId = snapshot.getConversationId();
         if (conversationId != null) {
-            var result = conversationCollectionObject.replaceOne(new Document(OBJECT_ID, new ObjectId(conversationId)), snapshot);
+            if (isPureAppend(snapshot)) {
+                appendConversationSteps(snapshot);
+                return conversationId;
+            }
+            long expectedRevision = snapshot.getRevision();
+            // The revision the write creates. Set BEFORE the replace, because
+            // replaceOne serializes the snapshot as-is — the stored _rev has to be the
+            // new one, or every subsequent write would match the same revision and the
+            // guard would never fire.
+            snapshot.setRevision(expectedRevision + 1);
+            long loadedHistoryRevision = snapshot.getHistoryRevision();
+            // A full-document write rewrites the history (or may), so it records itself as
+            // the latest rewrite. An append in flight elsewhere reads this to learn that
+            // re-applying its push would no longer land on the history it was built on.
+            snapshot.setHistoryRevision(expectedRevision + 1);
+            var result = conversationCollectionObject.replaceOne(revisionFilter(conversationId, expectedRevision), snapshot);
             // No upsert on purpose: a missing document means the conversation was
             // deleted while the turn was running (GDPR erasure, retention sweep).
             // Ignoring matchedCount discarded the turn's memory silently and still
             // returned a normal response to the caller — surface the conflict instead.
             if (result.getMatchedCount() == 0) {
-                throw new IResourceStore.ResourceStoreException(
-                        "Conversation '" + conversationId + "' no longer exists — the turn was NOT persisted. "
-                                + "The conversation document was deleted concurrently (e.g. erasure or retention cleanup).");
+                // Restore the revision so the caller's snapshot still describes the
+                // document it was derived from — a retry must re-present the revision
+                // it actually loaded, not the one this attempt failed to create.
+                snapshot.setRevision(expectedRevision);
+                snapshot.setHistoryRevision(loadedHistoryRevision);
+                throw conversationNotWritten(conversationId, expectedRevision);
             }
+            snapshot.setPersistedStepCount(snapshot.getConversationSteps().size());
         } else {
             snapshot.setId(new ObjectId().toString());
+            // A fresh conversation starts at revision 1, so a legacy-shaped document
+            // (no _rev, read as UNVERSIONED_REVISION) can never be mistaken for one.
+            snapshot.setRevision(ConversationMemorySnapshot.UNVERSIONED_REVISION + 1);
+            snapshot.setHistoryRevision(ConversationMemorySnapshot.UNVERSIONED_REVISION + 1);
             conversationCollectionObject.insertOne(snapshot);
+            snapshot.setPersistedStepCount(snapshot.getConversationSteps().size());
         }
 
         return snapshot.getConversationId();
@@ -101,14 +164,269 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
             // CAS miss (discard) rather than NPE on expectedState.name().
             return false;
         }
-        var filter = new Document(OBJECT_ID, new ObjectId(conversationId))
-                .append(KEY_CONVERSATION_STATE, expectedState.name());
-        // Atomic compare-and-store: replaces the whole document (including its new
-        // state) only while the persisted state still equals expectedState. If a
-        // concurrent terminal writer already flipped it (ENDED/EXECUTION_INTERRUPTED),
-        // the filter misses and nothing is overwritten.
+        long expectedRevision = snapshot.getRevision();
+        var filter = Filters.and(
+                revisionFilter(conversationId, expectedRevision),
+                Filters.eq(KEY_CONVERSATION_STATE, expectedState.name()));
+        // Atomic compare-and-store on BOTH arbiters: replaces the whole document
+        // (including its new state) only while the persisted state still equals
+        // expectedState AND nothing has written the document since this snapshot was
+        // loaded. The state half keeps a concurrent terminal writer
+        // (ENDED/EXECUTION_INTERRUPTED) from being overwritten; the revision half keeps
+        // a concurrent NON-terminal writer — a say turn that appended a step while an
+        // undo was in flight — from being overwritten too, which the state filter alone
+        // cannot see because both writers leave the same state behind.
+        long loadedHistoryRevision = snapshot.getHistoryRevision();
+        snapshot.setRevision(expectedRevision + 1);
+        snapshot.setHistoryRevision(expectedRevision + 1);
         var result = conversationCollectionObject.replaceOne(filter, snapshot);
-        return result.getMatchedCount() > 0;
+        if (result.getMatchedCount() == 0) {
+            snapshot.setRevision(expectedRevision);
+            snapshot.setHistoryRevision(loadedHistoryRevision);
+            return false;
+        }
+        snapshot.setPersistedStepCount(snapshot.getConversationSteps().size());
+        return true;
+    }
+
+    /**
+     * Whether this write only <em>adds</em> steps to the document it was derived
+     * from, which is what every ordinary conversation turn does.
+     * <p>
+     * All three conditions matter:
+     * <ul>
+     * <li>the snapshot knows the persisted step count — so it came from a load
+     * whose steps and outputs agreed, and was not rewritten by an undo or a redo
+     * (both reset the count; see
+     * {@code ConversationMemory.forgetPersistedStepCount})</li>
+     * <li>steps and outputs are still in step with each other, so one count
+     * identifies the new tail of both</li>
+     * <li>the count grew — a rerun re-executes the current step without starting a
+     * new one, so it lands here with no growth and takes the full-document replace,
+     * which is the only shape that can persist a change to an existing step</li>
+     * </ul>
+     * <p>
+     * <b>What leaving the prefix untouched rests on — a convention, not a type.</b>
+     * The memory API makes writing to an earlier step awkward:
+     * {@code IConversationStepStack.get}/{@code peek} return
+     * {@code IConversationStep}, which has no {@code storeData}; only
+     * {@code getCurrentStep()} returns an {@code IWritableConversationStep}. It
+     * does not make it impossible: the {@code IData} those steps hand out has
+     * setters, their {@code getConversationOutput()} is a mutable map, and so is
+     * every entry of {@code getConversationOutputs()}. No production code mutates a
+     * prior step today — the readers (InputParserTask, MemoryItemConverter, the
+     * behavior-rule matchers, PropertySetterTask, ConversationHistoryBuilder,
+     * ConversationSummarizer, ContextualToolsProvider) only read, and
+     * LifecycleManager's strict-write handling touches the current step only. A
+     * future caller that did would have its change dropped on the next append,
+     * which is why this is written down here.
+     */
+    private static boolean isPureAppend(ConversationMemorySnapshot snapshot) {
+        int baseline = snapshot.getPersistedStepCount();
+        int steps = snapshot.getConversationSteps().size();
+        int outputs = snapshot.getConversationOutputs().size();
+        return baseline >= 0 && steps == outputs && steps > baseline;
+    }
+
+    /**
+     * Persists a pure-append turn by pushing only the new steps and outputs,
+     * instead of shipping and rewriting the entire document.
+     * <p>
+     * <b>Why this exists.</b> Conversations on a production 5.x database average
+     * 410 KB, so appending one step used to send 410 KB over the wire, rewrite the
+     * whole document and put the whole document in the oplog — per turn. That same
+     * whole-document cost is what made the 6.x startup migration take 24 minutes on
+     * that database.
+     * <p>
+     * <b>It is also the repair for a lost update.</b> Because the operation only
+     * adds to the tail, a revision conflict can be retried rather than reported:
+     * reload the revision, re-apply the same push on top of whatever the winner
+     * wrote, and both turns survive. That is not available to a full-document
+     * replace, whose "retry" would be the overwrite this whole change exists to
+     * prevent.
+     * <p>
+     * <b>The field set is derived, not listed.</b> Everything the snapshot encodes
+     * is {@code $set}, and every key of
+     * {@link ConversationMemorySnapshot#TOP_LEVEL_KEYS} it did NOT encode is
+     * {@code $unset} — so the non-array part of the document ends up exactly as
+     * {@code replaceOne} would have left it, including fields the turn cleared to
+     * null (the HITL bookmark, every time {@code clearStaleToolPauseState} runs). A
+     * hand-written field list here would silently stop persisting the next field
+     * somebody adds, which would be a worse bug than the one this fixes.
+     */
+    private void appendConversationSteps(ConversationMemorySnapshot snapshot) throws IResourceStore.ResourceStoreException {
+        String conversationId = snapshot.getConversationId();
+        int baseline = snapshot.getPersistedStepCount();
+        int totalSteps = snapshot.getConversationSteps().size();
+        // The revision this turn was LOADED at. Kept apart from the per-attempt
+        // revision
+        // below: it is what the retry precondition compares against, and it is what a
+        // conflict report must name.
+        final long loadedRevision = snapshot.getRevision();
+        BsonDocument encoded = encodeWithTailOnly(snapshot, baseline);
+
+        List<Bson> operations = new ArrayList<>();
+        for (var field : encoded.entrySet()) {
+            if (!APPEND_HANDLED_KEYS.contains(field.getKey())) {
+                operations.add(Updates.set(field.getKey(), field.getValue()));
+            }
+        }
+        for (String key : ConversationMemorySnapshot.TOP_LEVEL_KEYS) {
+            if (!APPEND_HANDLED_KEYS.contains(key) && !encoded.containsKey(key)) {
+                operations.add(Updates.unset(key));
+            }
+        }
+        operations.add(Updates.pushEach(KEY_CONVERSATION_STEPS, List.copyOf(encoded.getArray(KEY_CONVERSATION_STEPS))));
+        operations.add(Updates.pushEach(KEY_CONVERSATION_OUTPUTS, List.copyOf(encoded.getArray(KEY_CONVERSATION_OUTPUTS))));
+        operations.add(Updates.inc(KEY_REVISION, 1L));
+        Bson update = Updates.combine(operations);
+
+        long attemptRevision = loadedRevision;
+        for (int attempt = 1;; attempt++) {
+            var filter = Filters.and(revisionFilter(conversationId, attemptRevision), appendPreconditions(loadedRevision));
+            var result = conversationCollectionDocument.updateOne(filter, update);
+            if (result.getMatchedCount() > 0) {
+                if (attempt == 1) {
+                    snapshot.setRevision(loadedRevision + 1);
+                    snapshot.setPersistedStepCount(totalSteps);
+                } else {
+                    markMerged(snapshot, loadedRevision);
+                }
+                return;
+            }
+            var stored = conversationCollectionDocument.find(Filters.eq(OBJECT_ID, new ObjectId(conversationId)))
+                    .projection(new Document(KEY_REVISION, 1).append(KEY_HISTORY_REVISION, 1).append(KEY_CONVERSATION_STATE, 1))
+                    .first();
+            if (stored == null) {
+                // Gone, not contended — there is nothing to append to.
+                throw conversationNotWritten(conversationId, loadedRevision);
+            }
+            long storedRevision = longOrUnversioned(stored.get(KEY_REVISION));
+            long storedHistoryRevision = longOrUnversioned(stored.get(KEY_HISTORY_REVISION));
+            Object storedState = stored.get(KEY_CONVERSATION_STATE);
+            if (storedHistoryRevision > loadedRevision || isNonAppendableState(storedState)) {
+                // The winner did not merely append: it rewrote the history (an undo, a
+                // redo, a rerun, a HITL pause or resume commit) or moved the conversation
+                // into a state a say turn must never overwrite (ENDED, AWAITING_HUMAN,
+                // IN_PROGRESS). Re-applying our $set/$unset on top of that would erase a
+                // pending approval, resurrect an ended conversation, or push our step
+                // after a history it was never an answer to. Refuse and report.
+                throw new ConcurrentConversationModificationException(conversationId, loadedRevision);
+            }
+            if (attempt >= MAX_APPEND_ATTEMPTS) {
+                LOGGER.warnf("Gave up appending the turn of conversation %s after %d attempts (loaded revision %d, now %d)",
+                        LogSanitizer.sanitize(conversationId), attempt, loadedRevision, storedRevision);
+                throw new ConcurrentConversationModificationException(conversationId, loadedRevision);
+            }
+            // Every write since our load was itself an append, so our history is still a
+            // prefix of the stored one: re-apply the SAME push after the winner's steps.
+            // The $set fields stay last-writer-wins, which is the pre-existing semantics.
+            LOGGER.debugf("Retrying the append for conversation %s: revision moved from %d to %d",
+                    LogSanitizer.sanitize(conversationId), attemptRevision, storedRevision);
+            attemptRevision = storedRevision;
+        }
+    }
+
+    /**
+     * Conditions every append attempt must meet besides the revision, evaluated in
+     * the same atomic filter so there is no check-then-act window.
+     * <ul>
+     * <li><b>No history rewrite since the load.</b> Every full-document write
+     * stamps {@code _histRev} with the revision it creates; appends leave it alone.
+     * So {@code _histRev <= loadedRevision} holds exactly when every write since
+     * this turn loaded was an append — the only case in which pushing our tail
+     * after the winner's is correct.</li>
+     * <li><b>A state a say turn may complete over.</b> Never AWAITING_HUMAN (a
+     * pause another instance committed — overwriting it erases the approval while
+     * its timeout stays armed), IN_PROGRESS (a resume is running) or ENDED. The
+     * narrow {@code setConversationState(ENDED)} does not bump the revision, so
+     * without this an in-flight turn on another instance would resurrect an ended
+     * conversation.</li>
+     * </ul>
+     */
+    private static Bson appendPreconditions(long loadedRevision) {
+        return Filters.and(
+                Filters.or(Filters.lte(KEY_HISTORY_REVISION, loadedRevision), Filters.exists(KEY_HISTORY_REVISION, false)),
+                Filters.nin(KEY_CONVERSATION_STATE, NON_APPENDABLE_STATES));
+    }
+
+    private static boolean isNonAppendableState(Object storedState) {
+        return storedState != null && NON_APPENDABLE_STATES.contains(storedState.toString());
+    }
+
+    /**
+     * After a retried (merged) append the document holds the winner's steps
+     * followed by ours, but the live memory holds only ours. It must no longer
+     * claim to mirror the document: leave the snapshot on the revision it was
+     * LOADED at and forget the step baseline, so any further write from this memory
+     * is refused as a conflict instead of silently erasing the winner's step.
+     */
+    private static void markMerged(ConversationMemorySnapshot snapshot, long loadedRevision) {
+        snapshot.setRevision(loadedRevision);
+        snapshot.setPersistedStepCount(ConversationMemorySnapshot.UNKNOWN_PERSISTED_STEP_COUNT);
+    }
+
+    /**
+     * Encodes the snapshot through the collection's own codec, so the append writes
+     * byte-for-byte what {@code replaceOne} would have written for the same fields
+     * — but with the two arrays swapped for their new tails first, so the stored
+     * history is neither re-serialized nor re-sent.
+     */
+    private BsonDocument encodeWithTailOnly(ConversationMemorySnapshot snapshot, int baseline) {
+        var steps = snapshot.getConversationSteps();
+        var outputs = snapshot.getConversationOutputs();
+        snapshot.setConversationSteps(new ArrayList<>(steps.subList(baseline, steps.size())));
+        snapshot.setConversationOutputs(new ArrayList<>(outputs.subList(baseline, outputs.size())));
+        try {
+            var codec = conversationCollectionObject.getCodecRegistry().get(ConversationMemorySnapshot.class);
+            var writer = new BsonDocumentWriter(new BsonDocument());
+            codec.encode(writer, snapshot, EncoderContext.builder().build());
+            return writer.getDocument();
+        } finally {
+            snapshot.setConversationSteps(steps);
+            snapshot.setConversationOutputs(outputs);
+        }
+    }
+
+    private static long longOrUnversioned(Object value) {
+        // Absent on a document written before the field existed.
+        return value instanceof Number number ? number.longValue() : ConversationMemorySnapshot.UNVERSIONED_REVISION;
+    }
+
+    /**
+     * Matches the conversation only while it still holds {@code expectedRevision}.
+     * <p>
+     * {@code UNVERSIONED_REVISION} needs the {@code $or}: a document written before
+     * {@code _rev} existed has no such field, and MongoDB's {@code {_rev: 0}} does
+     * not match a missing field. Without this, every pre-upgrade conversation's
+     * next write would be refused as a phantom conflict.
+     */
+    private static Bson revisionFilter(String conversationId, long expectedRevision) {
+        var idFilter = Filters.eq(OBJECT_ID, new ObjectId(conversationId));
+        if (expectedRevision == ConversationMemorySnapshot.UNVERSIONED_REVISION) {
+            return Filters.and(idFilter,
+                    Filters.or(Filters.eq(KEY_REVISION, expectedRevision), Filters.exists(KEY_REVISION, false)));
+        }
+        return Filters.and(idFilter, Filters.eq(KEY_REVISION, expectedRevision));
+    }
+
+    /**
+     * A zero-match write has exactly two causes, and they need different answers
+     * from the caller, so tell them apart with one extra point-read of the id
+     * alone: the document is gone (deleted mid-turn — nothing to retry against) or
+     * it is there at a different revision (another writer committed first — a retry
+     * from a fresh load can still land).
+     */
+    private IResourceStore.ResourceStoreException conversationNotWritten(String conversationId, long expectedRevision) {
+        boolean stillExists = conversationCollectionDocument
+                .find(Filters.eq(OBJECT_ID, new ObjectId(conversationId)))
+                .projection(new Document(OBJECT_ID, 1)).first() != null;
+        if (stillExists) {
+            return new ConcurrentConversationModificationException(conversationId, expectedRevision);
+        }
+        return new IResourceStore.ResourceStoreException(
+                "Conversation '" + conversationId + "' no longer exists — the turn was NOT persisted. "
+                        + "The conversation document was deleted concurrently (e.g. erasure or retention cleanup).");
     }
 
     @Override

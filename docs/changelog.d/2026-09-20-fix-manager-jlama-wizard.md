@@ -53,18 +53,32 @@ Manager wizard was the outlier.
 
 **Backend**
 
-The five deployment parameters the wizard now points users at did not exist yet —
+The deployment parameters the wizard now points users at did not exist yet —
 surfacing them without adding them would have been a fresh instance of the same bug.
-`JlamaLanguageModelBuilder` now reads `modelCachePath`, `threadCount`,
-`quantizeModelAtRuntime`, `workingDirectory` and `workingQuantizedType`, all of which
-`JlamaChatModel.builder()` has always accepted. `modelCachePath` is the one that
-matters operationally: its default is `~/.jlama/models`, which in a container is the
-ephemeral writable layer, so every pod restart re-downloads multiple gigabytes.
+`JlamaLanguageModelBuilder` now reads `modelCachePath`, `quantizeModelAtRuntime`,
+`workingDirectory` and `workingQuantizedType`, all of which `JlamaChatModel.builder()`
+has always accepted. `modelCachePath` is the one that matters operationally: its
+default is `~/.jlama/models`, which in a container is the ephemeral writable layer, so
+every pod restart re-downloads multiple gigabytes.
+
+**Merge note (main):** this branch originally also mapped `threadCount`. While this
+branch was in flight, `fix/jlama-vector-api` landed on `main` and deliberately
+removed `threadCount` from `recognisedParameters()` — it reaches Jlama's
+process-global, one-shot `PhysicalCoreExecutor.overrideThreadCount`, which throws on
+any second call, so it cannot be a safe per-model setting (`ChatModelRegistry` rebuilds
+Jlama models on cache eviction, secret rotation and idle TTL). Merging this branch with
+`main` kept `main`'s exclusion rather than reintroducing `threadCount`; the wizard-facing
+fixes below are unaffected, since the wizard never exposed `threadCount` itself. `main`
+also factored the parameter mapping into a static `applyTo` for testability and added
+the `JlamaRuntimeSupport.warnOnceIfDegraded()` call — both preserved as-is by the merge.
 
 `ModelParameterValues` gains `applyPath`, following the existing lenient-read
 convention — an unusable value is logged and skipped so the model default stands,
 rather than throwing out of the build path and failing every conversation the agent
-serves.
+serves. `main`'s version of `JlamaLanguageModelBuilder` applies `modelCachePath` and
+`workingDirectory` inline instead (an `isNullOrEmpty` check plus `Path.of`), so
+`applyPath` ships but is not yet wired into a builder; it stays available, tested by
+`ModelParameterValuesTest`, for whichever provider adopts it next.
 
 ### Design decisions
 

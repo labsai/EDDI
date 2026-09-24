@@ -7,7 +7,11 @@ node = "22.23.2"
 "npm:chromadb" = "3.4.3"
 
 [tasks.dev]
-run = "mvn compile quarkus:dev"
+# -Djvm.args carries --add-modules=jdk.incubator.vector into the forked dev JVM, so
+# a `jlama` agent behaves in dev the way it does in the container image. Without it
+# Jlama silently falls back to scalar tensor operations. Kept in step with
+# src/main/docker/Dockerfile and pom.xml; JlamaRuntimeFlagsTest fails if it is lost.
+run = "mvn compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'"
 description = "Start dev mode with live reload (port 7070)"
 
 [tasks.compile]
@@ -45,7 +49,7 @@ run = "mvn package -Plicense-gen -DskipTests"
 description = "Generate third-party licenses (Red Hat certification)"
 
 [tasks.debug]
-run = "mvn quarkus:dev -Dsuspend"
+run = "mvn quarkus:dev -Dsuspend '-Djvm.args=--add-modules=jdk.incubator.vector'"
 description = "Start dev mode and wait for debugger on port 5005"
 
 [tasks.clean]

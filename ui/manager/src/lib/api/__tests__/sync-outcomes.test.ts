@@ -150,18 +150,19 @@ describe("executeSyncBatch", () => {
     expect(execution.results[0]?.error).toBe("unreachable");
   });
 
-  it("survives a body that is not a list", async () => {
+  it("refuses a 2xx body that is not a list", async () => {
     // These calls bypass `ApiClient` — they send zip bodies and custom sync
     // headers — so they also miss its guard against a non-JSON 2xx. A reverse
-    // proxy answering 200 with an HTML page used to die here on
-    // `results.some is not a function`, an unhandled TypeError in place of an
-    // outcome the caller could report.
+    // proxy answering 200 with an HTML page first died here on
+    // `results.some is not a function`; then it was read as an empty list, which
+    // is worse — a proxy page reported as a clean "already up to date". It has to
+    // be an error: a 2xx that is not the per-agent list says nothing about what
+    // was written.
     server.use(http.post(SYNC_BATCH, () => HttpResponse.text("<html>nope</html>")));
 
-    const execution = await executeSyncBatch("https://remote", [], "");
-
-    expect(execution.results).toEqual([]);
-    expect(execution.partial).toBe(false);
+    await expect(executeSyncBatch("https://remote", [], "")).rejects.toThrow(
+      /not a list of per-agent results/
+    );
   });
 
   it("reports a clean batch as not partial", async () => {

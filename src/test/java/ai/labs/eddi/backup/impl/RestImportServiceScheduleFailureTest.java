@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import java.util.Optional;
 import ai.labs.eddi.backup.IZipArchive;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
@@ -26,6 +27,7 @@ import jakarta.enterprise.inject.Instance;
 import jakarta.enterprise.inject.spi.CDI;
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
+import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -113,7 +115,8 @@ class RestImportServiceScheduleFailureTest {
                 mock(IMigrationManager.class), documentDescriptorStore,
                 templateSyntaxMigrator, mock(StructuralMatcher.class),
                 mock(UpgradeExecutor.class), scheduleStore, metrics,
-                mock(ResourceAccessGuard.class), spaceContext);
+                mock(ResourceAccessGuard.class), spaceContext, mock(RagSourceIngestionService.class),
+                true, false, Optional.empty());
 
         when(jsonSerialization.deserialize(anyString(), eq(AgentConfiguration.class)))
                 .thenAnswer(inv -> mapper.readValue((String) inv.getArgument(0), AgentConfiguration.class));

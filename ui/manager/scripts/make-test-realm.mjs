@@ -37,7 +37,10 @@ export const ADMIN_PASSWORD = "e2e-admin-password";
 
 /** Fixtures the canonical realm already ships with passwords. */
 export const ROLE_FIXTURES = {
-  admin: { username: ADMIN_USER, password: ADMIN_PASSWORD, roles: ["eddi-admin", "eddi-editor"] },
+  // eddi-viewer is in there deliberately: EDDI has no role hierarchy, so an
+  // account without it is refused every MCP read tool (McpToolUtils.requireRole
+  // is a literal hasRole). The realm grants the administrator all three.
+  admin: { username: ADMIN_USER, password: ADMIN_PASSWORD, roles: ["eddi-admin", "eddi-editor", "eddi-viewer"] },
   user: { username: "user", password: "user", roles: ["eddi-user"] },
   viewer: { username: "viewer", password: "viewer", roles: ["eddi-viewer"] },
 };

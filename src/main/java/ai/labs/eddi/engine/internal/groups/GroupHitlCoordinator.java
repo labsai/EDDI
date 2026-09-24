@@ -145,6 +145,7 @@ public class GroupHitlCoordinator {
             var persistedState = conversationStore.read(gc.getId()).getState();
             if (persistedState == GroupConversationState.CANCELLED
                     || persistedState == GroupConversationState.FAILED
+                    || persistedState == GroupConversationState.REJECTED
                     || persistedState == GroupConversationState.COMPLETED
                     // CLOSED is terminal too: without it, a leg that keeps running past a
                     // concurrent close would fall through to the unconditional whole-document
@@ -449,6 +450,7 @@ public class GroupHitlCoordinator {
         if (state == GroupConversationState.COMPLETED
                 || state == GroupConversationState.CANCELLED
                 || state == GroupConversationState.FAILED
+                || state == GroupConversationState.REJECTED
                 || state == GroupConversationState.CLOSED) {
             LOGGER.infof("Cancel skipped: GC %s already in terminal state %s", conversationId, state);
             return false;
@@ -605,7 +607,11 @@ public class GroupHitlCoordinator {
 
         // Apply phase-level decision
         if (decision != null && decision.getVerdict() == HitlDecision.HitlVerdict.REJECTED) {
-            gc.setState(GroupConversationState.FAILED);
+            // REJECTED, not FAILED: the run did not break, a human declined its
+            // recommendation. Both are terminal and closeable; only the label differs,
+            // and rendering a recorded decision as "Failed" is wrong in a product whose
+            // point is the human in the loop.
+            gc.setState(GroupConversationState.REJECTED);
             gc.setPausedAt(null);
             // MAJOR-4: Use CAS to prevent concurrent approve clobbering reject
             conversationStore.updateIfState(gc, GroupConversationState.AWAITING_APPROVAL);

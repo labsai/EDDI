@@ -13,6 +13,7 @@ import com.github.benmanes.caffeine.cache.Caffeine;
 import dev.langchain4j.model.bedrock.BedrockTitanEmbeddingModel;
 import dev.langchain4j.model.cohere.CohereEmbeddingModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
+import dev.langchain4j.model.embedding.request.EmbeddingInputType;
 import dev.langchain4j.model.googleai.GoogleAiEmbeddingModel;
 import dev.langchain4j.model.googleai.GoogleAiEmbeddingModel.TaskType;
 import dev.langchain4j.model.mistralai.MistralAiEmbeddingModel;
@@ -48,6 +49,13 @@ public class EmbeddingModelFactory {
 
     private static final Logger LOGGER = Logger.getLogger(EmbeddingModelFactory.class);
 
+    /**
+     * Named in both rejections below — an absent provider and an unrecognised one
+     * are the same problem to whoever has to fix the configuration, so they get the
+     * same list rather than two that can drift apart.
+     */
+    private static final String SUPPORTED_PROVIDERS_HINT = "Supported: openai, azure-openai, ollama, mistral, bedrock, cohere, gemini, vertex";
+
     private final Cache<String, EmbeddingModel> cache = Caffeine.newBuilder().maximumSize(50).expireAfterAccess(Duration.ofMinutes(30)).build();
     private final GlobalVariableResolver globalVariableResolver;
     private final SecretResolver secretResolver;
@@ -81,25 +89,62 @@ public class EmbeddingModelFactory {
 
     /**
      * Returns a cached or newly created embedding model for the given
-     * configuration.
+     * configuration, tagged for the role it will be used in.
+     *
+     * <h4>Why the role is a required argument</h4>
+     *
+     * Asymmetric embedding models produce a different vector for the same text
+     * depending on whether it is being stored or searched with, and they have to be
+     * told which. Ingestion and retrieval previously called a single-argument
+     * {@code getOrCreate} with the same configuration, so they shared one cache
+     * entry and therefore one instance — and Gemini bakes its {@code taskType} in
+     * at construction, defaulting to {@code RETRIEVAL_DOCUMENT}. Every Gemini
+     * knowledge base was embedding its queries as documents.
+     * <p>
+     * Making the role a required parameter rather than adding an optional overload
+     * is the point: a caller cannot forget it, and the compiler names every site
+     * that has to choose. There are three: retrieval, and the two ingestion paths.
+     *
+     * @param config
+     *            the knowledge base's embedding configuration
+     * @param inputType
+     *            {@link EmbeddingInputType#DOCUMENT} when ingesting,
+     *            {@link EmbeddingInputType#QUERY} when retrieving
+     *
+     * @return a model for that role; for the providers that do not accept an input
+     *         type this is the provider's model unchanged
+     *
+     * @see InputTypedEmbeddingModel
      */
-    public EmbeddingModel getOrCreate(RagConfiguration config) {
+    public EmbeddingModel getOrCreate(RagConfiguration config, EmbeddingInputType inputType) {
         String paramKey = config.getEmbeddingParameters() != null ? new TreeMap<>(config.getEmbeddingParameters()).toString() : "";
-        String cacheKey = config.getEmbeddingProvider() + ":" + paramKey;
-        return cache.get(cacheKey, k -> build(config));
+        // The role is part of the key: to an asymmetric provider the two roles are
+        // two different models, and sharing one entry is precisely the defect.
+        String cacheKey = config.getEmbeddingProvider() + ":" + paramKey + ":" + inputType;
+        return cache.get(cacheKey, k -> build(config, inputType));
     }
 
-    private EmbeddingModel build(RagConfiguration config) {
+    private EmbeddingModel build(RagConfiguration config, EmbeddingInputType inputType) {
         Map<String, String> rawParams = config.getEmbeddingParameters() != null ? config.getEmbeddingParameters() : Map.of();
         Map<String, String> params = globalVariableResolver.resolveAll(rawParams);
         ConnectionParameterGuard.rejectConnectionReferences(params);
         // Trimmed, as RagConfiguration validates it: " openai" must not save and then
         // fail here as an unsupported provider.
         String provider = config.getEmbeddingProvider() != null ? config.getEmbeddingProvider().trim() : null;
+        // RagConfiguration.validate() only rejects providers it does not RECOGNISE —
+        // `embeddingProvider != null && !isBlank()` guards its own check, so a
+        // knowledge base saved with an explicit null provider passes validation and
+        // arrives here. The switch below would then throw a bare NullPointerException
+        // from deep inside the factory instead of naming the field the operator has to
+        // fix; a blank provider already reaches the switch's `default` and is reported
+        // properly, so say the same thing for null.
+        if (provider == null || provider.isEmpty()) {
+            throw new IllegalArgumentException("No embedding provider configured for this knowledge base. " + SUPPORTED_PROVIDERS_HINT);
+        }
         params = SecretResolver.requireResolved(secretResolver.resolveSecrets(params), "embedding model '" + provider + "'");
         LOGGER.infof("Building embedding model for provider: %s", provider);
 
-        return switch (provider) {
+        EmbeddingModel model = switch (provider) {
             case "openai" -> buildOpenAi(params);
             case "azure-openai" -> buildAzureOpenAi(params);
             case "ollama" -> buildOllama(params);
@@ -108,10 +153,72 @@ public class EmbeddingModelFactory {
             case "cohere" -> buildCohere(params);
             case "gemini" -> buildGemini(params);
             case "vertex" -> buildVertex(params);
-            default -> throw new IllegalArgumentException(
-                    "Unsupported embedding provider: " + provider
-                            + ". Supported: openai, azure-openai, ollama, mistral, bedrock, cohere, gemini, vertex");
+            default -> throw new IllegalArgumentException("Unsupported embedding provider: " + provider + ". " + SUPPORTED_PROVIDERS_HINT);
         };
+
+        if (pinsNonRetrievalTaskType(provider, params)) {
+            LOGGER.infof("Embedding provider %s pins taskType=%s; leaving the %s role unset so the configured task type stands",
+                    provider, params.get("taskType"), inputType);
+            return model;
+        }
+        return InputTypedEmbeddingModel.wrapIfSupported(model, inputType);
+    }
+
+    /**
+     * True when the configuration deliberately pins a Gemini {@code taskType} that
+     * is not about retrieval, and that choice would be overridden by the
+     * per-request role.
+     *
+     * <h4>Why the role does not simply always win</h4>
+     *
+     * {@code GoogleAiEmbeddingModel.toTaskType} falls back to the build-time
+     * {@code taskType} <em>only when no input type is given</em>; a
+     * {@link EmbeddingInputType#QUERY} or {@link EmbeddingInputType#DOCUMENT} maps
+     * unconditionally onto {@code RETRIEVAL_QUERY} / {@code RETRIEVAL_DOCUMENT}. So
+     * tagging every RAG call with its role — the fix for embedding queries as
+     * documents — would also silently retire a {@code taskType} of
+     * {@code SEMANTIC_SIMILARITY}, {@code CLASSIFICATION} or {@code CLUSTERING}
+     * that an operator had set on purpose. Vectors already in the store would keep
+     * that task type while everything ingested afterwards used
+     * {@code RETRIEVAL_DOCUMENT}: two incompatible geometries in one index, with
+     * nothing failing to say so.
+     * <p>
+     * {@code RETRIEVAL_DOCUMENT} and {@code RETRIEVAL_QUERY} are not treated as
+     * pinned. {@code RETRIEVAL_DOCUMENT} is the default this factory applies when
+     * nothing is configured, and it is exactly the value that produced the defect;
+     * honouring it would leave the bug in place for anyone who had written the
+     * default out explicitly. Both values say "this knowledge base is for
+     * retrieval", which is the statement the role refines rather than contradicts.
+     *
+     * <h4>Why the model name matters</h4>
+     *
+     * Gemini Embedding 2 does not accept {@code task_type} at all — langchain4j
+     * sends {@code null} for any model whose name contains {@code embedding-2} and
+     * applies a role-specific <em>prompt instruction</em> instead. A pinned task
+     * type is already inert there, so skipping the role would cost the instruction
+     * and buy nothing. The name test mirrors that library rule; if a dependency
+     * bump changes it, the symptom is this method going quiet for a model that does
+     * honour the task type, which {@code EmbeddingModelFactoryTest} pins by name.
+     * <p>
+     * Package-private, and tested directly, because every path through
+     * {@link #build} constructs a live provider client — which needs a socket, so
+     * the model-level tests only run where one is available. This predicate is the
+     * whole decision and it can be graded anywhere.
+     */
+    static boolean pinsNonRetrievalTaskType(String provider, Map<String, String> params) {
+        if (!"gemini".equals(provider)) {
+            return false;
+        }
+        String configured = params.get("taskType");
+        if (configured == null || configured.isBlank()) {
+            return false;
+        }
+        String modelName = params.getOrDefault("model", "gemini-embedding-2");
+        if (modelName.contains("embedding-2")) {
+            return false;
+        }
+        TaskType taskType = parseTaskType(configured);
+        return taskType != TaskType.RETRIEVAL_DOCUMENT && taskType != TaskType.RETRIEVAL_QUERY;
     }
 
     // ──────────────────────────────────────────────────
@@ -289,7 +396,7 @@ public class EmbeddingModelFactory {
         return VertexAiEmbeddingModel.builder().project(project).location(location).modelName(model).build();
     }
 
-    private TaskType parseTaskType(String taskTypeStr) {
+    private static TaskType parseTaskType(String taskTypeStr) {
         try {
             TaskType taskType = (taskTypeStr == null || taskTypeStr.isBlank())
                     ? TaskType.RETRIEVAL_DOCUMENT

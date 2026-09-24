@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationProperties;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -40,6 +41,16 @@ public class ConversationMemory implements IConversationMemory {
     private ConversationState conversationState;
     private ResolutionPrincipal.Provenance resolutionProvenance;
     private volatile boolean cancelled;
+    /**
+     * Optimistic-concurrency revision of the document this memory was loaded from.
+     * See {@link IConversationMemory#getRevision()}.
+     */
+    private long revision = ConversationMemorySnapshot.UNVERSIONED_REVISION;
+    /**
+     * Step count of the document this memory was loaded from. See
+     * {@link IConversationMemory#getPersistedStepCount()}.
+     */
+    private int persistedStepCount = ConversationMemorySnapshot.UNKNOWN_PERSISTED_STEP_COUNT;
 
     /** Transient — never serialized to MongoDB. Set per-turn for SSE streaming. */
     private transient ConversationEventSink eventSink;
@@ -118,6 +129,7 @@ public class ConversationMemory implements IConversationMemory {
         redoCache.push(currentStep);
         currentStep = (IWritableConversationStep) previousSteps.pop();
         conversationOutputs.pop();
+        forgetPersistedStepCount();
     }
 
     @Override
@@ -139,6 +151,19 @@ public class ConversationMemory implements IConversationMemory {
         previousSteps.push(currentStep);
         currentStep = (IWritableConversationStep) redoCache.pop();
         conversationOutputs.push(currentStep.getConversationOutput());
+        forgetPersistedStepCount();
+    }
+
+    /**
+     * Undo and redo REWRITE the step history rather than extending it — undo
+     * removes the last step and moves it to the redo cache, redo moves one back —
+     * so the persisted step list is no longer a prefix of this memory's. Dropping
+     * the baseline forces the next write down the full-document replace, which is
+     * the only shape that can persist a removal or a reordering. (A redo grows the
+     * count by one and would otherwise look exactly like a fresh turn.)
+     */
+    private void forgetPersistedStepCount() {
+        this.persistedStepCount = ConversationMemorySnapshot.UNKNOWN_PERSISTED_STEP_COUNT;
     }
 
     @Override
@@ -178,6 +203,26 @@ public class ConversationMemory implements IConversationMemory {
     @Override
     public Integer getAgentVersion() {
         return agentVersion;
+    }
+
+    @Override
+    public long getRevision() {
+        return revision;
+    }
+
+    @Override
+    public void setRevision(long revision) {
+        this.revision = revision;
+    }
+
+    @Override
+    public int getPersistedStepCount() {
+        return persistedStepCount;
+    }
+
+    @Override
+    public void setPersistedStepCount(int persistedStepCount) {
+        this.persistedStepCount = persistedStepCount;
     }
 
     public List<ConversationOutput> getConversationOutputs() {

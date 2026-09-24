@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import java.util.Optional;
 import ai.labs.eddi.backup.IZipArchive;
 import ai.labs.eddi.backup.model.ImportPreview.DiffAction;
 import ai.labs.eddi.backup.model.ImportPreview.ResourceDiff;
@@ -35,6 +36,7 @@ import jakarta.enterprise.inject.spi.CDI;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
+import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -115,7 +117,8 @@ class RestImportServiceArchiveContractTest {
                 mock(IMigrationManager.class), documentDescriptorStore,
                 templateSyntaxMigrator, mock(StructuralMatcher.class),
                 mock(UpgradeExecutor.class), scheduleStore, mock(BackupMetrics.class), mock(ResourceAccessGuard.class),
-                spaceContext);
+                spaceContext, mock(RagSourceIngestionService.class),
+                true, false, Optional.empty());
 
         when(jsonSerialization.deserialize(anyString(), eq(AgentConfiguration.class)))
                 .thenAnswer(inv -> mapper.readValue((String) inv.getArgument(0), AgentConfiguration.class));

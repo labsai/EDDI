@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import java.util.Optional;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.spaces.SpaceContext;
@@ -29,6 +30,7 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.core.Response;
+import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -77,7 +79,8 @@ class RestImportServiceExtendedTest {
                 zipArchive, jsonSerialization,
                 migrationManager, documentDescriptorStore,
                 templateSyntaxMigrator, structuralMatcher, upgradeExecutor, mock(IScheduleStore.class), mock(BackupMetrics.class),
-                mock(ResourceAccessGuard.class), mock(SpaceContext.class));
+                mock(ResourceAccessGuard.class), mock(SpaceContext.class), mock(RagSourceIngestionService.class),
+                true, false, Optional.empty());
     }
 
     // ==================== normalizeVaultReferences ====================
@@ -131,7 +134,7 @@ class RestImportServiceExtendedTest {
         @Test
         @DisplayName("should throw for invalid source URL")
         void invalidSourceUrl() {
-            assertThrows(IllegalArgumentException.class,
+            assertThrows(BadRequestException.class,
                     () -> importService.executeSyncBatch(null, List.of(), null));
         }
 
@@ -142,7 +145,7 @@ class RestImportServiceExtendedTest {
             // The validateSourceUrl check would reject null, so use valid URL
             // The RemoteApiResourceSource constructor would fail, but the error is caught
             // per-request. We need a valid URL but can't actually connect.
-            assertThrows(IllegalArgumentException.class,
+            assertThrows(BadRequestException.class,
                     () -> importService.executeSyncBatch("http://localhost",
                             List.of(new SyncRequest("src", 1, "tgt", null, null)), null));
         }
@@ -157,14 +160,14 @@ class RestImportServiceExtendedTest {
         @Test
         @DisplayName("should throw for null source URL")
         void nullSourceUrl() {
-            assertThrows(IllegalArgumentException.class,
+            assertThrows(BadRequestException.class,
                     () -> importService.executeSync(null, "agent", 1, "target", null, null, null));
         }
 
         @Test
         @DisplayName("should throw for blank source URL")
         void blankSourceUrl() {
-            assertThrows(IllegalArgumentException.class,
+            assertThrows(BadRequestException.class,
                     () -> importService.executeSync("", "agent", 1, "target", null, null, null));
         }
     }
@@ -178,14 +181,14 @@ class RestImportServiceExtendedTest {
         @Test
         @DisplayName("should throw for null source URL")
         void nullSourceUrl() {
-            assertThrows(IllegalArgumentException.class,
+            assertThrows(BadRequestException.class,
                     () -> importService.listRemoteAgents(null, null));
         }
 
         @Test
         @DisplayName("should throw for localhost URL (blocked by validator)")
         void localhostUrl() {
-            assertThrows(IllegalArgumentException.class,
+            assertThrows(BadRequestException.class,
                     () -> importService.listRemoteAgents("http://localhost:8080", null));
         }
     }
@@ -199,7 +202,7 @@ class RestImportServiceExtendedTest {
         @Test
         @DisplayName("should throw for null source URL")
         void nullSourceUrl() {
-            assertThrows(IllegalArgumentException.class,
+            assertThrows(BadRequestException.class,
                     () -> importService.previewSync(null, "agent", 1, "target", null));
         }
     }

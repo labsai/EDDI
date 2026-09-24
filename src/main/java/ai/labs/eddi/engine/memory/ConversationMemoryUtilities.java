@@ -72,6 +72,14 @@ public class ConversationMemoryUtilities {
         // read as legacy — a snapshot built from live memory is current by
         // definition and must say so explicitly.
         snapshot.setSchemaVersion(ConversationMemorySnapshot.CURRENT_SCHEMA_VERSION);
+        // The revision this write is DERIVED from, not the one it will create: the
+        // store filters on it and increments it, so a turn built on a snapshot that
+        // another writer has already superseded is refused instead of overwriting it.
+        snapshot.setRevision(conversationMemory.getRevision());
+        // How many steps the document held when this memory was loaded. Lets the store
+        // append the steps this turn added instead of rewriting the whole document; see
+        // IConversationMemory#getPersistedStepCount.
+        snapshot.setPersistedStepCount(conversationMemory.getPersistedStepCount());
 
         if (conversationMemory.getUserId() != null) {
             snapshot.setUserId(conversationMemory.getUserId());
@@ -143,6 +151,10 @@ public class ConversationMemoryUtilities {
                 snapshot.getUserId());
 
         conversationMemory.setConversationState(snapshot.getConversationState());
+        // The revision this memory is a view of. Every write derived from this memory
+        // carries it, so the store can tell "built on the current document" from
+        // "built on a document someone else has since replaced".
+        conversationMemory.setRevision(snapshot.getRevision());
         conversationMemory.setResolutionProvenance(snapshot.getResolutionProvenance());
         conversationMemory.setHitlPausedWorkflowId(snapshot.getHitlPausedWorkflowId());
         conversationMemory.setHitlPausedAbsoluteTaskIndex(snapshot.getHitlPausedAbsoluteTaskIndex());
@@ -171,6 +183,14 @@ public class ConversationMemoryUtilities {
                     + "pairing by index and skipping the drift.", LogSanitizer.sanitize(snapshot.getConversationId()), conversationSteps.size(),
                     conversationOutputs.size());
         }
+        // The append baseline, and ONLY when the two lists agree: on a drifted document
+        // the steps this turn adds cannot be identified by a single count, and leaving
+        // it unknown routes the next write through the full-document replace, which
+        // also repairs the drift.
+        conversationMemory.setPersistedStepCount(conversationSteps.size() == conversationOutputs.size()
+                ? conversationSteps.size()
+                : ConversationMemorySnapshot.UNKNOWN_PERSISTED_STEP_COUNT);
+
         for (int i = 0; i < conversationOutputs.size(); i++) {
             var conversationOutput = conversationOutputs.get(i);
             if (i > 0) {
@@ -408,17 +428,16 @@ public class ConversationMemoryUtilities {
      * Mutates the passed snapshot, matching
      * {@link #redactRawPendingToolCallsForRead}: both operate on a snapshot freshly
      * loaded for one request, never on shared state.
+     * <p>
+     * Private on purpose: it is one step of
+     * {@link #sanitizePendingToolCallsForApprover}, never a projection on its own.
+     * While it was public the MCP mirror of {@code detail=full} called it directly
+     * and so served argumentsRaw and the transcript the REST surface strips — the
+     * two doors drifted because there were two methods to choose from.
      */
-    public static ConversationMemorySnapshot stripRequestFingerprintsForRead(ConversationMemorySnapshot snapshot) {
-        if (snapshot == null || snapshot.getHitlPendingToolCalls() == null) {
-            return snapshot;
-        }
-        // The gating assistant message is resume machinery only, and it embeds every
-        // gated call's RAW arguments. Dropped here rather than only in the approver
-        // sanitizer because this is the one method every full-detail read calls —
-        // including the MCP approval-status tool, which calls nothing else.
-        snapshot.getHitlPendingToolCalls().setGatingAssistantMessageJson(null);
-        if (snapshot.getHitlPendingToolCalls().getCalls() == null) {
+    private static ConversationMemorySnapshot stripRequestFingerprintsForRead(ConversationMemorySnapshot snapshot) {
+        if (snapshot == null || snapshot.getHitlPendingToolCalls() == null
+                || snapshot.getHitlPendingToolCalls().getCalls() == null) {
             return snapshot;
         }
         for (var call : snapshot.getHitlPendingToolCalls().getCalls()) {
@@ -441,6 +460,11 @@ public class ConversationMemoryUtilities {
     /**
      * Sanitizes a snapshot about to be returned in FULL to an approver
      * ({@code approval-status?detail=full}, and the MCP mirror of it).
+     * <p>
+     * The ONE approver projection: both {@code RestAgentEngine#getApprovalStatus}
+     * and {@code McpHitlTools#getApprovalStatus} must call exactly this method, so
+     * a field added here is stripped on every surface at once. A new field on
+     * {@code PendingToolCallBatch} that carries raw tool arguments belongs here.
      * <p>
      * The approver's contract is the redacted arguments and the redacted request
      * preview — {@link #stripRequestFingerprintsForRead} handled the digest, but

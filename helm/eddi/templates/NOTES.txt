@@ -58,15 +58,17 @@
 
   👤 Give the EDDI administrator a password — it ships without one:
 
-    The realm seeds `eddi` with the eddi-admin and eddi-editor roles and NO
-    credential, so nobody can log in to /manage until you set one. It used to
+    The realm seeds `eddi` with the eddi-admin, eddi-editor and eddi-viewer
+    roles and NO credential, so nobody can log in to /manage until you set one. It used to
     ship as eddi/eddi, which the Keycloak Service made a guessable EDDI
     administrator for every pod in the cluster.
 
       Keycloak admin console → Users → eddi → Credentials → Set password
 
-    Or grant those two realm roles to an account of your own. The unprivileged
-    fixtures (viewer/viewer, user/user) still log straight in.
+    Or grant all three realm roles to an account of your own — eddi-viewer
+    included, because EDDI has no role hierarchy and an administrator without
+    it is refused every read tool over MCP. The unprivileged fixtures
+    (viewer/viewer, user/user) still log straight in.
 
 {{- end }}
 
