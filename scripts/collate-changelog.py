@@ -57,9 +57,11 @@ from changelog_common import (
     FRAGMENT_NAME,
     LIVE,
     ROW_DATE,
+    closes,
     date_of,
     fence_mask,
     heading_indices,
+    is_real_date,
     normalised_size,
     read,
     register_separator,
@@ -69,8 +71,11 @@ from changelog_common import (
     write,
 )
 
-# A fenced block carrying rows for one of the running registers.
-REGISTER_INFO = re.compile(r"^(`{3,})(decision-log|regression-note)[ \t]*$")
+# A fenced block carrying rows for one of the running registers. Tildes as well
+# as backticks, matching FENCE_MARK — otherwise a ~~~decision-log block is not
+# recognised as a register and then trips the near-miss check below, which would
+# tell the author their spelling is wrong when it is not.
+REGISTER_INFO = re.compile(r"^(`{3,}|~{3,})(decision-log|regression-note)[ \t]*$")
 REGISTER_OF = {"decision-log": "## Decision Log", "regression-note": "## Regression Notes"}
 # Near-misses: the right intent with the wrong spelling. Left alone these render
 # as an ordinary code block and the rows are never filed, which nothing notices.
@@ -85,7 +90,14 @@ BLANK_ROW = re.compile(r"^\|[\s|]*\|\s*$")
 
 
 def fragments():
-    """Every pending fragment, oldest filename first, validated."""
+    """Every pending fragment, oldest filename first.
+
+    Directories and non-markdown files are stepped over rather than refused:
+    this runs unattended on main, and a stray .DS_Store should not stop the
+    night's entries being collated. ChangelogFragmentTest is the gate that
+    keeps them from being committed in the first place, and it is stricter —
+    it allows nothing here but a README and dated fragments.
+    """
     if not os.path.isdir(FRAGMENT_DIR):
         return []
     found = []
@@ -93,7 +105,7 @@ def fragments():
         if name == "README.md":
             continue  # the directory's own instructions
         path = os.path.join(FRAGMENT_DIR, name)
-        if not os.path.isfile(path) or not name.endswith(".md"):
+        if not os.path.isfile(path) or not name.lower().endswith(".md"):
             continue
         if not FRAGMENT_NAME.match(name):
             sys.exit("%s is not a changelog fragment name. Use YYYY-MM-DD-<slug>.md, "
@@ -119,16 +131,16 @@ def take_register_rows(text, path):
             i += 1
             continue
 
-        run, info = len(mark.group(1)), mark.group(2).strip()
+        opened, info = (mark.group(1)[0], len(mark.group(1))), mark.group(2).strip()
         close = i + 1
         while close < len(lines):
             end = FENCE_MARK.match(lines[close].strip())
-            if end and len(end.group(1)) >= run and not end.group(2).strip():
+            if end and closes(end, opened):
                 break
             close += 1
         if close >= len(lines):
-            sys.exit("%s has an unterminated ```%s block — add the closing fence."
-                     % (path, info or "```"))
+            sys.exit("%s has an unterminated %s%s block — add the closing fence."
+                     % (path, opened[0] * opened[1], info))
 
         register = REGISTER_INFO.match(lines[i].strip())
         if register:
@@ -144,10 +156,14 @@ def take_register_rows(text, path):
                 # orders the rows once several fragments' worth arrive at once.
                 # A row without one cannot be placed, so it is refused here
                 # rather than silently landing wherever it happened to be read.
-                if not ROW_DATE.match(line):
+                row_date = ROW_DATE.match(line)
+                if not row_date:
                     sys.exit("%s has a ```%s row whose first cell is not a date: %s\n"
                              "Start the row with the day it applies to, e.g. "
                              "'| 2026-09-21 | …'." % (path, kind, line[:80]))
+                if not is_real_date(row_date.group(1)):
+                    sys.exit("%s has a ```%s row dated %s, which is not a day that exists: %s"
+                             % (path, kind, row_date.group(1), line[:80]))
                 rows.setdefault(REGISTER_OF[kind], []).append(line)
         elif REGISTER_TYPO.match(info):
             sys.exit("%s opens a ```%s block. The collator files rows from ```decision-log and "
@@ -191,9 +207,18 @@ def entries_of(path):
             sys.exit("%s has an entry with no date in its heading: %s\n"
                      "Every entry ends with its date in brackets, e.g. '(2026-09-21)'."
                      % (path, heading[:80]))
+        date = date_of(heading, None)
+        if not is_real_date(date):
+            sys.exit("%s is dated %s, which is not a day that exists: %s"
+                     % (path, date, heading[:80]))
         end = starts[n + 1] if n + 1 < len(starts) else len(lines)
         body = "\n".join(lines[start:end]).rstrip() + "\n"
-        found.append((date_of(heading, None), os.path.basename(path), n, undepth(body, path)))
+        # Entries in the live file are separated by a rule, and a fragment is
+        # not written with one — without this a collated entry butts straight
+        # against the next heading, which is visible in the rendered file.
+        if not body.rstrip().endswith("---"):
+            body = body + "\n---\n"
+        found.append((date, os.path.basename(path), n, undepth(body, path)))
     return found, registers
 
 
@@ -228,6 +253,13 @@ def merge_entries(collected, existing):
 
     Ties put the new entry above the old one, so a run of same-day entries
     reads with this collation's work on top.
+
+    This is a merge of two sorted sequences, so it assumes the live file is
+    already in date order — and today it is not quite: a handful of entries
+    predate the convention and sit out of sequence. A new entry then lands at
+    the first point where an older date appears, which is above those strays
+    rather than among them. Nothing is dropped or duplicated either way; the
+    placement simply inherits whatever disorder is already there.
     """
     dated, fallback = [], "9999-99-99"
     for heading, body in existing:
@@ -274,18 +306,29 @@ def main():
     collected.sort(key=lambda e: (e[1], e[2]))
     collected.sort(key=lambda e: e[0], reverse=True)
 
+    header, existing, registers = split_sections(read(LIVE))
+
+    # The destination is validated under --check too. Returning before this
+    # meant a live file missing a register section, or a table missing its
+    # |---| row, passed "validate, change nothing" and then failed the real
+    # run — which for the nightly job is a failure on main with nobody's change
+    # to blame for it.
+    unplaced = set(register_rows) - {h for h, _ in registers}
+    if unplaced:
+        sys.exit("docs/changelog.md has no %s section to append to."
+                 % " or ".join(sorted(unplaced)))
+    for heading, body in registers:
+        if not any(SEPARATOR_ROW.match(line) for line in body.split("\n")):
+            sys.exit("The '%s' table in docs/changelog.md has no |---|---| separator row, so there "
+                     "is nowhere to insert below and nothing renders as a table. Add one under "
+                     "its header row." % heading)
+
     if args.check:
         print("\n%d entr%s and %d register row(s) ready to collate."
               % (len(collected), "y" if len(collected) == 1 else "ies",
                  sum(len(r) for r in register_rows.values())))
         return 0
 
-    header, existing, registers = split_sections(read(LIVE))
-
-    unplaced = set(register_rows) - {h for h, _ in registers}
-    if unplaced:
-        sys.exit("docs/changelog.md has no %s section to append to."
-                 % " or ".join(sorted(unplaced)))
     # Newest first, matching both tables and the entry list. The rows arrive in
     # fragment-filename order — oldest first — and were inserted as one block at
     # the top, so a night that collated several days' fragments put 09-20 above

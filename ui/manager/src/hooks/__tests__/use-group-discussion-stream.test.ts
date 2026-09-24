@@ -5,6 +5,8 @@ import {
   useStreamingGroupIds,
   useGroupStreamStore,
 } from "@/hooks/use-group-discussion-stream";
+import type { GroupConversation, TranscriptEntry } from "@/lib/api/groups";
+import type { GroupApprovalRequest } from "@/lib/api/hitl";
 
 const mockStreamGroupDiscussion = vi.fn();
 const mockStreamGroupApproval = vi.fn();
@@ -895,5 +897,203 @@ describe("useGroupDiscussionStream", () => {
     expect(ids.result.current).toEqual([]);
 
     act(() => stream.result.current.resetStream());
+  });
+});
+
+/**
+ * Where a resumed or continued stream picks up from. Neither endpoint replays
+ * the discussion so far, and continuation rounds open with `round_start`, not
+ * `group_start`.
+ */
+describe("useGroupDiscussionStream — resuming and continuing", () => {
+  beforeEach(() => {
+    mockStreamGroupDiscussion.mockReset();
+    mockStreamGroupApproval.mockReset();
+    mockStreamGroupContinue.mockReset();
+  });
+  afterEach(() => {
+    useGroupStreamStore.setState({ streams: {} });
+  });
+
+  const APPROVE = { decision: { verdict: "APPROVED" } } as GroupApprovalRequest;
+
+  const row = (speakerAgentId: string, content: string, type = "OPINION", phaseIndex = 0) =>
+    ({
+      speakerAgentId,
+      speakerDisplayName: speakerAgentId,
+      content,
+      phaseIndex,
+      phaseName: null,
+      type,
+      timestamp: "2026-09-24T10:00:00Z",
+      errorReason: null,
+      targetAgentId: null,
+    }) as TranscriptEntry;
+
+  /** The stored document as the page holds it: two phases of round 1, paused before phase 2. */
+  const stored = (overrides: Partial<GroupConversation> = {}) =>
+    ({
+      id: "gc-paused",
+      state: "AWAITING_APPROVAL",
+      roundStartTranscriptIndex: 0,
+      transcript: [row("user", "Fund it?", "QUESTION", -1), row("a1", "Yes."), row("a2", "Critique.", "CRITIQUE", 1)],
+      ...overrides,
+    }) as GroupConversation;
+
+  const events = (...evts: { type: string; data: object }[]) =>
+    (async function* () {
+      for (const e of evts) yield { type: e.type, data: JSON.stringify(e.data) };
+    })();
+
+  it("records a continuation round's question from round_start and moves the round boundary", async () => {
+    mockStreamGroupDiscussion.mockReturnValue(
+      events(
+        { type: "group_start", data: { groupConversationId: "gc-1", question: "Round 1" } },
+        { type: "speaker_complete", data: { agentId: "a1", displayName: "A", phaseIndex: 0, response: "R1" } },
+        { type: "group_complete", data: { synthesizedAnswer: "S1" } },
+      ),
+    );
+    const { result } = renderHook(() => useGroupDiscussionStream());
+    await act(async () => {
+      await result.current.startStream("group-1", "Round 1");
+    });
+    const before = result.current.streamState.transcript.length;
+
+    // What /continue/stream actually sends for round 2: round_start, never group_start.
+    mockStreamGroupContinue.mockReturnValue(
+      events(
+        { type: "round_start", data: { groupConversationId: "gc-1", round: 2, question: "Round 2", phaseCount: 1 } },
+        { type: "speaker_complete", data: { agentId: "a1", displayName: "A", phaseIndex: 0, response: "R2" } },
+        { type: "group_complete", data: { synthesizedAnswer: "S2" } },
+      ),
+    );
+    await act(async () => {
+      await result.current.continueStream("group-1", "gc-1", "Round 2");
+    });
+
+    const s = result.current.streamState;
+    expect(s.transcript[before]?.type).toBe("QUESTION");
+    expect(s.transcript[before]?.content).toBe("Round 2");
+    expect(s.roundStartIndex).toBe(before);
+  });
+
+  it("seeds an approval after a reload from the stored document, so earlier phases stay", async () => {
+    mockStreamGroupApproval.mockReturnValue(
+      events(
+        { type: "hitl_resume", data: { verdict: "APPROVED", decidedBy: "u" } },
+        { type: "speaker_complete", data: { agentId: "a1", displayName: "A", phaseIndex: 2, response: "Resumed." } },
+      ),
+    );
+    // A fresh store: nothing from before the pause, as after a page reload.
+    const { result } = renderHook(() => useGroupDiscussionStream("group-1"));
+    await act(async () => {
+      await result.current.approveAndStream("group-1", "gc-paused", APPROVE, stored());
+    });
+
+    expect(result.current.streamState.transcript.map((e) => e.content)).toEqual([
+      "Fund it?",
+      "Yes.",
+      "Critique.",
+      "Resumed.",
+    ]);
+  });
+
+  it("does not repeat the question when a resume re-announces the round it resumes", async () => {
+    mockStreamGroupApproval.mockReturnValue(
+      events({ type: "group_start", data: { groupConversationId: "gc-paused", question: "Fund it?" } }),
+    );
+    const { result } = renderHook(() => useGroupDiscussionStream("group-1"));
+    await act(async () => {
+      await result.current.approveAndStream(
+        "group-1",
+        "gc-paused",
+        APPROVE,
+        stored({ transcript: [row("user", "Fund it?", "QUESTION", -1)] }),
+      );
+    });
+
+    const questions = result.current.streamState.transcript.filter((e) => e.type === "QUESTION");
+    expect(questions).toHaveLength(1);
+    expect(result.current.streamState.roundStartIndex).toBe(0);
+  });
+
+  it("continues from the stored rounds after a reload, not from the new round alone", async () => {
+    mockStreamGroupContinue.mockReturnValue(
+      events({
+        type: "round_start",
+        data: { groupConversationId: "gc-paused", round: 2, question: "Next?", phaseCount: 1 },
+      }),
+    );
+    const { result } = renderHook(() => useGroupDiscussionStream("group-1"));
+    await act(async () => {
+      await result.current.continueStream("group-1", "gc-paused", "Next?", stored({ state: "COMPLETED" }));
+    });
+
+    const s = result.current.streamState;
+    expect(s.transcript.map((e) => e.content)).toEqual(["Fund it?", "Yes.", "Critique.", "Next?"]);
+    expect(s.roundStartIndex).toBe(3);
+  });
+
+  it("drops another discussion's rows and spend when resuming a different one", async () => {
+    // Watch one discussion stream...
+    mockStreamGroupDiscussion.mockReturnValue(
+      events(
+        { type: "group_start", data: { groupConversationId: "gc-other", question: "Other?" } },
+        { type: "speaker_complete", data: { agentId: "x1", displayName: "X", phaseIndex: 0, response: "Other." } },
+        {
+          type: "cost_updated",
+          data: { attributionKey: "x1", displayName: "X", attributedCost: 1.5, totalCost: 1.5 },
+        },
+        { type: "group_complete", data: { synthesizedAnswer: "Other answer" } },
+      ),
+    );
+    const { result } = renderHook(() => useGroupDiscussionStream("group-1"));
+    await act(async () => {
+      await result.current.startStream("group-1", "Other?");
+    });
+    expect(result.current.streamState.memberCosts.size).toBeGreaterThan(0);
+
+    // ...then approve a different, paused one, with no stored copy to hand.
+    mockStreamGroupApproval.mockReturnValue(
+      events({ type: "hitl_resume", data: { verdict: "APPROVED", decidedBy: "u" } }),
+    );
+    await act(async () => {
+      await result.current.approveAndStream("group-1", "gc-paused", APPROVE);
+    });
+
+    const s = result.current.streamState;
+    expect(s.conversationId).toBe("gc-paused");
+    expect(s.transcript.some((e) => e.content === "Other.")).toBe(false);
+    expect(s.memberCosts.size).toBe(0);
+    expect(s.synthesizedAnswer).toBeNull();
+  });
+
+  it("keeps a live pause's own transcript when the stored copy is behind it", async () => {
+    mockStreamGroupDiscussion.mockReturnValue(
+      events(
+        { type: "group_start", data: { groupConversationId: "gc-paused", question: "Fund it?" } },
+        { type: "speaker_complete", data: { agentId: "a1", displayName: "A", phaseIndex: 0, response: "Yes." } },
+        { type: "speaker_complete", data: { agentId: "a2", displayName: "B", phaseIndex: 1, response: "Critique." } },
+      ),
+    );
+    const { result } = renderHook(() => useGroupDiscussionStream("group-1"));
+    await act(async () => {
+      await result.current.startStream("group-1", "Fund it?");
+    });
+
+    mockStreamGroupApproval.mockReturnValue(
+      events({ type: "hitl_resume", data: { verdict: "APPROVED", decidedBy: "u" } }),
+    );
+    await act(async () => {
+      await result.current.approveAndStream(
+        "group-1",
+        "gc-paused",
+        APPROVE,
+        // Fetched before the last streamed rows landed.
+        stored({ transcript: [row("user", "Fund it?", "QUESTION", -1)] }),
+      );
+    });
+
+    expect(result.current.streamState.transcript.map((e) => e.content)).toEqual(["Fund it?", "Yes.", "Critique."]);
   });
 });
