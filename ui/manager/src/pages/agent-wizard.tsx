@@ -903,7 +903,7 @@ function LlmStep({
             <p className="mt-1.5">
               {t(
                 "setupWizard.jlamaNoteTuning",
-                "Running EDDI in a container? Open the agent's LLM configuration afterwards and set modelCachePath to a mounted volume — the default cache lives on the container's ephemeral layer, so the model is re-downloaded on every restart. threadCount, quantizeModelAtRuntime, workingDirectory and workingQuantizedType can be tuned there too."
+                "Running EDDI in a container? Open the agent's LLM configuration afterwards and set modelCachePath to a mounted volume — the default cache lives on the container's ephemeral layer, so the model is re-downloaded on every restart. quantizeModelAtRuntime, workingDirectory and workingQuantizedType can be tuned there too."
               )}
             </p>
           </div>
