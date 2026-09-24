@@ -1179,15 +1179,46 @@ public class LlmTask implements ILifecycleTask {
     private static final Set<String> TEMPLATE_SKIP_PARAMS = Set.of("apiKey", "signingSecret", "appPassword", "botToken");
 
     /**
-     * A vault reference MENTIONED in an LLM parameter — {@code {vault:key-name}},
-     * with or without the leading {@code $} (which is plain text to Qute either
-     * way).
+     * A configuration reference MENTIONED in an LLM parameter —
+     * {@code {vault:key-name}}, {@code {vars:key}}, {@code {connection:name}} or
+     * {@code {caller:token}}, with or without the leading {@code $} (which is plain
+     * text to Qute either way).
+     * <p>
+     * All four namespaces are resolved AFTER templating, by
+     * {@code ChatModelRegistry} and {@code SecretResolver}, and none of them has a
+     * Qute namespace resolver — so to Qute every one of them is an unresolvable
+     * namespaced expression, not just {@code vault}.
      */
-    private static final Pattern VAULT_REF_MENTION = Pattern.compile("\\{vault:[^}]*\\}");
+    static final Pattern CONFIG_REF_MENTION = Pattern.compile("\\{(?:vault|eddivault|vars|connection|caller):[^}]*\\}");
 
     /**
-     * Wraps {@code {vault:...}} mentions in Qute raw sections so a PROMPT may talk
-     * about the syntax without crashing templating.
+     * Substrings that make a value WORTH running {@link #CONFIG_REF_MENTION}
+     * against — the cheap pre-check, so the common no-reference value never pays
+     * for a regex.
+     * <p>
+     * This is a superset filter, not the namespace list: it must match everything
+     * the pattern can match, and may match more. The legacy {@code eddivault:}
+     * namespace is deliberately absent because {@code "eddivault:"} CONTAINS
+     * {@code "vault:"}, so it is already covered — dropping {@code "vault:"} from
+     * this list would silently stop escaping the legacy prefix too. Any namespace
+     * added to the pattern must have a substring of it present here;
+     * {@code LlmTaskVaultMentionTest} fails if one does not.
+     */
+    private static final List<String> CONFIG_REF_NAMESPACES = List.of("vault:", "vars:", "connection:", "caller:");
+
+    /**
+     * Wraps configuration-reference mentions ({@code vault}, {@code vars},
+     * {@code connection}, {@code caller}) in Qute raw sections, so a parameter may
+     * CARRY or TALK ABOUT one without crashing templating.
+     * <p>
+     * Two shapes hit this. A prompt that documents the syntax, and a parameter
+     * whose value IS a reference — {@code "modelName": "${vars:gemini-model}"} is
+     * resolved by {@code ChatModelRegistry} after templating, but Qute sees it
+     * first. Before this escaped more than {@code vault}, such an agent logged "No
+     * namespace resolver found for [vars]" on every single turn (observed live),
+     * and the parameter fell back to its raw value — which happens to be right for
+     * a value that is ONLY a reference, and silently wrong for one that also
+     * contains a real expression, since the whole render is abandoned.
      * <p>
      * The Platform Operator's system prompt instructs the model to write secrets as
      * {@code ${vault:key-name}} references. Qute parses the brace part as a
@@ -1209,11 +1240,11 @@ public class LlmTask implements ILifecycleTask {
      * double-wrapped and render its markers. Prompts do not write Qute raw
      * sections; accepting that beats parsing Qute here.
      */
-    static String escapeVaultMentions(String value) {
-        if (value == null || !value.contains("vault:")) {
+    static String escapeConfigReferenceMentions(String value) {
+        if (value == null || CONFIG_REF_NAMESPACES.stream().noneMatch(value::contains)) {
             return value;
         }
-        return VAULT_REF_MENTION.matcher(value).replaceAll(match -> "{|" + match.group() + "|}");
+        return CONFIG_REF_MENTION.matcher(value).replaceAll(match -> "{|" + match.group() + "|}");
     }
 
     private HashMap<String, String> runTemplateEngineOnParams(Map<String, String> parameters, Map<String, Object> templateDataObjects) {
@@ -1222,7 +1253,7 @@ public class LlmTask implements ILifecycleTask {
         processedParams.forEach((key, value) -> {
             try {
                 if (!isNullOrEmpty(value) && !TEMPLATE_SKIP_PARAMS.contains(key)) {
-                    processedParams.put(key, templatingEngine.processTemplate(escapeVaultMentions(value), templateDataObjects));
+                    processedParams.put(key, templatingEngine.processTemplate(escapeConfigReferenceMentions(value), templateDataObjects));
                 }
             } catch (ITemplatingEngine.TemplateEngineException e) {
                 LOGGER.errorf(e, "Template processing failed for LLM parameter '%s': %s", key, e.getLocalizedMessage());
