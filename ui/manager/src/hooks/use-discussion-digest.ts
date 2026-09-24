@@ -181,6 +181,24 @@ export interface DiscussionDigest {
   isEmpty: boolean;
 }
 
+/**
+ * States in which the discussion will run no further, so no phase is "now" and no
+ * member is still "pending".
+ *
+ * `REJECTED` is here because the backend treats it as terminal ("treated as
+ * FAILED everywhere that asks 'may this still run?'"). It arrived after this list
+ * was first written, and the omission was silent: a rejected discussion kept the
+ * phase it was rejected in pulsing as "Now" indefinitely, with its members
+ * "pending". A string-union state gains members without any type error, so this
+ * list is the one place to update.
+ */
+const TERMINAL_STATES: ReadonlySet<GroupConversationState> = new Set<GroupConversationState>([
+  "COMPLETED",
+  "FAILED",
+  "REJECTED",
+  "CANCELLED",
+]);
+
 /** Entry types that mean "this member's turn failed", not "this is their position". */
 const FAILURE_TYPES: ReadonlySet<TranscriptEntryType> = new Set<TranscriptEntryType>(["ERROR", "SKIPPED"]);
 
@@ -196,12 +214,19 @@ const NON_MEMBER_TYPES: ReadonlySet<TranscriptEntryType> = new Set<TranscriptEnt
 ]);
 
 /**
- * Entry types that carry a member's position, mirroring the backend's
- * `StanceSummaryEngine.STANCE_BEARING`.
+ * Entry types a stance may be EXTRACTED from — the backend's extraction set,
+ * i.e. `StanceSummaryEngine.STANCE_BEARING` minus its `JSON_CONTRACT` types.
  *
  * ABSTAINED is excluded for the same reason it is there: its content is a
  * refusal to add anything, so extracting from it would replace a member's real
  * last position with "I have nothing to add".
+ *
+ * Deliberately absent too: `VOTE`, `BID`, `RETRO`, `PLAN`, `TASK_RESULT` and
+ * `VERIFICATION` carry a JSON contract, not prose. The lead "sentence" of a
+ * ballot is `{"choice":"pgvector","confidence":0.8,` — shown to the reader as
+ * that member's own words, and, being the newest entry, replacing their real
+ * position after every VOTE or RETRO phase. The backend's extractor skips the
+ * same set; its LLM summariser still reads them.
  */
 const STANCE_BEARING: ReadonlySet<TranscriptEntryType> = new Set<TranscriptEntryType>([
   "OPINION",
@@ -217,15 +242,6 @@ const STANCE_BEARING: ReadonlySet<TranscriptEntryType> = new Set<TranscriptEntry
   "HUMAN_INPUT",
   "FOLLOW_UP",
 ]);
-
-/**
- * Deliberately NOT in {@link STANCE_BEARING}: `VOTE`, `BID`, `RETRO`, `PLAN`,
- * `TASK_RESULT` and `VERIFICATION` carry a JSON contract, not prose. The lead
- * "sentence" of a ballot is `{"choice":"pgvector","confidence":0.8,` — shown to
- * the reader as that member's own words, and, being the newest entry, replacing
- * their real position after every VOTE or RETRO phase. The backend's extractor
- * excludes the same set; the LLM summariser still reads them.
- */
 
 /** Hard cap on a locally extracted stance; the backend's default for its own. */
 const STANCE_MAX_CHARS = 160;
@@ -418,7 +434,7 @@ export function buildDigest(
     isLive && streamState?.currentPhase ? streamState.currentPhase.index + 1 : 0,
   );
 
-  const terminal = state === "COMPLETED" || state === "FAILED" || state === "CANCELLED";
+  const terminal = TERMINAL_STATES.has(state);
 
   const phases: DigestPhase[] = [];
   for (let i = 0; i < phaseCount; i++) {

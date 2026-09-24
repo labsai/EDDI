@@ -14,6 +14,7 @@ import ai.labs.eddi.modules.ingestion.PreviewBusyException;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
+import ai.labs.eddi.modules.ingestion.files.IngestedFileService;
 import ai.labs.eddi.modules.rag.RagIngestionService;
 import jakarta.ws.rs.ForbiddenException;
 import jakarta.ws.rs.core.Response;
@@ -57,6 +58,7 @@ class RestRagIngestionSourcesTest {
 
     private IRestRagStore restRagStore;
     private RagSourceIngestionService sourceIngestionService;
+    private IngestedFileService ingestedFileService;
     private ResourceAccessGuard accessGuard;
     private RestRagIngestion rest;
 
@@ -65,7 +67,9 @@ class RestRagIngestionSourcesTest {
         restRagStore = mock(IRestRagStore.class);
         sourceIngestionService = mock(RagSourceIngestionService.class);
         accessGuard = mock(ResourceAccessGuard.class);
-        rest = new RestRagIngestion(restRagStore, mock(RagIngestionService.class), sourceIngestionService, accessGuard);
+        ingestedFileService = mock(IngestedFileService.class);
+        rest = new RestRagIngestion(restRagStore, mock(RagIngestionService.class), sourceIngestionService,
+                ingestedFileService, accessGuard);
 
         when(restRagStore.readRag(eq(KB_ID), anyInt())).thenReturn(knowledgeBaseWithSource());
         when(sourceIngestionService.runAsync(anyString(), any(), any())).thenReturn(Optional.of("run-key"));

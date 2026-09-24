@@ -512,7 +512,7 @@ nothing. It also means a fire's `COMPLETED` status says the discussion was
 writeback has run. VERIFIED outcomes stay VERIFIED on the backlog and credit the
 assignee's `perMemberStats`; anything else returns to PENDING with the
 reviewer's feedback appended to the description — **the cross-run retry
-loop**. A FAILED/CANCELLED discussion returns every pulled task untouched.
+loop**. A FAILED, REJECTED or CANCELLED discussion returns every pulled task untouched.
 Retro lessons flow through I8 unchanged (no duplication).
 
 **Stale claims are reclaimed.** The default group HITL timeout policy is

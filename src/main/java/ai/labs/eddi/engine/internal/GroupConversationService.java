@@ -1567,8 +1567,9 @@ public class GroupConversationService implements IGroupConversationService {
             // for COMPLETED rounds so follow-ups and continuations can reuse
             // dynamically-created agents; keep them alive while AWAITING_APPROVAL (the
             // discussion will resume). Clean up immediately only on terminal states with
-            // no follow-up or close path (FAILED, CANCELLED).
+            // no follow-up path (FAILED, REJECTED, CANCELLED).
             if (gc.getState() == GroupConversationState.FAILED
+                    || gc.getState() == GroupConversationState.REJECTED
                     || gc.getState() == GroupConversationState.CANCELLED) {
                 cleanupEphemeralAgents(gc, config);
             }

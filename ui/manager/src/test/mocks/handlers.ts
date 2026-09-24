@@ -2421,6 +2421,42 @@ export const handlers = [
     return HttpResponse.json({ status: "purged", sourceId: "src-1" });
   }),
 
+  // Uploaded files of an ingestion source of type "upload".
+  http.get("*/ragstore/rags/:id/sources/:sourceId/files", () => {
+    return HttpResponse.json([
+      {
+        fileId: "3f2a91c4e5b6d7089a1b2c3d4e5f6071",
+        fileName: "employee-handbook.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 1048576,
+        contentHash: "a1b2c3",
+        uploadedAt: "2026-09-18T09:12:00Z",
+        indexState: "INDEXED",
+      },
+    ]);
+  }),
+
+  http.post("*/ragstore/rags/:id/sources/:sourceId/files", () => {
+    return HttpResponse.json({
+      stored: [
+        {
+          fileId: "aa11bb22cc33dd44ee55ff6677889900",
+          fileName: "notes.md",
+          mimeType: "text/markdown",
+          sizeBytes: 64,
+          contentHash: "d4e5f6",
+          uploadedAt: "2026-09-18T09:20:00Z",
+          indexState: "NOT_INDEXED",
+        },
+      ],
+      rejected: [],
+    });
+  }),
+
+  http.delete("*/ragstore/rags/:id/sources/:sourceId/files/:fileId", ({ params }) => {
+    return HttpResponse.json({ status: "deleted", fileId: params.fileId });
+  }),
+
   // --- Group Store Mock Handlers ---
   http.get("*/groupstore/groups/descriptors", () => {
     const groups = [
@@ -3746,6 +3782,54 @@ export const secretsHandlers = [
     return HttpResponse.json(filtered);
   }),
 
+  // Update a secret's agent grant. Registered BEFORE the generic secret PUT so
+  // the more specific path wins; it echoes the requested list back and reports no
+  // affected agents, which is the "widening a grant" case. A test that needs the
+  // "these deployed agents lose access" warning overrides this via server.use().
+  http.put(
+    "*/secretstore/secrets/:tenantId/:keyName/grant",
+    async ({ params, request }) => {
+      const tenantId = params.tenantId as string;
+      const keyName = params.keyName as string;
+      const body = (await request.json()) as {
+        allowedAgents?: string[];
+        description?: string;
+      };
+      const existing = MOCK_SECRETS.find(
+        (s) => s.tenantId === tenantId && s.keyName === keyName,
+      );
+      if (!existing) {
+        return HttpResponse.json({ error: "Secret not found" }, { status: 404 });
+      }
+      // An empty array is truthy, so a bare falsiness check accepted `[]` — which
+      // the backend rejects, because everywhere else an empty list means "every
+      // agent". A mock that accepts it hides exactly the regression that matters.
+      if (!Array.isArray(body.allowedAgents) || body.allowedAgents.length === 0) {
+        return HttpResponse.json(
+          { error: "allowedAgents is required and must not be empty" },
+          { status: 400 },
+        );
+      }
+      const url = new URL(request.url);
+      return HttpResponse.json({
+        reference:
+          tenantId === "default"
+            ? `\${vault:${keyName}}`
+            : `\${vault:${tenantId}/${keyName}}`,
+        tenantId,
+        keyName,
+        dryRun: url.searchParams.get("dryRun") === "true",
+        allowedAgents: body.allowedAgents,
+        previousAllowedAgents: existing.allowedAgents,
+        grantsAllAgents: body.allowedAgents.includes("*"),
+        description: body.description ?? existing.description,
+        createdAt: existing.createdAt,
+        lastRotatedAt: existing.lastRotatedAt,
+        agentsLosingAccess: [],
+      });
+    },
+  ),
+
   // Store secret (tenant-scoped)
   http.put("*/secretstore/secrets/:tenantId/:keyName", ({ params }) => {
     const tenantId = params.tenantId as string;
@@ -4364,6 +4448,11 @@ export const scheduleHandlers = [
       groupId: "group1",
       userId: "manager-user",
       state: "COMPLETED",
+      // The backend computes this from `state` and always serializes it
+      // (GroupConversation.getAvailableActions, READ_ONLY). Omitting it here made
+      // the Manager read `[]` and disable the composer, so a fixture-backed test
+      // could not tell "continue this discussion" from "this discussion is over".
+      availableActions: ["followup", "continue", "close"],
       originalQuestion: "Should we expand into the European market this quarter?",
       transcript: [
         { speakerAgentId: "user", speakerDisplayName: "User", content: "Should we expand into the European market this quarter?", phaseIndex: -1, phaseName: null, type: "QUESTION", timestamp: new Date(now.getTime() - 600000).toISOString(), errorReason: null, targetAgentId: null },
@@ -5205,6 +5294,25 @@ const MOCK_EXPORT_PREVIEW = {
   ],
 };
 
+/**
+ * What EDDI's `UpgradeResult` looks like on the wire: a per-resource tally and
+ * the failures, if any. `hasFailures`/`wroteAnything` are derived methods on the
+ * Java record, not components, so they are deliberately absent here.
+ */
+const MOCK_UPGRADE_RESULT = {
+  agentUri: "eddi://ai.labs.agent/agentstore/agents/agent1?version=2",
+  agentUpdated: true,
+  updated: 2,
+  created: 0,
+  skipped: 3,
+  failures: [] as Array<{
+    sourceId: string;
+    resourceType: string;
+    name: string | null;
+    reason: string;
+  }>,
+};
+
 const MOCK_IMPORT_PREVIEW = {
   sourceAgentId: "agent1",
   sourceAgentName: "Support Agent",
@@ -5293,14 +5401,33 @@ export const backupSyncHandlers = [
     );
   }),
 
-  // Sync execute (single)
+  // Sync execute (single) — 201 and an UpgradeResult, as EDDI answers when a
+  // sync wrote something. The status is what the client branches on: 200 means
+  // the two instances already agreed, 207 that some resources failed.
   http.post("*/backup/import/sync", () => {
-    return new HttpResponse(null, { status: 202 });
+    return HttpResponse.json(MOCK_UPGRADE_RESULT, {
+      status: 201,
+      headers: { Location: MOCK_UPGRADE_RESULT.agentUri },
+    });
   }),
 
-  // Sync execute (batch)
-  http.post("*/backup/import/sync/batch", () => {
-    return new HttpResponse(null, { status: 202 });
+  // Sync execute (batch) — one BatchSyncResult per request, in request order.
+  // This used to answer 202 with no body at all, a shape the backend never
+  // produces, so every assertion about what a sync *did* was really an
+  // assertion about an empty response.
+  http.post("*/backup/import/sync/batch", async ({ request }) => {
+    const requests = (await request.json()) as Array<{
+      sourceAgentId: string;
+      targetAgentId: string | null;
+    }>;
+    return HttpResponse.json(
+      requests.map((r) => ({
+        sourceAgentId: r.sourceAgentId,
+        targetAgentId: r.targetAgentId,
+        result: MOCK_UPGRADE_RESULT,
+        error: null,
+      }))
+    );
   }),
 
   // ── User Conversation Store ──

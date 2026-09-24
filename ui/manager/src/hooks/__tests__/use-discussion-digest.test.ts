@@ -155,6 +155,21 @@ describe("buildDigest — phases", () => {
     expect(digest.phases[1]?.status).toBe("pending");
   });
 
+  it("treats a REJECTED discussion as finished — no phase left pulsing as Now", () => {
+    // REJECTED is terminal on the backend. Missing from this digest's terminal
+    // list, the phase a human rejected at stayed "active" indefinitely and its
+    // members "pending", with no type error to flag it.
+    const conv = conversation({
+      state: "REJECTED",
+      currentPhaseIndex: 1,
+      transcript: [entry(A, 0), entry(B, 0)],
+    });
+    const d = buildDigest(conv, undefined, PHASES);
+    expect(d.phases.map((p) => p.status)).toEqual(["done", "pending"]);
+    expect(d.phases.some((p) => p.status === "active")).toBe(false);
+    expect(d.matrix[A]?.[1]?.kind).not.toBe("pending");
+  });
+
   it("counts only member contributions, not bookkeeping rows", () => {
     const conv = conversation({
       transcript: [entry(A, 0), entry(A, 0, "CONVERGENCE"), entry(A, 0, "QUESTION")],

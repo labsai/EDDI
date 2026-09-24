@@ -190,6 +190,30 @@ COPY --from=docs --chown=185 /docs/ /deployments/docs/
 # This is a security requirement — containers MUST NOT run as root
 USER 185
 EXPOSE 7070
+# JDK_JAVA_OPTIONS carries the Jlama Vector API flag. It makes the in-process
+# `jlama` LLM provider usable: Jlama picks its tensor backend once, at first use,
+# and with jdk.incubator.vector unresolved its MachineSpec probe throws inside a
+# catch(Throwable), the vector type stays NONE and it selects
+# NaiveTensorOperations — scalar Java matrix arithmetic, orders of magnitude
+# slower than SIMD and not usable for interactive chat. It degrades silently.
+#
+# Why JDK_JAVA_OPTIONS and not JAVA_OPTS_APPEND below: the java launcher reads
+# JDK_JAVA_OPTIONS itself, independently of run-java.sh. Both JAVA_OPTS and
+# JAVA_OPTS_APPEND are REPLACED wholesale when an operator sets them at runtime
+# (run-java.sh computes opts=${JAVA_OPTS-... ${JAVA_OPTS_APPEND}}, and an -e on
+# `docker run` overrides an ENV rather than appending to it), and operators do
+# exactly that — see docs/setup-eddi-on-aws-with-mongodb-atlas.md. Putting the
+# flag there would mean any such deployment silently loses it. Verified in this
+# base image at this digest: with JDK_JAVA_OPTIONS set, the module resolves even
+# when JAVA_OPTS or JAVA_OPTS_APPEND is overridden; without the flag entirely,
+# ModuleLayer.boot().findModule("jdk.incubator.vector") is empty.
+#
+# Keep in step with Dockerfile.demo (a bare `java` ENTRYPOINT, so it needs its
+# own copy), pom.xml (surefire argLine) and mise.toml; JlamaRuntimeFlagsTest
+# fails the build if any of them loses it. The JVM prints one
+# "NOTE: Picked up JDK_JAVA_OPTIONS" and one "Using incubator modules" line at
+# startup; both are expected.
+ENV JDK_JAVA_OPTIONS="--add-modules=jdk.incubator.vector"
 ENV JAVA_OPTS_APPEND="-Dquarkus.http.host=0.0.0.0 -Djava.util.logging.manager=org.jboss.logmanager.LogManager -Dfile.encoding=UTF8 -Deddi.docs.path=/deployments/docs"
 # for debugging:
 # ENV JAVA_OPTS_APPEND="-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005"

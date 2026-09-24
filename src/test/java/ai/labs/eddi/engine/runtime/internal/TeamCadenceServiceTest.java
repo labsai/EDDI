@@ -378,6 +378,40 @@ class TeamCadenceServiceTest {
         assertEquals(GroupWorkspace.NO_RUNNING_DISCUSSION, workspace.getRunningDiscussionId());
     }
 
+    /**
+     * The cadence reconciler's switch is the last one over
+     * {@code GroupConversationState} in {@code src/main}, and it is exhaustive by
+     * hand rather than by the compiler (it has a {@code default} arm). When
+     * {@code REJECTED} was added it was routed to that default, so a human
+     * declining a cadence run's recommendation looked like "still running":
+     * writeback never ran, the claim was held, every later fire was skipped, and
+     * the pulled tasks stayed IN_PROGRESS on the backlog until {@code claim-ttl}
+     * (default PT24H) elapsed -- or forever with a non-positive TTL.
+     * <p>
+     * Driven through {@code reconcile} rather than {@code writebackFailure}
+     * directly: routing is the thing that broke, and calling the writeback by hand
+     * would pass with the state in the wrong arm.
+     */
+    @Test
+    @DisplayName("a REJECTED discussion releases the claim, as FAILED and CANCELLED do")
+    void reconcile_rejectedDiscussion_writesBackAndReleasesTheClaim() throws Exception {
+        var taskA = new TaskItem("A", "", 0);
+        var taskB = new TaskItem("B", "", 0);
+        var workspace = pulledWorkspace(taskA, taskB);
+        var gc = new GroupConversation();
+        gc.setId(GC_ID);
+        gc.setState(GroupConversationState.REJECTED);
+        when(conversationStore.read(GC_ID)).thenReturn(gc);
+
+        assertTrue(service.reconcile(workspace),
+                "a rejected run is over; the workspace is idle and the next fire must not be skipped");
+
+        assertEquals(GroupWorkspace.NO_RUNNING_DISCUSSION, workspace.getRunningDiscussionId());
+        assertEquals(TaskStatus.PENDING, workspace.getBacklog().findById(taskA.id()).status(),
+                "a pulled task must not be stranded IN_PROGRESS by a human's decision");
+        assertEquals(TaskStatus.PENDING, workspace.getBacklog().findById(taskB.id()).status());
+    }
+
     @Test
     @DisplayName("a vanished discussion releases the claim instead of stalling every future fire")
     void reconcile_goneDiscussion_releasesClaim() throws Exception {

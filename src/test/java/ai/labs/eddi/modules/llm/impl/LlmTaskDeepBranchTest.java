@@ -26,6 +26,7 @@ import ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import jakarta.inject.Provider;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -93,7 +94,7 @@ class LlmTaskDeepBranchTest {
         Map<String, Provider<ILanguageModelBuilder>> builders = new HashMap<>();
         builders.put("openai", () -> parameters -> new ChatModel() {
             @Override
-            public ChatResponse chat(List<ChatMessage> messages) {
+            public ChatResponse doChat(ChatRequest chatRequest) {
                 return ChatResponse.builder().aiMessage(aiMessage(LLM_RESPONSE)).build();
             }
         });
@@ -105,7 +106,7 @@ class LlmTaskDeepBranchTest {
         when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
         when(globalVariableResolver.getTemplateData()).thenReturn(Map.of());
 
-        var chatModelRegistry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver);
+        var chatModelRegistry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver, null);
 
         mockSnippetService = mock(PromptSnippetService.class);
         when(mockSnippetService.getAll()).thenReturn(Collections.emptyMap());
@@ -475,7 +476,7 @@ class LlmTaskDeepBranchTest {
             Map<String, Provider<ILanguageModelBuilder>> jsonBuilders = new HashMap<>();
             jsonBuilders.put("openai", () -> parameters -> new ChatModel() {
                 @Override
-                public ChatResponse chat(List<ChatMessage> messages) {
+                public ChatResponse doChat(ChatRequest chatRequest) {
                     return ChatResponse.builder().aiMessage(aiMessage("{\"key\":\"value\"}")).build();
                 }
             });
@@ -486,7 +487,7 @@ class LlmTaskDeepBranchTest {
             when(gvr.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
             when(gvr.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
             when(gvr.getTemplateData()).thenReturn(Map.of());
-            var chatModelRegistry = new ChatModelRegistry(jsonBuilders, gvr, secretResolver);
+            var chatModelRegistry = new ChatModelRegistry(jsonBuilders, gvr, secretResolver, null);
             var cws = new CounterweightService(mock(PromptSnippetService.class),
                     new SimpleMeterRegistry());
             cws.initMetrics();

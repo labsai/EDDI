@@ -161,7 +161,49 @@ The deployments that *are* affected have **both** a master key and a grant an op
 references vault secret(s) it is not granted
 ```
 
-Then set `enforce`. To widen a grant instead, add the agent ID to the secret's `allowedAgents` via the [REST API](#rest-api) — or remove the reference from the agent's configuration.
+Then set `enforce`. To widen a grant instead, see below — or remove the reference from the agent's configuration.
+
+### Changing a grant without the secret's value
+
+Use **`PUT /secretstore/secrets/{tenantId}/{keyName}/grant`**. It replaces `allowedAgents` (and optionally the description) and **never touches the encrypted value** — no plaintext is accepted, and none is required:
+
+```bash
+curl -X PUT "$EDDI/secretstore/secrets/default/llm-api-key/grant" \
+  -H 'Content-Type: application/json' \
+  -d '{"allowedAgents": ["0123456789abcdef01234567", "89abcdef0123456789abcdef"]}'
+```
+
+This exists because `PUT /{tenantId}/{keyName}` — the other way to write `allowedAgents` — requires the plaintext value, and **by the time you need to widen a grant the plaintext is gone**, which is the point of having vaulted it. Before this endpoint, adding one agent to a list meant recovering the value from a backup or rotating the key, and the path of least resistance was to grant `["*"]` to everything — throwing away the only control that limits a secret's blast radius. The endpoint is on the same `eddi-admin` role as every other vault endpoint.
+
+Three properties are worth knowing:
+
+- **`allowedAgents` is required and must not be empty.** Unlike the store endpoint, an omitted list is a `400` rather than a silent default to `["*"]`, and so is `[]` — which every other layer reads as "unrestricted": on an edit, a field missing from a JSON body, or a list filtered down to nothing, must not be able to open a narrowed secret to every agent. Send `["*"]` to mean "all agents". A list that mixes the wildcard with agent IDs, such as `["*", "someAgent"]`, is stored as plain `["*"]`, because that is what it already means to the deploy-time check — so a grant never *reads* narrower than it behaves.
+- **Absent means null.** Like every EDDI response, fields whose value is null are omitted — a secret that has never been rotated has no `lastRotatedAt` in the response, rather than `"lastRotatedAt": null`.
+- **It is not a rotation.** `createdAt` and `lastRotatedAt` keep their values and the checksum is unchanged; all three are echoed back so you can see that for yourself. The `SecretResolver` cache is deliberately *not* invalidated — the plaintext cannot have changed, and the grant check reads metadata from the store on every call, so the new grant is in force for the very next deployment either way.
+- **Narrowing a grant is reported, not silently applied.** The response lists every *deployed* agent that references the secret and is no longer granted it:
+
+```json
+{
+  "reference": "${vault:llm-api-key}",
+  "tenantId": "default",
+  "keyName": "llm-api-key",
+  "dryRun": false,
+  "allowedAgents": ["0123456789abcdef01234567"],
+  "previousAllowedAgents": ["0123456789abcdef01234567", "89abcdef0123456789abcdef"],
+  "grantsAllAgents": false,
+  "description": "LLM provider key",
+  "createdAt": "2026-03-15T10:30:00Z",
+  "agentsLosingAccessScope": "this-node",
+  "agentsLosingAccess": [
+    { "agentId": "89abcdef0123456789abcdef", "agentVersion": 3, "environment": "production" }
+  ],
+  "warning": "1 deployed agent(s) reference this secret and are not on the new grant list. They keep running — the grant is checked when an agent is deployed, not when a secret is resolved — but under eddi.vault.grant-enforcement=enforce their next deployment will be REFUSED. …"
+}
+```
+
+  Those agents are **not** broken now: the check is a deploy-time gate, so they keep resolving the secret until they are redeployed. What breaks is their *next* deployment, possibly weeks later on a restart nobody connects to the grant edit — which is exactly why it is reported at the moment of the change. Add `?dryRun=true` to get this answer **without writing anything**; that is how the Manager shows the warning before you commit rather than after. Every deployed *version* is considered, not only the latest, since an older version can be the one serving. The list covers the agents deployed on the node you are talking to — the response says so in `agentsLosingAccessScope: "this-node"` — so on a cluster it is indicative rather than exhaustive.
+
+**In the Manager UI:** *Secrets* → the **Allowed Agents** column, or the **Access** action on a row. Agents are picked from a searchable list of the ones that exist (a raw ID can still be typed, for an agent not created yet), and a change that would strip access from a deployed agent shows the warning above and has to be acknowledged before it can be saved.
 
 ## Encryption
 
@@ -409,6 +451,7 @@ All endpoints are under the base path `/secretstore/secrets`. All endpoints requ
 | Method   | Path                         | Description                                            |
 | -------- | ---------------------------- | ------------------------------------------------------ |
 | `PUT`    | `/{tenantId}/{keyName}`      | Store a secret (JSON body: `{"value": …, "description": …, "allowedAgents": …}`) |
+| `PUT`    | `/{tenantId}/{keyName}/grant` | Replace `allowedAgents` (and optionally the description) **without** the value — see [Changing a grant](#changing-a-grant-without-the-secrets-value). `?dryRun=true` previews the impact without writing |
 | `DELETE` | `/{tenantId}/{keyName}`      | Delete a secret                                        |
 | `GET`    | `/{tenantId}/{keyName}`      | Get secret **metadata only** (never returns plaintext) |
 | `GET`    | `/{tenantId}`                | List all secrets for a tenant (metadata only)          |
@@ -615,6 +658,7 @@ The vault emits metrics under the `eddi.vault.*` namespace for Grafana/Prometheu
 | `eddi.vault.store.count`     | Counter | Total store operations                     |
 | `eddi.vault.delete.count`    | Counter | Total delete operations                    |
 | `eddi.vault.rotate.count`    | Counter | Total rotation operations (DEK + KEK)      |
+| `eddi.vault.grant.update.count` | Counter | Successful grant edits (`PUT …/grant`) — counted apart from stores so a spike in widening is visible |
 | `eddi.vault.errors.count`    | Counter | Total error count (persistence + crypto)   |
 | `eddi.vault.resolve.duration`| Timer   | Duration of resolve operations             |
 | `eddi.vault.store.duration`  | Timer   | Duration of store operations               |

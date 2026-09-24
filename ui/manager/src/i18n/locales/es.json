@@ -864,7 +864,11 @@
     "cascadePartialFailure_other": "{{count}} actualizaciónes en cascada fallaron",
     "usedInAgents_many": "Usado en {{count}} agents",
     "usedInAgents_one": "Usado en {{count}} agent",
-    "usedInAgents_other": "Usado en {{count}} agents"
+    "usedInAgents_other": "Usado en {{count}} agents",
+    "savedNotLive": "Guardado — aún no activo",
+    "savedNotLiveDescription": "El agente en ejecución sigue sirviendo la versión desplegada. Despliegue para aplicar este cambio.",
+    "deployNow": "Desplegar",
+    "deployStarted": "Despliegue iniciado"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -1661,7 +1665,23 @@
     "resetSecretCount_other": "{{count}} secretos se perderán permanentemente",
     "resetTenantSuccess_many": "Vault restablecido para \"{{tenant}}\" — {{count}} secretos eliminados permanentemente",
     "resetTenantSuccess_one": "Vault restablecido para \"{{tenant}}\" — {{count}} secreto eliminados permanentemente",
-    "resetTenantSuccess_other": "Vault restablecido para \"{{tenant}}\" — {{count}} secretos eliminados permanentemente"
+    "resetTenantSuccess_other": "Vault restablecido para \"{{tenant}}\" — {{count}} secretos eliminados permanentemente",
+    "access": "Acceso",
+    "editGrant": "Editar qué agentes pueden usar este secreto",
+    "editGrantKey": "Editar el acceso de {{key}}",
+    "grantTitle": "Quién puede usar «{{key}}»",
+    "grantValueUntouched": "El valor del secreto no se modifica y no hace falta volver a introducirlo. Solo cambia quién puede usarlo.",
+    "grantOnlyTheseAgents": "Solo estos agentes",
+    "grantAllHint": "Todos los agentes de este tenant pueden referenciar este secreto. Restríngelo para limitar el alcance de una sola configuración filtrada.",
+    "grantAddAgent": "Añadir un agente",
+    "grantEmptyError": "Añade al menos un agente o elige «Todos los agentes». No se permite una lista vacía.",
+    "grantCheckingImpact": "Comprobando los agentes desplegados…",
+    "grantLosingAccessTitle": "Agentes desplegados que usan este secreto y perderían el acceso ({{count}})",
+    "grantLosingAccessBody": "Por ahora siguen funcionando — el permiso se comprueba al desplegar un agente, no al usar el secreto — pero su próximo despliegue será rechazado.",
+    "grantAcknowledge": "Entiendo que estos agentes no volverán a desplegarse hasta que se añadan de nuevo o su configuración deje de usar este secreto.",
+    "grantSaved": "Acceso actualizado para «{{key}}»",
+    "grantImpactFailed": "No se pudo comprobar qué agentes desplegados usan este secreto, así que cualquiera podría perder el acceso.",
+    "grantAcknowledgeUnchecked": "Guardar de todos modos sin saber a qué agentes desplegados afecta."
   },
   "audit": {
     "title": "Registro de auditoría",
@@ -2050,7 +2070,7 @@
       "enabled": "Activada",
       "running": "En ejecución",
       "emptyTitle": "Sin fuentes de ingesta",
-      "emptyDescription": "Añada una fuente para que esta base de conocimiento rastree un sitio y se mantenga actualizada.",
+      "emptyDescription": "Añade una fuente para rastrear un sitio o subir documentos y mantener esta base de conocimiento al día.",
       "name": "Nombre",
       "namePlaceholder": "public-docs",
       "startUrl": "URL inicial",
@@ -2087,7 +2107,40 @@
       "previewFailed": "No se pudo previsualizar esta fuente.",
       "previewNotCompleted": "La vista previa no se completó.",
       "disabledNoRun": "Esta fuente está desactivada. Actívela y guárdela para ejecutarla o programarla.",
-      "purgeBlockedWhileRunning": "Hay una ejecución en curso. Purgar ahora permitiría que empezara una segunda en paralelo."
+      "purgeBlockedWhileRunning": "Hay una ejecución en curso. Purgar ahora permitiría que empezara una segunda en paralelo.",
+      "type": "Fuente",
+      "typeWeb": "Sitio web",
+      "typeUpload": "Archivos",
+      "typeWebHint": "Rastrear un sitio web",
+      "typeUploadHint": "Leer los archivos que subas aquí",
+      "cronHintUpload": "Déjalo vacío: los archivos subidos se leen al ejecutar la fuente",
+      "maxFiles": "Máx. archivos",
+      "maxFilesHint": "Cuántos archivos puede contener esta fuente",
+      "maxFileMb": "Tamaño máx. de archivo (MB)",
+      "maxFileMbHint": "Por archivo",
+      "filesSaveFirst": "Guarda la base de conocimiento una vez y podrás subir archivos a esta fuente.",
+      "dropFiles": "Suelta archivos aquí, o",
+      "browseFiles": "elegírlos",
+      "acceptedFormats": "PDF, Word, Excel, PowerPoint, texto, Markdown, CSV y HTML",
+      "clearUploadList": "Borrar la lista",
+      "uploadFailed": "No se pudo subir este archivo.",
+      "noFiles": "Aún no hay archivos. Ejecuta la fuente después de subirlos para indexarlos.",
+      "filesSummary": "Archivos: {{count}} ({{size}})",
+      "deleteFile": "Eliminar {{fileName}}",
+      "deleteFileTitle": "¿Eliminar este archivo?",
+      "deleteFileDescription": "Se eliminan {{fileName}} y todo lo que la base de conocimiento aprendió de él. Los agentes dejan de responder a partir de él de inmediato.",
+      "previewFiles": "Previsualizar los cambios",
+      "saveBeforeUpload": "Guarda primero la base de conocimiento: las subidas van a la fuente guardada, no a los cambios en pantalla.",
+      "foldersNotSupported": "No se pueden subir carpetas. Suelta los archivos que contienen.",
+      "filesAwaitingRun": "Hay archivos guardados que aún no están en la base de conocimiento. Ejecuta la fuente para indexarlos.",
+      "retryUpload": "Reintentar {{fileName}}",
+      "fileIndexed": "Indexado",
+      "fileChanged": "Modificado",
+      "fileNotIndexed": "Sin indexar",
+      "maxTotalMb": "Tamaño total máx. (MB)",
+      "maxTotalMbHint": "Para todos los archivos de esta fuente",
+      "removeTitle": "¿Quitar esta fuente?",
+      "removeDescription": "Al guardar se eliminan sus archivos subidos y todo lo que la base de conocimiento aprendió de ellos. No se puede deshacer."
     }
   },
   "onboarding": {
@@ -2410,6 +2463,7 @@
       "SYNTHESIZING": "Sintetizando",
       "COMPLETED": "Completado",
       "FAILED": "Fallido",
+      "REJECTED": "Rechazada",
       "ERROR": "Error",
       "AWAITING_APPROVAL": "Pendiente de aprobación",
       "CANCELLED": "Cancelado",
@@ -2859,7 +2913,10 @@
       "rosterShowAll_one": "Mostrar {{count}} miembro",
       "rosterShowAll_other": "Mostrar los {{count}} miembros",
       "rosterShowAll_many": "Mostrar los {{count}} miembros"
-    }
+    },
+    "stateRejected": "Rechazada",
+    "inputDisabledRejected": "Esta recomendación fue rechazada",
+    "debateVerdictNote": "Responde con un veredicto puntuado (ganador y puntuaciones), no en prosa: {{phases}}. Los miembros tienen dos o más roles y los argumentos van antes, así que no se usa el propio prompt de síntesis del moderador. Defina una plantilla de entrada en la fase para obtener prosa."
   },
   "taskBoard": {
     "title": "Tablero de tareas",
@@ -3044,7 +3101,10 @@
     "syncError": "Error de sincronización",
     "empty": "Conéctese a una instancia de origen para comenzar la sincronización de agentes.",
     "autoMatched": "Correspondencia automática",
-    "previewFirst": "Vista previa de los cambios antes de sincronizar"
+    "previewFirst": "Vista previa de los cambios antes de sincronizar",
+    "syncPartial": "Sincronización incompleta: algunos recursos no se escribieron",
+    "syncIdentical": "Ya está actualizado: nada que escribir",
+    "previewFailed": "Error en la vista previa"
   },
   "sync": {
     "actionCreate": "Nuevo",
@@ -3746,7 +3806,9 @@
       "pausedRejected": "Esta conversación está en pausa a la espera de una decisión humana, así que el mensaje no se envió.",
       "reviewApprovals": "Revisar aprobaciones pendientes",
       "stop": "Detener la generación",
-      "streamEnded": "La conexión terminó antes de que la respuesta estuviera completa. Lo que llegó está arriba; vuelve a enviarlo para reintentar."
+      "streamEnded": "La conexión terminó antes de que la respuesta estuviera completa. Lo que llegó está arriba; vuelve a enviarlo para reintentar.",
+      "newConversation": "Nueva conversación",
+      "newConversationFailed": "No se pudo iniciar una nueva conversación"
     },
     "chat": {
       "agentDetails": "Detalles del agente",
@@ -4071,7 +4133,8 @@
       "transcript": "Transcripción de la conversación",
       "tryDifferent": "Prueba con otro término de búsqueda",
       "untitled": "Conversación sin título",
-      "loadListError": "No se pudieron cargar las conversaciones"
+      "loadListError": "No se pudieron cargar las conversaciones",
+      "rejected": "Rechazada"
     },
     "insights": "Información",
     "memberCount": "{{count}} miembros",

@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionStyle;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.PhaseType;
 import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
 import ai.labs.eddi.datastore.AbstractResourceStore;
 import ai.labs.eddi.datastore.IResourceStorageFactory;
@@ -22,12 +23,14 @@ import org.jboss.logging.Logger;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * DB-agnostic store for group configurations. Extends
@@ -60,6 +63,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         warnOnModeratorlessPhases(groupConfiguration);
         warnOnSummarizerlessWindow(groupConfiguration);
         warnOnHalfConfiguredStanceSummarizer(groupConfiguration);
+        noteDebateVerdictSynthesis(groupConfiguration);
         noteBuiltInToolPrerequisite(groupConfiguration);
         return super.create(groupConfiguration);
     }
@@ -81,6 +85,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         warnOnModeratorlessPhases(groupConfiguration);
         warnOnSummarizerlessWindow(groupConfiguration);
         warnOnHalfConfiguredStanceSummarizer(groupConfiguration);
+        noteDebateVerdictSynthesis(groupConfiguration);
         noteBuiltInToolPrerequisite(groupConfiguration);
         return super.update(id, version, groupConfiguration);
     }
@@ -333,9 +338,9 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
                 phases = DiscussionStylePresets.expand(style, config.getMaxRounds());
             }
             boolean taskPhases = phases.stream().filter(Objects::nonNull).anyMatch(
-                    p -> p.type() == AgentGroupConfiguration.PhaseType.PLAN
-                            || p.type() == AgentGroupConfiguration.PhaseType.EXECUTE
-                            || p.type() == AgentGroupConfiguration.PhaseType.VERIFY);
+                    p -> p.type() == PhaseType.PLAN
+                            || p.type() == PhaseType.EXECUTE
+                            || p.type() == PhaseType.VERIFY);
             if (taskPhases) {
                 problems.add("HUMAN members cannot join task-force groups (PLAN/EXECUTE/VERIFY phases) — "
                         + "task waves assign and time work on agent latencies (I6 v1)");
@@ -405,6 +410,147 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
     }
 
     /**
+     * Says, at save time, that a SYNTHESIS phase will answer with a <b>scoring
+     * verdict</b> rather than the balanced prose its moderator's own prompt asks
+     * for.
+     * <p>
+     * Giving members structural roles is what switches this on, and nothing in the
+     * config says so. A grant board whose members were given {@code role: PRO} and
+     * {@code role: CON} for flavour had its chair return
+     * {@code {"winner":"CON","scores":{...}}} instead of the recommendation its
+     * system prompt specified — correct for a debate-scoring exercise, wrong for
+     * anything else, and discoverable only by running it.
+     * <p>
+     * INFO rather than WARN, deliberately: for a real debate this is the intended
+     * behaviour and the note is the documentation of it, not a complaint. The
+     * Manager renders the same list beside the phase (see {@code
+     * debateVerdictSynthesisPhaseNames} in
+     * {@code ui/manager/src/lib/group-config.ts}), which is where a config author
+     * will actually read it.
+     */
+    private void noteDebateVerdictSynthesis(AgentGroupConfiguration groupConfiguration) {
+        debateVerdictSynthesisPhaseNames(groupConfiguration).forEach(name -> LOGGER.infof(
+                "Group '%s' phase '%s' will answer with a scoring verdict (winner/scores JSON), not prose: the members hold "
+                        + "two or more distinct roles and arguments precede it, so it takes the debate-judgment path and the "
+                        + "moderator's own synthesis prompt is not used. Set an inputTemplate on that phase to get prose back.",
+                LogSanitizer.sanitize(groupConfiguration.getName()), LogSanitizer.sanitize(name)));
+    }
+
+    /**
+     * The SYNTHESIS phases of this config that will take the debate-judgment path.
+     * Separated from the logging so the decision is assertable, and mirrored in the
+     * Manager so a config author sees it rather than a server log.
+     * <p>
+     * Mirrors {@code GroupContextBuilder.isDebateJudgment}, with the two
+     * substitutions a config-time check has to make:
+     * <ul>
+     * <li>the runtime asks whether ARGUMENT/REBUTTAL entries are already on the
+     * transcript; here we ask whether an {@code ARGUE}/{@code REBUTTAL}
+     * <em>phase</em> precedes the synthesis, which is where those entries come
+     * from;</li>
+     * <li>the runtime knows who is speaking; here only a phase restricted to
+     * {@code participants: "MODERATOR"} has a speaker that can be resolved from
+     * configuration at all, so only those are reported. A synthesis open to other
+     * participants can still hit the verdict path for a non-debating speaker — it
+     * is left unreported rather than guessed at.</li>
+     * </ul>
+     * Preset-expanded like {@link #moderatorlessPhaseNames}, or the check would be
+     * inert for exactly the style it matters most for: a DEBATE group stores no
+     * phases of its own.
+     */
+    static List<String> debateVerdictSynthesisPhaseNames(AgentGroupConfiguration groupConfiguration) {
+        Set<String> roles = distinctMemberRoles(groupConfiguration);
+        // The judgment prompt scores one side against another, so a roster with
+        // fewer than two sides never takes this path.
+        if (roles.size() < 2) {
+            return List.of();
+        }
+        List<DiscussionPhase> phases = resolvedPhases(groupConfiguration);
+        // A moderator that is itself a debater judges nothing: the runtime refuses to
+        // let a partisan score its own debate and falls back to prose.
+        if (moderatorIsADebater(groupConfiguration, roles)) {
+            return List.of();
+        }
+        List<String> names = new ArrayList<>();
+        boolean argumentsSoFar = false;
+        for (DiscussionPhase phase : phases) {
+            if (phase == null) {
+                continue;
+            }
+            if (phase.type() == PhaseType.SYNTHESIS
+                    && phase.inputTemplate() == null
+                    && argumentsSoFar
+                    && "MODERATOR".equalsIgnoreCase(phase.participants())) {
+                // Skipped rather than added: nothing validates a phase name as
+                // non-null, List.copyOf throws on a null element, and this method
+                // runs on every create and update -- so one unnamed phase would
+                // make the whole group unsaveable with an NPE. A phase with no
+                // name could not be named in the note anyway.
+                if (phase.name() != null) {
+                    names.add(phase.name());
+                }
+            }
+            if (phase.type() == PhaseType.ARGUE || phase.type() == PhaseType.REBUTTAL) {
+                argumentsSoFar = true;
+            }
+        }
+        return List.copyOf(names);
+    }
+
+    /**
+     * The distinct, upper-cased, non-blank member roles — a debate's "sides".
+     * <p>
+     * Deliberately NOT trimmed, because {@code GroupContextBuilder.debatingRoles}
+     * is not: to the runtime, {@code "PRO"} and {@code "PRO "} are two sides.
+     * Trimming here would make them one, so a roster the runtime judges as a debate
+     * would save without the note this method exists to produce — a mirror that
+     * disagrees with what it mirrors is worse than no mirror.
+     */
+    private static Set<String> distinctMemberRoles(AgentGroupConfiguration config) {
+        if (config.getMembers() == null) {
+            return Set.of();
+        }
+        return config.getMembers().stream()
+                .filter(m -> m != null && m.role() != null && !m.role().isBlank())
+                .map(m -> m.role().toUpperCase(Locale.ROOT))
+                .collect(Collectors.toSet());
+    }
+
+    /**
+     * Whether the agent that will speak a MODERATOR phase holds one of the debating
+     * roles. A moderator named but absent from the roster has no role at all, so it
+     * judges — which is the common shape: a chair agent that is not a member.
+     */
+    private static boolean moderatorIsADebater(AgentGroupConfiguration config, Set<String> roles) {
+        String moderator = config.getModeratorAgentId();
+        List<AgentGroupConfiguration.GroupMember> members = config.getMembers() != null ? config.getMembers() : List.of();
+        AgentGroupConfiguration.GroupMember speaker;
+        if (moderator != null && !moderator.isBlank()) {
+            speaker = members.stream().filter(m -> m != null && moderator.equals(m.agentId())).findFirst().orElse(null);
+        } else {
+            // No moderator: the engine substitutes the first member by speaking order
+            // (warnOnModeratorlessPhases says so separately), and that member is
+            // usually a debater.
+            speaker = members.stream()
+                    .filter(Objects::nonNull)
+                    .min(Comparator.comparing(m -> m.speakingOrder() == null ? Integer.MAX_VALUE : m.speakingOrder()))
+                    .orElse(null);
+        }
+        // Untrimmed, matching debatingRoles above and the runtime it mirrors.
+        return speaker != null && speaker.role() != null && roles.contains(speaker.role().toUpperCase(Locale.ROOT));
+    }
+
+    /** This config's phases, preset-expanded when it declares none of its own. */
+    private static List<DiscussionPhase> resolvedPhases(AgentGroupConfiguration groupConfiguration) {
+        List<DiscussionPhase> phases = groupConfiguration.getPhases();
+        if (phases != null && !phases.isEmpty()) {
+            return phases;
+        }
+        DiscussionStyle style = groupConfiguration.getStyle() != null ? groupConfiguration.getStyle() : DiscussionStyle.ROUND_TABLE;
+        return DiscussionStylePresets.expand(style, groupConfiguration.getMaxRounds());
+    }
+
+    /**
      * The phases this config restricts to a moderator it does not have. Separated
      * from the logging so the decision is assertable — a log-only method is a
      * decision nothing can pin.
@@ -419,12 +565,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         // preset at discussion time, and every one of the six presets ends in a
         // participants="MODERATOR" phase. Mirror
         // GroupConversationService.resolvePhases.
-        List<DiscussionPhase> phases = groupConfiguration.getPhases();
-        if (phases == null || phases.isEmpty()) {
-            DiscussionStyle style = groupConfiguration.getStyle() != null ? groupConfiguration.getStyle() : DiscussionStyle.ROUND_TABLE;
-            phases = DiscussionStylePresets.expand(style, groupConfiguration.getMaxRounds());
-        }
-        return phases.stream()
+        return resolvedPhases(groupConfiguration).stream()
                 .filter(p -> p != null && "MODERATOR".equalsIgnoreCase(p.participants()))
                 .map(DiscussionPhase::name)
                 .toList();

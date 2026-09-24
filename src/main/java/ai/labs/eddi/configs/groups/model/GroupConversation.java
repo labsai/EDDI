@@ -1009,6 +1009,20 @@ public class GroupConversation {
 
     public enum GroupConversationState {
         CREATED, IN_PROGRESS, SYNTHESIZING, COMPLETED, FAILED,
+        /**
+         * A human rejected the discussion's recommendation at a HITL gate.
+         * <p>
+         * Deliberately NOT {@link #FAILED}. A rejection is a recorded human decision
+         * and the product's whole selling point; rendering it as "Failed" told the
+         * operator the system had broken when in fact it had done exactly what it was
+         * asked. Terminal, closeable, and treated as FAILED is everywhere that asks
+         * "may this still run?" — the difference is what it MEANS, not what it permits.
+         * <p>
+         * Documents written before this state existed carry {@link #FAILED} for a
+         * rejection and are left alone: nothing in them distinguishes the two, so a
+         * migration could only guess.
+         */
+        REJECTED,
         /** Discussion was cancelled before completion — HITL foundation (Phase 9b). */
         CANCELLED,
         /** Paused for human approval — HITL foundation (Phase 9b). */
@@ -1399,9 +1413,9 @@ public class GroupConversation {
         }
         return switch (state) {
             case COMPLETED -> List.of("followup", "continue", "close");
-            // FAILED and CANCELLED are terminal but closeable — close ends member
-            // conversations and reclaims ephemeral agents.
-            case FAILED, CANCELLED -> List.of("close");
+            // FAILED, REJECTED and CANCELLED are terminal but closeable — close ends
+            // member conversations and reclaims ephemeral agents.
+            case FAILED, REJECTED, CANCELLED -> List.of("close");
             // I6: the one state a human member acts on — the UI switches to an
             // input prompt instead of approve/reject buttons.
             case AWAITING_HUMAN_INPUT -> List.of("submitHumanInput");

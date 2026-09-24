@@ -13,11 +13,17 @@ import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.modules.ingestion.IIngestionStateStore.IngestionRun;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline.IngestionReport;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline.Mode;
+import ai.labs.eddi.modules.ingestion.files.IIngestedFileStore;
 import ai.labs.eddi.utils.LogSanitizer;
+import io.quarkus.runtime.StartupEvent;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import java.time.Instant;
+import java.time.ZoneId;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
@@ -44,18 +50,44 @@ public class RagSourceIngestionService {
     /** Scheduled runs are not a user's action. */
     private static final String SCHEDULE_USER_ID = "system:scheduler";
 
+    /**
+     * How many schedules the startup repair reads per page, and how many pages it
+     * is willing to walk. Both stores page this listing deterministically (sorted
+     * by {@code createdAt} then id), so the walk cannot skip or repeat a row.
+     */
+    static final int REPAIR_PAGE_SIZE = 500;
+
+    static final int REPAIR_MAX_PAGES = 40;
+
     private final IngestionPipeline pipeline;
     private final IIngestionStateStore stateStore;
     private final IScheduleStore scheduleStore;
     private final IRagStore ragStore;
+    private final IIngestedFileStore fileStore;
+
+    /**
+     * Whether the startup repair below runs. There to be turned off, not tuned —
+     * see {@link #repairUnarmedSchedules()}.
+     */
+    @ConfigProperty(name = "eddi.rag.ingestion.schedule-repair.enabled", defaultValue = "true")
+    boolean scheduleRepairEnabled = true;
+
+    /**
+     * The zone the poller reads a schedule's cron in when the row does not name
+     * one. Read here so the startup repair below can compute a first fire the
+     * poller will agree with — see {@link #armIfUnarmed}.
+     */
+    @ConfigProperty(name = "eddi.schedule.default-timezone", defaultValue = "UTC")
+    String defaultTimeZone = RagIngestionSchedules.ZONE.getId();
 
     @Inject
     public RagSourceIngestionService(IngestionPipeline pipeline, IIngestionStateStore stateStore,
-            IScheduleStore scheduleStore, IRagStore ragStore) {
+            IScheduleStore scheduleStore, IRagStore ragStore, IIngestedFileStore fileStore) {
         this.pipeline = pipeline;
         this.stateStore = stateStore;
         this.scheduleStore = scheduleStore;
         this.ragStore = ragStore;
+        this.fileStore = fileStore;
     }
 
     /**
@@ -158,6 +190,7 @@ public class RagSourceIngestionService {
         capped.setEnabled(true);
         capped.setType(source.getType());
         capped.setWeb(source.getWeb());
+        capped.setUpload(source.getUpload());
         capped.setCron(null);
 
         var settings = new IngestionSource.IngestionSettings();
@@ -262,9 +295,184 @@ public class RagSourceIngestionService {
         }
     }
 
-    /** The id a source is addressed and keyed by. */
+    void onStartup(@Observes StartupEvent event) {
+        repairUnarmedSchedules();
+    }
+
+    /**
+     * Arms the ingestion schedules that were stored before their creator computed a
+     * {@code nextFire}.
+     *
+     * <p>
+     * Fixing {@code buildSchedule} only helps schedules written after the fix. The
+     * rows already in the database read back {@code enabled=true} with a null
+     * {@code nextFire}, which no poll can ever match, so without this an operator's
+     * nightly crawl stays dead until somebody happens to re-save the knowledge base
+     * — and nothing tells them to.
+     *
+     * <p>
+     * Safe to run on every boot and on every node of a cluster: it only touches
+     * rows that are enabled, marked as ingestion schedules, carry a cron and have
+     * no {@code nextFire} at all, so after the first pass nothing matches.
+     *
+     * <p>
+     * Two nodes do <em>not</em> compute the same occurrence: each uses its own
+     * {@code Instant.now()}, so across a cron boundary one computes 10:01 and the
+     * other 10:02, and an unconditional write let the slower node replace the
+     * earlier fire with the later one — the schedule skips an occurrence. Arming
+     * therefore goes through {@link IScheduleStore#armIfUnarmed}, which carries the
+     * "still unarmed" condition in the write predicate itself. That is the only
+     * place the nodes meet, so the first writer wins and every other one is a
+     * no-op; a re-read before writing would only have narrowed the window, not
+     * closed it.
+     *
+     * <p>
+     * Failures are logged, never thrown: a repair that cannot read the store must
+     * not stop the application from starting.
+     *
+     * @return what the sweep did, and whether it reached the end of the data —
+     *         returned rather than only logged so a test can tell a finished sweep
+     *         from a truncated one without reading log output
+     */
+    RepairResult repairUnarmedSchedules() {
+        if (!scheduleRepairEnabled) {
+            return new RepairResult(0, true);
+        }
+        int repaired = 0;
+        boolean walkedEverything = false;
+        try {
+            for (int page = 0; page < REPAIR_MAX_PAGES; page++) {
+                List<ScheduleConfiguration> batch = scheduleStore.readAllSchedules(REPAIR_PAGE_SIZE, page * REPAIR_PAGE_SIZE, true);
+                if (batch == null || batch.isEmpty()) {
+                    walkedEverything = true;
+                    break;
+                }
+                for (ScheduleConfiguration schedule : batch) {
+                    if (armIfUnarmed(schedule)) {
+                        repaired++;
+                    }
+                }
+                if (batch.size() < REPAIR_PAGE_SIZE) {
+                    walkedEverything = true;
+                    break;
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.errorf(e, "Could not check stored ingestion schedules for a missing next fire time — "
+                    + "any that were stored unarmed will not run until their knowledge base is saved again");
+            return new RepairResult(repaired, false);
+        }
+        if (repaired > 0) {
+            LOGGER.warnf("Armed %d ingestion schedule(s) that had been stored without a next fire time and "
+                    + "could never have run", repaired);
+        }
+        if (!walkedEverything) {
+            // Say so. A cap that truncates silently is worse than no cap: the
+            // operator reads "armed 12 schedules" and has no way to tell a finished
+            // repair from one that stopped a page short of the row they are waiting
+            // on.
+            LOGGER.warnf("Stopped checking stored schedules for a missing next fire time after %d rows (the "
+                    + "startup sweep's own bound, not the end of the data). Any ingestion schedule beyond "
+                    + "that point that was stored unarmed is still unarmed and will not run until its "
+                    + "knowledge base is saved again. Re-run with a larger bound, or re-save the affected "
+                    + "knowledge bases.", REPAIR_MAX_PAGES * REPAIR_PAGE_SIZE);
+        }
+        return new RepairResult(repaired, walkedEverything);
+    }
+
+    /**
+     * What one startup sweep did.
+     *
+     * @param armed
+     *            how many unarmed ingestion schedules were given a fire time
+     * @param complete
+     *            whether the walk reached the end of the data. {@code false} means
+     *            it stopped at its own page bound (or on a store failure) and rows
+     *            beyond that point were never examined — the difference between
+     *            "there was nothing left to repair" and "we stopped looking", which
+     *            a count alone cannot express
+     */
+    record RepairResult(int armed, boolean complete) {
+    }
+
+    /** @return whether this schedule was one of the broken ones, and was armed */
+    private boolean armIfUnarmed(ScheduleConfiguration schedule) {
+        if (schedule == null || schedule.getId() == null
+                || !RagIngestionSchedules.isIngestionSchedule(schedule.getMetadata())
+                || !schedule.isEnabled() || schedule.getNextFire() != null) {
+            return false;
+        }
+        String cron = schedule.getCronExpression();
+        if (cron == null || cron.isBlank()) {
+            // No cron and no nextFire is a schedule that was never meant to fire on
+            // its own; inventing a time for it would start crawling a third party
+            // on a cadence nobody configured.
+            return false;
+        }
+        try {
+            // Read the cron in the zone the POLLER will use for this row, not in
+            // RagIngestionSchedules.ZONE. armIfUnarmed writes only nextFire, so a
+            // legacy row's null timeZone stays null, and every fire after the first
+            // is re-armed through resolveTimeZone(null) — the deployment's
+            // eddi.schedule.default-timezone. Arming in UTC regardless would hand a
+            // non-UTC deployment exactly one interval of the wrong length, which is
+            // the drift buildSchedule's setTimeZone fixed, moved onto the repair
+            // path. The zone is read from the listed row rather than re-read: it is
+            // the same field the poller resolves, and unlike nextFire nothing races
+            // to change it.
+            Instant nextFire = RagIngestionSchedules.firstFire(cron, pollerZoneOf(schedule));
+            // No re-read first: the store's own predicate carries the "still unarmed"
+            // condition, so a second round-trip would only narrow a window this write
+            // already closes — and would still be reading a snapshot.
+            //
+            // A lost race is a success: another node armed the row a moment ago, so it
+            // is armed. Only the count of rows THIS node repaired is affected, and that
+            // number is a log line, not a decision.
+            return scheduleStore.armIfUnarmed(schedule.getId(), nextFire);
+        } catch (IllegalArgumentException | IResourceStore.ResourceStoreException e) {
+            // One unrepairable row must not stop the sweep: the next one may be the
+            // schedule somebody is waiting on.
+            LOGGER.errorf(e, "Ingestion schedule %s has no next fire time and could not be given one — "
+                    + "it will not run", LogSanitizer.sanitize(schedule.getId()));
+            return false;
+        }
+    }
+
+    /**
+     * The zone {@code SchedulePollerService.resolveTimeZone} will read this
+     * schedule's cron in: its own, when it names one, and otherwise the
+     * deployment's default. Same fallback, same invalid-zone tolerance — a row
+     * naming a zone the JDK does not know is re-armed by the poller in the default,
+     * so arming it here in the default is what keeps the two agreeing.
+     */
+    private ZoneId pollerZoneOf(ScheduleConfiguration schedule) {
+        String zone = schedule.getTimeZone();
+        if (zone != null && !zone.isBlank()) {
+            try {
+                return ZoneId.of(zone);
+            } catch (Exception e) {
+                LOGGER.warnf("Ingestion schedule %s names time zone '%s', which is not a zone; arming it in %s, "
+                        + "the same fallback the poller uses", LogSanitizer.sanitize(schedule.getId()),
+                        LogSanitizer.sanitize(zone), defaultTimeZone);
+            }
+        }
+        try {
+            return ZoneId.of(defaultTimeZone);
+        } catch (Exception e) {
+            return RagIngestionSchedules.ZONE;
+        }
+    }
+
+    /**
+     * The id a source is addressed and keyed by.
+     *
+     * <p>
+     * Delegates rather than repeating the rule: ingestion state, the schedule name
+     * and the run reports all have to agree on it, and two copies of "id, or name
+     * when it has none" is how they stop agreeing.
+     */
     public static String sourceIdOf(IngestionSource source) {
-        return source.getId() == null || source.getId().isBlank() ? source.getName() : source.getId();
+        return source.effectiveId();
     }
 
     private void deleteScheduleQuietly(String ragConfigId, String sourceId) {
@@ -276,13 +484,80 @@ public class RagSourceIngestionService {
         }
     }
 
-    /** Removes every ingestion schedule belonging to a knowledge base's sources. */
+    /**
+     * Removes every ingestion schedule belonging to a knowledge base's sources, and
+     * everything its upload sources put into it — called once the knowledge base
+     * itself has no readable version left.
+     */
     public void removeSchedules(String ragConfigId, RagConfiguration knowledgeBase) {
         if (knowledgeBase == null || knowledgeBase.getSources() == null) {
             return;
         }
         for (IngestionSource source : knowledgeBase.getSources()) {
             deleteScheduleQuietly(ragConfigId, sourceIdOf(source));
+            if (source.isUpload()) {
+                discardSourceContent(ragConfigId, knowledgeBase, source);
+            }
+        }
+    }
+
+    /**
+     * Takes back everything sources that are no longer there put into the knowledge
+     * base.
+     *
+     * <p>
+     * Two ways a source stops owning its documents: it is removed from
+     * {@code sources[]}, or it stays but stops being an upload source. Both used to
+     * delete the files and leave every vector they produced in the knowledge base —
+     * retrievable by every agent, and unreachable by every endpoint, because the
+     * source they belong to is gone. An operator who removes "HR policies 2023"
+     * would have had agents keep citing it with no way to list or delete what was
+     * left.
+     *
+     * <p>
+     * The <em>previous</em> configuration is what says where those vectors are: the
+     * store is addressed by the knowledge base's name, and that name may be part of
+     * what just changed.
+     */
+    public void discardRemovedSources(String ragConfigId, RagConfiguration previous, RagConfiguration updated) {
+        if (previous == null || previous.getSources() == null) {
+            return;
+        }
+        for (IngestionSource source : previous.getSources()) {
+            if (source == null || !source.isUpload()) {
+                // Only upload sources hold anything of their own. A crawl's documents
+                // come back on the next run against the same site.
+                continue;
+            }
+            IngestionSource now = updated == null ? null : updated.findSource(sourceIdOf(source));
+            if (now != null && now.isUpload()) {
+                continue;
+            }
+            LOGGER.warnf("Source '%s' of knowledge base %s %s. Its uploaded files and everything the knowledge "
+                    + "base learned from them are being removed.", LogSanitizer.sanitize(source.getName()),
+                    LogSanitizer.sanitize(ragConfigId),
+                    now == null ? "was removed" : "is no longer a file source");
+            discardSourceContent(ragConfigId, previous, source);
+        }
+    }
+
+    /** Vectors and ingestion state first, then the files that produced them. */
+    private void discardSourceContent(String ragConfigId, RagConfiguration knowledgeBase, IngestionSource source) {
+        try {
+            pipeline.forgetSource(ragConfigId, knowledgeBase, source);
+        } catch (RuntimeException e) {
+            LOGGER.errorf(e, "Could not remove what source %s put into knowledge base %s; its chunks stay "
+                    + "retrievable", LogSanitizer.sanitize(source.getName()), LogSanitizer.sanitize(ragConfigId));
+        }
+        try {
+            long deleted = fileStore.deleteAll(IngestionPipeline.stateKey(ragConfigId, source));
+            if (deleted > 0) {
+                LOGGER.infof("Deleted %d uploaded file(s) of source %s", deleted,
+                        LogSanitizer.sanitize(source.getName()));
+            }
+        } catch (RuntimeException e) {
+            LOGGER.errorf(e, "Could not delete the uploaded files of source %s of knowledge base %s",
+                    LogSanitizer.sanitize(source.getName()), LogSanitizer.sanitize(ragConfigId));
         }
     }
 
@@ -293,8 +568,15 @@ public class RagSourceIngestionService {
         schedule.setName(name);
         schedule.setTriggerType(ScheduleConfiguration.TriggerType.CRON);
         schedule.setCronExpression(source.getCron());
+        schedule.setTimeZone(RagIngestionSchedules.ZONE.getId());
         schedule.setEnabled(true);
         schedule.setUserId(SCHEDULE_USER_ID);
+        // Armed here, exactly as every other creator that writes to the store
+        // directly does (RestGroupWorkspace, ConversationHitlService,
+        // GroupHitlCoordinator, HitlCrashRecoveryObserver). Neither store's
+        // createSchedule computes one, and findDueSchedules never matches a null
+        // nextFire, so an unarmed row is stored looking enabled and never fires.
+        schedule.setNextFire(RagIngestionSchedules.firstFire(source.getCron()));
         schedule.setMetadata(RagIngestionSchedules.metadata(ragConfigId, version, sourceId));
         return schedule;
     }

@@ -120,6 +120,7 @@ Full narrative and metrics: [scheduling.md → Deployment Configuration](schedul
 | `eddi.schedule.fire-timeout` | `5m` | How long one conversation fire may run before it is abandoned as failed. **Keep it at or below `lease-timeout`** — past the lease another instance may reclaim the schedule regardless |
 | `eddi.schedule.fire-log-retention` | `90d` | Fire logs older than this are deleted by a periodic sweep. `0` keeps everything — a 60-second heartbeat alone writes ~525,600 rows a year |
 | `eddi.schedule.fire-log-prune-interval` | `1h` | How often that sweep runs. The `DELETE` is by timestamp and therefore idempotent, so it needs no cluster claim |
+| `eddi.rag.ingestion.schedule-repair.enabled` | `true` | At startup, gives a next fire time to any RAG ingestion schedule stored without one. Such a row reads back enabled and can never be selected by the poller, so it looks scheduled and never runs. The sweep only touches rows that have no fire time at all, so an already armed row is skipped and a boot with nothing left to repair does no writes. It is not guaranteed to finish in one pass: it stops at its own 20,000-row bound, and at a store failure, logging a warning that says which — a later boot picks up the rows it never examined — see [rag.md](rag.md#ingestion-sources) |
 
 ---
 
@@ -273,6 +274,17 @@ Full guide: [import-export-an-agent.md](import-export-an-agent.md).
 |---|---|---|
 | `eddi.backup.export.retention-minutes` | `60` | How long a finished export archive stays downloadable |
 | `eddi.backup.export.sweep-interval` | `15m` | How often the retention sweep runs on its own, independently of exports |
+| `eddi.backup.sync.require-https` | `true` | Whether live sync refuses a plain `http://` source. The caller's `X-Source-Authorization` bearer travels to that host, so HTTP hands it to anyone on the path — turn this off only between instances on a network you trust |
+| `eddi.backup.sync.allow-private-targets` | `false` | Whether live sync accepts a loopback, RFC 1918, ULA, CGNAT or link-local source. Off by default because a caller who can reach the sync endpoint could otherwise use this deployment to probe hosts behind it; on for a single-tenant deployment whose other instances are internal |
+| `eddi.backup.sync.allowed-sources` | *(empty)* | Comma-separated exact origins (`scheme://host[:port]`) that live sync accepts whatever the two settings above say. The narrow way to reach one internal staging instance without opening the endpoint to every internal address — **prefer this** |
+
+> These three decide what `POST /backup/import/sync*` will read an agent **from**.
+> The strict default is why two instances on one private network — staging and
+> production as neighbouring services — could not sync at all before 6.4.1.
+> Dev and test mode accept `http://` whatever `require-https` says, so a
+> `quarkus:dev` instance needs none of this. A refused URL answers `400` with a
+> message naming the setting that would allow it.
+> See [agent-sync-guide.md → Reaching the source instance](agent-sync-guide.md#reaching-the-source-instance).
 
 > `POST /backup/export/{agentId}` writes a ZIP under `tmp/archives/` and answers
 > with a `Location` header the client then GETs, so the file has to outlive the

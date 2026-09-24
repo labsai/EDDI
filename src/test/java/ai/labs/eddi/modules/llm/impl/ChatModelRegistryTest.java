@@ -58,7 +58,7 @@ class ChatModelRegistryTest {
         lastBuildStreamingParams.set(null);
         mockSyncModel = new ChatModel() {
             @Override
-            public ChatResponse chat(List<ChatMessage> messages) {
+            public ChatResponse doChat(ChatRequest chatRequest) {
                 return ChatResponse.builder().aiMessage(aiMessage("ok")).build();
             }
         };
@@ -99,7 +99,7 @@ class ChatModelRegistryTest {
         GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
         when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        registry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver);
+        registry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver, null);
 
         Map<String, Provider<ILanguageModelBuilder>> uniqueBuilders = new HashMap<>();
         uniqueBuilders.put("openai", () -> new ILanguageModelBuilder() {
@@ -108,7 +108,7 @@ class ChatModelRegistryTest {
                 parseTimeoutLikeARealProvider(parameters);
                 return new ChatModel() {
                     @Override
-                    public ChatResponse chat(List<ChatMessage> messages) {
+                    public ChatResponse doChat(ChatRequest chatRequest) {
                         return ChatResponse.builder().aiMessage(aiMessage("ok")).build();
                     }
                 };
@@ -124,7 +124,7 @@ class ChatModelRegistryTest {
                 };
             }
         });
-        uniqueRegistry = new ChatModelRegistry(uniqueBuilders, globalVariableResolver, secretResolver);
+        uniqueRegistry = new ChatModelRegistry(uniqueBuilders, globalVariableResolver, secretResolver, null);
     }
 
     /**
@@ -184,7 +184,7 @@ class ChatModelRegistryTest {
         when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> resolvingVault(inv.getArgument(0)));
         GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
         when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
-        return new ChatModelRegistry(builders, globalVariableResolver, secretResolver);
+        return new ChatModelRegistry(builders, globalVariableResolver, secretResolver, null);
     }
 
     @Nested
@@ -196,7 +196,7 @@ class ChatModelRegistryTest {
         void getOrCreate_validType_createsModel() throws Exception {
             ChatModel model = registry.getOrCreate("openai", Map.of("apiKey", "test"));
             assertNotNull(model);
-            assertSame(mockSyncModel, model);
+            assertInstanceOf(ObservableChatModel.class, model);
         }
 
         @Test
@@ -240,7 +240,7 @@ class ChatModelRegistryTest {
         void getOrCreateStreaming_supportedType_createsModel() throws Exception {
             StreamingChatModel model = registry.getOrCreateStreaming("openai", Map.of("apiKey", "test"));
             assertNotNull(model);
-            assertSame(mockStreamingModel, model);
+            assertInstanceOf(ObservableStreamingChatModel.class, model);
         }
 
         @Test
@@ -316,12 +316,20 @@ class ChatModelRegistryTest {
             assertInstanceOf(ObservableChatModel.class, model);
         }
 
+        /**
+         * Every model is wrapped now, including one with no observability parameters.
+         * That used to return the bare model, which is precisely why the default
+         * single-model path had no LLM span and no LLM meters: there was no decorator
+         * to attach a {@code ChatModelListener} to.
+         */
         @Test
-        @DisplayName("getOrCreate does NOT wrap when no observability params")
-        void getOrCreate_noObservabilityParams_returnsRawModel() throws Exception {
+        @DisplayName("getOrCreate wraps even with no observability params, so telemetry has a hook")
+        void getOrCreate_noObservabilityParams_stillWraps() throws Exception {
             ChatModel model = registry.getOrCreate("openai", Map.of("apiKey", "test"));
             assertNotNull(model);
-            assertSame(mockSyncModel, model, "Without observability params, raw model should be returned");
+            assertInstanceOf(ObservableChatModel.class, model,
+                    "an unwrapped model has nowhere to hang the telemetry listener");
+            assertNotSame(mockSyncModel, model);
         }
 
         @Test
@@ -433,7 +441,7 @@ class ChatModelRegistryTest {
 
             ChatModel model = registry.getOrCreate("openai", params);
 
-            assertSame(mockSyncModel, model, "A blank timeout was previously tolerated and must not start failing turns");
+            assertInstanceOf(ObservableChatModel.class, model);
             assertFalse(lastBuildParams.get().containsKey("timeout"), "An unusable timeout must be dropped, not forwarded");
         }
 
@@ -446,7 +454,7 @@ class ChatModelRegistryTest {
 
             ChatModel model = registry.getOrCreate("openai", params);
 
-            assertSame(mockSyncModel, model, "A non-numeric timeout was previously tolerated and must not start failing turns");
+            assertInstanceOf(ObservableChatModel.class, model);
             assertFalse(lastBuildParams.get().containsKey("timeout"));
         }
 
@@ -459,7 +467,7 @@ class ChatModelRegistryTest {
 
             ChatModel model = registry.getOrCreate("openai", params);
 
-            assertSame(mockSyncModel, model, "Zero meant 'no timeout' and must keep meaning that");
+            assertInstanceOf(ObservableChatModel.class, model);
             assertFalse(lastBuildParams.get().containsKey("timeout"));
         }
 
@@ -472,7 +480,7 @@ class ChatModelRegistryTest {
 
             StreamingChatModel model = registry.getOrCreateStreaming("openai", params);
 
-            assertSame(mockStreamingModel, model);
+            assertInstanceOf(ObservableStreamingChatModel.class, model);
             assertFalse(lastBuildStreamingParams.get().containsKey("timeout"));
         }
 
@@ -735,11 +743,13 @@ class ChatModelRegistryTest {
                     "logResponses must be honoured on the streaming path, not silently discarded");
         }
 
+        /** As on the sync path: always wrapped, so telemetry always has a hook. */
         @Test
-        @DisplayName("a streaming task without logging flags is returned unwrapped")
-        void getOrCreateStreaming_noLogging_notWrapped() throws Exception {
+        @DisplayName("a streaming task without logging flags is wrapped too")
+        void getOrCreateStreaming_noLogging_stillWraps() throws Exception {
             StreamingChatModel model = registry.getOrCreateStreaming("openai", Map.of("apiKey", "test"));
-            assertSame(mockStreamingModel, model, "Without logging flags the raw streaming model should be returned");
+            assertInstanceOf(ObservableStreamingChatModel.class, model);
+            assertNotSame(mockStreamingModel, model);
         }
     }
 
@@ -807,7 +817,7 @@ class ChatModelRegistryTest {
                 public ChatModel build(Map<String, String> parameters) {
                     return new ChatModel() {
                         @Override
-                        public ChatResponse chat(List<ChatMessage> messages) {
+                        public ChatResponse doChat(ChatRequest chatRequest) {
                             return ChatResponse.builder().aiMessage(aiMessage("ok")).build();
                         }
                     };
@@ -827,7 +837,7 @@ class ChatModelRegistryTest {
             when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> resolvingVault(inv.getArgument(0)));
             GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
             when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
-            invalidationRegistry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver);
+            invalidationRegistry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver, null);
         }
 
         @Test
@@ -977,7 +987,7 @@ class ChatModelRegistryTest {
                     }
                     return new ChatModel() {
                         @Override
-                        public ChatResponse chat(List<ChatMessage> messages) {
+                        public ChatResponse doChat(ChatRequest chatRequest) {
                             return ChatResponse.builder().aiMessage(aiMessage("ok")).build();
                         }
                     };
@@ -1024,7 +1034,7 @@ class ChatModelRegistryTest {
                 public ChatModel build(Map<String, String> parameters) {
                     return new ChatModel() {
                         @Override
-                        public ChatResponse chat(List<ChatMessage> messages) {
+                        public ChatResponse doChat(ChatRequest chatRequest) {
                             return ChatResponse.builder().aiMessage(aiMessage("ok")).build();
                         }
                     };

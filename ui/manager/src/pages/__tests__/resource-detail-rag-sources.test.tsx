@@ -238,15 +238,41 @@ describe("RAG ingestion sources", () => {
     expect(await screen.findByTestId("ingestion-source-0-running-hint")).toBeInTheDocument();
   });
 
-  it("does not offer Run for a disabled source", async () => {
+  it("does not offer Run for a source that is saved as disabled", async () => {
     const user = userEvent.setup();
+    // The source arrives disabled rather than being toggled on screen. Toggling it
+    // marks the editor dirty, and the unsaved-changes guard disables Run on its
+    // own — so the assertion below passed with `source.enabled === false` deleted
+    // from the button entirely, which is the behaviour it claims to cover.
+    server.use(
+      http.get("*/ragstore/rags/:id", () =>
+        HttpResponse.json({
+          name: "product-docs",
+          embeddingProvider: "openai",
+          storeType: "pgvector",
+          sources: [
+            {
+              id: "src-1",
+              name: "public-docs",
+              type: "web",
+              enabled: false,
+              cron: "0 2 * * *",
+              web: { startUrl: "https://example.com/docs/", pathPrefix: "/docs/" },
+            },
+          ],
+        }),
+      ),
+    );
     renderRagPage();
     await openFirstSource(user);
 
-    await user.click(screen.getByTestId("ingestion-source-0-enabled"));
-
     await waitFor(() => expect(screen.getByTestId("ingestion-source-0-run")).toBeDisabled());
     expect(await screen.findByTestId("ingestion-source-0-disabled-hint")).toBeInTheDocument();
+    // Nothing is dirty and nothing is in flight, so the only thing that can be
+    // disabling Run is the source being disabled. Preview proves it: it is gated
+    // on the same unsaved-changes and read-only guards and is still offered.
+    expect(screen.queryByTestId("ingestion-source-0-save-before-run")).not.toBeInTheDocument();
+    expect(screen.getByTestId("ingestion-source-0-preview")).toBeEnabled();
   });
 
   it("keeps a second exclude pattern that is typed rather than pasted", async () => {

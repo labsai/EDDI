@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -1006,8 +1007,50 @@ class RestImportServiceUncoveredBranchTest {
                 "RestImportService gained an overload — pick the @Inject one explicitly instead of the only one");
         var constructor = constructors[0];
         constructor.setAccessible(true);
-        // One null per parameter, derived from the constructor rather than
+        // A default per parameter, derived from the constructor rather than
         // hardcoded, so a signature change cannot break this at runtime again.
-        return (RestImportService) constructor.newInstance(new Object[constructor.getParameterCount()]);
+        // Reference types get null — the helpers under test do not use them —
+        // but a primitive cannot take one, so each gets its own zero value.
+        Class<?>[] parameterTypes = constructor.getParameterTypes();
+        Object[] arguments = new Object[parameterTypes.length];
+        for (int i = 0; i < parameterTypes.length; i++) {
+            arguments[i] = defaultValueFor(parameterTypes[i]);
+        }
+        return (RestImportService) constructor.newInstance(arguments);
+    }
+
+    /**
+     * The zero value for a constructor parameter type: {@code null} for a
+     * reference, and the type's own zero for a primitive — reflection cannot unbox
+     * a null into one.
+     */
+    private static Object defaultValueFor(Class<?> type) {
+        if (type == Optional.class) {
+            // An absent optional, not a null one: the constructor unwraps it, so a
+            // null here is an NPE before the instance exists.
+            return Optional.empty();
+        }
+        if (!type.isPrimitive()) {
+            return null;
+        }
+        if (type == boolean.class) {
+            return false;
+        }
+        if (type == char.class) {
+            // (char) 0 rather than a '\u0000' literal: the formatter decodes the escape
+            // into a real NUL byte, which makes git treat the file as binary and stop
+            // normalising its line endings.
+            return (char) 0;
+        }
+        if (type == long.class) {
+            return 0L;
+        }
+        if (type == float.class) {
+            return 0f;
+        }
+        if (type == double.class) {
+            return 0d;
+        }
+        return 0;
     }
 }

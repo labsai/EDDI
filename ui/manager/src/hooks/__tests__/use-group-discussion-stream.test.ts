@@ -103,6 +103,52 @@ describe("useGroupDiscussionStream", () => {
     expect(result.current.streamState.currentPhase?.name).toBe("Opinion Gathering");
   });
 
+  /**
+   * `group_complete` is the terminal notification for every outcome that ends a
+   * run, not only a successful one — a HITL rejection ends it as REJECTED. The
+   * handler used to hardcode COMPLETED, so a rejection rendered as "Completed"
+   * for the seconds before the persisted conversation loaded, which says the
+   * opposite of what happened.
+   */
+  it("reports the terminal state the backend sent, not COMPLETED", async () => {
+    async function* mockEvents() {
+      yield { type: "group_start", data: JSON.stringify({ groupConversationId: "conv-rej", question: "Fund it?" }) };
+      yield {
+        type: "group_complete",
+        data: JSON.stringify({ state: "REJECTED", synthesizedAnswer: "Recommend funding." }),
+      };
+    }
+
+    mockStreamGroupDiscussion.mockReturnValue(mockEvents());
+
+    const { result } = renderHook(() => useGroupDiscussionStream());
+
+    await act(async () => {
+      await result.current.startStream("group-1", "Fund it?");
+    });
+
+    expect(result.current.streamState.state).toBe("REJECTED");
+    expect(result.current.streamState.isStreaming).toBe(false);
+    expect(result.current.streamState.synthesizedAnswer).toBe("Recommend funding.");
+  });
+
+  it("still falls back to COMPLETED when the payload carries no state", async () => {
+    async function* mockEvents() {
+      yield { type: "group_start", data: JSON.stringify({ groupConversationId: "conv-old", question: "Fund it?" }) };
+      yield { type: "group_complete", data: JSON.stringify({ synthesizedAnswer: "Yes." }) };
+    }
+
+    mockStreamGroupDiscussion.mockReturnValue(mockEvents());
+
+    const { result } = renderHook(() => useGroupDiscussionStream());
+
+    await act(async () => {
+      await result.current.startStream("group-1", "Fund it?");
+    });
+
+    expect(result.current.streamState.state).toBe("COMPLETED");
+  });
+
   it("handles speaker_complete without matching speaker_start placeholder", async () => {
     async function* mockEvents() {
       yield { type: "group_start", data: JSON.stringify({ groupConversationId: "conv-123", question: "Is 2+2=4?" }) };

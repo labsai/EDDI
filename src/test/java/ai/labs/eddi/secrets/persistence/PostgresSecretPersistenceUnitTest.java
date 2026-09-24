@@ -9,6 +9,7 @@ import ai.labs.eddi.secrets.model.EncryptedSecret;
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
@@ -239,6 +240,60 @@ class PostgresSecretPersistenceUnitTest {
         when(preparedStatement.executeUpdate()).thenThrow(new SQLException("DB error"));
 
         assertThrows(PersistenceException.class, () -> persistence.updateSecretSealing(createTestSecret(), "dek-0"));
+    }
+
+    // ─── updateSecretGrant ───
+
+    @Test
+    void updateSecretGrant_setsExactlyTheTwoGrantColumns_andNeverInserts() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        assertTrue(persistence.updateSecretGrant("tenant-1", "key-1", List.of("agent-a"), "desc"));
+
+        var sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, atLeastOnce()).prepareStatement(sql.capture());
+        String statement = sql.getAllValues().getLast();
+        // The value columns must be unreachable from a grant edit, and a grant for a
+        // missing key must not create a row.
+        assertTrue(statement.contains("SET allowed_agents = ?::jsonb, description = ?"), statement);
+        for (String column : List.of("encrypted_value", "iv", "dek_id", "checksum", "last_rotated_at", "created_at", "INSERT")) {
+            assertFalse(statement.contains(column), () -> "grant update must not name " + column + ": " + statement);
+        }
+        verify(preparedStatement).setString(1, "[\"agent-a\"]");
+        verify(preparedStatement).setString(2, "desc");
+    }
+
+    @Test
+    void updateSecretGrant_noRow_returnsFalse() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(0);
+
+        assertFalse(persistence.updateSecretGrant("tenant-1", "missing", List.of("*"), null));
+    }
+
+    // ─── touchLastAccessed ───
+
+    @Test
+    void touchLastAccessed_writesOnlyLastAccessedAt() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        persistence.touchLastAccessed("tenant-1", "key-1", Instant.parse("2026-01-01T00:00:00Z"));
+
+        var sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, atLeastOnce()).prepareStatement(sql.capture());
+        String statement = sql.getAllValues().getLast();
+        // A resolve records its access with this. Naming any other column is how a
+        // stale read would write back over a concurrent grant edit or rotation.
+        assertTrue(statement.contains("SET last_accessed_at = ? WHERE"), statement);
+        for (String column : List.of("allowed_agents", "description", "encrypted_value", "iv", "dek_id", "INSERT")) {
+            assertFalse(statement.contains(column), () -> "touch must not name " + column + ": " + statement);
+        }
+    }
+
+    @Test
+    void touchLastAccessed_sqlException_throwsPersistenceException() throws Exception {
+        when(preparedStatement.executeUpdate()).thenThrow(new SQLException("DB error"));
+
+        assertThrows(PersistenceException.class, () -> persistence.touchLastAccessed("tenant-1", "key-1", Instant.now()));
     }
 
     @Test

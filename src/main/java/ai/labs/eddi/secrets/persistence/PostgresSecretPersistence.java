@@ -229,6 +229,44 @@ public class PostgresSecretPersistence implements ISecretPersistence {
         }
     }
 
+    @Override
+    public boolean updateSecretGrant(String tenantId, String keyName, List<String> allowedAgents, String description) {
+        ensureSchema();
+        // Two columns in the SET list, and no INSERT branch. encrypted_value, iv,
+        // dek_id and checksum are not named here, so a grant edit cannot re-encrypt
+        // or blank the secret; and a grant for a key that does not exist updates no
+        // rows, which the caller turns into a 404 rather than creating an empty one.
+        String sql = """
+                UPDATE secret_vault_secrets
+                   SET allowed_agents = ?::jsonb, description = ?
+                 WHERE tenant_id = ? AND key_name = ?
+                """;
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, MAPPER.writeValueAsString(allowedAgents != null ? allowedAgents : List.of("*")));
+            ps.setString(2, description);
+            ps.setString(3, tenantId);
+            ps.setString(4, keyName);
+            return ps.executeUpdate() == 1;
+        } catch (Exception e) {
+            throw new PersistenceException("Failed to update the grant of secret " + tenantId + "/" + keyName, e);
+        }
+    }
+
+    @Override
+    public void touchLastAccessed(String tenantId, String keyName, Instant lastAccessedAt) {
+        ensureSchema();
+        // One column, no INSERT branch — see ISecretPersistence#touchLastAccessed.
+        String sql = "UPDATE secret_vault_secrets SET last_accessed_at = ? WHERE tenant_id = ? AND key_name = ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setTimestamp(1, instantToTimestamp(lastAccessedAt));
+            ps.setString(2, tenantId);
+            ps.setString(3, keyName);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new PersistenceException("Failed to record access to secret " + tenantId + "/" + keyName, e);
+        }
+    }
+
     // ─── DEKs ───
 
     @Override

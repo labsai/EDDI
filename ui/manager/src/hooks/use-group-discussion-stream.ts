@@ -829,10 +829,16 @@ function handleSSEEvent(
     case "group_complete": {
       try {
         const payload: GroupCompletePayload = JSON.parse(event.data);
+        // Honour the state the backend put on the event rather than assuming
+        // COMPLETED. `group_complete` is the terminal notification for every
+        // outcome that ends a run, and a HITL rejection ends it as REJECTED —
+        // rendering that as "Completed" for the seconds before the persisted
+        // conversation loads says the opposite of what happened. COMPLETED
+        // remains the fallback for a payload that carries no state.
         setState((s) => ({
           ...s,
           isStreaming: false,
-          state: "COMPLETED",
+          state: payload.state ?? "COMPLETED",
           synthesizedAnswer: payload.synthesizedAnswer,
           activeSpeakers: new Set(),
         }));

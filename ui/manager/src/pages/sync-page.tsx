@@ -20,8 +20,14 @@ import {
   useExecuteSyncBatch,
 } from "@/hooks/use-backup";
 import { useInfiniteAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
-import type { DocumentDescriptor, ImportPreview, SyncMapping, SyncRequest } from "@/lib/api/backup";
-import { parseResourceUri } from "@/lib/api/backup";
+import type {
+  BatchSyncExecution,
+  DocumentDescriptor,
+  ImportPreview,
+  SyncMapping,
+  SyncRequest,
+} from "@/lib/api/backup";
+import { hasFailures, parseResourceUri } from "@/lib/api/backup";
 
 interface AgentMapping {
   remoteAgent: DocumentDescriptor;
@@ -91,6 +97,10 @@ export function SyncPage() {
       targetAgentId: m.localTargetId,
     }));
 
+    // The previous run's outcome describes resources this preview is about to
+    // replace; leaving it on screen reads as the result of what is about to happen.
+    executeBatchMutation.reset();
+
     previewBatchMutation.mutate(
       { sourceUrl: syncUrl, mappings: syncMappings, sourceAuth: syncAuth },
       {
@@ -111,7 +121,7 @@ export function SyncPage() {
   }
 
   function handleSyncSelected() {
-    const selected = mappings.filter((m) => m.checked && m.preview);
+    const selected = mappings.filter((m) => m.checked && m.preview && !m.preview.error);
     if (selected.length === 0) return;
 
     const requests: SyncRequest[] = selected.map((m) => ({
@@ -125,16 +135,31 @@ export function SyncPage() {
     executeBatchMutation.mutate(
       { sourceUrl: syncUrl, requests, sourceAuth: syncAuth },
       {
-        onSuccess: () => {
-          // Clear previews
-          setMappings((prev) => prev.map((m) => ({ ...m, preview: null })));
+        onSuccess: (execution) => {
+          // A mapping that had no local target now has one — the agent this run
+          // created. Without adopting it, the next Preview + Sync sends
+          // targetAgentId: null again and creates a SECOND copy of the same agent.
+          const createdBySource = new Map<string, string>();
+          for (const result of execution.results) {
+            if (!result.targetAgentId && result.result?.agentUri) {
+              const { id } = parseResourceUri(result.result.agentUri);
+              if (id) createdBySource.set(result.sourceAgentId, id);
+            }
+          }
+          setMappings((prev) =>
+            prev.map((m) => ({
+              ...m,
+              localTargetId: m.localTargetId ?? createdBySource.get(m.remoteId) ?? null,
+              preview: null,
+            }))
+          );
         },
       }
     );
   }
 
   const checkedCount = mappings.filter((m) => m.checked).length;
-  const hasPreviewedSelection = mappings.some((m) => m.checked && m.preview);
+  const hasPreviewedSelection = mappings.some((m) => m.checked && m.preview && !m.preview.error);
   const totalResources = mappings
     .filter((m) => m.checked && m.preview)
     .reduce((sum, m) => sum + (m.preview?.resources.length ?? 0), 0);
@@ -259,7 +284,17 @@ export function SyncPage() {
 
                   {/* Preview status */}
                   <div className="shrink-0 w-24 text-end">
-                    {m.preview && (
+                    {m.preview?.error && (
+                      <span
+                        className="inline-flex items-center gap-1 text-xs text-destructive"
+                        title={m.preview.error}
+                        data-testid={`sync-preview-error-${m.remoteId}`}
+                      >
+                        <AlertCircle className="h-3.5 w-3.5" />
+                        {t("syncPage.previewFailed", "Preview failed")}
+                      </span>
+                    )}
+                    {m.preview && !m.preview.error && (
                       <button
                         onClick={() =>
                           setExpandedAgent(
@@ -294,20 +329,22 @@ export function SyncPage() {
               {checkedCount} {t("syncPage.agentsSelected", "agents selected")} ·{" "}
               {totalResources} {t("syncPage.totalResources", "resources")}
             </span>
-            {executeBatchMutation.isSuccess && (
-              <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
-                <CheckCircle className="h-3.5 w-3.5" />
-                {t("syncPage.syncSuccess", "Sync complete")}
-              </span>
-            )}
             {executeBatchMutation.isError && (
-              <span className="inline-flex items-center gap-1 text-destructive">
+              <span
+                className="inline-flex items-center gap-1 text-destructive"
+                data-testid="sync-outcome-error"
+              >
                 <AlertCircle className="h-3.5 w-3.5" />
                 {(executeBatchMutation.error as Error)?.message ||
                   t("syncPage.syncError", "Sync failed")}
               </span>
             )}
           </div>
+
+          {/* What the sync actually did — never inferred from "the request resolved" */}
+          {executeBatchMutation.data && (
+            <SyncOutcome execution={executeBatchMutation.data} />
+          )}
         </section>
       )}
 
@@ -319,6 +356,73 @@ export function SyncPage() {
             {t("syncPage.empty", "Connect to a source instance to begin syncing agents.")}
           </p>
         </section>
+      )}
+    </div>
+  );
+}
+
+/**
+ * What the sync wrote, per agent.
+ *
+ * The page used to render a green "Sync complete" whenever the mutation
+ * resolved. `executeSyncBatch` deliberately resolves on HTTP 500 as well —
+ * that status means *every* mapping failed and the body carries the reasons,
+ * which are worth showing — so a sync that wrote nothing at all reported
+ * success. The outcome is read from the results themselves.
+ */
+function SyncOutcome({ execution }: { execution: BatchSyncExecution }) {
+  const { t } = useTranslation();
+  const { partial, results } = execution;
+
+  // "Nothing to write" has to mean the agent was untouched too: a run that only
+  // reordered workflows writes no resource but does burn an agent version, and
+  // calling that "already up to date" is wrong.
+  const wrote = results.reduce(
+    (sum, r) =>
+      sum + (r.result?.updated ?? 0) + (r.result?.created ?? 0) + (r.result?.agentUpdated ? 1 : 0),
+    0
+  );
+  const failedAgents = results.filter((r) => r.error || hasFailures(r.result));
+
+  return (
+    <div
+      className="border-t border-border px-5 py-3 space-y-2"
+      data-testid="sync-outcome"
+      data-outcome={partial ? "partial" : "ok"}
+    >
+      <div className="flex items-center gap-1.5 text-xs font-medium">
+        {partial ? (
+          <>
+            <AlertCircle className="h-3.5 w-3.5 text-destructive" />
+            <span className="text-destructive">
+              {t("syncPage.syncPartial", "Sync incomplete — some resources were not written")}
+            </span>
+          </>
+        ) : (
+          <>
+            <CheckCircle className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+            <span className="text-emerald-600 dark:text-emerald-400">
+              {wrote > 0
+                ? t("syncPage.syncSuccess", "Sync complete")
+                : t("syncPage.syncIdentical", "Already up to date — nothing to write")}
+            </span>
+          </>
+        )}
+      </div>
+
+      {failedAgents.length > 0 && (
+        <ul className="space-y-1 text-xs text-muted-foreground">
+          {failedAgents.map((r) => (
+            <li key={r.sourceAgentId} data-testid={`sync-failure-${r.sourceAgentId}`}>
+              <span className="font-medium text-foreground">{r.sourceAgentId}</span>
+              {": "}
+              {r.error ||
+                r.result?.failures
+                  .map((f) => `${f.name || f.resourceType} — ${f.reason}`)
+                  .join("; ")}
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );

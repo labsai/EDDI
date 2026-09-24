@@ -30,6 +30,8 @@ import java.util.List;
 import java.util.Map;
 
 import jakarta.ws.rs.NotFoundException;
+import org.mockito.ArgumentCaptor;
+
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -641,6 +643,113 @@ class RestGroupConversationHitlTest {
             Response response = restGroupConversation.getGroupApprovalStatus(GROUP_ID, GC_ID, "summary");
             assertEquals(Response.Status.OK.getStatusCode(), response.getStatus(),
                     "a matching groupId path must not 404");
+        }
+    }
+
+    // =================================================================
+    // decidedBy comes from the server, never from the caller
+    // =================================================================
+
+    /**
+     * A caller must not be able to self-assert who approved something, so the
+     * server overwrites {@code decidedBy} from the authenticated principal. That
+     * much was already true and deliberate.
+     * <p>
+     * What was not: with {@code eddi.security.allow-unauthenticated=true} there is
+     * no principal to name, and the ledger recorded {@code "decidedBy": ""} --
+     * which reads as "we recorded an empty answer" rather than "there was nobody to
+     * record". The audit writer already renders a null decider as
+     * {@code "unknown"}, so a blank name is written as null to land on that same
+     * honest value.
+     */
+    @Nested
+    @DisplayName("decidedBy is server-side")
+    class DecidedBy {
+
+        /** Captures the request the service actually received. */
+        private GroupApprovalRequest resumeWith(HitlDecision decision) throws Exception {
+            var gc = makeGc(OWNER_ID);
+            when(groupService.readGroupConversation(GC_ID)).thenReturn(gc);
+            when(groupService.resumeDiscussion(eq(GC_ID), any(), any())).thenReturn(gc);
+
+            var request = new GroupApprovalRequest();
+            request.setDecision(decision);
+            restGroupConversation.approveGroupPhase(GROUP_ID, GC_ID, request);
+
+            var captor = ArgumentCaptor.forClass(GroupApprovalRequest.class);
+            verify(groupService).resumeDiscussion(eq(GC_ID), captor.capture(), any());
+            return captor.getValue();
+        }
+
+        private HitlDecision decision(String claimedDecider) {
+            var decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.APPROVED);
+            decision.setDecidedBy(claimedDecider);
+            return decision;
+        }
+
+        @Test
+        @DisplayName("the authenticated principal replaces whatever the caller claimed")
+        void principalWins() throws Exception {
+            asUser(OWNER_ID);
+
+            var sent = resumeWith(decision("someone-else"));
+
+            assertEquals(OWNER_ID, sent.getDecision().getDecidedBy(),
+                    "a caller must not be able to name the decider");
+        }
+
+        /**
+         * The shape that actually produced {@code "decidedBy": ""} on the demo
+         * instance: {@code eddi.security.allow-unauthenticated=true} leaves the
+         * identity ANONYMOUS, which the ownership check waves through, and Quarkus's
+         * anonymous identity carries a principal whose name is empty. An authenticated
+         * identity with a blank name never gets this far --
+         * {@code NamelessPrincipalAugmentor} fails it at 401 and
+         * {@code OwnershipValidator} at 403.
+         */
+        @Test
+        @DisplayName("an anonymous caller's empty principal is recorded as null, not as an empty string")
+        void anonymousBlankPrincipalBecomesNull() throws Exception {
+            when(identity.isAnonymous()).thenReturn(true);
+            var principal = mock(Principal.class);
+            when(principal.getName()).thenReturn("");
+            when(identity.getPrincipal()).thenReturn(principal);
+
+            var sent = resumeWith(decision("officer"));
+
+            assertNull(sent.getDecision().getDecidedBy(),
+                    "the audit writer renders null as \"unknown\"; \"\" is recorded verbatim");
+        }
+
+        @Test
+        @DisplayName("a whitespace-only principal is treated the same way")
+        void whitespacePrincipalBecomesNull() throws Exception {
+            when(identity.isAnonymous()).thenReturn(true);
+            var principal = mock(Principal.class);
+            when(principal.getName()).thenReturn("   ");
+            when(identity.getPrincipal()).thenReturn(principal);
+
+            var sent = resumeWith(decision("officer"));
+
+            assertNull(sent.getDecision().getDecidedBy());
+        }
+
+        /**
+         * The self-assertion hole this found: the overwrite used to be guarded on a
+         * non-null principal, so with no principal at all the client's claimed decider
+         * survived into the ledger. It is now unconditional.
+         */
+        @Test
+        @DisplayName("the caller's claim is discarded even when there is no principal at all")
+        void noPrincipalStillDiscardsTheClaim() throws Exception {
+            when(identity.isAnonymous()).thenReturn(true);
+            when(identity.getPrincipal()).thenReturn(null);
+
+            var sent = resumeWith(decision("officer"));
+
+            assertNull(sent.getDecision().getDecidedBy(),
+                    "a caller must never be able to name the decider, in any branch");
         }
     }
 }

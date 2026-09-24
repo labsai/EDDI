@@ -219,6 +219,38 @@ public class MongoSecretPersistence implements ISecretPersistence {
         }
     }
 
+    @Override
+    public boolean updateSecretGrant(String tenantId, String keyName, List<String> allowedAgents, String description) {
+        try {
+            var filter = and(eq(FIELD_TENANT_ID, tenantId), eq(FIELD_KEY_NAME, keyName));
+
+            // Exactly two fields, and no upsert. Everything the value depends on —
+            // encryptedValue, iv, dekId, checksum — is absent from this $set, so a
+            // grant edit cannot re-encrypt or blank the secret. Nor can it create a
+            // row: a grant for a key that does not exist is an operator mistake and
+            // must surface as a 404, not as an empty secret.
+            var update = Updates.combine(Updates.set(FIELD_ALLOWED_AGENTS, allowedAgents), Updates.set(FIELD_DESCRIPTION, description));
+
+            // matchedCount, not modifiedCount: re-applying the grant a secret already
+            // has is a successful no-op, not a missing secret.
+            return secretsCollection.updateOne(filter, update).getMatchedCount() == 1;
+        } catch (MongoException e) {
+            throw new PersistenceException("Failed to update the grant of secret " + tenantId + "/" + keyName, e);
+        }
+    }
+
+    @Override
+    public void touchLastAccessed(String tenantId, String keyName, Instant lastAccessedAt) {
+        try {
+            // One field, no upsert: a resolve must never be able to write back a stale
+            // grant, value or rotation stamp, and must never recreate a deleted secret.
+            secretsCollection.updateOne(and(eq(FIELD_TENANT_ID, tenantId), eq(FIELD_KEY_NAME, keyName)),
+                    Updates.set(FIELD_LAST_ACCESSED_AT, instantToString(lastAccessedAt)));
+        } catch (MongoException e) {
+            throw new PersistenceException("Failed to record access to secret " + tenantId + "/" + keyName, e);
+        }
+    }
+
     // ─── DEKs ───
 
     @Override

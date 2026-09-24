@@ -12,6 +12,15 @@ interface MemberRosterProps {
 }
 
 /**
+ * How many stance cards to show before collapsing.
+ *
+ * A standing team can have twenty members, and twenty stance cards are the wall
+ * of text this whole view exists to replace. Eight fills the widest grid
+ * (three columns) without dominating the page.
+ */
+const ROSTER_VISIBLE = 8;
+
+/**
  * "Who thinks what" — one card per member: their current one-line position,
  * how many turns they have taken, what they have cost, and whether they are
  * speaking, dissenting or broken.
@@ -21,14 +30,6 @@ interface MemberRosterProps {
  * flattened: the two are different kinds of claim, and rendering a paraphrase
  * in a way that reads as a quote would put words in an agent's mouth.
  */
-/**
- * How many stance cards to show before collapsing.
- *
- * A standing team can have twenty members, and twenty stance cards are the wall
- * of text this whole view exists to replace. Eight fills the widest grid
- * (three columns) without dominating the page.
- */
-const ROSTER_VISIBLE = 8;
 
 export function MemberRoster({ members, anonymous, className }: MemberRosterProps) {
   const { t } = useTranslation();
