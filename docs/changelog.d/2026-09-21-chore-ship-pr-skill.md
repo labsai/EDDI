@@ -6,7 +6,7 @@
 
 Shipping a PR here has a long tail of repo-specific traps, and every session rediscovers them.
 The two that cost the most: the `CodeRabbit` check reads **`pass` while the description column
-says `Review rate limited`** — 12 of 13 recent PRs — so "green checks, zero unresolved threads"
+says `Review rate limited`** — so "green checks, zero unresolved threads"
 can mean *nothing was reviewed*; and a targeted `-Dtest='A,B'` **silently drops a missing class
 and exits 0**, because surefire's `failIfNoSpecifiedTests` only trips when zero tests ran.
 

@@ -1,6 +1,6 @@
 ---
 name: ship-pr
-description: Take a branch from local commits to a merge-ready PR — push it, write a real PR description, watch CI to green, then work every review comment (CodeRabbit, Copilot, code-quality, humans) including nitpicks until each thread is answered and resolved. Load when asked to push and open a PR, to watch CI, or to address review feedback on an existing PR.
+description: Take a branch from local commits to a merge-ready PR — push it, write a real PR description, watch CI to green, then work every review comment (CodeRabbit, Copilot, code-quality, humans) including nitpicks until each finding is answered and every bot-opened thread is resolved (a human's own thread stays open for them to close). Load when asked to push and open a PR, to watch CI, or to address review feedback on an existing PR.
 ---
 
 # Shipping a branch through review
@@ -67,7 +67,8 @@ Java sources, not the files their name suggests:**
 #   DocumentationAccuracyTest reads PropertySetterTask, AbstractBackupService,
 #   ScheduleConfiguration, AgentConfiguration, LlmConfiguration, PersistenceModule,
 #   LifecycleManager — adding a field to any of those fails it from a Java-only diff.
-./mvnw test -Dtest='DocumentationLinksTest,DocumentationAccuracyTest,DocumentedRestPathsTest,DeploymentManifestsTest'
+#   ChangelogFragmentTest is here too: it grades new files under docs/changelog.d/.
+./mvnw test -Dtest='DocumentationLinksTest,DocumentationAccuracyTest,DocumentedRestPathsTest,DeploymentManifestsTest,ChangelogFragmentTest'
 
 # added/changed a @ConfigProperty, an application.properties key, k8s/helm, compose, Dockerfile
 ./mvnw test -Dtest='ConfigurationReferenceCoverageTest,DeploymentManifestsTest,ComposeStackTest,EddiImageDockerfileTest,MissingPropertyRenderingTest,StaticAssetCachingTest,AuditRetentionConfigTest'
@@ -89,10 +90,17 @@ Java sources, not the files their name suggests:**
 > `surefire.failIfNoSpecifiedTests` only trips when *zero* tests ran, so
 > `-Dtest='ImportStyleTest,RenamedGuardTest'` exits **0** with no warning and only
 > `ImportStyleTest` executed — verified in this worktree. (The flag people reach for,
-> `-DfailIfNoTests=false`, is a different parameter and not the one in play.) After a guard
-> run, confirm every class you named actually produced a report:
+> `-DfailIfNoTests=false`, is a different parameter and not the one in play.) `mvn test` never
+> clears `target/surefire-reports/`, so a report left over from an earlier run (a renamed or
+> since-deleted class, or last time's `-Dtest` list) can make a raw file count look right while
+> this run actually skipped a class. Clear the directory before each guard run, then confirm
+> every class you named produced a report **by name**:
 > ```bash
-> ls target/surefire-reports/TEST-*.xml | wc -l    # must equal the number of classes you listed
+> rm -rf target/surefire-reports
+> ./mvnw test -Dtest='ImportStyleTest,BuildQualityGatesTest,ChangelogRotationTest'
+> for t in ImportStyleTest BuildQualityGatesTest ChangelogRotationTest; do
+>   find target/surefire-reports -name "TEST-*.$t.xml" | grep -q . || echo "MISSING: $t"
+> done
 > ```
 
 Redirect mvnw output to a file and echo `$?`; piping through `grep`/`head` returns 0 and can
@@ -151,8 +159,11 @@ Write the body file to the scratchpad, not the worktree, so it cannot be staged 
 
 ```bash
 git push -u origin HEAD
-gh pr create --base main --title "<conventional commit subject>" --body-file <file>
+gh pr create --base "$BASE" --title "<conventional commit subject>" --body-file <file>
 ```
+
+`$BASE` is `main` unless this is a stacked PR against an unmerged parent branch (see
+**Base** above) — use that parent, not `main`, or the diff includes its commits too.
 
 Bind it so CI reports back instead of being polled: `gh pr view --json number,url`, then
 `mcp__ccd_pr__bind_pr`.
@@ -290,7 +301,8 @@ threads — PR 806 had two open), and humans.
 gh pr checks <n> | grep -i coderabbit     # "Review completed" vs "Review rate limited"
 ```
 
-Eleven of thirteen recent PRs were `Review rate limited` (the plan here is 2 reviews/hour).
+The plan here is 2 reviews/hour, and `Review rate limited` is common enough that it is not
+a fluke to be waited out.
 An agent reading `pass` plus "0 unresolved threads" declares victory on an unreviewed PR.
 Re-check after **every** push. Report "rate limited" as **not reviewed**, never as clean.
 Recovery is in the command table below — check `@coderabbitai rate limit` first (it costs no
@@ -425,10 +437,14 @@ That is the only form that survives all three things a real reply contains: a le
 shell quote), and a newline. Inline `-f b='…'` handles the first but breaks on the other two.
 
 Then re-run 4a **with `--all`** — the default view hides resolved threads, which is precisely
-where the silent ones hide. The audit is only clean when it reports **0 unresolved *and*
-0 resolved-with-no-reply**. Read any thread whose last comment is not yours — bots
-frequently reply *inside* a thread you already resolved, and the default view hides it.
-Re-check CI and the CodeRabbit description column. Each push in this loop needs approval.
+where the silent ones hide. A human's own thread left open on purpose (§5, "Escalate instead
+of resolving") is not a gap, so judge bot threads and human threads separately: the audit is
+clean when **every bot-opened thread is resolved** and **0 resolved threads have no reply from
+you** — and **every open human-owned thread has an explicit disposition in your report**
+(fixed, pushed back, deferred, or escalated), not just a reply. Read any thread whose last
+comment is not yours — bots frequently reply *inside* a thread you already resolved, and the
+default view hides it. Re-check CI and the CodeRabbit description column. Each push in this
+loop needs approval.
 
 ## 6. Before you call it done
 
