@@ -434,6 +434,11 @@ Both are exposed as parameters:
 
 #### Jlama (Local Java Inference)
 
+Jlama is the only provider that runs inference **inside the EDDI JVM**. There is no
+second process, no Ollama, no HTTP hop — which also means the model's memory, CPU and
+weight storage are EDDI's problem rather than a sidecar's. Read the two subsections
+below before deploying it; both describe defaults that fail in a container.
+
 ```json
 {
   "tasks": [
@@ -444,7 +449,10 @@ Both are exposed as parameters:
       "description": "Jlama local model chat",
       "parameters": {
         "modelName": "tjake/Llama-3.2-1B-Instruct-JQ4",
+        "modelCachePath": "/var/lib/eddi/jlama",
+        "threadCount": "4",
         "temperature": "0.7",
+        "maxTokens": "512",
         "timeout": "30000",
         "systemMessage": "You are a helpful assistant",
         "addToOutput": "true"
@@ -454,7 +462,87 @@ Both are exposed as parameters:
 }
 ```
 
-**Note**: Jlama runs models locally in Java without requiring external services like Ollama.
+| Parameter | Meaning |
+| --------- | ------- |
+| `modelName` | Hugging Face repo id, e.g. `tjake/Llama-3.2-1B-Instruct-JQ4`. Jlama downloads it on first use |
+| `modelCachePath` | Where weights are cached. **Set this in any container** — see below. Default: `${user.home}/.jlama/models` |
+| `authToken` | Hugging Face token, for gated or private repos. Use `${vault:...}` rather than a literal |
+| `quantizeModelAtRuntime` | `true` quantizes on load: slower startup, smaller memory footprint |
+| `workingDirectory` | Scratch space for the loader. Needs to be writable |
+| `workingQuantizedType` | Jlama `DType` name for working-set quantization, e.g. `F32`, `I8`. Case-insensitive; an unknown name is logged and ignored |
+| `temperature`, `maxTokens` | As for every other provider. Jlama defaults to `0.3` and the model's full context length |
+| `timeout` | Honoured, but applied by EDDI as a wall-clock bound around the call rather than by Jlama itself — Jlama's own builder has no timeout |
+
+##### Required JVM flag
+
+Jlama needs the Java Vector API for SIMD tensor operations:
+
+```
+--add-modules=jdk.incubator.vector
+```
+
+**EDDI sets this for you** in both container images, in the Maven Surefire fork and in
+the `mise` dev tasks. (Deliberately not in the Failsafe fork — declaring an `argLine`
+there would replace the implicit `${argLine}` that carries the JaCoCo integration-test
+agent and Quarkus's module opens, and no integration test builds a Jlama model anyway.) You only need to add it yourself if you launch `quarkus-run.jar` with
+your own command line.
+
+The image carries it on **`JDK_JAVA_OPTIONS`**, deliberately, rather than on
+`JAVA_OPTS_APPEND` where EDDI's other JVM settings live. The `java` launcher reads
+`JDK_JAVA_OPTIONS` itself, so the flag survives an operator overriding either of the
+other two variables — and overriding them is normal: a `docker run -e JAVA_OPTS_APPEND=…`
+*replaces* the image's value rather than adding to it, so a deployment that sets its
+MongoDB connection string that way would otherwise silently drop the flag and fall back
+to scalar inference.
+
+> ⚠️ If you set `JDK_JAVA_OPTIONS` yourself, carry
+> `--add-modules=jdk.incubator.vector` across — that one *does* replace the image's value.
+> You will see `NOTE: Picked up JDK_JAVA_OPTIONS` in the startup log either way.
+
+This matters more than a usual tuning flag, because the failure is silent. Jlama probes
+for the Vector API inside a `catch (Throwable)`; without the module it logs one line,
+falls back to `NaiveTensorOperations` — scalar Java matrix arithmetic — and answers
+normally, just orders of magnitude slower than SIMD. Nothing errors; the agent is simply
+too slow to use. EDDI logs its own warning naming this flag when it builds a Jlama model
+on a JVM that lacks it.
+
+> The JVM prints `WARNING: Using incubator modules: jdk.incubator.vector` at startup.
+> That is expected and is not an error.
+
+##### Deploying Jlama in a container
+
+Three things behave differently inside a container. None of them raises an error — which
+is exactly why each is worth setting explicitly.
+
+- **`modelCachePath` — set it.** Jlama writes weights to `${user.home}/.jlama/models`,
+  which in a container is the pod's ephemeral writable layer. That *works*, which is what
+  makes it a trap rather than an error: the multi-gigabyte weights live exactly as long as
+  the pod does, so every restart, rollout and reschedule re-downloads them from Hugging
+  Face before the first turn can be answered. Point it at a mounted volume. (The download
+  happens on the *first turn*, not at deploy time, so a mistake here surfaces long after
+  the agent was configured and saved.)
+- **Thread count — give the pod a CPU *limit*, not a parameter.** Jlama runs inference on
+  a process-global `PhysicalCoreExecutor` sized at `max(2, availableProcessors() / 2)`.
+  `availableProcessors()` honours a container CPU **limit**, so `limits.cpu: 4` yields two
+  inference threads. It does **not** honour a CPU **request**: cgroup shares have been
+  ignored since JDK 19, so a pod with only `requests.cpu` sees the whole node. EDDI
+  deliberately exposes no `threadCount` parameter — Jlama applies it through a one-shot
+  process-global latch that throws on its second call, so it cannot be a per-model setting.
+  If you must override it, size the pod.
+- **Memory — size for the weights, outside the heap.** Jlama memory-maps the safetensors
+  files, so the weights land in RSS and page cache, not the Java heap. They still count
+  against the container's memory limit. Size the pod for the model *plus* EDDI's heap, and
+  note that `JAVA_MAX_MEM_RATIO` only governs the heap, so raising it does not make room
+  for the model — it takes room away.
+
+For an air-gapped deployment, pre-seed `modelCachePath` from a machine that has network
+access and mount it read-only. Jlama reaches out to Hugging Face whenever the model is
+not already in the cache, so an empty cache with no egress fails rather than degrades.
+
+**Note**: Jlama runs models locally in Java without requiring external services like
+Ollama. It is CPU inference — there is no GPU path — so it suits small quantized models
+(1B–8B) rather than large ones. For a GPU or a larger model, serve it with vLLM or
+`llama-server` and point the `openai` provider at it via `baseUrl`.
 
 #### Mistral AI
 
