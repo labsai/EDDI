@@ -608,25 +608,32 @@ Symptoms: the model answers as though it had never seen the corpus, the compiled
 and the logs show nothing from `RagContextProvider` or `EmbeddingStoreFactory` while other providers
 log on every turn.
 
-That combination means **no knowledge base was matched** — but two different causes produce it, and
-from the outside they look identical. Either the workflow binds no `eddi://ai.labs.rag` step at all,
-or it binds one whose name none of `knowledgeBases[].name` matches. Either way retrieval returns
-before doing any work: the trace entry, the store build and the INFO log are all downstream of a
-match, so none of them appear.
+That combination means **no context was produced** — but three different causes produce it, and from
+the outside they look identical. If the task's `knowledgeBases` is null or empty *and*
+`enableWorkflowRag` is not `true`, `RagContextProvider.retrieveContext` returns before it even
+discovers workflow steps — no discovery, no trace, no store build, no INFO log, and no DEBUG message,
+regardless of what the workflow itself binds. Otherwise discovery does run, and the other two causes
+apply: either the workflow binds no `eddi://ai.labs.rag` step at all, or it binds one whose name none
+of `knowledgeBases[].name` matches. In both of those, the trace entry, the store build and the INFO
+log are still downstream of a match, so none of them appear either.
 
-At `DEBUG` the two causes do separate — `No RAG steps found in workflow` is logged only for the
-first — so raise the level before guessing if you can. Otherwise work through it in this order:
+At `DEBUG` only the missing-step cause is distinguishable: `No RAG steps found in workflow` is logged
+once discovery runs and finds nothing. The task-level early return and the unmatched-name case log
+nothing at any level — so before raising the level, first confirm the task actually asks for RAG at
+all. Otherwise work through it in this order:
 
 | # | Check | How |
 |---|---|---|
-| 1 | Is `ai.labs.rag` a registered extension? | `GET /extensionstore/extensions`. If absent, this build cannot deploy a RAG step at all — upgrade; only `httpCallRag` works until then |
-| 2 | Does the agent's workflow carry an `eddi://ai.labs.rag` step? | Read the workflow config. **This is the usual cause** — see [step 2](#2-workflow-step-binds-the-kb-to-the-agent) |
-| 3 | Does `knowledgeBases[].name` match the KB's `name`? | Compare against the `RagConfiguration`. It matches on `name`, not id, and a miss is skipped silently |
-| 4 | Is the deployed agent version the one you edited? | Retrieval reads the workflow of the agent version in the conversation, and configs are versioned |
-| 5 | Was anything actually ingested — and is it still there? | Poll the ingestion status. On an `in-memory` store, confirm nothing has evicted it since (see [Vector Stores](#vector-stores)) |
-| 6 | Did ingestion write where retrieval reads? | If you passed `kbId` to `/ingest`, it must equal the KB's `name` exactly, or the documents are in a store retrieval never opens (see [Document Ingestion](#document-ingestion)) |
+| 1 | Does the task request RAG at all? | Task config: `knowledgeBases` must be non-empty, or `enableWorkflowRag: true`. Neither means `RagContextProvider` returns immediately — no discovery, no trace, no log line at any level |
+| 2 | Is `ai.labs.rag` a registered extension? | `GET /extensionstore/extensions`. If absent, this build cannot deploy a RAG step at all — upgrade; only `httpCallRag` works until then |
+| 3 | Does the agent's workflow carry an `eddi://ai.labs.rag` step? | Read the workflow config. **This is the usual cause** — see [step 2](#2-workflow-step-binds-the-kb-to-the-agent) |
+| 4 | Does `knowledgeBases[].name` match the KB's `name`? | Compare against the `RagConfiguration`. It matches on `name`, not id, and a miss is skipped silently |
+| 5 | Is the deployed agent version the one you edited? | Retrieval reads the workflow of the agent version in the conversation, and configs are versioned |
+| 6 | Was anything actually ingested — and is it still there? | Poll the ingestion status. On an `in-memory` store, confirm nothing has evicted it since (see [Vector Stores](#vector-stores)) |
+| 7 | Did ingestion write where retrieval reads? | If you passed `kbId` to `/ingest`, it must equal the KB's `name` exactly, or the documents are in a store retrieval never opens (see [Document Ingestion](#document-ingestion)) |
 
-Raise `RagContextProvider` to `DEBUG` to see the early return directly:
+Raise `RagContextProvider` to `DEBUG` to see the missing-step early return directly (it will not show
+the task-level or unmatched-name cases — rule those out with checks 1 and 4 above):
 
 ```properties
 quarkus.log.category."ai.labs.eddi.modules.llm.impl.RagContextProvider".level=DEBUG

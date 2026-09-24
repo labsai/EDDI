@@ -27,6 +27,15 @@ A second cause presents identically and the troubleshooting section now says so:
 `traceEntries` stays empty so no trace is stored, and `allResults.isEmpty()` returns null just the
 same. Only the `DEBUG` line distinguishes them — it is logged for the missing-step case alone.
 
+A third cause sits even earlier and was missed in the first pass at this section: `retrieveContext`
+checks the *task* before it ever looks at the workflow — `if (!hasExplicitRefs && !useWorkflowDiscovery)
+return null;` at the top of the method. A task with an empty `knowledgeBases` and no
+`enableWorkflowRag: true` returns here, before `WorkflowTraversal.discoverConfigs` runs at all, so it
+produces no discovery, no trace, no store build, no INFO log — and, unlike the missing-step cause, no
+`DEBUG` line either, because that line lives inside the `ragSteps.isEmpty()` branch this return never
+reaches. The troubleshooting table now leads with checking the task's own RAG settings before touching
+the workflow.
+
 `rag.md` mentioned the requirement only in a subordinate clause ("Each reference names a KB from the
 workflow") and in a Status bullet at the bottom of the page. Its setup path showed the KB config and
 the LLM task and nothing else — so a reader who followed it end to end built exactly the broken
@@ -62,8 +71,10 @@ two-sided configuration that was reported. That is a documentation defect, not a
   stores with a 30-minute `expireAfterAccess` and a full invalidation on any secret or global-variable
   change — so an in-memory KB empties itself after 30 idle minutes, on restart, and on credential
   rotation, then returns no context rather than an error.
-- **New `## Troubleshooting`** section: an ordered six-step check for the silent-no-context case, and
-  the `quarkus.log.category` line that makes the early return visible.
+- **New `## Troubleshooting`** section: an ordered seven-step check for the silent-no-context case
+  (task-level RAG settings checked first, ahead of the workflow-binding checks), and the
+  `quarkus.log.category` line that makes the missing-step early return visible — called out as not
+  covering the task-level or unmatched-name causes, which log nothing at any level.
 - **Status**: the workflow-step bullet said "Options 1 and 2 below" while they are above it.
 
 ### `docs/langchain.md`
@@ -95,4 +106,5 @@ than fixed, each arguably worth its own issue:
 ```regression-note
 | 2026-09-21 | A RAG setup with a correct KB config and a correct `knowledgeBases` reference but no `eddi://ai.labs.rag` workflow step retrieves nothing, and says nothing: no context, no `rag:trace:*`, no error, and the only log is `DEBUG` "No RAG steps found in workflow". Check the workflow step first, and `GET /extensionstore/extensions` before that on older builds. |
 | 2026-09-21 | `POST /ragstore/rags/{id}/ingest` accepts a `kbId` that overrides the embedding-store key, but retrieval always keys on the KB's `name` and cannot be redirected. A `kbId` that is not exactly the `name` ingests into a store nothing reads, reporting `202` then `completed` the whole way. Leave `kbId` unset. Ingestion sources are unaffected. |
+| 2026-09-24 | A task with an empty `knowledgeBases` and no `enableWorkflowRag: true` also retrieves nothing and says nothing — `RagContextProvider.retrieveContext` returns before workflow discovery even runs, so unlike the missing-step cause there is no `DEBUG` line either. Check the task's own RAG settings before checking the workflow binding. |
 ```
