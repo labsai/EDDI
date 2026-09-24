@@ -25,6 +25,7 @@ import dev.langchain4j.data.document.splitter.DocumentSplitters;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.exception.UnsupportedFeatureException;
 import dev.langchain4j.model.embedding.EmbeddingModel;
+import dev.langchain4j.model.embedding.request.EmbeddingInputType;
 import dev.langchain4j.store.embedding.EmbeddingStore;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
@@ -743,7 +744,9 @@ public class IngestionPipeline {
 
         private EmbeddingModel model() {
             if (model == null) {
-                model = embeddingModelFactory.getOrCreate(knowledgeBase);
+                // DOCUMENT: the crawler is storing these vectors. An asymmetric model
+                // embeds a document differently from a query, and gets to know which.
+                model = embeddingModelFactory.getOrCreate(knowledgeBase, EmbeddingInputType.DOCUMENT);
             }
             return model;
         }

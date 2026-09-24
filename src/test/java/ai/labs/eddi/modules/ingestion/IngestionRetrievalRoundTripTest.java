@@ -36,6 +36,7 @@ import ai.labs.eddi.modules.llm.model.LlmConfiguration.KnowledgeBaseReference;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.embedding.EmbeddingModel;
+import dev.langchain4j.model.embedding.request.EmbeddingInputType;
 import dev.langchain4j.model.output.Response;
 import dev.langchain4j.store.embedding.inmemory.InMemoryEmbeddingStore;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -95,6 +96,8 @@ class IngestionRetrievalRoundTripTest {
     /** Keyed like the real factory: a wrong key is an empty store, not a miss. */
     private final Map<String, InMemoryEmbeddingStore<TextSegment>> storesByKey = new HashMap<>();
     private final List<String> requestedKeys = new ArrayList<>();
+    /** The role each half asked the model factory for, in call order. */
+    private final List<EmbeddingInputType> requestedRoles = new ArrayList<>();
 
     private InMemoryIngestionStateStore stateStore;
     private final InMemoryIngestedFileStore fileStore = new InMemoryIngestedFileStore();
@@ -108,7 +111,11 @@ class IngestionRetrievalRoundTripTest {
 
         EmbeddingModel embeddingModel = new BagOfWordsEmbeddingModel();
         modelFactory = mock(EmbeddingModelFactory.class);
-        when(modelFactory.getOrCreate(any(RagConfiguration.class))).thenReturn(embeddingModel);
+        when(modelFactory.getOrCreate(any(RagConfiguration.class), any(EmbeddingInputType.class)))
+                .thenAnswer(invocation -> {
+                    requestedRoles.add(invocation.getArgument(1));
+                    return embeddingModel;
+                });
 
         storeFactory = mock(EmbeddingStoreFactory.class);
         when(storeFactory.getOrCreate(any(RagConfiguration.class), anyString())).thenAnswer(invocation -> {
@@ -152,6 +159,12 @@ class IngestionRetrievalRoundTripTest {
         assertTrue(context.contains("fourteen days"), context);
         assertEquals(List.of(KB_NAME, KB_NAME), requestedKeys,
                 "ingestion and retrieval must ask the factory for the same store");
+        // The same store, but deliberately NOT the same model. An asymmetric provider
+        // bakes the role in at construction and the factory keys its cache on it, so
+        // the two halves sharing one entry is exactly how a query got embedded as a
+        // document.
+        assertEquals(List.of(EmbeddingInputType.DOCUMENT, EmbeddingInputType.QUERY), requestedRoles,
+                "ingestion must embed as DOCUMENT and retrieval as QUERY");
     }
 
     @Test

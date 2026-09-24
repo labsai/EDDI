@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import dev.langchain4j.model.embedding.request.EmbeddingInputType;
+
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.secrets.SecretResolver;
@@ -46,14 +48,14 @@ class EmbeddingModelFactoryBranchTest {
         @DisplayName("null taskType defaults to RETRIEVAL_DOCUMENT")
         void nullTaskType() {
             var config = createConfig("gemini", Map.of("apiKey", "test", "taskType", ""));
-            assertDoesNotThrow(() -> factory.getOrCreate(config));
+            assertDoesNotThrow(() -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT));
         }
 
         @Test
         @DisplayName("blank taskType defaults to RETRIEVAL_DOCUMENT")
         void blankTaskType() {
             var config = createConfig("gemini", Map.of("apiKey", "test", "taskType", "   "));
-            assertDoesNotThrow(() -> factory.getOrCreate(config));
+            assertDoesNotThrow(() -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT));
         }
     }
 
@@ -65,28 +67,28 @@ class EmbeddingModelFactoryBranchTest {
         @DisplayName("null outputDimensionality uses default")
         void nullDimensionality() {
             var config = createConfig("gemini", Map.of("apiKey", "test"));
-            assertDoesNotThrow(() -> factory.getOrCreate(config));
+            assertDoesNotThrow(() -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT));
         }
 
         @Test
         @DisplayName("blank outputDimensionality uses default")
         void blankDimensionality() {
             var config = createConfig("gemini", Map.of("apiKey", "test", "outputDimensionality", ""));
-            assertDoesNotThrow(() -> factory.getOrCreate(config));
+            assertDoesNotThrow(() -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT));
         }
 
         @Test
         @DisplayName("invalid outputDimensionality throws")
         void invalidDimensionality() {
             var config = createConfig("gemini", Map.of("apiKey", "test", "outputDimensionality", "abc"));
-            assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(config));
+            assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT));
         }
 
         @Test
         @DisplayName("valid outputDimensionality parsed correctly")
         void validDimensionality() {
             var config = createConfig("gemini", Map.of("apiKey", "test", "outputDimensionality", "256"));
-            assertDoesNotThrow(() -> factory.getOrCreate(config));
+            assertDoesNotThrow(() -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT));
         }
     }
 
@@ -100,14 +102,14 @@ class EmbeddingModelFactoryBranchTest {
             var config = createConfig("azure-openai", Map.of(
                     "apiKey", "test",
                     "endpoint", "https://my-resource.openai.azure.com"));
-            assertDoesNotThrow(() -> factory.getOrCreate(config));
+            assertDoesNotThrow(() -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT));
         }
 
         @Test
         @DisplayName("without endpoint parameter")
         void withoutEndpoint() {
             var config = createConfig("azure-openai", Map.of("apiKey", "test"));
-            assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(config));
+            assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT));
         }
     }
 
@@ -119,14 +121,14 @@ class EmbeddingModelFactoryBranchTest {
         @DisplayName("with defaults")
         void withDefaults() {
             var config = createConfig("ollama", Map.of());
-            assertDoesNotThrow(() -> factory.getOrCreate(config));
+            assertDoesNotThrow(() -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT));
         }
 
         @Test
         @DisplayName("with custom baseUrl and model")
         void withCustomParams() {
             var config = createConfig("ollama", Map.of("baseUrl", "http://my-ollama:11434", "model", "custom-model"));
-            assertDoesNotThrow(() -> factory.getOrCreate(config));
+            assertDoesNotThrow(() -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT));
         }
     }
 
@@ -138,7 +140,7 @@ class EmbeddingModelFactoryBranchTest {
         @DisplayName("null project throws")
         void nullProject() {
             var config = createConfig("vertex", Map.of());
-            var ex = assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(config));
+            var ex = assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT));
             assertTrue(ex.getMessage().contains("project"));
         }
 
@@ -146,7 +148,7 @@ class EmbeddingModelFactoryBranchTest {
         @DisplayName("blank project throws")
         void blankProject() {
             var config = createConfig("vertex", Map.of("project", "  "));
-            var ex = assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(config));
+            var ex = assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT));
             assertTrue(ex.getMessage().contains("project"));
         }
     }
@@ -159,14 +161,14 @@ class EmbeddingModelFactoryBranchTest {
         @DisplayName("with defaults")
         void withDefaults() {
             var config = createConfig("bedrock", Map.of());
-            assertDoesNotThrow(() -> factory.getOrCreate(config));
+            assertDoesNotThrow(() -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT));
         }
 
         @Test
         @DisplayName("with custom region and model")
         void withCustomParams() {
             var config = createConfig("bedrock", Map.of("region", "eu-west-1", "model", "custom-model"));
-            assertDoesNotThrow(() -> factory.getOrCreate(config));
+            assertDoesNotThrow(() -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT));
         }
     }
 
@@ -180,7 +182,7 @@ class EmbeddingModelFactoryBranchTest {
             var config = new RagConfiguration();
             config.setEmbeddingProvider("openai");
             config.setEmbeddingParameters(null);
-            assertDoesNotThrow(() -> factory.getOrCreate(config));
+            assertDoesNotThrow(() -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT));
         }
     }
 

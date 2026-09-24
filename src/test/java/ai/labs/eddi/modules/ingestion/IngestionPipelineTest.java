@@ -25,6 +25,7 @@ import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.embedding.EmbeddingModel;
+import dev.langchain4j.model.embedding.request.EmbeddingInputType;
 import dev.langchain4j.model.output.Response;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -87,7 +88,8 @@ class IngestionPipelineTest {
         embeddingModel = mock(EmbeddingModel.class);
 
         when(storeFactory.getOrCreate(any(RagConfiguration.class), anyString())).thenReturn(embeddingStore);
-        when(modelFactory.getOrCreate(any(RagConfiguration.class))).thenReturn(embeddingModel);
+        when(modelFactory.getOrCreate(any(RagConfiguration.class), any(EmbeddingInputType.class)))
+                .thenReturn(embeddingModel);
         when(embeddingModel.embedAll(any())).thenAnswer(invocation -> {
             List<TextSegment> segments = invocation.getArgument(0);
             return Response.from(segments.stream().map(segment -> Embedding.from(new float[]{0.1f, 0.2f})).toList());
@@ -189,6 +191,20 @@ class IngestionPipelineTest {
         void stateIsScopedPerKnowledgeBase() {
             assertFalse(IngestionPipeline.stateKey("kb-a", source())
                     .equals(IngestionPipeline.stateKey("kb-b", source())));
+        }
+
+        @Test
+        @DisplayName("asks for a DOCUMENT model, because the crawler is storing these vectors")
+        void embedsCrawledPagesAsDocuments() {
+            // An asymmetric provider bakes the role in at construction, and the role is
+            // part of the factory's cache key. Asking for QUERY here would hand the
+            // crawler the retrieval instance and store every page as though it were a
+            // search string -- which reports success and quietly costs recall.
+            FakeSite site = new FakeSite().page(SITE + "/", pageWith("Install the thing."));
+
+            pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+
+            verify(modelFactory).getOrCreate(any(RagConfiguration.class), eq(EmbeddingInputType.DOCUMENT));
         }
     }
 
