@@ -133,6 +133,16 @@ __pycache__/
 !ui/manager/.claude/
 ui/manager/.claude/settings.local.json
 
+# Repo-root .claude/skills holds tracked, shared Claude Code skills (the backend's
+# counterpart to ui/manager/.claude/skills). The `.claude/` rule above ignores the
+# whole directory, and git will not descend into an excluded directory to find a
+# re-included file — so the parent has to be un-ignored first, then re-excluded for
+# everything that is genuinely machine-local: settings.local.json, worktrees/ and
+# the local workflow scratch.
+!.claude/
+.claude/*
+!.claude/skills/
+
 # === Generated frontend output (ui/manager and ui/chat, built by Maven) ===
 # frontend-maven-plugin installs Node into ui/node (installDirectory is ui/, so
 # ui/*/node would NOT match it).
