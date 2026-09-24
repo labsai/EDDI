@@ -23,6 +23,172 @@
   "links": [],
   "panels": [
     {
+      "id": 168,
+      "type": "row",
+      "title": "LLM — Per-call latency, tokens and errors",
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "panels": [
+        {
+          "id": 169,
+          "type": "timeseries",
+          "title": "LLM call latency (p95) by provider and model",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_llm_request_duration_seconds` — every provider call, not just cascade steps. Counts attempts: a retried turn contributes more than one sample.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 1
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "histogram_quantile(0.95, sum by (le, provider, model) (rate(eddi_llm_request_duration_seconds_bucket{job=~\"$job\"}[$__rate_interval])))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{provider}} / {{model}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "color": {
+                "mode": "palette-classic"
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 170,
+          "type": "timeseries",
+          "title": "LLM token rate by type",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_llm_tokens_total` — input vs output tokens per second. Do not add to `eddi_llm_cascade_tokens_total`; a cascading task reports through both.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 1
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (provider, model, type) (rate(eddi_llm_tokens_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{provider}} / {{model}} {{type}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 171,
+          "type": "timeseries",
+          "title": "LLM error rate by exception",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_llm_request_errors_total` — failed attempts, tagged with the exception's simple name. `ChatTimeoutException` is the configured wall-clock `timeout` firing.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 8
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (provider, error) (rate(eddi_llm_request_errors_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{provider}} / {{error}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 172,
+          "type": "timeseries",
+          "title": "LLM call outcome mix",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_llm_request_duration_seconds_count` split by outcome — the success/error ratio of actual provider calls.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 8
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (outcome) (rate(eddi_llm_request_duration_seconds_count{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{outcome}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              }
+            },
+            "overrides": []
+          }
+        }
+      ]
+    },
+    {
       "id": 134,
       "type": "row",
       "title": "Overview — is EDDI healthy right now?",
