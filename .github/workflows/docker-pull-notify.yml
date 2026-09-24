@@ -35,7 +35,7 @@ jobs:
       # Save always creates a new key; restore-keys finds the latest.
       - name: Restore metrics cache
         id: cache-restore
-        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v4
         with:
           path: metrics.json
           key: project-metrics-${{ github.run_id }}
