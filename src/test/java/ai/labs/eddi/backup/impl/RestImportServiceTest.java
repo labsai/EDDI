@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import java.util.Optional;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.spaces.SpaceContext;
@@ -24,6 +25,7 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.core.Response;
+import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -68,7 +70,8 @@ class RestImportServiceTest {
                 zipArchive, jsonSerialization,
                 migrationManager, documentDescriptorStore,
                 templateSyntaxMigrator, structuralMatcher, upgradeExecutor, mock(IScheduleStore.class), mock(BackupMetrics.class),
-                mock(ResourceAccessGuard.class), mock(SpaceContext.class));
+                mock(ResourceAccessGuard.class), mock(SpaceContext.class), mock(RagSourceIngestionService.class),
+                true, false, Optional.empty());
     }
 
     // ==================== Strategy Dispatch ====================
@@ -460,21 +463,21 @@ class RestImportServiceTest {
         @Test
         @DisplayName("null URL throws IllegalArgumentException")
         void nullUrl() {
-            assertThrows(IllegalArgumentException.class,
+            assertThrows(BadRequestException.class,
                     () -> importService.previewSyncBatch(null, List.of(new SyncMapping("a", 1, "b")), null));
         }
 
         @Test
         @DisplayName("blank URL throws IllegalArgumentException")
         void blankUrl() {
-            assertThrows(IllegalArgumentException.class,
+            assertThrows(BadRequestException.class,
                     () -> importService.previewSyncBatch("   ", List.of(new SyncMapping("a", 1, "b")), null));
         }
 
         @Test
         @DisplayName("localhost URL throws IllegalArgumentException")
         void localhostUrl() {
-            assertThrows(IllegalArgumentException.class,
+            assertThrows(BadRequestException.class,
                     () -> importService.previewSyncBatch("http://localhost:8080",
                             List.of(new SyncMapping("a", 1, "b")), null));
         }

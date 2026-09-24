@@ -864,7 +864,11 @@
     "cascadePartialFailure_other": "{{count}} mises à jour en cascade échouées",
     "usedInAgents_many": "Utilisé dans {{count}} agents",
     "usedInAgents_one": "Utilisé dans {{count}} agent",
-    "usedInAgents_other": "Utilisé dans {{count}} agents"
+    "usedInAgents_other": "Utilisé dans {{count}} agents",
+    "savedNotLive": "Enregistré — pas encore actif",
+    "savedNotLiveDescription": "L'agent en cours d'exécution sert toujours la version déployée. Déployez pour appliquer ce changement.",
+    "deployNow": "Déployer",
+    "deployStarted": "Déploiement lancé"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -1661,7 +1665,23 @@
     "resetSecretCount_other": "{{count}} secrets seront définitivement perdus",
     "resetTenantSuccess_many": "Vault réinitialisé pour \"{{tenant}}\" — {{count}} secrets définitivement supprimés",
     "resetTenantSuccess_one": "Vault réinitialisé pour \"{{tenant}}\" — {{count}} secret définitivement supprimés",
-    "resetTenantSuccess_other": "Vault réinitialisé pour \"{{tenant}}\" — {{count}} secrets définitivement supprimés"
+    "resetTenantSuccess_other": "Vault réinitialisé pour \"{{tenant}}\" — {{count}} secrets définitivement supprimés",
+    "access": "Accès",
+    "editGrant": "Modifier les agents autorisés à utiliser ce secret",
+    "editGrantKey": "Modifier l’accès de {{key}}",
+    "grantTitle": "Qui peut utiliser « {{key}} »",
+    "grantValueUntouched": "La valeur du secret n’est pas modifiée et n’a pas besoin d’être saisie à nouveau. Seuls les agents autorisés changent.",
+    "grantOnlyTheseAgents": "Uniquement ces agents",
+    "grantAllHint": "Tous les agents de ce tenant peuvent référencer ce secret. Restreignez la liste pour limiter la portée d’une seule configuration compromise.",
+    "grantAddAgent": "Ajouter un agent",
+    "grantEmptyError": "Ajoutez au moins un agent ou choisissez « Tous les agents ». Une liste vide n’est pas autorisée.",
+    "grantCheckingImpact": "Vérification des agents déployés…",
+    "grantLosingAccessTitle": "Agents déployés qui utilisent ce secret et perdraient l’accès ({{count}})",
+    "grantLosingAccessBody": "Ils continuent de fonctionner pour l’instant — l’autorisation est vérifiée au déploiement d’un agent, pas à l’utilisation du secret — mais leur prochain déploiement sera refusé.",
+    "grantAcknowledge": "Je comprends que ces agents ne pourront plus être déployés tant qu’ils n’auront pas été rajoutés à la liste ou que leur configuration n’aura pas cessé d’utiliser ce secret.",
+    "grantSaved": "Accès mis à jour pour « {{key}} »",
+    "grantImpactFailed": "Impossible de vérifier quels agents déployés utilisent ce secret : n’importe lequel pourrait perdre l’accès.",
+    "grantAcknowledgeUnchecked": "Enregistrer quand même, sans savoir quels agents déployés sont concernés."
   },
   "audit": {
     "title": "Journal d’audit",
@@ -2040,7 +2060,88 @@
     "ingestText": "Ingérer le texte",
     "ingestionHistory": "Statut d'ingestion",
     "saveFirstIngestion": "Enregistrez d'abord cette base pour autoriser l'ingestion.",
-    "addParam": "Ajout paramètre"
+    "addParam": "Ajout paramètre",
+    "sources": {
+      "title": "Sources d'ingestion",
+      "add": "Ajouter une source",
+      "remove": "Supprimer la source",
+      "unnamed": "Source sans nom",
+      "disabled": "Désactivée",
+      "enabled": "Activée",
+      "running": "En cours",
+      "emptyTitle": "Aucune source d'ingestion",
+      "emptyDescription": "Ajoutez une source pour explorer un site ou téléverser des documents, et garder cette base de connaissances à jour.",
+      "name": "Nom",
+      "namePlaceholder": "public-docs",
+      "startUrl": "URL de départ",
+      "pathPrefix": "Préfixe de chemin",
+      "pathPrefixHint": "N'explorer que sous ce chemin",
+      "cron": "Planification (cron)",
+      "cronHint": "Laisser vide pour exécuter manuellement uniquement",
+      "maxDepth": "Profondeur maximale",
+      "maxPages": "Pages maximales",
+      "respectRobots": "Respecter robots.txt",
+      "respectRobotsHint": "À désactiver uniquement pour un site vous appartenant",
+      "includeSubdomains": "Inclure les sous-domaines",
+      "excludePatterns": "Motifs d'exclusion",
+      "excludePatternsHint": "Globs appliqués au chemin de l'URL, séparés par des virgules — * reste dans un segment, ** les traverse",
+      "saveFirst": "Enregistrez la base de connaissances pour exécuter cette source, la prévisualiser ou voir son historique.",
+      "run": "Exécuter",
+      "runFailed": "Impossible de démarrer l'exécution. Une exécution est peut-être déjà en cours.",
+      "preview": "Aperçu",
+      "previewResult": "Aperçu — rien n'a été intégré",
+      "purge": "Purger l'état",
+      "purgeTitle": "Purger l'état d'ingestion ?",
+      "purgeDescription": "La prochaine exécution ré-explorera et ré-intégrera tout ce que cette source a ingéré. Les documents déjà stockés ne sont pas supprimés.",
+      "purgeConfirm": "Purger",
+      "history": "Exécutions récentes",
+      "noRuns": "Cette source n'a pas encore été exécutée.",
+      "runSummary": "{{ingested}} ingérés · {{unchanged}} inchangés",
+      "statSeen": "Vus",
+      "statChanged": "À ingérer",
+      "statUnchanged": "Inchangés",
+      "statFailed": "Échecs",
+      "partialCrawl": "L'exploration s'est arrêtée à une limite, rien ne sera donc considéré comme supprimé.",
+      "saveBeforeRun": "Enregistrez d'abord la base de connaissances — une exécution explore la configuration enregistrée, pas les modifications à l'écran.",
+      "purgeFailed": "Impossible de purger l'état d'ingestion.",
+      "previewFailed": "Impossible de prévisualiser cette source.",
+      "previewNotCompleted": "L'aperçu ne s'est pas terminé.",
+      "disabledNoRun": "Cette source est désactivée. Activez-la et enregistrez pour l'exécuter ou la planifier.",
+      "purgeBlockedWhileRunning": "Une exécution est en cours. Purger maintenant permettrait à une seconde de démarrer en parallèle.",
+      "type": "Source",
+      "typeWeb": "Site web",
+      "typeUpload": "Fichiers",
+      "typeWebHint": "Explorer un site web",
+      "typeUploadHint": "Lire les fichiers que vous téléversez ici",
+      "cronHintUpload": "Laisser vide — les fichiers téléversés sont lus lors de l'exécution de la source",
+      "maxFiles": "Fichiers max.",
+      "maxFilesHint": "Nombre de fichiers que cette source peut contenir",
+      "maxFileMb": "Taille max. du fichier (Mo)",
+      "maxFileMbHint": "Par fichier",
+      "filesSaveFirst": "Enregistrez la base de connaissances une fois, puis vous pourrez téléverser des fichiers vers cette source.",
+      "dropFiles": "Déposez des fichiers ici, ou",
+      "browseFiles": "choisissez-les",
+      "acceptedFormats": "PDF, Word, Excel, PowerPoint, texte, Markdown, CSV et HTML",
+      "clearUploadList": "Effacer la liste",
+      "uploadFailed": "Ce fichier n'a pas pu être téléversé.",
+      "noFiles": "Aucun fichier pour l'instant. Exécutez la source après le téléversement pour les indexer.",
+      "filesSummary": "Fichiers : {{count}} ({{size}})",
+      "deleteFile": "Supprimer {{fileName}}",
+      "deleteFileTitle": "Supprimer ce fichier ?",
+      "deleteFileDescription": "{{fileName}} et tout ce que la base de connaissances en a tiré sont supprimés. Les agents cessent immédiatement d'y répondre.",
+      "previewFiles": "Prévisualiser les modifications",
+      "saveBeforeUpload": "Enregistrez d'abord la base de connaissances — les téléversements vont à la source enregistrée, pas aux modifications à l'écran.",
+      "foldersNotSupported": "Les dossiers ne peuvent pas être téléversés. Déposez plutôt les fichiers qu'ils contiennent.",
+      "filesAwaitingRun": "Des fichiers sont stockés mais pas encore dans la base de connaissances. Exécutez la source pour les indexer.",
+      "retryUpload": "Réessayer {{fileName}}",
+      "fileIndexed": "Indexé",
+      "fileChanged": "Modifié",
+      "fileNotIndexed": "Non indexé",
+      "maxTotalMb": "Taille totale max. (Mo)",
+      "maxTotalMbHint": "Pour l'ensemble des fichiers de cette source",
+      "removeTitle": "Supprimer cette source ?",
+      "removeDescription": "À l'enregistrement, ses fichiers téléversés et tout ce que la base de connaissances en a tiré seront supprimés. C'est irréversible."
+    }
   },
   "onboarding": {
     "welcome": {
@@ -2362,6 +2463,7 @@
       "SYNTHESIZING": "Synthèse en cours",
       "COMPLETED": "Terminé",
       "FAILED": "Échoué",
+      "REJECTED": "Rejetée",
       "ERROR": "Erreur",
       "AWAITING_APPROVAL": "En attente d'approbation",
       "CANCELLED": "Annulé",
@@ -2738,7 +2840,10 @@
       "finalAnswer": "Réponse finale",
       "phase": "Phase"
     },
-    "deleteMembersConfigFailed": "Impossible de lire les membres du groupe : rien n'a été supprimé. Réessayez."
+    "deleteMembersConfigFailed": "Impossible de lire les membres du groupe : rien n'a été supprimé. Réessayez.",
+    "stateRejected": "Rejetée",
+    "inputDisabledRejected": "Cette recommandation a été rejetée",
+    "debateVerdictNote": "Répond par un verdict chiffré (vainqueur et scores), pas en prose : {{phases}}. Les membres ont au moins deux rôles et les arguments précèdent, donc l'invite de synthèse du modérateur n'est pas utilisée. Définissez un modèle d'entrée sur la phase pour obtenir de la prose."
   },
   "taskBoard": {
     "title": "Tableau des tâches",
@@ -2923,7 +3028,10 @@
     "syncError": "Échec de la synchronisation",
     "empty": "Connectez-vous à une instance source pour commencer la synchronisation des agents.",
     "autoMatched": "Correspondance automatique",
-    "previewFirst": "Aperçu des modifications avant synchronisation"
+    "previewFirst": "Aperçu des modifications avant synchronisation",
+    "syncPartial": "Synchronisation incomplète — certaines ressources n'ont pas été écrites",
+    "syncIdentical": "Déjà à jour — rien à écrire",
+    "previewFailed": "Échec de l'aperçu"
   },
   "sync": {
     "actionCreate": "Nouveau",
@@ -3625,7 +3733,9 @@
       "pausedRejected": "Cette conversation est en pause dans l'attente d'une décision humaine ; le message n'a donc pas été envoyé.",
       "reviewApprovals": "Examiner les approbations en attente",
       "stop": "Arrêter la génération",
-      "streamEnded": "La connexion s'est interrompue avant la fin de la réponse. Ce qui est arrivé figure ci-dessus ; renvoyez le message pour réessayer."
+      "streamEnded": "La connexion s'est interrompue avant la fin de la réponse. Ce qui est arrivé figure ci-dessus ; renvoyez le message pour réessayer.",
+      "newConversation": "Nouvelle conversation",
+      "newConversationFailed": "Impossible de démarrer une nouvelle conversation"
     },
     "chat": {
       "agentDetails": "Détails de l agent",
@@ -3950,7 +4060,8 @@
       "transcript": "Transcription de la conversation",
       "tryDifferent": "Essayez un autre terme de recherche",
       "untitled": "Conversation sans titre",
-      "loadListError": "Échec du chargement des conversations"
+      "loadListError": "Échec du chargement des conversations",
+      "rejected": "Rejetée"
     },
     "insights": "Analyses",
     "memberCount": "{{count}} membres",
@@ -4134,8 +4245,17 @@
       "tools": "Outils qui lui seront confiés ({{toolCount}})",
       "activate": "Activer et déployer",
       "callerIdentityNote": "EDDI insère votre jeton au moment de l'appel. Il n'est jamais enregistré dans la conversation et n'est renvoyé qu'à ce déploiement.",
-      "rebuildWarning": "L'enregistrement crée un nouvel agent opérateur et supprime l'actuel. Votre conversation d'opérateur existante ne sera pas conservée.",
-      "environmentHint": "Où s'exécute l'agent opérateur lui-même. Il peut toujours lire n'importe quel environnement."
+      "rebuildWarning": "L'enregistrement REMPLACE l'opérateur : un nouvel agent est créé, l'agent actuel ({{agentId}}) est retiré du déploiement puis supprimé. Votre conversation d'opérateur actuelle ne sera pas conservée, et cet écran s'adressera ensuite au nouvel agent.",
+      "environmentHint": "Où s'exécute l'agent opérateur lui-même. Il peut toujours lire n'importe quel environnement.",
+      "platformBaseUrl": "URL de base de la plateforme",
+      "platformBaseUrlHint": "L'adresse à laquelle EDDI peut se joindre lui-même — les outils de l'opérateur l'appellent depuis l'intérieur du serveur, ce n'est donc pas l'adresse utilisée par votre navigateur. Conservez la valeur pré-remplie sauf si vous savez qu'elle est incorrecte.",
+      "platformBaseUrlInvalid": "Cette valeur doit être une URL absolue http:// ou https://, par exemple http://127.0.0.1:7070.",
+      "platformBaseUrlUnknown": "Ce déploiement EDDI ne peut pas indiquer sa propre adresse : l'origine de votre navigateur sera utilisée par défaut. Cela n'est correct que si rien (tunnel, redirection de port ou proxy inverse) ne se trouve entre votre navigateur et EDDI — sinon, saisissez l'adresse ici.",
+      "platformBaseUrlLoopback": "Déduite du port HTTP de ce déploiement. Remplacez-la si EDDI doit être joint par un nom de service ou via TLS dans le processus.",
+      "platformBaseUrlAuto": "résolue par le serveur",
+      "platformBaseUrlDiffers": "Ce déploiement indique actuellement sa propre adresse comme {{serverUrl}}. La valeur ci-dessus diffère — ne la conservez que si vous l'avez définie délibérément.",
+      "platformBaseUrlQueryFailed": "Impossible de demander au serveur sa propre adresse. L'activation échouera sauf si vous la saisissez ici — ou rechargez pour réessayer.",
+      "platformBaseUrlUnresolved": "Ce déploiement tourne sur un port HTTP aléatoire sans eddi.self.base-url : il ne peut pas indiquer où se joindre lui-même. Saisissez l'adresse ici."
     },
     "authMode": {
       "none": {
@@ -4183,7 +4303,10 @@
       "gateUnknown": "Barrière non contrôlée",
       "gateVerified": "Barrière vérifiée",
       "gateNotVerified": "Barrière non vérifiée",
-      "gateUnverifiedHelp": "La barrière d'approbation n'a pas pu être vérifiée sur le document de cet agent."
+      "gateUnverifiedHelp": "La barrière d'approbation n'a pas pu être vérifiée sur le document de cet agent.",
+      "agentId": "Agent",
+      "platformBaseUrl": "Appelle la plateforme à",
+      "platformBaseUrlUnknown": "non enregistrée"
     },
     "chat": {
       "empty": "Interrogez votre déploiement. L'opérateur fait les recherches et vous montre chaque appel qu'il effectue.",
@@ -4297,6 +4420,9 @@
       "stepCount_one": "{{count}} étape",
       "stepCount_other": "{{count}} étapes",
       "stepCount_many": "{{count}} étapes"
+    },
+    "superseded": {
+      "title": "L'agent opérateur précédent est toujours déployé."
     }
   },
   "groupWorkspace": {

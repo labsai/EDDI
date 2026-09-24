@@ -234,12 +234,15 @@ function groupByPhase(entries: TranscriptEntry[]): PhaseGroup[] {
 }
 
 // State variants — labels resolved via i18n in component
-const STATE_VARIANTS: Record<string, { variant: "default" | "success" | "warning" | "destructive" }> = {
+const STATE_VARIANTS: Record<string, { variant: "default" | "secondary" | "success" | "warning" | "destructive" }> = {
   CREATED: { variant: "default" },
   IN_PROGRESS: { variant: "warning" },
   SYNTHESIZING: { variant: "warning" },
   COMPLETED: { variant: "success" },
   FAILED: { variant: "destructive" },
+  // A rejection is a decision, not a fault: "secondary" is the neutral chip, so
+  // it does not read as the system having broken.
+  REJECTED: { variant: "secondary" },
   AWAITING_APPROVAL: { variant: "warning" },
   AWAITING_HUMAN_INPUT: { variant: "warning" },
   CANCELLED: { variant: "destructive" },
@@ -389,6 +392,7 @@ export function DiscussionTranscript({
     SYNTHESIZING: t("groups.stateSynthesizing", "Synthesizing…"),
     COMPLETED: t("groups.stateCompleted", "Completed"),
     FAILED: t("groups.stateFailed", "Failed"),
+    REJECTED: t("groups.stateRejected", "Rejected"),
     AWAITING_APPROVAL: t("groups.stateAwaitingApproval", "Awaiting Approval"),
     AWAITING_HUMAN_INPUT: t("groups.stateAwaitingHumanInput", "Awaiting Human Input"),
     CANCELLED: t("groups.stateCancelled", "Cancelled"),
@@ -472,11 +476,20 @@ export function DiscussionTranscript({
             </div>
             {/* Clamped when long: this header is pinned above the transcript, and
                 a teaching case's full brief took 70% of a tablet's height —
-                leaving the discussion itself a sliver to scroll in. */}
+                leaving the discussion itself a sliver to scroll in.
+
+                EXPANDED is bounded and scrolls in place. It used to grow without
+                limit inside a `shrink-0` header in an `h-full` column, so a long
+                brief pushed the transcript, the composer AND its own "Show less"
+                button past the bottom of an `overflow-hidden` pane. Nothing
+                scrolled — the scroll container is the transcript below, not this
+                header — so the expansion could not be undone without reloading
+                the page. */}
             <p
               className={cn(
                 "text-sm sm:text-base font-medium text-foreground whitespace-pre-line",
                 questionIsLong && !questionExpanded && "line-clamp-4",
+                questionIsLong && questionExpanded && "max-h-[30vh] overflow-y-auto",
               )}
               data-testid="discussion-question"
             >

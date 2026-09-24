@@ -23,6 +23,7 @@ import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.secrets.SecretResolver;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import jakarta.inject.Provider;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -77,7 +78,7 @@ class LlmTaskBranchTest {
         Map<String, Provider<ILanguageModelBuilder>> builders = new HashMap<>();
         builders.put("openai", () -> parameters -> new ChatModel() {
             @Override
-            public ChatResponse chat(List<ChatMessage> messages) {
+            public ChatResponse doChat(ChatRequest chatRequest) {
                 return ChatResponse.builder().aiMessage(aiMessage(LLM_RESPONSE)).build();
             }
         });
@@ -89,7 +90,7 @@ class LlmTaskBranchTest {
         when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
         when(globalVariableResolver.getTemplateData()).thenReturn(Map.of());
 
-        var chatModelRegistry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver);
+        var chatModelRegistry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver, null);
 
         mockSnippetService = mock(PromptSnippetService.class);
         when(mockSnippetService.getAll()).thenReturn(Collections.emptyMap());

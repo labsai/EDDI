@@ -7,6 +7,7 @@ package ai.labs.eddi.secrets.persistence;
 import ai.labs.eddi.secrets.model.EncryptedDek;
 import ai.labs.eddi.secrets.model.EncryptedSecret;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -80,6 +81,47 @@ public interface ISecretPersistence {
      *             if the write fails
      */
     boolean updateSecretSealing(EncryptedSecret secret, String expectedDekId);
+
+    /**
+     * Rewrites one secret's {@code allowedAgents} and {@code description}, and
+     * nothing else.
+     * <p>
+     * Deliberately narrow. {@link #upsertSecret} can only express "write the whole
+     * row", so an operator who wants to widen a grant through it has to supply the
+     * ciphertext — which means holding the plaintext, which is precisely what a
+     * vault exists to make unnecessary. This method takes no ciphertext, no IV, no
+     * dekId and no checksum, so a grant edit <em>cannot</em> touch the value even
+     * by mistake: the guarantee is in the signature, not in a caller's discipline.
+     * <p>
+     * {@code createdAt} and {@code lastRotatedAt} are untouched for the same
+     * reason. A grant edit is not a rotation and must not read as one afterwards.
+     *
+     * @param allowedAgents
+     *            the replacement grant list, already canonicalised by the caller
+     * @param description
+     *            the replacement description; a caller that wants the existing one
+     *            kept passes it back in, because "leave unchanged" is a
+     *            request-level notion and not a storage one
+     * @return false if no such {@code (tenantId, keyName)} row exists, in which
+     *         case nothing was written
+     * @throws PersistenceException
+     *             if the write fails
+     */
+    boolean updateSecretGrant(String tenantId, String keyName, List<String> allowedAgents, String description);
+
+    /**
+     * Records that a secret was just resolved, writing {@code lastAccessedAt} and
+     * nothing else.
+     * <p>
+     * Resolution used to record this by re-upserting the whole row it had read.
+     * That is a read-modify-write of every field, so a resolve that read the row
+     * just before a grant edit — or a rotation — wrote it back a moment later and
+     * silently undid that edit. A single-field write has nothing stale to put back.
+     *
+     * @throws PersistenceException
+     *             if the write fails; callers treat this as best-effort
+     */
+    void touchLastAccessed(String tenantId, String keyName, Instant lastAccessedAt);
 
     // ─── DEKs ───
 

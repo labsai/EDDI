@@ -14,6 +14,8 @@ interface OutcomeRingProps {
 const OUTCOME_COLORS: Record<GroupConversationState, string> = {
   COMPLETED: "var(--color-primary)",
   FAILED: "var(--color-destructive)",
+  // A recorded human decision, not a fault — neutral, never destructive.
+  REJECTED: "var(--color-muted-foreground)",
   IN_PROGRESS: "color-mix(in srgb, var(--color-primary) 40%, transparent)",
   SYNTHESIZING: "color-mix(in srgb, var(--color-primary) 60%, transparent)",
   CREATED: "color-mix(in srgb, currentColor 20%, transparent)",
@@ -26,6 +28,7 @@ const OUTCOME_COLORS: Record<GroupConversationState, string> = {
 const OUTCOME_DOT_CLASSES: Record<GroupConversationState, string> = {
   COMPLETED: "bg-primary",
   FAILED: "bg-destructive",
+  REJECTED: "bg-muted-foreground",
   IN_PROGRESS: "bg-primary/40",
   SYNTHESIZING: "bg-primary/60",
   CREATED: "bg-muted-foreground/20",
@@ -38,6 +41,7 @@ const OUTCOME_DOT_CLASSES: Record<GroupConversationState, string> = {
 const STATE_LABELS: Record<GroupConversationState, string> = {
   COMPLETED: "Completed",
   FAILED: "Failed",
+  REJECTED: "Rejected",
   IN_PROGRESS: "In Progress",
   SYNTHESIZING: "Synthesizing",
   CREATED: "Created",

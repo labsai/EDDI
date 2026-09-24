@@ -351,6 +351,30 @@ class RestGroupConversationTest {
             assertEquals(1, result.size());
             assertEquals("gc-1", result.get(0).getId());
         }
+
+        @Test
+        @DisplayName("should return an empty list, not NPE, for an authenticated caller with no principal name")
+        void listGroupConversations_namelessCallerOwnsNothing() throws Exception {
+            when(ownershipValidator.isAuthEnabled()).thenReturn(true);
+            when(identity.isAnonymous()).thenReturn(false);
+            when(identity.hasRole("eddi-admin")).thenReturn(false);
+            var principal = mock(Principal.class);
+            when(principal.getName()).thenReturn(null);
+            when(identity.getPrincipal()).thenReturn(principal);
+
+            var owned = new GroupConversation();
+            owned.setId("gc-1");
+            owned.setUserId("user-1");
+            // A legacy row with no owner must not match a caller with no name.
+            var unowned = new GroupConversation();
+            unowned.setId("gc-2");
+            when(groupService.listGroupConversations("group-1", 0, 10))
+                    .thenReturn(new ArrayList<>(List.of(owned, unowned)));
+
+            List<GroupConversation> result = restGroupConversation.listGroupConversations("group-1", 0, 10);
+
+            assertTrue(result.isEmpty());
+        }
     }
 
     @Nested

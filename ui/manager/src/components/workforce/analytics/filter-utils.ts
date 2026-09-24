@@ -20,6 +20,7 @@ export interface ActiveFilter {
 const STATE_LABEL_FALLBACKS: Record<GroupConversationState, string> = {
   COMPLETED: "Completed",
   FAILED: "Failed",
+  REJECTED: "Rejected",
   IN_PROGRESS: "In Progress",
   SYNTHESIZING: "Synthesizing",
   CREATED: "Created",

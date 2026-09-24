@@ -52,7 +52,7 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 | `delete_agent`          | Delete an agent (with optional cascade)                                          |
 | `update_agent`          | Update an agent's name/description and optionally redeploy                       |
 | `read_workflow`         | Read a package's full pipeline configuration                                    |
-| `read_resource`         | Read any resource config by type (behavior, langchain, httpcalls, output, etc.) |
+| `read_resource`         | Read any resource config by type (behavior, langchain, httpcalls, output, rag, etc.) — read only; `rag` has no create/update/delete case |
 | `list_agent_triggers`   | List all agent triggers (intent→agent mappings) for managed conversations       |
 | `create_agent_trigger`  | Create an agent trigger mapping an intent to one or more agent deployments       |
 | `update_agent_trigger`  | Update an existing agent trigger                                                |
@@ -217,6 +217,8 @@ Both surfaces delegate to `DocsService`, which owns the filesystem access and th
 ### Client Configuration
 
 EDDI uses **Streamable HTTP** transport at `http://localhost:7070/mcp`. How you connect depends on your client's transport support.
+
+> The configurations below are for an instance with authentication **off**. If OIDC is enabled, each one additionally needs a bearer token — see [Connecting to an authenticated instance](#connecting-to-an-authenticated-instance).
 
 #### Direct HTTP (Streamable HTTP clients)
 
@@ -603,11 +605,15 @@ In `application.properties`:
 
 ```properties
 # MCP Server — Streamable HTTP at /mcp
-quarkus.mcp-server.http.root-path=/mcp
+quarkus.mcp.server.http.root-path=/mcp
 
 # Documentation path for MCP resources (default: docs/)
 eddi.docs.path=docs
 ```
+
+> The namespace is `quarkus.mcp.server.*` with dots. The hyphenated
+> `quarkus.mcp-server.*` is not a key the extension knows — setting it moves
+> nothing and only logs an "Unrecognized configuration key" warning.
 
 ## Tool Filtering
 
@@ -624,9 +630,110 @@ To add a new MCP tool: add its name to the `MCP_TOOLS` set in `McpToolFilter.jav
 - Authorization is enforced **in-code**, not via `@RolesAllowed`: most tools call `requireRole(identity, authEnabled, "<role>")` (`McpToolUtils`), and the HITL tools use the shared `HitlAccessGuard` (per-conversation owner / `eddi-admin` / `eddi-approver`). When `authorization.enabled=false` (the default dev posture) `requireRole` is a no-op — production is guarded by `AuthStartupGuard`, which fails startup if OIDC is disabled.
 - **Future**: Per-agent MCP access control via agent configuration for multi-tenant SaaS
 
+### Connecting to an authenticated instance
+
+The [Quick Start](#quick-start) configurations above assume an instance with authentication off. When `quarkus.oidc.tenant-enabled=true`, `/mcp` carries an explicit `authenticated` HTTP policy and every request needs a bearer token.
+
+#### The client signs itself in (preferred)
+
+EDDI advertises `/mcp` as an **OAuth 2.0 protected resource** ([RFC 9728](https://datatracker.ietf.org/doc/html/rfc9728)), which is what lets an MCP client obtain its own token and keep refreshing it — no shared credential, nothing for an operator to rotate. What ends that chain is not the 5-minute access token but the realm's **SSO session idle timeout** (Keycloak's default is 30 minutes): a client idle longer than that runs the browser flow again. Raise `ssoSessionIdleTimeout` on the realm, or grant `eddi-mcp` the `offline_access` scope, if you want it to survive longer.
+
+A client that supports the MCP authorization flow needs only the URL:
+
+```json
+{ "mcpServers": { "eddi": { "url": "https://eddi.example.com/mcp" } } }
+```
+
+Behind that, the client: reads `WWW-Authenticate: Bearer resource_metadata="…"` from the 401; fetches `/.well-known/oauth-protected-resource/mcp`, which names the resource and your Keycloak realm; discovers the realm's endpoints; runs authorization code + PKCE in your browser; and then keeps its own tokens.
+
+Two deployment notes:
+
+- **The advertised identifier is forced to `https`** (`quarkus.oidc.resource-metadata.force-https-scheme`, default `true` here), because the scheme is otherwise read from the request and a TLS-terminating proxy has already downgraded it. The case that needs action is the opposite one: a deployment serving **plain http with authentication on** must set it to `false`, or it advertises a URL nothing is listening on. Every shipped stack that serves plain http with authentication on does exactly that: both compose auth stacks and the k8s auth overlay set it to `false` outright. The chart does not read the Keycloak URL — it defaults `eddi.oidc.resourceMetadata.forceHttpsScheme` from whether `ingress.tls` is configured, which is right for the documented `kubectl port-forward` flow (no ingress, so no TLS, so `false`) but wrong wherever something outside the chart terminates TLS. Set the value explicitly there.
+- **The authorization server that is advertised** is `quarkus.oidc.token.issuer` when set, falling back to `quarkus.oidc.auth-server-url`. In the shipped compose and helm deployments the latter is the cluster-internal Keycloak address, so leave `QUARKUS_OIDC_TOKEN_ISSUER` pointing at the public URL.
+
+**The realm ships the client this uses: `eddi-mcp`.** Public, authorization code + PKCE (`S256` required), no direct access grant, and carrying the same protocol mappers as `eddi-frontend`. That last part is not a detail — the realm defines no `roles` client scope, so **a client without the `realm-roles` mapper issues tokens that authenticate and then fail every tool with "requires role"**, because EDDI reads roles from `realm_access/roles`. If you provision your realm by hand, copy those mappers.
+
+Its redirect URIs are `http://localhost:*` and `http://127.0.0.1:*`. Verified against Keycloak 26.7 (the version the auth E2E tier runs; the compose and k8s stacks ship 26.0): both wildcard forms match a loopback callback on any port, PKCE is genuinely required (a request without `code_challenge_method` is refused with `Missing parameter: code_challenge_method`), the password grant is refused, and a non-loopback redirect is refused with `Invalid parameter: redirect_uri`. **Which callback URL your particular client uses is its own business and not something this repo can verify** — if yours is not a loopback URL, add it to `eddi-mcp` in the admin console.
+
+- **Point your client at the client id.** Discovery names the authorization server, not which client to be, so each client has to be told:
+  - **Claude Code** — `claude mcp add --transport http --client-id eddi-mcp --callback-port 8080 eddi https://eddi.example.com/mcp`. The callback port is worth fixing: without it Claude Code picks a random one, and while `eddi-mcp`'s redirect URIs are wildcards that accept any port, a realm hardened to a single redirect URI would not. **[ext]** Some Claude Code versions attempt dynamic registration even with a client id configured, and fail with "Incompatible auth server: does not support dynamic client registration" — if you hit that, the hand-pasted token below is the fallback.
+  - **`mcp-remote`** — `--static-oauth-client-info '{"client_id":"eddi-mcp"}'`.
+  - Other clients have their own setting, and some support only dynamic registration. A client that insists on registering itself (RFC 7591) cannot work against this realm as shipped, because dynamic registration carries no protocol mappers and would hit exactly the role-less-token failure above.
+- **Claude Desktop connectors redirect to `https://claude.ai/api/mcp/auth_callback`**, not to loopback. That is deliberately *not* in the shipped list: it means the authorization response for your EDDI passes through a third party's endpoint, which is an operator's decision to make rather than a default to inherit. Add it to `eddi-mcp` in the Keycloak admin console if you want it.
+
+> **Upgrading an existing realm: you have to add this client yourself.** Keycloak's
+> `--import-realm` does **not** re-import into a realm that already exists, and both shipped
+> auth stacks keep its database in a named volume — so a realm provisioned before this
+> release keeps its old client list. The symptom is specific: discovery works, your client
+> follows the document to Keycloak, and Keycloak answers `invalid_client`. `install.sh`
+> does not add it either; its realm repair only restores `eddi-frontend`'s client scopes.
+>
+> Either re-provision the realm (in development, `docker compose -f docker-compose.auth.yml
+> down -v` and start again — this deletes your Keycloak data), or create the client by hand
+> from `eddi-mcp` in [`keycloak/eddi-realm.json`](../keycloak/eddi-realm.json). Creating it
+> in the admin console takes four things: **public** client, **Standard flow** on with
+> **Direct access grants** off, `pkce.code.challenge.method` = `S256` under Advanced, and the
+> redirect URIs. Then copy the three protocol mappers from `eddi-frontend` — `realm-roles`
+> above all, because **without it every token authenticates and every tool answers "requires
+> role"**.
+
+#### Supplying a token by hand (fallback)
+
+For a client with no OAuth support, or for a quick test, the token can be pasted in.
+
+**1. Get a token.** The shipped realm's `eddi-frontend` client is public and permits the direct access grant:
+
+```bash
+read -rsp "Password for eddi: " KC_PASSWORD && echo
+printf '%s' "$KC_PASSWORD" | curl -s \
+  -d grant_type=password -d client_id=eddi-frontend -d username=eddi \
+  --data-urlencode "password@-" \
+  http://localhost:8180/realms/eddi/protocol/openid-connect/token
+```
+
+> The password is read without echo and reaches `curl` on stdin, so it lands in
+> neither your shell history nor the process table. `--data-urlencode` encodes it,
+> which a password with `&` or `+` in it needs.
+
+**2a. Clients that speak Streamable HTTP and accept headers** (IDE plugins, Antigravity, custom clients):
+
+```json
+{
+  "mcpServers": {
+    "eddi": {
+      "url": "http://localhost:7070/mcp",
+      "headers": { "Authorization": "Bearer <access_token>" }
+    }
+  }
+}
+```
+
+**2b. stdio-only clients** keep the `mcp-remote` bridge and pass the header through it. `mcp-remote` splits arguments on whitespace, so put the whole value in an environment variable:
+
+```json
+{
+  "mcpServers": {
+    "eddi": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "http://localhost:7070/mcp", "--header", "Authorization:${AUTH_HEADER}"],
+      "env": { "AUTH_HEADER": "Bearer <access_token>" }
+    }
+  }
+}
+```
+
+**Caveats, in the order they will bite you:**
+
+- **The token expires.** The shipped realm does not override Keycloak's default access-token lifespan of five minutes, and a static header never refreshes. This recipe is for trying things out, not for running an assistant against EDDI all day.
+- **There is no long-lived API key for `/mcp`.** The only api-key surface in EDDI is the `/v1` OpenAI-compatible adapter (`eddi.openai-compat.api-key`), which is a different protocol — see [Open WebUI integration](open-webui-integration.md).
+- **Roles decide which tools work, and there is no hierarchy.** A token whose realm roles are missing authenticates fine and then fails every tool with "requires role" — see [Role Mapping](#role-mapping) below.
+- **`/mcp` cannot be opened selectively.** `eddi.mcp.allow-unauthenticated` only lets a *fully* unauthenticated deployment boot past `HighValueSurfaceGuard`; it does not exempt `/mcp` on an instance where authentication is on.
+
 ### Role Mapping
 
-These are the **actual Keycloak role strings** the tools check (not aliases). Roles are additive in intent — grant an editor/admin the read scope too. For exact per-tool roles see the code (`requireRole` calls) and the per-category sections above (HITL / Memory / GDPR).
+These are the **actual Keycloak role strings** the tools check (not aliases). Roles are additive in intent — grant an editor/admin the read scope too.
+
+> **There is no role hierarchy, and this bites exactly once.** `requireRole` is a literal `hasRole`, so an account holding `eddi-admin` but not `eddi-viewer` completes the OAuth flow and is then refused *every read tool* — 27 of the 84, including `list_agents`. It looks like a broken feature and is a missing role assignment. The shipped realm's `eddi` account holds `eddi-viewer` alongside `eddi-admin` and `eddi-editor` for this reason; grant the same to your own operators. For exact per-tool roles see the code (`requireRole` calls) and the per-category sections above (HITL / Memory / GDPR).
 
 | Role           | Scope |
 | -------------- | ----- |
@@ -733,8 +840,9 @@ person chatting, instead of a standing service credential:
 { "mcpServerUrl": "https://eddi.example/mcp", "apiKey": "${caller:token}" }
 ```
 
-The same guarantees apply as for API call headers — same origin only, fails
-closed rather than sending a placeholder, never persisted. See
+The same guarantees apply as for API call headers — released only to the
+caller's origin or to this deployment's own address, fails closed rather than
+sending a placeholder, never persisted. See
 [`httpcalls.md`](httpcalls.md#calling-as-the-signed-in-user).
 
 Two behaviours worth knowing, because they are deliberate:

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import java.util.Optional;
 import ai.labs.eddi.backup.IZipArchive;
 import ai.labs.eddi.backup.model.ImportPreview;
 import ai.labs.eddi.backup.model.ImportPreview.DiffAction;
@@ -29,6 +30,7 @@ import jakarta.enterprise.inject.UnsatisfiedResolutionException;
 import jakarta.enterprise.inject.spi.CDI;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.core.Response;
+import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -97,7 +99,8 @@ class RestImportServiceSnippetResilienceTest {
                 mock(IMigrationManager.class), documentDescriptorStore,
                 templateSyntaxMigrator, mock(StructuralMatcher.class),
                 mock(UpgradeExecutor.class), mock(IScheduleStore.class), mock(BackupMetrics.class),
-                mock(ResourceAccessGuard.class), mock(SpaceContext.class));
+                mock(ResourceAccessGuard.class), mock(SpaceContext.class), mock(RagSourceIngestionService.class),
+                true, false, Optional.empty());
 
         when(jsonSerialization.deserialize(anyString(), eq(AgentConfiguration.class)))
                 .thenAnswer(inv -> mapper.readValue((String) inv.getArgument(0), AgentConfiguration.class));

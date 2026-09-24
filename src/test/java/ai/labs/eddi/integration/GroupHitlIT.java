@@ -123,8 +123,17 @@ public class GroupHitlIT extends BaseIntegrationIT {
 
     // ==================== Reject is terminal ====================
 
+    /**
+     * A rejection is terminal, and it is its own state.
+     *
+     * It used to answer {@code FAILED}, which the Manager rendered as a red
+     * "Failed" badge -- telling the operator the system had broken when it had done
+     * exactly what it was asked. {@code REJECTED} permits precisely what
+     * {@code FAILED} permitted (terminal, closeable, {@code availableActions} of
+     * {@code ["close"]}), so the 409s below are unchanged; only the label moved.
+     */
     @Test
-    @DisplayName("REJECTED verdict fails the discussion terminally; later approve/cancel → 409")
+    @DisplayName("REJECTED verdict ends the discussion as REJECTED; later approve/cancel → 409")
     void rejectIsTerminal() {
         String gcId = startPausedDiscussion();
 
@@ -132,7 +141,8 @@ public class GroupHitlIT extends BaseIntegrationIT {
                 .body("{\"decision\": {\"verdict\": \"REJECTED\", \"note\": \"not convincing\"}}")
                 .post(approvePath(gcId))
                 .then().assertThat().statusCode(200)
-                .body("state", equalTo("FAILED"));
+                .body("state", equalTo("REJECTED"))
+                .body("availableActions", contains("close"));
 
         given().contentType(ContentType.JSON)
                 .body("{\"decision\": {\"verdict\": \"APPROVED\"}}")

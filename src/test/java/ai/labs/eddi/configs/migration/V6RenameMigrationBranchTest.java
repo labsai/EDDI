@@ -557,9 +557,10 @@ class V6RenameMigrationBranchTest {
 
             var method = V6RenameMigration.class.getDeclaredMethod("migrateAgentFields");
             method.setAccessible(true);
-            int migrated = (int) method.invoke(migration);
+            int[] result = migratedAndFailed(method.invoke(migration));
 
-            assertEquals(0, migrated);
+            assertEquals(0, result[0], "nothing to rename");
+            assertEquals(0, result[1], "and nothing went wrong");
             verify(collection, never()).replaceOne(any(), any());
         }
     }
@@ -572,16 +573,36 @@ class V6RenameMigrationBranchTest {
     @DisplayName("migrateCollection — exception handling")
     class MigrateCollectionExceptions {
 
+        /**
+         * A collection that cannot be reached is a collection nobody read, and it has
+         * to be counted as such: reporting {@code (0, 0)} is indistinguishable from
+         * "there was nothing to migrate here", which is what let the completion log be
+         * written over collections the migration never scanned.
+         */
         @Test
-        @DisplayName("exception during getCollection returns 0")
+        @DisplayName("an exception during getCollection is counted as a failure, not as an empty collection")
         void getCollectionException() throws Exception {
             when(database.getCollection("nonexistent")).thenThrow(new RuntimeException("not found"));
 
             var method = V6RenameMigration.class.getDeclaredMethod("migrateCollection", String.class);
             method.setAccessible(true);
-            int result = (int) method.invoke(migration, "nonexistent");
+            int[] result = migratedAndFailed(method.invoke(migration, "nonexistent"));
 
-            assertEquals(0, result);
+            assertEquals(0, result[0], "nothing was migrated");
+            assertEquals(1, result[1], "and the pass has to report that it could not read the collection");
         }
+    }
+
+    /**
+     * The {@code (migrated, failed)} pair a migration pass returns, read
+     * reflectively because both the record and the passes are private.
+     */
+    private static int[] migratedAndFailed(Object migrationResult) throws Exception {
+        var type = migrationResult.getClass();
+        var migrated = type.getDeclaredMethod("migrated");
+        var failed = type.getDeclaredMethod("failed");
+        migrated.setAccessible(true);
+        failed.setAccessible(true);
+        return new int[]{(int) migrated.invoke(migrationResult), (int) failed.invoke(migrationResult)};
     }
 }

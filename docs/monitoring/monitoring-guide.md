@@ -81,6 +81,7 @@ docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
 | `eddi_vault_store_duration` | Timer | Secret store latency |
 | `eddi_vault_delete_count` | Counter | Secret deletions |
 | `eddi_vault_rotate_count` | Counter | Secret rotations |
+| `eddi_vault_grant_update_count` | Counter | Grant edits (`allowedAgents` changed without the value) |
 | `eddi_vault_errors_count` | Counter | General vault errors |
 | `eddi_vault_cache_hits` | Counter | Vault cache hits |
 | `eddi_vault_cache_misses` | Counter | Vault cache misses |

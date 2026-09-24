@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.rag;
 
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
+import dev.langchain4j.model.embedding.request.EmbeddingInputType;
 import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
 import dev.langchain4j.data.document.Document;
 import dev.langchain4j.data.document.DocumentSplitter;
@@ -89,7 +90,9 @@ public class RagIngestionService {
             DocumentSplitter splitter = DocumentSplitters.recursive(ragConfig.getChunkSize(), ragConfig.getChunkOverlap());
 
             // 3. Embed + Store
-            EmbeddingModel model = embeddingModelFactory.getOrCreate(ragConfig);
+            // DOCUMENT: these vectors are being stored. An asymmetric model embeds a
+            // document differently from a query, and gets to know which.
+            EmbeddingModel model = embeddingModelFactory.getOrCreate(ragConfig, EmbeddingInputType.DOCUMENT);
             EmbeddingStore<TextSegment> store = embeddingStoreFactory.getOrCreate(ragConfig, kbId);
 
             EmbeddingStoreIngestor ingestor = EmbeddingStoreIngestor.builder().documentSplitter(splitter).embeddingModel(model).embeddingStore(store)

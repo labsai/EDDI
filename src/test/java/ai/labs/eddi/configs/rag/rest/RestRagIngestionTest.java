@@ -8,6 +8,8 @@ import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.rag.IRestRagStore;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.modules.rag.RagIngestionService;
+import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
+import ai.labs.eddi.modules.ingestion.files.IngestedFileService;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -32,7 +34,8 @@ class RestRagIngestionTest {
     @BeforeEach
     void setUp() {
         openMocks(this);
-        restRagIngestion = new RestRagIngestion(restRagStore, ragIngestionService, mock(ResourceAccessGuard.class));
+        restRagIngestion = new RestRagIngestion(restRagStore, ragIngestionService, mock(RagSourceIngestionService.class),
+                mock(IngestedFileService.class), mock(ResourceAccessGuard.class));
     }
 
     @Test

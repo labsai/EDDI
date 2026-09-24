@@ -1179,15 +1179,46 @@ public class LlmTask implements ILifecycleTask {
     private static final Set<String> TEMPLATE_SKIP_PARAMS = Set.of("apiKey", "signingSecret", "appPassword", "botToken");
 
     /**
-     * A vault reference MENTIONED in an LLM parameter — {@code {vault:key-name}},
-     * with or without the leading {@code $} (which is plain text to Qute either
-     * way).
+     * A configuration reference MENTIONED in an LLM parameter —
+     * {@code {vault:key-name}}, {@code {vars:key}}, {@code {connection:name}} or
+     * {@code {caller:token}}, with or without the leading {@code $} (which is plain
+     * text to Qute either way).
+     * <p>
+     * All four namespaces are resolved AFTER templating, by
+     * {@code ChatModelRegistry} and {@code SecretResolver}, and none of them has a
+     * Qute namespace resolver — so to Qute every one of them is an unresolvable
+     * namespaced expression, not just {@code vault}.
      */
-    private static final Pattern VAULT_REF_MENTION = Pattern.compile("\\{vault:[^}]*\\}");
+    static final Pattern CONFIG_REF_MENTION = Pattern.compile("\\{(?:vault|eddivault|vars|connection|caller):[^}]*\\}");
 
     /**
-     * Wraps {@code {vault:...}} mentions in Qute raw sections so a PROMPT may talk
-     * about the syntax without crashing templating.
+     * Substrings that make a value WORTH running {@link #CONFIG_REF_MENTION}
+     * against — the cheap pre-check, so the common no-reference value never pays
+     * for a regex.
+     * <p>
+     * This is a superset filter, not the namespace list: it must match everything
+     * the pattern can match, and may match more. The legacy {@code eddivault:}
+     * namespace is deliberately absent because {@code "eddivault:"} CONTAINS
+     * {@code "vault:"}, so it is already covered — dropping {@code "vault:"} from
+     * this list would silently stop escaping the legacy prefix too. Any namespace
+     * added to the pattern must have a substring of it present here;
+     * {@code LlmTaskVaultMentionTest} fails if one does not.
+     */
+    private static final List<String> CONFIG_REF_NAMESPACES = List.of("vault:", "vars:", "connection:", "caller:");
+
+    /**
+     * Wraps configuration-reference mentions ({@code vault}, {@code vars},
+     * {@code connection}, {@code caller}) in Qute raw sections, so a parameter may
+     * CARRY or TALK ABOUT one without crashing templating.
+     * <p>
+     * Two shapes hit this. A prompt that documents the syntax, and a parameter
+     * whose value IS a reference — {@code "modelName": "${vars:gemini-model}"} is
+     * resolved by {@code ChatModelRegistry} after templating, but Qute sees it
+     * first. Before this escaped more than {@code vault}, such an agent logged "No
+     * namespace resolver found for [vars]" on every single turn (observed live),
+     * and the parameter fell back to its raw value — which happens to be right for
+     * a value that is ONLY a reference, and silently wrong for one that also
+     * contains a real expression, since the whole render is abandoned.
      * <p>
      * The Platform Operator's system prompt instructs the model to write secrets as
      * {@code ${vault:key-name}} references. Qute parses the brace part as a
@@ -1209,11 +1240,11 @@ public class LlmTask implements ILifecycleTask {
      * double-wrapped and render its markers. Prompts do not write Qute raw
      * sections; accepting that beats parsing Qute here.
      */
-    static String escapeVaultMentions(String value) {
-        if (value == null || !value.contains("vault:")) {
+    static String escapeConfigReferenceMentions(String value) {
+        if (value == null || CONFIG_REF_NAMESPACES.stream().noneMatch(value::contains)) {
             return value;
         }
-        return VAULT_REF_MENTION.matcher(value).replaceAll(match -> "{|" + match.group() + "|}");
+        return CONFIG_REF_MENTION.matcher(value).replaceAll(match -> "{|" + match.group() + "|}");
     }
 
     private HashMap<String, String> runTemplateEngineOnParams(Map<String, String> parameters, Map<String, Object> templateDataObjects) {
@@ -1222,7 +1253,7 @@ public class LlmTask implements ILifecycleTask {
         processedParams.forEach((key, value) -> {
             try {
                 if (!isNullOrEmpty(value) && !TEMPLATE_SKIP_PARAMS.contains(key)) {
-                    processedParams.put(key, templatingEngine.processTemplate(escapeVaultMentions(value), templateDataObjects));
+                    processedParams.put(key, templatingEngine.processTemplate(escapeConfigReferenceMentions(value), templateDataObjects));
                 }
             } catch (ITemplatingEngine.TemplateEngineException e) {
                 LOGGER.errorf(e, "Template processing failed for LLM parameter '%s': %s", key, e.getLocalizedMessage());
@@ -1235,6 +1266,7 @@ public class LlmTask implements ILifecycleTask {
      * Extracts the current user input text from conversation memory. Used as the
      * query for RAG retrieval.
      */
+
     private String extractUserInput(IConversationMemory memory) {
         var currentStep = memory.getCurrentStep();
         IData<String> inputData = currentStep.getLatestData("input");
@@ -1618,6 +1650,7 @@ public class LlmTask implements ILifecycleTask {
                 LlmConfiguration llmConfiguration = resourceClientLibrary.getResource(uri, LlmConfiguration.class);
                 // Fail fast on cascade misconfiguration at deploy time (#validation).
                 CascadeConfigValidator.validate(llmConfiguration);
+                warnOnDeprecatedParameters(llmConfiguration);
                 return llmConfiguration;
             } catch (ServiceException e) {
                 LOGGER.error(e.getLocalizedMessage(), e);
@@ -1626,6 +1659,49 @@ public class LlmTask implements ILifecycleTask {
         }
 
         throw new WorkflowConfigurationException("No resource URI has been defined! [LlmConfiguration]");
+    }
+
+    /**
+     * Reports deprecated parameters once per configuration load, at the moment the
+     * configuration is read.
+     * <p>
+     * {@code includeFirstAgentMessage} is deprecated: it exists to satisfy an
+     * Anthropic rule that a conversation may not open on an assistant turn, and the
+     * Messages API no longer documents that rule. It is still honoured -- agent
+     * behaviour lives in stored JSON, and silently ignoring a parameter an author
+     * set on purpose would start sending a greeting they chose to withhold with no
+     * diagnostic.
+     * <p>
+     * <b>Here rather than in {@code execute}</b>, and static rather than instance.
+     * An {@link ILifecycleTask} is an application-scoped singleton shared by every
+     * conversation and MUST be stateless (AGENTS.md §4.1 rule 2), so the obvious
+     * "warn once, remember that we did" needs a field this class may not have.
+     * Keying such a field on the task id would have been wrong twice over: two
+     * tasks that both omit an id collapse to the same key, so the second one would
+     * never have warned at all.
+     * <p>
+     * Config load is the honest boundary anyway. It is where the mistake is
+     * fixable, it is already where deploy-time validation runs, and it visits every
+     * task in the document individually -- including two that share, or omit, an
+     * id.
+     */
+    static void warnOnDeprecatedParameters(LlmConfiguration llmConfiguration) {
+        // A record: the accessor is tasks(), not getTasks().
+        if (llmConfiguration == null || llmConfiguration.tasks() == null) {
+            return;
+        }
+        for (var task : llmConfiguration.tasks()) {
+            if (task == null || task.getParameters() == null) {
+                continue;
+            }
+            if (isNullOrEmpty(task.getParameters().get(KEY_INCLUDE_FIRST_AGENT_MESSAGE))) {
+                continue;
+            }
+            LOGGER.warnf("LLM task '%s' sets the deprecated parameter '%s'. It exists to satisfy an Anthropic "
+                    + "first-message rule that no longer applies, and it is honoured unchanged for now. Remove it from new "
+                    + "configurations; keep it only if this agent must genuinely withhold its opening greeting.",
+                    sanitize(task.getId() != null ? task.getId() : "<unnamed>"), KEY_INCLUDE_FIRST_AGENT_MESSAGE);
+        }
     }
 
     /**

@@ -308,9 +308,10 @@ public class RestGroupConversation implements IRestGroupConversation {
             // Filter to owned conversations unless admin
             if (ownershipValidator.isAuthEnabled() && identity != null && !identity.isAnonymous()
                     && !identity.hasRole("eddi-admin")) {
-                String callerId = identity.getPrincipal().getName();
+                // A nameless principal owns nothing — an empty list, not an NPE.
+                String callerId = OwnershipValidator.principalName(identity);
                 conversations = conversations.stream()
-                        .filter(gc -> callerId.equals(gc.getUserId()))
+                        .filter(gc -> callerId != null && callerId.equals(gc.getUserId()))
                         .toList();
             }
             return conversations;
@@ -844,12 +845,28 @@ public class RestGroupConversation implements IRestGroupConversation {
 
     /**
      * Sets decidedBy from the authenticated identity (server-side), not from the
-     * request body.
+     * request body — a caller must never be able to self-assert who approved
+     * something.
+     * <p>
+     * A blank principal name is written as {@code null}, not as {@code ""}. With
+     * {@code eddi.security.allow-unauthenticated=true} there is no principal to
+     * name, and the ledger then recorded {@code "decidedBy": ""} — which reads as
+     * "we recorded an empty answer" rather than "there was nobody to record". The
+     * audit writer already renders a null decider as {@code "unknown"}, so this
+     * routes the unauthenticated case onto that same, honest value. The
+     * client-supplied value is still discarded either way.
      */
     private void setDecidedByFromIdentity(GroupApprovalRequest request) {
-        if (request.getDecision() != null && identity != null && identity.getPrincipal() != null) {
-            request.getDecision().setDecidedBy(identity.getPrincipal().getName());
+        if (request.getDecision() == null) {
+            return;
         }
+        // Unconditional, so the caller's claim never survives ANY branch. Guarding
+        // the whole assignment on a non-null principal left the client-supplied
+        // value standing whenever there was no principal to overwrite it with --
+        // the one case where a self-asserted decider could have reached the
+        // ledger.
+        String name = identity == null || identity.getPrincipal() == null ? null : identity.getPrincipal().getName();
+        request.getDecision().setDecidedBy(name == null || name.isBlank() ? null : name);
     }
 
     // --- SSE Helpers ---

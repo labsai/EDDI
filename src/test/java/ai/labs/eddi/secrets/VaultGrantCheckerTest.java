@@ -23,6 +23,7 @@ import ai.labs.eddi.configs.connections.model.OAuthConfig;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.secrets.model.SecretMetadata;
+import ai.labs.eddi.secrets.model.SecretReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -35,6 +36,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -115,6 +117,84 @@ class VaultGrantCheckerTest {
         oauth.setClientSecret(clientSecret);
         connection.setOauth(oauth);
         return connection;
+    }
+
+    /**
+     * {@code references()} feeds the "these deployed agents lose access" warning. A
+     * false negative there is the dangerous direction — the operator narrows a
+     * grant believing nothing uses it — so every way an agent can reach a secret is
+     * pinned here rather than assumed to follow from sharing the traversal.
+     */
+    @Nested
+    @DisplayName("references() — does an agent use this secret at all")
+    class References {
+
+        private static final String AGENT_ID = "7c1d2e3f4a5b6c7d8e9f0a1b";
+        private static final SecretReference KEY = new SecretReference("default", "llm-api-key");
+
+        /** A deployed agent whose one httpcall target carries {@code text}. */
+        private void deployedAgentWhoseCallCarries(String text) throws Exception {
+            var agent = agentWithStep("ai.labs.httpcalls", LLM_ID);
+            var apiCalls = new ApiCallsConfiguration();
+            apiCalls.setTargetServerUrl("https://api.example.com/?key=" + text);
+            when(apiCallsStore.read(eq(LLM_ID), anyInt())).thenReturn(apiCalls);
+            when(agentStore.read(AGENT_ID, 1)).thenReturn(agent);
+        }
+
+        @Test
+        @DisplayName("a short-form reference counts as the default tenant's key")
+        void shortForm() throws Exception {
+            deployedAgentWhoseCallCarries("${vault:llm-api-key}");
+            assertTrue(checker.references(AGENT_ID, 1, KEY));
+        }
+
+        @Test
+        @DisplayName("a full-form reference matches its own tenant and not the default one")
+        void fullFormOtherTenant() throws Exception {
+            deployedAgentWhoseCallCarries("${vault:acme/llm-api-key}");
+            assertTrue(checker.references(AGENT_ID, 1, new SecretReference("acme", "llm-api-key")));
+            assertFalse(checker.references(AGENT_ID, 1, KEY), "same key name in another tenant is another secret");
+        }
+
+        @Test
+        @DisplayName("the legacy ${eddivault:…} prefix counts")
+        void legacyPrefix() throws Exception {
+            deployedAgentWhoseCallCarries("${eddivault:llm-api-key}");
+            assertTrue(checker.references(AGENT_ID, 1, KEY));
+        }
+
+        @Test
+        @DisplayName("a secret reached through a ${connection:…} counts")
+        void throughAConnection() throws Exception {
+            var agent = agentReferencingTheConnection();
+            when(agentStore.read(AGENT_ID, 1)).thenReturn(agent);
+            when(connectionStore.readByName("default", "jira")).thenReturn(oauthConnection("${vault:llm-api-key}"));
+
+            assertTrue(checker.references(AGENT_ID, 1, KEY));
+        }
+
+        @Test
+        @DisplayName("a secret reached through a ${vars:…} counts")
+        void throughAVariable() throws Exception {
+            deployedAgentWhoseCallCarries("${vars:model-key}");
+            when(globalVariableResolver.resolveValue("${vars:model-key}", "default")).thenReturn("${vault:llm-api-key}");
+
+            assertTrue(checker.references(AGENT_ID, 1, KEY));
+        }
+
+        @Test
+        @DisplayName("an agent that names a different key does not count")
+        void differentKey() throws Exception {
+            deployedAgentWhoseCallCarries("${vault:some-other-key}");
+            assertFalse(checker.references(AGENT_ID, 1, KEY));
+        }
+
+        @Test
+        @DisplayName("an agent that cannot be read is reported as not referencing, never as an exception")
+        void unreadableAgent() throws Exception {
+            when(agentStore.read(AGENT_ID, 1)).thenThrow(new ResourceStoreException("store down"));
+            assertFalse(checker.references(AGENT_ID, 1, KEY));
+        }
     }
 
     @Nested

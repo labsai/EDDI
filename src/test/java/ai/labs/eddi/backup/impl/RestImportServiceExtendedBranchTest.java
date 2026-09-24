@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import java.util.Optional;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.spaces.SpaceContext;
@@ -20,6 +21,7 @@ import io.quarkus.runtime.LaunchMode;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.core.Response;
+import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -65,7 +67,8 @@ class RestImportServiceExtendedBranchTest {
                 zipArchive, jsonSerialization,
                 migrationManager, documentDescriptorStore,
                 templateSyntaxMigrator, structuralMatcher, upgradeExecutor, mock(IScheduleStore.class), mock(BackupMetrics.class),
-                mock(ResourceAccessGuard.class), mock(SpaceContext.class));
+                mock(ResourceAccessGuard.class), mock(SpaceContext.class), mock(RagSourceIngestionService.class),
+                true, false, Optional.empty());
     }
 
     // =========================================================
@@ -361,14 +364,14 @@ class RestImportServiceExtendedBranchTest {
         @Test
         @DisplayName("localhost URL throws for listRemoteAgents")
         void localhostRejected() {
-            assertThrows(IllegalArgumentException.class,
+            assertThrows(BadRequestException.class,
                     () -> importService.listRemoteAgents("http://localhost:8080", null));
         }
 
         @Test
         @DisplayName("127.0.0.1 URL throws for previewSync")
         void loopbackIpRejected() {
-            assertThrows(IllegalArgumentException.class,
+            assertThrows(BadRequestException.class,
                     () -> importService.previewSync(
                             "http://127.0.0.1:8080", "src", 1, "tgt", null));
         }
@@ -383,7 +386,7 @@ class RestImportServiceExtendedBranchTest {
             LaunchMode originalMode = LaunchMode.current();
             try {
                 LaunchMode.set(LaunchMode.NORMAL);
-                assertThrows(IllegalArgumentException.class,
+                assertThrows(BadRequestException.class,
                         () -> importService.executeSync(
                                 "http://example.com", "src", 1, "tgt",
                                 null, null, null));
@@ -395,14 +398,14 @@ class RestImportServiceExtendedBranchTest {
         @Test
         @DisplayName("empty string URL throws for executeSyncBatch")
         void emptyStringUrl() {
-            assertThrows(IllegalArgumentException.class,
+            assertThrows(BadRequestException.class,
                     () -> importService.executeSyncBatch("", List.of(), null));
         }
 
         @Test
         @DisplayName("URL without scheme throws")
         void noScheme() {
-            assertThrows(IllegalArgumentException.class,
+            assertThrows(BadRequestException.class,
                     () -> importService.listRemoteAgents("example.com/api", null));
         }
     }

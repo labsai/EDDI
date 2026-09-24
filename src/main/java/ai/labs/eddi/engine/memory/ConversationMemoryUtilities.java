@@ -72,6 +72,14 @@ public class ConversationMemoryUtilities {
         // read as legacy — a snapshot built from live memory is current by
         // definition and must say so explicitly.
         snapshot.setSchemaVersion(ConversationMemorySnapshot.CURRENT_SCHEMA_VERSION);
+        // The revision this write is DERIVED from, not the one it will create: the
+        // store filters on it and increments it, so a turn built on a snapshot that
+        // another writer has already superseded is refused instead of overwriting it.
+        snapshot.setRevision(conversationMemory.getRevision());
+        // How many steps the document held when this memory was loaded. Lets the store
+        // append the steps this turn added instead of rewriting the whole document; see
+        // IConversationMemory#getPersistedStepCount.
+        snapshot.setPersistedStepCount(conversationMemory.getPersistedStepCount());
 
         if (conversationMemory.getUserId() != null) {
             snapshot.setUserId(conversationMemory.getUserId());
@@ -143,6 +151,10 @@ public class ConversationMemoryUtilities {
                 snapshot.getUserId());
 
         conversationMemory.setConversationState(snapshot.getConversationState());
+        // The revision this memory is a view of. Every write derived from this memory
+        // carries it, so the store can tell "built on the current document" from
+        // "built on a document someone else has since replaced".
+        conversationMemory.setRevision(snapshot.getRevision());
         conversationMemory.setResolutionProvenance(snapshot.getResolutionProvenance());
         conversationMemory.setHitlPausedWorkflowId(snapshot.getHitlPausedWorkflowId());
         conversationMemory.setHitlPausedAbsoluteTaskIndex(snapshot.getHitlPausedAbsoluteTaskIndex());
@@ -171,6 +183,14 @@ public class ConversationMemoryUtilities {
                     + "pairing by index and skipping the drift.", LogSanitizer.sanitize(snapshot.getConversationId()), conversationSteps.size(),
                     conversationOutputs.size());
         }
+        // The append baseline, and ONLY when the two lists agree: on a drifted document
+        // the steps this turn adds cannot be identified by a single count, and leaving
+        // it unknown routes the next write through the full-document replace, which
+        // also repairs the drift.
+        conversationMemory.setPersistedStepCount(conversationSteps.size() == conversationOutputs.size()
+                ? conversationSteps.size()
+                : ConversationMemorySnapshot.UNKNOWN_PERSISTED_STEP_COUNT);
+
         for (int i = 0; i < conversationOutputs.size(); i++) {
             var conversationOutput = conversationOutputs.get(i);
             if (i > 0) {
@@ -300,13 +320,17 @@ public class ConversationMemoryUtilities {
      * {@code source}/{@code gateReason}/{@code argsTruncated} — never
      * {@code argumentsRaw}, {@code argumentsRedacted}, {@code requestFingerprint},
      * or {@code requestPreview} — and leaves {@code chatTranscriptJson},
-     * {@code traceSoFar}, and {@code fingerprint} null. {@code requestPreview} is
-     * excluded for the same reason as {@code argumentsRedacted}: both are already
-     * redacted at persistence time, so the exclusion is not about a fresh secret
-     * leak — it is that this view's whole contract is "names only", and a request
-     * preview is materially more detail than a name. Consumers that read tool NAMES
-     * (delegated/group/MCP parity via {@code batch.getCalls().getToolName()}) keep
-     * working unchanged. Returns {@code null} when there is no batch.
+     * {@code gatingAssistantMessageJson}, {@code traceSoFar}, and
+     * {@code fingerprint} null. The gating message belongs in that list for the
+     * same reason as the transcript: it is verbatim, unredacted model output, kept
+     * only so a degraded resume can replay the provider-opaque fields attached to
+     * it. {@code requestPreview} is excluded for the same reason as
+     * {@code argumentsRedacted}: both are already redacted at persistence time, so
+     * the exclusion is not about a fresh secret leak — it is that this view's whole
+     * contract is "names only", and a request preview is materially more detail
+     * than a name. Consumers that read tool NAMES (delegated/group/MCP parity via
+     * {@code batch.getCalls().getToolName()}) keep working unchanged. Returns
+     * {@code null} when there is no batch.
      */
     private static PendingToolCallBatch namesOnlyPendingToolCalls(PendingToolCallBatch source) {
         if (source == null) {
@@ -325,8 +349,11 @@ public class ConversationMemoryUtilities {
         projected.setActivatedToolNames(source.getActivatedToolNames());
         projected.setAutoApproveCount(source.getAutoApproveCount());
         projected.setPauseCountThisTurn(source.getPauseCountThisTurn());
-        // Deliberately NOT copied (sensitive / heavy): chatTranscriptJson, traceSoFar,
-        // fingerprint. Left null so they never reach the generic read surfaces.
+        // Deliberately NOT copied (sensitive / heavy): chatTranscriptJson,
+        // gatingAssistantMessageJson, traceSoFar, fingerprint. Left null so they never
+        // reach the generic read surfaces. This copy is an allow-list, so a newly added
+        // field is excluded by default — which is the right default, and the reason a
+        // new one only needs naming here rather than actively suppressing.
 
         if (source.getCalls() != null) {
             var projectedCalls = new ArrayList<PendingToolCallBatch.PendingToolCall>(source.getCalls().size());
@@ -401,8 +428,14 @@ public class ConversationMemoryUtilities {
      * Mutates the passed snapshot, matching
      * {@link #redactRawPendingToolCallsForRead}: both operate on a snapshot freshly
      * loaded for one request, never on shared state.
+     * <p>
+     * Private on purpose: it is one step of
+     * {@link #sanitizePendingToolCallsForApprover}, never a projection on its own.
+     * While it was public the MCP mirror of {@code detail=full} called it directly
+     * and so served argumentsRaw and the transcript the REST surface strips — the
+     * two doors drifted because there were two methods to choose from.
      */
-    public static ConversationMemorySnapshot stripRequestFingerprintsForRead(ConversationMemorySnapshot snapshot) {
+    private static ConversationMemorySnapshot stripRequestFingerprintsForRead(ConversationMemorySnapshot snapshot) {
         if (snapshot == null || snapshot.getHitlPendingToolCalls() == null
                 || snapshot.getHitlPendingToolCalls().getCalls() == null) {
             return snapshot;
@@ -428,18 +461,25 @@ public class ConversationMemoryUtilities {
      * Sanitizes a snapshot about to be returned in FULL to an approver
      * ({@code approval-status?detail=full}, and the MCP mirror of it).
      * <p>
+     * The ONE approver projection: both {@code RestAgentEngine#getApprovalStatus}
+     * and {@code McpHitlTools#getApprovalStatus} must call exactly this method, so
+     * a field added here is stripped on every surface at once. A new field on
+     * {@code PendingToolCallBatch} that carries raw tool arguments belongs here.
+     * <p>
      * The approver's contract is the redacted arguments and the redacted request
      * preview — {@link #stripRequestFingerprintsForRead} handled the digest, but
-     * three other fields rode along that the approver never needs and must not see:
+     * four other fields rode along that the approver never needs and must not see:
      * <ul>
      * <li>{@code argumentsRaw} — unredacted by definition (execution needs it);
      * observed carrying a clear-text API key the model had embedded in a
      * create-agent call</li>
      * <li>{@code chatTranscriptJson} — the frozen LLM transcript for resume, which
      * contains every raw tool argument again</li>
+     * <li>{@code gatingAssistantMessageJson} — the gating assistant message, kept
+     * for the degraded resume; it embeds the gated calls' raw arguments too</li>
      * <li>{@code traceSoFar} — the running tool trace, same exposure</li>
      * </ul>
-     * All three are resume/execution machinery read from the PERSISTED document —
+     * All four are resume/execution machinery read from the PERSISTED document —
      * this method mutates only the freshly-deserialized, caller-owned snapshot
      * (same contract as the two projections above), so resume is unaffected.
      * <p>
@@ -456,6 +496,7 @@ public class ConversationMemoryUtilities {
         }
         var batch = snapshot.getHitlPendingToolCalls();
         batch.setChatTranscriptJson(null);
+        batch.setGatingAssistantMessageJson(null);
         batch.setTraceSoFar(null);
         if (batch.getCalls() == null) {
             return snapshot;

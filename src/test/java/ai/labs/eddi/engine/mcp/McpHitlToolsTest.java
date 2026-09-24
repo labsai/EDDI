@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.datastore.serialization.JsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.hitl.HitlAccessGuard;
@@ -13,7 +14,9 @@ import ai.labs.eddi.engine.internal.GroupApprovalRequest;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.security.OwnershipValidator;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -268,6 +271,41 @@ class McpHitlToolsTest {
         String out = tools.getApprovalStatus("c1", "full");
         assertTrue(out.contains("full"), out);
         assertFalse(out.contains("FORBIDDEN"), out);
+    }
+
+    /**
+     * The MCP mirror of {@code approval-status?detail=full} must serve the same
+     * approver projection as the REST surface. It used to strip only the request
+     * fingerprint, so the raw tool arguments and the frozen LLM transcript — both
+     * resume machinery carrying clear-text arguments — reached any MCP caller the
+     * gate admitted. Serialized for real: a mocked serializer would hide exactly
+     * which fields ride along.
+     */
+    @Test
+    void getApprovalStatus_detailFull_neverServesRawArgumentsOrTranscript() throws Exception {
+        String canary = "canary-raw-4f1d9c";
+        var batch = new PendingToolCallBatch();
+        batch.setChatTranscriptJson("{\"messages\":[{\"text\":\"" + canary + "-transcript\"}]}");
+        batch.setTraceSoFar(List.of(Map.of("arguments", canary + "-trace")));
+        var call = new PendingToolCallBatch.PendingToolCall();
+        call.setCallId("call-1");
+        call.setToolName("setupAgent");
+        call.setArgumentsRaw("{\"note\":\"" + canary + "-args\"}");
+        call.setArgumentsRedacted("{\"note\":\"visible-to-approver\"}");
+        batch.setCalls(List.of(call));
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setConversationState(ConversationState.AWAITING_HUMAN);
+        snapshot.setHitlPendingToolCalls(batch);
+        when(guard.requireConversationHitlAccess("c1")).thenReturn("someone-else");
+        when(conversationService.getConversationMemorySnapshot("c1")).thenReturn(snapshot);
+        json = new JsonSerialization(new ObjectMapper());
+        tools = build(true, true);
+
+        String out = tools.getApprovalStatus("c1", "full");
+
+        assertFalse(out.contains(canary), "raw arguments, transcript or trace leaked: " + out);
+        assertTrue(out.contains("visible-to-approver"),
+                "the redacted arguments are the approver's contract and must still be served: " + out);
     }
 
     @Test

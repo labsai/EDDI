@@ -49,6 +49,49 @@ public interface IRestSecretStore {
     Response storeSecret(@PathParam("tenantId") String tenantId, @PathParam("keyName") String keyName, SecretRequest body);
 
     /**
+     * Replace which agents may use an existing secret, <b>without</b> supplying its
+     * value.
+     * <p>
+     * The gap this closes: {@link #storeSecret} is the only other way to write
+     * {@code allowedAgents} and it requires the plaintext, which an operator does
+     * not have once a key is vaulted. Widening a grant therefore meant recovering
+     * the value from a backup or rotating the key — or granting {@code ["*"]} to
+     * everything, which is the outcome that made this endpoint necessary.
+     * <p>
+     * {@code PUT} on a {@code /grant} sub-resource rather than {@code PATCH} on the
+     * secret: the body replaces the grant wholesale, which is idempotent, and the
+     * sub-resource is what makes the value structurally unreachable from here —
+     * there is no field in {@link GrantRequest} that could carry it.
+     *
+     * @param tenantId
+     *            the tenant namespace
+     * @param keyName
+     *            the secret key name
+     * @param dryRun
+     *            when true, nothing is written and the response reports what the
+     *            change <em>would</em> do. Exists so a UI can show the "these
+     *            deployed agents lose access" warning before the operator commits,
+     *            rather than after
+     * @param body
+     *            the replacement grant list and an optional description
+     * @return 200 with the new grant plus any deployed agents it strips access
+     *         from, 404 if the secret does not exist, 400 on a malformed grant list
+     */
+    @PUT
+    @Path("/{tenantId}/{keyName}/grant")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    @RolesAllowed("eddi-admin")
+    @Operation(summary = "Update a secret's agent grant",
+               description = "Replaces the secret's allowedAgents list (and optionally its description) without "
+                       + "touching the encrypted value — no plaintext is accepted or required. Use [\"*\"] to allow "
+                       + "every agent. The response names any deployed agent that references the secret and would no "
+                       + "longer be granted it; pass dryRun=true to see that without writing anything.")
+    Response updateGrant(@PathParam("tenantId") String tenantId, @PathParam("keyName") String keyName,
+                         @QueryParam("dryRun")
+                         @DefaultValue("false") boolean dryRun, GrantRequest body);
+
+    /**
      * Delete a secret from the vault.
      *
      * @param tenantId
@@ -170,6 +213,27 @@ public interface IRestSecretStore {
      *            list of agent IDs, or ["*"] for all (nullable → defaults to ["*"])
      */
     record SecretRequest(String value, String description, List<String> allowedAgents) {
+    }
+
+    /**
+     * Request body for {@link #updateGrant}. Note what is <em>not</em> here: there
+     * is no value field, so this request cannot express a change to the secret
+     * itself.
+     *
+     * @param allowedAgents
+     *            the replacement grant list. <b>Required</b> — unlike
+     *            {@link SecretRequest}, an omitted list is rejected rather than
+     *            defaulting to {@code ["*"]}. On a create, defaulting to the
+     *            wildcard is a convenience; on an edit it would silently open a
+     *            narrowed secret to every agent because a field was left out of a
+     *            JSON body. An empty list is rejected for the same reason: it means
+     *            "every agent" everywhere else. Send {@code ["*"]} to mean all
+     *            agents
+     * @param description
+     *            the new description, or {@code null} to leave it as it is. An
+     *            empty string clears it
+     */
+    record GrantRequest(List<String> allowedAgents, String description) {
     }
 
     /**

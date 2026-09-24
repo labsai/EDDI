@@ -385,9 +385,9 @@ class ApiCallExecutorConnectionHeaderTest {
     class ConnectionOwnedHeadersAreRedacted {
 
         private static final String AMP_REF = "${connection:amplitude}";
-        private static final String GNOWBE_REF = "${connection:gnowbe}";
+        private static final String ACME_REF = "${connection:acme}";
         private static final String AMP_VALUE = "amp-live-id-12345";
-        private static final String GNOWBE_VALUE = "key-id:secret";
+        private static final String ACME_VALUE = "key-id:secret";
 
         /**
          * A STATIC connection on a custom header and a CALLER_SUPPLIED one on another:
@@ -399,7 +399,7 @@ class ApiCallExecutorConnectionHeaderTest {
         void connectionsResolveToUnremarkableLookingValues() {
             doAnswer(inv -> inv.<String>getArgument(0).contains("amplitude")
                     ? new ResolvedCredential("X-Custom-Id", AMP_VALUE)
-                    : new ResolvedCredential("X-Gnowbe-Key", GNOWBE_VALUE)).when(connectionResolver).resolve(anyString(), any(), any());
+                    : new ResolvedCredential("X-Acme-Key", ACME_VALUE)).when(connectionResolver).resolve(anyString(), any(), any());
             // The request map has to reflect what was actually written to the request,
             // or "the stored map is redacted" would be asserting on an empty map.
             var written = new LinkedHashMap<String, String>();
@@ -413,7 +413,7 @@ class ApiCallExecutorConnectionHeaderTest {
         private ApiCall callWithBothConnections() {
             var headers = new LinkedHashMap<String, String>();
             headers.put("X-Custom-Id", AMP_REF);
-            headers.put("X-Gnowbe-Key", GNOWBE_REF);
+            headers.put("X-Acme-Key", ACME_REF);
             headers.put("Accept", "application/json");
             return callWithHeaders(headers);
         }
@@ -432,13 +432,13 @@ class ApiCallExecutorConnectionHeaderTest {
             assertEquals(RequestRedactor.REDACTED, headers.get("X-Custom-Id"),
                     "a STATIC connection's value on a custom header name matches no credential heuristic, so only the executor's "
                             + "knowledge that a connection filled it can keep it out of MongoDB");
-            assertEquals(RequestRedactor.REDACTED, headers.get("X-Gnowbe-Key"),
+            assertEquals(RequestRedactor.REDACTED, headers.get("X-Acme-Key"),
                     "a CALLER_SUPPLIED credential is the end user's own key and must never be persisted");
             assertEquals("application/json", headers.get("Accept"), "a plain header must stay readable in the debug record");
             // The live request still went out with the real values — redaction is of
             // the record, not of the call.
             assertEquals(AMP_VALUE, capturedHeaders().get("X-Custom-Id"));
-            assertEquals(GNOWBE_VALUE, capturedHeaders().get("X-Gnowbe-Key"));
+            assertEquals(ACME_VALUE, capturedHeaders().get("X-Acme-Key"));
         }
 
         @Test
@@ -449,7 +449,7 @@ class ApiCallExecutorConnectionHeaderTest {
             // ResolvedRequest lower-cases header names for a stable fingerprint.
             assertEquals(RequestRedactor.REDACTED, preview.headers().get("x-custom-id"),
                     "the approver is routinely not the user whose turn raised the pause and must not see the org-wide key");
-            assertEquals(RequestRedactor.REDACTED, preview.headers().get("x-gnowbe-key"),
+            assertEquals(RequestRedactor.REDACTED, preview.headers().get("x-acme-key"),
                     "the approver must not see the end user's caller-supplied credential");
             assertEquals("application/json", preview.headers().get("accept"));
         }
