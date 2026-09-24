@@ -69,6 +69,7 @@ Log in to Grafana with `admin` / `admin`, then open **Dashboards → EDDI** — 
 `Integrations — MCP, A2A Identity, OpenAI-compatible API` ·
 `Capability Registry & Connections` · `Secrets Vault` · `Tenancy, Quotas & Audit` ·
 `Platform Operator` · `NATS JetStream` · `Backup — Export, Import & Sync` ·
+`RAG Ingestion` ·
 `Runtime context (Quarkus / JVM built-ins)`
 
 ---
@@ -146,6 +147,7 @@ eddi_conversation_processing_count_total    # Messages processed
 eddi_conversation_load_count_total          # Conversations loaded from DB
 eddi_conversation_undo_count_total          # Undo operations
 eddi_conversation_redo_count_total          # Redo operations
+eddi_conversation_store_conflict_count_total  # Writes refused: another writer changed the conversation first
 eddi_processing_conversation_count          # Currently active (gauge)
 
 eddi_conversation_start_duration_seconds    # Start latency (timer)
@@ -364,6 +366,55 @@ eddi_pipeline_task_errors_total             # Per-task failures; tags: task.id, 
 buckets, so it is the only one where `histogram_quantile` gives a real
 percentile. See [Timers do not publish percentiles](#timers-do-not-publish-percentiles).
 
+### LLM Call Metrics
+
+Emitted by `LlmTelemetryListener` for **every** LLM call, on every provider and on
+both the synchronous and streaming paths. Until these existed, the only LLM meters
+were the cascade ones below, which `LlmTask` reaches solely under
+`if (cascadeActive)` — so an agent naming a single model, which is almost every
+agent, produced no LLM latency, token or error signal at all.
+
+```text
+eddi_llm_request_duration_seconds           # Provider call latency (timer); tags: provider, model, outcome (success|error)
+eddi_llm_tokens_total                       # Tokens consumed; tags: provider, model, type (input|output)
+eddi_llm_request_errors_total               # Failed calls; tags: provider, model, error (exception simple name)
+```
+
+**These count attempts, not turns.** `AgentExecutionHelper.executeWithRetry`
+re-enters the model on a retryable failure, and each entry dispatches the
+listeners again. That is the right granularity for latency — you want the
+distribution of actual provider calls — but it means `eddi_llm_request_errors_total`
+counts failed *attempts*, and a turn that succeeded on its second try contributes
+one error and one success.
+
+**The duration timer publishes percentile buckets.** It is registered with
+`publishPercentileHistogram()`, so a Prometheus scrape carries
+`eddi_llm_request_duration_seconds_bucket` alongside `_count` and `_sum`, and the
+p95 panel on the bundled dashboard works without any extra registry
+configuration. A Micrometer timer publishes no buckets by default, and a
+`histogram_quantile` query over a series that does not exist renders as an empty
+panel — which reads as "no LLM traffic" rather than "this was never published".
+The cost is one series per bucket per `provider`/`model`/`outcome`; the tag set is
+bounded the same way `eddi_pipeline_task_duration_seconds` is, which makes the
+same trade.
+
+**Do not add these to the cascade meters.** A cascading task reports through both:
+once here per step, and once through `eddi_llm_cascade_*` tagged by step. They
+measure the same calls from different angles.
+
+**`error` is the exception's simple name**, which is what separates a rate limit
+from a timeout from a bad request on a dashboard. A wall-clock timeout configured
+via the `timeout` parameter reports as `ChatTimeoutException`.
+
+A matching span, `gen_ai.client.inference`, carries the OpenTelemetry GenAI
+attributes (`gen_ai.provider.name`, `gen_ai.request.model`,
+`gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`). Those conventions are
+still Development-status upstream, so the span also carries
+`eddi.semconv.schema_version` recording which revision the names came from. Spans
+only reach a collector when OpenTelemetry is enabled — it is off by default, see
+`quarkus.otel.sdk.disabled` in `application.properties`. The meters above are
+always recorded.
+
 ### Model Cascade Metrics
 
 Full guide: [model-cascade.md](model-cascade.md).
@@ -487,6 +538,7 @@ Full guide: [secrets-vault.md](secrets-vault.md).
 eddi_vault_resolve_count_total              # Secret resolutions
 eddi_vault_store_count_total                # Secrets written
 eddi_vault_rotate_count_total               # Key rotations
+eddi_vault_grant_update_count_total         # allowedAgents edited without the value (PUT .../grant)
 eddi_vault_delete_count_total               # Secrets deleted
 eddi_vault_errors_count_total               # Vault operation failures
 eddi_vault_cache_hits_total                 # Resolved-secret cache hits
@@ -595,6 +647,25 @@ eddi_summarization_calls_total              # Rolling-summary generations attemp
 eddi_summarization_errors_total             # Rolling-summary generations that failed
 eddi_summarization_duration_seconds         # Summarization duration (timer)
 ```
+
+### RAG Ingestion Metrics
+
+```text
+eddi_ingestion_segments_stored_total        # Chunks embedded and written by source ingestion
+eddi_ingestion_errors_total                 # Pages that failed to fetch, convert or embed
+eddi_ingestion_files_stored_total           # Files accepted onto an upload source
+eddi_ingestion_files_rejected_total         # Files an upload source refused, with a reason
+eddi_ingestion_files_deleted_total          # Files removed from an upload source
+```
+
+The first two carry `knowledgeBase` (the RAG configuration's name) and `source` (the
+ingestion source's name). Unchanged pages are not counted, so a scheduled re-crawl of a
+static site stores nothing.
+
+The three `files` counters carry `source` alone and belong to sources of type `upload`.
+Rejections are the one worth alerting on: a rate that climbs means operators are being
+turned away, and the reason is in the response rather than in the metric — a file that
+is too large, a format nothing can read, or a source that has reached its own limit.
 
 ### Connection Resolution Metrics
 

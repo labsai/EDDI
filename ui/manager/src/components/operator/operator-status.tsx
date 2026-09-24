@@ -96,6 +96,27 @@ export function OperatorStatusPanel({
           {config.version != null && (
             <Row label={t("operator.status.version", "Version")} value={String(config.version)} />
           )}
+          {/* The agent id, on screen, because a reconfigure REPLACES the agent
+              rather than versioning it in place. Two deployed operators once
+              existed side by side with nothing here to say which one this panel
+              and the chat address — so an engineer repaired the abandoned one and
+              the symptom did not move. */}
+          {config.agentId && (
+            <Row
+              label={t("operator.status.agentId", "Agent")}
+              value={config.agentId}
+              testId="operator-status-agent-id"
+              mono
+            />
+          )}
+          {/* The field the operator's tools actually call. Its wrong value (the
+              browser's origin) was previously invisible everywhere. */}
+          <Row
+            label={t("operator.status.platformBaseUrl", "Calls platform at")}
+            value={config.apiBaseUrl ?? t("operator.status.platformBaseUrlUnknown", "not recorded")}
+            testId="operator-status-platform-base-url"
+            mono
+          />
         </div>
 
         <DeploymentBadge state={state} loading={statusLoading} />
@@ -249,11 +270,26 @@ function GateBadge({
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
+function Row({
+  label,
+  value,
+  testId,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  testId?: string;
+  mono?: boolean;
+}) {
   return (
     <div className="flex justify-between gap-3">
       <span className="text-muted-foreground">{label}</span>
-      <span className="font-medium">{value}</span>
+      <span
+        className={mono ? "break-all text-right font-mono text-xs font-medium" : "font-medium"}
+        data-testid={testId}
+      >
+        {value}
+      </span>
     </div>
   );
 }

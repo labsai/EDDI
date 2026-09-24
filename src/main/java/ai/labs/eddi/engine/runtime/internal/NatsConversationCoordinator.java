@@ -325,7 +325,7 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
             PublishAck ack = jetStream.publish(subject, conversationId.getBytes());
             long durationNanos = System.nanoTime() - startNanos;
 
-            log.debugf("Published to NATS subject %s (seq: %d)", subject, ack.getSeqno());
+            log.debugf("Published to NATS subject %s (seq: %d)", sanitize(subject), ack.getSeqno());
 
             // Record publish metrics
             getMetrics().ifPresent(m -> {
@@ -426,11 +426,41 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
     }
 
     /**
-     * Sanitize conversation ID for use as NATS subject token. NATS subjects cannot
-     * contain spaces or dots.
+     * Sanitize a conversation id for use as a NATS subject token.
+     *
+     * <h4>Which characters, and why these</h4>
+     *
+     * A subject token may not contain {@code .} (it is the token delimiter), nor
+     * any of space, tab, CR or LF: {@code Validator.validateSubjectTerm} in the
+     * NATS client rejects all four with an {@link IllegalArgumentException}. That
+     * exception is <em>unchecked</em>, so it does not degrade to local execution
+     * through the {@code IOException | JetStreamApiException} handler around the
+     * publish -- it escapes it.
+     *
+     * <h4>Why widening this was safe</h4>
+     *
+     * CR, LF and tab were once left in place, on the reasoning that changing this
+     * method moves the subject namespace a deployment already publishes and
+     * consumes under. That reasoning holds for {@code .} and space, which remap ids
+     * that work; it does not hold for these three. An id containing one of them
+     * produced a subject the broker refuses outright, so nothing was ever delivered
+     * under it and there is no namespace to move. Every id that works today maps to
+     * the subject it already mapped to.
+     *
+     * <p>
+     * This is a token rule, not a log sanitizer. Log call sites keep their own
+     * {@code sanitize(...)}: it answers a different question -- whether a value can
+     * end a log record -- and it is applied to the conversation id directly on
+     * lines that build no subject at all.
+     * </p>
      */
     String sanitizeSubject(String conversationId) {
-        return conversationId.replace('.', '-').replace(' ', '_');
+        return conversationId
+                .replace('.', '-')
+                .replace(' ', '_')
+                .replace('\t', '_')
+                .replace('\r', '_')
+                .replace('\n', '_');
     }
 
     @PreDestroy

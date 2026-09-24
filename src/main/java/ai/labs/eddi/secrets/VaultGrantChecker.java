@@ -73,8 +73,12 @@ public class VaultGrantChecker {
 
     private static final Logger LOGGER = Logger.getLogger(VaultGrantChecker.class);
 
-    /** Grants every agent access — the default written by the setup wizard. */
-    static final String WILDCARD = "*";
+    /**
+     * Grants every agent access — the default written by the setup wizard. Aliases
+     * {@link SecretMetadata#WILDCARD_AGENT} rather than repeating the literal, so
+     * there stays exactly one definition of "everyone".
+     */
+    static final String WILDCARD = SecretMetadata.WILDCARD_AGENT;
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
@@ -164,6 +168,52 @@ public class VaultGrantChecker {
             }
         }
         return violations;
+    }
+
+    /**
+     * Whether {@code agentId}'s configuration names {@code secret} anywhere the
+     * deploy-time check would look.
+     * <p>
+     * Deliberately the inverse question to {@link #findUngrantedReferences}: it
+     * asks what an agent <em>uses</em>, with no reference to what it is allowed to
+     * use. That is what an operator about to narrow a grant needs — "who would this
+     * break?" cannot be answered by the current grant list, because the current
+     * grant list is the thing being replaced.
+     * <p>
+     * Reuses the same traversal, including the {@code ${connection:…}} hop and
+     * {@code ${vars:…}} expansion, so an agent that reaches a secret indirectly
+     * counts here exactly as it counts at deployment.
+     *
+     * @return false whenever the answer cannot be established — an unreadable
+     *         configuration, a reference that will not parse. This method feeds a
+     *         warning, not a gate, and guessing "yes" would cry wolf on agents that
+     *         have nothing to do with the secret
+     */
+    public boolean references(String agentId, Integer agentVersion, SecretReference secret) {
+        if (agentId == null || secret == null) {
+            return false;
+        }
+        AgentConfiguration agentConfiguration;
+        try {
+            agentConfiguration = agentStore.read(agentId, agentVersion);
+        } catch (Exception e) {
+            LOGGER.debugf("Could not read agent '%s' v%s while looking for references to %s: %s", sanitize(agentId), agentVersion,
+                    sanitize(secret.toReferenceString()), sanitize(e.getMessage()));
+            return false;
+        }
+        if (agentConfiguration == null) {
+            return false;
+        }
+        for (String reference : collectVaultReferences(agentConfiguration, new ArrayList<>())) {
+            try {
+                if (secret.equals(SecretReference.parse(reference))) {
+                    return true;
+                }
+            } catch (IllegalArgumentException e) {
+                LOGGER.debugf("Ignoring unparseable vault reference %s in agent '%s'", sanitize(reference), sanitize(agentId));
+            }
+        }
+        return false;
     }
 
     /**

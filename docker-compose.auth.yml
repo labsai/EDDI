@@ -51,6 +51,15 @@ services:
       # to validate the token's iss against the public hostname, not the
       # Docker-internal issuer from the discovery doc.
       QUARKUS_OIDC_TOKEN_ISSUER: "http://localhost:${KEYCLOAK_PORT:-8180}/realms/eddi"
+      # That issuer is also what EDDI advertises to MCP clients as the place to
+      # authenticate (quarkus.oidc.resource-metadata.authorization-server), which
+      # is the whole reason it prefers token.issuer over the auth-server-url above.
+      #
+      # This stack serves EDDI over plain http on localhost, so the advertised
+      # resource identifier must not be forced to https as it is by default — a
+      # client would be sent to fetch a URL nothing here is listening on. A
+      # deployment behind TLS should leave the default alone.
+      QUARKUS_OIDC_RESOURCE_METADATA_FORCE_HTTPS_SCHEME: "false"
     depends_on:
       keycloak:
         condition: service_healthy

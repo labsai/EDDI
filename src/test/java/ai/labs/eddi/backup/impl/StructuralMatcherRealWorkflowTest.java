@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
 import ai.labs.eddi.backup.IResourceSource;
 import ai.labs.eddi.backup.IResourceSource.AgentSourceData;
 import ai.labs.eddi.backup.IResourceSource.ExtensionSourceData;
@@ -88,6 +90,14 @@ class StructuralMatcherRealWorkflowTest {
 
         matcher = new StructuralMatcher(agentStore, documentDescriptorStore, snippetStore,
                 workflowStore, restInterfaceFactory, new JacksonJsonSerialization());
+
+        // The matcher resolves the target's current version from its descriptor and
+        // refuses to guess when it cannot — previewing version 1 of a target that
+        // may be at any version is what showed operators pre-sync content labelled
+        // "target". These fixtures are about matching, not versioning, so every
+        // resource simply reports version 1.
+        lenient().when(documentDescriptorStore.readCurrentDescriptor(anyString()))
+                .thenAnswer(invocation -> descriptorAtVersionOne(invocation.getArgument(0)));
 
         doReturn(Collections.emptyList()).when(snippetStore).readSnippetDescriptors(anyString(), anyInt(), anyInt());
         doReturn(llmStore).when(restInterfaceFactory).get(IRestLlmStore.class);
@@ -322,5 +332,12 @@ class StructuralMatcherRealWorkflowTest {
         public <T> T deserialize(String json, Class<T> type) throws IOException {
             return mapper.readValue(json, type);
         }
+    }
+
+    /** A descriptor naming version 1 of {@code resourceId}. */
+    private static DocumentDescriptor descriptorAtVersionOne(String resourceId) {
+        var descriptor = new DocumentDescriptor();
+        descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/" + resourceId + "?version=1"));
+        return descriptor;
     }
 }

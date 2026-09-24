@@ -99,31 +99,55 @@ export const MAX_GROUP_MEMBERS = 100;
  */
 export const MAX_DISCUSSION_ROUNDS = 50;
 
-export type GroupConversationState =
-  | "CREATED"
-  | "IN_PROGRESS"
-  | "SYNTHESIZING"
-  | "COMPLETED"
-  | "FAILED"
-  | "CANCELLED"
-  | "AWAITING_APPROVAL"
+/**
+ * Every value of the backend's `GroupConversation.GroupConversationState`.
+ *
+ * A runtime array rather than a bare union, and the union is derived from it, so
+ * the two cannot drift. Several render sites key translations off the state name
+ * with a template literal — ``t(`groups.state.${state}`)`` — which `npm run
+ * i18n:check` cannot see, so a state added to a union alone shipped with no
+ * translation in any of the eleven locales and every gate stayed green.
+ * `i18n-quality.test.ts` walks this array.
+ */
+export const GROUP_CONVERSATION_STATES = [
+  "CREATED",
+  "IN_PROGRESS",
+  "SYNTHESIZING",
+  "COMPLETED",
+  "FAILED",
+  /**
+   * A human rejected the discussion's recommendation at a HITL gate.
+   *
+   * Deliberately not FAILED — the run did not break, a person declined its
+   * result. Terminal and closeable exactly as FAILED is; only the meaning
+   * differs, and rendering a recorded decision as a red "Failed" badge told
+   * operators the system had gone wrong when it had done what it was asked.
+   * Documents written before the backend had this state carry FAILED for a
+   * rejection and are left alone.
+   */
+  "REJECTED",
+  "CANCELLED",
+  "AWAITING_APPROVAL",
   /**
    * A HUMAN group member's turn is up (I6): the discussion is parked on
    * `pendingHumanInput` until that member submits via `submitHumanInput`, or the
    * group's `humanMemberConfig` timeout policy resolves the turn. Distinct from
    * AWAITING_APPROVAL — this is "you're up", not "approve/reject".
    */
-  | "AWAITING_HUMAN_INPUT"
+  "AWAITING_HUMAN_INPUT",
   // Terminal — member conversations ended, ephemeral agents cleaned up, no
   // further follow-ups/continuations (backend GroupConversationState.CLOSED).
-  | "CLOSED";
+  "CLOSED",
+] as const;
+
+export type GroupConversationState = (typeof GROUP_CONVERSATION_STATES)[number];
 
 /**
  * Post-COMPLETED lifecycle operations the backend exposes on a group
  * conversation. Mirrors the identifiers returned by the backend's computed
  * `availableActions` field (GroupConversation.getAvailableActions):
- *   - COMPLETED             → ["followup", "continue", "close"]
- *   - FAILED / CANCELLED    → ["close"]
+ *   - COMPLETED                       → ["followup", "continue", "close"]
+ *   - FAILED / REJECTED / CANCELLED   → ["close"]
  *   - AWAITING_HUMAN_INPUT  → ["submitHumanInput"]
  *   - all other states      → []
  */

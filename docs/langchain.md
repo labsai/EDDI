@@ -96,7 +96,6 @@ This is the standard way to use the Langchain task - just connect to an LLM and 
         "systemMessage": "You are a helpful assistant",
         "prompt": "",
         "logSizeLimit": "-1",
-        "includeFirstAgentMessage": "true",
         "convertToObject": "false",
         "addToOutput": "true"
       }
@@ -116,7 +115,7 @@ This is the standard way to use the Langchain task - just connect to an LLM and 
 | `prompt`                   | string  | Override user input (if not set, uses actual input)   | ""                |
 | **Context Control**        |         |                                                       |                   |
 | `logSizeLimit`             | int     | Conversation history limit (`-1` = unlimited, `0` = none) | falls back to `conversationHistoryLimit` (default 10) |
-| `includeFirstAgentMessage` | boolean | Include first agent message in context                | true              |
+| `includeFirstAgentMessage` | boolean | **Deprecated — do not use in new configs.** Include the opening **agent** message in context. `false` drops it — and only it: a first message from the *user* is always kept. Setting it logs a WARN; see [Deprecated parameters](#deprecated-parameters) | true              |
 | **Output Control**         |         |                                                       |                   |
 | `convertToObject`          | boolean | Parse response as JSON. Enables three-layer enforcement: system prompt reinforcement, native API JSON mode (see the [provider matrix](#native-json-mode--provider-matrix)), and pre-parse validation | false             |
 | `responseSchema`           | string  | JSON schema for structured output. When set with `convertToObject=true`, the exact schema is injected into the system prompt so the LLM knows the expected format | ""                |
@@ -255,11 +254,87 @@ Both stored shapes therefore keep working: a config that sets only `streamingTim
 }
 ```
 
-> **Important**: Anthropic doesn't allow the first message to be from the agent, so `includeFirstAgentMessage` should be set to `false`.
+> **`includeFirstAgentMessage` is deprecated and no longer needed for Anthropic.** This example keeps
+> `"false"` only because countless existing configs carry it. The advice it used to
+> illustrate — "Anthropic doesn't allow the first message to be from the agent, so set
+> this to `false`" — described a restriction the
+> [Messages API](https://platform.claude.com/docs/en/api/messages) no longer documents,
+> and a history beginning with an assistant turn is accepted. Leave the parameter off
+> new Anthropic configs unless you genuinely want the opening greeting withheld.
 >
 > **maxTokens**: Anthropic requires `max_tokens` in every request. If omitted, EDDI defaults to **16384**. For models with **extended thinking** (e.g. `claude-sonnet-5`), thinking tokens count toward this budget — set it higher (e.g. `"32768"` or `"65536"`) for complex analysis tasks.
 
+#### Google Gemini (AI Studio)
+
+```json
+{
+  "tasks": [
+    {
+      "actions": ["send_message"],
+      "id": "geminiChat",
+      "type": "gemini",
+      "description": "Google Gemini chat",
+      "parameters": {
+        "apiKey": "your-gemini-api-key",
+        "modelName": "gemini-3.8-flash",
+        "temperature": "0.7",
+        "maxOutputTokens": "8192",
+        "timeout": "60000",
+        "systemMessage": "You are a helpful assistant",
+        "addToOutput": "true"
+      }
+    }
+  ]
+}
+```
+
+##### Thought signatures — required for tool calling on Gemini 3.x
+
+Gemini 3.x attaches an opaque **`thoughtSignature`** to every `functionCall` part
+it emits, and requires it echoed back verbatim when that model turn is replayed on
+the follow-up request carrying the `functionResponse`. Without it the API answers:
+
+```
+400 INVALID_ARGUMENT — Function call is missing a thought_signature in functionCall parts.
+```
+
+Measured against `generativelanguage.googleapis.com`:
+
+| Model | Emits `thoughtSignature` | Replay without it |
+| --- | --- | --- |
+| `gemini-3.8-flash` | yes | **400** |
+| `gemini-3.5-flash` | yes | **400** |
+| `gemini-2.5-flash` | yes | 200 (tolerated) |
+
+There is **no `thinkingConfig` setting that avoids this** — Gemini 3.x emits the
+signature and rejects its absence even with `thinkingBudget: 0`.
+
+EDDI handles it for you: the `gemini` builder sets langchain4j's `returnThinking`
+(capture the signature) and `sendThinking` (echo it back) to **`true` by default**.
+Both are exposed as parameters:
+
+| Parameter | Default | Effect |
+| --- | --- | --- |
+| `returnThinking` | `true` | Captures `thoughtSignature` off the response. Also routes any thought text to a separate field rather than into the user-visible reply. |
+| `sendThinking` | `true` | Echoes the captured signature back on follow-up requests. |
+
+> **Setting either to `false` breaks tool calling on every Gemini 3.x model.** There is
+> little reason to: Gemini 2.x tolerates the echoed signature. Note that `false` is not
+> the state before thought signatures were handled — EDDI used to leave `returnThinking` unset, which prepends any thought
+> text to the reply, whereas `false` drops it. EDDI exposes no `thinkingConfig`, so Gemini
+> returns no thought text today and the two are indistinguishable in practice.
+
 #### Google Gemini (Vertex AI)
+
+> **Gemini 3.x with tools is not supported on `gemini-vertex` — use `gemini`
+> instead.** The thought-signature requirement above applies to Gemini 3.x on
+> Vertex AI as well, but the field cannot be carried on this path: neither
+> `langchain4j-vertex-ai-gemini` nor the `com.google.cloud.vertexai.api.Part`
+> protobuf it depends on models `thought_signature`, so there is nothing for EDDI
+> to configure. Fixing it needs an upstream langchain4j change plus a
+> `google-cloud-vertexai` bump. `gemini-vertex` remains correct for Gemini 2.x, and
+> for Gemini 3.x **without** tools. Configuring a Gemini 3.x model id here logs a
+> warning at model-build time naming the alternative.
 
 ```json
 {
@@ -364,6 +439,11 @@ Both stored shapes therefore keep working: a config that sets only `streamingTim
 
 #### Jlama (Local Java Inference)
 
+Jlama is the only provider that runs inference **inside the EDDI JVM**. There is no
+second process, no Ollama, no HTTP hop — which also means the model's memory, CPU and
+weight storage are EDDI's problem rather than a sidecar's. Read the two subsections
+below before deploying it; both describe defaults that fail in a container.
+
 ```json
 {
   "tasks": [
@@ -374,7 +454,10 @@ Both stored shapes therefore keep working: a config that sets only `streamingTim
       "description": "Jlama local model chat",
       "parameters": {
         "modelName": "tjake/Llama-3.2-1B-Instruct-JQ4",
+        "modelCachePath": "/var/lib/eddi/jlama",
+        "threadCount": "4",
         "temperature": "0.7",
+        "maxTokens": "512",
         "timeout": "30000",
         "systemMessage": "You are a helpful assistant",
         "addToOutput": "true"
@@ -384,7 +467,87 @@ Both stored shapes therefore keep working: a config that sets only `streamingTim
 }
 ```
 
-**Note**: Jlama runs models locally in Java without requiring external services like Ollama.
+| Parameter | Meaning |
+| --------- | ------- |
+| `modelName` | Hugging Face repo id, e.g. `tjake/Llama-3.2-1B-Instruct-JQ4`. Jlama downloads it on first use |
+| `modelCachePath` | Where weights are cached. **Set this in any container** — see below. Default: `${user.home}/.jlama/models` |
+| `authToken` | Hugging Face token, for gated or private repos. Use `${vault:...}` rather than a literal |
+| `quantizeModelAtRuntime` | `true` quantizes on load: slower startup, smaller memory footprint |
+| `workingDirectory` | Scratch space for the loader. Needs to be writable |
+| `workingQuantizedType` | Jlama `DType` name for working-set quantization, e.g. `F32`, `I8`. Case-insensitive; an unknown name is logged and ignored |
+| `temperature`, `maxTokens` | As for every other provider. Jlama defaults to `0.3` and the model's full context length |
+| `timeout` | Honoured, but applied by EDDI as a wall-clock bound around the call rather than by Jlama itself — Jlama's own builder has no timeout |
+
+##### Required JVM flag
+
+Jlama needs the Java Vector API for SIMD tensor operations:
+
+```
+--add-modules=jdk.incubator.vector
+```
+
+**EDDI sets this for you** in both container images, in the Maven Surefire fork and in
+the `mise` dev tasks. (Deliberately not in the Failsafe fork — declaring an `argLine`
+there would replace the implicit `${argLine}` that carries the JaCoCo integration-test
+agent and Quarkus's module opens, and no integration test builds a Jlama model anyway.) You only need to add it yourself if you launch `quarkus-run.jar` with
+your own command line.
+
+The image carries it on **`JDK_JAVA_OPTIONS`**, deliberately, rather than on
+`JAVA_OPTS_APPEND` where EDDI's other JVM settings live. The `java` launcher reads
+`JDK_JAVA_OPTIONS` itself, so the flag survives an operator overriding either of the
+other two variables — and overriding them is normal: a `docker run -e JAVA_OPTS_APPEND=…`
+*replaces* the image's value rather than adding to it, so a deployment that sets its
+MongoDB connection string that way would otherwise silently drop the flag and fall back
+to scalar inference.
+
+> ⚠️ If you set `JDK_JAVA_OPTIONS` yourself, carry
+> `--add-modules=jdk.incubator.vector` across — that one *does* replace the image's value.
+> You will see `NOTE: Picked up JDK_JAVA_OPTIONS` in the startup log either way.
+
+This matters more than a usual tuning flag, because the failure is silent. Jlama probes
+for the Vector API inside a `catch (Throwable)`; without the module it logs one line,
+falls back to `NaiveTensorOperations` — scalar Java matrix arithmetic — and answers
+normally, just orders of magnitude slower than SIMD. Nothing errors; the agent is simply
+too slow to use. EDDI logs its own warning naming this flag when it builds a Jlama model
+on a JVM that lacks it.
+
+> The JVM prints `WARNING: Using incubator modules: jdk.incubator.vector` at startup.
+> That is expected and is not an error.
+
+##### Deploying Jlama in a container
+
+Three things behave differently inside a container. None of them raises an error — which
+is exactly why each is worth setting explicitly.
+
+- **`modelCachePath` — set it.** Jlama writes weights to `${user.home}/.jlama/models`,
+  which in a container is the pod's ephemeral writable layer. That *works*, which is what
+  makes it a trap rather than an error: the multi-gigabyte weights live exactly as long as
+  the pod does, so every restart, rollout and reschedule re-downloads them from Hugging
+  Face before the first turn can be answered. Point it at a mounted volume. (The download
+  happens on the *first turn*, not at deploy time, so a mistake here surfaces long after
+  the agent was configured and saved.)
+- **Thread count — give the pod a CPU *limit*, not a parameter.** Jlama runs inference on
+  a process-global `PhysicalCoreExecutor` sized at `max(2, availableProcessors() / 2)`.
+  `availableProcessors()` honours a container CPU **limit**, so `limits.cpu: 4` yields two
+  inference threads. It does **not** honour a CPU **request**: cgroup shares have been
+  ignored since JDK 19, so a pod with only `requests.cpu` sees the whole node. EDDI
+  deliberately exposes no `threadCount` parameter — Jlama applies it through a one-shot
+  process-global latch that throws on its second call, so it cannot be a per-model setting.
+  If you must override it, size the pod.
+- **Memory — size for the weights, outside the heap.** Jlama memory-maps the safetensors
+  files, so the weights land in RSS and page cache, not the Java heap. They still count
+  against the container's memory limit. Size the pod for the model *plus* EDDI's heap, and
+  note that `JAVA_MAX_MEM_RATIO` only governs the heap, so raising it does not make room
+  for the model — it takes room away.
+
+For an air-gapped deployment, pre-seed `modelCachePath` from a machine that has network
+access and mount it read-only. Jlama reaches out to Hugging Face whenever the model is
+not already in the cache, so an empty cache with no egress fails rather than degrades.
+
+**Note**: Jlama runs models locally in Java without requiring external services like
+Ollama. It is CPU inference — there is no GPU path — so it suits small quantized models
+(1B–8B) rather than large ones. For a GPU or a larger model, serve it with vLLM or
+`llama-server` and point the `openai` provider at it via `baseUrl`.
 
 #### Mistral AI
 
@@ -1435,6 +1598,41 @@ When `convertToObject=true`, the raw LLM response is **always** persisted in con
 
 ---
 
+## Deprecated parameters
+
+### `includeFirstAgentMessage`
+
+**Deprecated. Still honoured; do not use it in new configurations.**
+
+It exists for one reason: Anthropic used to reject a conversation whose first
+message was an assistant turn, so the flag stripped EDDI's opening greeting to
+make the history start with a user message.
+
+**That restriction is gone.** The
+[Messages API reference](https://platform.claude.com/docs/en/api/messages) no
+longer documents a first-message role rule anywhere, and a history beginning with
+an assistant turn is accepted.
+
+What remains is a flag whose only documented reason to exist has expired, and
+which for years was implemented as *remove the first message* regardless of whose
+it was — so an agent with no `ai.labs.output` step, which opens on the **user's**
+turn, sent an empty history and Anthropic answered
+`invalid_request_error: messages: Field required`. The removal is role-aware now,
+so the flag is no longer dangerous; it is merely pointless for the case it was
+written for.
+
+**Why deprecated rather than removed.** Agent behaviour lives in JSON stored in
+MongoDB and imported from ZIPs — the one backward-compatibility boundary this
+codebase has. Silently ignoring a parameter an author set deliberately would be
+worse than honouring it: an agent that genuinely wants its greeting withheld
+would start sending it, with no diagnostic. So the flag keeps working exactly as
+before, and `LlmTask` logs a WARN naming the task the first time each configured
+task uses it.
+
+**What to do:** delete it from the task. Keep it only if that agent must really
+withhold its opening greeting from the model — which is a presentation choice,
+not a provider requirement.
+
 ## Common Issues and Troubleshooting
 
 ### API Key Issues
@@ -1456,8 +1654,21 @@ When `convertToObject=true`, the raw LLM response is **always** persisted in con
 
 ### Anthropic First Message Error
 
-- **Problem**: Anthropic API rejects conversations starting with agent message
-- **Solution**: Set `includeFirstAgentMessage: "false"` for Anthropic tasks
+- **Historical problem**: the Anthropic API rejected conversations starting with an agent message
+- **Solution**: Historical. The Messages API no longer documents a "first message must be
+  the user's" rule, and an assistant-first history is accepted — so `includeFirstAgentMessage`
+  is not the fix for a modern Anthropic failure. Leave it unset.
+
+### `invalid_request_error: messages: Field required` (Anthropic)
+
+- **Problem**: An agent with **no** `ai.labs.output` step — a group member that only answers,
+  say — sends an empty message list.
+- **Cause**: `includeFirstAgentMessage: "false"` drops the opening greeting. An agent that
+  produces no greeting opens on the *user's* turn, so on the first turn there was nothing
+  left to send. The removal is role-aware since 6.4.1 and only ever drops an **agent**
+  message, so this cannot recur; a local Ollama smoke test will not reproduce it either,
+  because Ollama accepts an empty message list.
+- **Solution**: Remove `includeFirstAgentMessage` from the task (or set it to `"true"`).
 
 ### Tool Not Working
 

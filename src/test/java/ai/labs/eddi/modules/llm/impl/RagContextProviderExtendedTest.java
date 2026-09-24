@@ -19,6 +19,7 @@ import ai.labs.eddi.modules.llm.model.LlmConfiguration.RagDefaults;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.embedding.EmbeddingModel;
+import dev.langchain4j.model.embedding.request.EmbeddingInputType;
 import dev.langchain4j.model.output.Response;
 import dev.langchain4j.rag.content.Content;
 import dev.langchain4j.store.embedding.EmbeddingSearchRequest;
@@ -157,6 +158,37 @@ class RagContextProviderExtendedTest {
             assertNull(ragContextProvider.retrieveContext(memory, task, "query"));
         }
 
+        /**
+         * Retrieval must ask for a QUERY model — the half of the defect that was
+         * actually wrong.
+         * <p>
+         * Ingestion and retrieval both used to call a single-argument
+         * {@code getOrCreate} with the same configuration, so they shared one cache
+         * entry and one instance. With Gemini's {@code taskType} defaulting to
+         * {@code RETRIEVAL_DOCUMENT}, every query was embedded as though it were a
+         * document being stored. The decorator cannot fix that on its own: the two call
+         * sites have to disagree, and this is what pins that they do.
+         */
+        @Test
+        @DisplayName("retrieval asks for a QUERY model, not a DOCUMENT one")
+        void retrievalAsksForAQueryModel() {
+            var ref = new KnowledgeBaseReference();
+            ref.setName("product-docs");
+
+            var task = new LlmConfiguration.Task();
+            task.setId("task1");
+            task.setKnowledgeBases(List.of(ref));
+
+            setupWorkflowWithSuccessfulRetrieval("product-docs", "Relevant content about products");
+
+            ragContextProvider.retrieveContext(memory, task, "what is the refund policy?");
+
+            var role = ArgumentCaptor.forClass(EmbeddingInputType.class);
+            verify(embeddingModelFactory, atLeastOnce()).getOrCreate(any(), role.capture());
+            assertEquals(EmbeddingInputType.QUERY, role.getValue(),
+                    "the search key must be embedded as a QUERY; embedding it as a DOCUMENT is the defect");
+        }
+
         @Test
         @DisplayName("KB ref with custom maxResults and minScore overrides")
         void kbRefWithOverrides() {
@@ -285,7 +317,7 @@ class RagContextProviderExtendedTest {
 
             setupWorkflowWithRagConfig("kb-error");
 
-            when(embeddingModelFactory.getOrCreate(any())).thenThrow(
+            when(embeddingModelFactory.getOrCreate(any(), any())).thenThrow(
                     new RuntimeException("Model creation failed"));
 
             String result = ragContextProvider.retrieveContext(memory, task, "query");
@@ -419,7 +451,7 @@ class RagContextProviderExtendedTest {
         setupWorkflowWithRagConfig(kbName);
 
         EmbeddingModel embeddingModel = mock(EmbeddingModel.class);
-        when(embeddingModelFactory.getOrCreate(any())).thenReturn(embeddingModel);
+        when(embeddingModelFactory.getOrCreate(any(), any())).thenReturn(embeddingModel);
 
         var embedding = Embedding.from(new float[]{0.1f, 0.2f, 0.3f});
         when(embeddingModel.embed(anyString())).thenReturn(Response.from(embedding));
@@ -437,7 +469,7 @@ class RagContextProviderExtendedTest {
         setupWorkflowWithRagConfig(kbName);
 
         EmbeddingModel embeddingModel = mock(EmbeddingModel.class);
-        when(embeddingModelFactory.getOrCreate(any())).thenReturn(embeddingModel);
+        when(embeddingModelFactory.getOrCreate(any(), any())).thenReturn(embeddingModel);
 
         var embedding = Embedding.from(new float[]{0.1f, 0.2f, 0.3f});
         when(embeddingModel.embed(anyString())).thenReturn(Response.from(embedding));

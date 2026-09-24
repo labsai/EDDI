@@ -6,7 +6,6 @@ package ai.labs.eddi.modules.llm.impl;
 
 import dev.langchain4j.model.ModelProvider;
 import dev.langchain4j.model.chat.Capability;
-import dev.langchain4j.model.chat.ChatRequestOptions;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.listener.ChatModelListener;
 import dev.langchain4j.model.chat.request.ChatRequest;
@@ -20,9 +19,8 @@ import java.util.Set;
 
 /**
  * Streaming counterpart to {@link ObservableChatModel}: adds provider-agnostic
- * request/response logging to any {@link StreamingChatModel}. Applied
- * automatically by {@link ChatModelRegistry} when {@code logRequests} or
- * {@code logResponses} are set in the langchain configuration.
+ * request/response logging and telemetry to any {@link StreamingChatModel}.
+ * Applied by {@link ChatModelRegistry} to every streaming model it builds.
  * <p>
  * <strong>Deliberately no timeout here.</strong> {@link ObservableChatModel}
  * bounds a synchronous call with {@code Future.get}, which is the right shape
@@ -47,31 +45,45 @@ class ObservableStreamingChatModel implements StreamingChatModel {
     private final String modelType;
     private final boolean logRequests;
     private final boolean logResponses;
+    private final List<ChatModelListener> listeners;
 
-    ObservableStreamingChatModel(StreamingChatModel delegate, String modelType, boolean logRequests, boolean logResponses) {
+    ObservableStreamingChatModel(StreamingChatModel delegate, String modelType, boolean logRequests, boolean logResponses,
+            ChatModelListener telemetryListener) {
         this.delegate = delegate;
         this.modelType = modelType;
         this.logRequests = logRequests;
         this.logResponses = logResponses;
+
+        // EDDI's listener only, for the same reason as ObservableChatModel: doChat
+        // forwards to delegate.chat(), so the delegate dispatches its own listeners.
+        this.listeners = telemetryListener == null ? List.of() : List.of(telemetryListener);
     }
 
     /**
-     * Each overload forwards to the <em>same</em> overload on the delegate rather
-     * than funnelling through one of them. A {@link StreamingChatModel} may
-     * implement either {@code doChat} or the two-argument {@code chat} directly;
-     * re-dispatching to a different overload would hit the interface default and
-     * blow up with "Not implemented" for the latter kind.
+     * {@code doChat} is the override, not either {@code chat} overload, and that
+     * placement is load-bearing.
+     * <p>
+     * {@code StreamingChatModel.chat(ChatRequest, ChatRequestOptions, handler)} is
+     * where the interface reads {@link #listeners()} and fires
+     * {@code onRequest}/{@code onResponse}/{@code onError} around {@code doChat}.
+     * An earlier revision of this class overrode <em>both</em> {@code chat}
+     * overloads, which meant that default never ran, this decorator's
+     * {@code listeners()} was never consulted, and EDDI's telemetry listener never
+     * fired on a streaming turn at all — silently, because nothing asserted a
+     * callback.
+     * <p>
+     * Forwarding to {@code delegate.chat(...)} rather than
+     * {@code delegate.doChat(...)} is the same constraint the synchronous decorator
+     * documents: a {@link StreamingChatModel} may implement either, and
+     * re-dispatching to the wrong one hits the interface default and blows up with
+     * "Not implemented". Jlama and Vertex Gemini both override {@code chat}. The
+     * delegate therefore dispatches its own listeners, which is why
+     * {@link #listeners()} carries only EDDI's.
      */
     @Override
-    public void chat(ChatRequest request, StreamingChatResponseHandler handler) {
+    public void doChat(ChatRequest request, StreamingChatResponseHandler handler) {
         logRequest(request);
         delegate.chat(request, observing(handler));
-    }
-
-    @Override
-    public void chat(ChatRequest request, ChatRequestOptions options, StreamingChatResponseHandler handler) {
-        logRequest(request);
-        delegate.chat(request, options, observing(handler));
     }
 
     private void logRequest(ChatRequest request) {
@@ -128,9 +140,15 @@ class ObservableStreamingChatModel implements StreamingChatModel {
         return delegate.defaultRequestParameters();
     }
 
+    /**
+     * EDDI's telemetry listener, and only that — mirroring
+     * {@link ObservableChatModel#listeners()}, and for the same reason:
+     * {@link #doChat} forwards to {@code delegate.chat}, so the delegate dispatches
+     * its own listeners. Carrying them here as well would fire each of them twice.
+     */
     @Override
     public List<ChatModelListener> listeners() {
-        return delegate.listeners();
+        return listeners;
     }
 
     @Override
@@ -150,21 +168,21 @@ class ObservableStreamingChatModel implements StreamingChatModel {
     }
 
     /**
-     * Wraps a StreamingChatModel with request/response logging if either logging
-     * flag is set. Returns the original model unwrapped otherwise.
+     * Wraps a StreamingChatModel with request/response logging and telemetry.
+     * <p>
+     * <b>Always wraps</b>, for the same reason as {@link ObservableChatModel#wrap}:
+     * returning the bare model when no logging flag is set left the default path
+     * with nowhere to attach a listener, and so with no telemetry at all.
      * <p>
      * {@code timeout} deliberately does not trigger wrapping — see the class
      * javadoc; it is honoured by the provider's own streaming HTTP client and by
      * the executor's overall backstop.
      */
-    static StreamingChatModel wrapIfNeeded(StreamingChatModel model, String modelType, String logReq, String logResp) {
+    static StreamingChatModel wrap(StreamingChatModel model, String modelType, String logReq, String logResp,
+                                   ChatModelListener telemetryListener) {
         boolean logRequests = Boolean.parseBoolean(logReq);
         boolean logResponses = Boolean.parseBoolean(logResp);
 
-        if (!logRequests && !logResponses) {
-            return model;
-        }
-
-        return new ObservableStreamingChatModel(model, modelType, logRequests, logResponses);
+        return new ObservableStreamingChatModel(model, modelType, logRequests, logResponses, telemetryListener);
     }
 }

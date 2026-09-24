@@ -28,7 +28,6 @@ import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
-import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -39,6 +38,7 @@ import jakarta.ws.rs.core.Response;
 import java.time.Instant;
 import org.jboss.logging.Logger;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 import java.util.*;
 import java.util.concurrent.*;
@@ -116,13 +116,25 @@ public class RestAgentAdministration implements IRestAgentAdministration {
                 try {
                     deployFuture.get(30, TimeUnit.SECONDS);
                 } catch (TimeoutException e) {
-                    log.warn("Deployment wait timed out for Agent " + agentId + " v" + version);
+                    log.warn("Deployment wait timed out for Agent " + sanitize(agentId) + " v" + version);
                     deployError = "Deployment timed out";
                 } catch (ExecutionException e) {
                     Throwable cause = e.getCause();
-                    // Log full details server-side, expose only safe message to client
-                    log.warn("Deployment failed for Agent " + agentId + " v" + version + ": " + (cause != null ? cause.getMessage() : e.getMessage()),
-                            cause != null ? cause : e);
+                    // Log full details server-side, expose only safe message to client.
+                    //
+                    // The MESSAGE is sanitized; the throwable is deliberately not, and
+                    // cannot be. quarkus.log.console.format ends in %s%e, so %e renders
+                    // the stack trace whose first line is the throwable's own toString()
+                    // — a CR/LF in an exception message therefore still reaches the log
+                    // through that half. That is not a property of this call site: ~415
+                    // log calls in src/main/java pass a throwable, and the only fix that
+                    // covers them is a sanitizing log handler or formatter, because
+                    // LogSanitizer collapses newlines and would flatten any stack trace
+                    // it was pointed at. Dropping the throwable here is not the trade:
+                    // the client is told only "Check server logs for details", so this
+                    // stack trace is the sole diagnostic a failed deployment leaves.
+                    log.warn("Deployment failed for Agent " + sanitize(agentId) + " v" + version + ": "
+                            + sanitize(cause != null ? cause.getMessage() : e.getMessage()), cause != null ? cause : e);
                     deployError = "Deployment failed. Check server logs for details.";
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
@@ -180,12 +192,12 @@ public class RestAgentAdministration implements IRestAgentAdministration {
             // (the caller's mistake was the id, not its hex-ness) and leak which
             // datastore is behind the API.
             throw sneakyThrow(new IResourceStore.ResourceNotFoundException(
-                    String.format("Resource not found. (id=%s, version=%s)", LogSanitizer.sanitize(agentId), version)));
+                    String.format("Resource not found. (id=%s, version=%s)", sanitize(agentId), version)));
         } catch (IResourceStore.ResourceStoreException e) {
             // A store outage is not "agent missing" — let the deploy proceed and fail
             // (or succeed) on its own terms rather than reporting a false 404.
             log.warnf("Could not verify that Agent %s v%s exists before deploying: %s",
-                    LogSanitizer.sanitize(agentId), version, e.getMessage());
+                    sanitize(agentId), version, e.getMessage());
         }
     }
 
@@ -358,7 +370,8 @@ public class RestAgentAdministration implements IRestAgentAdministration {
                 }
 
                 undeploy(environment, agentId, version);
-                log.info(String.format("Successfully undeployed Agent (agentId=%s, agentVersion=%s, environment=%s)", agentId, version, environment));
+                log.info(String.format("Successfully undeployed Agent (agentId=%s, agentVersion=%s, environment=%s)", sanitize(agentId), version,
+                        environment));
             } while (undeployThisAndAllPreviousAgentVersions && version-- > 1);
 
             return Response.accepted().build();
@@ -454,14 +467,14 @@ public class RestAgentAdministration implements IRestAgentAdministration {
     }
 
     private Status throwError(String agentId, Integer version, ServiceException e, String message) {
-        message = String.format(message, agentId, version);
+        message = String.format(message, sanitize(agentId), version);
         log.error(message, e);
         throw sneakyThrow(e);
     }
 
     private Void throwErrorForbidden(String agentId, Integer version, IllegalAccessException e) {
         String message = "Agent deployment is currently in progress! (agentId=%s , version=%s)";
-        message = String.format(message, agentId, version);
+        message = String.format(message, sanitize(agentId), version);
         log.error(message, e);
         throw new WebApplicationException(new Throwable(message), Response.Status.FORBIDDEN.getStatusCode());
     }
@@ -475,11 +488,12 @@ public class RestAgentAdministration implements IRestAgentAdministration {
                 if (!schedule.isEnabled()) {
                     var nextFire = schedule.getNextFire() != null ? schedule.getNextFire() : Instant.now();
                     scheduleStore.setScheduleEnabled(schedule.getId(), true, nextFire);
-                    log.infof("[SCHEDULE] Auto-enabled schedule '%s' (id=%s) on Agent %s deploy", schedule.getName(), schedule.getId(), agentId);
+                    log.infof("[SCHEDULE] Auto-enabled schedule '%s' (id=%s) on Agent %s deploy", sanitize(schedule.getName()),
+                            sanitize(schedule.getId()), sanitize(agentId));
                 }
             }
         } catch (Exception e) {
-            log.warnf(e, "[SCHEDULE] Failed to auto-enable schedules for Agent %s (non-fatal)", agentId);
+            log.warnf(e, "[SCHEDULE] Failed to auto-enable schedules for Agent %s (non-fatal)", sanitize(agentId));
         }
     }
 
@@ -489,11 +503,12 @@ public class RestAgentAdministration implements IRestAgentAdministration {
             for (var schedule : schedules) {
                 if (schedule.isEnabled()) {
                     scheduleStore.setScheduleEnabled(schedule.getId(), false, null);
-                    log.infof("[SCHEDULE] Auto-disabled schedule '%s' (id=%s) on Agent %s undeploy", schedule.getName(), schedule.getId(), agentId);
+                    log.infof("[SCHEDULE] Auto-disabled schedule '%s' (id=%s) on Agent %s undeploy", sanitize(schedule.getName()),
+                            sanitize(schedule.getId()), sanitize(agentId));
                 }
             }
         } catch (Exception e) {
-            log.warnf(e, "[SCHEDULE] Failed to auto-disable schedules for Agent %s (non-fatal)", agentId);
+            log.warnf(e, "[SCHEDULE] Failed to auto-disable schedules for Agent %s (non-fatal)", sanitize(agentId));
         }
     }
 }

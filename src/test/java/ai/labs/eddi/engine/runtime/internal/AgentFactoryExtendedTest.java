@@ -230,6 +230,26 @@ class AgentFactoryExtendedTest {
         }
 
         @Test
+        @DisplayName("getAllDeployedAgents returns every registered version, not only the latest")
+        void allDeployedAgentsIncludesOlderVersions() throws Exception {
+            var a1v1 = new Agent("a1", 1);
+            a1v1.setDeploymentStatus(Deployment.Status.READY);
+            var a1v2 = new Agent("a1", 2);
+            a1v2.setDeploymentStatus(Deployment.Status.READY);
+            when(agentStoreClientLibrary.getAgent("a1", 1)).thenReturn(a1v1);
+            when(agentStoreClientLibrary.getAgent("a1", 2)).thenReturn(a1v2);
+            factory.deployAgent(Deployment.Environment.test, "a1", 1, null);
+            factory.deployAgent(Deployment.Environment.test, "a1", 2, null);
+
+            List<IAgent> all = factory.getAllDeployedAgents(Deployment.Environment.test);
+
+            // The vault-grant impact check depends on seeing v1 as well: it can be the
+            // version still serving while v2 is not READY.
+            assertEquals(List.of(1, 2), all.stream().map(IAgent::getAgentVersion).sorted().toList());
+            assertTrue(factory.getAllDeployedAgents(Deployment.Environment.production).isEmpty());
+        }
+
+        @Test
         @DisplayName("empty production environment returns empty list")
         void emptyProduction() {
             List<IAgent> agents = factory.getAllLatestAgents(Deployment.Environment.production);

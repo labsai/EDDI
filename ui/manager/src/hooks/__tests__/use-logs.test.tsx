@@ -9,6 +9,7 @@ import {
   useInstanceId,
   useLogStream,
 } from "@/hooks/use-logs";
+import { subscriberCount, isStreamOpen } from "@/hooks/session-log-store";
 import { http, HttpResponse } from "msw";
 
 function createWrapper() {
@@ -291,5 +292,56 @@ describe("useLogStream", () => {
     expect(result.current.entries[0]!.message).toBe("single log line");
 
     unmount();
+  });
+});
+
+/**
+ * The unfiltered stream is held by this hook, not by the module graph.
+ *
+ * `session-log-store` used to connect on import and `main.tsx` imported it for
+ * that side effect, so every Manager tab kept an /administration/logs/stream
+ * SSE connection open on every page. EDDI serves HTTP/1.1 — six concurrent
+ * connections per origin across the whole Chrome profile — so a couple of tabs
+ * saturated the cap and unrelated pages hung on skeleton loaders forever.
+ */
+describe("useLogStream — unfiltered stream ownership", () => {
+  it("holds the session stream only while mounted", async () => {
+    expect(subscriberCount()).toBe(0);
+
+    const { unmount } = renderHook(() => useLogStream(), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(subscriberCount()).toBe(1));
+    expect(isStreamOpen()).toBe(true);
+
+    unmount();
+
+    expect(subscriberCount()).toBe(0);
+    expect(isStreamOpen()).toBe(false);
+  });
+
+  it("does not hold it when filters are set — that path opens its own", async () => {
+    const { unmount } = renderHook(() => useLogStream({ level: "ERROR" }), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(subscriberCount()).toBe(0));
+
+    unmount();
+  });
+
+  it("two unfiltered consumers share one socket", async () => {
+    const first = renderHook(() => useLogStream(), { wrapper: createWrapper() });
+    const second = renderHook(() => useLogStream(), { wrapper: createWrapper() });
+
+    await waitFor(() => expect(subscriberCount()).toBe(2));
+    expect(isStreamOpen()).toBe(true);
+
+    first.unmount();
+    expect(isStreamOpen()).toBe(true);
+
+    second.unmount();
+    expect(isStreamOpen()).toBe(false);
   });
 });

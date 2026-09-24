@@ -8,6 +8,7 @@ import {
   Search,
   Upload,
   FileText,
+  Globe,
   Plus,
   X,
   Loader2,
@@ -20,6 +21,8 @@ import { cn } from "@/lib/utils";
 import { api } from "@/lib/api-client";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
 import { ConnectionReferenceWarning } from "@/components/shared/connection-reference-warning";
+import { IngestionSourcesPanel } from "@/components/editors/ingestion-sources-panel";
+import type { IngestionSource } from "@/lib/api/ingestion-sources";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -34,6 +37,8 @@ export interface RagConfig {
   chunkOverlap?: number;
   maxResults?: number;
   minScore?: number;
+  /** Where this knowledge base pulls its own documents from. */
+  sources?: IngestionSource[];
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -613,9 +618,18 @@ export interface RagEditorProps {
   readOnly?: boolean;
   resourceId?: string;
   version?: number;
+  /** Unsaved edits in the editor. Running a source would use the saved config. */
+  isDirty?: boolean;
 }
 
-export function RagEditor({ data, onChange, readOnly, resourceId, version = 1 }: RagEditorProps) {
+export function RagEditor({
+  data,
+  onChange,
+  readOnly,
+  resourceId,
+  version = 1,
+  isDirty,
+}: RagEditorProps) {
   const { t } = useTranslation();
 
   // Cache per-store-type params so switching back preserves values
@@ -1000,6 +1014,24 @@ export function RagEditor({ data, onChange, readOnly, resourceId, version = 1 }:
             </div>
           </div>
         </div>
+      </Section>
+
+      {/* ══════ Ingestion Sources ══════ */}
+      <Section
+        label={t("ragEditor.sources.title", "Ingestion Sources")}
+        icon={Globe}
+        accent="text-sky-500"
+        defaultOpen={false}
+        badge={data.sources?.length ? String(data.sources.length) : undefined}
+      >
+        <IngestionSourcesPanel
+          sources={data.sources ?? []}
+          onChange={(sources) => onChange({ ...data, sources })}
+          kbId={resourceId}
+          version={version}
+          readOnly={readOnly}
+          hasUnsavedChanges={isDirty}
+        />
       </Section>
 
       {/* ══════ Document Ingestion ══════ */}

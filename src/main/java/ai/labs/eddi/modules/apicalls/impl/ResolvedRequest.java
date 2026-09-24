@@ -8,8 +8,10 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
 
@@ -85,6 +87,28 @@ public record ResolvedRequest(
         String fingerprint = fingerprintable ? fingerprintOf(method, uri, sortedQuery, sortedHeaders, rawBody) : null;
         return new ResolvedRequest(method, RequestRedactor.redactUri(uri), displayQuery(sortedQuery), sortedHeaders,
                 RequestRedactor.redactBody(rawBody), fingerprint);
+    }
+
+    /**
+     * This request with every resolved secret plaintext removed from what is
+     * displayed — URI, query parameters, headers and body — and the fingerprint
+     * kept, so pinning still compares what was actually resolved. See
+     * {@link RequestRedactor#redactResolvedSecrets(String, Set)}.
+     */
+    public ResolvedRequest withoutResolvedSecrets(Set<String> resolvedSecrets) {
+        if (resolvedSecrets == null || resolvedSecrets.isEmpty()) {
+            return this;
+        }
+        var shownQuery = new LinkedHashMap<String, String>();
+        if (queryParams != null) {
+            queryParams.forEach((key, value) -> shownQuery.put(key, RequestRedactor.redactResolvedSecrets(value, resolvedSecrets)));
+        }
+        var shownHeaders = new LinkedHashMap<String, String>();
+        if (headers != null) {
+            headers.forEach((key, value) -> shownHeaders.put(key, RequestRedactor.redactResolvedSecrets(value, resolvedSecrets)));
+        }
+        return new ResolvedRequest(method, RequestRedactor.redactResolvedSecrets(uri, resolvedSecrets), queryParams == null ? null : shownQuery,
+                headers == null ? null : shownHeaders, RequestRedactor.redactResolvedSecrets(body, resolvedSecrets), fingerprint);
     }
 
     /** Whether this request was pinned to a fingerprint at gate time. */

@@ -26,21 +26,21 @@ import java.util.Map;
  * server — so they run in the unit gate on every build rather than in an
  * integration job that the unit run skips.
  */
-final class FakeSite implements PageFetcher {
+public final class FakeSite implements PageFetcher {
 
     private final Map<String, Response> responses = new LinkedHashMap<>();
     private final List<FetchCommand> requests = new ArrayList<>();
     private final Map<String, IOException> failures = new HashMap<>();
 
     /** Registers an HTML page. */
-    FakeSite page(String url, String html) {
+    public FakeSite page(String url, String html) {
         responses.put(url, new Response(200, url, "text/html; charset=utf-8",
                 html.getBytes(StandardCharsets.UTF_8), null, null));
         return this;
     }
 
     /** Registers a page whose body is encoded in something other than UTF-8. */
-    FakeSite pageEncoded(String url, String html, Charset charset, boolean declareInHeader) {
+    public FakeSite pageEncoded(String url, String html, Charset charset, boolean declareInHeader) {
         responses.put(url, new Response(200, url,
                 declareInHeader ? "text/html; charset=" + charset.name() : "text/html",
                 html.getBytes(charset), null, null));
@@ -50,51 +50,51 @@ final class FakeSite implements PageFetcher {
     /**
      * Registers a page carrying validators, so a later fetch can be conditional.
      */
-    FakeSite pageWithValidators(String url, String html, String etag, String lastModified) {
+    public FakeSite pageWithValidators(String url, String html, String etag, String lastModified) {
         responses.put(url, new Response(200, url, "text/html", html.getBytes(StandardCharsets.UTF_8),
                 etag, lastModified));
         return this;
     }
 
     /** Registers a page that answers 304 when the request carries any validator. */
-    FakeSite conditional(String url, String html, String etag) {
+    public FakeSite conditional(String url, String html, String etag) {
         responses.put(url, new Response(200, url, "text/html", html.getBytes(StandardCharsets.UTF_8), etag, null)
                 .answering304WhenConditional());
         return this;
     }
 
     /** Registers a URL that redirects: the fetch lands on {@code finalUrl}. */
-    FakeSite redirect(String requestedUrl, String finalUrl, String html) {
+    public FakeSite redirect(String requestedUrl, String finalUrl, String html) {
         responses.put(requestedUrl, new Response(200, finalUrl, "text/html",
                 html.getBytes(StandardCharsets.UTF_8), null, null));
         return this;
     }
 
     /** Registers a non-HTML resource. */
-    FakeSite binary(String url, String contentType, int sizeBytes) {
+    public FakeSite binary(String url, String contentType, int sizeBytes) {
         responses.put(url, new Response(200, url, contentType, new byte[sizeBytes], null, null));
         return this;
     }
 
     /** Registers an HTTP error status. */
-    FakeSite status(String url, int statusCode) {
+    public FakeSite status(String url, int statusCode) {
         responses.put(url, new Response(statusCode, url, "text/html", new byte[0], null, null));
         return this;
     }
 
     /** Registers a transport failure. */
-    FakeSite failure(String url, String message) {
+    public FakeSite failure(String url, String message) {
         failures.put(url, new IOException(message));
         return this;
     }
 
-    FakeSite robots(String baseUrl, String content) {
+    public FakeSite robots(String baseUrl, String content) {
         responses.put(baseUrl + "/robots.txt", new Response(200, baseUrl + "/robots.txt", "text/plain",
                 content.getBytes(StandardCharsets.UTF_8), null, null));
         return this;
     }
 
-    FakeSite sitemap(String url, String... pageUrls) {
+    public FakeSite sitemap(String url, String... pageUrls) {
         StringBuilder xml = new StringBuilder("<?xml version=\"1.0\" encoding=\"UTF-8\"?><urlset>");
         for (String pageUrl : pageUrls) {
             xml.append("<url><loc>").append(pageUrl).append("</loc></url>");
@@ -123,19 +123,19 @@ final class FakeSite implements PageFetcher {
     }
 
     /** Every request the crawler made, in order. */
-    List<FetchCommand> requests() {
+    public List<FetchCommand> requests() {
         return requests;
     }
 
-    List<String> requestedUrls() {
+    public List<String> requestedUrls() {
         return requests.stream().map(FetchCommand::url).toList();
     }
 
-    boolean wasRequested(String url) {
+    public boolean wasRequested(String url) {
         return requestedUrls().contains(url);
     }
 
-    long requestCount(String url) {
+    public long requestCount(String url) {
         return requestedUrls().stream().filter(url::equals).count();
     }
 

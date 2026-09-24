@@ -54,6 +54,32 @@ public interface IScheduleStore {
             throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException;
 
     /**
+     * Gives a next fire time to a schedule that has none — and only to one that has
+     * none.
+     *
+     * <p>
+     * A repair sweep runs on every node, so the same unarmed row is read by all of
+     * them at once and each computes its own next occurrence from its own
+     * {@code Instant.now()}. Those values are NOT equal across a cron boundary: for
+     * {@code * * * * *} a node at 10:00:59 computes 10:01:00 and one at 10:01:00
+     * computes 10:02:00, so an unconditional write lets the slower node replace the
+     * earlier occurrence with the later one and the schedule skips a fire. Writing
+     * only while {@code nextFire} is still absent makes the first write win and
+     * every other one a no-op.
+     *
+     * @param scheduleId
+     *            the schedule to arm
+     * @param nextFire
+     *            the fire time to set, never null
+     * @return whether THIS call armed it. {@code false} means it was already armed
+     *         — by another node, or because it never needed arming — which is a
+     *         success for the caller: the row is armed either way. It does not
+     *         distinguish a missing schedule from an already-armed one, because
+     *         neither is something a repair can act on.
+     */
+    boolean armIfUnarmed(String scheduleId, Instant nextFire) throws IResourceStore.ResourceStoreException;
+
+    /**
      * Atomically record the conversation a {@code conversationStrategy=persistent}
      * schedule reuses across fires. Writes that ONE field and nothing else.
      * <p>

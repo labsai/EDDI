@@ -100,6 +100,11 @@ public record MemoryCheckpoint(
                     p.getName(), p.getValueString(), p.getValueObject(),
                     p.getValueList(), p.getValueInt(), p.getValueFloat(),
                     p.getValueBoolean(), p.getScope(), p.getVisibility());
+            // Not in the all-args constructor, and dropping it is not cosmetic: the
+            // auto-vault provenance marker is what ConfigReferenceGuard requires before
+            // it resolves a credential reference read through {properties.x}. A clone
+            // that loses it turns a rollback into a refused API call.
+            cloned.setAutoVaulted(p.getAutoVaulted());
             copy.put(entry.getKey(), cloned);
         }
         return Collections.unmodifiableMap(copy);

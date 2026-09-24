@@ -425,7 +425,7 @@ class RestConnectionStoreWriteGuardTest {
         }
 
         private ConnectionConfiguration callerSupplied() {
-            var connection = connection("gnowbe", null);
+            var connection = connection("acme", null);
             connection.setBinding(Binding.CALLER_SUPPLIED);
             var auth = new StaticAuth();
             auth.setHeaderName("x-api-key");
@@ -449,7 +449,7 @@ class RestConnectionStoreWriteGuardTest {
         @Test
         @DisplayName("the same refusal applies on update")
         void refusesCallerSuppliedWithoutAuthorizationOnUpdate() throws Exception {
-            storedAs(connection("gnowbe", null), 1);
+            storedAs(connection("acme", null), 1);
 
             assertThrows(BadRequestException.class, () -> restWithoutAuthorization().updateConnection(ID, 1, callerSupplied()));
 

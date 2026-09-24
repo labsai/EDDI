@@ -890,7 +890,11 @@
     "cascadePartialFailure_one": "{{count}} cascade update failed",
     "cascadePartialFailure_other": "{{count}} cascade updates failed",
     "usedInAgents_one": "Used in {{count}} agent",
-    "usedInAgents_other": "Used in {{count}} agents"
+    "usedInAgents_other": "Used in {{count}} agents",
+    "savedNotLive": "Saved — not yet live",
+    "savedNotLiveDescription": "The running agent still serves the deployed version. Deploy to make this change take effect.",
+    "deployNow": "Deploy",
+    "deployStarted": "Deployment started"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -1679,7 +1683,23 @@
     "resetSecretCount_one": "{{count}} secret will be permanently lost",
     "resetSecretCount_other": "{{count}} secrets will be permanently lost",
     "resetTenantSuccess_one": "Vault reset for \"{{tenant}}\" — {{count}} secret permanently deleted",
-    "resetTenantSuccess_other": "Vault reset for \"{{tenant}}\" — {{count}} secrets permanently deleted"
+    "resetTenantSuccess_other": "Vault reset for \"{{tenant}}\" — {{count}} secrets permanently deleted",
+    "access": "Access",
+    "editGrant": "Edit which agents may use this secret",
+    "editGrantKey": "Edit access for {{key}}",
+    "grantTitle": "Who may use “{{key}}”",
+    "grantValueUntouched": "The secret value is not changed and does not need to be re-entered. Only who may use it changes.",
+    "grantOnlyTheseAgents": "Only these agents",
+    "grantAllHint": "Every agent in this tenant may reference this secret. Narrow it to limit what a single leaked configuration can reach.",
+    "grantAddAgent": "Add an agent",
+    "grantEmptyError": "Add at least one agent, or choose “All agents”. An empty list is not allowed.",
+    "grantCheckingImpact": "Checking deployed agents…",
+    "grantLosingAccessTitle": "Deployed agents that use this secret and would lose access ({{count}})",
+    "grantLosingAccessBody": "They keep running for now — the grant is checked when an agent is deployed, not when a secret is used — but their next deployment will be refused.",
+    "grantAcknowledge": "I understand these agents will not deploy again until they are added back or their configuration stops using this secret.",
+    "grantSaved": "Access updated for “{{key}}”",
+    "grantImpactFailed": "Could not check which deployed agents use this secret, so any of them may lose access.",
+    "grantAcknowledgeUnchecked": "Save anyway without knowing which deployed agents this affects."
   },
   "variables": {
     "deleteKey": "Delete {{key}}",
@@ -2098,7 +2118,88 @@
     "ingestText": "Ingest Text",
     "ingestionHistory": "Ingestion Status",
     "saveFirstIngestion": "Save this knowledge base first to enable document ingestion.",
-    "addParam": "Add Parameter"
+    "addParam": "Add Parameter",
+    "sources": {
+      "title": "Ingestion Sources",
+      "add": "Add source",
+      "remove": "Remove source",
+      "unnamed": "Unnamed source",
+      "disabled": "Disabled",
+      "enabled": "Enabled",
+      "running": "Running",
+      "emptyTitle": "No ingestion sources",
+      "emptyDescription": "Add a source to crawl a site or upload documents, and keep this knowledge base up to date.",
+      "name": "Name",
+      "namePlaceholder": "public-docs",
+      "startUrl": "Start URL",
+      "pathPrefix": "Path prefix",
+      "pathPrefixHint": "Only crawl under this path",
+      "cron": "Schedule (cron)",
+      "cronHint": "Leave empty to run only by hand",
+      "maxDepth": "Max depth",
+      "maxPages": "Max pages",
+      "respectRobots": "Respect robots.txt",
+      "respectRobotsHint": "Turn off only for a site you own",
+      "includeSubdomains": "Include subdomains",
+      "excludePatterns": "Exclude patterns",
+      "excludePatternsHint": "Globs matched against the URL path, comma separated — * stays in one segment, ** crosses them",
+      "saveFirst": "Save the knowledge base to run this source, preview it or see its history.",
+      "run": "Run now",
+      "runFailed": "Could not start the run. A run may already be in flight.",
+      "preview": "Preview",
+      "previewResult": "Preview — nothing was embedded",
+      "purge": "Purge state",
+      "purgeTitle": "Purge ingestion state?",
+      "purgeDescription": "The next run will re-crawl and re-embed everything this source has ingested. Documents already stored are not removed by this.",
+      "purgeConfirm": "Purge",
+      "history": "Recent runs",
+      "noRuns": "This source has not run yet.",
+      "runSummary": "{{ingested}} ingested · {{unchanged}} unchanged",
+      "statSeen": "Seen",
+      "statChanged": "Would ingest",
+      "statUnchanged": "Unchanged",
+      "statFailed": "Failed",
+      "partialCrawl": "The crawl stopped at a limit, so nothing would be treated as deleted.",
+      "saveBeforeRun": "Save the knowledge base first — a run crawls the saved configuration, not the edits on screen.",
+      "purgeFailed": "Could not purge the ingestion state.",
+      "previewFailed": "Could not preview this source.",
+      "previewNotCompleted": "The preview did not complete.",
+      "disabledNoRun": "This source is disabled. Enable and save it to run or schedule it.",
+      "purgeBlockedWhileRunning": "A run is in flight. Purging now would let a second run start alongside it.",
+      "type": "Source",
+      "typeWeb": "Website",
+      "typeUpload": "Files",
+      "typeWebHint": "Crawl a website",
+      "typeUploadHint": "Read files you upload here",
+      "cronHintUpload": "Leave empty — uploaded files are read when you run the source",
+      "maxFiles": "Max files",
+      "maxFilesHint": "How many files this source may hold",
+      "maxFileMb": "Max file size (MB)",
+      "maxFileMbHint": "Per file",
+      "filesSaveFirst": "Save the knowledge base once, and you can upload files to this source.",
+      "dropFiles": "Drop files here, or",
+      "browseFiles": "choose them",
+      "acceptedFormats": "PDF, Word, Excel, PowerPoint, text, Markdown, CSV and HTML",
+      "clearUploadList": "Clear list",
+      "uploadFailed": "This file could not be uploaded.",
+      "noFiles": "No files yet. Run the source after uploading to index them.",
+      "filesSummary": "Files: {{count}} ({{size}})",
+      "deleteFile": "Delete {{fileName}}",
+      "deleteFileTitle": "Delete this file?",
+      "deleteFileDescription": "{{fileName}} and everything the knowledge base learned from it are removed. Agents stop answering from it immediately.",
+      "previewFiles": "Preview changes",
+      "saveBeforeUpload": "Save the knowledge base first — uploads go to the saved source, not to the edits on screen.",
+      "foldersNotSupported": "Folders cannot be uploaded. Drop the files inside them instead.",
+      "filesAwaitingRun": "Files are stored but not yet in the knowledge base. Run the source to index them.",
+      "retryUpload": "Try {{fileName}} again",
+      "fileIndexed": "Indexed",
+      "fileChanged": "Changed",
+      "fileNotIndexed": "Not indexed",
+      "maxTotalMb": "Max total size (MB)",
+      "maxTotalMbHint": "Across all of this source's files",
+      "removeTitle": "Remove this source?",
+      "removeDescription": "When you save, its uploaded files and everything the knowledge base learned from them are deleted. This cannot be undone."
+    }
   },
   "onboarding": {
     "welcome": {
@@ -2396,6 +2497,7 @@
       "SYNTHESIZING": "Synthesizing",
       "COMPLETED": "Completed",
       "FAILED": "Failed",
+      "REJECTED": "Rejected",
       "ERROR": "Error",
       "AWAITING_APPROVAL": "Awaiting Approval",
       "CANCELLED": "Cancelled",
@@ -2762,7 +2864,10 @@
       "finalAnswer": "Final answer",
       "phase": "Phase"
     },
-    "deleteMembersConfigFailed": "Could not read the group's members, so nothing was deleted. Try again."
+    "deleteMembersConfigFailed": "Could not read the group's members, so nothing was deleted. Try again.",
+    "stateRejected": "Rejected",
+    "inputDisabledRejected": "This recommendation was rejected",
+    "debateVerdictNote": "Answers with a scoring verdict (winner and scores), not prose: {{phases}}. The members hold two or more roles and arguments come first, so the moderator's own synthesis prompt is not used. Set an input template on the phase for prose."
   },
   "taskBoard": {
     "title": "Task Board",
@@ -3118,7 +3223,10 @@
     "syncError": "Sync failed",
     "empty": "Connect to a source instance to begin syncing agents.",
     "autoMatched": "auto-matched",
-    "previewFirst": "Preview changes before syncing"
+    "previewFirst": "Preview changes before syncing",
+    "syncPartial": "Sync incomplete — some resources were not written",
+    "syncIdentical": "Already up to date — nothing to write",
+    "previewFailed": "Preview failed"
   },
   "userConversations": {
     "title": "User Conversations",
@@ -3590,7 +3698,9 @@
       "pausedRejected": "This conversation is paused waiting for a human decision, so the message was not sent.",
       "reviewApprovals": "Review pending approvals",
       "stop": "Stop generating",
-      "streamEnded": "The connection ended before the reply finished. What arrived is above — send again to retry."
+      "streamEnded": "The connection ended before the reply finished. What arrived is above — send again to retry.",
+      "newConversation": "New conversation",
+      "newConversationFailed": "Could not start a new conversation"
     },
     "chat": {
       "agentDetails": "Agent Details",
@@ -3913,7 +4023,8 @@
       "transcript": "Conversation transcript",
       "tryDifferent": "Try a different search term",
       "untitled": "Untitled Conversation",
-      "loadListError": "Failed to load conversations"
+      "loadListError": "Failed to load conversations",
+      "rejected": "Rejected"
     },
     "insights": "Insights",
     "memberCount": "{{count}} members",
@@ -4097,8 +4208,17 @@
       "tools": "Tools it will be given ({{toolCount}})",
       "activate": "Activate & deploy",
       "callerIdentityNote": "EDDI substitutes your token when it makes the call. It is never stored in the conversation, and is only ever sent back to this deployment.",
-      "rebuildWarning": "Saving builds a new operator agent and removes the current one. Your existing operator conversation will not carry over.",
-      "environmentHint": "Where the operator agent itself runs. It can still read any environment."
+      "rebuildWarning": "Saving REPLACES the operator: a new agent is built and the current one ({{agentId}}) is undeployed and deleted. Your existing operator conversation will not carry over, and this screen will address the new agent from then on.",
+      "environmentHint": "Where the operator agent itself runs. It can still read any environment.",
+      "platformBaseUrl": "Platform base URL",
+      "platformBaseUrlHint": "The address EDDI can reach itself at — the operator's tools call it from inside the server, so it is not the address your browser uses. Leave it as prefilled unless you know otherwise.",
+      "platformBaseUrlInvalid": "This must be an absolute http:// or https:// URL, for example http://127.0.0.1:7070.",
+      "platformBaseUrlUnknown": "This EDDI deployment cannot report its own address, so it will fall back to your browser's origin. That is only correct when nothing (no tunnel, port mapping or reverse proxy) sits between your browser and EDDI — otherwise enter the address here.",
+      "platformBaseUrlLoopback": "Derived from this deployment's HTTP port. Override it if EDDI must be addressed by a service name or through in-process TLS.",
+      "platformBaseUrlAuto": "resolved from the server",
+      "platformBaseUrlDiffers": "This deployment currently reports its own address as {{serverUrl}}. The value above differs — keep it only if you set it on purpose.",
+      "platformBaseUrlQueryFailed": "The server could not be asked for its own address. Activation will fail unless you enter it here — or reload to try again.",
+      "platformBaseUrlUnresolved": "This deployment runs on a random HTTP port and has no eddi.self.base-url, so it cannot say where it can reach itself. Enter the address here."
     },
     "authMode": {
       "none": {
@@ -4146,7 +4266,10 @@
       "gateUnknown": "Gate not checked",
       "gateVerified": "Gate verified",
       "gateNotVerified": "Gate not verified",
-      "gateUnverifiedHelp": "The approval gate could not be verified on this agent's document."
+      "gateUnverifiedHelp": "The approval gate could not be verified on this agent's document.",
+      "agentId": "Agent",
+      "platformBaseUrl": "Calls platform at",
+      "platformBaseUrlUnknown": "not recorded"
     },
     "chat": {
       "empty": "Ask about your deployment. The operator looks things up and shows you every call it makes.",
@@ -4258,6 +4381,9 @@
       "noOpeningMessage": "(no message yet)",
       "stepCount_one": "{{count}} step",
       "stepCount_other": "{{count}} steps"
+    },
+    "superseded": {
+      "title": "The previous operator agent is still deployed."
     }
   },
   "groupWorkspace": {
