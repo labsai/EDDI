@@ -133,9 +133,16 @@ a fragment, so neither half depends on the other being right.
 **Every scan is fence-aware.** A changelog entry routinely quotes the markdown it describes, and the
 first draft read a `## ` inside a fenced block as a heading and a ` ```decision-log ` inside a
 ` ````markdown ` example as a real register block — splitting an entry at a code line, and filing an
-example row into the live Decision Log while gutting the fence around it. `fence_mask()` applies the
-backtick-run rule (a fence closes only on a run at least as long as the one that opened it), and the
+example row into the live Decision Log while gutting the fence around it. `fence_mask()` closes a
+fence only on a run of the **same character**, at least as long as the one that opened it, and the
 heading scan, the register scan and both link transforms all go through it.
+
+CommonMark allows `~~~` as well as ``` ``` ```, and the first version of that mask knew only about
+backticks — so a `~~~markdown` example was not a fence at all, and everything inside it was read as
+structure. Both are recognised now, in the scripts and in the test. The test had the mirror-image
+bug: `registerRowsCarryADate` opened only on a register fence, so it graded the placeholder row in
+the README's own nested example as real and was *stricter* than the collator, against a class
+Javadoc promising it enforces exactly what the collator enforces.
 
 **The nightly job opens a PR and skips while one is open.** `main` requires a PR, and a bot pushing
 straight to it would be a hole in that requirement even where the token allows it. The skip matters
@@ -155,11 +162,20 @@ been exercised — the repository has no PR authored by `github-actions`. The jo
 the PR body that the checks need a close/reopen. A silently unmergeable nightly PR would stall the
 whole mechanism on day one.
 
-**Adding an entry in place now fails CI.** The `Changelog Discipline` job rejects a PR whose diff
-*adds* an entry heading or a dated register row to `docs/changelog.md`. Prose in AGENTS.md is what
-every session follows, but it is not a guard — and twenty-nine PRs were open against the old rule
-when this was written. The check is deliberately narrow: editing the header or correcting a past
-entry stays allowed, because only insertion at the fixed points conflicts.
+**Adding an entry in place now fails CI.** The `Changelog Discipline` job rejects a PR that *adds*
+an entry heading or a dated register row to `docs/changelog.md`. Prose in AGENTS.md is what every
+session follows, but it is not a guard — and twenty-nine PRs were open against the old rule when
+this was written.
+
+Two things the first draft of that job got wrong, both found by review. It required a closing `)`
+after the date while `DATE` deliberately does not, so the fourteen entries headed
+`(2026-07-02, session 2)` or `(2026-04-08 cont.)` — the house style — walked straight past a guard
+that the collator would still have treated as entries. And it counted additions only, so correcting
+a typo in a past entry's heading failed, with a summary telling the author to move their correction
+into a new fragment. It now compares added against **removed**: an edit is one `+` and one `-`, nets
+to zero, and is allowed; rotation removes entries and nets negative; only a genuine insertion raises
+the count. All ten cases are exercised. It is deliberately not a required check — it reports rather
+than blocks, which matters while those twenty-nine PRs are still open.
 
 **Rotation now maintains `SUMMARY.md` itself.** A new archive that is not listed there fails
 `DocumentationLinksTest` — the page exists and nothing navigates to it. That used to be a printed
@@ -206,6 +222,17 @@ move the last entry. `register_separator()` now emits one only when the body doe
 
 - The **Regression Notes** table had a header row and no `|---|` separator, so it had never rendered
   as a table. The collator writes into it, so it needed one.
+- Dates are checked against the calendar, not just bounded by a regex. `MONTH` and `DAY` stop
+  `2026-99-99` (which used to sort lexically into the live file and then crash rotation inside
+  `pretty_month()`, weeks later, in the nightly job), but they still admit `2026-02-30` — so both
+  the scripts and the test now parse the date as well.
+- `--check` validates the live file it would write into, not only the fragments. Returning early
+  meant a `changelog.md` missing a register section, or a table missing its `|---|` row, passed
+  "validate, change nothing" and then failed the real run — on main, with nobody's change to blame.
+- A UTF-8 BOM no longer reports a fragment as having no `## ` heading when the heading is plainly
+  there; `read()` uses `utf-8-sig` and the test strips it. The BOM constant in the test is written
+  numerically on purpose — the project formatter rewrites a `\uXXXX` escape into the raw character,
+  which would have put an invisible BOM into the source file.
 - Register rows are sorted newest-first before insertion. They arrive in fragment-filename order —
   oldest first — and were inserted as one block at the top, so a night that collated several days'
   fragments would have put 09-20 above 09-21 inside a table whose whole ordering is newest-first.
