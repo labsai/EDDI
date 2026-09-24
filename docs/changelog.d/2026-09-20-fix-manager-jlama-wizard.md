@@ -75,10 +75,14 @@ the `JlamaRuntimeSupport.warnOnceIfDegraded()` call — both preserved as-is by 
 `ModelParameterValues` gains `applyPath`, following the existing lenient-read
 convention — an unusable value is logged and skipped so the model default stands,
 rather than throwing out of the build path and failing every conversation the agent
-serves. `main`'s version of `JlamaLanguageModelBuilder` applies `modelCachePath` and
-`workingDirectory` inline instead (an `isNullOrEmpty` check plus `Path.of`), so
-`applyPath` ships but is not yet wired into a builder; it stays available, tested by
-`ModelParameterValuesTest`, for whichever provider adopts it next.
+serves. `main`'s version of `JlamaLanguageModelBuilder` had applied `modelCachePath`
+and `workingDirectory` inline instead (an `isNullOrEmpty` check plus a bare
+`Path.of`), which meant a NUL-containing or otherwise unusable configured path threw
+`InvalidPathException` during model construction instead of leaving Jlama's default
+in place — the same failure mode `applyPath` exists to prevent. Review feedback on
+this PR caught the mismatch after the merge, so `applyTo` now routes both settings
+through `applyPath`, and `LanguageModelBuildersTest` gained a case asserting that an
+unusable path for either setting falls back to the default rather than propagating.
 
 ### Design decisions
 

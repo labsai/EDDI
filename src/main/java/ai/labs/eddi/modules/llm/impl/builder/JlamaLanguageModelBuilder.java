@@ -10,7 +10,6 @@ import dev.langchain4j.model.jlama.JlamaChatModel;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.jboss.logging.Logger;
 
-import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Locale;
 import java.util.Map;
@@ -19,6 +18,7 @@ import java.util.Set;
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyBoolean;
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyDouble;
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyInt;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyPath;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
@@ -105,10 +105,11 @@ public class JlamaLanguageModelBuilder implements ILanguageModelBuilder {
         applyInt(parameters, KEY_MAX_TOKENS, builder::maxTokens);
 
         // Where the weights are cached. The most important setting for a containerised
-        // deployment, and the one with the least forgiving default.
-        if (!isNullOrEmpty(parameters.get(KEY_MODEL_CACHE_PATH))) {
-            builder.modelCachePath(Path.of(parameters.get(KEY_MODEL_CACHE_PATH)));
-        }
+        // deployment, and the one with the least forgiving default. Routed through
+        // applyPath rather than a bare Path.of: an unusable string (a NUL byte, say)
+        // must fall back to Jlama's own default, not throw InvalidPathException out
+        // of model construction.
+        applyPath(parameters, KEY_MODEL_CACHE_PATH, builder::modelCachePath);
 
         // NOTE: threadCount is deliberately NOT mapped, even though Jlama's builder
         // accepts it. It is not a per-model setting: JlamaModel.Loader hands it to
@@ -130,9 +131,7 @@ public class JlamaLanguageModelBuilder implements ILanguageModelBuilder {
         // ModelParameterValues#applyBoolean.
         applyBoolean(parameters, KEY_QUANTIZE_AT_RUNTIME, builder::quantizeModelAtRuntime);
 
-        if (!isNullOrEmpty(parameters.get(KEY_WORKING_DIRECTORY))) {
-            builder.workingDirectory(Path.of(parameters.get(KEY_WORKING_DIRECTORY)));
-        }
+        applyPath(parameters, KEY_WORKING_DIRECTORY, builder::workingDirectory);
 
         applyWorkingQuantizedType(builder, parameters);
 
