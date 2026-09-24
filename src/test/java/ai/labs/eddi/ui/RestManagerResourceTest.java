@@ -254,6 +254,55 @@ class RestManagerResourceTest {
     }
 
     /**
+     * {@code GET /manage/} — the trailing slash — answered <b>200 with
+     * content-length 0</b>, while {@code /manage} served the app.
+     * <p>
+     * The slash reaches {@code {path:.*}} as an EMPTY path;
+     * {@link RestManagerResource#normalizeSlashPath} drops empty segments, so the
+     * lookup became {@code getResourceAsStream("META-INF/resources/")} — a
+     * DIRECTORY entry, which a jar classloader answers with an open, empty stream
+     * rather than null. The non-null stream satisfied the missing-asset check, the
+     * manage.html fallback never ran, and the browser was handed an empty body.
+     * <p>
+     * The assertions record the LOOKUP rather than compare bodies, for the reason
+     * the neighbouring classpath-naming tests spell out: the unit run resolves off
+     * an exploded {@code target/classes}, where a directory name behaves
+     * differently from a jar entry. What must hold on every layout is that the base
+     * directory is never asked for at all.
+     */
+    @Nested
+    @DisplayName("Trailing slash")
+    class TrailingSlash {
+
+        @Test
+        @DisplayName("/manage/ serves the SPA shell, not an empty directory entry")
+        void emptyPathServesTheShell() throws Exception {
+            var recorder = new RecordingClassLoader(Thread.currentThread().getContextClassLoader());
+            Response response = underClassLoader(recorder, () -> resource.fetchManagerResources(""));
+
+            assertEquals(List.of("META-INF/resources/manage.html"), recorder.requested,
+                    "the resource BASE must never be looked up — a directory entry is an empty 200");
+            assertEquals(200, response.getStatus());
+            assertEquals(readEntity(resource.fetchManagerResources("manage.html")), readEntity(response),
+                    "/manage/ must serve exactly what /manage serves");
+        }
+
+        @Test
+        @DisplayName("a path of only separators and dots serves the shell too")
+        void separatorOnlyPathsServeTheShell() throws Exception {
+            for (String path : List.of("/", "//", "./", "/./")) {
+                var recorder = new RecordingClassLoader(Thread.currentThread().getContextClassLoader());
+                Response response = underClassLoader(recorder, () -> resource.fetchManagerResources(path));
+
+                assertEquals(List.of("META-INF/resources/manage.html"), recorder.requested,
+                        "'" + path + "' normalizes to nothing and must resolve straight to the shell");
+                assertEquals(200, response.getStatus());
+                assertFalse(readEntity(response).isEmpty(), "'" + path + "' served an empty body");
+            }
+        }
+    }
+
+    /**
      * Run {@code call} with {@code loader} installed as the context classloader.
      */
     private static Response underClassLoader(ClassLoader loader, Supplier<Response> call) {

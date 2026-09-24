@@ -5,6 +5,8 @@
 package ai.labs.eddi.configs.rag;
 
 import jakarta.annotation.security.RolesAllowed;
+import org.jboss.resteasy.reactive.RestForm;
+import org.jboss.resteasy.reactive.multipart.FileUpload;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
@@ -13,6 +15,8 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+
+import java.util.List;
 
 /**
  * JAX-RS interface for RAG document ingestion.
@@ -84,6 +88,49 @@ public interface IRestRagIngestion {
                             @QueryParam("version") Integer version,
                             @QueryParam("limit")
                             @DefaultValue("20") Integer limit);
+
+    // --- Uploaded files (sources of type "upload") ---
+
+    @POST
+    @Path("/{id}/sources/{sourceId}/files")
+    @Consumes(MediaType.MULTIPART_FORM_DATA)
+    @Produces(MediaType.APPLICATION_JSON)
+    @APIResponse(responseCode = "200", description = "What was stored and what was refused, per file.")
+    @APIResponse(responseCode = "400", description = "Nothing in the request could be stored.")
+    @APIResponse(responseCode = "409", description = "This source does not take uploaded files.")
+    @Operation(summary = "Upload files to an ingestion source",
+               description = "Stores one or more files on a source of type 'upload'. A file replaces any file of "
+                       + "the same name. Files are not embedded here — run the source afterwards. Each file is "
+                       + "accepted or refused on its own, so one bad file does not lose the rest of the batch.")
+    Response uploadSourceFiles(@PathParam("id") String ragConfigId,
+                               @PathParam("sourceId") String sourceId,
+                               @Parameter(name = "version", required = true, example = "1")
+                               @QueryParam("version") Integer version,
+                               @RestForm("files") List<FileUpload> files);
+
+    @GET
+    @Path("/{id}/sources/{sourceId}/files")
+    @Produces(MediaType.APPLICATION_JSON)
+    @APIResponse(responseCode = "200", description = "The files this source holds, oldest upload first.")
+    @Operation(summary = "List a source's uploaded files",
+               description = "Names, types, sizes and content hashes of the files stored on an upload source.")
+    Response readSourceFiles(@PathParam("id") String ragConfigId,
+                             @PathParam("sourceId") String sourceId,
+                             @Parameter(name = "version", required = true, example = "1")
+                             @QueryParam("version") Integer version);
+
+    @DELETE
+    @Path("/{id}/sources/{sourceId}/files/{fileId}")
+    @Produces(MediaType.APPLICATION_JSON)
+    @APIResponse(responseCode = "200", description = "The file and the chunks it produced were removed.")
+    @APIResponse(responseCode = "404", description = "No such file on this source.")
+    @Operation(summary = "Delete an uploaded file",
+               description = "Removes the file and, at once rather than at the next run, the vectors it produced.")
+    Response deleteSourceFile(@PathParam("id") String ragConfigId,
+                              @PathParam("sourceId") String sourceId,
+                              @PathParam("fileId") String fileId,
+                              @Parameter(name = "version", required = true, example = "1")
+                              @QueryParam("version") Integer version);
 
     @DELETE
     @Path("/{id}/sources/{sourceId}/documents")

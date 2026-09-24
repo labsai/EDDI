@@ -24,6 +24,7 @@ import {
   Copy,
   Check,
   Square,
+  MessageSquarePlus,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -690,6 +691,8 @@ function WorkforceThread() {
   const [isLoading, setIsLoading] = useState(false);
   const [sendError, setSendError] = useState<ThreadSendError | null>(null);
   const [isStarting, setIsStarting] = useState(true);
+  /** A restart is in flight — keeps the button from firing twice. */
+  const [isRestarting, setIsRestarting] = useState(false);
   const [inputPrefill, setInputPrefill] = useState("");
   const [showDetails, setShowDetails] = useState(false);
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
@@ -730,6 +733,42 @@ function WorkforceThread() {
     bottomThreshold: 80,
   });
 
+  /**
+   * Start a brand-new conversation with this advisor and make it the thread's.
+   *
+   * Registering the thread overwrites the stored entry for (board, member), so
+   * the previous conversation stops being the one this page resumes. The old
+   * conversation is left on the server — nothing is deleted — which is the same
+   * contract the Manager's other chat surfaces have: "New Conversation" starts a
+   * fresh one, it does not destroy the last.
+   */
+  const startFreshConversation = useCallback(async () => {
+    if (!boardId || !memberId) return;
+    const newConvId = await startConversation("production", memberId);
+    setConversationId(newConvId);
+    setMessages([]);
+    registerThreadRef.current({
+      memberId,
+      memberName: memberNameRef.current,
+      conversationId: newConvId,
+      boardId,
+    });
+
+    // Read any welcome message the agent might have
+    try {
+      const snapshot = await readConversation("production", memberId, newConvId);
+      const parsed = parseConversationSteps(snapshot.conversationSteps ?? []);
+      if (parsed.length > 0) {
+        setMessages(parsed);
+      }
+    } catch {
+      // No welcome message — that's fine
+    }
+  }, [boardId, memberId]);
+
+  const startFreshRef = useRef(startFreshConversation);
+  startFreshRef.current = startFreshConversation;
+
   // ─── Initialize conversation ─────────────────────────────────
   useEffect(() => {
     if (initRef.current || !boardId || !memberId) return;
@@ -753,32 +792,7 @@ function WorkforceThread() {
           setMessages(parsed);
           updateActivityRef.current(boardId, memberId);
         } else {
-          // Start a new conversation
-          const newConvId = await startConversation("production", memberId);
-          setConversationId(newConvId);
-          registerThreadRef.current({
-            memberId,
-            memberName: memberNameRef.current,
-            conversationId: newConvId,
-            boardId,
-          });
-
-          // Read any welcome message the agent might have
-          try {
-            const snapshot = await readConversation(
-              "production",
-              memberId,
-              newConvId,
-            );
-            const parsed = parseConversationSteps(
-              snapshot.conversationSteps ?? [],
-            );
-            if (parsed.length > 0) {
-              setMessages(parsed);
-            }
-          } catch {
-            // No welcome message — that's fine
-          }
+          await startFreshRef.current();
         }
       } catch (err) {
         console.error("Failed to initialize thread:", err);
@@ -789,6 +803,33 @@ function WorkforceThread() {
 
     init();
   }, [boardId, memberId]);
+
+  /**
+   * "New Conversation" — every other chat surface in the Manager has one
+   * (`chat-panel`, `chat-drawer`, `operator-chat`, and the Workforce board's
+   * "New"); this page, the 1:1 advisor thread, was the only one without. Its
+   * conversation is pinned in localStorage by (board, member), so without a
+   * restart the only way out of a derailed thread was to clear site data.
+   */
+  const handleNewConversation = useCallback(async () => {
+    if (isRestarting || isLoading) return;
+    setIsRestarting(true);
+    abortRef.current?.abort();
+    abortRef.current = null;
+    sendingRef.current = false;
+    setSendError(null);
+    setInputPrefill("");
+    try {
+      await startFreshConversation();
+    } catch (err) {
+      console.error("Failed to start a new conversation:", err);
+      toast.error(
+        t("Workforce.thread.newConversationFailed", "Could not start a new conversation"),
+      );
+    } finally {
+      setIsRestarting(false);
+    }
+  }, [isRestarting, isLoading, startFreshConversation, t]);
 
   // ─── Prefill input when group context is available ────────────
   useEffect(() => {
@@ -1115,6 +1156,22 @@ function WorkforceThread() {
               </span>
             )}
           </div>
+          {/* New conversation */}
+          <button
+            type="button"
+            onClick={handleNewConversation}
+            disabled={isRestarting || isLoading}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+            aria-label={t("Workforce.thread.newConversation", "New conversation")}
+            title={t("Workforce.thread.newConversation", "New conversation")}
+            data-testid="thread-new-conversation"
+          >
+            {isRestarting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <MessageSquarePlus className="h-4 w-4" />
+            )}
+          </button>
           {/* Details panel toggle */}
           <button
             type="button"

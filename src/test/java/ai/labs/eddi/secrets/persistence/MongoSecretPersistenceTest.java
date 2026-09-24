@@ -35,6 +35,7 @@ import org.mockito.ArgumentCaptor;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -373,6 +374,97 @@ class MongoSecretPersistenceTest {
         when(secretsCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(result);
 
         assertFalse(persistence.updateSecretSealing(createTestSecret(), "dek-0"));
+    }
+
+    // ==================== updateSecretGrant ====================
+
+    @Test
+    @DisplayName("updateSecretGrant — writes ONLY allowedAgents and description, never anything the value depends on")
+    void updateSecretGrantTouchesNothingElse() {
+        UpdateResult result = mock(UpdateResult.class);
+        when(result.getMatchedCount()).thenReturn(1L);
+        when(secretsCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(result);
+
+        assertTrue(persistence.updateSecretGrant(TENANT, "my-key", List.of("agent-a", "agent-b"), "new description"));
+
+        var update = ArgumentCaptor.forClass(Bson.class);
+        verify(secretsCollection).updateOne(any(Bson.class), update.capture());
+        BsonDocument set = update.getValue().toBsonDocument(BsonDocument.class, MongoClientSettings.getDefaultCodecRegistry())
+                .getDocument("$set");
+
+        // The whole point of the endpoint this feeds: a grant edit cannot re-encrypt
+        // or blank the secret. Asserted as an exact key set rather than as four
+        // absences, so a field added to the $set later fails here too.
+        assertEquals(Set.of("allowedAgents", "description"), set.keySet());
+        assertEquals(new BsonArray(List.of(new BsonString("agent-a"), new BsonString("agent-b"))), set.getArray("allowedAgents"));
+        assertEquals(new BsonString("new description"), set.getString("description"));
+    }
+
+    @Test
+    @DisplayName("updateSecretGrant — never upserts: a grant for a key that does not exist reports false")
+    void updateSecretGrantDoesNotCreateRows() {
+        UpdateResult result = mock(UpdateResult.class);
+        when(result.getMatchedCount()).thenReturn(0L);
+        when(secretsCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(result);
+
+        assertFalse(persistence.updateSecretGrant(TENANT, "missing-key", List.of("agent-a"), null));
+
+        // The two-arg updateOne, i.e. without UpdateOptions.upsert(true). A typo in a
+        // key name has to 404, not leave a valueless row behind.
+        verify(secretsCollection).updateOne(any(Bson.class), any(Bson.class));
+        verify(secretsCollection, never()).updateOne(any(Bson.class), any(Bson.class), any());
+    }
+
+    @Test
+    @DisplayName("updateSecretGrant — filters on exactly (tenantId, keyName)")
+    void updateSecretGrantFilter() {
+        UpdateResult result = mock(UpdateResult.class);
+        when(result.getMatchedCount()).thenReturn(1L);
+        when(secretsCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(result);
+
+        persistence.updateSecretGrant(TENANT, "my-key", List.of("*"), null);
+
+        var filter = ArgumentCaptor.forClass(Bson.class);
+        verify(secretsCollection).updateOne(filter.capture(), any(Bson.class));
+        String rendered = filter.getValue().toBsonDocument(BsonDocument.class, MongoClientSettings.getDefaultCodecRegistry()).toJson();
+        assertTrue(rendered.contains(TENANT), () -> "expected the tenant in the filter, got " + rendered);
+        assertTrue(rendered.contains("my-key"), () -> "expected the key name in the filter, got " + rendered);
+    }
+
+    @Test
+    @DisplayName("updateSecretGrant — a Mongo failure surfaces as PersistenceException")
+    void updateSecretGrantWrapsFailures() {
+        when(secretsCollection.updateOne(any(Bson.class), any(Bson.class))).thenThrow(new MongoException("fail"));
+
+        assertThrows(PersistenceException.class, () -> persistence.updateSecretGrant(TENANT, "my-key", List.of("*"), null));
+    }
+
+    // ==================== touchLastAccessed ====================
+
+    @Test
+    @DisplayName("touchLastAccessed — sets lastAccessedAt and nothing else, without upserting")
+    void touchLastAccessedIsOneField() {
+        when(secretsCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(mock(UpdateResult.class));
+
+        persistence.touchLastAccessed(TENANT, "my-key", Instant.parse("2026-01-01T00:00:00Z"));
+
+        var update = ArgumentCaptor.forClass(Bson.class);
+        verify(secretsCollection).updateOne(any(Bson.class), update.capture());
+        verify(secretsCollection, never()).updateOne(any(Bson.class), any(Bson.class), any());
+        BsonDocument set = update.getValue().toBsonDocument(BsonDocument.class, MongoClientSettings.getDefaultCodecRegistry())
+                .getDocument("$set");
+        // A resolve records its access with this. Any other field in the $set is a
+        // stale value written back over a concurrent grant edit or rotation.
+        assertEquals(Set.of("lastAccessedAt"), set.keySet());
+        assertEquals(new BsonString("2026-01-01T00:00:00Z"), set.getString("lastAccessedAt"));
+    }
+
+    @Test
+    @DisplayName("touchLastAccessed — a Mongo failure surfaces as PersistenceException")
+    void touchLastAccessedWrapsFailures() {
+        when(secretsCollection.updateOne(any(Bson.class), any(Bson.class))).thenThrow(new MongoException("fail"));
+
+        assertThrows(PersistenceException.class, () -> persistence.touchLastAccessed(TENANT, "my-key", Instant.now()));
     }
 
     // ==================== deleteDek ====================

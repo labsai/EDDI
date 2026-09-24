@@ -15,6 +15,8 @@ import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.result.UpdateResult;
 import org.bson.Document;
+import org.bson.conversions.Bson;
+import org.bson.types.ObjectId;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -40,16 +42,29 @@ class ConversationMemoryStoreResilienceTest {
     private static final String VALID_ID = "aabbccddeeff112233445566";
 
     private MongoCollection<ConversationMemorySnapshot> objectCollection;
+    private MongoCollection<Document> documentCollection;
     private ConversationMemoryStore store;
 
     @BeforeEach
     void setUp() {
         MongoDatabase database = mock(MongoDatabase.class);
-        MongoCollection<Document> documentCollection = mock(MongoCollection.class);
+        documentCollection = mock(MongoCollection.class);
         objectCollection = mock(MongoCollection.class);
         when(database.getCollection("conversationmemories", Document.class)).thenReturn(documentCollection);
         when(database.getCollection("conversationmemories", ConversationMemorySnapshot.class)).thenReturn(objectCollection);
         store = new ConversationMemoryStore(database);
+    }
+
+    /**
+     * Stubs the existence probe the store runs after a zero-match write to tell
+     * "the conversation is gone" apart from "the conversation moved to another
+     * revision".
+     */
+    private void stubConversationExists(boolean exists) {
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        when(documentCollection.find(any(Bson.class))).thenReturn(iterable);
+        when(iterable.projection(any(Document.class))).thenReturn(iterable);
+        when(iterable.first()).thenReturn(exists ? new Document("_id", new ObjectId(VALID_ID)) : null);
     }
 
     // ==================== G12 ====================
@@ -62,11 +77,33 @@ class ConversationMemoryStoreResilienceTest {
 
         UpdateResult noMatch = mock(UpdateResult.class);
         when(noMatch.getMatchedCount()).thenReturn(0L);
-        when(objectCollection.replaceOne(any(Document.class), eq(snapshot))).thenReturn(noMatch);
+        when(objectCollection.replaceOne(any(Bson.class), eq(snapshot))).thenReturn(noMatch);
+        stubConversationExists(false);
 
         var thrown = assertThrows(IResourceStore.ResourceStoreException.class, () -> store.storeConversationMemorySnapshot(snapshot));
         assertTrue(thrown.getMessage().contains(VALID_ID), thrown.getMessage());
         assertTrue(thrown.getMessage().contains("NOT persisted"), thrown.getMessage());
+        assertFalse(thrown instanceof ConcurrentConversationModificationException,
+                "an erased conversation has nothing to retry against — it must not be reported as a revision conflict");
+    }
+
+    @Test
+    @DisplayName("a zero-match write on a conversation that still exists is a revision conflict, not a deletion")
+    void concurrentWriteDuringTurnIsReportedAsConflict() {
+        ConversationMemorySnapshot snapshot = new ConversationMemorySnapshot();
+        snapshot.setId(VALID_ID);
+        snapshot.setRevision(7L);
+
+        UpdateResult noMatch = mock(UpdateResult.class);
+        when(noMatch.getMatchedCount()).thenReturn(0L);
+        when(objectCollection.replaceOne(any(Bson.class), eq(snapshot))).thenReturn(noMatch);
+        stubConversationExists(true);
+
+        var thrown = assertThrows(ConcurrentConversationModificationException.class,
+                () -> store.storeConversationMemorySnapshot(snapshot));
+        assertEquals(VALID_ID, thrown.getConversationId());
+        assertEquals(7L, thrown.getExpectedRevision());
+        assertEquals(7L, snapshot.getRevision(), "a refused write must leave the snapshot on the revision it was derived from");
     }
 
     @Test
@@ -77,9 +114,11 @@ class ConversationMemoryStoreResilienceTest {
 
         UpdateResult matched = mock(UpdateResult.class);
         when(matched.getMatchedCount()).thenReturn(1L);
-        when(objectCollection.replaceOne(any(Document.class), eq(snapshot))).thenReturn(matched);
+        when(objectCollection.replaceOne(any(Bson.class), eq(snapshot))).thenReturn(matched);
 
         assertEquals(VALID_ID, store.storeConversationMemorySnapshot(snapshot));
+        assertEquals(ConversationMemorySnapshot.UNVERSIONED_REVISION + 1, snapshot.getRevision(),
+                "a successful write must stamp the revision it created, or the next write would present a superseded one");
     }
 
     // ==================== G11 ====================

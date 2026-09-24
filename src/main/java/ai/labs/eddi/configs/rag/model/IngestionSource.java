@@ -34,8 +34,22 @@ import java.util.List;
  */
 public class IngestionSource {
 
-    /** Only source type implemented today. */
+    /** Documents are crawled from a website. */
     public static final String TYPE_WEB = "web";
+
+    /**
+     * Documents are files an operator uploaded, held by EDDI and re-read on every
+     * run.
+     *
+     * <p>
+     * Keeping the files rather than embedding them once and forgetting them is what
+     * makes this a source at all: changing the embedding model or the chunk size
+     * re-ingests from what is stored, a purge is recoverable, and deleting a file
+     * removes its vectors through the same reconciliation every other source uses.
+     * The alternative — embed on upload, keep nothing — would make every one of
+     * those an ask-the-operator-to-upload-200-files-again.
+     */
+    public static final String TYPE_UPLOAD = "upload";
 
     /** Stable identity within the knowledge base; generated when absent. */
     private String id;
@@ -50,6 +64,12 @@ public class IngestionSource {
 
     /** Populated when {@link #type} is {@link #TYPE_WEB}. */
     private WebSource web;
+
+    /**
+     * Optional for a {@link #TYPE_UPLOAD} source — absent means all defaults, the
+     * same as everywhere else in this class.
+     */
+    private UploadSource upload;
 
     private IngestionSettings settings;
 
@@ -68,15 +88,18 @@ public class IngestionSource {
         if (type == null || type.isBlank()) {
             throw new IllegalArgumentException("Ingestion source '" + name + "' needs a type");
         }
-        if (!TYPE_WEB.equals(type)) {
-            throw new IllegalArgumentException(
+        switch (type) {
+            case TYPE_WEB -> {
+                if (web == null) {
+                    throw new IllegalArgumentException("Web ingestion source '" + name + "' needs a 'web' block");
+                }
+                web.validate(name);
+            }
+            case TYPE_UPLOAD -> upload().validate(name);
+            default -> throw new IllegalArgumentException(
                     "Unsupported ingestion source type '" + type + "' on source '" + name
-                            + "'. Supported: " + TYPE_WEB);
+                            + "'. Supported: " + TYPE_WEB + ", " + TYPE_UPLOAD);
         }
-        if (web == null) {
-            throw new IllegalArgumentException("Web ingestion source '" + name + "' needs a 'web' block");
-        }
-        web.validate(name);
         settings().validate(name);
     }
 
@@ -92,6 +115,16 @@ public class IngestionSource {
     /** Never null — an absent settings block means "all defaults". */
     public IngestionSettings settings() {
         return settings == null ? new IngestionSettings() : settings;
+    }
+
+    /** Never null — an absent upload block means "all defaults". */
+    public UploadSource upload() {
+        return upload == null ? new UploadSource() : upload;
+    }
+
+    /** Whether this source's documents come from uploaded files. */
+    public boolean isUpload() {
+        return TYPE_UPLOAD.equals(type);
     }
 
     // --- Getters and Setters ---
@@ -134,6 +167,14 @@ public class IngestionSource {
 
     public void setWeb(WebSource web) {
         this.web = web;
+    }
+
+    public UploadSource getUpload() {
+        return upload;
+    }
+
+    public void setUpload(UploadSource upload) {
+        this.upload = upload;
     }
 
     public IngestionSettings getSettings() {
@@ -338,6 +379,98 @@ public class IngestionSource {
 
         public void setRespectRobots(boolean respectRobots) {
             this.respectRobots = respectRobots;
+        }
+    }
+
+    /**
+     * How much may be uploaded to a {@link #TYPE_UPLOAD} source.
+     *
+     * <p>
+     * These are storage limits, not ingestion limits: they bound what EDDI keeps on
+     * the operator's behalf. What is done with the text afterwards is bounded by
+     * {@link IngestionSettings} exactly as it is for a crawl.
+     */
+    public static class UploadSource {
+
+        /**
+         * The largest {@code maxFileBytes} that can be saved, held below
+         * {@code quarkus.http.limits.max-body-size} (60 MB) so that a file at the limit
+         * still reaches the code that knows what the limit is.
+         */
+        private static final long MAX_FILE_BYTES_CEILING = 50L * 1024 * 1024;
+
+        /** Files this source may hold. */
+        private Integer maxFiles = 500;
+
+        /**
+         * Bytes a single file may be. Twenty-five megabytes covers a long PDF with
+         * images and stops an operator filling the database from a browser tab.
+         *
+         * <p>
+         * The ceiling below is not arbitrary: the request carrying the file has to fit
+         * inside {@code quarkus.http.limits.max-body-size}, and a file over that is
+         * refused by the server with a bare 413 before anything here can explain why.
+         * Raise the two together or not at all.
+         */
+        private Long maxFileBytes = 25L * 1024 * 1024;
+
+        /** Bytes this source may hold across all of its files. */
+        private Long maxTotalBytes = 500L * 1024 * 1024;
+
+        void validate(String sourceName) {
+            requirePositiveAtMost(maxFiles, 10_000, "upload.maxFiles", sourceName);
+            requirePositiveAtMost(maxFileBytes, MAX_FILE_BYTES_CEILING, "upload.maxFileBytes", sourceName);
+            requirePositiveAtMost(maxTotalBytes, 20L * 1024 * 1024 * 1024, "upload.maxTotalBytes", sourceName);
+            if (maxFileBytes != null && maxTotalBytes != null && maxFileBytes > maxTotalBytes) {
+                // Otherwise every upload is refused: the first file is under its own
+                // limit and over the source's, with two error messages that each look
+                // wrong on their own.
+                throw new IllegalArgumentException("upload.maxFileBytes of ingestion source '" + sourceName
+                        + "' is larger than upload.maxTotalBytes, so no file could ever be stored");
+            }
+        }
+
+        public int maxFilesOrDefault() {
+            return maxFiles == null ? 500 : maxFiles;
+        }
+
+        public long maxFileBytesOrDefault() {
+            return maxFileBytes == null ? 25L * 1024 * 1024 : maxFileBytes;
+        }
+
+        public long maxTotalBytesOrDefault() {
+            return maxTotalBytes == null ? 500L * 1024 * 1024 : maxTotalBytes;
+        }
+
+        private static void requirePositiveAtMost(Number value, long ceiling, String field, String sourceName) {
+            if (value != null && (value.longValue() <= 0 || value.longValue() > ceiling)) {
+                throw new IllegalArgumentException(field + " of ingestion source '" + sourceName
+                        + "' must be between 1 and " + ceiling + ", got: " + value);
+            }
+        }
+
+        public Integer getMaxFiles() {
+            return maxFiles;
+        }
+
+        public void setMaxFiles(Integer maxFiles) {
+            this.maxFiles = maxFiles;
+        }
+
+        public Long getMaxFileBytes() {
+            return maxFileBytes;
+        }
+
+        public void setMaxFileBytes(Long maxFileBytes) {
+            this.maxFileBytes = maxFileBytes;
+        }
+
+        public Long getMaxTotalBytes() {
+            return maxTotalBytes;
+        }
+
+        public void setMaxTotalBytes(Long maxTotalBytes) {
+            this.maxTotalBytes = maxTotalBytes;
         }
     }
 

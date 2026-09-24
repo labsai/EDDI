@@ -50,6 +50,94 @@ export function moderatorlessPhaseNames(
     .map((p) => p.name);
 }
 
+/**
+ * SYNTHESIS phases that will answer with a **scoring verdict** instead of the
+ * prose their moderator's own prompt asks for.
+ *
+ * Giving members structural roles is what switches this on, and nothing in the
+ * configuration says so. A grant board whose members carried `role: PRO` and
+ * `role: CON` had its chair return `{"winner": "CON", "scores": {…}}` instead of
+ * the recommendation its system prompt specified — correct for a debate-scoring
+ * exercise, wrong for anything else, and discoverable only by running it.
+ *
+ * Informational, not a warning: for a real debate this is the intended
+ * behaviour, and the note is its documentation. Setting an `inputTemplate` on
+ * the phase is the documented way to opt out.
+ *
+ * Mirrors `AgentGroupStore.debateVerdictSynthesisPhaseNames`, which in turn
+ * mirrors `GroupContextBuilder.isDebateJudgment`. The two config-time
+ * substitutions: an `ARGUE`/`REBUTTAL` phase *before* the synthesis stands in
+ * for argument entries on the transcript, and only `participants: "MODERATOR"`
+ * phases are reported because only those have a speaker resolvable from
+ * configuration.
+ */
+export function debateVerdictSynthesisPhaseNames(
+  config: Pick<
+    AgentGroupConfiguration,
+    "moderatorAgentId" | "phases" | "style" | "maxRounds" | "members"
+  >,
+): string[] {
+  const members = config.members ?? [];
+  // Untrimmed on purpose: `GroupContextBuilder.debatingRoles` is not, so to the
+  // runtime "PRO" and "PRO " are two sides. Trimming here would make them one
+  // and the note would go missing on a roster the runtime does judge.
+  const roles = new Set(
+    members
+      .filter((m) => m && m.role && m.role.trim())
+      .map((m) => m.role!.toUpperCase()),
+  );
+  // The judgment prompt scores one side against another; fewer than two sides
+  // never takes this path.
+  if (roles.size < 2) return [];
+
+  // A moderator that is itself a debater judges nothing — the runtime refuses to
+  // let a partisan score its own debate and falls back to prose. With no
+  // moderator named, the engine substitutes the first member by speaking order,
+  // which is usually a debater.
+  // Trim only to decide whether an id was given; compare the ORIGINAL, because
+  // the Java helper does `moderator.equals(m.agentId())` on the untrimmed value.
+  // With a moderator of " a " and a member "a" the two disagreed: the Manager
+  // treated the member as the moderator and hid the note, while the backend
+  // treated the moderator as outside the roster and reported the verdict phase.
+  const moderatorId = config.moderatorAgentId?.trim() ? config.moderatorAgentId : undefined;
+  const speaker = moderatorId
+    ? members.find((m) => m && m.agentId === moderatorId)
+    : [...members]
+        .filter(Boolean)
+        .sort(
+          (a, b) =>
+            (a.speakingOrder ?? Number.MAX_SAFE_INTEGER) -
+            (b.speakingOrder ?? Number.MAX_SAFE_INTEGER),
+        )[0];
+  if (speaker?.role && roles.has(speaker.role.toUpperCase())) return [];
+
+  const phases: DiscussionPhase[] =
+    config.phases && config.phases.length > 0
+      ? config.phases
+      : getStylePhases(config.style ?? "ROUND_TABLE", config.maxRounds ?? 2);
+
+  const names: string[] = [];
+  let argumentsSoFar = false;
+  for (const phase of phases) {
+    if (!phase) continue;
+    if (
+      phase.type === "SYNTHESIS" &&
+      // `== null`, not falsy: an empty-string inputTemplate counts as SET, which
+      // is what the runtime's `inputTemplate() != null` does. Treating "" as
+      // unset would report a phase that actually concludes in prose. The
+      // Manager's own editor writes undefined for a blank field, so this only
+      // differs for a config saved through REST, import or MCP.
+      phase.inputTemplate == null &&
+      argumentsSoFar &&
+      phase.participants?.toUpperCase() === "MODERATOR"
+    ) {
+      names.push(phase.name);
+    }
+    if (phase.type === "ARGUE" || phase.type === "REBUTTAL") argumentsSoFar = true;
+  }
+  return names;
+}
+
 /** One role no member carries, with every phase that is restricted to it. */
 export interface RoleCoverageGap {
   role: string;

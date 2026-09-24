@@ -473,6 +473,27 @@ public class PostgresScheduleStore implements IScheduleStore {
     }
 
     @Override
+    public boolean armIfUnarmed(String scheduleId, Instant nextFire) throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        // next_fire IS NULL in the predicate, not read-then-write: every node's repair
+        // sweep touches this row at the same moment, and the UPDATE is what decides
+        // which of them wins. A row that already has a fire time is left exactly as it
+        // is, including its fire_status — re-arming a CLAIMED row would steal it from
+        // the node currently running it.
+        String sql = "UPDATE eddi_schedules SET next_fire=?, fire_status=?, updated_at=? "
+                + "WHERE id=? AND next_fire IS NULL AND enabled=true";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setLong(1, nextFire.toEpochMilli());
+            ps.setString(2, FireStatus.PENDING.name());
+            ps.setLong(3, Instant.now().toEpochMilli());
+            ps.setString(4, scheduleId);
+            return ps.executeUpdate() == 1;
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to arm schedule " + scheduleId, e);
+        }
+    }
+
+    @Override
     public void deleteSchedule(String scheduleId) throws IResourceStore.ResourceStoreException {
         ensureSchema();
         // Fire logs first: a schedule's logs are unreachable once the schedule is gone,

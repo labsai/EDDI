@@ -20,7 +20,7 @@ import java.util.Optional;
  * knowledge base quietly — the failure mode is an answer citing text that was
  * deleted from the source months ago, with nothing in any log.
  *
- * <h2>Two rules that are easy to get wrong</h2>
+ * <h2>Three rules that are easy to get wrong</h2>
  *
  * <p>
  * <b>Record a document only after its vectors are safely stored.</b>
@@ -38,6 +38,54 @@ import java.util.Optional;
  * and callers must not call it at all for a run that failed. Tombstoning is
  * what drives vector deletion, so a hair trigger here empties a knowledge base
  * because a site was briefly unreachable.
+ *
+ * <p>
+ * <b>A run that has been superseded must not write anything.</b> A worker can
+ * stall past the stale threshold, have its run reaped by
+ * {@link #reapStaleRuns}, and wake up afterwards — by which time a replacement
+ * run owns the source. Its late {@code record*} calls would land on rows that
+ * belong to the new run. The worst case is not a miscounted run: a document the
+ * previous run tombstoned had its vectors deleted, so a stale
+ * {@link #recordIngested} that clears the tombstone and restores the old hash
+ * makes every later run report the page "unchanged" and it is never embedded
+ * again — the page is gone from retrieval for good, with nothing in any log.
+ * Implementations must therefore <b>fence</b> document writes, as described
+ * below.
+ *
+ * <h2>The fence</h2>
+ *
+ * <p>
+ * Every document row records which run <em>owns</em> it. Ownership changes in
+ * exactly two places, and both are single statements the database applies
+ * atomically:
+ *
+ * <ul>
+ * <li>{@link #startRun} takes ownership of the source's document rows for the
+ * run it has just claimed.</li>
+ * <li>{@link #reapStaleRuns} releases ownership when it actually reaps
+ * something, so a reaped worker is fenced from that moment rather than only
+ * once a replacement claims the source.</li>
+ * </ul>
+ *
+ * <p>
+ * Every {@code record*} and {@link #tombstoneMissing} call then carries its
+ * {@code runId} into the update's own filter, so a write from a run that no
+ * longer owns the source matches nothing. The caller reads no extra state and
+ * makes no extra round trip: the {@code runId} it already passes <em>is</em>
+ * the fencing token.
+ *
+ * <p>
+ * A fenced write is a no-op, not an exception. The reaper has already decided
+ * this run is dead and {@link #finishRun} logs that its result was discarded;
+ * failing every document of a doomed crawl would only add noise to a run whose
+ * outcome is thrown away anyway.
+ *
+ * <p>
+ * <b>What the fence does not cover.</b> A document the superseded run is the
+ * first ever to see has no row to own, so its insert still lands. That is the
+ * benign direction — it adds a document rather than deleting or hiding one, and
+ * the owning run's {@link #tombstoneMissing} reconciles it away over the
+ * following runs.
  */
 public interface IIngestionStateStore {
 
@@ -55,6 +103,11 @@ public interface IIngestionStateStore {
      * or while deciding — see the interface Javadoc. Also counts as seeing the
      * document: the miss counter resets and any tombstone is lifted.
      *
+     * <p>
+     * Fenced on {@code runId}: ignored when the run no longer owns the source. That
+     * is what stops a reaped worker lifting a tombstone whose vectors are already
+     * deleted.
+     *
      * @param contentHash
      *            hash of the converted content, from {@link ContentHashes}
      * @param etag
@@ -69,6 +122,10 @@ public interface IIngestionStateStore {
      * Records that a document still exists and has not changed, so it keeps its
      * hash but is not treated as missing. Resets the miss counter and lifts any
      * tombstone.
+     *
+     * <p>
+     * Fenced on {@code runId}, and ignored for a document with no row — both are
+     * no-ops.
      */
     void recordSeen(String sourceId, String documentId, String runId);
 
@@ -82,6 +139,12 @@ public interface IIngestionStateStore {
      * or a WAF is not deleted for being unreachable. Without this, the same tail
      * pages of a rate-limited site are tombstoned after
      * {@code tombstoneAfterMissedRuns} runs while every run reports success.
+     *
+     * <p>
+     * Fenced on {@code runId}. Stamping the run marker is exactly how a document
+     * escapes the owning run's miss count, so a stale worker allowed to stamp it
+     * would hand a page the owning run had just seen back to
+     * {@link #tombstoneMissing}.
      */
     void recordUnreachable(String sourceId, String documentId, String runId);
 
@@ -94,13 +157,21 @@ public interface IIngestionStateStore {
      * Only call this for a run that completed — a failed or aborted run saw an
      * arbitrary subset of the source and would tombstone the remainder.
      *
+     * <p>
+     * Fenced on {@code runId}: a superseded run tombstones nothing and is handed
+     * back an empty list, so it deletes no vectors.
+     *
      * @return the documents tombstoned by this call, whose vectors the caller is
      *         then responsible for removing
      */
     default List<DocumentState> tombstoneMissing(String sourceId, String runId, int missedRunsThreshold) {
         List<DocumentState> missing = bumpAndFindMissing(sourceId, runId, missedRunsThreshold);
         markTombstoned(sourceId, missing.stream().map(DocumentState::documentId).toList());
-        return missing;
+        // Restamped, because bumpAndFindMissing reports its candidates BEFORE they
+        // are marked and DocumentState is immutable -- so the list still says
+        // tombstoned=false although marking has just succeeded. A caller that
+        // believed it would re-report the same documents on the next run.
+        return missing.stream().map(DocumentState::asTombstoned).toList();
     }
 
     /**
@@ -136,6 +207,14 @@ public interface IIngestionStateStore {
      * this returns empty when one is already active, which is what stops an
      * impatient operator clicking "run now" five times from starting five
      * concurrent crawls into one knowledge base.
+     *
+     * <p>
+     * A successful claim also takes ownership of the source's existing document
+     * rows — the fence described in the interface Javadoc. That costs one bulk
+     * update per run, proportional to the documents the source already holds; it
+     * buys a fence the caller can enforce with the {@code runId} it already has,
+     * which is the only shape both backends can apply in the same statement as the
+     * document write.
      */
     Optional<String> startRun(String sourceId);
 
@@ -159,6 +238,11 @@ public interface IIngestionStateStore {
      * 10-minute budget reap the live run of a source configured for hours — and a
      * reaped run is one whose source immediately accepts a second, concurrent
      * crawl.
+     *
+     * <p>
+     * When it reaps anything it also releases ownership of the source's document
+     * rows, so the worker it just declared dead is fenced immediately rather than
+     * only once a replacement run claims the source.
      *
      * @return how many runs were reaped
      */
@@ -202,6 +286,14 @@ public interface IIngestionStateStore {
          */
         public boolean hasChanged(String candidateHash) {
             return tombstoned || contentHash == null || !contentHash.equals(candidateHash);
+        }
+
+        /** The same document, reported as gone. */
+        public DocumentState asTombstoned() {
+            return tombstoned
+                    ? this
+                    : new DocumentState(sourceId, documentId, contentHash, etag, lastModified,
+                            firstIngestedAt, lastIngestedAt, lastRunId, missedRuns, true);
         }
     }
 

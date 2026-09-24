@@ -76,6 +76,14 @@ public class ChatModelRegistry {
     private final Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders;
     private final GlobalVariableResolver globalVariableResolver;
     private final SecretResolver secretResolver;
+
+    /**
+     * Attached to every model this registry builds, sync and streaming alike. It is
+     * the single hook through which an LLM call becomes a span and a set of meters
+     * — see {@link LlmTelemetryListener} for why that hook is a listener rather
+     * than code inside the decorators.
+     */
+    private final LlmTelemetryListener telemetryListener;
     private final Cache<ModelCacheKey, ChatModel> modelCacheStore = newModelCache();
     private final Cache<ModelCacheKey, StreamingChatModel> streamingModelCacheStore = newModelCache();
     /**
@@ -138,10 +146,12 @@ public class ChatModelRegistry {
 
     @Inject
     ChatModelRegistry(Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders,
-            GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver) {
+            GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver,
+            LlmTelemetryListener telemetryListener) {
         this.languageModelApiConnectorBuilders = languageModelApiConnectorBuilders;
         this.globalVariableResolver = globalVariableResolver;
         this.secretResolver = secretResolver;
+        this.telemetryListener = telemetryListener;
     }
 
     /**
@@ -221,7 +231,7 @@ public class ChatModelRegistry {
         var modelBuilder = languageModelApiConnectorBuilders.get(type).get();
         modelBuilder.warnAboutUnrecognisedParameters(type, resolvedParams);
         var rawModel = modelBuilder.build(resolvedParams);
-        var model = ObservableChatModel.wrapIfNeeded(rawModel, type, timeoutMs, logReq, logResp);
+        var model = ObservableChatModel.wrap(rawModel, type, timeoutMs, logReq, logResp, telemetryListener);
         publishIfCurrent(modelCache, cacheKey, model, generationAtBuildStart);
 
         return model;
@@ -274,7 +284,7 @@ public class ChatModelRegistry {
             var modelBuilder = languageModelApiConnectorBuilders.get(type).get();
             modelBuilder.warnAboutUnrecognisedParameters(type, resolvedParams);
             var rawModel = modelBuilder.buildStreaming(resolvedParams);
-            var model = ObservableStreamingChatModel.wrapIfNeeded(rawModel, type, logReq, logResp);
+            var model = ObservableStreamingChatModel.wrap(rawModel, type, logReq, logResp, telemetryListener);
             publishIfCurrent(streamingModelCache, cacheKey, model, generationAtBuildStart);
             return model;
         } catch (UnsupportedOperationException e) {
@@ -346,11 +356,10 @@ public class ChatModelRegistry {
      * The builders parse the value with an unguarded {@code Long.parseLong}, so a
      * stored {@code " "}, {@code "30s"} or {@code "0"} would abort {@code build()}
      * on every turn of that agent. Those values were previously tolerated (their
-     * only consumer, {@link ObservableChatModel#wrapIfNeeded}, guards blank,
-     * swallows {@link NumberFormatException} and drops non-positive durations), and
-     * stored configs get no migration — so the same tolerance is applied here:
-     * trim, and drop the key entirely when it is blank, non-numeric or
-     * non-positive.
+     * only consumer, {@link ObservableChatModel#wrap}, guards blank, swallows
+     * {@link NumberFormatException} and drops non-positive durations), and stored
+     * configs get no migration — so the same tolerance is applied here: trim, and
+     * drop the key entirely when it is blank, non-numeric or non-positive.
      * <p>
      * Normalising before the key is built also means {@code "5000"} and
      * {@code " 5000 "} are one cached model rather than two.

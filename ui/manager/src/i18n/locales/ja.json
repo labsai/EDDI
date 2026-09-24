@@ -850,7 +850,11 @@
     "cascadePartialFailure_other": "{{count}} 件のカスケード更新が失敗しました",
     "cascadePartialFailure_one": "{{count}} 件のカスケード更新が失敗しました",
     "usedInAgents_other": "{{count}} 個の Agent で使用中",
-    "usedInAgents_one": "{{count}} 個の Agent で使用中"
+    "usedInAgents_one": "{{count}} 個の Agent で使用中",
+    "savedNotLive": "保存しました — まだ反映されていません",
+    "savedNotLiveDescription": "実行中のエージェントはデプロイ済みのバージョンを使用しています。この変更を反映するにはデプロイしてください。",
+    "deployNow": "デプロイ",
+    "deployStarted": "デプロイを開始しました"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -1639,7 +1643,23 @@
     "resetSecretCount_other": "{{count}} 件の Secret が完全に失われます",
     "resetSecretCount_one": "{{count}} 件の Secret が完全に失われます",
     "resetTenantSuccess_other": "「{{tenant}}」の Vault をリセットしました — {{count}} 件の Secret を完全に削除しました",
-    "resetTenantSuccess_one": "「{{tenant}}」の Vault をリセットしました — {{count}} 件の Secret を完全に削除しました"
+    "resetTenantSuccess_one": "「{{tenant}}」の Vault をリセットしました — {{count}} 件の Secret を完全に削除しました",
+    "access": "アクセス",
+    "editGrant": "このシークレットを使用できるエージェントを編集",
+    "editGrantKey": "{{key}} のアクセスを編集",
+    "grantTitle": "「{{key}}」を使用できる対象",
+    "grantValueUntouched": "シークレットの値は変更されず、再入力も不要です。使用できる対象のみが変わります。",
+    "grantOnlyTheseAgents": "これらのエージェントのみ",
+    "grantAllHint": "このテナントのすべてのエージェントがこのシークレットを参照できます。範囲を狭めると、漏洩した設定 1 つが及ぶ範囲を限定できます。",
+    "grantAddAgent": "エージェントを追加",
+    "grantEmptyError": "エージェントを 1 つ以上追加するか、「すべてのエージェント」を選択してください。空のリストは使用できません。",
+    "grantCheckingImpact": "デプロイ済みエージェントを確認中…",
+    "grantLosingAccessTitle": "このシークレットを使用していてアクセスを失うデプロイ済みエージェント（{{count}}）",
+    "grantLosingAccessBody": "今のところ稼働は続きます — 権限はシークレット使用時ではなくエージェントのデプロイ時にチェックされます — が、次回のデプロイは拒否されます。",
+    "grantAcknowledge": "これらのエージェントは、再度追加されるか設定がこのシークレットを使わなくなるまでデプロイできないことを理解しました。",
+    "grantSaved": "「{{key}}」のアクセスを更新しました",
+    "grantImpactFailed": "このシークレットを使用しているデプロイ済みエージェントを確認できなかったため、どのエージェントもアクセスを失う可能性があります。",
+    "grantAcknowledgeUnchecked": "影響を受けるデプロイ済みエージェントが分からないまま保存します。"
   },
   "audit": {
     "title": "監査ログ",
@@ -2028,7 +2048,7 @@
       "enabled": "有効",
       "running": "実行中",
       "emptyTitle": "取り込みソースがありません",
-      "emptyDescription": "ソースを追加すると、このナレッジベースがサイトをクロールして最新の状態を保ちます。",
+      "emptyDescription": "ソースを追加してサイトをクロールするか文書をアップロードし、このナレッジベースを最新に保ちます。",
       "name": "名前",
       "namePlaceholder": "public-docs",
       "startUrl": "開始 URL",
@@ -2065,7 +2085,40 @@
       "previewFailed": "このソースをプレビューできませんでした。",
       "previewNotCompleted": "プレビューは完了しませんでした。",
       "disabledNoRun": "このソースは無効です。実行またはスケジュールするには有効にして保存してください。",
-      "purgeBlockedWhileRunning": "実行中です。今消去すると、並行して 2 つ目の実行が始まる可能性があります。"
+      "purgeBlockedWhileRunning": "実行中です。今消去すると、並行して 2 つ目の実行が始まる可能性があります。",
+      "type": "ソース",
+      "typeWeb": "ウェブサイト",
+      "typeUpload": "ファイル",
+      "typeWebHint": "ウェブサイトをクロールする",
+      "typeUploadHint": "ここにアップロードしたファイルを読み込みます",
+      "cronHintUpload": "空のままにします — ソースを実行するとアップロード済みファイルが読まれます",
+      "maxFiles": "最大ファイル数",
+      "maxFilesHint": "このソースが保持できるファイル数",
+      "maxFileMb": "最大ファイルサイズ（MB）",
+      "maxFileMbHint": "1 ファイルあたり",
+      "filesSaveFirst": "ナレッジベースを一度保存すると、このソースにファイルをアップロードできます。",
+      "dropFiles": "ここにファイルをドロップ、または",
+      "browseFiles": "選択します",
+      "acceptedFormats": "PDF、Word、Excel、PowerPoint、テキスト、Markdown、CSV、HTML",
+      "clearUploadList": "リストをクリア",
+      "uploadFailed": "このファイルをアップロードできませんでした。",
+      "noFiles": "まだファイルがありません。アップロード後にソースを実行してインデックスしてください。",
+      "filesSummary": "ファイル: {{count}} ({{size}})",
+      "deleteFile": "{{fileName}} を削除",
+      "deleteFileTitle": "このファイルを削除しますか？",
+      "deleteFileDescription": "{{fileName}} と、ナレッジベースがそこから学んだ内容が削除され、エージェントは直ちにそれを使って回答しなくなります。",
+      "previewFiles": "変更をプレビュー",
+      "saveBeforeUpload": "先にナレッジベースを保存してください — アップロードは画面上の編集ではなく、保存済みのソースに送られます。",
+      "foldersNotSupported": "フォルダーはアップロードできません。中のファイルをドロップしてください。",
+      "filesAwaitingRun": "ファイルは保存済みですが、まだナレッジベースには入っていません。ソースを実行してインデックスしてください。",
+      "retryUpload": "{{fileName}} を再試行",
+      "fileIndexed": "インデックス済み",
+      "fileChanged": "変更あり",
+      "fileNotIndexed": "未インデックス",
+      "maxTotalMb": "合計サイズの上限（MB）",
+      "maxTotalMbHint": "このソースの全ファイル合計",
+      "removeTitle": "このソースを削除しますか？",
+      "removeDescription": "保存すると、アップロードされたファイルとナレッジベースがそこから学んだ内容が削除されます。元には戻せません。"
     }
   },
   "onboarding": {
@@ -2388,6 +2441,7 @@
       "SYNTHESIZING": "統合中",
       "COMPLETED": "完了",
       "FAILED": "失敗",
+      "REJECTED": "却下",
       "ERROR": "エラー",
       "AWAITING_APPROVAL": "承認待ち",
       "CANCELLED": "キャンセル済み",
@@ -2757,7 +2811,10 @@
       "finalAnswer": "最終回答",
       "phase": "フェーズ"
     },
-    "deleteMembersConfigFailed": "グループのメンバーを読み取れなかったため、何も削除されていません。もう一度お試しください。"
+    "deleteMembersConfigFailed": "グループのメンバーを読み取れなかったため、何も削除されていません。もう一度お試しください。",
+    "stateRejected": "却下",
+    "inputDisabledRejected": "この提案は却下されました",
+    "debateVerdictNote": "散文ではなく採点による裁定（勝者とスコア）で回答します: {{phases}}。メンバーが2つ以上の役割を持ち、議論が先行するため、モデレーター自身の統合プロンプトは使用されません。散文が必要な場合はフェーズに入力テンプレートを設定してください。"
   },
   "taskBoard": {
     "title": "タスクボード",
@@ -2941,7 +2998,10 @@
     "syncError": "同期エラー",
     "empty": "エージェント同期を開始するには、ソースインスタンスに接続してください。",
     "autoMatched": "自動マッチ",
-    "previewFirst": "同期前に変更をプレビュー"
+    "previewFirst": "同期前に変更をプレビュー",
+    "syncPartial": "同期は未完了です — 一部のリソースが書き込まれませんでした",
+    "syncIdentical": "すでに最新です — 書き込む項目はありません",
+    "previewFailed": "プレビューに失敗しました"
   },
   "sync": {
     "actionCreate": "新規",
@@ -3638,7 +3698,9 @@
       "pausedRejected": "この会話は人による判断を待って停止しているため、メッセージは送信されませんでした。",
       "reviewApprovals": "保留中の承認を確認",
       "stop": "生成を停止",
-      "streamEnded": "返信が完了する前に接続が終了しました。届いた分は上に表示されています。もう一度送信してやり直してください。"
+      "streamEnded": "返信が完了する前に接続が終了しました。届いた分は上に表示されています。もう一度送信してやり直してください。",
+      "newConversation": "新しい会話",
+      "newConversationFailed": "新しい会話を開始できませんでした"
     },
     "chat": {
       "agentDetails": "エージェントの詳細",
@@ -3961,7 +4023,8 @@
       "transcript": "会話の書き起こし",
       "tryDifferent": "別の検索語をお試しください",
       "untitled": "無題の会話",
-      "loadListError": "会話の読み込みに失敗しました"
+      "loadListError": "会話の読み込みに失敗しました",
+      "rejected": "却下"
     },
     "insights": "インサイト",
     "memberCount": "{{count}} 名のメンバー",

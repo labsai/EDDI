@@ -850,7 +850,11 @@
     "cascadePartialFailure_one": "{{count}} Kaskaden-Update fehlgeschlagen",
     "cascadePartialFailure_other": "{{count}} Kaskaden-Updates fehlgeschlagen",
     "usedInAgents_one": "Wird in {{count}} Agent verwendet",
-    "usedInAgents_other": "Wird in {{count}} Agents verwendet"
+    "usedInAgents_other": "Wird in {{count}} Agents verwendet",
+    "savedNotLive": "Gespeichert — noch nicht aktiv",
+    "savedNotLiveDescription": "Der laufende Agent liefert weiterhin die bereitgestellte Version. Zum Aktivieren bereitstellen.",
+    "deployNow": "Bereitstellen",
+    "deployStarted": "Bereitstellung gestartet"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -1639,7 +1643,23 @@
     "resetSecretCount_one": "{{count}} Secret gehen dauerhaft verloren",
     "resetSecretCount_other": "{{count}} Secrets gehen dauerhaft verloren",
     "resetTenantSuccess_one": "Vault für \"{{tenant}}\" zurückgesetzt — {{count}} Secret dauerhaft gelöscht",
-    "resetTenantSuccess_other": "Vault für \"{{tenant}}\" zurückgesetzt — {{count}} Secrets dauerhaft gelöscht"
+    "resetTenantSuccess_other": "Vault für \"{{tenant}}\" zurückgesetzt — {{count}} Secrets dauerhaft gelöscht",
+    "access": "Zugriff",
+    "editGrant": "Bearbeiten, welche Agenten dieses Secret verwenden dürfen",
+    "editGrantKey": "Zugriff für {{key}} bearbeiten",
+    "grantTitle": "Wer darf „{{key}}“ verwenden",
+    "grantValueUntouched": "Der Secret-Wert wird nicht geändert und muss nicht erneut eingegeben werden. Es ändert sich nur, wer ihn verwenden darf.",
+    "grantOnlyTheseAgents": "Nur diese Agenten",
+    "grantAllHint": "Jeder Agent in diesem Tenant darf dieses Secret referenzieren. Schränke die Liste ein, um zu begrenzen, was eine einzelne kompromittierte Konfiguration erreichen kann.",
+    "grantAddAgent": "Agent hinzufügen",
+    "grantEmptyError": "Füge mindestens einen Agenten hinzu oder wähle „Alle Agenten“. Eine leere Liste ist nicht zulässig.",
+    "grantCheckingImpact": "Deployte Agenten werden geprüft…",
+    "grantLosingAccessTitle": "Deployte Agenten, die dieses Secret verwenden und den Zugriff verlieren würden ({{count}})",
+    "grantLosingAccessBody": "Sie laufen zunächst weiter — die Berechtigung wird beim Deployment eines Agenten geprüft, nicht bei der Verwendung des Secrets — aber ihr nächstes Deployment wird abgelehnt.",
+    "grantAcknowledge": "Mir ist klar, dass diese Agenten nicht mehr deployt werden können, bis sie wieder hinzugefügt werden oder ihre Konfiguration dieses Secret nicht mehr verwendet.",
+    "grantSaved": "Zugriff für „{{key}}“ aktualisiert",
+    "grantImpactFailed": "Es konnte nicht geprüft werden, welche deployten Agenten dieses Secret verwenden – jeder von ihnen könnte den Zugriff verlieren.",
+    "grantAcknowledgeUnchecked": "Trotzdem speichern, ohne zu wissen, welche deployten Agenten betroffen sind."
   },
   "audit": {
     "title": "Prüfprotokoll",
@@ -2028,7 +2048,7 @@
       "enabled": "Aktiviert",
       "running": "Läuft",
       "emptyTitle": "Keine Ingestions-Quellen",
-      "emptyDescription": "Fügen Sie eine Quelle hinzu, damit diese Wissensdatenbank eine Website crawlt und sich aktuell hält.",
+      "emptyDescription": "Fügen Sie eine Quelle hinzu, um eine Website zu crawlen oder Dokumente hochzuladen und diese Wissensdatenbank aktuell zu halten.",
       "name": "Name",
       "namePlaceholder": "public-docs",
       "startUrl": "Start-URL",
@@ -2065,7 +2085,40 @@
       "previewFailed": "Vorschau für diese Quelle nicht möglich.",
       "previewNotCompleted": "Die Vorschau wurde nicht abgeschlossen.",
       "disabledNoRun": "Diese Quelle ist deaktiviert. Aktivieren und speichern Sie sie, um sie auszuführen oder zu planen.",
-      "purgeBlockedWhileRunning": "Ein Lauf ist aktiv. Ein Löschen jetzt würde einen zweiten Lauf daneben zulassen."
+      "purgeBlockedWhileRunning": "Ein Lauf ist aktiv. Ein Löschen jetzt würde einen zweiten Lauf daneben zulassen.",
+      "type": "Quelle",
+      "typeWeb": "Website",
+      "typeUpload": "Dateien",
+      "typeWebHint": "Eine Website crawlen",
+      "typeUploadHint": "Hier hochgeladene Dateien lesen",
+      "cronHintUpload": "Leer lassen — hochgeladene Dateien werden beim Ausführen der Quelle gelesen",
+      "maxFiles": "Max. Dateien",
+      "maxFilesHint": "Wie viele Dateien diese Quelle halten darf",
+      "maxFileMb": "Max. Dateigröße (MB)",
+      "maxFileMbHint": "Pro Datei",
+      "filesSaveFirst": "Speichern Sie die Wissensdatenbank einmal, dann können Sie Dateien zu dieser Quelle hochladen.",
+      "dropFiles": "Dateien hier ablegen oder",
+      "browseFiles": "auswählen",
+      "acceptedFormats": "PDF, Word, Excel, PowerPoint, Text, Markdown, CSV und HTML",
+      "clearUploadList": "Liste leeren",
+      "uploadFailed": "Diese Datei konnte nicht hochgeladen werden.",
+      "noFiles": "Noch keine Dateien. Führen Sie die Quelle nach dem Hochladen aus, um sie zu indizieren.",
+      "filesSummary": "Dateien: {{count}} ({{size}})",
+      "deleteFile": "{{fileName}} löschen",
+      "deleteFileTitle": "Diese Datei löschen?",
+      "deleteFileDescription": "{{fileName}} und alles, was die Wissensdatenbank daraus gelernt hat, werden entfernt. Agenten antworten sofort nicht mehr daraus.",
+      "previewFiles": "Änderungen vorschauen",
+      "saveBeforeUpload": "Speichern Sie die Wissensdatenbank zuerst — Uploads gehen an die gespeicherte Quelle, nicht an die Änderungen auf dem Bildschirm.",
+      "foldersNotSupported": "Ordner können nicht hochgeladen werden. Ziehen Sie stattdessen die Dateien darin hierher.",
+      "filesAwaitingRun": "Dateien sind gespeichert, aber noch nicht in der Wissensdatenbank. Führen Sie die Quelle aus, um sie zu indizieren.",
+      "retryUpload": "{{fileName}} erneut versuchen",
+      "fileIndexed": "Indiziert",
+      "fileChanged": "Geändert",
+      "fileNotIndexed": "Nicht indiziert",
+      "maxTotalMb": "Max. Gesamtgröße (MB)",
+      "maxTotalMbHint": "Über alle Dateien dieser Quelle",
+      "removeTitle": "Diese Quelle entfernen?",
+      "removeDescription": "Beim Speichern werden die hochgeladenen Dateien und alles, was die Wissensdatenbank daraus gelernt hat, gelöscht. Das lässt sich nicht rückgängig machen."
     }
   },
   "onboarding": {
@@ -2388,6 +2441,7 @@
       "SYNTHESIZING": "Wird zusammengefasst",
       "COMPLETED": "Abgeschlossen",
       "FAILED": "Fehlgeschlagen",
+      "REJECTED": "Abgelehnt",
       "ERROR": "Fehler",
       "AWAITING_APPROVAL": "Wartet auf Genehmigung",
       "CANCELLED": "Abgebrochen",
@@ -2757,7 +2811,10 @@
       "finalAnswer": "Endgültige Antwort",
       "phase": "Phase"
     },
-    "deleteMembersConfigFailed": "Die Mitglieder der Gruppe konnten nicht gelesen werden — es wurde nichts gelöscht. Bitte erneut versuchen."
+    "deleteMembersConfigFailed": "Die Mitglieder der Gruppe konnten nicht gelesen werden — es wurde nichts gelöscht. Bitte erneut versuchen.",
+    "stateRejected": "Abgelehnt",
+    "inputDisabledRejected": "Diese Empfehlung wurde abgelehnt",
+    "debateVerdictNote": "Antwortet mit einem bewerteten Urteil (Sieger und Punkte) statt mit Fließtext: {{phases}}. Die Mitglieder haben zwei oder mehr Rollen und Argumente gehen voraus, daher wird der eigene Synthese-Prompt des Moderators nicht verwendet. Für Fließtext eine Eingabevorlage für die Phase setzen."
   },
   "taskBoard": {
     "title": "Aufgabenübersicht",
@@ -3107,7 +3164,10 @@
     "syncError": "Synchronisierung fehlgeschlagen",
     "empty": "Verbinden Sie sich mit einer Quell-Instanz, um die Agenten-Synchronisierung zu starten.",
     "autoMatched": "Automatisch zugeordnet",
-    "previewFirst": "Änderungen vor dem Synchronisieren ansehen"
+    "previewFirst": "Änderungen vor dem Synchronisieren ansehen",
+    "syncPartial": "Synchronisierung unvollständig – einige Ressourcen wurden nicht geschrieben",
+    "syncIdentical": "Bereits aktuell – nichts zu schreiben",
+    "previewFailed": "Vorschau fehlgeschlagen"
   },
   "sync": {
     "actionCreate": "Neu",
@@ -3638,7 +3698,9 @@
       "pausedRejected": "Diese Unterhaltung wartet auf eine menschliche Entscheidung — die Nachricht wurde deshalb nicht gesendet.",
       "reviewApprovals": "Offene Freigaben prüfen",
       "stop": "Erzeugung stoppen",
-      "streamEnded": "Die Verbindung endete, bevor die Antwort fertig war. Was angekommen ist, steht oben — zum erneuten Versuch noch einmal senden."
+      "streamEnded": "Die Verbindung endete, bevor die Antwort fertig war. Was angekommen ist, steht oben — zum erneuten Versuch noch einmal senden.",
+      "newConversation": "Neue Konversation",
+      "newConversationFailed": "Neue Konversation konnte nicht gestartet werden"
     },
     "chat": {
       "agentDetails": "Agenten-Details",
@@ -3961,7 +4023,8 @@
       "transcript": "Konversationstranskript",
       "tryDifferent": "Versuchen Sie einen anderen Suchbegriff",
       "untitled": "Konversation ohne Titel",
-      "loadListError": "Konversationen konnten nicht geladen werden"
+      "loadListError": "Konversationen konnten nicht geladen werden",
+      "rejected": "Abgelehnt"
     },
     "insights": "Insights",
     "memberCount": "{{count}} Mitglieder",
