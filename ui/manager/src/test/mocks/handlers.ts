@@ -2421,6 +2421,42 @@ export const handlers = [
     return HttpResponse.json({ status: "purged", sourceId: "src-1" });
   }),
 
+  // Uploaded files of an ingestion source of type "upload".
+  http.get("*/ragstore/rags/:id/sources/:sourceId/files", () => {
+    return HttpResponse.json([
+      {
+        fileId: "3f2a91c4e5b6d7089a1b2c3d4e5f6071",
+        fileName: "employee-handbook.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 1048576,
+        contentHash: "a1b2c3",
+        uploadedAt: "2026-09-18T09:12:00Z",
+        indexState: "INDEXED",
+      },
+    ]);
+  }),
+
+  http.post("*/ragstore/rags/:id/sources/:sourceId/files", () => {
+    return HttpResponse.json({
+      stored: [
+        {
+          fileId: "aa11bb22cc33dd44ee55ff6677889900",
+          fileName: "notes.md",
+          mimeType: "text/markdown",
+          sizeBytes: 64,
+          contentHash: "d4e5f6",
+          uploadedAt: "2026-09-18T09:20:00Z",
+          indexState: "NOT_INDEXED",
+        },
+      ],
+      rejected: [],
+    });
+  }),
+
+  http.delete("*/ragstore/rags/:id/sources/:sourceId/files/:fileId", ({ params }) => {
+    return HttpResponse.json({ status: "deleted", fileId: params.fileId });
+  }),
+
   // --- Group Store Mock Handlers ---
   http.get("*/groupstore/groups/descriptors", () => {
     const groups = [

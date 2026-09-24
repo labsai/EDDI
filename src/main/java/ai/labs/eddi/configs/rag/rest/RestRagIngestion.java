@@ -12,14 +12,21 @@ import ai.labs.eddi.configs.rag.model.IngestionSource;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.modules.ingestion.PreviewBusyException;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
+import ai.labs.eddi.modules.ingestion.files.IIngestedFileStore;
+import ai.labs.eddi.modules.ingestion.files.IngestedFileService;
 import ai.labs.eddi.modules.rag.RagIngestionService;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
+import org.jboss.resteasy.reactive.multipart.FileUpload;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
+import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -34,16 +41,19 @@ public class RestRagIngestion implements IRestRagIngestion {
     private final IRestRagStore restRagStore;
     private final RagIngestionService ragIngestionService;
     private final RagSourceIngestionService sourceIngestionService;
+    private final IngestedFileService ingestedFileService;
 
     private final ResourceAccessGuard resourceAccessGuard;
 
     @Inject
     public RestRagIngestion(IRestRagStore restRagStore, RagIngestionService ragIngestionService,
-            RagSourceIngestionService sourceIngestionService, ResourceAccessGuard resourceAccessGuard) {
+            RagSourceIngestionService sourceIngestionService, IngestedFileService ingestedFileService,
+            ResourceAccessGuard resourceAccessGuard) {
         this.resourceAccessGuard = resourceAccessGuard;
         this.restRagStore = restRagStore;
         this.ragIngestionService = ragIngestionService;
         this.sourceIngestionService = sourceIngestionService;
+        this.ingestedFileService = ingestedFileService;
     }
 
     @Override
@@ -184,6 +194,148 @@ public class RestRagIngestion implements IRestRagIngestion {
         sourceIngestionService.purge(ragConfigId, resolved.source());
         LOGGER.infof("Purged ingestion state for source %s of RAG config %s", sanitize(sourceId), sanitize(ragConfigId));
         return Response.ok(Map.of("status", "purged", "sourceId", sourceId)).build();
+    }
+
+    // --- Uploaded files ---
+
+    @Override
+    public Response uploadSourceFiles(String ragConfigId, String sourceId, Integer version, List<FileUpload> files) {
+        // EDIT for the same reason a run needs it: what is uploaded here becomes
+        // what every agent using this knowledge base answers from.
+        resourceAccessGuard.requireAccess(ragConfigId, AccessLevel.EDIT, "RAG configuration");
+
+        var resolved = resolveSource(ragConfigId, sourceId, version);
+        if (resolved.error() != null) {
+            return resolved.error();
+        }
+        Response wrongType = requireUploadSource(resolved.source(), sourceId);
+        if (wrongType != null) {
+            return wrongType;
+        }
+        if (files == null || files.isEmpty()) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(Map.of("error", "No files were sent. Attach them as multipart parts named 'files'."))
+                    .build();
+        }
+
+        // Handed over as suppliers, not as bytes: the service reads one file at a
+        // time, so a batch costs one file of memory rather than the whole request.
+        // The runtime has already spooled every part to disk.
+        List<IngestedFileService.IncomingFile> incoming = files.stream()
+                .map(file -> new IngestedFileService.IncomingFile(file.fileName(),
+                        () -> Files.readAllBytes(file.uploadedFile())))
+                .toList();
+
+        var outcome = ingestedFileService.upload(ragConfigId, resolved.source(), incoming);
+        List<Map<String, Object>> rejected = new ArrayList<>();
+        outcome.rejected().forEach(rejection -> rejected
+                .add(Map.of("fileName", rejection.fileName(), "reason", rejection.reason())));
+
+        LOGGER.infof("Uploaded %d file(s) to source %s of knowledge base %s, %d refused",
+                outcome.accepted().size(), sanitize(sourceId), sanitize(ragConfigId), rejected.size());
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("stored", outcome.accepted().stream().map(RestRagIngestion::describeFile).toList());
+        body.put("rejected", rejected);
+        // 400 only when nothing at all was stored: a batch where one file failed is
+        // a success with a caveat, and a client that treats 4xx as "nothing
+        // happened" would leave the operator re-uploading files that are already
+        // there.
+        Response.Status status = outcome.accepted().isEmpty()
+                ? Response.Status.BAD_REQUEST
+                : Response.Status.OK;
+        return Response.status(status).entity(body).build();
+    }
+
+    @Override
+    public Response readSourceFiles(String ragConfigId, String sourceId, Integer version) {
+        resourceAccessGuard.requireAccess(ragConfigId, AccessLevel.VIEW, "RAG configuration");
+
+        var resolved = resolveSource(ragConfigId, sourceId, version);
+        if (resolved.error() != null) {
+            return resolved.error();
+        }
+        Response wrongType = requireUploadSource(resolved.source(), sourceId);
+        if (wrongType != null) {
+            return wrongType;
+        }
+        return Response.ok(ingestedFileService.listWithStatus(ragConfigId, resolved.source()).stream()
+                .map(RestRagIngestion::describeFile).toList()).build();
+    }
+
+    @Override
+    public Response deleteSourceFile(String ragConfigId, String sourceId, String fileId, Integer version) {
+        resourceAccessGuard.requireAccess(ragConfigId, AccessLevel.EDIT, "RAG configuration");
+
+        var resolved = resolveSource(ragConfigId, sourceId, version);
+        if (resolved.error() != null) {
+            return resolved.error();
+        }
+        Response wrongType = requireUploadSource(resolved.source(), sourceId);
+        if (wrongType != null) {
+            return wrongType;
+        }
+        if (sourceIngestionService.activeRun(ragConfigId, resolved.source()).isPresent()) {
+            // A run in flight is reading these files and writing state rows for them.
+            // Deleting one underneath it leaves the run recording a document whose
+            // vectors were just removed.
+            return Response.status(Response.Status.CONFLICT)
+                    .entity(Map.of("error", "A run is in flight for this source. Delete files once it has finished.",
+                            "sourceId", sourceId))
+                    .build();
+        }
+
+        var outcome = ingestedFileService.delete(ragConfigId, resolved.knowledgeBase(), resolved.source(), fileId);
+        return switch (outcome) {
+            case NOT_FOUND -> Response.status(Response.Status.NOT_FOUND)
+                    .entity(Map.of("error", "No file '" + fileId + "' on this source")).build();
+            case BUSY -> Response.status(Response.Status.CONFLICT)
+                    .entity(Map.of("error", "A run started for this source. Delete files once it has finished.",
+                            "sourceId", sourceId))
+                    .build();
+            case DELETED -> Response.ok(Map.of("status", "deleted", "fileId", fileId)).build();
+            case DELETED_BUT_CHUNKS_REMAIN -> Response.ok(Map.of(
+                    "status", "deleted",
+                    "fileId", fileId,
+                    "warning", "The file is gone, but this knowledge base's vector store cannot delete by "
+                            + "metadata, so the text it produced is still retrievable."))
+                    .build();
+        };
+    }
+
+    /**
+     * Files belong to an upload source; on any other type the request is a mistake.
+     */
+    private static Response requireUploadSource(IngestionSource source, String sourceId) {
+        if (source.isUpload()) {
+            return null;
+        }
+        return Response.status(Response.Status.CONFLICT)
+                .entity(Map.of("error", "Source '" + sourceId + "' is of type '" + source.getType()
+                        + "' and does not take uploaded files.", "sourceId", sourceId))
+                .build();
+    }
+
+    private static Map<String, Object> describeFile(IngestedFileService.FileStatus status) {
+        IIngestedFileStore.StoredFile file = status.file();
+        Map<String, Object> described = new LinkedHashMap<>();
+        described.put("fileId", file.fileId());
+        described.put("fileName", file.fileName());
+        described.put("mimeType", file.mimeType());
+        described.put("sizeBytes", file.sizeBytes());
+        described.put("contentHash", file.contentHash());
+        described.put("uploadedAt", file.uploadedAt().toString());
+        // Whether the knowledge base actually answers from this file. Without it an
+        // uploaded file, an indexed one and one that was changed after it was
+        // indexed are indistinguishable, and the only way to find out is to run the
+        // source and compare counters.
+        described.put("indexState", status.indexState().name());
+        return described;
+    }
+
+    /** As above, for a file that has just been stored and has no state yet. */
+    private static Map<String, Object> describeFile(IIngestedFileStore.StoredFile file) {
+        return describeFile(new IngestedFileService.FileStatus(file, IngestedFileService.IndexState.NOT_INDEXED));
     }
 
     /**

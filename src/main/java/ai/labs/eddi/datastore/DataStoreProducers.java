@@ -46,6 +46,9 @@ import ai.labs.eddi.engine.memory.MongoConversationCheckpointStore;
 import ai.labs.eddi.engine.runtime.DatabaseLogs;
 import ai.labs.eddi.engine.runtime.IDatabaseLogs;
 import ai.labs.eddi.modules.ingestion.IIngestionStateStore;
+import ai.labs.eddi.modules.ingestion.files.IIngestedFileStore;
+import ai.labs.eddi.modules.ingestion.mongo.MongoIngestedFileStore;
+import ai.labs.eddi.datastore.postgres.PostgresIngestedFileStore;
 import ai.labs.eddi.modules.ingestion.mongo.MongoIngestionStateStore;
 import ai.labs.eddi.datastore.postgres.PostgresIngestionStateStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
@@ -110,6 +113,13 @@ public class DataStoreProducers {
     @ApplicationScoped
     public IIngestionStateStore ingestionStateStore(Instance<MongoIngestionStateStore> mongo,
                                                     Instance<PostgresIngestionStateStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IIngestedFileStore ingestedFileStore(Instance<MongoIngestedFileStore> mongo,
+                                                Instance<PostgresIngestedFileStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 

@@ -602,11 +602,19 @@ eddi_summarization_duration_seconds         # Summarization duration (timer)
 ```text
 eddi_ingestion_segments_stored_total        # Chunks embedded and written by source ingestion
 eddi_ingestion_errors_total                 # Pages that failed to fetch, convert or embed
+eddi_ingestion_files_stored_total           # Files accepted onto an upload source
+eddi_ingestion_files_rejected_total         # Files an upload source refused, with a reason
+eddi_ingestion_files_deleted_total          # Files removed from an upload source
 ```
 
-Both carry `knowledgeBase` (the RAG configuration's name) and `source` (the ingestion
-source's name). Unchanged pages are not counted, so a scheduled re-crawl of a static
-site stores nothing.
+The first two carry `knowledgeBase` (the RAG configuration's name) and `source` (the
+ingestion source's name). Unchanged pages are not counted, so a scheduled re-crawl of a
+static site stores nothing.
+
+The three `files` counters carry `source` alone and belong to sources of type `upload`.
+Rejections are the one worth alerting on: a rate that climbs means operators are being
+turned away, and the reason is in the response rather than in the metric — a file that
+is too large, a format nothing can read, or a source that has reached its own limit.
 
 ### Connection Resolution Metrics
 

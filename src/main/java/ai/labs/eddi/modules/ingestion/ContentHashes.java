@@ -32,10 +32,21 @@ public final class ContentHashes {
      * caller cannot accidentally key on the string "null".
      */
     public static String sha256(String content) {
+        return sha256Bytes((content == null ? "" : content).getBytes(StandardCharsets.UTF_8));
+    }
+
+    /**
+     * SHA-256 of raw bytes, lowercase hex — for content that is not text, such as
+     * an uploaded file, where hashing a decoded form would depend on the decoder.
+     *
+     * <p>
+     * A distinct name rather than an overload: {@code sha256(null)} would otherwise
+     * not compile, and every call site would have to say which one it meant.
+     */
+    public static String sha256Bytes(byte[] content) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest((content == null ? "" : content).getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(hash);
+            return HexFormat.of().formatHex(digest.digest(content == null ? new byte[0] : content));
         } catch (NoSuchAlgorithmException e) {
             // SHA-256 is mandated by the JLS for every conforming JVM.
             throw new IllegalStateException("SHA-256 is unavailable on this JVM", e);

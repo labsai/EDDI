@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.modules.ingestion.IIngestionStateStore.IngestionRun;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline.IngestionReport;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline.Mode;
+import ai.labs.eddi.modules.ingestion.files.IIngestedFileStore;
 import ai.labs.eddi.utils.LogSanitizer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -48,14 +49,16 @@ public class RagSourceIngestionService {
     private final IIngestionStateStore stateStore;
     private final IScheduleStore scheduleStore;
     private final IRagStore ragStore;
+    private final IIngestedFileStore fileStore;
 
     @Inject
     public RagSourceIngestionService(IngestionPipeline pipeline, IIngestionStateStore stateStore,
-            IScheduleStore scheduleStore, IRagStore ragStore) {
+            IScheduleStore scheduleStore, IRagStore ragStore, IIngestedFileStore fileStore) {
         this.pipeline = pipeline;
         this.stateStore = stateStore;
         this.scheduleStore = scheduleStore;
         this.ragStore = ragStore;
+        this.fileStore = fileStore;
     }
 
     /**
@@ -158,6 +161,7 @@ public class RagSourceIngestionService {
         capped.setEnabled(true);
         capped.setType(source.getType());
         capped.setWeb(source.getWeb());
+        capped.setUpload(source.getUpload());
         capped.setCron(null);
 
         var settings = new IngestionSource.IngestionSettings();
@@ -276,13 +280,80 @@ public class RagSourceIngestionService {
         }
     }
 
-    /** Removes every ingestion schedule belonging to a knowledge base's sources. */
+    /**
+     * Removes every ingestion schedule belonging to a knowledge base's sources, and
+     * everything its upload sources put into it — called once the knowledge base
+     * itself has no readable version left.
+     */
     public void removeSchedules(String ragConfigId, RagConfiguration knowledgeBase) {
         if (knowledgeBase == null || knowledgeBase.getSources() == null) {
             return;
         }
         for (IngestionSource source : knowledgeBase.getSources()) {
             deleteScheduleQuietly(ragConfigId, sourceIdOf(source));
+            if (source.isUpload()) {
+                discardSourceContent(ragConfigId, knowledgeBase, source);
+            }
+        }
+    }
+
+    /**
+     * Takes back everything sources that are no longer there put into the knowledge
+     * base.
+     *
+     * <p>
+     * Two ways a source stops owning its documents: it is removed from
+     * {@code sources[]}, or it stays but stops being an upload source. Both used to
+     * delete the files and leave every vector they produced in the knowledge base —
+     * retrievable by every agent, and unreachable by every endpoint, because the
+     * source they belong to is gone. An operator who removes "HR policies 2023"
+     * would have had agents keep citing it with no way to list or delete what was
+     * left.
+     *
+     * <p>
+     * The <em>previous</em> configuration is what says where those vectors are: the
+     * store is addressed by the knowledge base's name, and that name may be part of
+     * what just changed.
+     */
+    public void discardRemovedSources(String ragConfigId, RagConfiguration previous, RagConfiguration updated) {
+        if (previous == null || previous.getSources() == null) {
+            return;
+        }
+        for (IngestionSource source : previous.getSources()) {
+            if (source == null || !source.isUpload()) {
+                // Only upload sources hold anything of their own. A crawl's documents
+                // come back on the next run against the same site.
+                continue;
+            }
+            IngestionSource now = updated == null ? null : updated.findSource(sourceIdOf(source));
+            if (now != null && now.isUpload()) {
+                continue;
+            }
+            LOGGER.warnf("Source '%s' of knowledge base %s %s. Its uploaded files and everything the knowledge "
+                    + "base learned from them are being removed.", LogSanitizer.sanitize(source.getName()),
+                    LogSanitizer.sanitize(ragConfigId),
+                    now == null ? "was removed" : "is no longer a file source");
+            discardSourceContent(ragConfigId, previous, source);
+        }
+    }
+
+    /** Vectors and ingestion state first, then the files that produced them. */
+    private void discardSourceContent(String ragConfigId, RagConfiguration knowledgeBase, IngestionSource source) {
+        try {
+            pipeline.forgetSource(ragConfigId, knowledgeBase, source);
+        } catch (RuntimeException e) {
+            LOGGER.errorf(e, "Could not remove what source %s put into knowledge base %s; its chunks stay "
+                    + "retrievable", LogSanitizer.sanitize(source.getName()), LogSanitizer.sanitize(ragConfigId));
+        }
+        try {
+            long deleted = fileStore.deleteAll(IngestionPipeline.stateKey(ragConfigId, source));
+            if (deleted > 0) {
+                LOGGER.infof("Deleted %d uploaded file(s) of source %s", deleted,
+                        LogSanitizer.sanitize(source.getName()));
+            }
+        } catch (RuntimeException e) {
+            LOGGER.errorf(e, "Could not delete the uploaded files of source %s of knowledge base %s",
+                    LogSanitizer.sanitize(source.getName()), LogSanitizer.sanitize(ragConfigId));
         }
     }
 
