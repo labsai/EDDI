@@ -5,7 +5,6 @@
 package ai.labs.eddi.configs.rag.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
-import ai.labs.eddi.engine.runtime.internal.CronParser;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.rag.IRagStore;
@@ -14,6 +13,7 @@ import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
+import ai.labs.eddi.modules.ingestion.RagIngestionSchedules;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.utils.LogSanitizer;
@@ -387,23 +387,14 @@ public class RestRagStore implements IRestRagStore {
      * A cron the scheduler cannot parse is refused here, where the operator is
      * waiting for an answer. Stored, it becomes a schedule that simply never fires,
      * and the source looks scheduled on every screen that shows it.
+     * <p>
+     * The rule itself lives in {@link RagIngestionSchedules#requireValidCrons},
+     * because this is not the only way a knowledge base is written: importing a ZIP
+     * creates one through the store directly, and a second copy of the check would
+     * have been a second chance to forget it.
      */
     private void requireValidCronExpressions(RagConfiguration ragConfiguration) {
-        if (ragConfiguration.getSources() == null) {
-            return;
-        }
-        for (var source : ragConfiguration.getSources()) {
-            String cron = source.getCron();
-            if (cron == null || cron.isBlank()) {
-                continue;
-            }
-            try {
-                CronParser.validate(cron);
-            } catch (IllegalArgumentException e) {
-                throw new IllegalArgumentException(
-                        "Ingestion source '" + source.getName() + "' has an invalid cron: " + e.getMessage());
-            }
-        }
+        RagIngestionSchedules.requireValidCrons(ragConfiguration);
     }
 
     private void assignSourceIds(RagConfiguration ragConfiguration) {
