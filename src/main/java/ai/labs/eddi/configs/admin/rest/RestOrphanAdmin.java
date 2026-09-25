@@ -52,7 +52,7 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 @ApplicationScoped
 public class RestOrphanAdmin implements IRestOrphanAdmin {
 
-    private static final Logger log = Logger.getLogger(RestOrphanAdmin.class);
+    private static final Logger LOGGER = Logger.getLogger(RestOrphanAdmin.class);
 
     /**
      * Store types to scan for orphans. Each entry is {descriptorType,
@@ -110,7 +110,7 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
         // proceed on a partial picture.
         ReferenceScan scan = scanReferencedUris();
         if (!scan.complete()) {
-            log.errorf("Refusing to purge orphans: the reference scan was incomplete (%s)", scan.failureReason());
+            LOGGER.errorf("Refusing to purge orphans: the reference scan was incomplete (%s)", scan.failureReason());
             // Build the Response explicitly rather than using the (String, Status)
             // constructor: that one sets no entity, so the caller would receive a bare
             // 409 and the reason would exist only in the server log.
@@ -141,18 +141,18 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
                 // can still be followed by a delete of something in use.
                 Integer version = resolveVersion(orphan);
                 if (isReferencedNow(orphan, version) || isReferencedByADeployedVersionNow(orphan)) {
-                    log.warnf("Skipping orphan %s — it became referenced after the scan and before the purge", orphan.getResourceUri());
+                    LOGGER.warnf("Skipping orphan %s — it became referenced after the scan and before the purge", orphan.getResourceUri());
                     continue;
                 }
                 deleteOrphan(orphan, version);
                 deletedCount++;
-                log.infof("Purged orphan: %s [%s]", orphan.getResourceUri(), orphan.getType());
+                LOGGER.infof("Purged orphan: %s [%s]", orphan.getResourceUri(), orphan.getType());
             } catch (Exception e) {
-                log.warnf("Failed to purge orphan %s: %s", orphan.getResourceUri(), e.getMessage());
+                LOGGER.warnf("Failed to purge orphan %s: %s", orphan.getResourceUri(), e.getMessage());
             }
         }
 
-        log.infof("Orphan purge complete: %d/%d deleted", deletedCount, orphans.size());
+        LOGGER.infof("Orphan purge complete: %d/%d deleted", deletedCount, orphans.size());
         return new OrphanReport(orphans.size(), deletedCount, orphans, true, null);
     }
 
@@ -182,14 +182,14 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
         if (resourceId == null || version == null || version < 1) {
             // Nothing to re-query with. Do not upgrade the scan's classification to a
             // permanent delete on a reference we cannot ask about.
-            log.warnf("Cannot re-check orphan %s (no usable version) — NOT purging it", orphan.getResourceUri());
+            LOGGER.warnf("Cannot re-check orphan %s (no usable version) — NOT purging it", orphan.getResourceUri());
             return true;
         }
 
         try {
             if (WORKFLOW_TYPE.equals(orphan.getType())) {
                 if (isNullOrEmpty(resourceId.getId())) {
-                    log.warnf("Cannot re-check orphan workflow %s (no usable id) — NOT purging it", orphan.getResourceUri());
+                    LOGGER.warnf("Cannot re-check orphan workflow %s (no usable id) — NOT purging it", orphan.getResourceUri());
                     return true;
                 }
                 return !agentStore.getAgentDescriptorsContainingWorkflow(resourceId.getId(), version, true).isEmpty();
@@ -198,7 +198,7 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
             return !workflowStore.getWorkflowDescriptorsContainingResource(atVersion(orphan.getResourceUri(), version).toString(), true)
                     .isEmpty();
         } catch (Exception e) {
-            log.warnf("Re-check of orphan %s failed — NOT purging it: %s", orphan.getResourceUri(), e.getMessage());
+            LOGGER.warnf("Re-check of orphan %s failed — NOT purging it: %s", orphan.getResourceUri(), e.getMessage());
             return true;
         }
     }
@@ -231,7 +231,7 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
     private boolean isReferencedByADeployedVersionNow(OrphanInfo orphan) {
         String key = resourceKey(orphan.getResourceUri());
         if (key == null) {
-            log.warnf("Cannot re-check orphan %s against deployed versions (no usable key) — NOT purging it", orphan.getResourceUri());
+            LOGGER.warnf("Cannot re-check orphan %s against deployed versions (no usable key) — NOT purging it", orphan.getResourceUri());
             return true;
         }
         Set<String> deployedReferences = new HashSet<>();
@@ -239,15 +239,15 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
         try {
             failureReason = scanDeployedAgents(deployedReferences, null);
         } catch (Exception e) {
-            log.warnf("Deployed-version re-check of orphan %s failed — NOT purging it: %s", orphan.getResourceUri(), e.getMessage());
+            LOGGER.warnf("Deployed-version re-check of orphan %s failed — NOT purging it: %s", orphan.getResourceUri(), e.getMessage());
             return true;
         }
         if (failureReason != null) {
-            log.warnf("Deployed-version re-check of orphan %s was incomplete (%s) — NOT purging it", orphan.getResourceUri(), failureReason);
+            LOGGER.warnf("Deployed-version re-check of orphan %s was incomplete (%s) — NOT purging it", orphan.getResourceUri(), failureReason);
             return true;
         }
         if (deployedReferences.contains(key)) {
-            log.warnf("Skipping orphan %s — a deployed Agent version started referencing it after the scan", orphan.getResourceUri());
+            LOGGER.warnf("Skipping orphan %s — a deployed Agent version started referencing it after the scan", orphan.getResourceUri());
             return true;
         }
         return false;
@@ -438,7 +438,7 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
         try {
             documentDescriptorStore.deleteAllDescriptor(resourceId.getId());
         } catch (Exception e) {
-            log.warnf("Purged resource %s but could not remove its descriptor; it will be re-reported as an orphan: %s", resourceId.getId(),
+            LOGGER.warnf("Purged resource %s but could not remove its descriptor; it will be re-reported as an orphan: %s", resourceId.getId(),
                     e.getMessage());
         }
     }
@@ -530,7 +530,7 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
     }
 
     private List<OrphanInfo> collectOrphans(Set<String> referencedResources, boolean includeDeleted) {
-        log.infof("Orphan scan: found %d referenced resources", referencedResources.size());
+        LOGGER.infof("Orphan scan: found %d referenced resources", referencedResources.size());
 
         List<OrphanInfo> orphans = new ArrayList<>();
 
@@ -551,11 +551,11 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
                 // orphan CANDIDATES, so the purge under-deletes rather than over-
                 // deletes. The opposite failure — an incomplete REFERENCE set — is the
                 // dangerous one and is handled by ReferenceScan.complete().
-                log.warnf("Error scanning store type %s: %s", type, e.getMessage());
+                LOGGER.warnf("Error scanning store type %s: %s", type, e.getMessage());
             }
         }
 
-        log.infof("Orphan scan complete: %d orphans found", orphans.size());
+        LOGGER.infof("Orphan scan complete: %d orphans found", orphans.size());
         return orphans;
     }
 
@@ -592,7 +592,7 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
                     // Agent descriptor exists but resource doesn't — genuinely
                     // unreferenced, so this does not make the scan incomplete.
                 } catch (Exception e) {
-                    log.warnf("Error reading Agent %s: %s", agentDescriptor.getResource(), e.getMessage());
+                    LOGGER.warnf("Error reading Agent %s: %s", agentDescriptor.getResource(), e.getMessage());
                     failureReason = "could not read Agent " + agentDescriptor.getResource() + ": " + e.getMessage();
                 }
             }
@@ -611,7 +611,7 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
                     // Workflow descriptor exists but resource doesn't — genuinely
                     // unreferenced, so this does not make the scan incomplete.
                 } catch (Exception e) {
-                    log.warnf("Error reading workflow %s: %s", workflowDescriptor.getResource(), e.getMessage());
+                    LOGGER.warnf("Error reading workflow %s: %s", workflowDescriptor.getResource(), e.getMessage());
                     failureReason = "could not read workflow " + workflowDescriptor.getResource() + ": " + e.getMessage();
                 }
             }
@@ -630,7 +630,7 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
             failureReason = scanDeployedAgents(referencedResources, failureReason);
 
         } catch (Exception e) {
-            log.errorf("Error building referenced URIs set: %s", e.getMessage());
+            LOGGER.errorf("Error building referenced URIs set: %s", e.getMessage());
             failureReason = "could not enumerate Agent/workflow descriptors: " + e.getMessage();
         }
 
@@ -654,7 +654,7 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
         try {
             deployments = deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed);
         } catch (Exception e) {
-            log.errorf("Could not read the deployment records: %s", e.getMessage());
+            LOGGER.errorf("Could not read the deployment records: %s", e.getMessage());
             return "could not read the deployment records: " + e.getMessage();
         }
 
@@ -675,7 +675,7 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
                 // The deployed version is gone from the store already; it protects
                 // nothing, and that is not an incomplete scan.
             } catch (Exception e) {
-                log.warnf("Error reading deployed Agent %s (v%d): %s", deployment.getAgentId(), deployment.getAgentVersion(), e.getMessage());
+                LOGGER.warnf("Error reading deployed Agent %s (v%d): %s", deployment.getAgentId(), deployment.getAgentVersion(), e.getMessage());
                 failureReason = "could not read deployed Agent " + deployment.getAgentId() + " (v" + deployment.getAgentVersion() + "): "
                         + e.getMessage();
             }
@@ -699,7 +699,7 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
         } catch (IResourceStore.ResourceNotFoundException e) {
             return currentFailure;
         } catch (Exception e) {
-            log.warnf("Error reading deployed workflow %s: %s", workflowUri, e.getMessage());
+            LOGGER.warnf("Error reading deployed workflow %s: %s", workflowUri, e.getMessage());
             return "could not read deployed workflow " + workflowUri + ": " + e.getMessage();
         }
     }
@@ -753,7 +753,7 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
             // Letting this out would cost the scan every OTHER reference this workflow
             // holds — the per-workflow catch upstream discards the whole traversal —
             // and that is exactly what promotes live resources to "orphan".
-            log.warnf("Workflow references a malformed resource uri '%s'; recording it verbatim: %s", raw, e.getMessage());
+            LOGGER.warnf("Workflow references a malformed resource uri '%s'; recording it verbatim: %s", raw, e.getMessage());
             referencedResources.add(raw);
         }
     }
@@ -784,7 +784,7 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
         } while (batch.size() == BATCH_SIZE && pageIndex < MAX_PAGES);
 
         if (batch.size() == BATCH_SIZE) {
-            log.warnf("Descriptor scan for type %s hit the %d-page ceiling (%d rows); results are incomplete", type, MAX_PAGES,
+            LOGGER.warnf("Descriptor scan for type %s hit the %d-page ceiling (%d rows); results are incomplete", type, MAX_PAGES,
                     all.size());
             throw new IResourceStore.ResourceStoreException(
                     "Descriptor scan for type " + type + " exceeded " + (MAX_PAGES * BATCH_SIZE) + " rows");

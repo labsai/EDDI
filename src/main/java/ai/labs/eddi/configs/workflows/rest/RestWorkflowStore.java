@@ -58,7 +58,7 @@ public class RestWorkflowStore implements IRestWorkflowStore {
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final ResourceAccessGuard resourceAccessGuard;
 
-    private static final Logger log = Logger.getLogger(RestWorkflowStore.class);
+    private static final Logger LOGGER = Logger.getLogger(RestWorkflowStore.class);
 
     @Inject
     public RestWorkflowStore(IWorkflowStore workflowStore, ResourceClientLibrary resourceClientLibrary,
@@ -342,9 +342,9 @@ public class RestWorkflowStore implements IRestWorkflowStore {
                 }
             }
         } catch (IResourceStore.ResourceNotFoundException e) {
-            log.warnf("Workflow %s (v%d) not found for cascade — deleting workflow only", sanitize(id), version);
+            LOGGER.warnf("Workflow %s (v%d) not found for cascade — deleting workflow only", sanitize(id), version);
         } catch (IResourceStore.ResourceStoreException e) {
-            log.warnf("Error reading workflow %s for cascade: %s", sanitize(id), sanitize(e.getMessage()));
+            LOGGER.warnf("Error reading workflow %s for cascade: %s", sanitize(id), sanitize(e.getMessage()));
         }
         return new CascadePlan(toDelete, skipped[0]);
     }
@@ -420,7 +420,7 @@ public class RestWorkflowStore implements IRestWorkflowStore {
             // cascade=true delete into a 500 — before the workflow itself was
             // deleted, so the workflow became undeletable-with-cascade until someone
             // edited the stray reference out.
-            log.errorf(e, "Could not resolve %s to a live version — NOT cascade-deleting it", pinnedUri);
+            LOGGER.errorf(e, "Could not resolve %s to a live version — NOT cascade-deleting it", pinnedUri);
             skipped[0]++;
             return;
         }
@@ -428,7 +428,7 @@ public class RestWorkflowStore implements IRestWorkflowStore {
             // Either the type is not one this cascade can route, or the resource has
             // no live version left. Both mean "nothing here to delete", and neither
             // is a reason to guess at the pinned version.
-            log.infof("Skipping cascade-delete of %s — no live version to delete, or its type is not routable", pinnedUri);
+            LOGGER.infof("Skipping cascade-delete of %s — no live version to delete, or its type is not routable", pinnedUri);
             skipped[0]++;
             return;
         }
@@ -450,19 +450,19 @@ public class RestWorkflowStore implements IRestWorkflowStore {
             // answers this way for EVERY resource, which silently turns cascade
             // delete into a permanent no-op. That must be loud, and the cause must
             // be in the log — hence the throwable rather than just its message.
-            log.errorf(e, "Reference check for %s failed — NOT cascade-deleting it", currentUri);
+            LOGGER.errorf(e, "Reference check for %s failed — NOT cascade-deleting it", currentUri);
             skipped[0]++;
             return;
         }
 
         if (referencingWorkflows == null) {
-            log.warnf("Reference check for %s returned no answer — NOT cascade-deleting it", currentUri);
+            LOGGER.warnf("Reference check for %s returned no answer — NOT cascade-deleting it", currentUri);
             skipped[0]++;
             return;
         }
 
         if (referencingWorkflows.size() > 1) {
-            log.infof("Skipping cascade-delete of resource %s — still referenced by %d other workflow(s)", currentUri,
+            LOGGER.infof("Skipping cascade-delete of resource %s — still referenced by %d other workflow(s)", currentUri,
                     referencingWorkflows.size() - 1);
             skipped[0]++;
             return;
@@ -511,15 +511,15 @@ public class RestWorkflowStore implements IRestWorkflowStore {
         try {
             referencingWorkflows = workflowStore.getWorkflowDescriptorsContainingResource(currentUri.toString(), true);
         } catch (Exception e) {
-            log.errorf(e, "Re-check of %s after the workflow delete failed — NOT cascade-deleting it", currentUri);
+            LOGGER.errorf(e, "Re-check of %s after the workflow delete failed — NOT cascade-deleting it", currentUri);
             return true;
         }
         if (referencingWorkflows == null) {
-            log.warnf("Re-check of %s after the workflow delete returned no answer — NOT cascade-deleting it", currentUri);
+            LOGGER.warnf("Re-check of %s after the workflow delete returned no answer — NOT cascade-deleting it", currentUri);
             return true;
         }
         if (!referencingWorkflows.isEmpty()) {
-            log.infof("Skipping cascade-delete of %s — it became referenced by %d workflow(s) after the cascade was planned",
+            LOGGER.infof("Skipping cascade-delete of %s — it became referenced by %d workflow(s) after the cascade was planned",
                     currentUri, referencingWorkflows.size());
             return true;
         }
@@ -530,10 +530,10 @@ public class RestWorkflowStore implements IRestWorkflowStore {
     private boolean deleteCascadedResource(URI resourceUri) {
         try {
             resourceClientLibrary.deleteResource(resourceUri, false);
-            log.infof("Cascade-deleted resource %s", resourceUri);
+            LOGGER.infof("Cascade-deleted resource %s", resourceUri);
             return true;
         } catch (Exception e) {
-            log.warnf("Failed to cascade-delete resource %s: %s", resourceUri, e.getMessage());
+            LOGGER.warnf("Failed to cascade-delete resource %s: %s", resourceUri, e.getMessage());
             return false;
         }
     }
