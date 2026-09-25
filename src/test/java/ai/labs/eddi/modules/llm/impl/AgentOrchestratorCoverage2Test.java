@@ -164,7 +164,7 @@ class AgentOrchestratorCoverage2Test {
         lenient()
                 .when(toolExecutionService.executeToolWrapped(any(ToolInvocation.class), anyString(), nullable(String.class), any(),
                         any(Supplier.class),
-                        anyBoolean(), anyBoolean(), anyBoolean(), anyInt()))
+                        anyBoolean(), anyBoolean(), anyBoolean(), anyInt(), anyInt()))
                 .thenAnswer(inv -> {
                     Supplier<String> sup = inv.getArgument(4);
                     return sup.get();

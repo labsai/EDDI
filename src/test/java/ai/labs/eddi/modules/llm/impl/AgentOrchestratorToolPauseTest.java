@@ -37,6 +37,7 @@ import java.util.ArrayList;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
@@ -143,7 +144,7 @@ class AgentOrchestratorToolPauseTest {
         // executeToolWrapped actually runs the supplied executor so we can verify
         // which tool method was invoked.
         when(toolExecutionService.executeToolWrapped(any(ToolInvocation.class), anyString(), nullable(String.class), any(), any(Supplier.class),
-                anyBoolean(), anyBoolean(), anyBoolean(), anyInt()))
+                anyBoolean(), anyBoolean(), anyBoolean(), anyInt(), anyInt()))
                 .thenAnswer(inv -> {
                     Supplier<String> sup = inv.getArgument(4);
                     return sup.get();
@@ -187,6 +188,52 @@ class AgentOrchestratorToolPauseTest {
         // The ungated datetime tool ran once; the gated calculator never ran.
         verify(dateTimeTool, times(1)).getCurrentDateTime(anyString());
         verify(calculatorTool, never()).calculate(anyString());
+    }
+
+    /**
+     * A tool call waiting for a human is not on the execution clock.
+     *
+     * <p>
+     * The per-tool execution timeout lives inside
+     * {@link ToolExecutionService#executeToolWrapped}, and it starts when the
+     * supplier is invoked. So the question "can an awaiting-approval call be timed
+     * out?" reduces to "does a gated call reach that method at all?" — and it does
+     * not: the gate classifies the batch and {@code ToolLoopRunner} throws the
+     * pause before any gated call is dispatched.
+     * </p>
+     *
+     * <p>
+     * Proved two-sided rather than with a bare {@code never()}, which would pass
+     * just as happily if the loop had executed nothing whatsoever: the batch
+     * carries one gated call and one ungated one, the task's timeout is set to the
+     * tightest bound expressible, and the single execution that does reach the
+     * service is asserted to be the ungated one.
+     * </p>
+     */
+    @Test
+    @DisplayName("a call waiting for human approval never reaches the timed execution step, so it cannot be timed out")
+    void gatedCallNeverEntersTheTimedExecutionStep() {
+        var task = twoToolTask();
+        task.setDefaultToolTimeoutMs(1);
+        ChatModel chatModel = mock(ChatModel.class);
+
+        var gatedReq = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"6*7\"}").build();
+        var ungatedReq = ToolExecutionRequest.builder().id("c2").name("getCurrentDateTime").arguments("{\"timezone\":\"UTC\"}").build();
+        when(chatModel.chat(any(ChatRequest.class))).thenReturn(toolBatch(gatedReq, ungatedReq));
+
+        assertThrows(ToolApprovalRequiredException.class,
+                () -> orchestrator.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")),
+                        task, memory, gateCalculate(), 0));
+
+        var executed = ArgumentCaptor.forClass(ToolInvocation.class);
+        verify(toolExecutionService, times(1)).executeToolWrapped(executed.capture(), anyString(), nullable(String.class), any(),
+                any(Supplier.class), anyBoolean(), anyBoolean(), anyBoolean(), anyInt(), anyInt());
+
+        assertEquals(1, executed.getAllValues().size(),
+                "exactly one of the two calls may be executed while the other waits for a human");
+        assertEquals("getCurrentDateTime", executed.getValue().dispatchName(),
+                "the gated call must never be handed to the timed execution step — a 1ms bound would otherwise "
+                        + "expire on it while the human is still deciding");
     }
 
     @Test

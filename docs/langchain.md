@@ -722,6 +722,8 @@ Ollama. It is CPU inference — there is no GPU path — so it suits small quant
 | `toolCacheScopes`          | map      | Per-tool cache partition: `user`/`conversation`/`global` | (all `user`)   |
 | `defaultToolCacheScope`    | string   | Cache partition for tools without an override    | `user`                 |
 | `enableRateLimiting`       | boolean  | Limit tool/LLM usage rate                        | true                   |
+| `defaultToolTimeoutMs`     | int      | Wall-clock ceiling in milliseconds on a single tool execution. On expiry the call is abandoned and the model gets an error result; the turn continues. `-1` or `0` disables the bound — see [Execution timeouts](#execution-timeouts) | 120000 |
+| `toolTimeoutsMs`           | map      | Per-tool execution timeouts in milliseconds, keyed on the built-in slug (`{"websearch": 15000}`) or on a single dispatch name, which takes precedence. `-1` exempts one tool without unbounding the task | (all `defaultToolTimeoutMs`) |
 | `toolLoadingStrategy`      | string   | `EAGER` sends every tool spec on every request. `LAZY` sends only a `discover_tools` meta-tool, and injects the tools the model asks for from the next iteration on. Use `LAZY` when a large tool set is crowding the context window | `EAGER` |
 | `maxToolsInContext`        | int      | Maximum tool specifications returned per discovery call under `LAZY`. Ignored under `EAGER` | 20 |
 | `retry`                    | object   | Retry policy for LLM calls — see [Retry configuration](#retry-configuration) | (none) |
@@ -1249,7 +1251,7 @@ The Langchain task configurations can be managed via REST API endpoints.
 All tool invocations—both built-in tools and custom HTTP call tools—are routed through a unified **Tool Execution Service** that applies enterprise-grade controls:
 
 ```
-Tool Call ──▶ Rate Limiter ──▶ Cache Check ──▶ Execute Tool ──▶ Cost Tracker ──▶ Result
+Tool Call ──▶ Rate Limiter ──▶ Cache Check ──▶ Execute Tool (timeout) ──▶ Cost Tracker ──▶ Result
 ```
 
 ### Controls
@@ -1259,6 +1261,7 @@ Tool Call ──▶ Rate Limiter ──▶ Cache Check ──▶ Execute Tool �
 | **Rate Limiting** | Token-bucket per tool, configurable limits                             | `enableRateLimiting`, `defaultRateLimit`, `toolRateLimits` |
 | **Smart Caching** | Deduplicates identical tool calls, partitioned per identity            | `enableToolCaching`, `toolCacheScopes`, `defaultToolCacheScope` |
 | **Cost Tracking** | Per-conversation tool-cost accounting, with an opt-in ceiling and automatic stale-data eviction | `enableCostTracking`, `toolPricing`, `maxBudgetPerConversation`, `enforceBudget` |
+| **Execution Timeout** | Wall-clock ceiling on a single tool call; on expiry the model gets an error result and the turn continues | `defaultToolTimeoutMs`, `toolTimeoutsMs` |
 
 #### Tool names: dispatch name vs. configuration slug
 
@@ -1277,6 +1280,7 @@ difference between a rule that binds and one that is silently ignored:
 | `toolRateLimits`             | slug **or** dispatch name — dispatch name wins       |
 | `toolPricing`                | slug **or** dispatch name — dispatch name wins       |
 | `toolCacheScopes`            | slug **or** dispatch name — dispatch name wins       |
+| `toolTimeoutsMs`             | slug **or** dispatch name — dispatch name wins       |
 | `toolApprovals`              | dispatch name, optionally `source:name`-qualified    |
 | cache TTL, default price     | slug (resolved automatically)                        |
 | `eddi.tool.*` metric `tool` tag | dispatch name                                     |
@@ -1285,6 +1289,59 @@ difference between a rule that binds and one that is silently ignored:
 > *limit* for the whole tool but gives `searchWeb`, `searchNews` and
 > `searchWikipedia` 30 calls/minute **each**, not 30 between them. Pin a single
 > operation by using its dispatch name: `{"searchNews": 5}`.
+
+#### Execution timeouts
+
+Every tool call — built-in, http, MCP, A2A, dynamic, memory and recall alike —
+runs under a wall-clock ceiling. Without one, a tool that never returns holds the
+whole conversation turn open indefinitely.
+
+| Parameter              | Type                  | Description                                                                                  | Default  |
+| ---------------------- | --------------------- | -------------------------------------------------------------------------------------------- | -------- |
+| `defaultToolTimeoutMs` | int                   | Ceiling, in milliseconds, on a single tool execution                                          | `120000` |
+| `toolTimeoutsMs`       | map<string,int>       | Per-tool overrides, keyed on the dispatch name or the canonical slug — dispatch name wins    | —        |
+
+```json
+"defaultToolTimeoutMs": 120000,
+"toolTimeoutsMs": { "websearch": 15000, "generateQuarterlyReport": -1 }
+```
+
+**On expiry the model is told, and the turn carries on.** The call is abandoned
+and the model receives
+`Error: Execution timed out after <n>ms for tool: <name>` — the same shape as the
+rate-limit refusal — so it can apologise, try a different tool, or answer without
+one. Nothing is cached and nothing is charged for the abandoned call, and an
+`eddi_tool_execution_timeout_total{tool="…"}` counter is incremented. A timeout is
+**never retried**: retrying a hang only buys another full wait and another chance
+to re-fire a side effect the tool had already begun.
+
+**`-1` (or `0`) means no bound.** Set it on a single tool in `toolTimeoutsMs` to
+exempt one deliberately long-running operation without unbounding every other
+tool on the task; set it as `defaultToolTimeoutMs` to restore the unbounded
+behaviour this field replaced, for the whole task.
+
+The default of two minutes sits far above the transport timeouts the tool sources
+set for themselves — `mcp.timeoutMs` and `a2a.timeoutMs` default to 30000 each —
+so those keep reporting their own, more specific errors and this ceiling only
+fires on a genuine hang.
+
+> **A call waiting for human approval is never on this clock.** A tool call gated
+> by [`hitlConfig.toolApprovals`](hitl.md) does not enter the execution step at
+> all: the loop pauses before dispatching it, and the approved call is timed from
+> the moment it actually starts running on resume. A reviewer who takes an hour
+> costs the tool nothing.
+
+> **A timeout abandons the call; it cannot stop it.** The worker is interrupted,
+> so a tool blocked in interruptible I/O unwinds immediately — but one stuck in a
+> native call keeps running and can still complete its side effect after the model
+> was told it failed. For a tool whose side effects must never be doubled, put it
+> behind the HITL tool-approval gate or give it `-1`, rather than a short timeout.
+>
+> Such workers are counted, not assumed away: the gauge
+> `eddi_tool_execution_abandoned` reports how many are still running with nobody
+> waiting on them. It normally reads zero, so a value that climbs and does not
+> come back down is a tool leaking workers — pair it with
+> `eddi_tool_execution_timeout_total` to see which one.
 
 #### Budgets
 
@@ -1365,6 +1422,8 @@ bound.
       "enableRateLimiting": true,
       "defaultRateLimit": 100,
       "toolRateLimits": { "websearch": 30, "weather": 50 },
+      "defaultToolTimeoutMs": 120000,
+      "toolTimeoutsMs": { "websearch": 15000 },
       "enableToolCaching": true,
       "enableCostTracking": true,
       "toolPricing": { "websearch": 0.005 },
