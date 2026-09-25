@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
 import { LLM_PROVIDERS, getProviderConfig } from "@/lib/api/agent-setup";
-import { MODEL_SUGGESTIONS, isBaseUrlRequired } from "@/lib/model-suggestions";
+import { MODEL_SUGGESTIONS, isBaseUrlRequired, supportsBaseUrl } from "@/lib/model-suggestions";
 import { useVaultHealth } from "@/hooks/use-secrets";
 import { useAuth } from "@/hooks/use-auth";
 import { usePlatformSelfUrl } from "@/hooks/use-operator";
@@ -199,6 +199,10 @@ export function OperatorActivation({
     setProvider(next);
     const cfg = getProviderConfig(next);
     if (cfg) setModel(cfg.defaultModel);
+    // The field only renders for a provider that needs one, so a URL carried
+    // across a switch would be sent invisibly — and for an in-process provider
+    // it would be sent to something that has no endpoint to begin with.
+    if (!supportsBaseUrl(next)) setBaseUrl("");
     // A key is provider-specific, so carrying it across a provider switch would
     // silently send the wrong credential.
     setApiKey(next === initial.provider && initial.credentialKey ? toVaultRef(initial.credentialKey) : "");

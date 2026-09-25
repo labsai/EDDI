@@ -455,8 +455,12 @@
   },
   "setupWizard": {
     "baseUrlHintCloud": "مطلوب فقط عند استخدام وكيل بروكسي أو نشر خاص أو نقطة نهاية Azure OpenAI",
+    "jlamaNoteTitle": "يعمل Jlama داخل EDDI",
+    "jlamaNoteBody": "لا يوجد خادم نماذج للإشارة إليه — يحمّل EDDI النموذج داخل عمليته الخاصة وينزّل الأوزان من Hugging Face عند أول استخدام، لذا قد تستغرق الرسالة الأولى بعض الوقت.",
+    "jlamaNoteTuning": "هل تشغّل EDDI داخل حاوية؟ افتح بعد ذلك إعدادات نموذج اللغة للوكيل واضبط modelCachePath على وحدة تخزين مركّبة — فذاكرة التخزين المؤقت الافتراضية توجد على الطبقة المؤقتة للحاوية، ما قد يعني إعادة تنزيل النموذج بعد إزالة الحاوية أو استبدالها. ويمكن كذلك ضبط quantizeModelAtRuntime وworkingDirectory وworkingQuantizedType هناك.",
     "baseUrlHintLocal": "مطلوب — الرابط الذي يعمل عليه خادم نموذجك المحلي",
     "modelHint": "اكتب أي اسم نموذج يدعمه مزوّدك، أو اختر واحداً من الاقتراحات",
+    "modelHintJlama": "يجب أن يكون معرّف مستودع على Hugging Face بصيغة owner/name، مثل tjake/Llama-3.2-1B-Instruct-JQ4. لا يمكن تحليل اسم نموذج مجرّد، وسيفشل الوكيل عند أول رسالة.",
     "modelPlaceholder": "مثل: {{model}} (أو أي نموذج يدعمه مزوّدك)",
     "title": "معالج إنشاء Agent",
     "subtitle": "أنشئ Agent مكتمل التكوين في دقائق",

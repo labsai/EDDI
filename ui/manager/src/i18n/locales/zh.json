@@ -451,8 +451,12 @@
   },
   "setupWizard": {
     "baseUrlHintCloud": "仅在使用代理、私有部署或 Azure OpenAI 端点时需要",
+    "jlamaNoteTitle": "Jlama 在 EDDI 内部运行",
+    "jlamaNoteBody": "没有可指向的模型服务器——EDDI 将模型加载到自身进程中，并在首次使用时从 Hugging Face 下载权重，因此第一条消息可能需要一段时间。",
+    "jlamaNoteTuning": "在容器中运行 EDDI？请在创建后打开该智能体的 LLM 配置，将 modelCachePath 指向挂载的卷——默认缓存位于容器的临时层，容器被移除或替换后模型可能会重新下载。quantizeModelAtRuntime、workingDirectory 和 workingQuantizedType 也可在那里调整。",
     "baseUrlHintLocal": "必填——本地模型服务器运行的 URL",
     "modelHint": "输入您的提供商支持的任何模型名称，或从建议中选择一个",
+    "modelHintJlama": "必须是 owner/name 形式的 Hugging Face 仓库 ID，例如 tjake/Llama-3.2-1B-Instruct-JQ4。仅填模型名称无法解析，智能体会在第一条消息时失败。",
     "modelPlaceholder": "例如 {{model}}（或您的提供商支持的任何模型）",
     "title": "Agent 创建向导",
     "subtitle": "几分钟内创建一个完全配置的 Agent",

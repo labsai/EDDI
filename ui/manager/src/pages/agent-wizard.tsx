@@ -36,7 +36,7 @@ import {
   type CreateApiAgentRequest,
   type SetupResult,
 } from "@/lib/api/agent-setup";
-import { MODEL_SUGGESTIONS, isBaseUrlRequired } from "@/lib/model-suggestions";
+import { MODEL_SUGGESTIONS, isBaseUrlRequired, supportsBaseUrl } from "@/lib/model-suggestions";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
@@ -148,6 +148,13 @@ export function AgentWizardPage() {
       provider: providerId,
       model: "",
       apiKey: config?.needsKey === false ? "" : state.apiKey,
+      // A provider with no endpoint hides the field, so a URL left over from
+      // the previous provider would be submitted with no way to see or clear
+      // it. What the user cannot see, the wizard does not send.
+      baseUrl: supportsBaseUrl(providerId) ? state.baseUrl : "",
+      // A provider with no endpoint hides the field, so a URL left over from
+      // the previous provider would be submitted with no way to see or clear
+      // it. What the user cannot see, the wizard does not send.
     });
   }
 
@@ -743,6 +750,8 @@ function LlmStep({
   const suggestions = useMemo(() => MODEL_SUGGESTIONS[provider] ?? [], [provider]);
   const datalistId = `model-suggestions-${provider}`;
   const baseUrlRequired = isBaseUrlRequired(provider);
+  const baseUrlSupported = supportsBaseUrl(provider);
+  const inProcess = !baseUrlSupported;
 
   return (
     <div>
@@ -801,10 +810,15 @@ function LlmStep({
             ))}
           </datalist>
           <p className="mt-1 text-xs text-muted-foreground">
-            {t(
-              "setupWizard.modelHint",
-              "Type any model name supported by your provider, or pick one from the suggestions"
-            )}
+            {inProcess
+              ? t(
+                  "setupWizard.modelHintJlama",
+                  "Must be a Hugging Face repository id in owner/name form, e.g. tjake/Llama-3.2-1B-Instruct-JQ4. A bare model name cannot be resolved and the agent will fail on its first message."
+                )
+              : t(
+                  "setupWizard.modelHint",
+                  "Type any model name supported by your provider, or pick one from the suggestions"
+                )}
           </p>
         </div>
 
@@ -826,49 +840,74 @@ function LlmStep({
           </div>
         )}
 
-        {/* Base URL */}
-        <div>
-          <label
-            htmlFor="wizard-baseurl"
-            className="mb-1.5 block text-sm font-medium text-foreground"
-          >
-            {t("setupWizard.baseUrl", "Base URL")}{" "}
-            {!baseUrlRequired && (
-              <span className="text-muted-foreground font-normal">
-                ({t("setupWizard.optional", "optional")})
-              </span>
-            )}
-            {baseUrlRequired && (
-              <span className="text-primary font-normal">*</span>
-            )}
-          </label>
-          <input
-            id="wizard-baseurl"
-            type="url"
-            value={baseUrl}
-            onChange={(e) => onBaseUrlChange(e.target.value)}
-            placeholder={
-              provider === "ollama"
-                ? "http://localhost:11434"
-                : provider === "jlama"
-                  ? "http://localhost:8080"
+        {/* Base URL — omitted entirely for in-process providers, which have no
+            endpoint to address. Offering the field there is worse than useless:
+            the backend drops the value, so the agent silently ignores it. */}
+        {baseUrlSupported && (
+          <div>
+            <label
+              htmlFor="wizard-baseurl"
+              className="mb-1.5 block text-sm font-medium text-foreground"
+            >
+              {t("setupWizard.baseUrl", "Base URL")}{" "}
+              {!baseUrlRequired && (
+                <span className="text-muted-foreground font-normal">
+                  ({t("setupWizard.optional", "optional")})
+                </span>
+              )}
+              {baseUrlRequired && (
+                <span className="text-primary font-normal">*</span>
+              )}
+            </label>
+            <input
+              id="wizard-baseurl"
+              type="url"
+              value={baseUrl}
+              onChange={(e) => onBaseUrlChange(e.target.value)}
+              placeholder={
+                provider === "ollama"
+                  ? "http://localhost:11434"
                   : t("setupWizard.baseUrlPlaceholder", "Custom endpoint URL")
-            }
-            className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
-            data-testid="wizard-baseurl"
-          />
-          <p className="mt-1 text-xs text-muted-foreground">
-            {baseUrlRequired
-              ? t(
-                  "setupWizard.baseUrlHintLocal",
-                  "Required — the URL where your local model server is running"
-                )
-              : t(
-                  "setupWizard.baseUrlHintCloud",
-                  "Only needed if using a proxy, private deployment, or Azure OpenAI endpoint"
-                )}
-          </p>
-        </div>
+              }
+              className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
+              data-testid="wizard-baseurl"
+            />
+            <p className="mt-1 text-xs text-muted-foreground">
+              {baseUrlRequired
+                ? t(
+                    "setupWizard.baseUrlHintLocal",
+                    "Required — the URL where your local model server is running"
+                  )
+                : t(
+                    "setupWizard.baseUrlHintCloud",
+                    "Only needed if using a proxy, private deployment, or Azure OpenAI endpoint"
+                  )}
+            </p>
+          </div>
+        )}
+
+        {inProcess && (
+          <div
+            className="rounded-lg border border-border bg-muted/40 p-4 text-xs text-muted-foreground"
+            data-testid="wizard-jlama-note"
+          >
+            <p className="font-medium text-foreground">
+              {t("setupWizard.jlamaNoteTitle", "Jlama runs inside EDDI")}
+            </p>
+            <p className="mt-1.5">
+              {t(
+                "setupWizard.jlamaNoteBody",
+                "There is no model server to point at — EDDI loads the model into its own process and downloads the weights from Hugging Face on first use, so the first message can take a while."
+              )}
+            </p>
+            <p className="mt-1.5">
+              {t(
+                "setupWizard.jlamaNoteTuning",
+                "Running EDDI in a container? Open the agent's LLM configuration afterwards and set modelCachePath to a mounted volume — the default cache lives on the container's ephemeral layer, so the model may be re-downloaded after the container is removed or replaced. quantizeModelAtRuntime, workingDirectory and workingQuantizedType can be tuned there too."
+              )}
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

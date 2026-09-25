@@ -455,7 +455,6 @@ below before deploying it; both describe defaults that fail in a container.
       "parameters": {
         "modelName": "tjake/Llama-3.2-1B-Instruct-JQ4",
         "modelCachePath": "/var/lib/eddi/jlama",
-        "threadCount": "4",
         "temperature": "0.7",
         "maxTokens": "512",
         "timeout": "30000",
@@ -548,6 +547,20 @@ not already in the cache, so an empty cache with no egress fails rather than deg
 Ollama. It is CPU inference — there is no GPU path — so it suits small quantized models
 (1B–8B) rather than large ones. For a GPU or a larger model, serve it with vLLM or
 `llama-server` and point the `openai` provider at it via `baseUrl`.
+
+**`modelName` must be a Hugging Face repository id in `owner/name` form** — for
+example `tjake/Llama-3.2-1B-Instruct-JQ4` or
+`tjake/TinyLlama-1.1B-Chat-v1.0-Jlama-Q4`. Jlama resolves the model through its
+own registry, which downloads it from Hugging Face on first use; a bare name
+such as `llama-3.2-1b` has no owner to resolve and fails on the agent's first
+turn, long after the configuration was saved. Private repositories additionally
+need `authToken`.
+
+**There is no `baseUrl`.** Jlama runs *inside the EDDI JVM* — there is no model
+server to point at, and a `baseUrl` parameter is dropped with an
+"unrecognised parameter" warning. See the parameter table above for everything
+the builder does read; `threadCount` is deliberately absent from it — see
+"Deploying Jlama in a container" above.
 
 #### Mistral AI
 

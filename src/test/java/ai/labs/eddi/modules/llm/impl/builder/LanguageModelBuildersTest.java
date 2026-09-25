@@ -590,6 +590,29 @@ class LanguageModelBuildersTest {
         }
 
         /**
+         * {@code modelCachePath} and {@code workingDirectory} are routed through
+         * {@link ModelParameterValues#applyPath}, not a bare {@code Path.of}, precisely
+         * so that a path the platform cannot express falls back to Jlama's own default
+         * instead of throwing {@link java.nio.file.InvalidPathException} out of model
+         * construction — the same failure mode {@code applyPath} exists to prevent for
+         * every other caller.
+         */
+        @Test
+        @DisplayName("an unusable modelCachePath or workingDirectory falls back to the Jlama default")
+        void unusablePathsFallBackToDefaults() {
+            // NUL is rejected by every platform's path parser.
+            String withNul = "bad" + (char) 0 + "path";
+            Map<String, String> params = new HashMap<>();
+            params.put("modelCachePath", withNul);
+            params.put("workingDirectory", withNul);
+
+            String state = applied(params);
+
+            assertTrue(state.contains("modelCachePath=null"), state);
+            assertTrue(state.contains("workingDirectory=null"), state);
+        }
+
+        /**
          * Every key this builder declares must actually reach the Jlama builder.
          * {@code recognisedParameters()} is what suppresses the "parameter has no
          * effect" warning, so a key listed there but never read is worse than one that

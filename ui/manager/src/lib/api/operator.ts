@@ -252,7 +252,9 @@ export interface ProvisionOperatorParams {
   /** Vault reference or plain key for the LLM. Not the EDDI credential. */
   apiKey: string;
   /**
-   * Base URL of the LLM provider itself, for local models (Ollama, Jlama).
+   * Base URL of the LLM provider's own server, for a local model server
+   * (Ollama). Not Jlama, which runs in-process and has no endpoint — see
+   * `supportsBaseUrl`.
    *
    * Distinct from `apiBaseUrl`, which is the target server of the *generated
    * tools*. Sending this as `apiBaseUrl` pointed every operator tool at the

@@ -41,7 +41,7 @@ export interface CreateApiAgentRequest {
   apiKey?: string;
   /** Target server of the generated tools. */
   apiBaseUrl?: string;
-  /** Base URL of the LLM provider itself (Ollama, Jlama) — not the tool target. */
+  /** Base URL of the LLM provider's own server (Ollama) — not the tool target. */
   llmBaseUrl?: string;
   apiAuth?: string;
   endpoints?: string;
@@ -126,7 +126,10 @@ export const LLM_PROVIDERS = [
   { id: "bedrock", name: "Amazon Bedrock", defaultModel: "anthropic.claude-sonnet-5", needsKey: false },
   { id: "oracle-genai", name: "Oracle GenAI", defaultModel: "cohere.command-r-plus-v2", needsKey: false },
   { id: "ollama", name: "Ollama (Local)", defaultModel: "llama3.3:70b", needsKey: false },
-  { id: "jlama", name: "Jlama (Local)", defaultModel: "llama-3.2-1b", needsKey: false },
+  // Jlama loads from Hugging Face, so the default has to be a real `owner/name`
+  // repo id — it is shown as the model placeholder and seeds the operator
+  // activation form. See MODEL_SUGGESTIONS.jlama.
+  { id: "jlama", name: "Jlama (In-Process)", defaultModel: "tjake/Llama-3.2-1B-Instruct-JQ4", needsKey: false },
 ] as const;
 
 export type ProviderId = (typeof LLM_PROVIDERS)[number]["id"];

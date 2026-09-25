@@ -8,6 +8,8 @@ import org.jboss.logging.Logger;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
+import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
@@ -176,6 +178,34 @@ final class ModelParameterValues {
         } else {
             LOGGER.warnf("LLM parameter '%s' is not a boolean ('%s') — leaving the provider default in place.",
                     sanitize(key), sanitize(raw));
+        }
+    }
+
+    /**
+     * Filesystem-path variant of {@link #applyInt}, for provider options that take
+     * a {@link Path}.
+     * <p>
+     * {@code Path.of} throws {@link InvalidPathException} on a string the platform
+     * cannot express as a path — a Windows drive letter typed into a Linux
+     * deployment, say. That is the same class of mistake as a mistyped
+     * {@code topP}, so it is treated the same way: log which key was rejected and
+     * leave the provider default in place, rather than failing every conversation
+     * the agent serves.
+     */
+    static void applyPath(Map<String, String> parameters, String key, Consumer<Path> setter) {
+        String raw = rawValue(parameters, key);
+        if (raw == null) {
+            return;
+        }
+        try {
+            setter.accept(Path.of(raw));
+        } catch (InvalidPathException e) {
+            // The configured value itself is never logged: an invalid path can still
+            // carry a real filesystem path (a username's home directory, an internal
+            // project name) even though it fails Path.of, so echoing it back would leak
+            // that into the log for no diagnostic gain the key name doesn't already give.
+            LOGGER.warnv("LLM parameter ''{0}'' is not a usable filesystem path — "
+                    + "falling back to the model default.", sanitize(key));
         }
     }
 
