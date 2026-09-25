@@ -57,7 +57,7 @@ public class OutputTemplateTask implements ILifecycleTask {
     private final IDataFactory dataFactory;
     private final ObjectMapper objectMapper;
 
-    private static final Logger log = Logger.getLogger(OutputTemplateTask.class);
+    private static final Logger LOGGER = Logger.getLogger(OutputTemplateTask.class);
 
     @Inject
     public OutputTemplateTask(ITemplatingEngine templatingEngine, IMemoryItemConverter memoryItemConverter, IDataFactory dataFactory,
@@ -159,7 +159,7 @@ public class OutputTemplateTask implements ILifecycleTask {
             try {
                 return templatingEngine.processTemplate(value, contextMap, templateMode);
             } catch (ITemplatingEngine.TemplateEngineException e) {
-                log.errorf(e, "Template processing failed for '%s' (mode %s), substituting an empty string. Template was: %s", dataKey,
+                LOGGER.errorf(e, "Template processing failed for '%s' (mode %s), substituting an empty string. Template was: %s", dataKey,
                         templateMode, value);
                 return FAILED_TEMPLATE_SUBSTITUTE;
             }

@@ -55,7 +55,7 @@ public class RulesEvaluationTask implements ILifecycleTask {
     private static final boolean appendActionsDefault = true;
     private static final boolean expressionsAsActionsDefault = false;
 
-    private static final Logger log = Logger.getLogger(RulesEvaluationTask.class);
+    private static final Logger LOGGER = Logger.getLogger(RulesEvaluationTask.class);
 
     @Inject
     public RulesEvaluationTask(IResourceClientLibrary resourceClientLibrary, IJsonSerialization jsonSerialization,
@@ -89,7 +89,7 @@ public class RulesEvaluationTask implements ILifecycleTask {
 
         } catch (RulesEvaluator.RuleExecutionException e) {
             String msg = "Error while evaluating behavior rules!";
-            log.error(msg, e);
+            LOGGER.error(msg, e);
             throw new LifecycleException(msg, e);
         } catch (InterruptedException e) {
             // B2: the pipeline's graceful-stop signal IS the thread's interrupt flag —
@@ -98,7 +98,7 @@ public class RulesEvaluationTask implements ILifecycleTask {
             // flag before returning normally; otherwise the remaining tasks of an
             // interrupted turn keep running.
             Thread.currentThread().interrupt();
-            log.warn(e.getLocalizedMessage(), e);
+            LOGGER.warn(e.getLocalizedMessage(), e);
         }
     }
 
@@ -188,17 +188,17 @@ public class RulesEvaluationTask implements ILifecycleTask {
             return new RulesEvaluator(behaviorSet, appendActions, expressionsAsActions);
         } catch (IOException | DeserializationException e) {
             String message = "Error while configuring RuleLifecycleTask!";
-            log.debug(message, e);
+            LOGGER.debug(message, e);
             throw new WorkflowConfigurationException(message, e);
         } catch (IllegalArgumentException e) {
             // an invalid behavior rule condition — surface the offending rule instead of
             // letting the workflow start with a condition that can never evaluate itself
             String message = "Invalid behavior rules configuration!\n" + e.getMessage();
-            log.debug(message, e);
+            LOGGER.debug(message, e);
             throw new WorkflowConfigurationException(message, e);
         } catch (ServiceException e) {
             String message = "Error while fetching RuleConfigurationSet!\n" + e.getLocalizedMessage();
-            log.debug(message, e);
+            LOGGER.debug(message, e);
             throw new WorkflowConfigurationException(message, e);
         }
     }
