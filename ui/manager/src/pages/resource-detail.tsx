@@ -41,7 +41,11 @@ import {
 } from "@/lib/api/resource-usage";
 import { useJsonSchema } from "@/hooks/use-json-schema";
 import type { CascadeContext } from "@/lib/api/cascade-save";
-import { cascadeVersionUpdate } from "@/lib/api/cascade-save";
+import {
+  cascadePartialResult,
+  cascadeVersionUpdate,
+  nextCascadeContext,
+} from "@/lib/api/cascade-save";
 import { VersionDiffDialog } from "@/components/editors/version-diff-dialog";
 import { getResource } from "@/lib/api/resources";
 import { useAgentContext } from "@/hooks/use-agent-context";
@@ -178,6 +182,23 @@ export function ResourceDetailPage() {
       })
     : [{ version: currentVersion ?? 1 }];
 
+  /**
+   * After a cascade that failed partway, move this page onto the versions that
+   * now exist. The resource (and perhaps the workflow) already carries a new
+   * version, so a retry that still addressed the old one 409'd on every attempt
+   * until a reload — which discarded the edit being saved.
+   */
+  const adoptPartialCascade = useCallback((err: unknown) => {
+    const partial = cascadePartialResult(err);
+    if (!partial) return;
+    if (partial.newResourceVersion !== undefined) {
+      setCurrentVersion(partial.newResourceVersion);
+    }
+    if (partial.retryContext) {
+      setCascadeContext(partial.retryContext);
+    }
+  }, []);
+
   // All hooks are above — safe to do early returns below
 
   const handleSave = useCallback(
@@ -256,13 +277,12 @@ export function ResourceDetailPage() {
                 setSaveSuccess(true);
                 setCurrentVersion(result.newResourceVersion);
                 // Update cascade context so next save uses new versions
-                setCascadeContext({
-                  ...cascadeContext,
-                  workflowVersion: result.newWorkflowVersion ?? cascadeContext.workflowVersion,
-                  agentVersion: newAgentVersion ?? cascadeContext.agentVersion,
-                });
+                setCascadeContext(nextCascadeContext(cascadeContext, result));
               },
-              onError: (err) => toast.error(getErrorMessage(err)),
+              onError: (err) => {
+                adoptPartialCascade(err);
+                toast.error(getErrorMessage(err));
+              },
             }
           );
         } else {
@@ -306,7 +326,7 @@ export function ResourceDetailPage() {
         // Invalid JSON — shouldn't happen, ConfigEditorLayout validates
       }
     },
-    [id, currentVersion, cascadeSave, cascadeContext, rt, t, queryClient]
+    [id, currentVersion, cascadeSave, cascadeContext, rt, t, queryClient, adoptPartialCascade]
   );
 
   const handleSaveAndDeploy = useCallback(
@@ -317,19 +337,21 @@ export function ResourceDetailPage() {
         await saveAndDeploy({
           agentId: agentCtx.agentId,
           save: async () => {
-            const result = await cascadeSave.mutateAsync({
-              id: id ?? "",
-              version: currentVersion,
-              body: parsed,
-              context: cascadeContext,
-            });
+            let result;
+            try {
+              result = await cascadeSave.mutateAsync({
+                id: id ?? "",
+                version: currentVersion,
+                body: parsed,
+                context: cascadeContext,
+              });
+            } catch (err) {
+              adoptPartialCascade(err);
+              throw err;
+            }
             setCurrentVersion(result.newResourceVersion);
             // Update cascade context so next Save & Test uses correct versions
-            setCascadeContext(prev => prev ? {
-              ...prev,
-              workflowVersion: result.newWorkflowVersion ?? prev.workflowVersion,
-              agentVersion: result.newAgentVersion ?? prev.agentVersion,
-            } : prev);
+            setCascadeContext(prev => prev ? nextCascadeContext(prev, result) : prev);
             return { newAgentVersion: result.newAgentVersion ?? agentCtx.agentVer };
           },
         });
@@ -337,7 +359,7 @@ export function ResourceDetailPage() {
         // Error handled inside saveAndDeploy
       }
     },
-    [id, currentVersion, cascadeSave, cascadeContext, agentCtx, saveAndDeploy]
+    [id, currentVersion, cascadeSave, cascadeContext, agentCtx, saveAndDeploy, adoptPartialCascade]
   );
 
   const handleCascadeConfirm = useCallback(
@@ -370,6 +392,16 @@ export function ResourceDetailPage() {
                 workflowVersion,
                 agentId: usage.agentId,
                 agentVersion,
+                /*
+                 * A workflow shared by two agents has moved on after the first
+                 * one's cascade, but the second agent still references the
+                 * version the usage scan found. Say so — the cascade checks the
+                 * agent's reference before it writes, and an agent pointing at
+                 * a version other than the one it expects is refused.
+                 */
+                ...(workflowVersion !== usage.workflowVersion
+                  ? { agentWorkflowVersion: usage.workflowVersion }
+                  : {}),
               },
             );
 
@@ -379,8 +411,15 @@ export function ResourceDetailPage() {
             if (result.newAgentVersion) {
               updatedAgentVersions.set(usage.agentId, result.newAgentVersion);
             }
-          } catch {
+          } catch (err) {
             failCount++;
+            // The workflow may already carry the new reference even though the
+            // agent hop failed; a later usage of the same workflow must build on
+            // that version, not 409 on the one it replaced.
+            const partial = cascadePartialResult(err);
+            if (partial?.newWorkflowVersion !== undefined) {
+              updatedWorkflowVersions.set(usage.workflowId, partial.newWorkflowVersion);
+            }
           }
         }
       } finally {
