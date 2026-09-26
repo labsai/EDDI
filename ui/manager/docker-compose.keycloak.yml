@@ -47,6 +47,7 @@ services:
 volumes:
   mongodb-db:
 
-# Log in as viewer/viewer or user/user. The `eddi` administrator ships without a
-# credential (helm/eddi/templates/NOTES.txt explains why) — set one in the Keycloak
-# admin console at http://localhost:8180 (admin/admin) if you need admin rights.
+# No account in the shipped realm has a password (helm/eddi/templates/NOTES.txt
+# explains why). Set one for `eddi`, `viewer` or `user` in the Keycloak admin
+# console at http://localhost:8180 — log in there with the bootstrap admin pair
+# set on the keycloak service above.

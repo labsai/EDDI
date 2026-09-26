@@ -36,11 +36,11 @@ docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
 
 | Service    | URL                        | Credentials    |
 |------------|----------------------------|----------------|
-| Grafana    | http://localhost:3000       | admin / admin  |
+| Grafana    | http://localhost:3000       | admin / `GRAFANA_ADMIN_PASSWORD` |
 | Prometheus | http://localhost:9090       | —              |
 | Metrics    | http://localhost:7070/q/metrics | —          |
 
-Log in to Grafana with `admin` / `admin`, then open **Dashboards → EDDI** — the provisioned folder holding all three. Grafana's built-in Home is still the landing page; anonymous access is not enabled.
+The overlay has no default Grafana password and refuses to start without `GRAFANA_ADMIN_PASSWORD` in `.env` (the installers generate one). Every port is published on `127.0.0.1` only. Log in to Grafana with `admin` and that password, then open **Dashboards → EDDI** — the provisioned folder holding all three. Grafana's built-in Home is still the landing page; anonymous access is not enabled.
 
 ### Dashboard Sections
 

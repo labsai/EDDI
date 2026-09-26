@@ -53,8 +53,6 @@ DEFAULT_EDDI_VERSION="latest"
 NETWORK_TAG="eddi-server"
 FIREWALL_RULE_HTTP="allow-eddi-http"
 FIREWALL_RULE_HTTPS="allow-eddi-https"
-FIREWALL_RULE_KC="allow-eddi-keycloak"
-FIREWALL_RULE_GRAFANA="allow-eddi-grafana"
 FIREWALL_RULE_NGINX_HTTP="allow-eddi-nginx-http"
 FIREWALL_RULE_NGINX_HTTPS="allow-eddi-nginx-https"
 
@@ -233,15 +231,15 @@ setup_firewall_rules() {
   ensure_firewall_rule "$FIREWALL_RULE_HTTPS" \
     "$EDDI_HTTPS_PORT" "EDDI HTTPS (direct)"
 
-  if [[ "$WITH_AUTH" == "true" ]]; then
-    ensure_firewall_rule "$FIREWALL_RULE_KC" \
-      "8180" "EDDI Keycloak authentication portal (direct)"
-  fi
-
-  if [[ "$WITH_MONITORING" == "true" ]]; then
-    ensure_firewall_rule "$FIREWALL_RULE_GRAFANA" \
-      "3000,9090" "EDDI Grafana + Prometheus"
-  fi
+  # No rule for Keycloak (8180) or Grafana/Prometheus (3000/9090) any more.
+  # docker-compose.auth.yml and docker-compose.monitoring.yml publish them on
+  # 127.0.0.1 only, so a firewall rule would open nothing — and when they were
+  # published on every interface, these rules put the Keycloak master-realm
+  # admin and Grafana, both admin/admin at the time, on the public internet.
+  # Keycloak is reached through nginx with --https; Grafana and Prometheus
+  # through an SSH tunnel (printed at the end). A VM provisioned earlier keeps
+  # its old rules: delete them with
+  #   gcloud compute firewall-rules delete allow-eddi-keycloak allow-eddi-grafana
 
   # nginx ports — needed for Let's Encrypt HTTP-01 challenge and HTTPS traffic
   if [[ "$SETUP_HTTPS" == "true" ]]; then
@@ -553,10 +551,15 @@ OVERRIDE_EOF
   # ── Update Keycloak client with HTTPS redirect URIs ───────────────────────────
   echo "Updating Keycloak eddi-frontend client..."
   KC_TOKEN=""
+  # install.sh generated this and stored it in .env; the compose overlay no
+  # longer has an admin/admin default. The password travels on stdin.
+  KC_ADMIN_USER=\$(grep -m1 '^KEYCLOAK_ADMIN_USERNAME=' "\${EDDI_DIR}/.env" | cut -d= -f2- | tr -d "'\"") || KC_ADMIN_USER=""
+  KC_ADMIN_PW=\$(grep -m1 '^KEYCLOAK_ADMIN_PASSWORD=' "\${EDDI_DIR}/.env" | cut -d= -f2- | tr -d "'\"") || KC_ADMIN_PW=""
   for attempt in \$(seq 1 18); do
-    KC_TOKEN=\$(curl -sf -X POST \\
+    KC_TOKEN=\$(printf '%s' "\${KC_ADMIN_PW}" | curl -sf -X POST \\
       "http://localhost:8180/realms/master/protocol/openid-connect/token" \\
-      -d "client_id=admin-cli&username=admin&password=admin&grant_type=password" \\
+      --data-urlencode "client_id=admin-cli" --data-urlencode "grant_type=password" \\
+      --data-urlencode "username=\${KC_ADMIN_USER:-admin}" --data-urlencode "password@-" \\
       2>/dev/null | jq -r '.access_token // empty' 2>/dev/null) || KC_TOKEN=""
     [[ -n "\${KC_TOKEN:-}" ]] && break
     echo "  Waiting for Keycloak admin API... (\${attempt}/18)"
@@ -763,19 +766,23 @@ print_success() {
 
   if [[ "$WITH_AUTH" == "true" && "$SETUP_HTTPS" != "true" ]]; then
     echo ""
-    echo -e "  ${BOLD}Keycloak${RESET}     ${CYAN}http://${EXTERNAL_IP}:8180${RESET}"
+    echo -e "  ${BOLD}Keycloak${RESET}     ${DIM}bound to the VM's loopback — tunnel it:${RESET}"
+    echo -e "  ${DIM}  gcloud compute ssh ${VM_NAME} --zone=${ZONE} -- -L 8180:localhost:8180${RESET}"
   fi
 
   if [[ "$WITH_AUTH" == "true" ]]; then
     echo ""
-    echo -e "  ${DIM}Login:  eddi / eddi  (admin)  •  viewer / viewer  (read-only)${RESET}"
-    echo -e "  ${DIM}Keycloak console admin: admin / admin${RESET}"
+    echo -e "  ${DIM}Login: install.sh printed a one-time password for \`eddi\` in the startup log${RESET}"
+    echo -e "  ${DIM}  (sudo journalctl -u google-startup-scripts | grep -A3 Login). No account ships${RESET}"
+    echo -e "  ${DIM}  a default password any more. Keycloak console admin: KEYCLOAK_ADMIN_PASSWORD${RESET}"
+    echo -e "  ${DIM}  in /root/.eddi/.env on the VM.${RESET}"
   fi
 
   if [[ "$WITH_MONITORING" == "true" ]]; then
     echo ""
-    echo -e "  ${BOLD}Grafana${RESET}      ${CYAN}http://${EXTERNAL_IP}:3000${RESET}  ${DIM}(admin/admin)${RESET}"
-    echo -e "  ${BOLD}Prometheus${RESET}   ${CYAN}http://${EXTERNAL_IP}:9090${RESET}"
+    echo -e "  ${BOLD}Grafana${RESET}      ${DIM}bound to the VM's loopback — tunnel it:${RESET}"
+    echo -e "  ${DIM}  gcloud compute ssh ${VM_NAME} --zone=${ZONE} -- -L 3000:localhost:3000 -L 9090:localhost:9090${RESET}"
+    echo -e "  ${DIM}  admin / GRAFANA_ADMIN_PASSWORD in /root/.eddi/.env on the VM${RESET}"
   fi
 
   echo ""

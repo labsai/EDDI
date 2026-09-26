@@ -3,7 +3,9 @@ services:
     image: chromadb/chroma:1.1.0
     restart: always
     ports:
-      - "${CHROMA_PORT:-8000}:8000"
+      # 127.0.0.1 only. Chroma runs without authentication; on every interface
+      # anyone on the same network could read or overwrite the embeddings.
+      - "127.0.0.1:${CHROMA_PORT:-8000}:8000"
     volumes:
       - chroma-data:/chroma/chroma
     environment:

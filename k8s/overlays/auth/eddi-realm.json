@@ -482,7 +482,7 @@
       "publicClient": true,
       "bearerOnly": false,
       "standardFlowEnabled": true,
-      "directAccessGrantsEnabled": true,
+      "directAccessGrantsEnabled": false,
       "redirectUris": [
         "http://localhost:*",
         "https://localhost:*",
@@ -638,13 +638,6 @@
       "email": "viewer@localhost",
       "enabled": true,
       "emailVerified": true,
-      "credentials": [
-        {
-          "type": "password",
-          "value": "viewer",
-          "temporary": true
-        }
-      ],
       "realmRoles": [
         "eddi-viewer"
       ]
@@ -656,13 +649,6 @@
       "email": "user@localhost",
       "enabled": true,
       "emailVerified": true,
-      "credentials": [
-        {
-          "type": "password",
-          "value": "user",
-          "temporary": true
-        }
-      ],
       "realmRoles": [
         "eddi-user"
       ]

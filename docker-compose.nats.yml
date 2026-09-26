@@ -28,8 +28,11 @@ services:
     image: nats:2.10-alpine
     command: ["--jetstream", "--store_dir=/data", "-m", "8222"]
     ports:
-      - "4222:4222"   # Client connections
-      - "8222:8222"   # HTTP monitoring
+      # 127.0.0.1 only. NATS here runs without authentication, and on every
+      # interface anyone on the same network could publish into EDDI's
+      # conversation streams or read them from the monitoring port.
+      - "127.0.0.1:4222:4222"   # Client connections
+      - "127.0.0.1:8222:8222"   # HTTP monitoring
     volumes:
       - nats-data:/data
     restart: unless-stopped

@@ -16,8 +16,8 @@
 # eddi.ollama.default-base-url (EDDI_OLLAMA_DEFAULT_BASE_URL), so the Manager's
 # agent wizard and the setup API pre-fill something that actually resolves.
 #
-# The port is still published on the host, so `ollama run …` and curl against
-# http://localhost:11434 keep working from your shell.
+# The port is still published on the host (loopback only), so `ollama run …`
+# and curl against http://localhost:11434 keep working from your shell.
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
@@ -39,8 +39,10 @@ services:
     image: ollama/ollama:0.34.0
     restart: always
     ports:
-      # Host-visible so the `ollama` CLI and curl still reach it directly.
-      - "${OLLAMA_PORT:-11434}:11434"
+      # Host-visible so the `ollama` CLI and curl still reach it directly — on
+      # 127.0.0.1 only. Ollama has no authentication, and on every interface
+      # anyone on the same network could run (and pull) models on this machine.
+      - "127.0.0.1:${OLLAMA_PORT:-11434}:11434"
     volumes:
       # Named volume, so pulled models survive `docker compose down`. Model
       # weights are measured in gigabytes — re-pulling them on every restart is

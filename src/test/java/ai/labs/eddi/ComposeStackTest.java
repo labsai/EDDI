@@ -85,6 +85,29 @@ class ComposeStackTest {
 
     private static final YAMLMapper YAML = new YAMLMapper();
 
+    /**
+     * The services a compose stack is FOR, which a user reaches from a browser or
+     * an SDK and which are published on every interface on purpose. Everything else
+     * is infrastructure.
+     */
+    private static final Set<String> USER_FACING_SERVICES = Set.of("eddi", "open-webui");
+
+    /**
+     * Host addresses an infrastructure port may be published on: the loopback
+     * literal, or a variable that DEFAULTS to it (an operator exposing Keycloak
+     * deliberately, behind TLS, sets {@code KEYCLOAK_BIND_ADDRESS}).
+     */
+    private static final Pattern LOOPBACK_PUBLISH = Pattern.compile(
+            "^(127\\.0\\.0\\.1|\\$\\{[A-Z_]+_BIND_ADDRESS:-127\\.0\\.0\\.1\\}):.+");
+
+    /**
+     * Administrator passwords of the bundled third-party services. Each must come
+     * from a REQUIRED variable ({@code ${VAR:?message}}), never a literal and never
+     * a {@code :-} default.
+     */
+    private static final Set<String> ADMIN_PASSWORD_VARIABLES = Set.of("KC_BOOTSTRAP_ADMIN_PASSWORD",
+            "GF_SECURITY_ADMIN_PASSWORD");
+
     private static List<Path> composeFiles() {
         try (Stream<Path> files = Files.list(Path.of("").toAbsolutePath())) {
             return files.filter(Files::isRegularFile)
@@ -259,6 +282,90 @@ class ComposeStackTest {
         assertEquals(Set.of(), missing,
                 README + " documents compose files that do not exist. A stale `-f <file>` is a copy-paste command"
                         + " that fails with 'no such file' on a first-run user's terminal.");
+    }
+
+    /**
+     * Keycloak (the master-realm superuser, which can mint an eddi-admin for
+     * anyone), Grafana, Prometheus, the Jaeger UI and OTLP, NATS, Chroma and Ollama
+     * were all published on {@code 0.0.0.0}. Most of them have no authentication at
+     * all, and the two that do shipped as {@code admin}/{@code admin} — so anyone
+     * on the same LAN or Wi-Fi as a developer running the stack could administer
+     * its identity provider or run models on the machine. {@code install.sh} labels
+     * the Keycloak option "production".
+     * <p>
+     * The base file already bound MongoDB to {@code 127.0.0.1}; this holds every
+     * infrastructure port to the same rule. Only the services a user is meant to
+     * reach ({@link #USER_FACING_SERVICES}) may take a bare {@code host:container}
+     * mapping, which publishes on every interface.
+     */
+    @Test
+    @DisplayName("only the user-facing services are published beyond loopback")
+    void infrastructurePortsArePublishedOnLoopbackOnly() {
+        List<String> offenders = new ArrayList<>();
+        int checked = 0;
+        for (Path file : composeFiles()) {
+            for (var entry : services(file).entrySet()) {
+                if (USER_FACING_SERVICES.contains(entry.getKey())) {
+                    continue;
+                }
+                for (JsonNode port : entry.getValue().path("ports")) {
+                    checked++;
+                    String mapping = port.isTextual() ? port.asText() : port.path("host_ip").asText("") + ":";
+                    if (!LOOPBACK_PUBLISH.matcher(mapping).matches()) {
+                        offenders.add(name(file) + " publishes `" + entry.getKey() + "` as `" + mapping + "`");
+                    }
+                }
+            }
+        }
+        assertTrue(checked > 0, "no infrastructure port found at all — the sweep would be vacuous");
+        assertEquals(List.of(), offenders,
+                "an infrastructure service is published on every interface. Prefix the mapping with 127.0.0.1: (or a"
+                        + " *_BIND_ADDRESS variable defaulting to it) — the containers reach each other over the compose"
+                        + " network, so the host binding is only for the developer's own shell.");
+    }
+
+    /**
+     * {@code KC_BOOTSTRAP_ADMIN_PASSWORD: admin} and
+     * {@code GF_SECURITY_ADMIN_PASSWORD: admin} were literals, and a literal is a
+     * default nobody changes. {@code ${VAR:?message}} is the only compose form that
+     * refuses to start without a value AND says what to set; {@code ${VAR:-admin}}
+     * would be the same hole behind one more indirection.
+     */
+    @Test
+    @DisplayName("bundled admin passwords come from required variables, never a default")
+    void adminPasswordsHaveNoDefault() {
+        List<String> offenders = new ArrayList<>();
+        int checked = 0;
+        for (Path file : composeFiles()) {
+            for (var entry : services(file).entrySet()) {
+                JsonNode environment = entry.getValue().path("environment");
+                for (String variable : ADMIN_PASSWORD_VARIABLES) {
+                    String value = null;
+                    if (environment.isObject() && environment.has(variable)) {
+                        value = environment.get(variable).asText();
+                    } else if (environment.isArray()) {
+                        for (JsonNode item : environment) {
+                            if (item.asText().startsWith(variable + "=")) {
+                                value = item.asText().substring(variable.length() + 1);
+                            }
+                        }
+                    }
+                    if (value == null) {
+                        continue;
+                    }
+                    checked++;
+                    if (!value.matches("^\\$\\{[A-Z_]+:\\?[^}]+\\}$")) {
+                        offenders.add(name(file) + " sets " + variable + " on `" + entry.getKey() + "` to `" + value + "`");
+                    }
+                }
+            }
+        }
+        assertEquals(ADMIN_PASSWORD_VARIABLES.size(), checked,
+                "expected each of " + ADMIN_PASSWORD_VARIABLES + " exactly once across the compose files — a renamed"
+                        + " variable would otherwise leave this sweep checking nothing");
+        assertEquals(List.of(), offenders,
+                "an administrator password has a literal value or a default. Use ${SOME_VARIABLE:?what to set}, so"
+                        + " `docker compose up` refuses to start without one and says why.");
     }
 
     /**

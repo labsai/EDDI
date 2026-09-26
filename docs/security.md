@@ -44,13 +44,17 @@ bash install.sh --with-auth
 .\install.ps1 -WithAuth
 ```
 
-This starts Keycloak alongside EDDI with pre-configured realm, clients, and test users:
+This starts Keycloak alongside EDDI with a pre-configured realm, clients and accounts. **No account ships with a password**, and the installer generates the Keycloak bootstrap admin password rather than using a default:
 
 | User | Password | Role | Notes |
 |------|----------|------|-------|
-| `eddi` | *none* | `eddi-admin`, `eddi-editor`, `eddi-viewer` | Full access (`eddi-viewer` included deliberately — there is no role hierarchy, so an admin without it is refused every MCP read tool). Ships without a password: set one at `http://localhost:8180/admin` (`admin`/`admin`) → Users → eddi → Credentials |
-| `viewer` | `viewer` | `eddi-viewer` | Read-only access. Development only: no password change is forced |
-| `user` | `user` | `eddi-user` | Standard user access. Development only: no password change is forced |
+| `eddi` | one-time, printed by the installer | `eddi-admin`, `eddi-editor`, `eddi-viewer` | Full access (`eddi-viewer` included deliberately — there is no role hierarchy, so an admin without it is refused every MCP read tool). Keycloak asks for a new password at the first login |
+| `viewer` | *none* (`--demo-users` / `-DemoUsers` sets a one-time one) | `eddi-viewer` | Read-only access |
+| `user` | *none* (`--demo-users` / `-DemoUsers` sets a one-time one) | `eddi-user` | Standard user access |
+
+The Keycloak admin console is at `http://localhost:8180/admin` — bound to `127.0.0.1` — with the user `admin` and the `KEYCLOAK_ADMIN_PASSWORD` from `~/.eddi/.env`. The public `eddi-frontend` client does not allow the password grant: the Manager signs in with the authorization-code flow.
+
+> **Upgrading an existing install.** These accounts used to ship as `viewer`/`viewer` and `user`/`user`, the console as `admin`/`admin`, and the password grant was on. Realm import is one-shot, so an existing Keycloak volume keeps all of that until it is changed. Re-running the installer changes the console password to the generated one, turns the password grant off and gives `eddi` a first password if it has none; it leaves `viewer` and `user` alone, so reset or delete their credentials in the console if you never changed them.
 
 ### Configuration Properties
 

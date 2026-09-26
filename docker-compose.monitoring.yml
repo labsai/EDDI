@@ -5,9 +5,22 @@
 #
 # Access (host ports; override any of them in .env):
 #   Prometheus:  http://localhost:9090   PROMETHEUS_PORT
-#   Grafana:     http://localhost:3000   GRAFANA_PORT     (admin/admin)
+#   Grafana:     http://localhost:3000   GRAFANA_PORT     (admin / GRAFANA_ADMIN_PASSWORD)
 #   Jaeger UI:   http://localhost:16686  JAEGER_PORT
 #   Jaeger OTLP: 4317 / 4318             OTLP_GRPC_PORT / OTLP_HTTP_PORT
+#
+# ⚠️  GRAFANA_ADMIN_PASSWORD must be set (in .env or the environment) or
+# `docker compose up` refuses to start — it used to be hard-coded admin/admin:
+#   echo "GRAFANA_ADMIN_PASSWORD=$(openssl rand -base64 24)" >> .env
+# install.sh / install.ps1 --with-monitoring generate it. Grafana applies it only
+# when it creates its database, so an existing grafana-data volume keeps the
+# password it had (the old admin/admin, unless changed) — change it in Grafana,
+# or re-run the installer, which does it for you.
+#
+# Every port is published on 127.0.0.1 only. None of these services is meant
+# for the network: Prometheus and the Jaeger UI have no authentication at all,
+# and OTLP accepts spans from anyone who can reach it. Expose one deliberately
+# behind a proxy that authenticates.
 #
 # These are host bindings only -- the containers reach each other on the compose
 # network using the service name and the internal port (prometheus:9090,
@@ -30,7 +43,7 @@ services:
     image: prom/prometheus:v3.4.0
     container_name: eddi-prometheus
     ports:
-      - "${PROMETHEUS_PORT:-9090}:9090"
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
     volumes:
       - ./docs/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
@@ -44,7 +57,7 @@ services:
     image: grafana/grafana:11.6.0
     container_name: eddi-grafana
     ports:
-      - "${GRAFANA_PORT:-3000}:3000"
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
     volumes:
       - ./docs/monitoring/eddi-grafana-dashboard.json:/var/lib/grafana/dashboards/eddi.json:ro
       # The provider globs this directory, so a second dashboard needs no
@@ -60,7 +73,9 @@ services:
       - grafana-data:/var/lib/grafana
     environment:
       GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin
+      # No default: `:?` stops `docker compose up` with this message instead of
+      # starting Grafana as admin/admin.
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD is not set - add GRAFANA_ADMIN_PASSWORD=<a strong password> to .env (openssl rand -base64 24). See the header of docker-compose.monitoring.yml}"
       GF_USERS_ALLOW_SIGN_UP: "false"
     restart: unless-stopped
 
@@ -68,9 +83,9 @@ services:
     image: jaegertracing/jaeger:2.7.0
     container_name: eddi-jaeger
     ports:
-      - "${JAEGER_PORT:-16686}:16686"
-      - "${OTLP_GRPC_PORT:-4317}:4317"
-      - "${OTLP_HTTP_PORT:-4318}:4318"
+      - "127.0.0.1:${JAEGER_PORT:-16686}:16686"
+      - "127.0.0.1:${OTLP_GRPC_PORT:-4317}:4317"
+      - "127.0.0.1:${OTLP_HTTP_PORT:-4318}:4318"
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
     restart: unless-stopped
