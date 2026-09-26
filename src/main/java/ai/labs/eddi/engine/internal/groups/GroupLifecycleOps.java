@@ -217,6 +217,11 @@ public class GroupLifecycleOps {
         return conversationStore.listByGroupId(groupId, index, limit);
     }
 
+    public List<GroupConversation> listGroupConversations(String groupId, String ownerUserId, int index, int limit)
+            throws IResourceStore.ResourceStoreException {
+        return conversationStore.listByGroupId(groupId, ownerUserId, index, limit);
+    }
+
     public GroupConversation followUpWithMember(String groupConversationId, String targetAgentId, String question)
             throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
 

@@ -181,6 +181,35 @@ class GroupConversationStoreTest {
         assertTrue(result.isEmpty());
     }
 
+    @Test
+    @DisplayName("listByGroupId(owner) — the owner is part of the QUERY, escaped and re-checked exactly")
+    void listByGroupId_ownerRestrictedInTheQuery() throws Exception {
+        IResourceStore.IResourceId ownId = mock(IResourceStore.IResourceId.class);
+        when(ownId.getId()).thenReturn("gc-own");
+        IResourceStore.IResourceId foreignId = mock(IResourceStore.IResourceId.class);
+        when(foreignId.getId()).thenReturn("gc-foreign");
+        ArgumentCaptor<IResourceFilter.QueryFilters[]> filters = ArgumentCaptor.forClass(IResourceFilter.QueryFilters[].class);
+        when(storage.findResources(filters.capture(), anyString(), eq(20), eq(10))).thenReturn(List.of(ownId, foreignId));
+        GroupConversation own = new GroupConversation();
+        own.setUserId("bob.smith");
+        GroupConversation foreign = new GroupConversation();
+        foreign.setUserId("bobXsmith");
+        IResourceStorage.IResource<GroupConversation> ownResource = mock(IResourceStorage.IResource.class);
+        when(ownResource.getData()).thenReturn(own);
+        IResourceStorage.IResource<GroupConversation> foreignResource = mock(IResourceStorage.IResource.class);
+        when(foreignResource.getData()).thenReturn(foreign);
+        when(storage.read("gc-own", 1)).thenReturn(ownResource);
+        when(storage.read("gc-foreign", 1)).thenReturn(foreignResource);
+
+        List<GroupConversation> result = store.listByGroupId("group-1", "bob.smith", 20, 10);
+
+        assertEquals(List.of(own), result, "a regex over-match never reaches the caller");
+        var queryFilters = filters.getValue()[0].getQueryFilters();
+        assertEquals(2, queryFilters.size(), "group AND owner, so paging covers only the owner's conversations");
+        assertEquals("userId", queryFilters.get(1).getField());
+        assertEquals("^bob\\.smith$", queryFilters.get(1).getFilter());
+    }
+
     // ==================== compareAndSetState ====================
 
     @Test

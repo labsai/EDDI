@@ -35,6 +35,16 @@ public interface IGroupConversationStore {
     List<GroupConversation> listByGroupId(String groupId, int index, int limit) throws IResourceStore.ResourceStoreException;
 
     /**
+     * As {@link #listByGroupId(String, int, int)}, restricted to conversations
+     * owned by {@code ownerUserId} ({@code null} = every owner). The owner
+     * restriction is part of the QUERY, so {@code index}/{@code limit} page through
+     * the caller's own conversations — filtering a page after fetching it handed a
+     * non-admin short or empty pages while their conversations sat on later ones.
+     */
+    List<GroupConversation> listByGroupId(String groupId, String ownerUserId, int index, int limit)
+            throws IResourceStore.ResourceStoreException;
+
+    /**
      * Atomically transition a group conversation from expectedState to newState.
      * Returns true if the transition succeeded (state matched), false if the state
      * had already changed (concurrent modification).

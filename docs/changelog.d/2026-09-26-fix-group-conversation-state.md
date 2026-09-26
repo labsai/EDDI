@@ -63,6 +63,30 @@ id), nothing runs until `launch()` after the claim is won, and a lost claim call
   contribution), with "[N earlier contribution(s) omitted]" — it used to be every contribution concatenated, re-sent
   at every boundary and eventually past the summarizer's context window.
 
+**Timed-out PARALLEL members were anonymous.** When the batch deadline released a parallel speaker (or its turn
+errored), the orchestrator recorded a `SKIPPED`/`ERROR` entry for `"unknown"` and fired no `speaker_complete` for it —
+only successful entries did. The transcript could not say who timed out, and a client that showed the member typing
+on `speaker_start` kept showing it forever (the backend half of the Workforce "typing indicator forever" finding).
+Every outcome is now attributed to its speaker and closed with `speaker_complete` (null content for a skip).
+
+**Workforce history owner filter ran after pagination.** `GET /groups/{groupId}/conversations` (and MCP
+`list_group_conversations`) fetched a page of everyone's conversations and then removed the ones a non-admin does not
+own, so non-admins got short or empty pages while their conversations sat on later ones. The owner restriction is now
+part of the store query (`IGroupConversationStore.listByGroupId(groupId, ownerUserId, index, limit)`, the userId
+escaped and anchored like the erasure sweep and re-checked exactly), so `index`/`limit` page through the caller's own
+conversations. The REST shape is unchanged; the UI needs no change to benefit.
+
+### Deferred / notes
+
+- *Timed-out member writes*: read as the attribution + `speaker_complete` defect above. A related gap stays open: with
+  `onAgentFailure: RETRY`, a member whose attempt timed out is re-sent a turn while the first may still be running on
+  the coordinator (the conversation queue serializes them), so the member can execute twice. Fixing it needs the
+  member turn cancelled through the coordinator, which is its own change.
+- Merges with `fix/gdpr-erasure`: `GroupConversationStore.update` is identical on both branches; that branch also
+  renames `activeTokens` to `discussionControls`, which touches a handful of the same lines here
+  (`GroupLifecycleOps.deleteGroupConversation`, the cancel branches of `executeDiscussion`) — resolve by keeping this
+  branch's logic under the new name.
+
 ### Compatibility
 
 No stored-JSON, REST or MCP shape changes. `IGroupWorkspaceStore.update` and
@@ -80,4 +104,6 @@ No stored-JSON, REST or MCP shape changes. `IGroupWorkspaceStore.update` and
 **Tests:** `GroupConversationStateRaceTest` (a CAS fake store: a cancel landing between the boundary re-read and the
 write; a delete mid-run; delete signalling the leg), `RunningDiscussionWritesTest`, `GroupWorkspaceStoreTest`,
 `RestGroupWorkspaceTest`, `TeamCadenceServiceTest` (claim/settle retries on the fresh document, prepare → claim →
-launch order, abandon on a lost claim).
+launch order, abandon on a lost claim), `NegotiationEngineTest`, `VoteTallyEngineTest`, `PhaseExecutionEngineTest`,
+`RetroEngineTest`, `StanceSummaryEngineTest`, `GroupConversationServiceConcurrencyTest` (timeouts attributed and
+closed), `GroupConversationStoreTest` / `RestGroupConversationTest` / `McpGroupToolsTest` (owner in the query).
