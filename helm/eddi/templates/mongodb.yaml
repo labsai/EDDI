@@ -1,8 +1,14 @@
 {{- if .Values.mongodb.enabled }}
+{{- /*
+  Missing mongodb.auth (a `helm upgrade --reuse-values` from chart 2.x) counts
+  as enabled — see eddi.enabledUnlessFalse — so such an upgrade stops at the
+  `required` below instead of silently keeping an open database.
+*/}}
 {{- $mongoAuth := .Values.mongodb.auth | default dict }}
-{{- if $mongoAuth.enabled }}
-{{- $mongoUser := required "mongodb.auth.username is required when mongodb.auth.enabled=true." $mongoAuth.username }}
-{{- $mongoPassword := required "mongodb.auth.password is required when mongodb.enabled=true and mongodb.auth.enabled=true — the in-chart MongoDB no longer runs without authentication and the chart ships no default. Generate one: openssl rand -hex 24. UPGRADING an install that ran without auth? Create the user in the running database FIRST (kubectl exec into the mongodb pod and run mongosh admin with db.createUser, roles root — the exact command is under mongodb.auth in values.yaml), then upgrade with the same password. Or set mongodb.auth.enabled=false to keep the old unauthenticated database." $mongoAuth.password }}
+{{- $mongoAuthOn := eq (include "eddi.mongoAuthEnabled" .) "true" }}
+{{- if $mongoAuthOn }}
+{{- $mongoUser := default "eddi" $mongoAuth.username }}
+{{- $mongoPassword := required "mongodb.auth.password is required when mongodb.enabled=true and mongodb.auth.enabled=true — the in-chart MongoDB no longer runs without authentication and the chart ships no default. Generate one: openssl rand -hex 24. UPGRADING an install that ran without auth? Create the user in the running database FIRST (kubectl exec into the <fullname>-mongodb StatefulSet and run mongosh admin with db.createUser, roles root — the exact command is under mongodb.auth in values.yaml), then upgrade with the same password. Or set mongodb.auth.enabled=false explicitly to keep the old unauthenticated database. (helm upgrade --reuse-values lands here too: it carries no mongodb.auth from the old release, and a missing setting counts as enabled.)" $mongoAuth.password }}
 apiVersion: v1
 kind: Secret
 metadata:
@@ -55,7 +61,7 @@ spec:
           ports:
             - containerPort: 27017
               name: mongo
-          {{- if $mongoAuth.enabled }}
+          {{- if $mongoAuthOn }}
           env:
             - name: MONGO_INITDB_ROOT_USERNAME
               valueFrom:

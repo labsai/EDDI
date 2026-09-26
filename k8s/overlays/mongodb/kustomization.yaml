@@ -8,6 +8,11 @@
 # for the mongo container, and a properties file with the connection string
 # for EDDI, mounted as a FILE (never an env var):
 #
+# The Secret is the stored copy of the password — run this ONCE, never on an
+# upgrade: a fresh password over an initialised database locks EDDI out,
+# because mongod keeps the user it created at first start. `kubectl create`
+# (not apply) refuses with AlreadyExists rather than replacing it.
+#
 #   set -eu
 #   pw=$(openssl rand -hex 24)   # hex: nothing in it needs URL-encoding
 #   kubectl create secret generic mongodb-secrets -n eddi \

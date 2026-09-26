@@ -10,12 +10,18 @@
   networkPolicy.enabled.
 
   Each policy selects one datastore pod and admits only the EDDI server pod of
-  this release, on the one port EDDI uses. Readiness probes are exec probes and
-  `kubectl exec` / `kubectl port-forward` do not traverse pod networking, so
-  none of them is affected. Something else that genuinely needs the database —
+  this release, on the one port EDDI uses. MongoDB's and PostgreSQL's probes
+  are exec probes, and `kubectl exec` / `kubectl port-forward` do not traverse
+  pod networking. NATS is the exception: its probes are httpGet on the
+  monitoring port 8222, which this policy does not admit. That is deliberate —
+  the kubelet's probes originate on the node, and the NetworkPolicy spec (and
+  every mainstream CNI: Calico, Cilium, the cloud providers') always allows
+  traffic from the node a pod runs on, so the probes still pass while no other
+  pod can read the monitoring endpoint. Something else that genuinely needs the database —
   a backup job — needs a policy of its own that admits it.
 */}}
-{{- if (.Values.networkPolicy.datastores | default dict).enabled }}
+{{- /* Missing counts as enabled (helm upgrade --reuse-values) — see eddi.enabledUnlessFalse. */}}
+{{- if eq (include "eddi.enabledUnlessFalse" (dict "section" .Values.networkPolicy.datastores)) "true" }}
 {{- $release := . }}
 {{- $stores := list }}
 {{- if .Values.mongodb.enabled }}{{ $stores = append $stores (list "mongodb" 27017) }}{{ end }}

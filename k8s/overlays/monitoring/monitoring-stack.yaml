@@ -20,7 +20,7 @@ data:
         # to an anonymous scrape and this target shows DOWN. Either give
         # Prometheus a token — uncomment ONE of the blocks below — or, with
         # /q/metrics unreachable from outside the cluster, set
-        # QUARKUS_HTTP_AUTH_PERMISSION_METRICS_POLICY=permit on EDDI.
+        # EDDI_METRICS_HTTP_POLICY=permit on EDDI (eddi.metrics.http-policy).
         # docs/monitoring/monitoring-guide.md ("Scraping with authentication
         # on") walks through both.
         #

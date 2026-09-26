@@ -592,6 +592,18 @@ jobs:
             --set eddi.datastore.externalConnectionString=null \
             --set eddi.messagingType=null > /dev/null
 
+          # `helm upgrade --reuse-values` from chart 2.x carries no
+          # networkPolicy.datastores at all. A MISSING switch must count as
+          # enabled, or the upgrade drops every datastore policy with exit 0.
+          echo "--- a missing networkPolicy.datastores still renders the datastore policies"
+          policies=$(helm template eddi helm/eddi \
+            --set eddi.vaultMasterKey=$key --set mongodb.auth.password=$mongo \
+            --set networkPolicy.datastores=null | grep -c '^kind: NetworkPolicy$' || true)
+          if [ "$policies" -lt 1 ]; then
+            echo "::error::networkPolicy.datastores=null rendered no datastore NetworkPolicy — a --reuse-values upgrade from 2.x would silently drop them"
+            exit 1
+          fi
+
       - name: The chart's guards still fire
         # Every one of these used to render happily and hand the operator a
         # deployment that could not work. A guard that stops firing is invisible,
@@ -613,6 +625,14 @@ jobs:
           # and the chart ships none.
           expect_failure "an in-chart MongoDB with authentication but no password" \
             --set eddi.vaultMasterKey=$key
+          # `helm upgrade --reuse-values` from chart 2.x: the old release's values
+          # carry neither mongodb.auth nor networkPolicy.datastores. A MISSING
+          # switch counts as enabled, so this has to stop at the password check
+          # rather than render an unauthenticated MongoDB with exit 0.
+          expect_failure "a --reuse-values upgrade with no mongodb.auth (mongodb.auth=null)" \
+            --set eddi.vaultMasterKey=$key --set mongodb.auth=null
+          expect_failure "a --reuse-values upgrade with neither mongodb.auth nor networkPolicy.datastores" \
+            --set eddi.vaultMasterKey=$key --set mongodb.auth=null --set networkPolicy.datastores=null
           expect_failure "no datastore configured at all" \
             --set eddi.vaultMasterKey=$key --set mongodb.auth.password=$mongo --set mongodb.enabled=false --set postgres.enabled=false
           expect_failure "messagingType=nats on a stock image" \
@@ -667,10 +687,11 @@ jobs:
             --set keycloak.enabled=true --set keycloak.adminPassword=ci-placeholder-kc \
             --set eddi.oidc.publicUrl=null
           # Two datastores of one kind. The in-chart URL is a ConfigMap env var
-          # (ordinal 300) and the external URI a line in the mounted properties
-          # file (ordinal 400), so the external one silently won while NOTES.txt
-          # reported "in-chart" — a stale value in an upgraded values file
-          # changed which database EDDI talked to, with no render error.
+          # and the external URI a line in the mounted properties file; both sit
+          # at config ordinal 300 (the file inherits the ordinal of the
+          # QUARKUS_CONFIG_LOCATIONS env var that lists it), so which one EDDI
+          # used was an accident of source ordering while NOTES.txt reported
+          # "in-chart" — with no render error.
           expect_failure "an in-chart MongoDB alongside an external one" \
             --set eddi.vaultMasterKey=$key --set mongodb.auth.password=$mongo \
             --set eddi.datastore.externalConnectionString=mongodb://db.example.com:27017/eddi
