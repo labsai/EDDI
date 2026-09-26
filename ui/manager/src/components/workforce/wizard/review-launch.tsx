@@ -325,11 +325,13 @@ function ReviewLaunch({
 
       <GroupSaveProblems problems={saveProblems} testId="workforce-wizard-save-problems" />
 
-      {/* Create button */}
+      {/* Create button. It is never on screen while a create runs: `isCreating`
+          swaps this whole view for the progress view above, and the wizard's
+          `creatingRef` refuses a second click that lands before that re-render. */}
       <Button
         className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
         size="lg"
-        disabled={isCreating || saveProblems.length > 0}
+        disabled={saveProblems.length > 0}
         onClick={onCreateClick}
         data-testid="workforce-wizard-create"
       >
