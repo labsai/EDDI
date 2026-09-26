@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
+import { createElement, type ReactNode } from "react";
 import { useWorkforceThreads } from "@/hooks/use-workforce-threads";
+import { useTemplates } from "@/hooks/use-templates";
+import { AuthContext, GUEST_CONTEXT } from "@/components/auth/auth-context";
+import { clearUserScopedStorage } from "@/lib/user-storage";
 
 /**
  * Thread bookkeeping for the Workforce 1:1 view, persisted to localStorage.
@@ -166,5 +170,127 @@ describe("useWorkforceThreads", () => {
       const { result } = renderHook(() => useWorkforceThreads());
       expect(result.current.threads).toEqual([]);
     }
+  });
+});
+
+/**
+ * Per-user storage. The keys were global, so on a shared browser the next user
+ * to sign in saw — and could reopen — the previous user's advisor threads and
+ * saved templates.
+ */
+describe("Workforce storage is per signed-in user", () => {
+  function signedInAs(username: string) {
+    return ({ children }: { children: ReactNode }) =>
+      createElement(
+        AuthContext.Provider,
+        {
+          value: {
+            ...GUEST_CONTEXT,
+            method: "keycloak",
+            user: { username, firstName: "", lastName: "", email: "", fullName: "" },
+          },
+        },
+        children,
+      );
+  }
+
+  const thread = { boardId: "b1", memberId: "m1", memberName: "Ana", conversationId: "c1" };
+
+  it("does not show one user's threads to another", () => {
+    const alice = renderHook(() => useWorkforceThreads(), { wrapper: signedInAs("alice") });
+    act(() => alice.result.current.registerThread(thread));
+    expect(localStorage.getItem("workforce-threads:alice")).not.toBeNull();
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+
+    const bob = renderHook(() => useWorkforceThreads(), { wrapper: signedInAs("bob") });
+    expect(bob.result.current.threads).toEqual([]);
+
+    const aliceAgain = renderHook(() => useWorkforceThreads(), { wrapper: signedInAs("alice") });
+    expect(aliceAgain.result.current.getThread("b1", "m1")).toMatchObject({ conversationId: "c1" });
+  });
+
+  it("does not show one user's templates to another", () => {
+    const alice = renderHook(() => useTemplates(), { wrapper: signedInAs("alice") });
+    act(() => {
+      alice.result.current.saveTemplate({
+        name: "Mine",
+        description: "",
+        style: "ROUND_TABLE",
+        members: [],
+        maxRounds: 2,
+      });
+    });
+    const bob = renderHook(() => useTemplates(), { wrapper: signedInAs("bob") });
+    expect(bob.result.current.templates).toEqual([]);
+    const aliceAgain = renderHook(() => useTemplates(), { wrapper: signedInAs("alice") });
+    expect(aliceAgain.result.current.templates.map((t) => t.name)).toEqual(["Mine"]);
+  });
+
+  it("keys by the stable OIDC subject when there is one, not the renameable username", () => {
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(
+        AuthContext.Provider,
+        {
+          value: {
+            ...GUEST_CONTEXT,
+            method: "keycloak",
+            user: { id: "sub-123", username: "alice", firstName: "", lastName: "", email: "", fullName: "" },
+          },
+        },
+        children,
+      );
+    const { result } = renderHook(() => useWorkforceThreads(), { wrapper });
+    act(() => result.current.registerThread(thread));
+    expect(localStorage.getItem("workforce-threads:sub-123")).not.toBeNull();
+    expect(localStorage.getItem("workforce-threads:alice")).toBeNull();
+  });
+
+  it("adopts pre-upgrade templates into the first signed-in user's key, once", () => {
+    // Saved before keys were per user. Switching keys used to hide them.
+    localStorage.setItem(
+      "workforce-templates",
+      JSON.stringify([{ id: "t1", name: "Old", description: "", style: "ROUND_TABLE", members: [], maxRounds: 2, createdAt: "" }]),
+    );
+    const alice = renderHook(() => useTemplates(), { wrapper: signedInAs("alice") });
+    expect(alice.result.current.templates.map((t) => t.name)).toEqual(["Old"]);
+    expect(localStorage.getItem("workforce-templates:alice")).not.toBeNull();
+    expect(localStorage.getItem("workforce-templates")).toBeNull();
+
+    // Moved, not copied: the next user does not inherit it as well.
+    const bob = renderHook(() => useTemplates(), { wrapper: signedInAs("bob") });
+    expect(bob.result.current.templates).toEqual([]);
+  });
+
+  it("adopts pre-upgrade threads the same way", () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify([{ ...thread, lastActivity: 1 }]));
+    const alice = renderHook(() => useWorkforceThreads(), { wrapper: signedInAs("alice") });
+    expect(alice.result.current.getThread("b1", "m1")).toMatchObject({ conversationId: "c1" });
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+  });
+
+  it("does not overwrite a user's own data with the legacy key", () => {
+    localStorage.setItem("workforce-templates", JSON.stringify([{ id: "x", name: "Legacy" }]));
+    localStorage.setItem("workforce-templates:alice", JSON.stringify([{ id: "y", name: "Mine" }]));
+    const alice = renderHook(() => useTemplates(), { wrapper: signedInAs("alice") });
+    expect(alice.result.current.templates.map((t) => t.name)).toEqual(["Mine"]);
+    expect(localStorage.getItem("workforce-templates")).not.toBeNull();
+  });
+
+  it("keeps the plain key when auth is disabled", () => {
+    const { result } = renderHook(() => useWorkforceThreads());
+    act(() => result.current.registerThread(thread));
+    expect(read()).toHaveLength(1);
+  });
+
+  it("clearUserScopedStorage removes threads in every scoping, and nothing else", () => {
+    localStorage.setItem("workforce-threads", "[]");
+    localStorage.setItem("workforce-threads:alice", "[]");
+    localStorage.setItem("workforce-templates:alice", "[]");
+    localStorage.setItem("eddi-theme", "dark");
+    clearUserScopedStorage();
+    expect(localStorage.getItem("workforce-threads")).toBeNull();
+    expect(localStorage.getItem("workforce-threads:alice")).toBeNull();
+    expect(localStorage.getItem("workforce-templates:alice")).toBe("[]");
+    expect(localStorage.getItem("eddi-theme")).toBe("dark");
   });
 });

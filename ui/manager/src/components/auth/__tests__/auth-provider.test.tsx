@@ -54,15 +54,19 @@ describe("AuthProvider", () => {
     );
   });
 
-  it("shows loading screen when keycloak auth is initializing", () => {
+  it("shows loading screen when keycloak auth is initializing", async () => {
     renderWithAuth("keycloak");
 
-    // The mock keycloak init() resolves immediately with false,
-    // but during the initial render, loading is true
-    expect(
-      screen.getByTestId("auth-loading") ||
-        screen.getByTestId("auth-method")
-    ).toBeTruthy();
+    // The global mock's init() resolves with false, but not synchronously, so
+    // the first render is the loading screen. (This used to be
+    // `getByTestId(a) || getByTestId(b)`, which could not fail: getByTestId
+    // throws rather than returning a falsy value.)
+    expect(screen.getByTestId("auth-loading")).toBeInTheDocument();
+    expect(screen.queryByTestId("auth-method")).not.toBeInTheDocument();
+
+    // …and an init without a session never falls through to the app.
+    expect(await screen.findByTestId("auth-signed-out")).toBeInTheDocument();
+    expect(screen.queryByTestId("auth-method")).not.toBeInTheDocument();
   });
 
   it("does not show user section when auth is disabled", () => {

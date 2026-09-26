@@ -25,7 +25,15 @@
     "profile": "プロフィール",
     "guest": "ゲスト",
     "userMenu": "ユーザーメニュー",
-    "signedIn": "サインイン済み"
+    "signedIn": "サインイン済み",
+    "initFailedTitle": "サインインを利用できません",
+    "initFailedMessage": "Manager がサインインサービスに接続できませんでした。接続を確認してから、もう一度お試しください。",
+    "signedOutTitle": "サインアウトしています",
+    "signedOutMessage": "続行するにはサインインしてください。",
+    "retry": "再試行",
+    "signIn": "サインイン",
+    "incompleteTitle": "サインインが完了しませんでした",
+    "incompleteMessage": "サインインがキャンセルされたか、拒否されました。続行するには、もう一度サインインしてください。"
   },
   "nav": {
     "dashboard": "ダッシュボード",
@@ -75,7 +83,8 @@
     "workforce": "ワークフォース",
     "monitoring": "会話モニタリング",
     "analytics": "分析",
-    "connections": "接続"
+    "connections": "接続",
+    "breadcrumb": "パンくずリスト"
   },
   "theme": {
     "light": "ライト",
@@ -95,7 +104,8 @@
     "ko": "한국어",
     "pt": "Português",
     "hi": "हिन्दी",
-    "switchFailed": "その言語を読み込めませんでした。もう一度お試しください。"
+    "switchFailed": "その言語を読み込めませんでした。もう一度お試しください。",
+    "select": "言語"
   },
   "pages": {
     "dashboard": {
@@ -264,7 +274,10 @@
     "openExternalChatIn": "{{environment}} のチャットを新しいタブで開く",
     "deployToProduction": "本番にデプロイ",
     "undeployFromProduction": "本番から削除",
-    "deployFailedIn": "{{environment}} へのデプロイに失敗しました"
+    "deployFailedIn": "{{environment}} へのデプロイに失敗しました",
+    "pickerUseAsId": "Enter キーを押すと「{{id}}」を ID として使用します。",
+    "pickerOpen": "エージェントを表示",
+    "pickerClose": "エージェント一覧を閉じる"
   },
   "agentDetail": {
     "a2aDescHint": "エージェントカードに表示され、他のエージェントがこのエージェントの機能を理解するのに役立ちます",
@@ -814,7 +827,9 @@
       }
     },
     "emptyDescription": "最初の {{type}} を作成してワークフローで使用しましょう。",
-    "descriptionPlaceholder": "この {{type}} 設定を説明してください…"
+    "descriptionPlaceholder": "この {{type}} 設定を説明してください…",
+    "snippetNamePlaceholder": "例: cautious_mode",
+    "namePlaceholder": "マイ {{type}}"
   },
   "editor": {
     "compare": "比較",
@@ -3483,7 +3498,8 @@
   },
   "errorBoundary": {
     "retry": "再試行",
-    "title": "問題が発生しました"
+    "title": "問題が発生しました",
+    "reload": "再読み込み"
   },
   "gdpr": {
     "auditPseudonymized": "監査を仮名化",
@@ -4945,5 +4961,14 @@
     "headerMismatch": "この接続は資格情報を「{{expected}}」として送るため、ヘッダー名もそれにする必要があります。そうでないと設定上の名前と実際のリクエストのヘッダーが食い違います。",
     "refusedInRequest": "${connection:…} はパス、クエリパラメーター、ボディでは拒否されます。URL 内の資格情報はすべてのプロキシログに残り、ボディ内のものは読まれません。代わりにヘッダーから接続を参照してください。",
     "refusedInModel": "言語モデル、埋め込み、ベクターストアは ${connection:…} を受け付けません。接続はヘッダー全体に解決されますが、これらには生の資格情報が必要です。ここでは ${vault:…} を使ってください。"
+  },
+  "time": {
+    "justNow": "たった今"
+  },
+  "sidebar": {
+    "checkingVersion": "バージョンを確認中…",
+    "demoModeFallback": "スタンドアロンのデモモード",
+    "expand": "サイドバーを展開",
+    "collapse": "サイドバーを折りたたむ"
   }
 }

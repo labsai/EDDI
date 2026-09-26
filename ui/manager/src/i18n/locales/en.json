@@ -25,7 +25,15 @@
     "profile": "Profile",
     "guest": "Guest",
     "userMenu": "User menu",
-    "signedIn": "Signed in"
+    "signedIn": "Signed in",
+    "initFailedTitle": "Sign-in is unavailable",
+    "initFailedMessage": "The Manager could not reach the sign-in service. Check your connection, then try again.",
+    "signedOutTitle": "You are signed out",
+    "signedOutMessage": "Sign in to continue.",
+    "retry": "Try again",
+    "signIn": "Sign in",
+    "incompleteTitle": "Sign-in did not complete",
+    "incompleteMessage": "The sign-in was cancelled or refused. Sign in again to continue."
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -75,7 +83,8 @@
     "workforce": "Workforce",
     "monitoring": "Conversation Monitoring",
     "analytics": "Analytics",
-    "connections": "Connections"
+    "connections": "Connections",
+    "breadcrumb": "Breadcrumb"
   },
   "theme": {
     "light": "Light",
@@ -95,7 +104,8 @@
     "ko": "한국어",
     "pt": "Português",
     "hi": "हिन्दी",
-    "switchFailed": "Could not load that language. Please try again."
+    "switchFailed": "Could not load that language. Please try again.",
+    "select": "Language"
   },
   "pages": {
     "dashboard": {
@@ -291,7 +301,10 @@
     "openExternalChatIn": "Open {{environment}} chat in a new tab",
     "deployToProduction": "Deploy to production",
     "undeployFromProduction": "Undeploy from production",
-    "deployFailedIn": "Deployment failed in {{environment}}"
+    "deployFailedIn": "Deployment failed in {{environment}}",
+    "pickerUseAsId": "Press Enter to use \"{{id}}\" as ID.",
+    "pickerOpen": "Show agents",
+    "pickerClose": "Close agent list"
   },
   "agentDetail": {
     "a2aDescHint": "Shown in the Agent Card — helps other agents understand what this agent does",
@@ -854,7 +867,9 @@
         "description": "NLP input parsing and dictionary configuration"
       }
     },
-    "descriptionPlaceholder": "Describe this {{type}} configuration..."
+    "descriptionPlaceholder": "Describe this {{type}} configuration...",
+    "snippetNamePlaceholder": "e.g. cautious_mode",
+    "namePlaceholder": "My {{type}}"
   },
   "editor": {
     "compare": "Compare",
@@ -3523,7 +3538,8 @@
   },
   "errorBoundary": {
     "retry": "Try Again",
-    "title": "Something went wrong"
+    "title": "Something went wrong",
+    "reload": "Reload"
   },
   "gdpr": {
     "auditPseudonymized": "Audit Pseudonymized",
@@ -4945,5 +4961,14 @@
     "headerMismatch": "This connection sends its credential as “{{expected}}”, so the header must be named that — otherwise the config shows one name and the request carries another.",
     "refusedInRequest": "${connection:…} is refused in a path, query parameter or body — a credential in a URL lands in every proxy log, and one in a body is not read. Reference the connection from a header instead.",
     "refusedInModel": "Language models, embeddings and vector stores do not accept ${connection:…}: a connection resolves to a whole header, and these need a bare credential. Use ${vault:…} here."
+  },
+  "time": {
+    "justNow": "just now"
+  },
+  "sidebar": {
+    "checkingVersion": "Checking version…",
+    "demoModeFallback": "Standalone demo mode",
+    "expand": "Expand sidebar",
+    "collapse": "Collapse sidebar"
   }
 }

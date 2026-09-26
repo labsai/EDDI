@@ -139,7 +139,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const { data: serverVersion, isLoading } = useEddiVersion();
 
   const versionLabel = isLoading
-    ? "Checking version..."
+    ? t("sidebar.checkingVersion", "Checking version…")
     : serverVersion && serverVersion !== UNKNOWN_VERSION
       ? `EDDI ${serverVersion}`
       : `EDDI Demo ${__APP_VERSION__}`;
@@ -429,7 +429,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
             className="mb-1 block px-3 text-center text-[10px] text-sidebar-foreground/30 transition-colors hover:text-sidebar-accent"
             title={
               serverVersion === UNKNOWN_VERSION
-                ? `Standalone Demo Mode fallback`
+                ? t("sidebar.demoModeFallback", "Standalone demo mode")
                 : t("updates.title", "EDDI Updates")
             }
             // The visible text is a version string, which says nothing about
@@ -443,7 +443,12 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         <button
           onClick={onToggle}
           data-testid="sidebar-toggle"
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-label={
+            collapsed
+              ? t("sidebar.expand", "Expand sidebar")
+              : t("sidebar.collapse", "Collapse sidebar")
+          }
+          aria-expanded={!collapsed}
           className="flex w-full items-center justify-center rounded-lg p-2 text-sidebar-foreground transition-all hover:bg-sidebar-accent/10 hover:text-sidebar-accent active:scale-[0.98]"
         >
           {collapsed ? (

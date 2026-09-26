@@ -200,13 +200,25 @@ describe("CreateResourceDialog", () => {
       <CreateResourceDialog open={true} onClose={mockOnClose} typeSlug="rules" typeName="Ruleset" />
     );
 
-    const closeBtn = screen.getByTestId("create-resource-close");
+    const closeBtn = screen.getByRole("button", { name: "Close" });
     await user.click(closeBtn);
     expect(mockOnClose).toHaveBeenCalledTimes(1);
 
-    const backdrop = screen.getByTestId("create-resource-backdrop");
+    const backdrop = screen.getByTestId("create-resource-dialog-backdrop");
     await user.click(backdrop);
     expect(mockOnClose).toHaveBeenCalledTimes(2);
+
+    // A click inside the box is not a click on the backdrop.
+    await user.click(screen.getByTestId("resource-name-input"));
+    expect(mockOnClose).toHaveBeenCalledTimes(2);
+  });
+
+  it("is announced as a named modal dialog", () => {
+    renderWithProviders(
+      <CreateResourceDialog open={true} onClose={mockOnClose} typeSlug="rules" typeName="Ruleset" />
+    );
+    const dialog = screen.getByRole("dialog", { name: /Ruleset/ });
+    expect(dialog).toHaveAttribute("aria-modal", "true");
   });
 
   it("closes dialog when Escape key is pressed", () => {

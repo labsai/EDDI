@@ -25,7 +25,15 @@
     "profile": "Perfil",
     "guest": "Invitado",
     "userMenu": "Menú de usuario",
-    "signedIn": "Sesión iniciada"
+    "signedIn": "Sesión iniciada",
+    "initFailedTitle": "El inicio de sesión no está disponible",
+    "initFailedMessage": "El Manager no pudo contactar con el servicio de inicio de sesión. Comprueba tu conexión y vuelve a intentarlo.",
+    "signedOutTitle": "Has cerrado sesión",
+    "signedOutMessage": "Inicia sesión para continuar.",
+    "retry": "Reintentar",
+    "signIn": "Iniciar sesión",
+    "incompleteTitle": "No se completó el inicio de sesión",
+    "incompleteMessage": "El inicio de sesión se canceló o fue rechazado. Vuelve a iniciar sesión para continuar."
   },
   "nav": {
     "dashboard": "Panel",
@@ -75,7 +83,8 @@
     "workforce": "Grupo de trabajo",
     "monitoring": "Supervisión de conversaciones",
     "analytics": "Analíticas",
-    "connections": "Conexiones"
+    "connections": "Conexiones",
+    "breadcrumb": "Ruta de navegación"
   },
   "theme": {
     "light": "Claro",
@@ -95,7 +104,8 @@
     "ko": "한국어",
     "pt": "Português",
     "hi": "हिन्दी",
-    "switchFailed": "No se pudo cargar ese idioma. Inténtalo de nuevo."
+    "switchFailed": "No se pudo cargar ese idioma. Inténtalo de nuevo.",
+    "select": "Idioma"
   },
   "pages": {
     "dashboard": {
@@ -265,7 +275,10 @@
     "openExternalChatIn": "Abrir el chat de {{environment}} en una pestaña nueva",
     "deployToProduction": "Desplegar en producción",
     "undeployFromProduction": "Retirar de producción",
-    "deployFailedIn": "El despliegue falló en {{environment}}"
+    "deployFailedIn": "El despliegue falló en {{environment}}",
+    "pickerUseAsId": "Pulsa Intro para usar «{{id}}» como ID.",
+    "pickerOpen": "Mostrar agentes",
+    "pickerClose": "Cerrar la lista de agentes"
   },
   "agentDetail": {
     "a2aDescHint": "Se muestra en la Agent Card — ayuda a otros agentes a entender qué hace este agente",
@@ -826,7 +839,9 @@
     "emptyDescription": "Cree su primer(a) {{type}} para usarlo en workflows.",
     "itemCount_many": "{{count}} elementos",
     "count_many": "{{count}} recursos",
-    "descriptionPlaceholder": "Describe esta configuración de {{type}}…"
+    "descriptionPlaceholder": "Describe esta configuración de {{type}}…",
+    "snippetNamePlaceholder": "p. ej. cautious_mode",
+    "namePlaceholder": "Mi {{type}}"
   },
   "editor": {
     "compare": "Comparar",
@@ -3518,7 +3533,8 @@
   },
   "errorBoundary": {
     "retry": "Reintentar",
-    "title": "Algo salió mal"
+    "title": "Algo salió mal",
+    "reload": "Recargar"
   },
   "gdpr": {
     "auditPseudonymized": "Auditoría seudonimizada",
@@ -4994,5 +5010,14 @@
     "headerMismatch": "Esta conexión envía su credencial como «{{expected}}», así que la cabecera debe llamarse así; de lo contrario la configuración muestra un nombre y la solicitud lleva otro.",
     "refusedInRequest": "${connection:…} se rechaza en una ruta, un parámetro de consulta o un cuerpo: una credencial en una URL acaba en todos los registros de proxy y en un cuerpo no se lee. Haga referencia a la conexión desde una cabecera.",
     "refusedInModel": "Los modelos de lenguaje, los embeddings y los almacenes vectoriales no aceptan ${connection:…}: una conexión se resuelve en una cabecera completa y estos necesitan una credencial sin adornos. Use ${vault:…} aquí."
+  },
+  "time": {
+    "justNow": "justo ahora"
+  },
+  "sidebar": {
+    "checkingVersion": "Comprobando la versión…",
+    "demoModeFallback": "Modo de demostración independiente",
+    "expand": "Expandir la barra lateral",
+    "collapse": "Contraer la barra lateral"
   }
 }

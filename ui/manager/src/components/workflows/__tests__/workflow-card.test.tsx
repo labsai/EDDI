@@ -3,6 +3,12 @@ import { screen } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { WorkflowCard } from "@/components/workflows/workflow-card";
 
+/** What this environment's CLDR data calls "n units ago" in narrow English. */
+function ago(n: number, unit: Intl.RelativeTimeFormatUnit): string {
+  return new Intl.RelativeTimeFormat("en", { style: "narrow", numeric: "always" }).format(-n, unit);
+}
+
+
 const baseWorkflow = {
   id: "wf-123",
   version: 3,
@@ -171,6 +177,6 @@ describe("WorkflowCard", () => {
       />
     );
     // 2 hours ago should show "2h ago"
-    expect(screen.getByText("2h ago")).toBeInTheDocument();
+    expect(screen.getByText(ago(2, "hour"))).toBeInTheDocument();
   });
 });

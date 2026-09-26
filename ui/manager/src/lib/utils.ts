@@ -1,11 +1,22 @@
 import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
+import i18next from "i18next";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-/** Format a timestamp into a human-friendly relative time string */
+/**
+ * Format a timestamp into a human-friendly relative time string ("5m ago"), in
+ * the language on screen.
+ *
+ * It used to build English by hand ("5m ago", "just now") for every locale.
+ * `Intl.RelativeTimeFormat` in `narrow` style produces the right strings in
+ * every locale — the exact English wording ("5m ago" vs "5 min. ago") comes
+ * from the browser's CLDR data, so tests compare against `Intl`, not literals; "just now" is a translation key.
+ * Reads the shared i18next instance rather than taking `t`, so the ~15 callers
+ * (cards, lists, pickers) stay unchanged.
+ */
 export function formatRelativeTime(timestamp: number): string {
   if (!timestamp || !Number.isFinite(timestamp)) return "—";
   const now = Date.now();
@@ -16,10 +27,30 @@ export function formatRelativeTime(timestamp: number): string {
   const hours = Math.floor(minutes / 60);
   const days = Math.floor(hours / 24);
 
-  if (days > 0) return `${days}d ago`;
-  if (hours > 0) return `${hours}h ago`;
-  if (minutes > 0) return `${minutes}m ago`;
-  return "just now";
+  if (days <= 0 && hours <= 0 && minutes <= 0) {
+    return i18next.isInitialized ? i18next.t("time.justNow", "just now") : "just now";
+  }
+  const format = relativeTimeFormat();
+  if (days > 0) return format.format(-days, "day");
+  if (hours > 0) return format.format(-hours, "hour");
+  return format.format(-minutes, "minute");
+}
+
+const relativeTimeFormats = new Map<string, Intl.RelativeTimeFormat>();
+
+/** One formatter per language, reused — list pages call this per row. */
+function relativeTimeFormat(): Intl.RelativeTimeFormat {
+  const language = i18next.resolvedLanguage || i18next.language || "en";
+  let format = relativeTimeFormats.get(language);
+  if (!format) {
+    try {
+      format = new Intl.RelativeTimeFormat(language, { style: "narrow", numeric: "always" });
+    } catch {
+      format = new Intl.RelativeTimeFormat("en", { style: "narrow", numeric: "always" });
+    }
+    relativeTimeFormats.set(language, format);
+  }
+  return format;
 }
 
 /** Agent deployment status color configuration */

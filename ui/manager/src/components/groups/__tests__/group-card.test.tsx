@@ -3,6 +3,12 @@ import { screen } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { GroupCard } from "@/components/groups/group-card";
 
+/** What this environment's CLDR data calls "n units ago" in narrow English. */
+function ago(n: number, unit: Intl.RelativeTimeFormatUnit): string {
+  return new Intl.RelativeTimeFormat("en", { style: "narrow", numeric: "always" }).format(-n, unit);
+}
+
+
 const baseGroup = {
   id: "grp-123",
   version: 2,
@@ -273,6 +279,6 @@ describe("GroupCard", () => {
   it("renders valid relative time for valid timestamp", () => {
     const group = { ...baseGroup, lastModifiedOn: Date.now() - 7200000 }; // 2h ago
     renderWithProviders(<GroupCard group={group} />);
-    expect(screen.getByText("2h ago")).toBeInTheDocument();
+    expect(screen.getByText(ago(2, "hour"))).toBeInTheDocument();
   });
 });

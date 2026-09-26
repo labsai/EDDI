@@ -1,9 +1,11 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { useDebugStore } from "@/hooks/use-debug-events";
 import { Circle, ChevronRight, Workflow } from "lucide-react";
 import { getExtensionIcon, getExtensionColor } from "@/lib/api/extensions";
+import { hasUnsavedChanges } from "@/lib/unsaved-changes";
+import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";
 
 // ==================== Types ====================
 
@@ -28,6 +30,18 @@ export function PipelineRailroad({
 }: PipelineRailroadProps) {
   const { t } = useTranslation();
   const currentTurnEvents = useDebugStore((s) => s.currentTurnEvents);
+
+  // Switching stage remounts the editor panel, which throws away an unsaved
+  // edit exactly as a navigation would — but it is local state, not a route
+  // change, so the router-level guard never sees it. Ask here instead.
+  const [pendingStage, setPendingStage] = useState<number | null>(null);
+  const requestStage = (index: number) => {
+    if (index !== selectedIndex && hasUnsavedChanges()) {
+      setPendingStage(index);
+      return;
+    }
+    onSelectStage(index);
+  };
 
   // Build stage status from live SSE events
   const stageStatuses = useMemo(() => {
@@ -66,7 +80,7 @@ export function PipelineRailroad({
           <div key={idx}>
             {/* Stage button */}
             <button
-              onClick={() => onSelectStage(idx)}
+              onClick={() => requestStage(idx)}
               aria-current={isSelected ? "true" : undefined}
               className={cn(
                 "group flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-start transition-all",
@@ -140,6 +154,16 @@ export function PipelineRailroad({
           </p>
         </div>
       )}
+
+      <UnsavedChangesDialog
+        open={pendingStage !== null}
+        onConfirm={() => {
+          const index = pendingStage;
+          setPendingStage(null);
+          if (index !== null) onSelectStage(index);
+        }}
+        onCancel={() => setPendingStage(null)}
+      />
     </div>
   );
 }

@@ -1,19 +1,32 @@
-import { useEffect } from "react";
+import { useEffect, useId } from "react";
+import { setUnsavedChanges } from "@/lib/unsaved-changes";
 
 /**
  * Prevent accidental data loss when there are unsaved changes.
  *
- * Uses the browser's `beforeunload` event to show a native prompt when
- * the user tries to close the tab, reload, or navigate to an external URL.
+ * Two exits are covered:
+ *  - **Leaving the app** (tab close, reload, typed URL): the browser's own
+ *    `beforeunload` prompt.
+ *  - **In-app navigation** (sidebar, breadcrumb, command palette, Back): this
+ *    hook registers the edit in `@/lib/unsaved-changes`, and the single
+ *    `UnsavedChangesNavigationGuard` at the router root blocks the navigation
+ *    and asks. That guard needs the data router (`createBrowserRouter` in
+ *    `main.tsx`); before the switch this hook covered `beforeunload` only, and
+ *    every in-app exit silently discarded the edit.
  *
- * NOTE: React Router's `useBlocker` requires `createBrowserRouter` (data router API).
- * This app uses `<BrowserRouter>`, so we rely on `beforeunload` only.
- * In-app navigation confirmation is handled via the Discard button and
- * explicit "are you sure?" prompts in the UI.
+ * Navigations that only change the query string (a version switch, a tab) are
+ * not blocked — the page is still on screen with the edit.
  *
  * @param isDirty Whether there are unsaved changes
  */
 export function useUnsavedChangesGuard(isDirty: boolean) {
+  const id = useId();
+
+  useEffect(() => {
+    setUnsavedChanges(id, isDirty);
+    return () => setUnsavedChanges(id, false);
+  }, [id, isDirty]);
+
   useEffect(() => {
     if (!isDirty) return;
 

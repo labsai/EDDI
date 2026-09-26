@@ -1,4 +1,6 @@
 import { useState, useCallback } from "react";
+import { useAuth } from "@/hooks/use-auth";
+import { readUserScoped, storageUserId, userScopedKey } from "@/lib/user-storage";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -25,9 +27,9 @@ const STORAGE_KEY = "workforce-threads";
 
 // ─── Helpers ─────────────────────────────────────────────────────
 
-function loadThreads(): ThreadInfo[] {
+function loadThreads(userId: string | undefined): ThreadInfo[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readUserScoped(STORAGE_KEY, userId);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
@@ -46,9 +48,9 @@ function loadThreads(): ThreadInfo[] {
   }
 }
 
-function saveThreads(threads: ThreadInfo[]): void {
+function saveThreads(key: string, threads: ThreadInfo[]): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(threads));
+    localStorage.setItem(key, JSON.stringify(threads));
   } catch {
     // localStorage may be full or unavailable — silently ignore
   }
@@ -57,9 +59,36 @@ function saveThreads(threads: ThreadInfo[]): void {
 // ─── Hook ────────────────────────────────────────────────────────
 
 function useWorkforceThreads(): UseWorkforceThreadsReturn {
-  const [threads, setThreads] = useState<ThreadInfo[]>(loadThreads);
+  // Per signed-in user: these point at that user's advisor conversations, and a
+  // global key handed them to whoever signed in next on the same browser. They
+  // are also cleared at logout (`clearUserScopedStorage`).
+  const { user } = useAuth();
+  const userId = storageUserId(user);
+  const storageKey = userScopedKey(STORAGE_KEY, userId);
 
+  const [state, setState] = useState(() => ({
+    key: storageKey,
+    threads: loadThreads(userId),
+  }));
+  // A different user (or the profile arriving) means a different store: reload
+  // from it rather than carry the previous user's list across.
+  if (state.key !== storageKey) {
+    setState({ key: storageKey, threads: loadThreads(userId) });
+  }
+  // On the render that switched keys React discards this output and renders
+  // again with the reloaded list, so the stale value is never committed.
+  const threads = state.threads;
 
+  const setThreads = useCallback(
+    (update: (prev: ThreadInfo[]) => ThreadInfo[]) => {
+      setState((prev) => {
+        const next = update(prev.threads);
+        if (next !== prev.threads) saveThreads(prev.key, next);
+        return next === prev.threads ? prev : { ...prev, threads: next };
+      });
+    },
+    [],
+  );
 
   const getThread = useCallback(
     (boardId: string, memberId: string): ThreadInfo | undefined => {
@@ -85,11 +114,10 @@ function useWorkforceThreads(): UseWorkforceThreadsReturn {
         } else {
           next = [...prev, entry];
         }
-        saveThreads(next);
         return next;
       });
     },
-    [],
+    [setThreads],
   );
 
   const updateActivity = useCallback(
@@ -102,11 +130,10 @@ function useWorkforceThreads(): UseWorkforceThreadsReturn {
 
         const next = [...prev];
         next[idx] = { ...next[idx]!, lastActivity: Date.now() };
-        saveThreads(next);
         return next;
       });
     },
-    [],
+    [setThreads],
   );
 
   const removeThread = useCallback(
@@ -115,11 +142,10 @@ function useWorkforceThreads(): UseWorkforceThreadsReturn {
         const next = prev.filter(
           (t) => !(t.boardId === boardId && t.memberId === memberId),
         );
-        saveThreads(next);
         return next;
       });
     },
-    [],
+    [setThreads],
   );
 
   const getThreadsForBoard = useCallback(

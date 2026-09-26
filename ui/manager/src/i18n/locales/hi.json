@@ -25,7 +25,15 @@
     "profile": "प्रोफ़ाइल",
     "guest": "अतिथि",
     "userMenu": "उपयोगकर्ता मेनू",
-    "signedIn": "साइन इन किया गया"
+    "signedIn": "साइन इन किया गया",
+    "initFailedTitle": "साइन-इन उपलब्ध नहीं है",
+    "initFailedMessage": "Manager साइन-इन सेवा तक नहीं पहुँच सका। अपना कनेक्शन जाँचें, फिर दोबारा कोशिश करें।",
+    "signedOutTitle": "आप साइन आउट हैं",
+    "signedOutMessage": "जारी रखने के लिए साइन इन करें।",
+    "retry": "फिर से कोशिश करें",
+    "signIn": "साइन इन करें",
+    "incompleteTitle": "साइन-इन पूरा नहीं हुआ",
+    "incompleteMessage": "साइन-इन रद्द या अस्वीकार कर दिया गया। जारी रखने के लिए फिर से साइन इन करें।"
   },
   "nav": {
     "dashboard": "डैशबोर्ड",
@@ -75,7 +83,8 @@
     "workforce": "कार्यबल",
     "monitoring": "वार्तालाप निगरानी",
     "analytics": "विश्लेषण",
-    "connections": "कनेक्शन"
+    "connections": "कनेक्शन",
+    "breadcrumb": "ब्रेडक्रम्ब"
   },
   "theme": {
     "light": "लाइट",
@@ -95,7 +104,8 @@
     "ko": "한국어",
     "pt": "Português",
     "hi": "हिन्दी",
-    "switchFailed": "वह भाषा लोड नहीं हो सकी। कृपया पुनः प्रयास करें।"
+    "switchFailed": "वह भाषा लोड नहीं हो सकी। कृपया पुनः प्रयास करें।",
+    "select": "भाषा"
   },
   "pages": {
     "dashboard": {
@@ -264,7 +274,10 @@
     "openExternalChatIn": "{{environment}} चैट नए टैब में खोलें",
     "deployToProduction": "प्रोडक्शन में तैनात करें",
     "undeployFromProduction": "प्रोडक्शन से हटाएँ",
-    "deployFailedIn": "{{environment}} में तैनाती विफल"
+    "deployFailedIn": "{{environment}} में तैनाती विफल",
+    "pickerUseAsId": "\"{{id}}\" को ID के रूप में उपयोग करने के लिए Enter दबाएँ।",
+    "pickerOpen": "एजेंट दिखाएँ",
+    "pickerClose": "एजेंट सूची बंद करें"
   },
   "agentDetail": {
     "a2aDescHint": "Agent Card में दिखाया जाता है — अन्य एजेंट को यह समझने में मदद करता है कि यह एजेंट क्या करता है",
@@ -814,7 +827,9 @@
       }
     },
     "emptyDescription": "Workflow में उपयोग करने के लिए अपना पहला {{type}} बनाएं।",
-    "descriptionPlaceholder": "इस {{type}} कॉन्फ़िगरेशन का वर्णन करें…"
+    "descriptionPlaceholder": "इस {{type}} कॉन्फ़िगरेशन का वर्णन करें…",
+    "snippetNamePlaceholder": "उदा. cautious_mode",
+    "namePlaceholder": "मेरा {{type}}"
   },
   "editor": {
     "compare": "तुलना करें",
@@ -3483,7 +3498,8 @@
   },
   "errorBoundary": {
     "retry": "पुनः प्रयास करें",
-    "title": "कुछ गलत हो गया"
+    "title": "कुछ गलत हो गया",
+    "reload": "फिर से लोड करें"
   },
   "gdpr": {
     "auditPseudonymized": "ऑडिट छद्मनामित",
@@ -4945,5 +4961,14 @@
     "headerMismatch": "यह कनेक्शन अपना क्रेडेंशियल “{{expected}}” के रूप में भेजता है, इसलिए हेडर का नाम वही होना चाहिए — वरना कॉन्फ़िग एक नाम दिखाएगा और अनुरोध दूसरा ले जाएगा।",
     "refusedInRequest": "${connection:…} पाथ, क्वेरी पैरामीटर या बॉडी में अस्वीकृत है — URL में क्रेडेंशियल हर प्रॉक्सी लॉग में पहुँच जाता है, और बॉडी में इसे पढ़ा नहीं जाता। इसके बजाय हेडर से कनेक्शन को संदर्भित करें।",
     "refusedInModel": "भाषा मॉडल, एम्बेडिंग और वेक्टर स्टोर ${connection:…} स्वीकार नहीं करते: कनेक्शन पूरे हेडर में हल होता है, जबकि इन्हें सादा क्रेडेंशियल चाहिए। यहाँ ${vault:…} उपयोग करें।"
+  },
+  "time": {
+    "justNow": "अभी-अभी"
+  },
+  "sidebar": {
+    "checkingVersion": "संस्करण जाँचा जा रहा है…",
+    "demoModeFallback": "स्टैंडअलोन डेमो मोड",
+    "expand": "साइडबार फैलाएँ",
+    "collapse": "साइडबार समेटें"
   }
 }

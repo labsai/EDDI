@@ -1,4 +1,4 @@
-import { lazy, type ComponentType, type LazyExoticComponent } from "react";
+import { createElement, lazy, type ComponentType, type LazyExoticComponent } from "react";
 
 /**
  * Key for the one-shot reload guard. Session-scoped on purpose: a genuinely
@@ -60,38 +60,59 @@ function looksLikeStaleChunk(error: unknown): boolean {
 export function lazyPage<K extends string, M extends Record<K, ComponentType>>(
   loader: () => Promise<M>,
   name: K,
-): LazyExoticComponent<ComponentType> {
-  return lazy(async () => {
-    try {
-      const module = await loader();
-      // A successful load means the current chunk set is reachable; clear the
-      // guard so a future deploy gets its own retry.
+): ComponentType {
+  // `React.lazy` caches its promise for the life of the component — a REJECTED
+  // one included. So after one failed load (a network blip, a chunk the server
+  // could not serve for a moment) every later render re-threw the same error,
+  // and the ErrorBoundary's "Try Again" could never work: only a full reload
+  // recovered. On failure the lazy component is replaced with a fresh one, and
+  // the wrapper below always renders the current one, so a retry calls
+  // `loader()` again. Whether that re-downloads the chunk is up to the browser:
+  // some keep a failed module in their module map and reject again without
+  // fetching, in which case only a reload helps — the stale-chunk path above.
+  let current: LazyExoticComponent<ComponentType> = createLazy();
+
+  function createLazy(): LazyExoticComponent<ComponentType> {
+    return lazy(async () => {
       try {
-        sessionStorage.removeItem(RELOAD_GUARD_KEY);
-      } catch {
-        // Storage unavailable (private mode, disabled cookies) — the guard is a
-        // nicety, not a correctness requirement.
-      }
-      return { default: module[name] };
-    } catch (error) {
-      if (looksLikeStaleChunk(error)) {
-        let alreadyTried = false;
+        const module = await loader();
+        // A successful load means the current chunk set is reachable; clear the
+        // guard so a future deploy gets its own retry.
         try {
-          alreadyTried = sessionStorage.getItem(RELOAD_GUARD_KEY) === "1";
-          if (!alreadyTried) sessionStorage.setItem(RELOAD_GUARD_KEY, "1");
+          sessionStorage.removeItem(RELOAD_GUARD_KEY);
         } catch {
-          // Without storage we cannot prove this is the first attempt. Treat it
-          // as already tried rather than risk a reload loop.
-          alreadyTried = true;
+          // Storage unavailable (private mode, disabled cookies) — the guard is a
+          // nicety, not a correctness requirement.
         }
-        if (!alreadyTried) {
-          window.location.reload();
-          // Never resolves — the reload tears the page down. Returning here
-          // instead would flash an error boundary on the way out.
-          return new Promise<never>(() => {});
+        return { default: module[name] };
+      } catch (error) {
+        if (looksLikeStaleChunk(error)) {
+          let alreadyTried = false;
+          try {
+            alreadyTried = sessionStorage.getItem(RELOAD_GUARD_KEY) === "1";
+            if (!alreadyTried) sessionStorage.setItem(RELOAD_GUARD_KEY, "1");
+          } catch {
+            // Without storage we cannot prove this is the first attempt. Treat it
+            // as already tried rather than risk a reload loop.
+            alreadyTried = true;
+          }
+          if (!alreadyTried) {
+            window.location.reload();
+            // Never resolves — the reload tears the page down. Returning here
+            // instead would flash an error boundary on the way out.
+            return new Promise<never>(() => {});
+          }
         }
+        // The next render — an error boundary's reset — imports afresh.
+        current = createLazy();
+        throw error;
       }
-      throw error;
-    }
-  });
+    });
+  }
+
+  function LazyPage() {
+    return createElement(current);
+  }
+  LazyPage.displayName = `LazyPage(${name})`;
+  return LazyPage;
 }

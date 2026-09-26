@@ -25,7 +25,15 @@
     "profile": "Perfil",
     "guest": "Visitante",
     "userMenu": "Menu do utilizador",
-    "signedIn": "Sessão iniciada"
+    "signedIn": "Sessão iniciada",
+    "initFailedTitle": "O login não está disponível",
+    "initFailedMessage": "O Manager não conseguiu acessar o serviço de login. Verifique sua conexão e tente novamente.",
+    "signedOutTitle": "Você saiu da sua conta",
+    "signedOutMessage": "Faça login para continuar.",
+    "retry": "Tentar novamente",
+    "signIn": "Entrar",
+    "incompleteTitle": "O login não foi concluído",
+    "incompleteMessage": "O login foi cancelado ou recusado. Faça login novamente para continuar."
   },
   "nav": {
     "dashboard": "Painel",
@@ -75,7 +83,8 @@
     "workforce": "Equipa",
     "monitoring": "Monitorização de conversas",
     "analytics": "Análises",
-    "connections": "Conexões"
+    "connections": "Conexões",
+    "breadcrumb": "Trilha de navegação"
   },
   "theme": {
     "light": "Claro",
@@ -95,7 +104,8 @@
     "ko": "한국어",
     "pt": "Português",
     "hi": "हिन्दी",
-    "switchFailed": "Não foi possível carregar esse idioma. Tente novamente."
+    "switchFailed": "Não foi possível carregar esse idioma. Tente novamente.",
+    "select": "Idioma"
   },
   "pages": {
     "dashboard": {
@@ -265,7 +275,10 @@
     "openExternalChatIn": "Abrir o chat de {{environment}} numa nova aba",
     "deployToProduction": "Implantar em produção",
     "undeployFromProduction": "Remover da produção",
-    "deployFailedIn": "A implantação falhou em {{environment}}"
+    "deployFailedIn": "A implantação falhou em {{environment}}",
+    "pickerUseAsId": "Pressione Enter para usar \"{{id}}\" como ID.",
+    "pickerOpen": "Mostrar agentes",
+    "pickerClose": "Fechar a lista de agentes"
   },
   "agentDetail": {
     "a2aDescHint": "Apresentado no Agent Card — ajuda outros agentes a entender o que este agente faz",
@@ -826,7 +839,9 @@
     "emptyDescription": "Crie seu primeiro(a) {{type}} para usar em workflows.",
     "itemCount_many": "{{count}} itens",
     "count_many": "{{count}} recursos",
-    "descriptionPlaceholder": "Descreva esta configuração de {{type}}…"
+    "descriptionPlaceholder": "Descreva esta configuração de {{type}}…",
+    "snippetNamePlaceholder": "ex.: cautious_mode",
+    "namePlaceholder": "Meu {{type}}"
   },
   "editor": {
     "compare": "Comparar",
@@ -3518,7 +3533,8 @@
   },
   "errorBoundary": {
     "retry": "Tentar novamente",
-    "title": "Algo deu errado"
+    "title": "Algo deu errado",
+    "reload": "Recarregar"
   },
   "gdpr": {
     "auditPseudonymized": "Auditoria pseudonimizada",
@@ -4994,5 +5010,14 @@
     "headerMismatch": "Esta ligação envia a credencial como “{{expected}}”, por isso o cabeçalho tem de ter esse nome — caso contrário a configuração mostra um nome e o pedido leva outro.",
     "refusedInRequest": "${connection:…} é recusado num caminho, parâmetro de consulta ou corpo — uma credencial num URL acaba em todos os registos de proxy, e num corpo não é lida. Referencie a ligação a partir de um cabeçalho.",
     "refusedInModel": "Modelos de linguagem, embeddings e armazenamentos vetoriais não aceitam ${connection:…}: uma ligação resolve-se num cabeçalho completo, e estes precisam de uma credencial simples. Use ${vault:…} aqui."
+  },
+  "time": {
+    "justNow": "agora mesmo"
+  },
+  "sidebar": {
+    "checkingVersion": "Verificando a versão…",
+    "demoModeFallback": "Modo de demonstração independente",
+    "expand": "Expandir a barra lateral",
+    "collapse": "Recolher a barra lateral"
   }
 }

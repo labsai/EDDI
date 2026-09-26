@@ -163,11 +163,26 @@ export function getErrorMessage(error: unknown): string {
   return String(error);
 }
 
+/**
+ * How `ApiClient` keeps its bearer token current. Installed by the auth
+ * provider while a Keycloak session is live; absent when auth is off.
+ *
+ * Both methods are expected to push any new token through `setAuthToken`
+ * themselves — the client only decides WHEN to ask.
+ */
+export interface TokenRefresher {
+  /** Refresh if the token expires within the next few seconds. Never throws. */
+  ensureFresh(): Promise<void>;
+  /** Refresh unconditionally. Resolves true when a new token is in place. */
+  forceRefresh(): Promise<boolean>;
+}
+
 class ApiClient {
   private baseUrl: string;
   private headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
+  private tokenRefresher: TokenRefresher | null = null;
 
   constructor(baseUrl: string) {
     this.baseUrl = baseUrl;
@@ -179,6 +194,17 @@ class ApiClient {
 
   clearAuthToken() {
     delete this.headers["Authorization"];
+  }
+
+  /**
+   * Install (or, with null, remove) the session's token refresher.
+   *
+   * Without one, a request sent in the seconds around expiry went out with a
+   * dead token and its 401 surfaced as an error — the token was only renewed
+   * AFTER Keycloak's expiry callback fired, and nothing retried.
+   */
+  setTokenRefresher(refresher: TokenRefresher | null) {
+    this.tokenRefresher = refresher;
   }
 
   /** Get current auth header (if set). Used by modules that need raw fetch (SSE, text/plain). */
@@ -223,27 +249,55 @@ class ApiClient {
     requestHeaders?: Record<string, string>
   ): Promise<ApiResponse<T>> {
     const url = `${this.baseUrl}${path}`;
+    const payload = body !== undefined
+      ? (typeof body === "string" ? body : JSON.stringify(body))
+      : undefined;
 
-    const mergedHeaders = { ...this.headers, ...requestHeaders };
+    const send = async (): Promise<Response> => {
+      try {
+        // Headers are read per attempt: a retry after a refresh must carry the
+        // NEW token, not the one captured before it.
+        return await fetch(url, {
+          method,
+          headers: { ...this.headers, ...requestHeaders },
+          body: payload,
+        });
+      } catch (networkError) {
+        // Network failure (offline, DNS, CORS, etc.)
+        throw new ApiClientError(
+          0,
+          networkError instanceof Error
+            ? `Network error: ${networkError.message}`
+            : "Network error: unable to reach server",
+          url,
+        );
+      }
+    };
 
-    let response: Response;
-    try {
-      response = await fetch(url, {
-        method,
-        headers: mergedHeaders,
-        body: body !== undefined
-          ? (typeof body === "string" ? body : JSON.stringify(body))
-          : undefined,
-      });
-    } catch (networkError) {
-      // Network failure (offline, DNS, CORS, etc.)
-      throw new ApiClientError(
-        0,
-        networkError instanceof Error
-          ? `Network error: ${networkError.message}`
-          : "Network error: unable to reach server",
-        url,
-      );
+    const refresher = this.tokenRefresher;
+    if (refresher) await refresher.ensureFresh();
+
+    const sentAuth = this.headers["Authorization"];
+    let response = await send();
+
+    // One retry, with a newer token: the token can be revoked or expire between
+    // the freshness check and the server reading it (clock skew, a long request
+    // queue, a laptop waking from sleep). A second 401 is real.
+    //
+    // Replaying the request — a POST or PUT included — is safe only because
+    // EDDI authenticates BEFORE the resource method runs: a 401 from Quarkus
+    // OIDC means the handler never executed, so nothing happened twice. An
+    // endpoint that did work and then answered 401 would break that.
+    //
+    // If a background refresh already swapped the token while this request was
+    // in flight, retry with it; otherwise force one (rate-limited by the
+    // refresher, so a 401 that is not about the token does not hit Keycloak on
+    // every request).
+    if (response.status === 401 && refresher) {
+      const tokenChanged = this.headers["Authorization"] !== sentAuth;
+      if (tokenChanged || (await refresher.forceRefresh())) {
+        response = await send();
+      }
     }
 
     if (!response.ok) {

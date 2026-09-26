@@ -9,7 +9,8 @@ AGENTS.md is the authority; this is the working summary for building a screen.
 
 ## Routing
 
-React Router v7, declarative mode (no data router). Routes are declared in `src/app.tsx`;
+React Router v7. `main.tsx` creates a data router with one splat route (so `useBlocker`
+works — see the unsaved-changes guard); the routes themselves are declared in `src/app.tsx`;
 pages render through `AppLayout`'s `<Outlet />`. Resource detail routes carry the version as
 a query param: `/manage/channels/:id?version=2`. `src/__tests__/route-integrity.test.ts`
 asserts every nav target resolves — add the route and the sidebar entry together.

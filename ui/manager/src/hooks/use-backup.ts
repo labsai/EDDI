@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { agentKeys } from "@/lib/query-keys";
 import {
   exportAndDownloadAgent,
@@ -23,6 +23,36 @@ import type {
   DocumentDescriptor,
 } from "@/lib/api/backup";
 
+/**
+ * Everything an import, merge, upgrade or sync can have written.
+ *
+ * These operations create or bump the agent AND its workflows and every
+ * resource they reference, and an agent ZIP also carries snippets, schedules
+ * and connections (root AGENTS.md §5.5) — yet they used to invalidate only the
+ * agent queries. The workflow, resource, schedule and connection lists, the
+ * dashboard counts, the orphan scan and every open detail page kept showing
+ * the pre-import state until each entry went stale on its own. Snippets are a
+ * resource type, so `["resources"]` covers them (`["resources", "snippets"]`).
+ */
+const IMPORT_TOUCHED_KEYS = [
+  agentKeys.all,
+  ["agent"],
+  ["agent-descriptor"],
+  ["agent-prompt"],
+  ["workflows"],
+  ["resources"],
+  ["latest-versions"],
+  ["dashboard"],
+  ["orphans"],
+  ["schedules"],
+  ["connections"],
+] as const;
+
+function invalidateAfterImport(queryClient: QueryClient) {
+  for (const queryKey of IMPORT_TOUCHED_KEYS) {
+    void queryClient.invalidateQueries({ queryKey });
+  }
+}
 
 // ==================== Existing Hooks ====================
 
@@ -38,7 +68,7 @@ export function useImportAgent() {
   return useMutation({
     mutationFn: (file: File) => importAgent(file),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: agentKeys.all });
+      invalidateAfterImport(queryClient);
     },
   });
 }
@@ -60,7 +90,7 @@ export function useImportAgentMerge() {
       selectedSourceIds?: string[];
     }) => importAgentMerge(file, selectedSourceIds),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: agentKeys.all });
+      invalidateAfterImport(queryClient);
     },
   });
 }
@@ -119,7 +149,7 @@ export function useImportUpgrade() {
       workflowOrder?: string[];
     }) => importAgentUpgrade(file, targetAgentId, selectedSourceIds, workflowOrder),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: agentKeys.all });
+      invalidateAfterImport(queryClient);
     },
   });
 }
@@ -200,7 +230,7 @@ export function useExecuteSync() {
         sourceAuth
       ),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: agentKeys.all });
+      invalidateAfterImport(queryClient);
     },
   });
 }
@@ -218,7 +248,7 @@ export function useExecuteSyncBatch() {
       sourceAuth: string;
     }) => executeSyncBatch(sourceUrl, requests, sourceAuth),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: agentKeys.all });
+      invalidateAfterImport(queryClient);
     },
   });
 }

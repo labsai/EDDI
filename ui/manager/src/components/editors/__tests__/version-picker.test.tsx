@@ -3,6 +3,12 @@ import { screen } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { VersionPicker } from "@/components/editors/version-picker";
 
+/** What this environment's CLDR data calls "n units ago" in narrow English. */
+function ago(n: number, unit: Intl.RelativeTimeFormatUnit): string {
+  return new Intl.RelativeTimeFormat("en", { style: "narrow", numeric: "always" }).format(-n, unit);
+}
+
+
 describe("VersionPicker", () => {
   it("renders version badge when only 1 version", () => {
     renderWithProviders(
@@ -79,8 +85,8 @@ describe("VersionPicker", () => {
         onChange={vi.fn()}
       />
     );
-    expect(screen.getByText(/1m ago/)).toBeInTheDocument();
-    expect(screen.getByText(/1h ago/)).toBeInTheDocument();
+    expect(screen.getByText(new RegExp(ago(1, "minute")))).toBeInTheDocument();
+    expect(screen.getByText(new RegExp(ago(1, "hour")))).toBeInTheDocument();
   });
 
   it("disables dropdown when disabled is true", () => {

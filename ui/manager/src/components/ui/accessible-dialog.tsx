@@ -39,6 +39,8 @@ export function AccessibleDialog({
 }: AccessibleDialogProps) {
   const { t } = useTranslation();
   const dialogRef = useRef<HTMLDivElement>(null);
+  /** Whether the current mouse press began on the backdrop layer itself. */
+  const pressStartedOnLayerRef = useRef(false);
   const titleId = useId();
 
   // The element to hand focus back to on close, recorded while rendering the
@@ -84,7 +86,11 @@ export function AccessibleDialog({
   useEffect(() => {
     if (!open) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
+      // A control inside the dialog that consumed Escape itself — an open
+      // AgentPicker or combobox closing its popup — marks it handled. Closing
+      // the whole dialog on top of that threw away the form the user was
+      // filling in (Trigger, Edit Grant).
+      if (e.key === "Escape" && !e.defaultPrevented) {
         e.stopPropagation();
         onClose();
       }
@@ -123,15 +129,30 @@ export function AccessibleDialog({
 
   return (
     <>
-      {/* Backdrop */}
+      {/* Backdrop — visual only. The centring layer below covers it entirely,
+          so a click handler here never fired; the layer owns the click. */}
       <div
         className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm"
-        onClick={onClose}
         aria-hidden="true"
       />
 
       {/* Dialog */}
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        data-testid={testId ? `${testId}-backdrop` : undefined}
+        onMouseDown={(e) => {
+          pressStartedOnLayerRef.current = e.target === e.currentTarget;
+        }}
+        onClick={(e) => {
+          // Only a click that both STARTED and ENDED on the dimmed area. A drag
+          // that begins in an input (selecting text past the box's edge) and is
+          // released over the backdrop also delivers a click to this layer —
+          // the nearest common ancestor — and closing then threw the form away.
+          const startedOnLayer = pressStartedOnLayerRef.current;
+          pressStartedOnLayerRef.current = false;
+          if (startedOnLayer && e.target === e.currentTarget) onClose();
+        }}
+      >
         {/* Capped at the viewport and scrolled in the body, not the box: a
             dialog taller than the window was centred and then clipped at BOTH
             ends, so its title and close button sat off-screen with nothing to
