@@ -99,6 +99,23 @@ public class ScheduleFireExecutor {
     Duration fireTimeout = DEFAULT_FIRE_TIMEOUT;
 
     /**
+     * Steps after which a {@code conversationStrategy=persistent} schedule rolls
+     * over to a fresh conversation. {@code 0} or less disables the rollover.
+     * <p>
+     * A persistent heartbeat appends a step on every fire, forever, to one
+     * conversation document. Nothing bounded that document, so it eventually hit
+     * MongoDB's 16 MB document limit, after which every write of the conversation
+     * failed and every fire from then on was lost. The old conversation is ended,
+     * not trimmed: its full history stays readable, and the next fire starts a new
+     * one. The default keeps a heartbeat that stores a few KB per turn far below
+     * the limit.
+     */
+    @ConfigProperty(name = "eddi.schedule.persistent-conversation-max-steps", defaultValue = "1000")
+    int persistentConversationMaxSteps = DEFAULT_PERSISTENT_CONVERSATION_MAX_STEPS;
+
+    static final int DEFAULT_PERSISTENT_CONVERSATION_MAX_STEPS = 1000;
+
+    /**
      * Execute a schedule fire. Returns the fire log entry.
      *
      * @param schedule
@@ -583,8 +600,10 @@ public class ScheduleFireExecutor {
         if (conversationId != null && !conversationId.isBlank()) {
             // Validate conversation still exists and is usable
             try {
-                conversationService.readConversation(env, schedule.getAgentId(), conversationId, false, true, List.of());
-                return conversationId;
+                var existing = conversationService.readConversation(env, schedule.getAgentId(), conversationId, false, false, List.of());
+                if (isReusable(schedule, conversationId, existing)) {
+                    return conversationId;
+                }
             } catch (Exception e) {
                 LOGGER.infof("[SCHEDULE] Persistent conversation %s no longer valid for schedule %s, creating new", conversationId, schedule.getId());
             }
@@ -607,6 +626,39 @@ public class ScheduleFireExecutor {
             LOGGER.warnf(e, "[SCHEDULE] Failed to update persistent conversation ID on schedule %s", schedule.getId());
         }
         return newConversationId;
+    }
+
+    /**
+     * Whether the persistent conversation can take another fire. An ENDED one
+     * cannot: every fire into it was refused with "conversation has ended" and the
+     * schedule never recovered on its own. One that reached
+     * {@link #persistentConversationMaxSteps} is ended here and replaced, so the
+     * document stays clear of the 16 MB limit.
+     */
+    private boolean isReusable(ScheduleConfiguration schedule, String conversationId, SimpleConversationMemorySnapshot existing) {
+        if (existing == null) {
+            // Nothing to judge by — the read did not fail, which is what "usable" meant
+            // before this check existed.
+            return true;
+        }
+        if (existing.getConversationState() == ConversationState.ENDED) {
+            LOGGER.infof("[SCHEDULE] Persistent conversation %s of schedule %s has ended — starting a new one", conversationId,
+                    schedule.getId());
+            return false;
+        }
+        int steps = existing.getConversationSteps() != null ? existing.getConversationSteps().size() : 0;
+        if (persistentConversationMaxSteps > 0 && steps >= persistentConversationMaxSteps) {
+            LOGGER.infof("[SCHEDULE] Persistent conversation %s of schedule %s reached %d steps (limit %d) — ending it and "
+                    + "starting a new one; its history stays readable", conversationId, schedule.getId(), steps,
+                    persistentConversationMaxSteps);
+            try {
+                conversationService.endConversation(conversationId, "system:scheduler");
+            } catch (Exception e) {
+                LOGGER.warnf(e, "[SCHEDULE] Could not end the rolled-over conversation %s of schedule %s", conversationId, schedule.getId());
+            }
+            return false;
+        }
+        return true;
     }
 
     private InputData buildInputData(ScheduleConfiguration schedule) {
