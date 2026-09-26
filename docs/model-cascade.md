@@ -65,10 +65,11 @@ Cascading is configured per-task in a `langchain.json` resource:
 | `strategy` | string | `"cascade"` | Execution strategy. Only `cascade` (sequential) is implemented; `parallel` and any unknown value warn at deploy time and run sequentially. |
 | `evaluationStrategy` | string | `"structured_output"` | How confidence is evaluated (see below) |
 | `enableInAgentMode` | boolean | `true` | Whether cascade activates when tools/agents are configured |
-| `judgeModel` | object | — | Model for the `judge_model` strategy: `{ "type": "...", "parameters": {...} }`. Expected when `evaluationStrategy` is `judge_model`; if omitted or unbuildable, deployment logs a warning and confidence evaluation falls back to `heuristic` at runtime. |
+| `judgeModel` | object | — | Model for the `judge_model` strategy: `{ "type": "...", "parameters": {...}, "inputPricePer1M": 0.15, "outputPricePer1M": 0.6 }` (prices optional; they make the judge's spend count toward `maxCostPerRun` and the reported cost; negative values fail deployment). Expected when `evaluationStrategy` is `judge_model`; if omitted or unbuildable, deployment logs a warning and confidence evaluation falls back to `heuristic` at runtime. |
 | `heuristic` | object | — | Overrides for the `heuristic` strategy (see below). Optional. |
 | `maxTotalDurationMs` | long | — | Wall-clock ceiling across the whole cascade. When reached, escalation stops and the best response so far is returned. Also caps each **buffered** step's timeout by the remaining budget — a step streamed live is exempt (see [Streaming the Final Step](#streaming-the-final-step)). |
-| `maxCostPerRun` | double | — | Dollar ceiling for a single run, computed from token usage × per-step pricing. When reached, escalation stops and the best response so far is returned. |
+| `maxCostPerRun` | double | — | Dollar ceiling for a single run: the steps' token cost (per-step pricing) **plus** the judge model's token cost (`judgeModel` pricing) **plus** the tracked cost of the tools agent-mode steps ran. When reached, escalation stops and the best response so far is returned. |
+| `carryToolResultsOnEscalation` | boolean | `true` | Agent mode: when a step that already executed tools escalates, the next step starts from that step's tool calls and results instead of re-running the tool loop from the conversation alone (which executed every side-effecting tool again). Set `false` if a cross-provider escalation rejects the earlier provider's tool-call transcript. |
 | `inputPricePer1M` / `outputPricePer1M` | double | — | Cascade-level default token pricing (steps may override). Used for cost reporting and the cost ceiling. |
 | `returnBestAcrossSteps` | boolean | `false` | When true, if an earlier (escalated) step scored strictly higher than the finally-accepted step, the earlier step's response is returned. |
 | `steps` | array | — | Ordered list of cascade steps (cheap → expensive) |
@@ -185,6 +186,10 @@ When the audit collector is active, the cascade writes:
 ## Agent Mode
 
 When `enableInAgentMode` is `true` (default), the cascade also works when tools (built-in, MCP, HTTP calls, A2A) are configured — each step can independently invoke the tool-calling loop. Because the `structured_output` wrapper cannot be injected around the tool loop, agent-mode confidence uses `judge_model` (if configured) or `heuristic`.
+
+**Escalation does not replay tools.** When a step that ran tools escalates, the next step receives those tool calls and their results (`carryToolResultsOnEscalation`, default `true`) and continues from them, so a tool that already ran is not executed again just because a stronger model took over. The returned tool trace covers every step's calls, not only the winning step's. What is *not* carried: the tools of a step that timed out or failed outright — its partial transcript is lost with it, and the next step starts without it.
+
+**HITL:** a tool-approval pause raised inside a cascade step records which step paused, and the resume continues on **that step's** model — not the task's base model.
 
 **Cancellation:** when a step times out, the orchestrator checks for interruption between tool-loop iterations and before each tool, so it stops launching further side-effectful tools. A tool already in flight when the timeout fires may still complete — keep cascade-in-agent-mode tools idempotent where possible.
 

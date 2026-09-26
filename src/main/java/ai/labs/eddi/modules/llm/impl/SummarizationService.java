@@ -16,7 +16,6 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -107,9 +106,9 @@ public class SummarizationService {
      * Enabling {@code conversationSummary} without global-variable-backed
      * credentials therefore threw, the exception was swallowed as a WARN, and the
      * rolling summary silently never materialised. Pass the parent task's resolved
-     * parameters here and only {@code modelName} is overridden — the same
-     * inheritance {@link ToolResponseTruncator} already performs for its
-     * summarizer.
+     * parameters here and only the model is overridden (under the provider's own
+     * key, see {@link ModelParameterKeys#withModel}) — the same inheritance
+     * {@link ToolResponseTruncator} already performs for its summarizer.
      * <p>
      * <strong>Caller contract:</strong> the map handed in must belong to
      * {@code llmProvider}. This service cannot tell whose credentials it was given,
@@ -156,8 +155,8 @@ public class SummarizationService {
      * @param inheritedParameters
      *            the calling task's resolved parameters, which must belong to
      *            {@code llmProvider} (see
-     *            {@link #summarize(String, String, String, String, Map)});
-     *            {@code modelName} is overridden with {@code llmModel} and
+     *            {@link #summarize(String, String, String, String, Map)}); the
+     *            model is overridden with {@code llmModel} and
      *            {@code responseFormat} is stripped (a summary is plain text, never
      *            JSON)
      */
@@ -166,8 +165,9 @@ public class SummarizationService {
                                                   Map<String, String> inheritedParameters) {
         long start = System.nanoTime();
         try {
-            Map<String, String> params = inheritedParameters != null ? new HashMap<>(inheritedParameters) : new HashMap<>();
-            params.put("modelName", llmModel);
+            // Every provider's model key, not just modelName (M-L2) — see
+            // ModelParameterKeys#withModel.
+            Map<String, String> params = ModelParameterKeys.withModel(inheritedParameters, llmProvider, llmModel);
             params.remove("responseFormat");
 
             var model = chatModelRegistry.getOrCreate(llmProvider, params);

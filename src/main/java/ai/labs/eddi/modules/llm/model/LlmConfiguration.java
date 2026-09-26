@@ -262,6 +262,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         private Integer maxRagContextChars = 20000;
 
         /**
+         * Whether retrieved context (vector-store and httpCall RAG) is wrapped in a
+         * provenance envelope that marks it as data, not instructions, before it is
+         * appended to the system prompt. Null or {@code true} = marked (default);
+         * {@code false} appends the retrieved text bare, as before.
+         */
+        private Boolean markRagProvenance;
+
+        /**
          * Hard ceiling on the assembled system prompt, in characters, applied after all
          * RAG context, counterweight, identity-masking and response-format blocks have
          * been appended. This is the last line of defence for a prompt that grows from
@@ -753,6 +761,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setHttpCallRag(String httpCallRag) {
             this.httpCallRag = httpCallRag;
+        }
+
+        public Boolean getMarkRagProvenance() {
+            return markRagProvenance;
+        }
+
+        public void setMarkRagProvenance(Boolean markRagProvenance) {
+            this.markRagProvenance = markRagProvenance;
         }
 
         public Integer getMaxRagContextChars() {
@@ -1471,12 +1487,26 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         private Long maxTotalDurationMs;
 
         /**
-         * Optional dollar ceiling for a single cascade run. Computed from captured
-         * token usage and per-step pricing. When the accumulated cost reaches this
-         * ceiling, the cascade stops escalating and returns the best response so far.
-         * Null = unlimited. Steps without configured pricing contribute $0.
+         * Optional dollar ceiling for a single cascade run: the steps' token cost
+         * (per-step pricing), plus the judge model's token cost
+         * ({@link JudgeModelConfig} pricing), plus the tracked cost of the tools
+         * agent-mode steps executed. When the accumulated cost reaches this ceiling,
+         * the cascade stops escalating and returns the best response so far. Null =
+         * unlimited. Anything without configured pricing contributes $0.
          */
         private Double maxCostPerRun;
+
+        /**
+         * Agent mode only: when a step that already executed tools escalates, hand the
+         * next step that step's tool calls and results, so the stronger model continues
+         * from what was done instead of re-running the whole tool loop — which
+         * re-executed every side-effecting tool (a second POST, a second created agent)
+         * once per escalation. Default {@code true}. Set {@code false} to start every
+         * step from the conversation alone (the previous behaviour), e.g. when a
+         * cross-provider escalation rejects the earlier provider's tool-call
+         * transcript.
+         */
+        private boolean carryToolResultsOnEscalation = true;
 
         /** Cascade-level default input price per 1M tokens (steps may override). */
         private Double inputPricePer1M;
@@ -1553,6 +1583,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setMaxTotalDurationMs(Long maxTotalDurationMs) {
             this.maxTotalDurationMs = maxTotalDurationMs;
+        }
+
+        public boolean isCarryToolResultsOnEscalation() {
+            return carryToolResultsOnEscalation;
+        }
+
+        public void setCarryToolResultsOnEscalation(boolean carryToolResultsOnEscalation) {
+            this.carryToolResultsOnEscalation = carryToolResultsOnEscalation;
         }
 
         public Double getMaxCostPerRun() {
@@ -1687,6 +1725,16 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         /** Model-specific parameters (model name, apiKey, etc.). */
         private Map<String, String> parameters;
 
+        /**
+         * Input price per 1M tokens of the judge model. The judge runs once per
+         * evaluated step, so its spend counts toward the cascade's
+         * {@code maxCostPerRun} and reported cost. Null = $0 (unpriced).
+         */
+        private Double inputPricePer1M;
+
+        /** Output price per 1M tokens of the judge model. Null = $0 (unpriced). */
+        private Double outputPricePer1M;
+
         public String getType() {
             return type;
         }
@@ -1701,6 +1749,22 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setParameters(Map<String, String> parameters) {
             this.parameters = parameters;
+        }
+
+        public Double getInputPricePer1M() {
+            return inputPricePer1M;
+        }
+
+        public void setInputPricePer1M(Double inputPricePer1M) {
+            this.inputPricePer1M = inputPricePer1M;
+        }
+
+        public Double getOutputPricePer1M() {
+            return outputPricePer1M;
+        }
+
+        public void setOutputPricePer1M(Double outputPricePer1M) {
+            this.outputPricePer1M = outputPricePer1M;
         }
     }
 
@@ -1846,6 +1910,22 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         private int maxRecallTurns = 20;
 
         /**
+         * Most conversation turns folded into the summary by a single update. A
+         * conversation that enabled summarization late (or whose summarizer failed for
+         * a while) catches up over several turns instead of sending its whole backlog
+         * in one request — which, once it outgrew the summarizer's context window,
+         * failed on every turn from then on and was paid for every time.
+         */
+        private int maxTurnsPerUpdate = 20;
+
+        /**
+         * Character ceiling on the new turns sent in a single update (the previous
+         * summary is bounded separately by {@code maxSummaryTokens}). The batch is
+         * shortened turn by turn to fit; a single turn larger than this is cut.
+         */
+        private int maxCharsPerUpdate = 60_000;
+
+        /**
          * Custom summarization prompt override. When null, a default structured prompt
          * is used that preserves goals, decisions, reasoning, and tone.
          */
@@ -1865,6 +1945,12 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
             }
             if (maxSummaryTokens < 100) {
                 maxSummaryTokens = 800;
+            }
+            if (maxTurnsPerUpdate < 1) {
+                maxTurnsPerUpdate = 20;
+            }
+            if (maxCharsPerUpdate < 1000) {
+                maxCharsPerUpdate = 60_000;
             }
             // llmProvider/llmModel are deliberately NOT defaulted here any more: a blank
             // value means "inherit the parent LLM task", which only the caller can
@@ -1902,6 +1988,22 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setMaxSummaryTokens(int maxSummaryTokens) {
             this.maxSummaryTokens = maxSummaryTokens;
+        }
+
+        public int getMaxTurnsPerUpdate() {
+            return maxTurnsPerUpdate;
+        }
+
+        public void setMaxTurnsPerUpdate(int maxTurnsPerUpdate) {
+            this.maxTurnsPerUpdate = maxTurnsPerUpdate;
+        }
+
+        public int getMaxCharsPerUpdate() {
+            return maxCharsPerUpdate;
+        }
+
+        public void setMaxCharsPerUpdate(int maxCharsPerUpdate) {
+            this.maxCharsPerUpdate = maxCharsPerUpdate;
         }
 
         public boolean isExcludePropertiesFromSummary() {

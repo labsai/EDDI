@@ -77,6 +77,13 @@ public class PromptSnippetService {
      */
     private final Cache<String, Map<String, Object>> snippetCache;
 
+    /**
+     * The last map that loaded successfully, served while the store is failing.
+     * Survives cache invalidation and expiry on purpose: it is what keeps a safety
+     * snippet in the prompt through a transient database outage.
+     */
+    private volatile Map<String, Object> lastLoaded;
+
     @Inject
     public PromptSnippetService(IPromptSnippetStore snippetStore,
             IDocumentDescriptorStore descriptorStore,
@@ -119,6 +126,16 @@ public class PromptSnippetService {
 
         cacheMissCounter.increment();
         Map<String, Object> snippetMap = loadAllSnippets();
+        if (snippetMap == null) {
+            // A failed load is NOT cached (M-L6). It used to be, as an empty map, for
+            // the full five-minute TTL: one transient store error and every prompt
+            // rendered {snippets.x} — safety instructions included — as blank for
+            // five minutes, with nothing but one ERROR line to show for it. Serve the
+            // last good map instead, and try the store again on the next call.
+            Map<String, Object> fallback = lastLoaded;
+            return fallback != null ? fallback : Collections.emptyMap();
+        }
+        lastLoaded = snippetMap;
         snippetCache.put(CACHE_KEY, snippetMap);
         return snippetMap;
     }
@@ -132,6 +149,10 @@ public class PromptSnippetService {
         LOGGER.debug("Snippet cache invalidated");
     }
 
+    /**
+     * @return every snippet by name, or {@code null} when the store could not be
+     *         read — which the caller must not mistake for "no snippets"
+     */
     private Map<String, Object> loadAllSnippets() {
         try {
             // Use descriptor store to enumerate all snippet resources
@@ -168,9 +189,9 @@ public class PromptSnippetService {
             LOGGER.debugv("Loaded {0} prompt snippets into cache", result.size());
             return Collections.unmodifiableMap(result);
 
-        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
-            LOGGER.errorv("Failed to load prompt snippets: {0}", e.getMessage());
-            return Collections.emptyMap();
+        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException | RuntimeException e) {
+            LOGGER.errorv("Failed to load prompt snippets, keeping the last loaded set: {0}", e.getMessage());
+            return null;
         }
     }
 

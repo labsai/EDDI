@@ -620,7 +620,9 @@ class LlmTaskCoverageTest {
         var t = task("taskA", List.of("action1"), Map.of("convertToObject", "true"));
         llmTask.execute(memory, new LlmConfiguration(List.of(t)));
 
-        verify(jsonSerialization).deserialize(eq("[1,2,3]"), eq(Map.class));
+        // A JSON array is a List, not a Map (M-L4): deserializing it as a Map threw
+        // and failed the turn.
+        verify(jsonSerialization).deserialize(eq("[1,2,3]"), eq(List.class));
     }
 
     @Test

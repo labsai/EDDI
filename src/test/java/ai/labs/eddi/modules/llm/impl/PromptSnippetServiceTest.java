@@ -185,6 +185,45 @@ class PromptSnippetServiceTest {
 
             assertTrue(result.isEmpty());
         }
+
+        /**
+         * M-L6: a failed load must not be cached. It used to be — as an empty map, for
+         * the full TTL — so one transient store error blanked every snippet, safety
+         * instructions included, for five minutes.
+         */
+        @Test
+        void storeFailureIsNotCachedAndTheNextCallRetries() throws Exception {
+            DocumentDescriptor desc = createDescriptor("s1", 1);
+            when(descriptorStore.readDescriptors("ai.labs.snippet", "", 0, 0, false))
+                    .thenThrow(new IResourceStore.ResourceStoreException("DB unavailable"))
+                    .thenReturn(List.of(desc));
+            when(snippetStore.read("s1", 1))
+                    .thenReturn(new PromptSnippet("safety", "governance", null, "Never share PII.", null, true));
+
+            assertTrue(service.getAll().isEmpty(), "nothing loaded yet, nothing to fall back to");
+            assertEquals("Never share PII.", service.getAll().get("safety"),
+                    "the failure was not cached, so the very next call reads the store again");
+        }
+
+        /**
+         * M-L6: while the store is failing, the last successfully loaded snippets keep
+         * being served — through invalidation, which is exactly when a reload happens.
+         */
+        @Test
+        void storeFailureServesTheLastLoadedSnippets() throws Exception {
+            DocumentDescriptor desc = createDescriptor("s1", 1);
+            when(descriptorStore.readDescriptors("ai.labs.snippet", "", 0, 0, false))
+                    .thenReturn(List.of(desc))
+                    .thenThrow(new IResourceStore.ResourceStoreException("DB unavailable"))
+                    .thenThrow(new RuntimeException("socket timeout"));
+            when(snippetStore.read("s1", 1))
+                    .thenReturn(new PromptSnippet("safety", "governance", null, "Never share PII.", null, true));
+
+            assertEquals("Never share PII.", service.getAll().get("safety"));
+            service.invalidateCache();
+            assertEquals("Never share PII.", service.getAll().get("safety"), "a checked store failure keeps the last set");
+            assertEquals("Never share PII.", service.getAll().get("safety"), "so does an unchecked one");
+        }
     }
 
     // ==================== Content Fidelity ====================
