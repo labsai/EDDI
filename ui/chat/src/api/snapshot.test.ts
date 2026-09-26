@@ -134,4 +134,19 @@ describe("stepsToMessages — secret turns must never be re-rendered in clear", 
 
     expect(msgs[0].content).toBe("what is 2+2");
   });
+
+  it("masks the backend placeholder after a reload, without the session set", () => {
+    // Simulated reload: a fresh page has an empty secretTexts set, but the
+    // backend now persists input:initial as "<secret input>" for a secret turn.
+    // The transcript must show the mask, never the raw placeholder token, and of
+    // course never the secret.
+    const msgs = stepsToMessages(
+      [step([{ key: "input:initial", value: "<secret input>" }])],
+      new Set(),
+    );
+
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0]).toMatchObject({ role: "user", content: "●●●●●●●●" });
+    expect(msgs.some((m) => m.content.includes("<secret input>"))).toBe(false);
+  });
 });
