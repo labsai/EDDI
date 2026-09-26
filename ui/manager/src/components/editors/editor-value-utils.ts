@@ -16,17 +16,18 @@ export function renameKey<V>(
 
 /** `${prefix}1`, `${prefix}2`, … — the first one that is not already taken. */
 export function nextFreeKey(taken: Iterable<string>, prefix: string): string {
-  const used = new Set(taken);
+  const used = new Set(taken); // a Set, not `in`: "constructor" is not taken
   let n = 1;
   while (used.has(`${prefix}${n}`)) n++;
   return `${prefix}${n}`;
 }
 
 /**
- * A comma-separated HTTP status code list as the backend wants it. An empty
- * field is `undefined`, never `[]`: the engine substitutes its defaults only
- * for a missing list (`PrePostUtils`), and an empty `runOnHttpCode` matches no
- * status code at all, so the instruction it guards would never run again.
+ * A comma-separated HTTP status code list, `undefined` when it holds none.
+ * The caller decides what "none" means: for `runOnHttpCode` it must stay
+ * absent (the engine substitutes its defaults only for a missing list, and
+ * `[]` matches no status code at all); for `skipOnHttpCode` `[]` is "skip
+ * nothing" and is written as such.
  */
 export function parseHttpCodeList(raw: string): number[] | undefined {
   const codes = raw
@@ -63,4 +64,13 @@ export function parseJsonArgument(raw: string): { ok: true; value: unknown } | {
   } catch {
     return { ok: false };
   }
+}
+
+/**
+ * Whether `key` is one of the object's own keys. Not `key in obj`, which is
+ * also true for "constructor", "toString" and the rest of the prototype (and
+ * `Object.hasOwn` is past this project's `lib` target).
+ */
+export function hasOwnKey(obj: object, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(obj, key);
 }

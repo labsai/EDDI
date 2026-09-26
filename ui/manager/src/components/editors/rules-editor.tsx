@@ -191,6 +191,8 @@ function KeyValueRow({
   onValueChange,
   onRemove,
   readOnly,
+  valuePlaceholder,
+  invalidMessage,
 }: {
   configKey: string;
   value: string;
@@ -198,9 +200,13 @@ function KeyValueRow({
   onValueChange: (v: string) => void;
   onRemove: () => void;
   readOnly?: boolean;
+  valuePlaceholder?: string;
+  /** Shown under the row, and marks the value invalid, when set. */
+  invalidMessage?: string;
 }) {
   const { t } = useTranslation();
   return (
+    <div>
     <div className="flex items-center gap-1.5">
       <input
         type="text"
@@ -216,8 +222,11 @@ function KeyValueRow({
         value={value}
         onChange={(e) => onValueChange(e.target.value)}
         readOnly={readOnly}
-        placeholder={t("rulesEditor.configValue", "Value")}
-        className="h-7 flex-1 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+        placeholder={valuePlaceholder ?? t("rulesEditor.configValue", "Value")}
+        aria-invalid={invalidMessage ? true : undefined}
+        className={`h-7 flex-1 rounded border bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring ${
+          invalidMessage ? "border-destructive" : "border-input"
+        }`}
       />
       {!readOnly && (
         <button
@@ -229,8 +238,23 @@ function KeyValueRow({
         </button>
       )}
     </div>
+    {invalidMessage && (
+      <p className="mt-0.5 ps-1 text-[10px] text-destructive" role="alert">
+        {invalidMessage}
+      </p>
+    )}
+    </div>
   );
 }
+
+/**
+ * SizeMatcher parses every `min` / `max` / `equal` key it finds with
+ * `Integer.parseInt`, so an empty or non-numeric bound fails the whole save
+ * with a 400. `-1` is its own "no bound" value: a cleared bound is stored as
+ * `-1` and shown as an empty field.
+ */
+const SIZE_BOUND_KEYS = new Set(["min", "max", "equal"]);
+const NO_SIZE_BOUND = "-1";
 
 function ConditionEditor({
   condition,
@@ -252,10 +276,16 @@ function ConditionEditor({
 
   const configEntries = Object.entries(condition.configs ?? {});
 
+  const isSizeBound = (key: string) =>
+    condition.type === "sizematcher" && SIZE_BOUND_KEYS.has(key);
+  /** What is written for a value typed into `key`. */
+  const toStored = (key: string, value: string) =>
+    isSizeBound(key) && value.trim() === "" ? NO_SIZE_BOUND : value;
+
   const updateConfig = (key: string, value: string) => {
     onChange({
       ...condition,
-      configs: { ...condition.configs, [key]: value },
+      configs: { ...condition.configs, [key]: toStored(key, value) },
     });
   };
 
@@ -269,7 +299,7 @@ function ConditionEditor({
     if (oldKey === newKey) return;
     const entries = Object.entries(condition.configs ?? {});
     const updated = Object.fromEntries(
-      entries.map(([k, v]) => (k === oldKey ? [newKey, v] : [k, v]))
+      entries.map(([k, v]) => (k === oldKey ? [newKey, toStored(newKey, v)] : [k, v]))
     );
     onChange({ ...condition, configs: updated });
   };
@@ -392,7 +422,13 @@ function ConditionEditor({
             <KeyValueRow
               key={i}
               configKey={k}
-              value={v}
+              value={isSizeBound(k) && v === NO_SIZE_BOUND ? "" : v}
+              valuePlaceholder={isSizeBound(k) ? t("rulesEditor.sizeNoBound", "no limit") : undefined}
+              invalidMessage={
+                isSizeBound(k) && v.trim() !== "" && !/^-?\d+$/.test(v.trim())
+                  ? t("rulesEditor.sizeBoundInvalid", "Must be a whole number, or empty for no limit.")
+                  : undefined
+              }
               onKeyChange={(nk) => renameConfigKey(k, nk)}
               onValueChange={(nv) => updateConfig(k, nv)}
               onRemove={() => removeConfigEntry(k)}

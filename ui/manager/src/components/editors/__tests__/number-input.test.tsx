@@ -82,3 +82,26 @@ describe("NumberInput", () => {
     expect(onChange).toHaveBeenLastCalledWith(2.5);
   });
 });
+
+describe("NumberInput integer parsing", () => {
+  it("does not store 1 for '1.5' in an integer field, and shows what was stored on blur", () => {
+    const onValue = vi.fn();
+    renderWithProviders(<Harness initial={5} emptyValue={0} onValue={onValue} />);
+    const input = screen.getByTestId("num");
+    fireEvent.change(input, { target: { value: "1.5" } });
+    expect(onValue).toHaveBeenLastCalledWith(0);
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    fireEvent.blur(input);
+    expect(input).toHaveValue(0);
+  });
+
+  it("stores 1000 for '1e3' and displays 1000 once the field is left", () => {
+    const onValue = vi.fn();
+    renderWithProviders(<Harness initial={5} onValue={onValue} />);
+    const input = screen.getByTestId("num");
+    fireEvent.change(input, { target: { value: "1e3" } });
+    expect(onValue).toHaveBeenLastCalledWith(1000);
+    fireEvent.blur(input);
+    expect(input).toHaveValue(1000);
+  });
+});

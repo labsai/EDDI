@@ -891,7 +891,9 @@
     "removeCondition": "조건 제거",
     "noGroups": "동작 그룹이 정의되지 않았습니다",
     "noRules": "이 그룹에 규칙이 없습니다",
-    "noConditions": "조건 없음"
+    "noConditions": "조건 없음",
+    "sizeNoBound": "제한 없음",
+    "sizeBoundInvalid": "정수여야 하며, 제한이 없으면 비워 두세요."
   },
   "apiCallsEditor": {
     "noEndpointsFound": "사양에서 엔드포인트를 찾을 수 없습니다",
@@ -997,7 +999,11 @@
     "useDefaultCodes": "기본값 사용",
     "httpCodeFilterDefaults": "비어 있는 필드는 표시된 기본 코드를 사용합니다.",
     "scopeSecretUnsupported": "(여기서는 볼트에 저장되지 않음)",
-    "scopeSecretWarning": "이 명령에서는 secret 범위가 볼트에 저장되지 않으며 값이 평문으로 저장됩니다. 다른 범위를 선택하고 자격 증명은 시크릿 볼트에 보관하세요."
+    "scopeSecretWarning": "이 명령에서는 secret 범위가 볼트에 저장되지 않으며 값이 평문으로 저장됩니다. 다른 범위를 선택하고 자격 증명은 시크릿 볼트에 보관하세요.",
+    "skipNone": "없음 — 건너뛰는 코드 없음",
+    "runSkipConflict": "{{codes}}이(가) 건너뛰기 목록에도 있으므로 이 명령은 해당 코드에서 실행되지 않습니다.",
+    "httpCodeFilterSkipSet": "\"실행할 코드\"가 비어 있으면 200, 201을 사용하고, \"건너뛸 코드\"가 비어 있으면 아무것도 건너뛰지 않습니다.",
+    "useDefaultSkipCodes": "기본 건너뛰기 목록 사용"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "실패 시 파이프라인이 계속됩니다. 오류는 다음 위치에 노출됩니다: ",
@@ -1385,7 +1391,7 @@
     "visibilityTitle": "이 longTerm 속성을 볼 수 있는 Agent",
     "editValue": "값 편집",
     "toggleGroup": "속성 그룹 토글",
-    "secretFromPathWarning": "시크릿은 값 필드에서 온 경우에만 볼트에 저장됩니다. \"원본 경로\"가 설정되어 있으면 값이 평문으로 저장되므로 경로를 비우거나 다른 범위를 선택하세요."
+    "secretFromPathWarning": "시크릿은 값 필드에서 온 경우에만 볼트에 저장됩니다. \"원본 경로\"에서 읽거나 다른 방식으로 지정하면 평문으로 저장되므로 값 필드에 입력하거나 다른 범위를 선택하세요."
   },
   "dictionaryEditor": {
     "language": "언어",
@@ -2135,7 +2141,9 @@
       "filesLoadFailed": "파일을 불러올 수 없습니다: {{error}}"
     },
     "chunkStrategyLegacy": "{{value}} (재귀로 저장됨)",
-    "saveBeforeIngest": "먼저 변경 사항을 저장하세요. 문서는 화면의 편집 내용이 아니라 저장된 지식 베이스의 저장소와 임베딩 모델로 수집됩니다."
+    "saveBeforeIngest": "먼저 변경 사항을 저장하세요. 문서는 화면의 편집 내용이 아니라 저장된 지식 베이스의 저장소와 임베딩 모델로 수집됩니다.",
+    "chunkStrategyUnsupported": "{{value}} (지원되지 않음)",
+    "chunkStrategyUnsupportedHint": "저장할 때 서버가 이 전략을 거부합니다. 재귀를 선택하세요."
   },
   "onboarding": {
     "welcome": {

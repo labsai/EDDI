@@ -155,6 +155,15 @@ const CHUNK_STRATEGIES = [
   { value: "recursive", label: "Recursive (recommended)" },
 ] as const;
 
+/**
+ * Only these two are rewritten to `recursive` on save; any other unknown
+ * strategy (from an import, a hand edit) is refused by
+ * `RagConfiguration.validate()` with a 400.
+ */
+const LEGACY_CHUNK_STRATEGIES = new Set(["paragraph", "sentence"]);
+const isLegacyChunkStrategy = (value: string | undefined) =>
+  LEGACY_CHUNK_STRATEGIES.has((value ?? "").trim().toLowerCase());
+
 // ─── Section Component ──────────────────────────────────────────────────────
 
 function Section({
@@ -677,6 +686,10 @@ export function RagEditor({
   const storeHints = STORE_PARAM_HINTS[data.storeType ?? "in-memory"] ?? [];
   const embeddingHints = EMBEDDING_PARAM_HINTS[data.embeddingProvider ?? "openai"] ?? [];
 
+  const unknownChunkStrategy =
+    !!data.chunkStrategy?.trim() &&
+    !CHUNK_STRATEGIES.some((s) => s.value === data.chunkStrategy!.trim().toLowerCase());
+
   // Deterministic chunk preview bar heights (stable across re-renders)
   const chunkCount = Math.min(6, Math.ceil(2048 / (data.chunkSize ?? 512)));
   const previewHeights = useMemo(
@@ -878,14 +891,26 @@ export function RagEditor({
                   {s.label}
                 </option>
               ))}
-              {data.chunkStrategy && !CHUNK_STRATEGIES.some((s) => s.value === data.chunkStrategy) && (
+              {unknownChunkStrategy && (
                 <option value={data.chunkStrategy} disabled>
-                  {t("ragEditor.chunkStrategyLegacy", "{{value}} (saved as Recursive)", {
-                    value: data.chunkStrategy,
-                  })}
+                  {isLegacyChunkStrategy(data.chunkStrategy)
+                    ? t("ragEditor.chunkStrategyLegacy", "{{value}} (saved as Recursive)", {
+                        value: data.chunkStrategy,
+                      })
+                    : t("ragEditor.chunkStrategyUnsupported", "{{value}} (not supported)", {
+                        value: data.chunkStrategy,
+                      })}
                 </option>
               )}
             </select>
+            {unknownChunkStrategy && !isLegacyChunkStrategy(data.chunkStrategy) && (
+              <p className="mt-1 text-[10px] text-destructive" role="alert" data-testid="chunk-strategy-unsupported">
+                {t(
+                  "ragEditor.chunkStrategyUnsupportedHint",
+                  "The server refuses this strategy when you save. Choose Recursive.",
+                )}
+              </p>
+            )}
           </div>
 
           {/* Chunk size slider */}

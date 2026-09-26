@@ -35,15 +35,16 @@ export function RenamableKeyInput({
 
   useEffect(() => setDraft(value), [value]);
 
+  // Compared untrimmed: a stored key with surrounding whitespace must not be
+  // rewritten just because the field was focused and left.
+  const edited = draft !== value;
   const trimmed = draft.trim();
-  const invalid = trimmed !== value && (trimmed === "" || !isAvailable(trimmed));
+  const invalid =
+    edited && (trimmed === "" || (trimmed !== value && !isAvailable(trimmed)));
 
   const commit = () => {
-    if (trimmed === value) {
-      setDraft(value);
-      return;
-    }
-    if (invalid) {
+    if (!edited) return;
+    if (invalid || trimmed === value) {
       setDraft(value);
       return;
     }

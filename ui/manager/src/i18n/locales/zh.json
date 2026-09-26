@@ -891,7 +891,9 @@
     "removeCondition": "移除条件",
     "noGroups": "未定义行为组",
     "noRules": "此组中没有规则",
-    "noConditions": "无条件"
+    "noConditions": "无条件",
+    "sizeNoBound": "无限制",
+    "sizeBoundInvalid": "必须是整数，留空表示无限制。"
   },
   "apiCallsEditor": {
     "noEndpointsFound": "在规范中未找到端点",
@@ -997,7 +999,11 @@
     "useDefaultCodes": "使用默认值",
     "httpCodeFilterDefaults": "留空的字段使用其中显示的默认状态码。",
     "scopeSecretUnsupported": "（此处不会存入保险库）",
-    "scopeSecretWarning": "此指令中的 secret 作用域不会存入保险库：该值以明文存储。请选择其他作用域，并将凭据保存在密钥保险库中。"
+    "scopeSecretWarning": "此指令中的 secret 作用域不会存入保险库：该值以明文存储。请选择其他作用域，并将凭据保存在密钥保险库中。",
+    "skipNone": "无——不跳过任何状态码",
+    "runSkipConflict": "{{codes}} 也在跳过列表中，因此此指令永远不会针对它运行。",
+    "httpCodeFilterSkipSet": "“运行状态码”留空时使用 200、201；“跳过状态码”留空时不跳过任何状态码。",
+    "useDefaultSkipCodes": "使用默认跳过列表"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "失败时流水线继续；错误将暴露于 ",
@@ -1385,7 +1391,7 @@
     "visibilityTitle": "哪些 Agent 可以看到此 longTerm 属性",
     "editValue": "编辑值",
     "toggleGroup": "切换属性组",
-    "secretFromPathWarning": "只有来自值字段的 secret 才会存入保险库。设置了“来源路径”时，该值以明文存储——请清空路径或选择其他作用域。"
+    "secretFromPathWarning": "只有来自值字段的 secret 才会存入保险库。通过“来源路径”读取或以其他方式提供时，它会以明文存储——请在值字段中输入，或选择其他作用域。"
   },
   "dictionaryEditor": {
     "language": "语言",
@@ -2135,7 +2141,9 @@
       "filesLoadFailed": "无法加载文件：{{error}}"
     },
     "chunkStrategyLegacy": "{{value}}（保存为递归）",
-    "saveBeforeIngest": "请先保存更改——文档会使用已保存知识库的存储和嵌入模型导入，而不是屏幕上的编辑内容。"
+    "saveBeforeIngest": "请先保存更改——文档会使用已保存知识库的存储和嵌入模型导入，而不是屏幕上的编辑内容。",
+    "chunkStrategyUnsupported": "{{value}}（不支持）",
+    "chunkStrategyUnsupportedHint": "保存时服务器会拒绝此策略。请选择递归。"
   },
   "onboarding": {
     "welcome": {

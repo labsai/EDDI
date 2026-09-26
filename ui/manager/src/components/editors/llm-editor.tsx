@@ -3,7 +3,7 @@ import { PromptPreview } from "./prompt-preview";
 import { useTranslation } from "react-i18next";
 import { NumberInput } from "./number-input";
 import { RenamableKeyInput } from "./renamable-key-input";
-import { nextFreeKey, renameKey } from "./editor-value-utils";
+import { hasOwnKey, nextFreeKey, renameKey } from "./editor-value-utils";
 import {
   ChevronDown,
   ChevronRight,
@@ -436,7 +436,7 @@ function TaskEditor({
                           readOnly={readOnly}
                           isAvailable={(next) =>
                             !HIDDEN_PARAM_KEYS.has(next) &&
-                            !(next in (task.parameters ?? {}))
+                            !hasOwnKey(task.parameters ?? {}, next)
                           }
                           onRename={(next) =>
                             onChange({
@@ -919,6 +919,7 @@ function TaskEditor({
                         </div>
                         <NumberInput integer
                           value={agent.timeoutMs}
+                          title={t("llmEditor.a2aTimeout", "Timeout (ms)")}
                           onChange={(v) => {
                             const agents = [...(task.a2aAgents ?? [])];
                             agents[ai] = {
@@ -928,7 +929,7 @@ function TaskEditor({
                             onChange({ ...task, a2aAgents: agents });
                           }}
                           readOnly={readOnly}
-                          placeholder={t("llmEditor.a2aTimeout", "Timeout (ms)")}
+                          placeholder="30000"
                           className="h-7 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                         />
                       </div>

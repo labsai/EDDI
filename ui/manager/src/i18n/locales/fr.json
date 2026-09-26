@@ -905,7 +905,9 @@
     "removeCondition": "Supprimer la condition",
     "noGroups": "Aucun groupe de comportement défini",
     "noRules": "Aucune règle dans ce groupe",
-    "noConditions": "Aucune condition"
+    "noConditions": "Aucune condition",
+    "sizeNoBound": "aucune limite",
+    "sizeBoundInvalid": "Doit être un nombre entier, ou vide pour aucune limite."
   },
   "apiCallsEditor": {
     "noEndpointsFound": "Aucun endpoint trouvé dans la spécification",
@@ -1009,9 +1011,13 @@
     "authRefLiteral": "Saisissez une référence telle que ${vault:ma-cle}, et non la clé elle-même. La clé ne quitte jamais le coffre.",
     "runOnNoCodes": "Une liste « Exécuter sur les codes » vide ne correspond à aucun code de statut : cette instruction ne s'exécute donc jamais.",
     "useDefaultCodes": "Utiliser les valeurs par défaut",
-    "httpCodeFilterDefaults": "Un champ vide utilise les codes par défaut qui y sont affichés.",
+    "httpCodeFilterDefaults": "Les champs vides utilisent les codes par défaut qui y sont affichés.",
     "scopeSecretUnsupported": "(non stocké dans le coffre ici)",
-    "scopeSecretWarning": "La portée « secret » n'est pas stockée dans le coffre pour cette instruction : la valeur est enregistrée en clair. Choisissez une autre portée et conservez les identifiants dans le coffre des secrets."
+    "scopeSecretWarning": "La portée « secret » n'est pas stockée dans le coffre pour cette instruction : la valeur est enregistrée en clair. Choisissez une autre portée et conservez les identifiants dans le coffre des secrets.",
+    "skipNone": "aucun — aucun code n'est ignoré",
+    "runSkipConflict": "{{codes}} figure aussi dans la liste à ignorer : cette instruction ne s'exécute donc jamais pour ce code.",
+    "httpCodeFilterSkipSet": "Un champ « Exécuter sur les codes » vide utilise 200, 201 ; un champ « Ignorer les codes » vide n'ignore rien.",
+    "useDefaultSkipCodes": "Utiliser la liste à ignorer par défaut"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "En cas d'échec, le pipeline continue ; l'erreur est exposée à ",
@@ -1399,7 +1405,7 @@
     "visibilityTitle": "Quels agents peuvent voir cette propriété longTerm",
     "editValue": "Modifier la valeur",
     "toggleGroup": "Basculer le groupe de propriétés",
-    "secretFromPathWarning": "Un secret n'est stocké dans le coffre que s'il provient du champ valeur. Avec un « Chemin source » défini, la valeur est enregistrée en clair : videz le chemin ou choisissez une autre portée."
+    "secretFromPathWarning": "Un secret n'est stocké dans le coffre que s'il provient du champ valeur. Lu depuis un « Chemin source » ou fourni autrement, il est enregistré en clair : saisissez-le dans le champ valeur ou choisissez une autre portée."
   },
   "dictionaryEditor": {
     "language": "Langue",
@@ -2157,7 +2163,9 @@
       "filesLoadFailed": "Impossible de charger les fichiers : {{error}}"
     },
     "chunkStrategyLegacy": "{{value}} (enregistré comme Récursif)",
-    "saveBeforeIngest": "Enregistrez d'abord vos modifications : les documents sont ingérés avec le stockage et le modèle d'embedding de la base de connaissances enregistrée, pas avec les modifications à l'écran."
+    "saveBeforeIngest": "Enregistrez d'abord vos modifications : les documents sont ingérés avec le stockage et le modèle d'embedding de la base de connaissances enregistrée, pas avec les modifications à l'écran.",
+    "chunkStrategyUnsupported": "{{value}} (non pris en charge)",
+    "chunkStrategyUnsupportedHint": "Le serveur refuse cette stratégie à l'enregistrement. Choisissez Récursif."
   },
   "onboarding": {
     "welcome": {

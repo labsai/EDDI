@@ -905,7 +905,9 @@
     "removeCondition": "Eliminar condición",
     "noGroups": "No hay grupos de comportamiento definidos",
     "noRules": "No hay reglas en este grupo",
-    "noConditions": "Sin condiciones"
+    "noConditions": "Sin condiciones",
+    "sizeNoBound": "sin límite",
+    "sizeBoundInvalid": "Debe ser un número entero, o vacío para no tener límite."
   },
   "apiCallsEditor": {
     "noEndpointsFound": "No se encontraron endpoints en la especificación",
@@ -1009,9 +1011,13 @@
     "authRefLiteral": "Introduzca una referencia como ${vault:mi-clave}, no la clave en sí. La clave nunca sale del vault.",
     "runOnNoCodes": "Una lista «Ejecutar con códigos» vacía no coincide con ningún código de estado, así que esta instrucción nunca se ejecuta.",
     "useDefaultCodes": "Usar valores predeterminados",
-    "httpCodeFilterDefaults": "Un campo vacío usa los códigos predeterminados que muestra.",
+    "httpCodeFilterDefaults": "Los campos vacíos usan los códigos predeterminados que muestran.",
     "scopeSecretUnsupported": "(aquí no se guarda en la bóveda)",
-    "scopeSecretWarning": "El ámbito «secret» no se guarda en la bóveda en esta instrucción: el valor se almacena en texto plano. Elija otro ámbito y guarde las credenciales en la bóveda de secretos."
+    "scopeSecretWarning": "El ámbito «secret» no se guarda en la bóveda en esta instrucción: el valor se almacena en texto plano. Elija otro ámbito y guarde las credenciales en la bóveda de secretos.",
+    "skipNone": "ninguno: no se omite ningún código",
+    "runSkipConflict": "{{codes}} también está en la lista de omisión, así que esta instrucción nunca se ejecuta con ese código.",
+    "httpCodeFilterSkipSet": "Un «Ejecutar con códigos» vacío usa 200, 201; un «Omitir códigos» vacío no omite nada.",
+    "useDefaultSkipCodes": "Usar la lista de omisión predeterminada"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "En caso de fallo, el pipeline continúa; el error se expone en ",
@@ -1399,7 +1405,7 @@
     "visibilityTitle": "Qué agents pueden ver esta propiedad longTerm",
     "editValue": "Editar valor",
     "toggleGroup": "Alternar grupo de propiedades",
-    "secretFromPathWarning": "Un secreto solo se guarda en la bóveda si proviene del campo de valor. Con una «Ruta de origen» definida, el valor se almacena en texto plano: vacíe la ruta o elija otro ámbito."
+    "secretFromPathWarning": "Un secreto solo se guarda en la bóveda si proviene del campo de valor. Leído desde una «Ruta de origen» o dado de otra forma, se almacena en texto plano: introdúzcalo en el campo de valor o elija otro ámbito."
   },
   "dictionaryEditor": {
     "language": "Idioma",
@@ -2157,7 +2163,9 @@
       "filesLoadFailed": "No se pudieron cargar los archivos: {{error}}"
     },
     "chunkStrategyLegacy": "{{value}} (se guarda como Recursivo)",
-    "saveBeforeIngest": "Guarde primero sus cambios: los documentos se ingieren con el almacén y el modelo de embeddings de la base de conocimiento guardada, no con los cambios en pantalla."
+    "saveBeforeIngest": "Guarde primero sus cambios: los documentos se ingieren con el almacén y el modelo de embeddings de la base de conocimiento guardada, no con los cambios en pantalla.",
+    "chunkStrategyUnsupported": "{{value}} (no compatible)",
+    "chunkStrategyUnsupportedHint": "El servidor rechaza esta estrategia al guardar. Elija Recursivo."
   },
   "onboarding": {
     "welcome": {

@@ -511,3 +511,35 @@ describe("PropertySetterEditor edge cases", () => {
     expect(screen.queryByTestId("property-secret-from-path-warning")).not.toBeInTheDocument();
   });
 });
+
+describe("PropertySetterEditor secret warning for non-string values", () => {
+  it("warns for a secret given as valueObject or valueList", () => {
+    renderWithProviders(
+      <PropertySetterEditor
+        data={{
+          setOnActions: [
+            {
+              actions: ["a"],
+              setProperties: [
+                { name: "creds", scope: "secret", valueObject: { key: "v" } },
+                { name: "keys", scope: "secret", valueList: ["k"] },
+              ],
+            },
+          ],
+        }}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.getAllByTestId("property-secret-from-path-warning")).toHaveLength(2);
+  });
+
+  it("does not warn for a secret row that has no value yet", () => {
+    renderWithProviders(
+      <PropertySetterEditor
+        data={{ setOnActions: [{ actions: ["a"], setProperties: [{ name: "t", valueString: "", scope: "secret" }] }] }}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId("property-secret-from-path-warning")).not.toBeInTheDocument();
+  });
+});

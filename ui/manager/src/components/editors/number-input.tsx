@@ -15,10 +15,17 @@ export interface NumberInputProps
   integer?: boolean;
 }
 
+/**
+ * The whole text must be a number — `parseInt("1.5")` is 1 and
+ * `parseInt("1e3")` is 1, which stored something other than what the field
+ * showed. For an integer field a fraction is not a value at all.
+ */
 function parse(raw: string, integer: boolean): number | undefined {
   if (raw.trim() === "") return undefined;
-  const parsed = integer ? parseInt(raw, 10) : parseFloat(raw);
-  return Number.isFinite(parsed) ? parsed : undefined;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return undefined;
+  if (integer && !Number.isInteger(parsed)) return undefined;
+  return parsed;
 }
 
 function format(value: number | undefined): string {
@@ -55,10 +62,14 @@ export function NumberInput({
     }
   }, [value]);
 
+  const invalid = draft.trim() !== "" && parse(draft, integer) === undefined;
+
   return (
     <input
       {...rest}
       type="number"
+      step={rest.step ?? (integer ? 1 : undefined)}
+      aria-invalid={invalid || undefined}
       value={draft}
       onChange={(e) => {
         const raw = e.target.value;
@@ -68,9 +79,11 @@ export function NumberInput({
         onChange(next);
       }}
       onBlur={(e) => {
-        // Tidy up only once the user has left the field: an unparseable
-        // leftover ("-", "1e") shows what was actually stored.
-        if (parse(draft, integer) === undefined) setDraft(format(emptyValue));
+        // Tidy up only once the user has left the field, so the field shows
+        // exactly what was stored: an unparseable leftover ("-", "1.5" in an
+        // integer field) becomes the empty value, and "1e3" becomes "1000".
+        const parsed = parse(draft, integer);
+        setDraft(format(parsed ?? emptyValue));
         onBlur?.(e);
       }}
     />

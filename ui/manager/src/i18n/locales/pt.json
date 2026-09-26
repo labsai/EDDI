@@ -905,7 +905,9 @@
     "removeCondition": "Remover condição",
     "noGroups": "Nenhum grupo de comportamento definido",
     "noRules": "Sem regras neste grupo",
-    "noConditions": "Sem condições"
+    "noConditions": "Sem condições",
+    "sizeNoBound": "sem limite",
+    "sizeBoundInvalid": "Deve ser um número inteiro, ou vazio para sem limite."
   },
   "apiCallsEditor": {
     "noEndpointsFound": "Nenhum endpoint encontrado na especificação",
@@ -1009,9 +1011,13 @@
     "authRefLiteral": "Introduza uma referência como ${vault:minha-chave}, e não a chave em si. A chave nunca sai do vault.",
     "runOnNoCodes": "Uma lista \"Executar nos códigos\" vazia não corresponde a nenhum código de status, então esta instrução nunca é executada.",
     "useDefaultCodes": "Usar padrões",
-    "httpCodeFilterDefaults": "Um campo vazio usa os códigos padrão exibidos nele.",
+    "httpCodeFilterDefaults": "Campos vazios usam os códigos padrão exibidos neles.",
     "scopeSecretUnsupported": "(não guardado no cofre aqui)",
-    "scopeSecretWarning": "O escopo \"secret\" não é guardado no cofre nesta instrução: o valor é armazenado em texto simples. Escolha outro escopo e mantenha as credenciais no cofre de segredos."
+    "scopeSecretWarning": "O escopo \"secret\" não é guardado no cofre nesta instrução: o valor é armazenado em texto simples. Escolha outro escopo e mantenha as credenciais no cofre de segredos.",
+    "skipNone": "nenhum — nenhum código é ignorado",
+    "runSkipConflict": "{{codes}} também está na lista de ignorados, então esta instrução nunca é executada com ele.",
+    "httpCodeFilterSkipSet": "Um \"Executar nos códigos\" vazio usa 200, 201; um \"Ignorar nos códigos\" vazio não ignora nada.",
+    "useDefaultSkipCodes": "Usar lista de ignorados padrão"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "Em caso de falha, o pipeline continua; o erro é exposto em ",
@@ -1399,7 +1405,7 @@
     "visibilityTitle": "Quais agents podem ver esta propriedade longTerm",
     "editValue": "Editar valor",
     "toggleGroup": "Alternar grupo de propriedades",
-    "secretFromPathWarning": "Um segredo só é guardado no cofre quando vem do campo de valor. Com um \"Caminho de origem\" definido, o valor é armazenado em texto simples — limpe o caminho ou escolha outro escopo."
+    "secretFromPathWarning": "Um segredo só é guardado no cofre quando vem do campo de valor. Lido de um \"Caminho de origem\" ou fornecido de outra forma, é armazenado em texto simples — insira-o no campo de valor ou escolha outro escopo."
   },
   "dictionaryEditor": {
     "language": "Idioma",
@@ -2157,7 +2163,9 @@
       "filesLoadFailed": "Não foi possível carregar os arquivos: {{error}}"
     },
     "chunkStrategyLegacy": "{{value}} (salvo como Recursivo)",
-    "saveBeforeIngest": "Salve suas alterações primeiro — os documentos são ingeridos com o armazenamento e o modelo de embeddings da base de conhecimento salva, não com as edições na tela."
+    "saveBeforeIngest": "Salve suas alterações primeiro — os documentos são ingeridos com o armazenamento e o modelo de embeddings da base de conhecimento salva, não com as edições na tela.",
+    "chunkStrategyUnsupported": "{{value}} (não suportado)",
+    "chunkStrategyUnsupportedHint": "O servidor recusa esta estratégia ao salvar. Escolha Recursivo."
   },
   "onboarding": {
     "welcome": {
