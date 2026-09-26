@@ -236,4 +236,38 @@ class UserMemoryEntryTest {
         assertTrue(UserMemoryEntry.DEFAULT_CATEGORIES.contains("context"));
         assertEquals(3, UserMemoryEntry.DEFAULT_CATEGORIES.size());
     }
+
+    // === M-E2: group ids ===
+
+    @Test
+    void fromProperty_groupVisibility_prefersThePropertysOwnGroups() {
+        Property prop = new Property("goal", "ship", Scope.longTerm);
+        prop.setVisibility(Visibility.group);
+        prop.setGroupIds(List.of("g1", "g2"));
+
+        var entry = UserMemoryEntry.fromProperty(prop, "u", "a", "c", Visibility.self, List.of("g3"));
+
+        assertEquals(List.of("g1", "g2"), entry.groupIds());
+    }
+
+    @Test
+    void fromProperty_groupVisibility_fallsBackToTheTurnsGroups() {
+        Property prop = new Property("goal", "ship", Scope.longTerm);
+        prop.setVisibility(Visibility.group);
+
+        var entry = UserMemoryEntry.fromProperty(prop, "u", "a", "c", Visibility.self, List.of("g3"));
+
+        assertEquals(List.of("g3"), entry.groupIds(), "a group entry written with no groups can never be recalled");
+    }
+
+    @Test
+    void fromProperty_nonGroupVisibility_carriesNoGroups() {
+        Property prop = new Property("goal", "ship", Scope.longTerm);
+        prop.setVisibility(Visibility.global);
+        prop.setGroupIds(List.of("g1"));
+
+        var entry = UserMemoryEntry.fromProperty(prop, "u", "a", "c", Visibility.self, List.of("g3"));
+
+        assertEquals(List.of(), entry.groupIds());
+    }
 }
