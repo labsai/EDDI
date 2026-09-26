@@ -8,7 +8,9 @@ import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.SealedDataRotationParticipant;
 import ai.labs.eddi.secrets.VaultStartupBanner;
 import ai.labs.eddi.secrets.crypto.EnvelopeCrypto;
+import ai.labs.eddi.secrets.crypto.VaultMasterKeyStrength;
 import ai.labs.eddi.secrets.crypto.VaultSaltManager;
+import io.quarkus.runtime.LaunchMode;
 import ai.labs.eddi.secrets.model.*;
 import ai.labs.eddi.secrets.persistence.ISecretPersistence;
 import ai.labs.eddi.secrets.persistence.PersistenceException;
@@ -156,6 +158,19 @@ public class VaultSecretProvider implements ISecretProvider {
             VaultStartupBanner.printDisabled();
             return;
         }
+
+        // Refuse to protect real secrets with a weak or publicly-known master key.
+        // Fails startup in production, warns (and continues) in development/test —
+        // the same production-only enforcement AuthStartupGuard applies to OIDC.
+        VaultMasterKeyStrength.weakness(masterKeyConfig.get()).ifPresent(reason -> {
+            if (getLaunchMode() == LaunchMode.NORMAL) {
+                throw new IllegalStateException("[VAULT] Refusing to start: " + reason + ". "
+                        + "Set EDDI_VAULT_MASTER_KEY to a strong, unique passphrase (at least " + VaultMasterKeyStrength.MIN_LENGTH
+                        + " characters). The installer can generate one for you.");
+            }
+            LOGGER.warnf("[VAULT] %s. This is tolerated in %s mode but would FAIL startup in production. "
+                    + "Set EDDI_VAULT_MASTER_KEY to a strong, unique passphrase.", reason, getLaunchMode().name().toLowerCase());
+        });
 
         // Initialize per-deployment salt (generates on first boot, loads on subsequent)
         saltManager.initialize();
@@ -819,6 +834,16 @@ public class VaultSecretProvider implements ISecretProvider {
         persistence.upsertDek(dek);
         LOGGER.infof("Generated new DEK for tenant: %s", sanitize(tenantId));
         return newDek;
+    }
+
+    /**
+     * The current launch mode. Package-private so a test can exercise the
+     * production-vs-development branch of the master-key strength gate without
+     * booting a container ({@link LaunchMode#current()} is static and not
+     * mockable).
+     */
+    LaunchMode getLaunchMode() {
+        return LaunchMode.current();
     }
 
     private void ensureAvailable() throws SecretProviderException {

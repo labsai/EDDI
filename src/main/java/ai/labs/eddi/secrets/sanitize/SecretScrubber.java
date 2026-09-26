@@ -80,6 +80,13 @@ public class SecretScrubber {
     private static final Pattern SOLE_CONNECTION_REFERENCE = Pattern.compile("\\s*" + ConnectionReference.CONNECTION_PATTERN + "\\s*");
 
     /**
+     * A single {@code ${vault:…}} or {@code ${eddivault:…}} reference. Used to
+     * strip the pointers out of a value so what remains can be judged on its own —
+     * see {@link #scrubTextValue}.
+     */
+    private static final Pattern VAULT_REFERENCE = Pattern.compile("\\$\\{(?:vault|eddivault):[^}]*\\}");
+
+    /**
      * Fields whose value is a schema-fixed identifier — a discriminator, a name, or
      * a memory path — and therefore never a credential. Exempt from the entropy
      * heuristic; see {@link #isStructuralFieldName(String)} for why.
@@ -236,9 +243,27 @@ public class SecretScrubber {
         // `?api_key=${vault:k}&access_token=<plaintext>` was exported intact. A URL
         // is therefore always handed to the part-by-part pass below, which judges
         // each parameter on its own.
-        if (!looksLikeUrl(textValue) && (textValue.contains("${vault:") || textValue.contains("${eddivault:")
-                || SOLE_CONNECTION_REFERENCE.matcher(textValue).matches())) {
-            return null;
+        if (!looksLikeUrl(textValue)) {
+            if (SOLE_CONNECTION_REFERENCE.matcher(textValue).matches()) {
+                return null;
+            }
+            if (textValue.contains("${vault:") || textValue.contains("${eddivault:")) {
+                // "Contains a reference" is not "is a reference". A value built from
+                // references, optionally with fixed scaffolding like "Bearer ", is a
+                // legitimate shape and is left legible so an operator can still read
+                // WHICH key the config used. But a value that pairs a reference with a
+                // real credential — "Bearer sk-live-… ${vault:x}" — must NOT ride the
+                // exemption: the plaintext half would then be exported verbatim. Strip
+                // the references and judge only what is left.
+                String remainder = VAULT_REFERENCE.matcher(textValue).replaceAll("");
+                if (!containsSecretMaterial(remainder)) {
+                    return null;
+                }
+                // The non-reference remainder itself looks like a secret, so redact the
+                // whole value rather than leak the plaintext half. Losing the pointer
+                // costs nothing — this value could never be a valid single credential.
+                return REDACTED;
+            }
         }
 
         // Check 1: Known secret field names
@@ -413,6 +438,28 @@ public class SecretScrubber {
      */
     private static boolean isStructuralFieldName(String fieldName) {
         return fieldName != null && STRUCTURAL_FIELD_NAMES.contains(normalizeFieldName(fieldName));
+    }
+
+    /**
+     * Whether any whitespace-separated token of {@code remainder} looks like a
+     * secret — the same length/key-shape/entropy heuristic {@code scrubTextValue}
+     * check 3 applies to a whole value, run per token here because the remainder of
+     * a vault-reference value ("Bearer sk-live-…") is not a single token.
+     * <p>
+     * Deliberately does NOT re-run the field-name check: this feeds the vault-ref
+     * exemption, which only exists to keep pointer-bearing values legible, and the
+     * field-name check runs anyway on the value as a whole further down.
+     */
+    private static boolean containsSecretMaterial(String remainder) {
+        if (remainder == null || remainder.isBlank()) {
+            return false;
+        }
+        for (String token : remainder.trim().split("\\s+")) {
+            if (token.length() >= MIN_ENTROPY_LENGTH && KEY_LIKE_PATTERN.matcher(token).matches() && shannonEntropy(token) > ENTROPY_THRESHOLD) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

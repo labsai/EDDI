@@ -596,4 +596,59 @@ class SecretScrubberTest {
         assertFalse(scrubbed.contains("xoxb-1234567890"), scrubbed);
         assertTrue(scrubbed.contains(SecretScrubber.REDACTED), scrubbed);
     }
+
+    // ─── Finding #7a: a vault reference must not exempt a plaintext secret beside
+    // it ───
+
+    @Test
+    @DisplayName("a value that IS a sole vault reference is preserved legibly")
+    void scrubJson_soleVaultReference_preserved() {
+        // Field name is deliberately non-secret so only the vault-reference exemption
+        // can keep it; a value that is exactly a reference is a pointer, not a secret.
+        String json = "{\"note\":\"${vault:default/agent1/openaiKey}\"}";
+
+        String scrubbed = scrubber.scrubJson(json);
+
+        assertTrue(scrubbed.contains("${vault:default/agent1/openaiKey}"), scrubbed);
+        assertFalse(scrubbed.contains("REDACTED"), scrubbed);
+    }
+
+    @Test
+    @DisplayName("a vault reference with only low-entropy scaffolding beside it is preserved")
+    void scrubJson_vaultReferenceWithScaffolding_preserved() {
+        // "Bearer ${vault:k}" is the legitimate shape the exemption exists for: the
+        // only non-reference text is the scheme word, which carries no secret.
+        String json = "{\"prefix\":\"Bearer ${vault:default/token}\"}";
+
+        String scrubbed = scrubber.scrubJson(json);
+
+        assertTrue(scrubbed.contains("${vault:default/token}"), scrubbed);
+        assertTrue(scrubbed.contains("Bearer"), scrubbed);
+        assertFalse(scrubbed.contains("REDACTED"), scrubbed);
+    }
+
+    @Test
+    @DisplayName("a plaintext secret riding alongside a vault reference is still redacted (the leak this fixes)")
+    void scrubJson_plaintextSecretBesideVaultReference_redacted() {
+        // Non-secret field name, and the mixed value would slip past the entropy check
+        // (spaces defeat the whole-string key pattern), so ONLY the old
+        // "contains ${vault:}" exemption used to keep the plaintext key legible.
+        String json = "{\"note\":\"Bearer sk-live-AbCdEf1234567890XyZq ${vault:default/token}\"}";
+
+        String scrubbed = scrubber.scrubJson(json);
+
+        assertFalse(scrubbed.contains("sk-live-AbCdEf1234567890XyZq"), "the plaintext key must not survive export: " + scrubbed);
+        assertTrue(scrubbed.contains(SecretScrubber.REDACTED), scrubbed);
+    }
+
+    @Test
+    @DisplayName("an eddivault reference beside a plaintext secret is also redacted")
+    void scrubJson_plaintextSecretBesideEddivaultReference_redacted() {
+        String json = "{\"note\":\"${eddivault:default/token} and also ghp_ABCDEFGH1234567890ijklmnop\"}";
+
+        String scrubbed = scrubber.scrubJson(json);
+
+        assertFalse(scrubbed.contains("ghp_ABCDEFGH1234567890ijklmnop"), scrubbed);
+        assertTrue(scrubbed.contains(SecretScrubber.REDACTED), scrubbed);
+    }
 }
