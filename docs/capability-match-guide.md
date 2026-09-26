@@ -87,16 +87,7 @@
 
 ## Template Variables
 
-> **Known limitation — template expressions do not currently resolve here.**
-> `CapabilityMatchCondition.resolveTemplate` hands a config value to the templating
-> engine only when the value contains the double-brace marker `{{`, so a single-brace
-> Qute expression such as `{properties.requiredSkill}` never reaches the engine at all —
-> and a double-brace one that does reach it is left literal, because Qute does not
-> resolve `{{ … }}` (pinned by `PlaceholderSyntaxContractTest`). Either way the
-> unresolved string is used as the skill name, matches nothing, and the condition
-> silently returns FAIL. Give `skill` and `strategy` literal values until this is fixed.
-
-The intent is that config values are **Qute template expressions**, resolved against the conversation memory at evaluation time, enabling dynamic routing:
+Config values are **Qute template expressions** (single braces, as everywhere else in EDDI), resolved against the conversation memory at evaluation time, enabling dynamic routing:
 
 ```json
 {
@@ -109,7 +100,11 @@ The intent is that config values are **Qute template expressions**, resolved aga
 }
 ```
 
-The `skill` and `strategy` values would be resolved using `IMemoryItemConverter.convert(memory)` — the same data map available to system prompts and httpCalls templates.
+The `skill` and `strategy` values are resolved using `IMemoryItemConverter.convert(memory)` — the same data map available to system prompts and httpCalls templates.
+
+- A `skill` that renders blank (for example because the property is not set yet) makes the condition **FAIL** without querying the registry.
+- A `strategy` that renders blank falls back to `highest_confidence`.
+- Double-brace `{{ … }}` is **not** Qute syntax and is not resolved; configs written that way (the form an earlier Javadoc showed) must be changed to single braces.
 
 ---
 
@@ -218,9 +213,8 @@ Use the createGroupConversation tool to assemble them into a discussion panel.
 
 ### Example 3: Template-Based Routing with Properties
 
-Use PropertySetter to capture the user's intent, then route dynamically — subject to the
-limitation in [Template Variables](#template-variables): the `{properties.requiredSkill}`
-below is not resolved by `capabilityMatch` today, so this example does not yet work.
+Use PropertySetter to capture the user's intent, then route dynamically — see
+[Template Variables](#template-variables) for how `{properties.requiredSkill}` is resolved.
 
 **property.json (PropertySetterTask):**
 ```json
