@@ -49,7 +49,7 @@ class ContextualToolsProviderGroupIdTest {
         // Build the inner mock BEFORE opening the when(...) — creating a mock inside
         // an in-progress stubbing is what Mockito reports as UnfinishedStubbing.
         var data = contextData(value);
-        when(currentStep.getLatestData(CONTEXT_KEY)).thenReturn(data);
+        when(currentStep.getData(CONTEXT_KEY)).thenReturn(data);
         when(memory.getCurrentStep()).thenReturn(currentStep);
         return memory;
     }
@@ -78,7 +78,7 @@ class ContextualToolsProviderGroupIdTest {
         var memory = mock(IConversationMemory.class);
         when(memory.getConversationId()).thenReturn("conv-1");
         var currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-        when(currentStep.getLatestData(CONTEXT_KEY)).thenReturn(null);
+        when(currentStep.getData(CONTEXT_KEY)).thenReturn(null);
         when(memory.getCurrentStep()).thenReturn(currentStep);
         // Built before stubbing: creating a mock inside thenReturn(...) is unfinished
         // stubbing.
@@ -87,8 +87,8 @@ class ContextualToolsProviderGroupIdTest {
                 ? Arrays.asList((IData<Object>) null)
                 : List.of(contextData(new Context(Context.ContextType.string, discussionId)));
         var allSteps = mock(IConversationMemory.IConversationStepStack.class);
-        when(allSteps.getAllLatestData(CONTEXT_KEY)).thenReturn(groupIds);
-        when(allSteps.getAllLatestData(DISCUSSION_KEY)).thenReturn(discussions);
+        when(allSteps.getExactDataPerStep(CONTEXT_KEY)).thenReturn(groupIds);
+        when(allSteps.getExactDataPerStep(DISCUSSION_KEY)).thenReturn(discussions);
         when(memory.getAllSteps()).thenReturn(allSteps);
         return memory;
     }

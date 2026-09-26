@@ -185,7 +185,7 @@ class AgentOrchestratorToolGovernanceTest {
             IData<Object> contextData = contextValue == null
                     ? null
                     : new Data<Object>("context:dynamicCreatedAgentIds", new Context(Context.ContextType.object, contextValue));
-            when(currentStep.<Object>getLatestData("context:dynamicCreatedAgentIds")).thenReturn(contextData);
+            when(currentStep.<Object>getData("context:dynamicCreatedAgentIds")).thenReturn(contextData);
 
             List<IData<Object>> prior = priorIds == null
                     ? List.of()
@@ -235,7 +235,7 @@ class AgentOrchestratorToolGovernanceTest {
             IData<Object> data = value == null
                     ? null
                     : new Data<Object>("context:delegationDepth", new Context(Context.ContextType.string, value));
-            when(currentStep.<Object>getLatestData("context:" + ConverseWithAgentTool.CONTEXT_DELEGATION_DEPTH)).thenReturn(data);
+            when(currentStep.<Object>getData("context:" + ConverseWithAgentTool.CONTEXT_DELEGATION_DEPTH)).thenReturn(data);
             return memory;
         }
 

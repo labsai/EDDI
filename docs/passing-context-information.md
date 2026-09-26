@@ -70,6 +70,10 @@ point is logged at WARN, repeats within the hour at DEBUG:
 | `dynamicAgentConfig`, `dynamicCreatedAgentIds` | The group's dynamic-agent policy and created-agent total |
 | `delegationDepth` | A conversation started by `converse_with_agent` |
 
+Any key that **starts with** one of these names is dropped as well —
+`groupIdSuffix`, `delegationDepthMax`, `dynamicAgentConfigV2` — so pick context
+key names that do not begin with a reserved one.
+
 Templates can still read them (`{context.groupId}`) in a conversation the engine
 started with them. The list lives in `ReservedContextKeys`.
 

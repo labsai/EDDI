@@ -367,10 +367,29 @@ public interface IConversationMemory extends Serializable {
 
         IConversationStep peek();
 
+        /**
+         * One entry per step, oldest first: that step's latest data whose key
+         * <em>starts with</em> {@code prefix}, or {@code null}. Prefix semantics —
+         * {@code "context:groupId"} also matches {@code context:groupIdSuffix}. For a
+         * key whose writer matters (an engine-reserved context key, see
+         * {@code ReservedContextKeys}) use {@link #getExactDataPerStep(String)}.
+         */
         <T> List<IData<T>> getAllLatestData(String prefix);
+
+        /**
+         * One entry per step, oldest first: that step's data stored under exactly
+         * {@code key}, or {@code null} when the step has none. The exact-key
+         * counterpart of {@link #getAllLatestData(String)}, with the same shape, so two
+         * such lists can be paired by index.
+         */
+        <T> List<IData<T>> getExactDataPerStep(String key);
     }
 
     interface IConversationStep extends Serializable {
+        /**
+         * The data stored under exactly {@code key}, or {@code null}. Unlike
+         * {@link #getLatestData(String)} this is not a prefix match.
+         */
         <T> IData<T> getData(String key);
 
         /** Type-safe variant of {@link #getData(String)}. */
@@ -393,6 +412,15 @@ public interface IConversationMemory extends Serializable {
 
         boolean isEmpty();
 
+        /**
+         * The most recently stored data whose key <em>starts with</em> {@code prefix}.
+         * Prefix semantics: {@code getLatestData("context:groupId")} also returns a
+         * {@code context:groupIdSuffix} entry, and returns it first if it was stored
+         * later. Never use it to read a key whose writer matters — an engine-reserved
+         * context key ({@code ReservedContextKeys}) in particular, since the client
+         * chooses its own context key names. Use {@link #getData(String)}, which is
+         * exact, for those.
+         */
         <T> IData<T> getLatestData(String prefix);
 
         /** Type-safe variant of {@link #getLatestData(String)}. */
