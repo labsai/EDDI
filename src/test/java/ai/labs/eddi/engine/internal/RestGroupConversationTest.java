@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -20,6 +21,8 @@ import ai.labs.eddi.engine.security.OwnershipValidator;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.sse.Sse;
+import jakarta.ws.rs.sse.SseEventSink;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -44,10 +47,12 @@ class RestGroupConversationTest {
     private SecurityIdentity identity;
     private OwnershipValidator ownershipValidator;
     private RestGroupConversation restGroupConversation;
+    private ResourceAccessGuard resourceAccessGuard;
 
     @BeforeEach
     void setUp() {
         groupService = mock(IGroupConversationService.class);
+        resourceAccessGuard = mock(ResourceAccessGuard.class);
         jsonSerialization = mock(IJsonSerialization.class);
         identity = mock(SecurityIdentity.class);
         ownershipValidator = mock(OwnershipValidator.class);
@@ -58,7 +63,8 @@ class RestGroupConversationTest {
                 mock(IConversationService.class),
                 groupService);
         restGroupConversation = new RestGroupConversation(
-                groupService, jsonSerialization, identity, ownershipValidator, hitlAccessGuard);
+                groupService, jsonSerialization, identity, ownershipValidator, hitlAccessGuard,
+                resourceAccessGuard);
     }
 
     @Nested
@@ -792,6 +798,66 @@ class RestGroupConversationTest {
             assertEquals(400, oversizedTarget.getStatus());
 
             verifyNoInteractions(groupService);
+        }
+    }
+
+    @Nested
+    @DisplayName("group USE gate (H1)")
+    class GroupUseGate {
+
+        @Test
+        @DisplayName("discuss refuses a caller without USE on the group before any member runs")
+        void discussRequiresUse() throws Exception {
+            doThrow(new ForbiddenException("no")).when(resourceAccessGuard).requireUseAccess("group-1", "group");
+
+            assertThrows(ForbiddenException.class,
+                    () -> restGroupConversation.discuss("group-1", new DiscussRequest("Q", "user-1")));
+
+            verify(groupService, never()).discuss(any(), any(), any(), anyInt());
+            verify(groupService, never()).discuss(any(), any(), any(), anyInt(), any(), any());
+        }
+
+        @Test
+        @DisplayName("discuss checks USE on exactly the group in the path")
+        void discussChecksPathGroup() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-9");
+            when(groupService.discuss("group-1", "Q", "user-1", 0)).thenReturn(gc);
+
+            restGroupConversation.discuss("group-1", new DiscussRequest("Q", "user-1"));
+
+            verify(resourceAccessGuard).requireUseAccess("group-1", "group");
+        }
+
+        @Test
+        @DisplayName("streaming discuss refuses with a 403 before the stream starts, and starts nothing")
+        void streamingRequiresUse() throws Exception {
+            doThrow(new ForbiddenException("no")).when(resourceAccessGuard).requireUseAccess("group-1", "group");
+            var sink = mock(SseEventSink.class);
+            var sse = mock(Sse.class, RETURNS_DEEP_STUBS);
+
+            assertThrows(ForbiddenException.class,
+                    () -> restGroupConversation.discussStreaming("group-1", new DiscussRequest("Q", "user-1"), sink, sse));
+
+            verify(groupService, never()).startAndDiscussAsync(any(), any(), any(), any());
+            verify(groupService, never()).startAndDiscussAsync(any(), any(), any(), any(), any());
+            verify(sink, never()).send(any());
+        }
+
+        @Test
+        @DisplayName("a continuation round re-checks USE — owning the transcript is not enough")
+        void continueRequiresUse() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            gc.setGroupId("group-1");
+            gc.setUserId("user-1");
+            when(groupService.readGroupConversation("gc-1")).thenReturn(gc);
+            doThrow(new ForbiddenException("no")).when(resourceAccessGuard).requireUseAccess("group-1", "group");
+
+            assertThrows(ForbiddenException.class, () -> restGroupConversation.continueDiscussion("group-1", "gc-1",
+                    new DiscussRequest("q", "user-1")));
+
+            verify(groupService, never()).continueDiscussion(any(), any(), any());
         }
     }
 }

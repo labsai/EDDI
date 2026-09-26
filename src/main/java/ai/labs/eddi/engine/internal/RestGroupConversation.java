@@ -19,6 +19,7 @@ import ai.labs.eddi.engine.hitl.HitlAccessGuard;
 import ai.labs.eddi.engine.memory.model.Attachment;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import ai.labs.eddi.engine.security.OwnershipValidator;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.annotation.PreDestroy;
@@ -59,18 +60,50 @@ public class RestGroupConversation implements IRestGroupConversation {
     private final OwnershipValidator ownershipValidator;
     private final ExecutorService executorService = Executors.newVirtualThreadPerTaskExecutor();
     private final HitlAccessGuard hitlAccessGuard;
+    private final ResourceAccessGuard resourceAccessGuard;
 
     @Inject
     public RestGroupConversation(IGroupConversationService groupConversationService,
             IJsonSerialization jsonSerialization,
             SecurityIdentity identity,
             OwnershipValidator ownershipValidator,
-            HitlAccessGuard hitlAccessGuard) {
+            HitlAccessGuard hitlAccessGuard,
+            ResourceAccessGuard resourceAccessGuard) {
         this.groupConversationService = groupConversationService;
         this.jsonSerialization = jsonSerialization;
         this.identity = identity;
         this.ownershipValidator = ownershipValidator;
         this.hitlAccessGuard = hitlAccessGuard;
+        this.resourceAccessGuard = resourceAccessGuard;
+    }
+
+    /**
+     * The USE gate on running a group: the group-level twin of {@code POST
+     * /agents/{id}/start}.
+     * <p>
+     * A discussion (or a continuation round) fans the question out to every member
+     * agent, at the group owner's cost, and the member turns themselves run below
+     * the agent USE gate because no interactive caller exists for them. The group
+     * save path checks USE on every member agent for the author; this check is what
+     * stops anybody else from borrowing that authority by naming a group id they
+     * were never given. A no-op while workspaces are not enforced.
+     */
+    private void requireGroupUseAccess(String groupId) {
+        resourceAccessGuard.requireUseAccess(groupId, "group");
+    }
+
+    /**
+     * The USE gate on resuming a paused discussion. An approval resumes the run —
+     * every remaining member turn, at the group owner's cost — so an owner whose
+     * access to the group was revoked while it was paused must not be able to drive
+     * it to completion. Admins and designated approvers decide approvals by role,
+     * independently of group access, and keep doing so.
+     */
+    private void requireResumeUseAccess(String groupId) {
+        if (ownershipValidator.isAdmin(identity) || ownershipValidator.isApprover(identity)) {
+            return;
+        }
+        requireGroupUseAccess(groupId);
     }
 
     @PreDestroy
@@ -158,6 +191,7 @@ public class RestGroupConversation implements IRestGroupConversation {
         if (rejection != null) {
             return badRequest(rejection);
         }
+        requireGroupUseAccess(groupId);
         try {
             String userId = ownershipValidator.validateAndResolveUserId(identity, request.userId());
             if (userId == null || userId.isBlank())
@@ -204,6 +238,10 @@ public class RestGroupConversation implements IRestGroupConversation {
             closeQuietly(eventSink);
             return;
         }
+        // Thrown, not turned into an SSE event: nothing has been written to the sink
+        // yet, so the refusal still reaches the client as a plain 403 — the same
+        // contract continueDiscussionStreaming has for its ownership check.
+        requireGroupUseAccess(groupId);
         try {
             String userId = ownershipValidator.validateAndResolveUserId(identity, request.userId());
             if (userId == null || userId.isBlank())
@@ -428,6 +466,7 @@ public class RestGroupConversation implements IRestGroupConversation {
                     .build();
         }
         validateGroupConversationOwnership(groupId, gcId, true);
+        requireResumeUseAccess(groupId);
         setDecidedByFromIdentity(request);
         try {
             var gc = groupConversationService.resumeDiscussion(gcId, request, null);
@@ -550,6 +589,9 @@ public class RestGroupConversation implements IRestGroupConversation {
         try {
             GroupConversation gc = loadInGroup(groupId, gcId);
             ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
+            // A continuation re-runs every member, exactly like a new discussion: owning
+            // the transcript is not the same as still being allowed to run the group.
+            requireGroupUseAccess(groupId);
             GroupConversation result = groupConversationService.continueDiscussion(gcId, request.question(), null);
             return Response.ok(result).build();
         } catch (ForbiddenException e) {
@@ -605,6 +647,7 @@ public class RestGroupConversation implements IRestGroupConversation {
         try {
             GroupConversation gc = loadInGroup(groupId, gcId);
             ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
+            requireGroupUseAccess(groupId);
 
             // Reuse the shared streaming listener so a continuation that pauses or is
             // cancelled for HITL streams the awaiting_approval / cancelled /
@@ -659,6 +702,7 @@ public class RestGroupConversation implements IRestGroupConversation {
             closeQuietly(eventSink);
             return;
         }
+        requireResumeUseAccess(groupId);
         setDecidedByFromIdentity(request);
         var listener = createStreamingListener(eventSink, sse);
         try {

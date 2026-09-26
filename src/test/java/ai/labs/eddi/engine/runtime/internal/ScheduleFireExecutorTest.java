@@ -867,14 +867,14 @@ class ScheduleFireExecutorTest {
     @Timeout(10)
     void fire_teamCadenceSchedule_dispatchesToTheCadenceService() throws Exception {
         var schedule = makeTeamCadenceSchedule("sched-cadence-1");
-        when(teamCadenceService.processScheduledFire(any()))
+        when(teamCadenceService.processScheduledFire(any(), any()))
                 .thenReturn(new TeamCadenceService.CadenceResult("group-1", "cadence-1", "gc-1", 3, null, null));
 
         ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
 
         assertEquals(FireStatus.COMPLETED.name(), result.status());
         assertEquals("gc-1", result.conversationId(), "the fire log records WHICH discussion the cadence started");
-        verify(teamCadenceService).processScheduledFire(schedule.getMetadata());
+        verify(teamCadenceService).processScheduledFire(schedule.getId(), schedule.getMetadata());
         // A cadence pull is orchestration, not a conversation turn.
         verifyNoInteractions(conversationService);
     }
@@ -883,14 +883,14 @@ class ScheduleFireExecutorTest {
     @Timeout(10)
     void fire_teamCadenceSchedule_skipIsCompleted_failureRetries() throws Exception {
         var skipped = makeTeamCadenceSchedule("sched-cadence-2");
-        when(teamCadenceService.processScheduledFire(any()))
+        when(teamCadenceService.processScheduledFire(any(), any()))
                 .thenReturn(new TeamCadenceService.CadenceResult("group-1", "cadence-1", null, 0,
                         "No executable backlog tasks", null));
         assertEquals(FireStatus.COMPLETED.name(), executor.fire(skipped, "instance-1", 1).status(),
                 "a deliberate skip is a successful fire, not a retryable failure");
 
         var failing = makeTeamCadenceSchedule("sched-cadence-3");
-        when(teamCadenceService.processScheduledFire(any()))
+        when(teamCadenceService.processScheduledFire(any(), any()))
                 .thenReturn(new TeamCadenceService.CadenceResult("group-1", "cadence-1", null, 0, null,
                         "No workspace exists for group group-1"));
         ScheduleFireLog failed = executor.fire(failing, "instance-1", 2);
@@ -909,7 +909,7 @@ class ScheduleFireExecutorTest {
     @Timeout(10)
     void fire_teamCadence_fireLogFailure_doesNotChangeTheOutcome() throws Exception {
         var schedule = makeTeamCadenceSchedule("sched-cadence-4");
-        when(teamCadenceService.processScheduledFire(any()))
+        when(teamCadenceService.processScheduledFire(any(), any()))
                 .thenReturn(new TeamCadenceService.CadenceResult("group-1", "cadence-1", "gc-9", 2, null, null));
         doThrow(new RuntimeException("db down")).when(scheduleStore).logFire(any());
 

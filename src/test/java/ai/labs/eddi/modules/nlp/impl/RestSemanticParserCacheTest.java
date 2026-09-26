@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.nlp.impl;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.parser.model.ParserConfiguration;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.runtime.IRuntime;
@@ -81,7 +82,7 @@ class RestSemanticParserCacheTest {
 
         lifecycleTasks = new HashMap<>();
         lifecycleTasks.put("ai.labs.parser", parserProvider);
-        parser = new RestSemanticParser(runtime, resourceClientLibrary, lifecycleTasks);
+        parser = new RestSemanticParser(runtime, resourceClientLibrary, lifecycleTasks, mock(ResourceAccessGuard.class));
 
         doReturn(parserTask).when(parserProvider).get();
         doReturn(inputParser).when(parserTask).configure(any(), any());
@@ -219,7 +220,8 @@ class RestSemanticParserCacheTest {
         doReturn(new ParserConfiguration()).when(resourceClientLibrary).getResource(any(), eq(ParserConfiguration.class));
 
         AtomicLong nanos = new AtomicLong();
-        RestSemanticParser expiringParser = new RestSemanticParser(runtime, resourceClientLibrary, lifecycleTasks, nanos::get);
+        RestSemanticParser expiringParser = new RestSemanticParser(runtime, resourceClientLibrary, lifecycleTasks,
+                mock(ResourceAccessGuard.class), nanos::get);
 
         expiringParser.parse(CONFIG_ID, 1, "first", asyncResponse);
         captureCallables(1).getFirst().call();

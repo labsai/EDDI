@@ -203,7 +203,17 @@ public interface IScheduleStore {
      *            timeouts are excluded by the query, so limit/offset apply to the
      *            visible set
      */
-    List<ScheduleConfiguration> readAllSchedules(int limit, int offset, boolean excludeHitlTimeouts) throws IResourceStore.ResourceStoreException;
+    default List<ScheduleConfiguration> readAllSchedules(int limit, int offset, boolean excludeHitlTimeouts)
+            throws IResourceStore.ResourceStoreException {
+        return readAllSchedules(limit, offset, excludeHitlTimeouts, ListingScope.UNRESTRICTED);
+    }
+
+    /**
+     * As {@link #readAllSchedules(int, int, boolean)}, restricted to the rows
+     * {@code scope} admits — again inside the query, for the same paging reason.
+     */
+    List<ScheduleConfiguration> readAllSchedules(int limit, int offset, boolean excludeHitlTimeouts, ListingScope scope)
+            throws IResourceStore.ResourceStoreException;
 
     List<ScheduleConfiguration> readSchedulesByAgentId(String agentId) throws IResourceStore.ResourceStoreException;
 
@@ -211,8 +221,66 @@ public interface IScheduleStore {
      * Paged, deterministically ordered variant — see
      * {@link #readAllSchedules(int, int, boolean)}.
      */
-    List<ScheduleConfiguration> readSchedulesByAgentId(String agentId, int limit, int offset, boolean excludeHitlTimeouts)
+    default List<ScheduleConfiguration> readSchedulesByAgentId(String agentId, int limit, int offset, boolean excludeHitlTimeouts)
+            throws IResourceStore.ResourceStoreException {
+        return readSchedulesByAgentId(agentId, limit, offset, excludeHitlTimeouts, ListingScope.UNRESTRICTED);
+    }
+
+    /**
+     * As {@link #readSchedulesByAgentId(String, int, int, boolean)}, restricted to
+     * the rows {@code scope} admits.
+     */
+    List<ScheduleConfiguration> readSchedulesByAgentId(String agentId, int limit, int offset, boolean excludeHitlTimeouts,
+                                                       ListingScope scope)
             throws IResourceStore.ResourceStoreException;
+
+    /**
+     * Which schedules a listing may return, expressed so both backends can push it
+     * into the query.
+     * <p>
+     * A schedule is <em>owned</em> when its {@code userId} names a real principal —
+     * it runs as that user, so it is that user's (their dream consolidation, a
+     * cadence they created). It is <em>unowned</em> when the {@code userId} is
+     * absent or a {@code system:} identity such as {@code system:scheduler}. With a
+     * {@link #principal} set, a row is admitted when it is owned by that principal,
+     * or when it is unowned and either {@link #includeUnowned} is true or the
+     * principal created it ({@code createdBy}), or — with
+     * {@link #includeTeamCadences} — when it is a team cadence schedule, whoever
+     * created it.
+     *
+     * @param principal
+     *            the caller; {@code null} admits every row
+     * @param includeUnowned
+     *            whether unowned schedules someone else created are admitted too
+     * @param includeTeamCadences
+     *            whether every team cadence schedule is admitted. A cadence runs as
+     *            its creator but belongs to its group, so the group's co-editors
+     *            must see it; the caller sets this only when it may see every group
+     *            (workspaces not enforced), because group access cannot be decided
+     *            inside a schedule query
+     */
+    record ListingScope(String principal, boolean includeUnowned, boolean includeTeamCadences) {
+
+        /** Every row — an administrator, or authorization disabled. */
+        public static final ListingScope UNRESTRICTED = new ListingScope(null, true, true);
+
+        /** A scope that admits no team cadence beyond the caller's own. */
+        public ListingScope(String principal, boolean includeUnowned) {
+            this(principal, includeUnowned, false);
+        }
+
+        /** Prefix of the non-human identities schedules run as. */
+        public static final String SYSTEM_IDENTITY_PREFIX = "system:";
+
+        public boolean isUnrestricted() {
+            return principal == null;
+        }
+
+        /** Whether a {@code userId} names nobody in particular — see the record doc. */
+        public static boolean isUnownedUserId(String userId) {
+            return userId == null || userId.isBlank() || userId.startsWith(SYSTEM_IDENTITY_PREFIX);
+        }
+    }
 
     // --- Polling & Claiming ---
 

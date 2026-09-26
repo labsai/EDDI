@@ -604,4 +604,60 @@ class ResourceAccessGuardTest {
                     "an unowned resource must still carry a token, or it can never be listed");
         }
     }
+
+    @Nested
+    @DisplayName("currentLevel / hasAccess — the non-throwing lookup for id-only listings")
+    class CurrentLevel {
+
+        private final WorkspaceSettings enforced = settings(true, true, WorkspaceSettings.LEGACY_SHARED);
+
+        @Test
+        @DisplayName("mirrors requireAccess: the owner holds OWN, a stranger holds nothing")
+        void ownerVersusStranger() throws Exception {
+            var store = mock(IDocumentDescriptorStore.class);
+            when(store.readCurrentDescriptor(RESOURCE_ID)).thenReturn(ownedBy("alice"));
+
+            assertEquals(AccessLevel.OWN, guard(identity("alice"), enforced, store).currentLevel(RESOURCE_ID));
+            assertNull(guard(identity("bob"), enforced, store).currentLevel(RESOURCE_ID));
+            assertFalse(guard(identity("bob"), enforced, store).hasAccess(RESOURCE_ID, AccessLevel.USE));
+            assertTrue(guard(identity("alice"), enforced, store).hasAccess(RESOURCE_ID, AccessLevel.EDIT));
+        }
+
+        @Test
+        @DisplayName("a missing descriptor admits at most VIEW, and only under legacy-visibility=shared")
+        void missingDescriptorIsReadOnly() throws Exception {
+            var store = mock(IDocumentDescriptorStore.class);
+            when(store.readCurrentDescriptor(RESOURCE_ID)).thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+
+            assertEquals(AccessLevel.VIEW, guard(identity("bob"), enforced, store).currentLevel(RESOURCE_ID));
+            // Agrees with requireLegacyFallback, which admits USE and VIEW: an agent the
+            // caller can start a conversation with must not drop out of id-only listings.
+            assertTrue(guard(identity("bob"), enforced, store).hasAccess(RESOURCE_ID, AccessLevel.USE));
+            assertTrue(guard(identity("bob"), enforced, store).hasAccess(RESOURCE_ID, AccessLevel.VIEW));
+            assertDoesNotThrow(() -> guard(identity("bob"), enforced, store).requireAgentUseAccess(RESOURCE_ID));
+            assertFalse(guard(identity("bob"), enforced, store).hasAccess(RESOURCE_ID, AccessLevel.EDIT));
+
+            var adminOnly = settings(true, true, WorkspaceSettings.LEGACY_ADMIN_ONLY);
+            assertNull(guard(identity("bob"), adminOnly, store).currentLevel(RESOURCE_ID));
+        }
+
+        @Test
+        @DisplayName("an unreadable descriptor grants nothing instead of throwing")
+        void storeFailureGrantsNothing() throws Exception {
+            var store = mock(IDocumentDescriptorStore.class);
+            when(store.readCurrentDescriptor(RESOURCE_ID)).thenThrow(new IResourceStore.ResourceStoreException("down"));
+
+            assertNull(guard(identity("bob"), enforced, store).currentLevel(RESOURCE_ID));
+        }
+
+        @Test
+        @DisplayName("with enforcement off everyone holds OWN and the store is never consulted")
+        void disabledSeesEverything() throws Exception {
+            var store = mock(IDocumentDescriptorStore.class);
+            var g = guard(identity("bob"), settings(false, true, WorkspaceSettings.LEGACY_SHARED), store);
+
+            assertEquals(AccessLevel.OWN, g.currentLevel(RESOURCE_ID));
+            verify(store, never()).readCurrentDescriptor(anyString());
+        }
+    }
 }

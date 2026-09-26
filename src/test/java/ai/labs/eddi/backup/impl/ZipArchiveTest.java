@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -51,6 +52,25 @@ class ZipArchiveTest {
             }
             assertEquals(2, count);
         }
+    }
+
+    @Test
+    void createZip_thatFailsPartWay_leavesNoPartialArchiveBehind(@TempDir Path tempDir) throws IOException {
+        Path sourceDir = tempDir.resolve("source");
+        Files.createDirectories(sourceDir);
+        Files.writeString(sourceDir.resolve("a.txt"), "content");
+        // A dangling link is listed like a file but cannot be opened, so the write
+        // fails after the target has been created.
+        try {
+            Files.createSymbolicLink(sourceDir.resolve("b.txt"), tempDir.resolve("missing"));
+        } catch (IOException | UnsupportedOperationException e) {
+            Assumptions.abort("symbolic links are not available here: " + e.getMessage());
+        }
+        Path targetZip = tempDir.resolve("output.zip");
+
+        assertThrows(IOException.class, () -> zipArchive.createZip(sourceDir.toString(), targetZip.toString(), tempDir));
+
+        assertFalse(Files.exists(targetZip), "a failed export must not leave a truncated archive under its download name");
     }
 
     @Test

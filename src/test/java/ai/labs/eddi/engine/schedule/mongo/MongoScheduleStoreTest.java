@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.schedule.mongo;
 
+import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -727,6 +728,35 @@ class MongoScheduleStoreTest {
         var filter = ArgumentCaptor.forClass(Bson.class);
         verify(scheduleCollection).find(filter.capture());
         assertRedactsHitlTimeouts(filter.getValue());
+    }
+
+    @Test
+    @DisplayName("readAllSchedules — owner scoping is part of the filter (H2a)")
+    void readAllSchedulesScopedToACallerFiltersInTheQuery() throws Exception {
+        setupSchedulePageIteration();
+
+        store.readAllSchedules(50, 0, false, new IScheduleStore.ListingScope("alice", false));
+
+        var filter = ArgumentCaptor.forClass(Bson.class);
+        verify(scheduleCollection).find(filter.capture());
+        String rendered = encodedFilter(filter.getValue()).toJson();
+        assertTrue(rendered.contains("\"userId\": \"alice\""), rendered);
+        assertTrue(rendered.contains("\"createdBy\": \"alice\""), rendered);
+        assertTrue(rendered.contains("system:"), "system identities count as unowned: " + rendered);
+    }
+
+    @Test
+    @DisplayName("readAllSchedules — includeUnowned drops the createdBy condition")
+    void readAllSchedulesIncludingUnownedAdmitsEveryUnownedRow() throws Exception {
+        setupSchedulePageIteration();
+
+        store.readAllSchedules(50, 0, false, new IScheduleStore.ListingScope("alice", true));
+
+        var filter = ArgumentCaptor.forClass(Bson.class);
+        verify(scheduleCollection).find(filter.capture());
+        String rendered = encodedFilter(filter.getValue()).toJson();
+        assertTrue(rendered.contains("\"userId\": \"alice\""), rendered);
+        assertFalse(rendered.contains("createdBy"), rendered);
     }
 
     @Test

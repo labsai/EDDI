@@ -503,9 +503,10 @@ class RestExportServiceTest {
             var desc = new DocumentDescriptor();
             desc.setName("My Agent");
             String filename = invokePrepareZipFilename(desc, "abc123", 2);
-            assertTrue(filename.contains("abc123"));
-            assertTrue(filename.contains("-2.zip"));
-            assertTrue(filename.startsWith("My-Agent-"), filename);
+            assertTrue(filename.matches("My-Agent--abc123-2-[0-9a-f]{32}\\.zip"), filename);
+            assertEquals("abc123", RestExportService.agentIdOfArchive(filename));
+            assertEquals("My-Agent-abc123-2.zip", RestExportService.downloadNameOf(filename),
+                    "the saved name is the one archives always had, without the token");
             // The filename doubles as the download URL's path segment, so it has to
             // survive sanitizeFileName's character class.
             assertTrue(filename.matches("^[a-zA-Z0-9_.+\\-]+$"), filename);
@@ -517,7 +518,7 @@ class RestExportServiceTest {
             var desc = new DocumentDescriptor();
             desc.setName(null);
             String filename = invokePrepareZipFilename(desc, "abc123", 1);
-            assertEquals("abc123-1.zip", filename);
+            assertTrue(filename.matches("abc123-1-[0-9a-f]{32}\\.zip"), filename);
         }
 
         @Test
@@ -526,7 +527,31 @@ class RestExportServiceTest {
             var desc = new DocumentDescriptor();
             desc.setName("");
             String filename = invokePrepareZipFilename(desc, "abc123", 1);
-            assertEquals("abc123-1.zip", filename);
+            assertTrue(filename.matches("abc123-1-[0-9a-f]{32}\\.zip"), filename);
+        }
+
+        @Test
+        @DisplayName("every archive key carries a fresh unguessable token (H2c)")
+        void keysAreUnguessable() throws Exception {
+            var desc = new DocumentDescriptor();
+            desc.setName("My Agent");
+            String first = invokePrepareZipFilename(desc, "abc123", 1);
+            String second = invokePrepareZipFilename(desc, "abc123", 1);
+            assertNotEquals(first, second, "two exports of the same agent version must not share a download key");
+        }
+
+        @Test
+        @DisplayName("the agent id is recovered from any key shape, including UUID ids and dotted slugs")
+        void agentIdIsRecoverable() {
+            // Any 32 lower-case hex characters stand for the random part of a key.
+            String archiveNonce = "f".repeat(32);
+            assertEquals("123e4567-e89b-12d3-a456-426614174000",
+                    RestExportService.agentIdOfArchive("Bot.v2--123e4567-e89b-12d3-a456-426614174000-3-" + archiveNonce + ".zip"));
+            assertEquals("123e4567-e89b-12d3-a456-426614174000",
+                    RestExportService.agentIdOfArchive("123e4567-e89b-12d3-a456-426614174000-3-" + archiveNonce + ".zip"));
+            // The pre-token format, and anything else not produced by prepareZipFilename.
+            assertNull(RestExportService.agentIdOfArchive("My-Agent-abc123-2.zip"));
+            assertNull(RestExportService.agentIdOfArchive("abc123-2-" + archiveNonce + ".tar"));
         }
     }
 

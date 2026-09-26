@@ -11,6 +11,7 @@ import ai.labs.eddi.engine.model.Deployment.Status;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.integrations.openai.model.ModelObject;
+import io.quarkus.security.ForbiddenException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -28,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -367,6 +369,116 @@ class AgentModelResolverTest {
 
         resolver.invalidate();
         assertEquals(4, resolver.listModels().size());
+    }
+
+    // ─── the USE gate on resolution (H2h) ───
+
+    /**
+     * A guard that refuses USE on {@code deniedAgentId} and admits everything else.
+     */
+    private AgentModelResolver resolverDenying(String deniedAgentId) {
+        var guard = mock(ResourceAccessGuard.class);
+        doThrow(new ForbiddenException("no")).when(guard).requireAgentUseAccess(deniedAgentId);
+        var resolver = new AgentModelResolver(agentFactory, descriptorStore, OpenAiTestFixtures.enabledConfig(), guard);
+        resolver.initCache();
+        return resolver;
+    }
+
+    @Test
+    void resolve_agentTheCallerMayNotUse_isIndistinguishableFromUnknown() throws Exception {
+        givenAgent(AGENT_ID_SUPPORT, "Private Support");
+        var resolver = resolverDenying(AGENT_ID_SUPPORT);
+
+        var byCanonical = assertThrows(AgentModelResolver.UnknownModelException.class,
+                () -> resolver.resolve("private-support-a3f9c1"));
+        var unknown = assertThrows(AgentModelResolver.UnknownModelException.class,
+                () -> resolver.resolve("private-support-ffffff"));
+        assertEquals(unknown.getMessage().replace("private-support-ffffff", "X"),
+                byCanonical.getMessage().replace("private-support-a3f9c1", "X"),
+                "a refused agent must answer exactly like an absent one, or /v1/models/{id} is an oracle");
+        assertThrows(AgentModelResolver.UnknownModelException.class, () -> resolver.resolve(AGENT_ID_SUPPORT));
+        assertThrows(AgentModelResolver.UnknownModelException.class, () -> resolver.resolve("Private Support"));
+        assertThrows(AgentModelResolver.UnknownModelException.class, () -> resolver.resolve("private-support"));
+    }
+
+    @Test
+    void resolve_refusedExactIdMatch_doesNotFallThroughToANamesake() throws Exception {
+        givenAgent(AGENT_ID_SUPPORT, "Private Support");
+        // A usable agent whose display name is the private agent's id.
+        givenAgent(AGENT_ID_SALES, AGENT_ID_SUPPORT);
+
+        assertThrows(AgentModelResolver.UnknownModelException.class,
+                () -> resolverDenying(AGENT_ID_SUPPORT).resolve(AGENT_ID_SUPPORT),
+                "a request naming a refused agent's id must not quietly land on another agent");
+    }
+
+    @Test
+    void resolve_nameShared_withAnUnusableAgent_neitherLeaksNorIsAmbiguous() throws Exception {
+        givenAgent(AGENT_ID_SUPPORT, "Support");
+        givenAgent(AGENT_ID_SALES, "Support");
+
+        assertEquals(AGENT_ID_SUPPORT, resolverDenying(AGENT_ID_SALES).resolve("Support").agentId(),
+                "the private namesake must not take part in the uniqueness decision, nor be named in an error");
+    }
+
+    // ─── short-id collisions ───
+
+    /** Two ids that share their last six characters with AGENT_ID_SUPPORT. */
+    private static final String COLLIDING_A = "11aaaaaaaaaaaaaaaaa3f9c1";
+    private static final String COLLIDING_B = "22bbbbbbbbbbbbbbbba3f9c1";
+
+    @Test
+    void collidingShortIds_eachAgentIsListedUnderADistinctId() throws Exception {
+        givenAgent(COLLIDING_A, "Support");
+        givenAgent(COLLIDING_B, "Support");
+        givenAgent(AGENT_ID_SALES, "Sales");
+
+        List<String> ids = resolver(OpenAiTestFixtures.config(b -> b.exposeStatelessVariants = false))
+                .listModels().stream().map(ModelObject::id).toList();
+
+        assertEquals(List.of("support-11aaaaaaaaaaaaaaaaa3f9c1", "support-22bbbbbbbbbbbbbbbba3f9c1", "sales-b4e2d7"),
+                ids, "colliding agents get <slug>-<agentId>; a non-colliding agent keeps its short id");
+    }
+
+    @Test
+    void collidingShortIds_theUsableAgentStaysReachable_whenItsNamesakeIsDenied() throws Exception {
+        givenAgent(COLLIDING_A, "Support");
+        givenAgent(COLLIDING_B, "Support");
+        var resolver = resolverDenying(COLLIDING_A);
+
+        assertEquals(List.of("support-22bbbbbbbbbbbbbbbba3f9c1", "support-22bbbbbbbbbbbbbbbba3f9c1:stateless"),
+                resolver.listModels().stream().map(ModelObject::id).toList());
+        assertEquals(COLLIDING_B, resolver.resolve("support-22bbbbbbbbbbbbbbbba3f9c1").agentId());
+        var byShortId = resolver.resolve("support-a3f9c1");
+        assertEquals(COLLIDING_B, byShortId.agentId(),
+                "the short id stored before the collision must still reach the one agent the caller may use");
+        assertEquals("support-22bbbbbbbbbbbbbbbba3f9c1", byShortId.canonicalModelId());
+        assertThrows(AgentModelResolver.UnknownModelException.class,
+                () -> resolver.resolve("support-11aaaaaaaaaaaaaaaaa3f9c1"));
+    }
+
+    @Test
+    void collidingShortIds_areAmbiguous_whenBothAgentsAreUsable() throws Exception {
+        givenAgent(COLLIDING_A, "Support");
+        givenAgent(COLLIDING_B, "Support");
+
+        var e = assertThrows(AgentModelResolver.AmbiguousModelException.class,
+                () -> resolver().resolve("support-a3f9c1"));
+        assertTrue(e.getMessage().contains("support-11aaaaaaaaaaaaaaaaa3f9c1")
+                && e.getMessage().contains("support-22bbbbbbbbbbbbbbbba3f9c1"), e.getMessage());
+    }
+
+    @Test
+    void collidingShortIds_withNoUsableAgent_answerLikeAnUnknownModel() throws Exception {
+        givenAgent(COLLIDING_A, "Support");
+        givenAgent(COLLIDING_B, "Support");
+        var guard = mock(ResourceAccessGuard.class);
+        doThrow(new ForbiddenException("no")).when(guard).requireAgentUseAccess(any());
+        var resolver = new AgentModelResolver(agentFactory, descriptorStore, OpenAiTestFixtures.enabledConfig(), guard);
+        resolver.initCache();
+
+        assertThrows(AgentModelResolver.UnknownModelException.class, () -> resolver.resolve("support-a3f9c1"));
+        assertTrue(resolver.listModels().isEmpty());
     }
 
     /**

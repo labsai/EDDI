@@ -4,12 +4,15 @@
  */
 package ai.labs.eddi.engine.triggermanagement.rest;
 
+import java.util.List;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.triggermanagement.IAgentTriggerStore;
+import ai.labs.eddi.engine.triggermanagement.IRestAgentTriggerStore;
 import ai.labs.eddi.engine.model.AgentDeployment;
 import ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration;
 import io.quarkus.security.ForbiddenException;
@@ -111,5 +114,85 @@ class RestAgentTriggerStoreTest {
                 () -> restAgentTriggerStore.deleteAgentTrigger("broken"));
 
         verify(cache, never()).remove("broken");
+    }
+
+    // --- H2b: authority over an existing trigger ---
+
+    private static AgentTriggerConfiguration trigger(String intent, String agentId) {
+        var deployment = new AgentDeployment();
+        deployment.setAgentId(agentId);
+        var configuration = new AgentTriggerConfiguration();
+        configuration.setIntent(intent);
+        configuration.getAgentDeployments().add(deployment);
+        return configuration;
+    }
+
+    @Test
+    void updateAgentTrigger_repointingAnotherTeamsIntent_refused() throws Exception {
+        // The victim's intent routes to their agent; the caller may use their own
+        // agent (the new target) but may not edit the victim's.
+        when(agentTriggerStore.readAgentTrigger("support")).thenReturn(trigger("support", "victimagent00000000000"));
+        when(resourceAccessGuard.hasAccess("victimagent00000000000", AccessLevel.EDIT)).thenReturn(false);
+
+        assertThrows(ForbiddenException.class,
+                () -> restAgentTriggerStore.updateAgentTrigger("support", trigger("support", "attackeragent000000000")));
+
+        verify(agentTriggerStore, never()).updateAgentTrigger(any(), any());
+        verify(cache, never()).put(any(), any());
+    }
+
+    @Test
+    void updateAgentTrigger_callerMayEditTheCurrentTarget_allowed() throws Exception {
+        when(agentTriggerStore.readAgentTrigger("support")).thenReturn(trigger("support", "teamagent0000000000000"));
+        when(resourceAccessGuard.hasAccess("teamagent0000000000000", AccessLevel.EDIT)).thenReturn(true);
+
+        Response response = restAgentTriggerStore.updateAgentTrigger("support", trigger("support", "teamagent0000000000000"));
+
+        assertEquals(200, response.getStatus());
+        verify(agentTriggerStore).updateAgentTrigger(eq("support"), any());
+    }
+
+    @Test
+    void deleteAgentTrigger_anotherTeamsIntent_refused() throws Exception {
+        when(agentTriggerStore.readAgentTrigger("support")).thenReturn(trigger("support", "victimagent00000000000"));
+        when(resourceAccessGuard.hasAccess("victimagent00000000000", AccessLevel.EDIT)).thenReturn(false);
+
+        assertThrows(ForbiddenException.class, () -> restAgentTriggerStore.deleteAgentTrigger("support"));
+
+        verify(agentTriggerStore, never()).deleteAgentTrigger(any());
+        verify(cache, never()).remove(any());
+    }
+
+    @Test
+    void readAllAgentTriggers_hidesTriggersRoutingToAgentsTheCallerMayNotUse() throws Exception {
+        when(agentTriggerStore.readAllAgentTriggers()).thenReturn(List.of(
+                trigger("mine", "myagent000000000000000"), trigger("theirs", "theiragent000000000000")));
+        when(resourceAccessGuard.hasAccess("myagent000000000000000", AccessLevel.USE)).thenReturn(true);
+        when(resourceAccessGuard.hasAccess("theiragent000000000000", AccessLevel.USE)).thenReturn(false);
+
+        var visible = restAgentTriggerStore.readAllAgentTriggers();
+
+        assertEquals(List.of("mine"), visible.stream().map(AgentTriggerConfiguration::getIntent).toList());
+    }
+
+    @Test
+    void readAgentTrigger_anotherTeamsIntent_answersLikeAnAbsentOne() throws Exception {
+        when(agentTriggerStore.readAgentTrigger("theirs")).thenReturn(trigger("theirs", "theiragent000000000000"));
+        when(resourceAccessGuard.hasAccess("theiragent000000000000", AccessLevel.USE)).thenReturn(false);
+
+        var refused = assertThrows(ResourceNotFoundException.class, () -> restAgentTriggerStore.readAgentTrigger("theirs"));
+        assertInstanceOf(IRestAgentTriggerStore.TriggerNotVisibleException.class, refused,
+                "a refusal must be distinguishable in-process, so callers do not clean up as if it were deleted");
+    }
+
+    @Test
+    void workspacesOff_everythingBehavesAsBefore() throws Exception {
+        when(resourceAccessGuard.seesEverything()).thenReturn(true);
+        when(agentTriggerStore.readAllAgentTriggers()).thenReturn(List.of(trigger("any", "someagent0000000000000")));
+
+        assertEquals(1, restAgentTriggerStore.readAllAgentTriggers().size());
+        restAgentTriggerStore.deleteAgentTrigger("any");
+        verify(agentTriggerStore, never()).readAgentTrigger(any());
+        verify(agentTriggerStore).deleteAgentTrigger("any");
     }
 }

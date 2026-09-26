@@ -33,6 +33,47 @@ class SelfUrlResolverTest {
     }
 
     @Nested
+    @DisplayName("derived from the HTTP bind address (E5)")
+    class BindAddress {
+
+        @Test
+        @DisplayName("a wildcard or localhost bind keeps the loopback address")
+        void wildcardAndLocalhostStayOnLoopback() {
+            for (String host : new String[]{"0.0.0.0", "::", "[::]", "localhost", "", " "}) {
+                assertEquals("http://127.0.0.1:7070", new SelfUrlResolver(Optional.empty(), 7070, host).baseUrl(), host);
+            }
+        }
+
+        /**
+         * Bound to one specific address, EDDI is not listening on 127.0.0.1 at all.
+         * Whatever is must not be treated as this process: isSelf gates the release of
+         * the caller's bearer token.
+         */
+        @Test
+        @DisplayName("a specific non-loopback bind is used as the host, and 127.0.0.1 is no longer 'self'")
+        void specificBindAddressIsUsed() {
+            var resolver = new SelfUrlResolver(Optional.empty(), 7070, "10.1.2.3");
+            assertEquals("http://10.1.2.3:7070", resolver.baseUrl());
+            assertTrue(resolver.isSelf(URI.create("http://10.1.2.3:7070/agentstore/agents")));
+            assertFalse(resolver.isSelf(URI.create("http://127.0.0.1:7070/agentstore/agents")));
+        }
+
+        @Test
+        @DisplayName("a specific loopback or IPv6 bind is used verbatim, bracketed where needed")
+        void specificLoopbackAndIpv6() {
+            assertEquals("http://127.0.0.5:7070", new SelfUrlResolver(Optional.empty(), 7070, "127.0.0.5").baseUrl());
+            assertEquals("http://[::1]:7070", new SelfUrlResolver(Optional.empty(), 7070, "::1").baseUrl());
+            assertEquals("http://[fd00::5]:7070", new SelfUrlResolver(Optional.empty(), 7070, "[fd00::5]").baseUrl());
+        }
+
+        @Test
+        @DisplayName("the override still wins over a bind address")
+        void overrideWins() {
+            assertEquals("http://eddi:7070", new SelfUrlResolver(Optional.of("http://eddi:7070"), 7070, "10.1.2.3").baseUrl());
+        }
+    }
+
+    @Nested
     @DisplayName("derived from the HTTP port")
     class Loopback {
 

@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.schedule.mongo;
 
 import ai.labs.eddi.engine.hitl.HitlSchedules;
+import ai.labs.eddi.engine.runtime.internal.TeamCadenceService;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
@@ -77,6 +78,7 @@ public class MongoScheduleStore implements IScheduleStore {
     private static final String AGENT_ID = "agentId";
     private static final String TENANT_ID = "tenantId";
     private static final String USER_ID = "userId";
+    private static final String CREATED_BY = "createdBy";
     private static final String SCHEDULE_ID = "scheduleId";
     private static final String STARTED_AT = "startedAt";
     private static final String STATUS = "status";
@@ -426,9 +428,9 @@ public class MongoScheduleStore implements IScheduleStore {
     }
 
     @Override
-    public List<ScheduleConfiguration> readAllSchedules(int limit, int offset, boolean excludeHitlTimeouts)
+    public List<ScheduleConfiguration> readAllSchedules(int limit, int offset, boolean excludeHitlTimeouts, ListingScope scope)
             throws IResourceStore.ResourceStoreException {
-        return readSchedulePage(redacted(new Document(), excludeHitlTimeouts), limit, offset);
+        return readSchedulePage(scoped(redacted(new Document(), excludeHitlTimeouts), scope), limit, offset);
     }
 
     @Override
@@ -437,9 +439,30 @@ public class MongoScheduleStore implements IScheduleStore {
     }
 
     @Override
-    public List<ScheduleConfiguration> readSchedulesByAgentId(String agentId, int limit, int offset, boolean excludeHitlTimeouts)
+    public List<ScheduleConfiguration> readSchedulesByAgentId(String agentId, int limit, int offset, boolean excludeHitlTimeouts,
+                                                              ListingScope scope)
             throws IResourceStore.ResourceStoreException {
-        return readSchedulePage(redacted(new Document(AGENT_ID, agentId), excludeHitlTimeouts), limit, offset);
+        return readSchedulePage(scoped(redacted(new Document(AGENT_ID, agentId), excludeHitlTimeouts), scope), limit, offset);
+    }
+
+    /**
+     * Adds the caller's {@link ListingScope} to a listing filter — see its Javadoc
+     * for the rule. {@code eq(field, null)} also matches a missing field, which is
+     * what "no userId" means for documents written before the field existed.
+     */
+    static Bson scoped(Bson filter, ListingScope scope) {
+        if (scope == null || scope.isUnrestricted()) {
+            return filter;
+        }
+        Bson unowned = or(eq(USER_ID, null), eq(USER_ID, ""),
+                // The prefix carries no regex metacharacters, so it is used as-is.
+                regex(USER_ID, "^" + ListingScope.SYSTEM_IDENTITY_PREFIX));
+        Bson admittedUnowned = scope.includeUnowned() ? unowned : and(unowned, eq(CREATED_BY, scope.principal()));
+        if (scope.includeTeamCadences()) {
+            Bson cadence = eq(METADATA + "." + TeamCadenceService.METADATA_TYPE_KEY, TeamCadenceService.METADATA_TYPE_CADENCE);
+            return and(filter, or(eq(USER_ID, scope.principal()), admittedUnowned, cadence));
+        }
+        return and(filter, or(eq(USER_ID, scope.principal()), admittedUnowned));
     }
 
     /**

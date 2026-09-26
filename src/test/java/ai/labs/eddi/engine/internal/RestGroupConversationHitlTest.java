@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -53,10 +54,12 @@ class RestGroupConversationHitlTest {
     private SecurityIdentity identity;
     private OwnershipValidator ownershipValidator;
     private RestGroupConversation restGroupConversation;
+    private ResourceAccessGuard resourceAccessGuard;
 
     @BeforeEach
     void setUp() {
         groupService = mock(IGroupConversationService.class);
+        resourceAccessGuard = mock(ResourceAccessGuard.class);
         jsonSerialization = mock(IJsonSerialization.class);
         identity = mock(SecurityIdentity.class);
         // Use a real OwnershipValidator with auth enabled to test actual logic
@@ -72,7 +75,8 @@ class RestGroupConversationHitlTest {
                 mock(IConversationService.class),
                 groupService);
         restGroupConversation = new RestGroupConversation(
-                groupService, jsonSerialization, identity, ownershipValidator, hitlAccessGuard);
+                groupService, jsonSerialization, identity, ownershipValidator, hitlAccessGuard,
+                resourceAccessGuard);
     }
 
     /** Creates a GC owned by the given userId. */
@@ -750,6 +754,41 @@ class RestGroupConversationHitlTest {
 
             assertNull(sent.getDecision().getDecidedBy(),
                     "a caller must never be able to name the decider, in any branch");
+        }
+    }
+
+    @Nested
+    @DisplayName("resume is USE-gated for the transcript owner")
+    class ResumeUseGate {
+
+        private GroupApprovalRequest approval() {
+            var request = new GroupApprovalRequest();
+            var decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.APPROVED);
+            request.setDecision(decision);
+            return request;
+        }
+
+        @Test
+        @DisplayName("an owner who lost USE on the group cannot resume it")
+        void ownerWithoutUseIsRefused() throws Exception {
+            asUser(OWNER_ID);
+            when(groupService.readGroupConversation(GC_ID)).thenReturn(makeGc(OWNER_ID));
+            doThrow(new ForbiddenException("no")).when(resourceAccessGuard).requireUseAccess(GROUP_ID, "group");
+
+            assertThrows(ForbiddenException.class, () -> restGroupConversation.approveGroupPhase(GROUP_ID, GC_ID, approval()));
+            verify(groupService, never()).resumeDiscussion(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("an admin decides by role, whatever their group access")
+        void adminIsNotGroupGated() throws Exception {
+            asAdmin("root");
+            when(groupService.readGroupConversation(GC_ID)).thenReturn(makeGc(OWNER_ID));
+            doThrow(new ForbiddenException("no")).when(resourceAccessGuard).requireUseAccess(GROUP_ID, "group");
+            when(groupService.resumeDiscussion(eq(GC_ID), any(), any())).thenReturn(makeGc(OWNER_ID));
+
+            assertEquals(200, restGroupConversation.approveGroupPhase(GROUP_ID, GC_ID, approval()).getStatus());
         }
     }
 }
