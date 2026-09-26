@@ -211,7 +211,7 @@ public interface IRestGroupConversation {
                        + "Lifecycle: discuss → COMPLETED → [followup|continue]* → close → CLOSED (terminal).")
     @APIResponse(responseCode = "200", description = "Closed group conversation.")
     @APIResponse(responseCode = "404", description = "Group conversation not found.")
-    @APIResponse(responseCode = "409", description = "Conversation not in COMPLETED, FAILED or CANCELLED state.")
+    @APIResponse(responseCode = "409", description = "Conversation not in COMPLETED, FAILED, REJECTED or CANCELLED state.")
     Response closeGroupConversation(@PathParam("groupId") String groupId,
                                     @PathParam("groupConversationId") String gcId);
 
