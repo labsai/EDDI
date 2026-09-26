@@ -421,7 +421,7 @@ class WeatherToolExtendedTest {
 
             String result = weatherTool.getCurrentWeather("London", "standard");
 
-            assertTrue(result.contains("295.1 K"), result);
+            assertTrue(result.contains(String.format("%.1f", 295.1) + " K"), result);
             assertFalse(result.contains("°F"), result);
             assertTrue(result.contains("m/s"), result);
         }

@@ -9,6 +9,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.net.http.HttpHeaders;
+import java.net.http.HttpResponse;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -19,6 +20,7 @@ import java.util.concurrent.Flow;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -122,6 +124,60 @@ class BoundedBodyHandlersTest {
         subscriber.onComplete();
 
         assertArrayEquals("abcde".getBytes(StandardCharsets.US_ASCII), subscriber.getBody().toCompletableFuture().join());
+    }
+
+    @Test
+    @DisplayName("discarding: a body under the limit is drained and completes with null")
+    void discardingDrainsSmallBody() {
+        var cancelled = new boolean[1];
+        var requested = new long[1];
+        HttpResponse.BodySubscriber<String> subscriber = BoundedBodyHandlers.discarding(10, OptionalLong.empty());
+        subscriber.onSubscribe(subscription(requested, cancelled));
+        subscriber.onNext(List.of(ByteBuffer.wrap(new byte[6])));
+        subscriber.onComplete();
+
+        assertEquals(Long.MAX_VALUE, requested[0]);
+        assertFalse(cancelled[0]);
+        assertNull(subscriber.getBody().toCompletableFuture().join());
+    }
+
+    @Test
+    @DisplayName("discarding: past the limit the connection is dropped and the body still completes normally")
+    void discardingStopsPastLimitWithoutFailing() {
+        var cancelled = new boolean[1];
+        HttpResponse.BodySubscriber<String> subscriber = BoundedBodyHandlers.discarding(10, OptionalLong.empty());
+        subscriber.onSubscribe(subscription(new long[1], cancelled));
+        subscriber.onNext(List.of(ByteBuffer.wrap(new byte[6]), ByteBuffer.wrap(new byte[6])));
+
+        assertTrue(cancelled[0]);
+        assertNull(subscriber.getBody().toCompletableFuture().join());
+    }
+
+    @Test
+    @DisplayName("discarding: a declared Content-Length above the limit reads nothing and completes normally")
+    void discardingRefusesOversizedDeclaredLength() {
+        var cancelled = new boolean[1];
+        var requested = new long[1];
+        HttpResponse.BodySubscriber<String> subscriber = BoundedBodyHandlers.discarding(10, OptionalLong.of(11));
+        subscriber.onSubscribe(subscription(requested, cancelled));
+
+        assertEquals(0, requested[0]);
+        assertTrue(cancelled[0]);
+        assertNull(subscriber.getBody().toCompletableFuture().join());
+    }
+
+    private static Flow.Subscription subscription(long[] requested, boolean[] cancelled) {
+        return new Flow.Subscription() {
+            @Override
+            public void request(long n) {
+                requested[0] = n;
+            }
+
+            @Override
+            public void cancel() {
+                cancelled[0] = true;
+            }
+        };
     }
 
     private static HttpHeaders headers(String contentType) {

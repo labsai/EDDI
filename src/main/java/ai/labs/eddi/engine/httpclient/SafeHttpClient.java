@@ -63,6 +63,12 @@ public class SafeHttpClient {
     /** Maximum number of redirect hops per request. */
     private static final int MAX_REDIRECTS = 5;
 
+    /**
+     * Most bytes of a redirect response's body read before it is dropped. A
+     * redirect body is only a courtesy page; nothing reads it.
+     */
+    private static final long MAX_REDIRECT_BODY_BYTES = 64 * 1024;
+
     /** HTTP status codes considered redirects. */
     private static final Set<Integer> REDIRECT_CODES = Set.of(301, 302, 303, 307, 308);
 
@@ -272,10 +278,13 @@ public class SafeHttpClient {
      * caller's handler. A redirect response is never returned to the caller, so its
      * body has no reader: given to an {@code ofInputStream} handler it was an
      * unclosed stream per hop, holding that hop's connection until the GC found it.
+     * The discard reads at most {@link #MAX_REDIRECT_BODY_BYTES} and then drops the
+     * connection, so a redirect with a huge body can neither spend bandwidth nor
+     * fail a caller whose own handler is bounded more tightly than the hop.
      */
     private static <T> HttpResponse.BodyHandler<T> discardingRedirectBodies(HttpResponse.BodyHandler<T> bodyHandler) {
         return info -> REDIRECT_CODES.contains(info.statusCode())
-                ? HttpResponse.BodySubscribers.replacing(null)
+                ? BoundedBodyHandlers.discarding(MAX_REDIRECT_BODY_BYTES, info.headers().firstValueAsLong("Content-Length"))
                 : bodyHandler.apply(info);
     }
 
