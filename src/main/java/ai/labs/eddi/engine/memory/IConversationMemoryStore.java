@@ -49,6 +49,15 @@ public interface IConversationMemoryStore {
     String storeConversationMemorySnapshot(ConversationMemorySnapshot snapshot) throws IResourceStore.ResourceStoreException;
 
     /**
+     * A fresh conversation id in this store's id format, allocated before the
+     * conversation's first turn runs so that turn can already name its conversation
+     * (a {@code scope: "secret"} property is vaulted under a key that contains it).
+     * A snapshot marked {@link ConversationMemorySnapshot#isUnpersisted()
+     * unpersisted} is inserted under the id it carries.
+     */
+    String newConversationId();
+
+    /**
      * Store the full snapshot ONLY IF the conversation is still in
      * {@code expectedState} <em>and</em> still holds the snapshot's
      * {@link ConversationMemorySnapshot#getRevision() revision} — an atomic

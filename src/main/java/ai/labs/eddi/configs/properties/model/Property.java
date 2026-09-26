@@ -28,9 +28,8 @@ public class Property {
      * document it is indistinguishable from any other conversation property a
      * template wrote from user input, a model reply or an API response. This field
      * is the difference, and {@code ApiCallExecutor}'s
-     * {@link ai.labs.eddi.modules.apicalls.impl.ConfigReferenceGuard} requires it
-     * before it will resolve a credential reference that arrived through
-     * {@code {properties.x}}.
+     * {@link ai.labs.eddi.secrets.ConfigReferenceGuard} requires it before it will
+     * resolve a credential reference that arrived through {@code {properties.x}}.
      * <p>
      * <b>Exactly one writer.</b> Nothing else sets it, no property instruction
      * field maps to it ({@code PropertySetterTask.convertPropertyInstructions}

@@ -288,6 +288,15 @@ public class CallerIdentityResolver {
     }
 
     /**
+     * The current caller's raw token, or {@code null} when there is none — for
+     * redacting an echo of it from a response, never for sending anywhere.
+     */
+    public String currentCallerToken() {
+        var identity = callerIdentityContext.current();
+        return identity != null && identity.hasToken() ? identity.token() : null;
+    }
+
+    /**
      * Count a resolution outcome.
      * <p>
      * Tags are a fixed, low-cardinality vocabulary — never the token, the user id

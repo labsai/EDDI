@@ -80,12 +80,13 @@ copied into a property. The property therefore carries an `autoVaulted` marker, 
 auto-vaulting code and by nothing else, and the reference is resolved only when that marker is
 present. On top of it the reference must still name this agent, **this conversation** and the
 property the template reads, under the default tenant. A reference to the old, per-agent key
-(`<agentId>.apiKey`, shared by every conversation of the agent) is refused; so is a tenant-prefixed
-one, because the tenant used to come from a `tenantId` property a client can set.
+(`<agentId>.apiKey`, shared by every conversation of the agent) is refused, with an error that says
+the secret was stored by an earlier release and must be entered again; so is a tenant-prefixed one,
+because the tenant used to come from a `tenantId` property a client can set.
 
-The same rule covers the builder parameters of an LLM task (`modelName`, `baseUrl`, …): they are
-resolved against the vault after templating, so a reference conversation data put into one fails the
-turn instead of being resolved. The prompts (`systemMessage`, `prompt`) are never resolved and may
+The same rule covers the builder parameters of an LLM task (`modelName`, `baseUrl`, …) and of its
+cascade steps and judge model: they are resolved against the vault after templating, so a reference
+conversation data put into one fails the turn instead of being resolved. The prompts (`systemMessage`, `prompt`) are never resolved and may
 carry reference-shaped text.
 
 A property with no marker is refused, which includes one stored in a conversation that began before
@@ -98,6 +99,12 @@ A configured reference that **cannot** be resolved — no such secret, the provi
 vault is disabled — also refuses the call, naming the field and the reference. The literal
 `${vault:name}` is never sent as a credential: it would come back as the API's own "invalid key",
 with nothing naming the cause.
+
+The plaintext EDDI substitutes — a vault secret, a connection credential, the caller's token — is
+also removed by value from the response before it reaches conversation memory, template data, the
+LLM tool result or the log. Error bodies are redacted in full. A success body is data, so it is
+handled more carefully: a secret of 8 characters or more is removed from its text, a shorter one only
+where a JSON value is exactly the secret, and a number is never rewritten digit by digit.
 
 The plaintext EDDI substitutes is redacted by value from everything it records about the request:
 the request record in conversation memory, the HITL approval preview and the request log line. The

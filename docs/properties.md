@@ -247,11 +247,15 @@ Properties with `scope=secret` are automatically handled by the SecretsVault —
 3. The property value becomes a `${vault:<agentId>.<conversationId>.<name>}` reference with `conversation` scope
 4. Downstream consumers (`ChatModelRegistry`, `ApiCallExecutor`, `SecretResolver`) resolve the reference at point-of-use
 
-Only a string can be vaulted. `valueObject`, `valueList`, `valueInt`, `valueFloat`, `valueBoolean` and `convertToObject: true` are rejected under `scope: secret` when the configuration is saved; a `fromObjectPath` that yields anything but a string fails the turn. None of them is ever stored in plaintext.
+Only a string can be vaulted. `valueObject`, `valueList`, `valueInt`, `valueFloat` and `valueBoolean` are rejected under `scope: secret` when the configuration is saved, and so is a literal name containing `/`, `{`, `}` or `$`. A value that only turns out not to be a string at run time — a `fromObjectPath` that yields an object or a number, a `convertToObject: true` value that parses as JSON — fails the turn, in the property setter and in the httpcall, MCP and LLM instructions alike. None of them is ever stored in plaintext.
 
-If the vault is unavailable or disabled, the turn fails closed with a `LifecycleException` rather than persisting the plaintext — set `EDDI_VAULT_MASTER_KEY`.
+If the vault is unavailable or disabled, the turn fails closed with a `LifecycleException` rather than persisting the plaintext — set `EDDI_VAULT_MASTER_KEY`. **The vault is disabled on a default install**, so there every `scope: secret` instruction fails its turn with an error naming `EDDI_VAULT_MASTER_KEY` — including a post-response instruction of an httpcall, which used to store the value in plaintext.
 
-> **Upgrading:** a conversation that vaulted a secret under an earlier release holds a reference to the old, per-agent key (`<agentId>.<name>`), which every conversation of the agent shared. Apicalls refuse to resolve it; have the user enter the secret again, or start a new conversation. A `tenantId` conversation property no longer selects the vault tenant — a client can set it.
+A new conversation is given its id before its first turn runs, so a secret set on `CONVERSATION_START` (for example from client context) is vaulted like any other.
+
+The entries are removed when their conversation is permanently deleted — an explicit delete or the ended-conversation retention sweep (`eddi.conversations.deleteEndedConversationsOnceOlderThanDays`). A soft delete keeps them, as it keeps the conversation. Each entry is described `Auto-vaulted from conversation <conversationId>`.
+
+> **Upgrading:** a conversation that vaulted a secret under an earlier release holds a reference to the old, per-agent key (`<agentId>.<name>`), which every conversation of the agent shared. Apicalls refuse to resolve it with an error that says so; have the user enter the secret again, or start a new conversation. A `tenantId` conversation property no longer selects the vault tenant — a client can set it.
 
 ```json
 {

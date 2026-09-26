@@ -12,12 +12,15 @@ import ai.labs.eddi.engine.memory.DataFactory;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.model.AutoVaultReference;
+import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
@@ -36,6 +39,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * C2 — a {@code scope: "secret"} property must be vaulted per conversation.
@@ -113,7 +117,7 @@ class SecretPropertyVaultTest {
 
         assertEquals(Scope.conversation, stored.getScope());
         assertEquals(Boolean.TRUE, stored.getAutoVaulted());
-        assertEquals(SecretPropertyVault.referenceFor("agent-1", "aaaaaaaaaaaaaaaaaaaaaaaa", "apiKey").toReferenceString(),
+        assertEquals(AutoVaultReference.of("agent-1", "aaaaaaaaaaaaaaaaaaaaaaaa", "apiKey").toReferenceString(),
                 stored.getValueString(), "the guard and the writer derive the key from one definition");
     }
 
@@ -141,12 +145,44 @@ class SecretPropertyVaultTest {
     }
 
     @Test
-    @DisplayName("referenceFor refuses missing ids and unembeddable parts")
+    @DisplayName("AutoVaultReference refuses missing ids and unembeddable parts")
     void referenceForGuards() {
-        assertNull(SecretPropertyVault.referenceFor(null, "c", "p"));
-        assertNull(SecretPropertyVault.referenceFor("a", "", "p"));
-        assertNull(SecretPropertyVault.referenceFor("a", "c", "p}x"));
-        assertNull(SecretPropertyVault.referenceFor("a", "c", "p q"));
-        assertEquals(new SecretReference("default", "a.c.p"), SecretPropertyVault.referenceFor("a", "c", "p"));
+        assertNull(AutoVaultReference.of(null, "c", "p"));
+        assertNull(AutoVaultReference.of("a", "", "p"));
+        assertNull(AutoVaultReference.of("a", "c", "p}x"));
+        assertEquals(new SecretReference("default", "a.c.p"), AutoVaultReference.of("a", "c", "p"));
+    }
+
+    @Test
+    @DisplayName("review #3: deleting conversations removes exactly their auto-vaulted entries")
+    void deleteConversationSecrets() throws Exception {
+        when(secretProvider.isAvailable()).thenReturn(true);
+        when(secretProvider.listKeys("default")).thenReturn(List.of(
+                entry("agent-1.conv1.apiKey", "Auto-vaulted from conversation conv1"),
+                entry("agent-1.conv1.token", "Auto-vaulted from conversation conv1"),
+                entry("agent-1.conv2.apiKey", "Auto-vaulted from conversation conv2"),
+                // an operator's secret that merely looks like one: different description
+                entry("team.conv1.shared", "created by ops"),
+                // described as conv1's but keyed elsewhere: never touched
+                entry("openai-prod", "Auto-vaulted from conversation conv1")));
+
+        int deleted = vault.deleteConversationSecrets(List.of("conv1"));
+
+        assertEquals(2, deleted);
+        verify(secretProvider).delete(new SecretReference("default", "agent-1.conv1.apiKey"));
+        verify(secretProvider).delete(new SecretReference("default", "agent-1.conv1.token"));
+        verify(secretProvider, times(2)).delete(any());
+        verify(secretResolver).invalidateCache(new SecretReference("default", "agent-1.conv1.apiKey"));
+    }
+
+    @Test
+    @DisplayName("review #3: with the vault disabled nothing is listed or deleted")
+    void deleteConversationSecretsVaultDisabled() throws Exception {
+        assertEquals(0, vault.deleteConversationSecrets(List.of("conv1")));
+        verify(secretProvider, never()).listKeys(anyString());
+    }
+
+    private static SecretMetadata entry(String keyName, String description) {
+        return new SecretMetadata("default", keyName, Instant.now(), null, null, "x", description, List.of("agent-1"));
     }
 }

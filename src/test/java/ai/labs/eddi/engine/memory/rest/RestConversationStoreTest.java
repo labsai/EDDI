@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.memory.rest;
 
+import ai.labs.eddi.modules.properties.impl.SecretPropertyVault;
+
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
@@ -197,6 +199,30 @@ class RestConversationStoreTest {
 
             verify(conversationMemoryStore).deleteConversationMemorySnapshot("conv-1");
             verify(conversationDescriptorStore).deleteAllDescriptor("conv-1");
+        }
+
+        @Test
+        @DisplayName("review #3: a permanent delete removes the conversation's vault entries; a vault failure does not stop it")
+        void permanentDeleteRemovesSecrets() throws Exception {
+            var vault = mock(SecretPropertyVault.class);
+            restConversationStore.secretPropertyVault = vault;
+            when(vault.deleteConversationSecrets(any())).thenThrow(new IllegalStateException("vault down"));
+
+            restConversationStore.deleteConversationLog("conv-1", true);
+
+            verify(vault).deleteConversationSecrets(List.of("conv-1"));
+            verify(conversationMemoryStore).deleteConversationMemorySnapshot("conv-1");
+        }
+
+        @Test
+        @DisplayName("review #3: a soft delete keeps the vault entries — the conversation can still be restored")
+        void softDeleteKeepsSecrets() throws Exception {
+            var vault = mock(SecretPropertyVault.class);
+            restConversationStore.secretPropertyVault = vault;
+
+            restConversationStore.deleteConversationLog("conv-1", false);
+
+            verifyNoInteractions(vault);
         }
 
         @Test
@@ -450,6 +476,22 @@ class RestConversationStoreTest {
             verify(conversationMemoryStore).deleteConversationMemorySnapshot("conv-old");
             verify(documentDescriptorStore).deleteAllDescriptor("conv-old");
             verify(conversationDescriptorStore).deleteAllDescriptor("conv-old");
+        }
+
+        @Test
+        @DisplayName("review #3: the sweep removes the deleted conversations' vault entries in one batch")
+        void sweepDeletesConversationSecrets() throws Exception {
+            var vault = mock(SecretPropertyVault.class);
+            restConversationStore.secretPropertyVault = vault;
+            when(conversationMemoryStore.getEndedConversationIds()).thenReturn(List.of("conv-old", "conv-orphan"));
+            var descriptor = new DocumentDescriptor();
+            descriptor.setLastModifiedOn(new Date(System.currentTimeMillis() - 100L * 24 * 60 * 60 * 1000));
+            when(documentDescriptorStore.readDescriptor("conv-old", 0)).thenReturn(descriptor);
+            when(documentDescriptorStore.readDescriptor("conv-orphan", 0)).thenThrow(new ResourceNotFoundException("not found"));
+
+            restConversationStore.permanentlyDeleteEndedConversationLogs(30);
+
+            verify(vault).deleteConversationSecrets(List.of("conv-old", "conv-orphan"));
         }
 
         @Test

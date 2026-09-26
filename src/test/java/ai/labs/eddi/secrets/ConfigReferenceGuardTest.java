@@ -2,7 +2,7 @@
  * Copyright EDDI contributors
  * SPDX-License-Identifier: Apache-2.0
  */
-package ai.labs.eddi.modules.apicalls.impl;
+package ai.labs.eddi.secrets;
 
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.Property.Scope;
@@ -13,6 +13,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -156,8 +157,12 @@ class ConfigReferenceGuardTest {
         // Stored before the per-conversation key: that entry holds whichever user's
         // value was written last, so it is not resolved any more.
         Map<String, Property> legacy = properties(autoVaulted("apiKey", "${vault:agent1.apiKey}"));
-        assertThrows(IllegalArgumentException.class, () -> ConfigReferenceGuard.requireConfiguredReferences("Bearer {properties.apiKey}",
-                "Bearer ${vault:agent1.apiKey}", "header", DATA, legacy));
+        var e = assertThrows(IllegalArgumentException.class, () -> ConfigReferenceGuard.requireConfiguredReferences(
+                "Bearer {properties.apiKey}", "Bearer ${vault:agent1.apiKey}", "header", DATA, legacy));
+        // Review #9: not the injection wording — the operator must not chase a phantom
+        // attack.
+        assertTrue(e.getMessage().contains("earlier release") && e.getMessage().contains("enter the secret again"), e.getMessage());
+        assertFalse(e.getMessage().contains("came from conversation data"), e.getMessage());
     }
 
     @Test

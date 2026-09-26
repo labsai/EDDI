@@ -23,6 +23,7 @@ import ai.labs.eddi.engine.memory.model.ConversationStatus;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.ThreadContext;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
+import ai.labs.eddi.modules.properties.impl.SecretPropertyVault;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.quarkus.scheduler.Scheduled;
@@ -38,6 +39,7 @@ import org.jboss.logging.Logger;
 import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.LinkedList;
 import java.util.List;
@@ -99,6 +101,14 @@ public class RestConversationStore implements IRestConversationStore {
     // (CDI overwrites it with the real registry in production).
     @Inject
     MeterRegistry meterRegistry = new SimpleMeterRegistry();
+
+    /**
+     * Removes the vault entries of a deleted conversation's secret properties.
+     * Field-injected and optional, like the meter registry: absent in unit tests
+     * that construct this resource directly.
+     */
+    @Inject
+    SecretPropertyVault secretPropertyVault;
 
     private static final Logger log = Logger.getLogger(RestConversationStore.class);
 
@@ -411,6 +421,7 @@ public class RestConversationStore implements IRestConversationStore {
             deleteAttachmentsForConversation(conversationId);
             conversationMemoryStore.deleteConversationMemorySnapshot(conversationId);
             conversationDescriptorStore.deleteAllDescriptor(conversationId);
+            deleteConversationSecrets(List.of(conversationId));
             log.info(format("Conversation has been permanently deleted (conversationId=%s)", sanitize(conversationId)));
         } else {
             softDelete(conversationId);
@@ -510,6 +521,7 @@ public class RestConversationStore implements IRestConversationStore {
         int amountOfEndedConversations = 0;
         var deleteOlderThanThisDate = Date.from(Instant.now().minus(Duration.ofDays(deleteOlderThanDays)));
         var endedConversationIds = conversationMemoryStore.getEndedConversationIds();
+        var deletedConversationIds = new ArrayList<String>();
 
         for (var endedConversationId : endedConversationIds) {
             try {
@@ -519,17 +531,38 @@ public class RestConversationStore implements IRestConversationStore {
                     conversationDescriptorStore.deleteAllDescriptor(endedConversationId);
                     deleteAttachmentsForConversation(endedConversationId);
                     conversationMemoryStore.deleteConversationMemorySnapshot(endedConversationId);
+                    deletedConversationIds.add(endedConversationId);
                     amountOfEndedConversations++;
                 }
             } catch (ResourceNotFoundException e) {
                 conversationDescriptorStore.deleteAllDescriptor(endedConversationId);
                 deleteAttachmentsForConversation(endedConversationId);
                 conversationMemoryStore.deleteConversationMemorySnapshot(endedConversationId);
+                deletedConversationIds.add(endedConversationId);
                 log.debug(format("Cleaned up orphaned conversation memory without descriptor (id=%s)", endedConversationId));
             }
         }
+        // One vault listing for the whole sweep rather than one per conversation.
+        deleteConversationSecrets(deletedConversationIds);
 
         return amountOfEndedConversations;
+    }
+
+    /**
+     * Best effort: a vault failure never undoes or fails a conversation delete.
+     */
+    private void deleteConversationSecrets(List<String> conversationIds) {
+        if (secretPropertyVault == null || conversationIds.isEmpty()) {
+            return;
+        }
+        try {
+            int deleted = secretPropertyVault.deleteConversationSecrets(conversationIds);
+            if (deleted > 0) {
+                log.info(format("Deleted %d vault entr%s of secret properties of deleted conversations", deleted, deleted == 1 ? "y" : "ies"));
+            }
+        } catch (RuntimeException e) {
+            log.warn(format("Could not remove the vault entries of deleted conversations: %s", e.getMessage()));
+        }
     }
 
     @Override

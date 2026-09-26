@@ -91,16 +91,20 @@ class SecretScopeValidationTest {
     }
 
     @Test
-    @DisplayName("convertToObject and an unembeddable literal name are rejected")
-    void convertAndNameRejected() {
-        var convert = secret("token");
-        convert.setFromObjectPath("x");
-        convert.setConvertToObject(true);
-        assertThrows(IllegalArgumentException.class, () -> SecretScopeValidation.validate(List.of(convert), "p"));
-
+    @DisplayName("an unembeddable literal name is rejected; convertToObject and whitespace names are left to the run time")
+    void nameRejectedConvertAccepted() {
         var slashed = secret("tenant/apiKey");
         slashed.setValueString("x");
         assertThrows(IllegalArgumentException.class, () -> SecretScopeValidation.validate(List.of(slashed), "p"));
+
+        // convertToObject only converts a value shaped like a JSON object, so a plain
+        // token still vaults; a value that does become an object fails at run time.
+        var convert = secret("token");
+        convert.setFromObjectPath("x");
+        convert.setConvertToObject(true);
+        var spaced = secret("api key");
+        spaced.setValueString("x");
+        assertDoesNotThrow(() -> SecretScopeValidation.validate(List.of(convert, spaced), "p"));
     }
 
     @Test
@@ -137,8 +141,7 @@ class SecretScopeValidationTest {
     @DisplayName("the apicalls store rejects a secret post-response instruction that cannot be vaulted")
     void apiCallsStoreValidates() {
         var bad = secret("claims");
-        bad.setFromObjectPath("resp.claims");
-        bad.setConvertToObject(true);
+        bad.setValueObject(Map.of("sub", "u"));
         var postResponse = new HttpPostResponse();
         postResponse.setPropertyInstructions(List.of(bad));
         var call = new ApiCall();
