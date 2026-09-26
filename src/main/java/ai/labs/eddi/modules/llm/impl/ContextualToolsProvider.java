@@ -6,7 +6,6 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
-import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.memory.AttachmentContextExtractor;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -232,8 +231,16 @@ class ContextualToolsProvider implements ToolSourceProvider {
      * Reads {@code context:groupId} the way {@code DynamicAgentToolsProvider}
      * resolves its own delegation-depth context, falling back to the current step
      * and then to any earlier step, since a resumed turn re-enters without the
-     * original context map. The property read is kept as a last resort so a config
-     * that genuinely does set a {@code groupId} property still works.
+     * original context map.
+     * <p>
+     * The context value is the only source. A {@code groupId} conversation
+     * <em>property</em> used to be honoured as a last resort, but properties are
+     * not a trusted channel — a client can set them per turn through
+     * {@code properties} context expressions, and property setters can capture user
+     * input into them — so the fallback let a conversation claim membership of any
+     * group and reach its shared memories. Group membership is a runtime fact the
+     * group orchestrator asserts, and {@code ClientContextGuard} keeps clients from
+     * asserting it through the context key instead.
      */
     static List<String> resolveGroupIds(IConversationMemory memory) {
         String contextKey = "context:groupId";
@@ -259,10 +266,6 @@ class ContextualToolsProvider implements ToolSourceProvider {
             }
         }
 
-        var props = memory.getConversationProperties();
-        if (props != null && props.get("groupId") instanceof Property p && p.getValueString() != null) {
-            return List.of(p.getValueString());
-        }
         return List.of();
     }
 

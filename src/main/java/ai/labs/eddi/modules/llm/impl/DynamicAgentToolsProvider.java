@@ -418,12 +418,46 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
      * inversion both guards exist to prevent.
      */
     static boolean hasGroupPolicy(IConversationMemory memory) {
+        return groupPolicyContext(memory) != null;
+    }
+
+    /**
+     * The group policy context entry governing this turn, or {@code null} for a
+     * standalone conversation.
+     * <p>
+     * The current step is consulted first — that is where
+     * {@code MemberTurnExecutor} puts the policy on every member turn. Earlier
+     * steps are the fallback: a member conversation belongs to the user who started
+     * the discussion, so that user can also send a turn into it directly, and such
+     * a turn carries no group context at all. Reading the current step alone
+     * resolved that turn to "standalone" and handed it the permissive default — a
+     * group's disabled policy disappeared exactly when the group was not the one
+     * driving the turn. Once a conversation has been governed by a group, the most
+     * recent policy it received keeps governing it. (A client cannot supply this
+     * key itself — see {@code ClientContextGuard}.)
+     */
+    private static Context groupPolicyContext(IConversationMemory memory) {
         var currentStep = memory.getCurrentStep();
-        if (currentStep == null) {
-            return false;
+        if (currentStep != null) {
+            var contextData = currentStep.getLatestData(CONTEXT_DYNAMIC_AGENT_CONFIG);
+            if (contextData != null && contextData.getResult() instanceof Context ctx && ctx.getValue() != null) {
+                return ctx;
+            }
         }
-        var contextData = currentStep.getLatestData(CONTEXT_DYNAMIC_AGENT_CONFIG);
-        return contextData != null && contextData.getResult() instanceof Context ctx && ctx.getValue() != null;
+        var allSteps = memory.getAllSteps();
+        if (allSteps != null) {
+            List<IData<Object>> entries = allSteps.getAllLatestData(CONTEXT_DYNAMIC_AGENT_CONFIG);
+            if (entries != null) {
+                // Oldest step first — walk backwards for the most recent policy.
+                for (int i = entries.size() - 1; i >= 0; i--) {
+                    var entry = entries.get(i);
+                    if (entry != null && entry.getResult() instanceof Context ctx && ctx.getValue() != null) {
+                        return ctx;
+                    }
+                }
+            }
+        }
+        return null;
     }
 
     /**
@@ -464,14 +498,10 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
      *         standalone default only when none is present at all
      */
     static DynamicAgentConfig resolveDynamicAgentConfig(IConversationMemory memory) {
-        var currentStep = memory.getCurrentStep();
-        if (currentStep == null) {
-            return createDefaultDynamicConfig();
-        }
-        var contextData = currentStep.getLatestData(CONTEXT_DYNAMIC_AGENT_CONFIG);
-        if (contextData == null || !(contextData.getResult() instanceof Context ctx) || ctx.getValue() == null) {
-            // No group context — a standalone agent whose operator whitelisted these
-            // tools deliberately.
+        Context ctx = groupPolicyContext(memory);
+        if (ctx == null) {
+            // No group context on this or any earlier turn — a standalone agent whose
+            // operator whitelisted these tools deliberately.
             return createDefaultDynamicConfig();
         }
 

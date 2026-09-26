@@ -85,7 +85,9 @@ class ContextualToolsProviderGroupIdTest {
     }
 
     @Test
-    void propertyFallback_stillWorks() {
+    void groupIdProperty_doesNotGrantGroupScope() {
+        // Properties are client- and input-settable, so they are not evidence of
+        // group membership. Only the context value the orchestrator injects counts.
         var memory = mock(IConversationMemory.class);
         when(memory.getCurrentStep()).thenReturn(null);
         when(memory.getAllSteps()).thenReturn(null);
@@ -93,8 +95,8 @@ class ContextualToolsProviderGroupIdTest {
         when(props.get("groupId")).thenReturn(new Property("groupId", "group-prop", Property.Scope.conversation));
         when(memory.getConversationProperties()).thenReturn(props);
 
-        assertEquals(List.of("group-prop"), ContextualToolsProvider.resolveGroupIds(memory),
-                "a config that genuinely sets a groupId property must keep working");
+        assertTrue(ContextualToolsProvider.resolveGroupIds(memory).isEmpty(),
+                "a groupId conversation property must not select a group memory scope");
     }
 
     @Test
