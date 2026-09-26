@@ -9,7 +9,9 @@ import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.stubbing.Answer;
@@ -31,7 +33,9 @@ class ConverseWithAgentToolHitlTest {
     @BeforeEach
     void setUp() {
         conversationService = mock(IConversationService.class);
-        tool = new ConverseWithAgentTool(conversationService, "user-1");
+        // "conv-x" was started through this tool on an earlier turn — the only kind
+        // of conversation a supplied conversationId may name (C6).
+        tool = new ConverseWithAgentTool(conversationService, "user-1", null, 0, new HashSet<>(Set.of("conv-x")));
     }
 
     @Test

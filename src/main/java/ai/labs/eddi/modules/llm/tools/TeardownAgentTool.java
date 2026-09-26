@@ -5,6 +5,9 @@
 package ai.labs.eddi.modules.llm.tools;
 
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration.DynamicOrigin;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
@@ -18,15 +21,29 @@ import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CopyOnWriteArraySet;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 /**
  * LLM tool for tearing down dynamically created agents. Constructed
  * per-invocation by {@code AgentOrchestrator} with the factory, agent store,
  * and the lists of created/retained agent IDs from the group conversation.
  *
  * <p>
- * Only agents that were created during the current discussion (tracked in
- * {@code createdAgentIds}) can be torn down — preventing accidental destruction
- * of pre-existing agents.
+ * Only agents that were created during the current discussion can be torn down
+ * — preventing destruction of pre-existing agents. Two independent proofs are
+ * required, and either one failing refuses:
+ * <ol>
+ * <li>the id is in {@code createdAgentIds}, the tracking list this conversation
+ * (or its discussion) accumulated;</li>
+ * <li>the agent's own configuration carries a {@link DynamicOrigin} naming this
+ * conversation or this discussion — stamped by {@code create_sub_agent} and by
+ * nothing else.</li>
+ * </ol>
+ * The list alone used to decide, and it could be seeded from client-supplied
+ * context, which turned {@code teardown_agent(id, delete=true)} into "delete
+ * any agent permanently". The context channel is now closed at the entry points
+ * ({@code ReservedContextKeys}); the marker makes sure a future leak of that
+ * kind still cannot reach an agent a person built.
  *
  * @since 6.0.0
  */
@@ -49,17 +66,30 @@ public class TeardownAgentTool {
      * the next turn's seed.
      */
     private final Set<String> tornDownAgentIds;
+    /** The calling conversation — must match the target's {@link DynamicOrigin}. */
+    private final String conversationId;
+    /** The calling conversation's discussion, or null; also accepted as a match. */
+    private final String groupConversationId;
 
     /**
      * {@code deploymentStore} may be null; teardown then skips retiring deployment
      * records.
+     *
+     * @param conversationId
+     *            the conversation this tool runs in
+     * @param groupConversationId
+     *            the discussion that conversation belongs to, or {@code null}
      */
     public TeardownAgentTool(IAgentFactory agentFactory,
             IAgentStore agentStore,
             IDeploymentStore deploymentStore,
             List<String> createdAgentIds,
             Set<String> retainedAgentIds,
-            Set<String> tornDownAgentIds) {
+            Set<String> tornDownAgentIds,
+            String conversationId,
+            String groupConversationId) {
+        this.conversationId = conversationId;
+        this.groupConversationId = groupConversationId;
         this.agentFactory = agentFactory;
         this.agentStore = agentStore;
         this.deploymentStore = deploymentStore;
@@ -91,6 +121,12 @@ public class TeardownAgentTool {
                 return "⚠️ Agent '%s' has been marked as retained and cannot be torn down. "
                         .formatted(agentId)
                         + "Remove the retain flag first if you want to tear it down.";
+            }
+
+            // --- Security: the agent itself must say it was created here ---
+            String originRefusal = refuseUnlessCreatedHere(agentId);
+            if (originRefusal != null) {
+                return originRefusal;
             }
 
             // --- Undeploy ---
@@ -131,6 +167,38 @@ public class TeardownAgentTool {
                     agentId, e.getMessage());
             return "❌ Unexpected error: " + e.getMessage();
         }
+    }
+
+    /**
+     * {@code null} when the agent's current configuration carries a
+     * {@link DynamicOrigin} naming this conversation or its discussion; otherwise
+     * the refusal to return. Fails closed: an agent whose configuration cannot be
+     * read is not torn down.
+     * <p>
+     * Undeploy-only is gated as well as delete: taking someone else's production
+     * agent offline is the same trespass, just reversible.
+     */
+    private String refuseUnlessCreatedHere(String agentId) {
+        DynamicOrigin origin;
+        try {
+            IResourceStore.IResourceId current = agentStore.getCurrentResourceId(agentId);
+            AgentConfiguration configuration = current != null ? agentStore.read(agentId, current.getVersion()) : null;
+            origin = configuration != null ? configuration.getDynamicOrigin() : null;
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return "⚠️ Cannot tear down agent '%s' — no such agent exists.".formatted(agentId);
+        } catch (Exception e) {
+            LOGGER.warnf("[TEARDOWN] Could not read agent '%s' to verify its origin — refusing: %s", sanitize(agentId), e.getMessage());
+            return "⚠️ Cannot tear down agent '%s' — its origin could not be verified. Try again later.".formatted(agentId);
+        }
+        if (origin == null) {
+            LOGGER.warnf("[TEARDOWN] Refused teardown of agent '%s': it carries no dynamic-agent origin", sanitize(agentId));
+            return "⚠️ Cannot tear down agent '%s' — it was not created by create_sub_agent.".formatted(agentId);
+        }
+        if (!origin.namesConversationOrDiscussion(conversationId, groupConversationId)) {
+            LOGGER.warnf("[TEARDOWN] Refused teardown of agent '%s': created by a different conversation", sanitize(agentId));
+            return "⚠️ Cannot tear down agent '%s' — it was not created during this discussion.".formatted(agentId);
+        }
+        return null;
     }
 
     /**

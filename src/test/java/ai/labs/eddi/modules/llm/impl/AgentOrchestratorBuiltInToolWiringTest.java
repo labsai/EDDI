@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.memory.ConversationMemory;
+import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
@@ -268,11 +269,14 @@ class AgentOrchestratorBuiltInToolWiringTest {
         }
 
         @Test
-        @DisplayName("a delegated follow-up into a conversation the tool did not start still resolves its depth")
+        @DisplayName("a delegated follow-up into a conversation started on an earlier turn still resolves its depth")
         void depthTravelsOnTheFollowUpTurnAlone() throws Exception {
             var memory = memory();
             putContext(memory, ConverseWithAgentTool.CONTEXT_DELEGATION_DEPTH,
                     new Context(Context.ContextType.string, "1"));
+            // Started through the tool on an earlier turn (C6: only such a
+            // conversation may be continued).
+            memory.getCurrentStep().storeData(new Data<Object>(MemoryKeys.DYNAMIC_DELEGATED_CONVERSATION_IDS, List.of("conv-b")));
             var tool = findTool(orchestrator.collectEnabledTools(taskWith("converse_with_agent"), memory),
                     ConverseWithAgentTool.class);
 

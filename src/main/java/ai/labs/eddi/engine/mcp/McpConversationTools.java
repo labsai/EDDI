@@ -872,7 +872,10 @@ public class McpConversationTools {
         // the JAX-RS layer which converts exceptions to HTTP responses that are
         // hard to inspect programmatically.
         resourceAccessGuard.requireAgentUseAccess(agentId);
-        var initialContext = new HashMap<String, Context>(deployment.getInitialContext());
+        // A trigger's initialContext is editor-written config, not engine state: it
+        // must not be able to pose as a group member's policy or created-agent list.
+        var initialContext = ReservedContextKeys.stripFromExternal(new HashMap<String, Context>(deployment.getInitialContext()),
+                "trigger initialContext");
         var convResult = conversationService.startConversation(usedEnv, agentId, userId, initialContext);
         String conversationId = convResult.conversationId();
 

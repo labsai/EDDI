@@ -22,6 +22,9 @@ import org.jboss.logging.Logger;
 import java.time.Instant;
 import java.util.List;
 import java.util.Set;
+import java.util.function.BiPredicate;
+
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * Brings an existing deployed agent into a running discussion (I7).
@@ -87,9 +90,30 @@ public class RecruitAgentTool {
      * field exists.
      */
     private final Set<String> configuredMemberIds;
+    /**
+     * M-A1: {@code (agentId, principal) -> may that principal use that agent},
+     * asked for the discussion's owner. {@code null} skips the check (tests).
+     */
+    private final BiPredicate<String, String> useCheck;
 
     public RecruitAgentTool(LiveDiscussionRegistry registry, String groupConversationId, String recruiterAgentId,
             DynamicAgentConfig config, IDeploymentStore deploymentStore, Set<String> configuredMemberIds) {
+        this(registry, groupConversationId, recruiterAgentId, config, deploymentStore, configuredMemberIds, null);
+    }
+
+    /**
+     * @param useCheck
+     *            {@code (agentId, principal) -> boolean}: whether the discussion's
+     *            owner may use the recruit. A recruit speaks as that owner and at
+     *            their cost, so it has to be an agent they could have started a
+     *            conversation with themselves — without this, any deployed agent in
+     *            any workspace could be pulled into the discussion by id.
+     *            {@code null} skips the check.
+     */
+    public RecruitAgentTool(LiveDiscussionRegistry registry, String groupConversationId, String recruiterAgentId,
+            DynamicAgentConfig config, IDeploymentStore deploymentStore, Set<String> configuredMemberIds,
+            BiPredicate<String, String> useCheck) {
+        this.useCheck = useCheck;
         this.registry = registry;
         this.groupConversationId = groupConversationId;
         this.recruiterAgentId = recruiterAgentId;
@@ -127,6 +151,16 @@ public class RecruitAgentTool {
         int cap = config.getMaxRecruitedAgentsPerDiscussion();
         if (gc.getRecruitedAgentIds().size() >= cap) {
             return "This discussion has already recruited its limit of %d agent(s). Work with the current team.".formatted(cap);
+        }
+
+        // M-A1: the recruit will speak as the discussion's owner, so the owner must be
+        // allowed to use it. Checked BEFORE the deployment check (review #6): the other
+        // order told the model whether an agent it may not touch is deployed.
+        if (useCheck != null && !useCheck.test(wanted, gc.getUserId())) {
+            LOGGER.warnf("Recruitment of '%s' into group conversation %s refused: the discussion owner has no access to it",
+                    sanitize(wanted), sanitize(groupConversationId));
+            return "Agent '%s' is not available to this discussion's owner, so it cannot join. Pick an agent they can use."
+                    .formatted(wanted);
         }
         if (!isDeployedAndReady(wanted)) {
             return "Agent '%s' is not deployed and ready, so it cannot join. Use findAgentsByCapability to find one that is."

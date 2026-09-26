@@ -29,6 +29,7 @@ import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.engine.model.ReservedContextKeys;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
@@ -124,7 +125,11 @@ public class RestAgentEngine implements IRestAgentEngine {
             // no interactive caller and must not be gated on one.
             resourceAccessGuard.requireAgentUseAccess(agentId);
             String resolvedUserId = ownershipValidator.validateAndResolveUserId(identity, userId);
-            var result = conversationService.startConversation(environment, agentId, resolvedUserId, context);
+            // startConversation trusts its context (group members and delegation use it
+            // to hand over policy); this body is client-supplied, so the engine-reserved
+            // keys go first. See ReservedContextKeys.
+            var clientContext = ReservedContextKeys.stripFromExternal(context, "REST start");
+            var result = conversationService.startConversation(environment, agentId, resolvedUserId, clientContext);
             return Response.created(result.conversationUri()).build();
         } catch (ProcessingRestrictedException e) {
             LOGGER.warnf("GDPR processing restricted for user: %s", e.getMessage());

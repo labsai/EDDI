@@ -7,10 +7,13 @@ package ai.labs.eddi.modules.llm.tools;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService.CapabilityMatch;
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration.DynamicOrigin;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentConfig;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
@@ -28,6 +31,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
 import java.util.*;
@@ -78,7 +82,7 @@ class DynamicAgentToolsTest {
 
         @Test
         void createSubAgent_success() throws Exception {
-            when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
                     .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/DataAnalyst",
                             "anthropic", "claude-sonnet-4-6", true, "ready", null, null, null, null, null, null));
 
@@ -91,10 +95,29 @@ class DynamicAgentToolsTest {
         }
 
         @Test
+        @DisplayName("the created agent is stamped with the origin teardown_agent later requires")
+        void createSubAgent_stampsDynamicOrigin() throws Exception {
+            var stampingTool = new CreateSubAgentTool(agentSetupService, conversationService, "parent-agent-1", "user-1", config,
+                    createdAgentIds, retainedAgentIds, "conv-parent", "gc-7");
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
+                    .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/DataAnalyst",
+                            "anthropic", "claude-sonnet-4-6", true, "ready", null, null, null, null, null, null));
+
+            stampingTool.createSubAgent("DataAnalyst", "You analyze data", "anthropic", "claude-sonnet-4-6", null, null);
+
+            var origin = ArgumentCaptor.forClass(DynamicOrigin.class);
+            verify(agentSetupService).setupAgent(any(SetupAgentRequest.class), origin.capture());
+            assertEquals("parent-agent-1", origin.getValue().getCreatedByAgentId());
+            assertEquals("conv-parent", origin.getValue().getCreatedInConversationId());
+            assertEquals("gc-7", origin.getValue().getCreatedInGroupConversationId());
+            assertEquals("user-1", origin.getValue().getCreatedForUserId());
+        }
+
+        @Test
         void createSubAgent_failedInheritanceIsExplained() throws Exception {
             // The parent's profile could not be read (the mock returns null), so no key
             // was inherited — the model must be told that, not just "API key is required".
-            when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
                     .thenThrow(new AgentSetupService.AgentSetupException("API key is required for cloud LLM providers"));
 
             String result = tool.createSubAgent("Helper", "You help", null, null, null, null);
@@ -125,7 +148,7 @@ class DynamicAgentToolsTest {
 
             assertTrue(result.contains("⚠️"));
             assertTrue(result.contains("Maximum created agents"));
-            verify(agentSetupService, never()).setupAgent(any());
+            verify(agentSetupService, never()).setupAgent(any(), any());
         }
 
         @Test
@@ -168,7 +191,7 @@ class DynamicAgentToolsTest {
             // Quota is enforced by startConversation() internally, not by
             // CreateSubAgentTool.
             // The tool no longer holds a TenantQuotaService reference at all.
-            when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
                     .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
                             null, null, true, "ready", null, null, null, null, null, null));
 
@@ -193,7 +216,7 @@ class DynamicAgentToolsTest {
 
         @Test
         void createSubAgent_setupFailure() throws Exception {
-            when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
                     .thenThrow(new AgentSetupException("DB error"));
 
             String result = tool.createSubAgent("Test", "prompt", null, null, null, null);
@@ -205,7 +228,7 @@ class DynamicAgentToolsTest {
 
         @Test
         void createSubAgent_retainFlag() throws Exception {
-            when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
                     .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
                             null, null, true, "ready", null, null, null, null, null, null));
 
@@ -222,7 +245,7 @@ class DynamicAgentToolsTest {
             config.setAllowedProviders(List.of("openai"));
             config.setAllowedModels(Map.of("OpenAI", List.of("gpt-4o-mini")));
 
-            when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
                     .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
                             "openai", "gpt-4o-mini", true, "ready", null, null, null, null, null, null));
 
@@ -251,7 +274,7 @@ class DynamicAgentToolsTest {
         void createSubAgent_modelAllowed_providerNamed() throws Exception {
             config.setAllowedModels(Map.of("openai", List.of("gpt-4o-mini")));
 
-            when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
                     .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
                             null, "gpt-4o-mini", true, "ready", null, null, null, null, null, null));
 
@@ -287,13 +310,13 @@ class DynamicAgentToolsTest {
             // config.
             when(agentSetupService.resolveParentLlmProfile("parent-agent-1"))
                     .thenReturn(new AgentSetupService.ParentLlmProfile("anthropic", "claude-sonnet-4-6", "${vault:parent.apiKey}"));
-            when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
                     .thenReturn(SetupResult.builder().action("setup_complete").agentId("sub-1").build());
 
             tool.createSubAgent("Test", "prompt", "openai", "gpt-4o", null, null);
 
             var captor = org.mockito.ArgumentCaptor.forClass(SetupAgentRequest.class);
-            verify(agentSetupService).setupAgent(captor.capture());
+            verify(agentSetupService).setupAgent(captor.capture(), any());
             assertNull(captor.getValue().apiKey(), "the parent's anthropic vault reference must not reach an openai config");
             assertEquals("openai", captor.getValue().provider());
         }
@@ -303,13 +326,13 @@ class DynamicAgentToolsTest {
         void createSubAgent_credentialInheritedForSameProvider() throws Exception {
             when(agentSetupService.resolveParentLlmProfile("parent-agent-1"))
                     .thenReturn(new AgentSetupService.ParentLlmProfile("anthropic", "claude-sonnet-4-6", "${vault:parent.apiKey}"));
-            when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
                     .thenReturn(SetupResult.builder().action("setup_complete").agentId("sub-1").build());
 
             tool.createSubAgent("Test", "prompt", null, null, null, null);
 
             var captor = org.mockito.ArgumentCaptor.forClass(SetupAgentRequest.class);
-            verify(agentSetupService).setupAgent(captor.capture());
+            verify(agentSetupService).setupAgent(captor.capture(), any());
             assertEquals("${vault:parent.apiKey}", captor.getValue().apiKey(),
                     "inheritance is the whole point — create_sub_agent failed outright without it");
             assertEquals("anthropic", captor.getValue().provider());
@@ -329,7 +352,7 @@ class DynamicAgentToolsTest {
 
         @Test
         void createSubAgent_withInitialMessage_success() throws Exception {
-            when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
                     .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
                             "openai", "gpt-4o-mini", true, "ready", null, null, null, null, null, null));
 
@@ -363,7 +386,7 @@ class DynamicAgentToolsTest {
 
         @Test
         void createSubAgent_withInitialMessage_failure() throws Exception {
-            when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
                     .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
                             null, null, true, "ready", null, null, null, null, null, null));
 
@@ -379,7 +402,7 @@ class DynamicAgentToolsTest {
 
         @Test
         void createSubAgent_noProviderNoModel_omitsFromResult() throws Exception {
-            when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
                     .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
                             null, null, true, "ready", null, null, null, null, null, null));
 
@@ -392,7 +415,7 @@ class DynamicAgentToolsTest {
 
         @Test
         void createSubAgent_unexpectedException() throws Exception {
-            when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
                     .thenThrow(new RuntimeException("Unexpected"));
 
             String result = tool.createSubAgent("Test", "prompt", null, null, null, null);
@@ -420,7 +443,7 @@ class DynamicAgentToolsTest {
             // Empty (not null) allow list should not restrict
             config.setAllowedProviders(List.of());
 
-            when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
                     .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
                             "anthropic", null, true, "ready", null, null, null, null, null, null));
 
@@ -433,7 +456,7 @@ class DynamicAgentToolsTest {
             // Empty (not null) model allow list should not restrict
             config.setAllowedModels(Map.of());
 
-            when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
                     .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
                             null, "any-model", true, "ready", null, null, null, null, null, null));
 
@@ -443,7 +466,7 @@ class DynamicAgentToolsTest {
 
         @Test
         void createSubAgent_retainFalse_notTracked() throws Exception {
-            when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
                     .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
                             null, null, true, "ready", null, null, null, null, null, null));
 
@@ -456,7 +479,7 @@ class DynamicAgentToolsTest {
 
         @Test
         void createSubAgent_withInitialMessage_extractResponseMapFormat() throws Exception {
-            when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
                     .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
                             null, null, true, "ready", null, null, null, null, null, null));
 
@@ -521,7 +544,7 @@ class DynamicAgentToolsTest {
             config.setAllowedModels(models);
             config.setAllowedProviders(List.of("openai"));
 
-            when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
                     .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
                             "openai", "gpt-4o", true, "ready", null, null, null, null, null, null));
 
@@ -564,7 +587,7 @@ class DynamicAgentToolsTest {
             var toolNullLists = new CreateSubAgentTool(agentSetupService,
                     conversationService, "parent-1", "user-1", config, null, null);
 
-            when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
                     .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
                             null, null, true, "ready", null, null, null, null, null, null));
 
@@ -590,7 +613,9 @@ class DynamicAgentToolsTest {
         @BeforeEach
         void setUp() {
             conversationService = mock(IConversationService.class);
-            tool = new ConverseWithAgentTool(conversationService, USER_ID);
+            // CONVERSATION_ID counts as started by this tool on an earlier turn, so the
+            // continuation tests below may name it (C6).
+            tool = new ConverseWithAgentTool(conversationService, USER_ID, null, 0, new HashSet<>(Set.of(CONVERSATION_ID)));
         }
 
         /**
@@ -1025,14 +1050,29 @@ class DynamicAgentToolsTest {
         private TeardownAgentTool tool;
 
         @BeforeEach
-        void setUp() {
+        void setUp() throws Exception {
             agentFactory = mock(IAgentFactory.class);
             agentStore = mock(IAgentStore.class);
             deploymentStore = mock(IDeploymentStore.class);
             createdAgentIds = new CopyOnWriteArrayList<>(List.of("created-1", "created-2"));
             retainedAgentIds = ConcurrentHashMap.newKeySet();
             tool = new TeardownAgentTool(agentFactory, agentStore, deploymentStore, createdAgentIds, retainedAgentIds,
-                    ConcurrentHashMap.newKeySet());
+                    ConcurrentHashMap.newKeySet(), TEARDOWN_CONVERSATION_ID, null);
+            // Both tracked agents carry the marker create_sub_agent stamps, naming this
+            // conversation — the second proof teardown requires.
+            stubOrigin("created-1", new DynamicOrigin("parent", TEARDOWN_CONVERSATION_ID, null, "user"));
+            stubOrigin("created-2", new DynamicOrigin("parent", TEARDOWN_CONVERSATION_ID, null, "user"));
+        }
+
+        private static final String TEARDOWN_CONVERSATION_ID = "conv-teardown";
+
+        private void stubOrigin(String agentId, DynamicOrigin origin) throws Exception {
+            IResourceStore.IResourceId current = mock(IResourceStore.IResourceId.class);
+            when(current.getVersion()).thenReturn(1);
+            when(agentStore.getCurrentResourceId(agentId)).thenReturn(current);
+            var configuration = new AgentConfiguration();
+            configuration.setDynamicOrigin(origin);
+            when(agentStore.read(agentId, 1)).thenReturn(configuration);
         }
 
         @Test
@@ -1185,9 +1225,62 @@ class DynamicAgentToolsTest {
         }
 
         @Test
+        @DisplayName("C3b: a tracked id is not enough — an agent with no dynamic origin is never torn down")
+        void teardownAgent_trackedButNoOrigin_refused() throws Exception {
+            // The attack: context:dynamicCreatedAgentIds seeded with a victim id. Even if
+            // such a seed reached the list again, the victim — built by a person — carries
+            // no marker, so neither undeploy nor delete may happen.
+            createdAgentIds.add("victim");
+            stubOrigin("victim", null);
+
+            String result = tool.teardownAgent("victim", true);
+
+            assertTrue(result.contains("not created by create_sub_agent"), result);
+            verifyNoInteractions(agentFactory);
+            verify(agentStore, never()).deleteAllPermanently(any());
+            assertTrue(createdAgentIds.contains("victim"), "a refusal must not silently forget the id");
+        }
+
+        @Test
+        @DisplayName("an agent created by a different conversation is refused")
+        void teardownAgent_originFromOtherConversation_refused() throws Exception {
+            stubOrigin("created-2", new DynamicOrigin("parent", "some-other-conversation", null, "user"));
+
+            String result = tool.teardownAgent("created-2", true);
+
+            assertTrue(result.contains("not created during this discussion"), result);
+            verifyNoInteractions(agentFactory);
+            verify(agentStore, never()).deleteAllPermanently(any());
+        }
+
+        @Test
+        @DisplayName("another member of the same discussion may tear down an agent created in it")
+        void teardownAgent_originFromSameDiscussion_allowed() throws Exception {
+            var memberTool = new TeardownAgentTool(agentFactory, agentStore, deploymentStore, createdAgentIds, retainedAgentIds,
+                    ConcurrentHashMap.newKeySet(), "member-b-conversation", "gc-1");
+            stubOrigin("created-2", new DynamicOrigin("parent", "member-a-conversation", "gc-1", "user"));
+
+            String result = memberTool.teardownAgent("created-2", true);
+
+            assertTrue(result.contains("✅"), result);
+            verify(agentStore).deleteAllPermanently("created-2");
+        }
+
+        @Test
+        @DisplayName("an unreadable agent configuration fails closed")
+        void teardownAgent_originUnreadable_refused() throws Exception {
+            when(agentStore.getCurrentResourceId("created-1")).thenThrow(new RuntimeException("store down"));
+
+            String result = tool.teardownAgent("created-1", false);
+
+            assertTrue(result.contains("could not be verified"), result);
+            verifyNoInteractions(agentFactory);
+        }
+
+        @Test
         void constructor_nullArgs_doesNotThrow() {
             // Null constructor args should produce safe fallback collections
-            var safeTool = new TeardownAgentTool(agentFactory, agentStore, null, null, null, null);
+            var safeTool = new TeardownAgentTool(agentFactory, agentStore, null, null, null, null, null, null);
             // teardownAgent with unknown agentId returns a warning (doesn't NPE)
             String result = safeTool.teardownAgent("non-existent", false);
             assertTrue(result.contains("⚠️"));

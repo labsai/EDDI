@@ -5,6 +5,8 @@
 package ai.labs.eddi.engine.internal.groups;
 
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration.DynamicOrigin;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
@@ -80,6 +82,21 @@ class GroupLifecycleOpsTest {
         return gc;
     }
 
+    /**
+     * The marker create_sub_agent stamps; cleanup deletes only agents carrying it
+     * for this discussion.
+     */
+    private void stubOrigin(String agentId, String createdInGroupConversationId) throws Exception {
+        IResourceStore.IResourceId current = mock(IResourceStore.IResourceId.class);
+        when(current.getVersion()).thenReturn(1);
+        when(agentStore.getCurrentResourceId(agentId)).thenReturn(current);
+        var configuration = new AgentConfiguration();
+        if (createdInGroupConversationId != null) {
+            configuration.setDynamicOrigin(new DynamicOrigin("parent", "member-conv", createdInGroupConversationId, "user"));
+        }
+        when(agentStore.read(agentId, 1)).thenReturn(configuration);
+    }
+
     private AgentGroupConfiguration configWithPolicy(LifecyclePolicy policy) {
         var config = new AgentGroupConfiguration();
         var dynamicAgents = new DynamicAgentConfig();
@@ -103,6 +120,7 @@ class GroupLifecycleOpsTest {
     @Test
     void cleanupEphemeralAgents_ephemeralPolicy_undeploysAndDeletes() throws Exception {
         var ops = ops();
+        stubOrigin(AGENT_A, "gc-1");
         ops.cleanupEphemeralAgents(gc(AGENT_A), configWithPolicy(LifecyclePolicy.EPHEMERAL));
 
         verify(agentFactory).undeployAgent(any(), eq(AGENT_A), isNull());
@@ -140,12 +158,48 @@ class GroupLifecycleOpsTest {
     @Test
     void cleanupEphemeralAgents_agentDecidesPolicy_nonRetainedAgentCleaned() throws Exception {
         var ops = ops();
+        stubOrigin(AGENT_A, "gc-1");
         var gc = gc(AGENT_A); // not added to retainedAgentIds
 
         ops.cleanupEphemeralAgents(gc, configWithPolicy(LifecyclePolicy.AGENT_DECIDES));
 
         verify(agentFactory).undeployAgent(any(), eq(AGENT_A), isNull());
         verify(agentStore).deleteAllPermanently(AGENT_A);
+    }
+
+    @Test
+    void cleanupEphemeralAgents_unmarkedAgent_undeployedButNeverDeleted() throws Exception {
+        // Review #3: a created-list entry alone must not reach a permanent delete —
+        // an agent without a dynamicOrigin may have been built by a person.
+        var ops = ops();
+        stubOrigin(AGENT_A, null);
+
+        ops.cleanupEphemeralAgents(gc(AGENT_A), configWithPolicy(LifecyclePolicy.EPHEMERAL));
+
+        verify(agentFactory).undeployAgent(any(), eq(AGENT_A), isNull());
+        verify(agentStore, never()).deleteAllPermanently(any());
+    }
+
+    @Test
+    void cleanupEphemeralAgents_agentFromAnotherDiscussion_leftAlone() throws Exception {
+        var ops = ops();
+        stubOrigin(AGENT_A, "some-other-discussion");
+
+        ops.cleanupEphemeralAgents(gc(AGENT_A), configWithPolicy(LifecyclePolicy.EPHEMERAL));
+
+        verifyNoInteractions(agentFactory);
+        verify(agentStore, never()).deleteAllPermanently(any());
+    }
+
+    @Test
+    void cleanupEphemeralAgents_unreadableOrigin_undeployedButNeverDeleted() throws Exception {
+        var ops = ops();
+        when(agentStore.getCurrentResourceId(AGENT_A)).thenThrow(new RuntimeException("store down"));
+
+        ops.cleanupEphemeralAgents(gc(AGENT_A), configWithPolicy(LifecyclePolicy.EPHEMERAL));
+
+        verify(agentFactory).undeployAgent(any(), eq(AGENT_A), isNull());
+        verify(agentStore, never()).deleteAllPermanently(any());
     }
 
     @Test

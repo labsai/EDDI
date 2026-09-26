@@ -480,6 +480,11 @@ public class ConversationMemory implements IConversationMemory {
         }
 
         @Override
+        public <T> List<IData<T>> getExactDataPerStep(String key) {
+            return conversationSteps.stream().map((IConversationStep conversationStep) -> conversationStep.<T>getData(key)).toList();
+        }
+
+        @Override
         public int size() {
             return conversationSteps.size();
         }

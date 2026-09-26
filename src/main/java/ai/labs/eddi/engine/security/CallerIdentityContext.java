@@ -51,6 +51,11 @@ public class CallerIdentityContext {
     public static final String CONNECTION_CREDENTIAL_HEADER = "X-EDDI-Connection-Credential";
 
     /**
+     * The role {@code OwnershipValidator.isAdmin} checks, recorded on the identity.
+     */
+    private static final String ADMIN_ROLE = "eddi-admin";
+
+    /**
      * How many such headers are read. An agent referencing more than a handful of
      * caller-supplied connections in one turn is a config mistake, and the cap
      * keeps a hostile client from making header parsing the expensive part of a
@@ -110,7 +115,8 @@ public class CallerIdentityContext {
             if (token == null && (userId == null || userId.isBlank())) {
                 return null;
             }
-            return new CallerIdentity(token, userId, currentRequestOrigin(), captureConnectionCredentials());
+            return new CallerIdentity(token, userId, currentRequestOrigin(), captureConnectionCredentials(),
+                    securityIdentity.hasRole(ADMIN_ROLE));
         } catch (Exception e) {
             // No active request context — nothing to capture. Not an error.
             LOGGER.debugf("No caller identity to capture: %s", e.getMessage());

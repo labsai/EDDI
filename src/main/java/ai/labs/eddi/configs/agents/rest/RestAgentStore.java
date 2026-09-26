@@ -159,6 +159,11 @@ public class RestAgentStore implements IRestAgentStore {
         // this agent must not be able to use as an oracle for arbitrary workflow ids.
         restVersionInfo.requireEditAccess(id);
         requireWorkflowsExist(agentConfiguration);
+        // dynamicOrigin is engine-written provenance that teardown_agent and group
+        // cleanup rely on before they delete an agent. Keep what is stored, never
+        // what the body says: an editor must not be able to erase the marker (the
+        // sub-agent would then outlive its discussion) or plant one.
+        agentConfiguration.setDynamicOrigin(storedDynamicOrigin(id));
         Response response = restVersionInfo.update(id, version, agentConfiguration);
         capabilityRegistryService.register(id, agentConfiguration);
         return response;
@@ -203,6 +208,28 @@ public class RestAgentStore implements IRestAgentStore {
         }
     }
 
+    /**
+     * The {@code dynamicOrigin} on the agent's current stored version, or
+     * {@code null} when it has none or does not exist (the update then fails on its
+     * own). A store failure propagates rather than being read as "no marker":
+     * silently dropping the marker would turn a transient error into a sub-agent
+     * that group cleanup can no longer delete.
+     */
+    private AgentConfiguration.DynamicOrigin storedDynamicOrigin(String id) {
+        try {
+            IResourceId current = agentStore.getCurrentResourceId(id);
+            if (current == null) {
+                return null;
+            }
+            AgentConfiguration stored = agentStore.read(id, current.getVersion());
+            return stored != null ? stored.getDynamicOrigin() : null;
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return null;
+        } catch (IResourceStore.ResourceStoreException e) {
+            throw sneakyThrow(e);
+        }
+    }
+
     @Override
     public Response createAgent(AgentConfiguration agentConfiguration) {
         validateSecurityFlags(agentConfiguration);
@@ -235,6 +262,9 @@ public class RestAgentStore implements IRestAgentStore {
         try {
             AgentConfiguration agentConfig = agentStore.read(id, version);
             validateSecurityFlags(agentConfig);
+            // The copy is an agent a person made, not one create_sub_agent
+            // provisioned: it must not inherit the original's provenance.
+            agentConfig.setDynamicOrigin(null);
             if (deepCopy) {
                 List<URI> packages = agentConfig.getWorkflows();
                 for (int i = 0; i < packages.size(); i++) {

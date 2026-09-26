@@ -20,6 +20,7 @@ import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
@@ -41,6 +42,7 @@ import org.mockito.ArgumentCaptor;
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 
@@ -107,6 +109,25 @@ class RestAgentEngineTest {
                     Deployment.Environment.production, "user-1", Map.of());
 
             assertEquals(403, response.getStatus());
+        }
+
+        @Test
+        @DisplayName("C3: engine-reserved keys in the start body never reach the conversation")
+        @SuppressWarnings("unchecked")
+        void reservedContextKeysAreStripped() throws Exception {
+            when(conversationService.startConversation(any(), anyString(), any(), any()))
+                    .thenReturn(new IConversationService.ConversationResult("conv-1", URI.create("/conversations/conv-1")));
+            Map<String, Context> body = Map.of(
+                    "groupId", new Context(Context.ContextType.string, "another-team"),
+                    "dynamicAgentConfig", new Context(Context.ContextType.object, Map.of("enabled", true)),
+                    "delegationDepth", new Context(Context.ContextType.string, "0"),
+                    "lang", new Context(Context.ContextType.string, "en"));
+
+            restAgentEngine.startConversationWithContext("agent-1", Deployment.Environment.production, "user-1", body);
+
+            ArgumentCaptor<Map<String, Context>> passed = ArgumentCaptor.forClass(Map.class);
+            verify(conversationService).startConversation(any(), eq("agent-1"), eq("user-1"), passed.capture());
+            assertEquals(Set.of("lang"), passed.getValue().keySet());
         }
 
         @Test

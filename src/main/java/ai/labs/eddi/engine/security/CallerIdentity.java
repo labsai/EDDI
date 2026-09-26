@@ -31,10 +31,18 @@ import java.util.Map;
  *            fails closed. Named rather than {@code @link}ed because an import
  *            used only from Javadoc is what Checkstyle's {@code UnusedImports}
  *            calls unused.
+ * @param admin
+ *            whether the caller held the {@code eddi-admin} role on the request
+ *            that captured this identity. Lets engine code that acts for this
+ *            caller on a worker thread — where there is no
+ *            {@code SecurityIdentity} to ask — give an administrator the same
+ *            access the request-scoped guards give them (see
+ *            {@code ResourceAccessGuard.principalMayUse}). Never trusted for a
+ *            different principal than {@link #userId}.
  *
  * @author ginccc
  */
-public record CallerIdentity(String token, String userId, String origin, Map<String, String> connectionCredentials) {
+public record CallerIdentity(String token, String userId, String origin, Map<String, String> connectionCredentials, boolean admin) {
 
     /**
      * Defensive copy, and {@code null} normalised to empty.
@@ -55,6 +63,19 @@ public record CallerIdentity(String token, String userId, String origin, Map<Str
     /** An identity carrying no caller-supplied connection credentials. */
     public CallerIdentity(String token, String userId, String origin) {
         this(token, userId, origin, Map.of());
+    }
+
+    /** A non-admin identity. */
+    public CallerIdentity(String token, String userId, String origin, Map<String, String> connectionCredentials) {
+        this(token, userId, origin, connectionCredentials, false);
+    }
+
+    /**
+     * Whether this identity is an administrator acting as {@code principal} — both
+     * halves required, so an admin's identity never vouches for someone else.
+     */
+    public boolean isAdminActingAs(String principal) {
+        return admin && principal != null && principal.equals(userId);
     }
 
     /** Whether this identity can satisfy a {@code ${caller:token}} reference. */
