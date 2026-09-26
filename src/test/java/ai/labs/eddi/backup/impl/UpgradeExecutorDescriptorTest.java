@@ -257,6 +257,24 @@ class UpgradeExecutorDescriptorTest {
     }
 
     @Test
+    @DisplayName("workflows and extensions are not counted when the agent's descriptor could not be moved")
+    void extensionsNotCountedWhenTheAgentDescriptorBumpFails() throws Exception {
+        givenTargetAt(3);
+        // The agent write lands, its descriptor does not move: the deployment and the
+        // next sync still resolve v3, so nothing written for v4 is delivered.
+        when(descriptorStore.updateDescriptor(eq(AGENT_ID), anyInt(), any()))
+                .thenThrow(new IllegalStateException("descriptor store unavailable"));
+
+        UpgradeResult result = withLlmStoreInCdi(() -> executor.executeUpgrade(sourceWithOneLlm(), AGENT_ID, null, null));
+
+        assertTrue(result.failures().stream()
+                .anyMatch(f -> "agent".equals(f.resourceType()) && f.reason().contains("descriptor")),
+                "the failed agent descriptor bump must be reported, got: " + result.failures());
+        assertEquals(0, result.updated(),
+                "neither the workflow nor the LLM is reachable while the agent descriptor names the old version");
+    }
+
+    @Test
     @DisplayName("a changed workflow the operator deselected is not counted as skipped (identical)")
     void deselectedChangedWorkflowIsNotSkipped() throws Exception {
         givenTargetAt(3);

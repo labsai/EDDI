@@ -236,11 +236,17 @@ public class UpgradeExecutor {
                     || !newWorkflowUris.isEmpty()
                     || (workflowOrder != null && !workflowOrder.isEmpty());
 
+            int failuresBeforeAgent = outcome.failures.size();
             URI agentUri = agentNeedsUpdate
                     ? updateAgentConfig(targetAgentId, updatedWorkflowUris, newWorkflowUris, workflowOrder, outcome)
                     : currentAgentUri(targetAgentId);
 
-            if (agentUri != null) {
+            // The agent write can land while its descriptor bump fails: the new
+            // agent version exists but the deployment and the next sync still
+            // resolve the old one, so nothing it references is delivered yet.
+            // Counting the workflows and extensions then reported "N updated" next
+            // to a failure saying the agent that loads them is not deployable.
+            if (agentUri != null && outcome.failures.size() == failuresBeforeAgent) {
                 outcome.updated += deliveredResources;
             }
 

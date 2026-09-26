@@ -136,7 +136,9 @@ public class RestApiCallsStore implements IRestApiCallsStore {
     public Response duplicateApiCalls(String id, Integer version) {
         restVersionInfo.validateParameters(id, version);
         ApiCallsConfiguration httpCallsConfiguration = restVersionInfo.read(id, version);
-        return restVersionInfo.create(httpCallsConfiguration);
+        // A duplicate is a create: a source saved under a higher ceiling (or before
+        // the check existed) must not become a new resource the create path refuses.
+        return createApiCalls(httpCallsConfiguration);
     }
 
     /**

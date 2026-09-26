@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.apicalls.model.BatchRequestBuildingInstruction;
 import ai.labs.eddi.configs.apicalls.model.HttpPreRequest;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
@@ -27,6 +28,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * A {@code maxBatchSize} above the deployment ceiling used to be clamped
@@ -61,6 +63,23 @@ class RestApiCallsStoreBatchLimitTest {
 
         assertEquals(400, response.getStatus());
         verify(apiCallsStore, never()).update(anyString(), anyInt(), any());
+    }
+
+    @Test
+    void duplicateAboveCeilingIsRefused() throws Exception {
+        // The source was saved under a higher ceiling (or before the check existed);
+        // duplicating it creates a new resource, which must meet the create rule.
+        when(apiCallsStore.read("aabbccddeeff112233445566", 1)).thenReturn(configWithBatch(1001));
+        // Answer a create, so a duplicate that skipped the check would come back 201.
+        var created = mock(IResourceStore.IResourceId.class);
+        when(created.getId()).thenReturn("bbccddeeff112233445566aa");
+        when(created.getVersion()).thenReturn(1);
+        when(apiCallsStore.create(any())).thenReturn(created);
+
+        Response response = store.duplicateApiCalls("aabbccddeeff112233445566", 1);
+
+        assertEquals(400, response.getStatus());
+        verify(apiCallsStore, never()).create(any());
     }
 
     @Test
