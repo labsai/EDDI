@@ -132,30 +132,30 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
     const agentIdParam = searchParams.get("agentId");
     if (!agentIdParam) return;
 
-    // Skip if this agent is already selected (prevents duplicate opens)
-    if (agentIdParam === selectedAgentId) {
-      // Still clean the URL params
-      setSearchParams({}, { replace: true });
-      return;
+    // Wait for the deployed-agents list before acting, so the display name can be
+    // resolved from it (below) rather than falling back to the id and then losing
+    // the chance once the param is cleared.
+    if (deployedAgents === undefined) return;
+
+    // Deep links only PRESELECT the agent; they never start or reopen a
+    // conversation on their own. Auto-starting from URL params let a crafted
+    // link (e.g. in agent studio, /manage/chat, /workforce/chat) silently open a
+    // conversation AS THE ADMIN the moment the page loaded — a CSRF-style side
+    // effect. Starting is now always an explicit user action (agent picker,
+    // "New conversation", or sending a message).
+    if (agentIdParam !== selectedAgentId) {
+      // The display name is resolved ONLY from the deployed-agents list, never
+      // from the URL: an attacker-supplied ?agentName= must not be reflected
+      // into the UI. Falls back to the id when the agent is not listed.
+      const agentName =
+        deployedAgents.find((b) => b.id === agentIdParam)?.name || agentIdParam;
+      setSelectedAgent(agentIdParam, agentName);
     }
 
-    // Resolve agent name: URL param > deployed agents lookup > fallback to ID
-    const agentNameParam = searchParams.get("agentName");
-    const agentName =
-      agentNameParam ||
-      deployedAgents?.find((b) => b.id === agentIdParam)?.name ||
-      agentIdParam;
-
-    // Auto-select and reopen the agent's last conversation (or start one)
-    setSelectedAgent(agentIdParam, agentName);
-    openConversation.mutate(
-      { agentId: agentIdParam, environment: environmentFor(agentIdParam) },
-      { onError: (err) => toast.error(getErrorMessage(err)) },
-    );
-
-    // Remove query params so refresh doesn't re-open
+    // Remove query params so a refresh does not re-trigger, and so the
+    // (ignored) agentName does not linger in the URL.
     setSearchParams({}, { replace: true });
-  }, [searchParams, deployedAgents, selectedAgentId, setSelectedAgent, openConversation, setSearchParams, environmentFor]);
+  }, [searchParams, deployedAgents, selectedAgentId, setSelectedAgent, setSearchParams]);
 
   // Smart auto-scroll: auto scrolls when at bottom, pauses when user scrolls up
   const {

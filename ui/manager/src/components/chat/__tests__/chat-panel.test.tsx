@@ -723,7 +723,11 @@ describe("ChatPanel", () => {
     await user.click(redoBtn);
   });
 
-  it("auto-starts conversation if agentId query parameter is present", async () => {
+  it("preselects the agent from ?agentId= but does NOT auto-start a conversation", async () => {
+    // Auto-starting from a URL param let a crafted link silently open a
+    // conversation as the admin the moment the page loaded. A deep link may only
+    // PRESELECT; starting stays an explicit user action.
+    let started = false;
     server.use(
       http.get("*/agentstore/agents/descriptors", () => {
         return HttpResponse.json([
@@ -745,6 +749,7 @@ describe("ChatPanel", () => {
         return HttpResponse.json({ status: "READY" });
       }),
       http.post("*/agents/agent-query-1/start", () => {
+        started = true;
         return HttpResponse.json(null, {
           status: 201,
           headers: {
@@ -752,25 +757,51 @@ describe("ChatPanel", () => {
           },
         });
       }),
-      http.get("*/agents/conv-query", () => {
-        return HttpResponse.json({
-          conversationSteps: [],
-          conversationOutputs: [
-            {
-              output: [{ type: "text", text: "Auto hello!" }],
-            },
-          ],
-        });
-      })
     );
 
     renderWithProviders(<ChatPanel />, { initialRoute: "/?agentId=agent-query-1" });
 
+    // The agent is preselected...
     await waitFor(() => {
       expect(useChatStore.getState().selectedAgentId).toBe("agent-query-1");
-      expect(useChatStore.getState().conversationId).toBe("conv-query");
-      expect(screen.getByText("Auto hello!")).toBeInTheDocument();
     });
+    // ...but no conversation was started and no /start call was made.
+    expect(useChatStore.getState().conversationId).toBeNull();
+    expect(started).toBe(false);
+  });
+
+  it("ignores ?agentName= and resolves the display name from the deployed list", async () => {
+    server.use(
+      http.get("*/agentstore/agents/descriptors", () => {
+        return HttpResponse.json([
+          {
+            resource: "eddi://ai.labs.agent/agentstore/agents/agent-query-1?version=1",
+            name: "Real Agent Name",
+            description: "Loaded via query param",
+          },
+        ]);
+      }),
+      http.get("*/documentdescriptor/descriptors/agentstore/agents/agent-query-1", () => {
+        return HttpResponse.json({
+          resource: "eddi://ai.labs.agent/agentstore/agents/agent-query-1?version=1",
+          name: "Real Agent Name",
+          description: "Loaded via query param",
+        });
+      }),
+      http.get("*/deployment/production/agentstore/agents/agent-query-1/version/1", () => {
+        return HttpResponse.json({ status: "READY" });
+      }),
+    );
+
+    renderWithProviders(<ChatPanel />, {
+      initialRoute: "/?agentId=agent-query-1&agentName=%3Cb%3EInjected%3C%2Fb%3E",
+    });
+
+    await waitFor(() => {
+      expect(useChatStore.getState().selectedAgentId).toBe("agent-query-1");
+    });
+    // The attacker-supplied name must never win over the deployed-list name.
+    expect(useChatStore.getState().selectedAgentName).toBe("Real Agent Name");
   });
 });
 
