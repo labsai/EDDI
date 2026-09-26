@@ -32,7 +32,7 @@ EDDI Chat UI is a standalone, themeable React chat widget that connects to any E
 
 - 💬 **Rich Markdown** — Tables, code blocks, bold/italic, links, lists, and raw HTML
 - 🌊 **SSE Streaming** — Real-time token-by-token agent responses with thinking indicator
-- 🧮 **LaTeX Math** — KaTeX rendering for mathematical expressions (`$inline$` and `$$block$$`)
+- 🧮 **LaTeX Math** — KaTeX rendering for mathematical expressions (`$$…$$`, inline or on its own lines; a single `$` stays a dollar sign)
 - 🎨 **Syntax Highlighting** — Code blocks with language-aware highlighting via `rehype-highlight`
 - 🌗 **Dark / Light Themes** — Toggle via UI button, URL parameter, or system preference
 - ⚡ **Quick Replies** — Pill buttons for suggested responses returned by the agent
@@ -184,9 +184,9 @@ Dark/light themes are controlled by `[data-theme]` attribute — no runtime styl
 | Build     | Vite 6                                                 |
 | UI        | React 19 + TypeScript 5.7 (strict)                     |
 | Styling   | Vanilla CSS with CSS custom properties (BEM naming)    |
-| Markdown  | react-markdown 9 + remark-gfm + remark-math            |
-| Math      | KaTeX 0.16                                             |
-| Code      | rehype-highlight                                       |
+| Markdown  | react-markdown 10 + remark-gfm + remark-math           |
+| Math      | KaTeX 0.18 (loaded on first use)                       |
+| Code      | rehype-highlight (loaded on first use)                 |
 | Routing   | React Router v7                                        |
 | Streaming | Native `fetch` + `ReadableStream` (SSE via AsyncGenerator) |
 | Tests     | Vitest 5 + React Testing Library                       |

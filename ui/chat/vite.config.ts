@@ -22,7 +22,13 @@ export default defineConfig({
         // Put JS/CSS into scripts/ to match existing EDDI structure
         entryFileNames: "scripts/js/chat-ui.[hash].js",
         chunkFileNames: "scripts/js/chat-ui-[name].[hash].js",
-        assetFileNames: "scripts/css/chat-ui.[hash][extname]",
+        // Stylesheets beside the scripts; anything else a stylesheet pulls in
+        // (the KaTeX fonts) under fonts/, which the Maven build already
+        // copies, serves and prunes between builds.
+        assetFileNames: (asset) =>
+          (asset.names ?? []).some((name) => name.endsWith(".css"))
+            ? "scripts/css/chat-ui.[hash][extname]"
+            : "fonts/chat-ui-[name].[hash][extname]",
       },
     },
   },

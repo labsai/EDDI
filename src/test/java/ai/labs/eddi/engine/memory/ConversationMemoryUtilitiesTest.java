@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.model.Context;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -179,6 +180,82 @@ class ConversationMemoryUtilitiesTest {
             assertTrue(output.containsKey("actions"));
             assertTrue(output.containsKey("output"));
             assertFalse(output.containsKey("internal:debug"));
+        }
+
+        /**
+         * A secret turn stored before Conversation scrubbed at turn end: raw
+         * input:initial, the parser's normalized copy in input / input:normalized, and
+         * the secretInput flag in both the step's context datum and the output.
+         */
+        private ConversationMemorySnapshot oldShapeSecretTurn(Object stepFlag) {
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setConversationId("conv-1");
+            snapshot.setAgentId("agent-1");
+            snapshot.setAgentVersion(1);
+
+            var greeting = new ConversationOutput();
+            greeting.put("input", "hello there");
+            greeting.put("output", List.of("hi"));
+            snapshot.getConversationOutputs().add(greeting);
+            var greetingStep = new ConversationStepSnapshot();
+            var greetingRun = new WorkflowRunSnapshot();
+            greetingRun.getLifecycleTasks().add(new ResultSnapshot("input:initial", "hello there", null, new Date(), null, true));
+            greetingStep.getWorkflows().add(greetingRun);
+            snapshot.getConversationSteps().add(greetingStep);
+
+            var secret = new ConversationOutput();
+            secret.put("context", Map.of("secretInput", "true"));
+            secret.put("input", "tok-aaaa-bbbb-1111");
+            secret.put("output", List.of("saved"));
+            snapshot.getConversationOutputs().add(secret);
+            var step = new ConversationStepSnapshot();
+            var run = new WorkflowRunSnapshot();
+            run.getLifecycleTasks().add(new ResultSnapshot("context:secretInput", stepFlag, null, new Date(), null, false));
+            run.getLifecycleTasks().add(new ResultSnapshot("input:initial", "Tok-Aaaa-Bbbb-1111", null, new Date(), null, true));
+            run.getLifecycleTasks().add(new ResultSnapshot("input:normalized", "tok-aaaa-bbbb-1111", null, new Date(), null, false));
+            run.getLifecycleTasks().add(new ResultSnapshot("expressions:parsed", "unknown(tok-aaaa-bbbb-1111)", null, new Date(), null, false));
+            step.getWorkflows().add(run);
+            snapshot.getConversationSteps().add(step);
+            return snapshot;
+        }
+
+        @Test
+        @DisplayName("a secret turn stored before the turn-end scrub is masked on read, in both detail levels")
+        void oldStoredSecretTurnIsMaskedOnRead() throws Exception {
+            var mapper = new ObjectMapper();
+            for (Object stepFlag : List.of(new Context(Context.ContextType.string, "true"), Map.of("type", "string", "value", "true"))) {
+                var snapshot = oldShapeSecretTurn(stepFlag);
+                for (boolean detailed : List.of(false, true)) {
+                    var simple = ConversationMemoryUtilities.convertSimpleConversationMemory(snapshot, detailed, false);
+                    String json = mapper.writeValueAsString(simple.getConversationOutputs())
+                            + mapper.writeValueAsString(simple.getConversationSteps());
+                    assertFalse(json.toLowerCase().contains("tok-aaaa-bbbb-1111"), "detailed=" + detailed + " leaks: " + json);
+                    assertEquals(MemoryKeys.SECRET_INPUT_PLACEHOLDER, simple.getConversationOutputs().get(1).get("input"));
+                    assertEquals("hello there", simple.getConversationOutputs().get(0).get("input"), "an ordinary turn is untouched");
+                    assertTrue(json.contains("hello there"));
+                }
+                // returnCurrentStepOnly — what the streaming done frame and most reads use.
+                var last = ConversationMemoryUtilities.convertSimpleConversationMemory(snapshot, false, true);
+                assertEquals(MemoryKeys.SECRET_INPUT_PLACEHOLDER, last.getConversationOutputs().getFirst().get("input"));
+                // The stored document is read, never rewritten.
+                assertEquals("tok-aaaa-bbbb-1111", snapshot.getConversationOutputs().get(1).get("input"));
+            }
+        }
+
+        @Test
+        @DisplayName("returnDetailed=false keeps the display input, which masks a secret turn")
+        void nonDetailedKeepsDisplayInput() {
+            // Conversation writes the placeholder under "input" for a secretInput turn
+            // while input:initial stays raw; a client rebuilding the transcript needs
+            // the masked copy or it can only print the plaintext.
+            var snapshot = buildSnapshotWithOutputs("input:initial", "input", "inputDebug", "output");
+            snapshot.getConversationOutputs().getFirst().put("input", MemoryKeys.SECRET_INPUT_PLACEHOLDER);
+
+            var simple = ConversationMemoryUtilities.convertSimpleConversationMemory(snapshot, false, false);
+
+            var output = simple.getConversationOutputs().getFirst();
+            assertEquals(MemoryKeys.SECRET_INPUT_PLACEHOLDER, output.get("input"));
+            assertFalse(output.containsKey("inputDebug"), "only the exact display key passes, not every input* key");
         }
 
         @Test

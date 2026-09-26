@@ -37,6 +37,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.UUID;
 
 import static ai.labs.eddi.engine.model.Deployment.Environment.production;
+import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 @ApplicationScoped
 public class RestAgentManagement implements IRestAgentManagement {
@@ -74,9 +75,15 @@ public class RestAgentManagement implements IRestAgentManagement {
             var memorySnapshot = restAgentEngine.readConversation(userConversation.getConversationId(), returnDetailed, returnCurrentStepOnly,
                     returningFields);
 
+            // Re-render only when the caller ASKED for a language that differs from
+            // the stored one. A load without ?language= used to compare the stored
+            // value against null, so any conversation that had ever carried a lang
+            // property re-ran its last step on every load — another model call,
+            // and its cost, each time the widget opened.
             Property languageProperty = extractLanguageProperty(memorySnapshot);
-            if (!userConversationResult.isNewlyCreatedConversation() && (languageProperty != null && languageProperty.getValueString() != null
-                    && !languageProperty.getValueString().equals(language))) {
+            if (!userConversationResult.isNewlyCreatedConversation() && !isNullOrEmpty(language)
+                    && (languageProperty != null && languageProperty.getValueString() != null
+                            && !languageProperty.getValueString().equals(language))) {
                 restAgentEngine.rerunLastConversationStep(userConversation.getConversationId(), language, returnDetailed, returnCurrentStepOnly,
                         returningFields, asyncResponse);
             } else {

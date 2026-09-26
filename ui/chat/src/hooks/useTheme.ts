@@ -8,6 +8,29 @@ export type ThemeMode = "dark" | "light" | "system";
 
 const STORAGE_KEY = "eddi-chat-theme";
 
+/**
+ * Storage access throws when site data is blocked — a sandboxed iframe, a
+ * browser's third-party storage block, some private modes. Unguarded, that
+ * exception escaped the effect and left the whole widget blank; the remembered
+ * theme is a convenience, so it simply goes unremembered instead.
+ */
+function readStoredTheme(): ThemeMode | null {
+  try {
+    const value = window.localStorage.getItem(STORAGE_KEY);
+    return value === "dark" || value === "light" || value === "system" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function storeTheme(mode: ThemeMode): void {
+  try {
+    window.localStorage.setItem(STORAGE_KEY, mode);
+  } catch {
+    // Not persisted — applied for this page only.
+  }
+}
+
 function getSystemTheme(): "dark" | "light" {
   return window.matchMedia("(prefers-color-scheme: dark)").matches
     ? "dark"
@@ -22,15 +45,13 @@ function applyTheme(mode: ThemeMode): void {
 export function useTheme(initial: ThemeMode = "dark") {
   // Apply on mount
   useEffect(() => {
-    const stored = localStorage.getItem(STORAGE_KEY) as ThemeMode | null;
-    const mode = stored ?? initial;
+    const mode = readStoredTheme() ?? initial;
     applyTheme(mode);
 
     // Listen for system theme changes
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     const handler = () => {
-      const current = localStorage.getItem(STORAGE_KEY) as ThemeMode | null;
-      if ((current ?? initial) === "system") {
+      if ((readStoredTheme() ?? initial) === "system") {
         applyTheme("system");
       }
     };
@@ -39,7 +60,7 @@ export function useTheme(initial: ThemeMode = "dark") {
   }, [initial]);
 
   const setTheme = useCallback((mode: ThemeMode) => {
-    localStorage.setItem(STORAGE_KEY, mode);
+    storeTheme(mode);
     applyTheme(mode);
   }, []);
 

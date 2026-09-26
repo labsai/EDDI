@@ -10,6 +10,8 @@ export interface ChatMessage {
   timestamp: number;
   /** True while the agent is still streaming tokens. */
   isStreaming?: boolean;
+  /** `image` output items, rendered by the widget rather than as markdown. */
+  images?: { uri: string; alt?: string }[];
 }
 
 /**
@@ -129,10 +131,20 @@ export interface OutputItem {
   placeholder?: string;
   label?: string;
   defaultValue?: string;
+  /** image */
+  uri?: string;
+  alt?: string;
+  /** applicationLink */
+  path?: string;
 }
 
 /** Per-step output block from POST /agents responses. */
 export interface ConversationOutput {
+  /**
+   * The display copy of the user's message — `<secret input>` for a turn sent
+   * with `secretInput`, where the step's `input:initial` stays raw.
+   */
+  input?: string;
   actions?: string[];
   output?: OutputItem[];
   quickReplies?: QuickReply[];

@@ -226,7 +226,9 @@ public class ConversationMemoryUtilities {
         var conversationOutputs = conversationMemorySnapshot.getConversationOutputs();
         conversationOutputs = returnCurrentStepOnly ? List.of(conversationOutputs.getLast()) : conversationOutputs;
         if (returnDetailed) {
-            newSnapshot.getConversationOutputs().addAll(conversationOutputs);
+            for (var conversationOutput : conversationOutputs) {
+                newSnapshot.getConversationOutputs().add(maskSecretTurnOutput(conversationOutput));
+            }
         } else {
             var newConversationOutputs = newSnapshot.getConversationOutputs();
             for (int index = 0; index < conversationOutputs.size(); index++) {
@@ -234,10 +236,17 @@ public class ConversationMemoryUtilities {
                 var conversationOutput = conversationOutputs.get(index);
                 var newConversationOutput = newConversationOutputs.get(index);
 
+                boolean secretTurn = isSecretTurnOutput(conversationOutput);
                 for (var key : conversationOutput.keySet()) {
-                    if (key.startsWith(INPUT_INITIAL.key()) || key.startsWith(ACTIONS.key()) || key.startsWith(OUTPUT_PREFIX)
-                            || key.startsWith(QUICK_REPLIES_PREFIX)) {
-                        newConversationOutput.put(key, conversationOutput.get(key));
+                    // "input" is the masked DISPLAY copy of the user's message:
+                    // "<secret input>" for a turn the client flagged secretInput
+                    // (Conversation scrubs such a turn, input:initial included, when it
+                    // ends). A client rebuilding a transcript after a reload, undo or
+                    // rerun uses it to mask that turn.
+                    if (key.startsWith(INPUT_INITIAL.key()) || key.equals(INPUT.key()) || key.startsWith(ACTIONS.key())
+                            || key.startsWith(OUTPUT_PREFIX) || key.startsWith(QUICK_REPLIES_PREFIX)) {
+                        newConversationOutput.put(key,
+                                secretTurn && key.equals(INPUT.key()) ? SECRET_INPUT_PLACEHOLDER : conversationOutput.get(key));
                     }
                 }
             }
@@ -248,13 +257,17 @@ public class ConversationMemoryUtilities {
         for (var conversationStepSnapshot : conversationSteps) {
             var simpleConversationStep = new SimpleConversationStep();
             newSnapshot.getConversationSteps().add(simpleConversationStep);
+            // Judged from the step's own context datum, so a drifted document (steps
+            // and outputs of different lengths) cannot mis-pair a step with the flag
+            // of another turn's output.
+            boolean secretTurn = isSecretTurnStep(conversationStepSnapshot);
             for (var packageRunSnapshot : conversationStepSnapshot.getWorkflows()) {
                 for (var resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {
                     var key = resultSnapshot.getKey();
                     if (returnDetailed || key.equals(INPUT_INITIAL.key()) || key.startsWith(ACTIONS.key()) || key.startsWith(OUTPUT_PREFIX)
                             || key.startsWith(QUICK_REPLIES_PREFIX)) {
 
-                        var result = resultSnapshot.getResult();
+                        var result = secretTurn ? maskedSecretTurnValue(key, resultSnapshot.getResult()) : resultSnapshot.getResult();
                         simpleConversationStep.getConversationStep()
                                 .add(new ConversationStepData(key, result, resultSnapshot.getTimestamp(), resultSnapshot.getOriginWorkflowId()));
 
@@ -268,6 +281,66 @@ public class ConversationMemoryUtilities {
         }
 
         return newSnapshot;
+    }
+
+    /**
+     * Read-time masking of a turn the client sent with {@code secretInput}.
+     * Conversation scrubs such a turn when it ends, but turns stored before that
+     * scrub existed still hold the raw {@code input:initial} and the parser's
+     * normalized copy in {@code input} / {@code input:normalized}. Every secret
+     * turn — old or new — carries {@code context.secretInput == "true"} in its
+     * output and a {@code context:secretInput} datum in its step, so masking on
+     * read closes the exposure for stored history without a data migration. The
+     * stored document itself is not changed.
+     */
+    private static final String SECRET_INPUT_CONTEXT_KEY = "secretInput";
+    private static final String CONTEXT_OUTPUT_KEY = "context";
+    private static final String CONTEXT_SECRET_INPUT_DATUM = CONTEXT_OUTPUT_KEY + ":" + SECRET_INPUT_CONTEXT_KEY;
+
+    static boolean isSecretTurnOutput(Map<String, Object> conversationOutput) {
+        return conversationOutput != null && conversationOutput.get(CONTEXT_OUTPUT_KEY) instanceof Map<?, ?> context
+                && isTrue(context.get(SECRET_INPUT_CONTEXT_KEY));
+    }
+
+    static boolean isSecretTurnStep(ConversationStepSnapshot step) {
+        for (var workflow : step.getWorkflows()) {
+            for (var result : workflow.getLifecycleTasks()) {
+                if (CONTEXT_SECRET_INPUT_DATUM.equals(result.getKey())) {
+                    Object value = result.getResult();
+                    if (value instanceof Context context) {
+                        value = context.getValue();
+                    } else if (value instanceof Map<?, ?> map) {
+                        value = map.get("value");
+                    }
+                    return isTrue(value);
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean isTrue(Object value) {
+        return value != null && "true".equals(String.valueOf(value));
+    }
+
+    private static ConversationOutput maskSecretTurnOutput(ConversationOutput conversationOutput) {
+        if (!isSecretTurnOutput(conversationOutput) || !conversationOutput.containsKey(INPUT.key())) {
+            return conversationOutput;
+        }
+        var masked = new ConversationOutput();
+        masked.putAll(conversationOutput);
+        masked.put(INPUT.key(), SECRET_INPUT_PLACEHOLDER);
+        return masked;
+    }
+
+    private static Object maskedSecretTurnValue(String key, Object value) {
+        if (INPUT_INITIAL.key().equals(key) || INPUT_NORMALIZED.key().equals(key)) {
+            return value == null ? null : SECRET_INPUT_PLACEHOLDER;
+        }
+        if (EXPRESSIONS_PARSED.key().equals(key)) {
+            return value == null ? null : "";
+        }
+        return value;
     }
 
     private static SimpleConversationMemorySnapshot getSimpleMemorySnapshot(ConversationMemorySnapshot conversationMemorySnapshot) {

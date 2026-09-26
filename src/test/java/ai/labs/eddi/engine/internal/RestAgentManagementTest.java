@@ -263,6 +263,35 @@ class RestAgentManagementTest {
         }
 
         @Test
+        @DisplayName("should not rerun when the load names no language")
+        void noRerunWhenNoLanguageRequested() throws Exception {
+            // The Chat UI loads managed conversations without ?language=. Comparing
+            // the stored lang against null re-ran the last step on every load.
+            var userConv = createUserConversation();
+            when(userConversationStore.readUserConversation("intent-1", "user-1"))
+                    .thenReturn(userConv);
+            when(restAgentEngine.getConversationState("conv-1"))
+                    .thenReturn(ConversationState.READY);
+
+            var snapshot = new SimpleConversationMemorySnapshot();
+            var langProp = new Property("lang", "en", Property.Scope.longTerm);
+            var props = new ConversationProperties(null);
+            props.put("lang", langProp);
+            snapshot.setConversationProperties(props);
+            when(restAgentEngine.readConversation(eq("conv-1"), any(), any(), any()))
+                    .thenReturn(snapshot);
+
+            restAgentManagement.loadConversationMemory("intent-1", "user-1", null,
+                    false, false, List.of(), asyncResponse);
+            restAgentManagement.loadConversationMemory("intent-1", "user-1", "",
+                    false, false, List.of(), asyncResponse);
+
+            verify(asyncResponse, times(2)).resume(snapshot);
+            verify(restAgentEngine, never()).rerunLastConversationStep(
+                    any(), any(), any(), any(), any(), any());
+        }
+
+        @Test
         @DisplayName("should resume without rerun when language matches")
         void noRerunWhenLangMatches() throws Exception {
             var userConv = createUserConversation();

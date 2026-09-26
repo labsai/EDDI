@@ -49,6 +49,8 @@ public class Conversation implements IConversation {
     private static final String KEY_CONTEXT = "context";
     private static final String KEY_PROPERTIES = "properties";
     private static final String KEY_SECRET_INPUT = "secretInput";
+    /** The conversation-output key the parser echoes its expressions under. */
+    private static final String KEY_EXPRESSIONS_OUTPUT = "expressions";
     private static final String SECRET_INPUT_PLACEHOLDER = MemoryKeys.SECRET_INPUT_PLACEHOLDER;
     private static final String CONVERSATION_START = "CONVERSATION_START";
     private static final String CONVERSATION_END = "CONVERSATION_END";
@@ -94,6 +96,14 @@ public class Conversation implements IConversation {
      * it, and a value that short is not a credential.
      */
     static final int MIN_SCRUBBED_SECRET_CONTEXT_LENGTH = 8;
+
+    /**
+     * The raw message of this turn when the client flagged it {@code secretInput},
+     * otherwise {@code null}. Tasks see the plaintext while the turn runs; when it
+     * stops, {@link #scrubSecretClientInput} removes it from everything that
+     * outlives the turn.
+     */
+    private String secretClientInput;
 
     Conversation(List<IExecutableWorkflow> executableWorkflows, IConversationMemory conversationMemory, IPropertiesHandler propertiesHandler,
             IConversationOutputRenderer outputProvider) {
@@ -473,6 +483,7 @@ public class Conversation implements IConversation {
         }
 
         boolean isSecretInput = isSecretInputFlagged(contexts);
+        secretClientInput = isSecretInput && !isNullOrEmpty(message) && !message.isBlank() ? message : null;
         storeUserInputInMemory(message, lifecycleData, isSecretInput);
         return lifecycleData;
     }
@@ -556,7 +567,11 @@ public class Conversation implements IConversation {
             // First, so nothing below — the audit flush, the longTerm write, the
             // stored snapshot, the rendered output — sees a secret context value.
             scrubSecretContextValues();
+            // Also before the audit flush: TurnAuditBuffer redacts the recorded user
+            // input exactly when input:initial reads as the placeholder.
+            Set<String> secretInputForms = scrubSecretClientInput();
             if (auditBuffer != null) {
+                auditBuffer.addSecretInputForms(secretInputForms);
                 auditBuffer.flush(conversationMemory, searchableSecretContextValues());
             }
             // BEFORE the persist decision below, and on every exit including the
@@ -916,6 +931,123 @@ public class Conversation implements IConversation {
                 }
             }
         }
+    }
+
+    /**
+     * Removes the plaintext of a turn the client flagged {@code secretInput} from
+     * everything that outlives the turn, on every exit (completed, stopped, paused,
+     * failed).
+     * <p>
+     * {@code storeUserInputInMemory} writes the placeholder to the displayed
+     * {@code input}, but the parser — the first task of practically every workflow
+     * — overwrites that entry with the normalized plaintext, and
+     * {@code input:initial} was never masked at all. Only a {@code scope:"secret"}
+     * property scrubbed them, so for any other agent the secret stayed in the
+     * stored step, the audit ledger, and every snapshot and streamed {@code done}
+     * frame that carries the turn's output. The display {@code input} is therefore
+     * re-asserted here, and its contract is "the masked display copy": a client may
+     * rely on it reading {@link MemoryKeys#SECRET_INPUT_PLACEHOLDER} for a secret
+     * turn.
+     * <p>
+     * Replaced wholesale: {@code input:initial}, {@code input:normalized}, the
+     * displayed {@code input}, and the parsed forms derived from the secret.
+     * Searched for (raw and normalized, from
+     * {@link #MIN_SCRUBBED_SECRET_CONTEXT_LENGTH} characters): every other datum of
+     * the step and its conversation output — a template may have echoed the input.
+     * Deliberately NOT touched: conversation properties and their step mirrors. A
+     * property that captured the input ({@code {memory.current.input}}) is the
+     * agent designer's explicit choice — the wizard pattern hands it to a later
+     * turn — and {@code scope:"secret"} is how a designer asks for it to be
+     * vaulted.
+     * <p>
+     * A task that runs after a HITL resume of this turn sees the placeholder, as it
+     * does for a secret context value.
+     *
+     * @return the plaintext forms found (raw and normalized), for the audit
+     *         redaction; empty when the turn was not flagged secret
+     */
+    private Set<String> scrubSecretClientInput() {
+        String raw = secretClientInput;
+        if (raw == null) {
+            return Set.of();
+        }
+        var step = conversationMemory.getCurrentStep();
+        if (step == null) {
+            return Set.of(raw);
+        }
+        Set<String> plaintexts = new LinkedHashSet<>();
+        plaintexts.add(raw);
+        plaintexts.add(raw.trim());
+        for (IData<?> datum : step.getAllElements()) {
+            if (MemoryKeys.INPUT_NORMALIZED.key().equals(datum.getKey()) && datum.getResult() instanceof String normalized) {
+                plaintexts.add(normalized);
+            }
+        }
+        List<String> needles = plaintexts.stream()
+                .filter(value -> value.length() >= MIN_SCRUBBED_SECRET_CONTEXT_LENGTH)
+                .sorted(Comparator.comparingInt(String::length).reversed())
+                .toList();
+
+        // A tool-call pause persists its batch: the transcript the model saw
+        // (built from the display input, which the parser had overwritten with
+        // the normalized text), the gated call's arguments, and the redacted
+        // arguments an approver is shown. A resume replays and executes from it,
+        // so it is scrubbed like the step — the resumed turn sees the placeholder.
+        PendingToolCallBatch pendingToolCalls = conversationMemory.getHitlPendingToolCalls();
+        if (pendingToolCalls != null && !needles.isEmpty()) {
+            PendingToolCallBatch cleaned = SecretValueScrubber.scrubTyped(pendingToolCalls, PendingToolCallBatch.class, needles,
+                    SECRET_INPUT_PLACEHOLDER);
+            if (cleaned != null) {
+                conversationMemory.setHitlPendingToolCalls(cleaned);
+            }
+        }
+
+        for (IData<?> datum : step.getAllElements()) {
+            @SuppressWarnings("unchecked")
+            var writable = (IData<Object>) datum;
+            String key = datum.getKey();
+            if (INPUT_INITIAL.key().equals(key) || MemoryKeys.INPUT_NORMALIZED.key().equals(key)) {
+                writable.setResult(SECRET_INPUT_PLACEHOLDER);
+                writable.setPossibleResults(null);
+            } else if (MemoryKeys.EXPRESSIONS_PARSED.key().equals(key)) {
+                writable.setResult("");
+                writable.setPossibleResults(null);
+            } else if (MemoryKeys.EXPRESSIONS_MATCHES.key().equals(key) || MemoryKeys.INTENTS.key().equals(key)
+                    || MemoryKeys.PROPERTIES_EXTRACTED.key().equals(key)) {
+                writable.setResult(List.of());
+                writable.setPossibleResults(null);
+            } else if (!needles.isEmpty() && !key.startsWith(KEY_PROPERTIES + ":")) {
+                Object cleaned = scrubSecretInputFrom(datum.getResult(), needles);
+                if (cleaned != null) {
+                    writable.setResult(cleaned);
+                }
+                if (scrubSecretInputFrom(writable.getPossibleResults(), needles) instanceof List<?> cleanedPossible) {
+                    writable.setPossibleResults(castList(cleanedPossible));
+                }
+            }
+        }
+
+        step.removeConversationOutput(KEY_EXPRESSIONS_OUTPUT);
+        step.removeConversationOutput(MemoryKeys.INTENTS.key());
+        var conversationOutput = step.getConversationOutput();
+        if (conversationOutput != null && !needles.isEmpty()) {
+            for (var entry : conversationOutput.entrySet()) {
+                if (INPUT.key().equals(entry.getKey()) || KEY_PROPERTIES.equals(entry.getKey())) {
+                    continue;
+                }
+                Object cleaned = scrubSecretInputFrom(entry.getValue(), needles);
+                if (cleaned != null) {
+                    entry.setValue(cleaned);
+                }
+            }
+        }
+        step.resetConversationOutput(INPUT.key());
+        step.addConversationOutputString(INPUT.key(), SECRET_INPUT_PLACEHOLDER);
+        return plaintexts;
+    }
+
+    private static Object scrubSecretInputFrom(Object value, List<String> needles) {
+        return SecretValueScrubber.scrubDeep(value, needles, SECRET_INPUT_PLACEHOLDER);
     }
 
     /**
