@@ -128,6 +128,10 @@ export function isSamePause(shown: ShownPause, current: CurrentPause): boolean {
   const currentId = usablePauseId(current.pauseId);
   const shownId = usablePauseId(shown.pauseId);
   if (shownId && currentId) return shownId === currentId;
+  // Without an id, the start instant is what tells one pause from the next of
+  // the same kind. A shown pause that carries neither cannot be recognised
+  // again, so it is refused rather than matched on kind alone.
+  if (!shownId && !shown.pausedAt) return false;
   if (pauseKind(shown.pauseType) !== pauseKind(current.pauseType)) return false;
   if (shown.pausedAt && current.pausedAt && !sameInstant(shown.pausedAt, current.pausedAt)) {
     return false;
@@ -166,13 +170,19 @@ export async function bindDecisionToPause<D extends { pauseId?: string }>(
  */
 export function isPauseChanged(err: unknown): boolean {
   if (err instanceof PauseChangedError) return true;
-  // Both backend wordings ("…changed since this decision was made (pauseId no
-  // longer current)…" for a conversation, "…changed since this decision was
-  // made…" for a group) — a plain state conflict ("not awaiting approval")
-  // stays an ordinary error.
+  // The conversation resume answers a stale pauseId with "…changed since this
+  // decision was made (pauseId no longer current)…". The group approve answers
+  // EVERY wrong-state refusal — a pauseId mismatch included, since the
+  // coordinator's mismatch is a GroupDiscussionException — with "Group
+  // conversation is not awaiting approval — it may have been resolved…". For a
+  // decision made from a displayed pause both mean the same thing: what the
+  // reviewer saw is no longer what is pending. A conversation that is simply not
+  // resumable ("not in a resumable state") stays an ordinary error.
   return (
     err instanceof ApiClientError &&
     err.status === 409 &&
-    /changed since this decision|pauseId no longer current/i.test(err.message)
+    /changed since this decision|pauseId no longer current|group conversation is not awaiting approval/i.test(
+      err.message,
+    )
   );
 }

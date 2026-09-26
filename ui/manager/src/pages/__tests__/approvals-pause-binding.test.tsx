@@ -207,6 +207,99 @@ describe("queue decisions are bound to the pause the row showed", () => {
   });
 });
 
+describe("group rows are bound too", () => {
+  const groupPause = {
+    conversationId: "gc-1",
+    groupId: "grp1",
+    userId: "u1",
+    pausedAt: "2026-07-01T10:00:00.000Z",
+    pauseReason: "Phase requires approval",
+    pauseType: "PHASE",
+  };
+
+  function serveGroupQueue(onList?: () => void) {
+    server.use(
+      http.get("*/agents/pending-approvals", () => HttpResponse.json([])),
+      http.get("*/groups/pending-approvals", () => {
+        onList?.();
+        return HttpResponse.json([groupPause]);
+      }),
+    );
+  }
+
+  function recordGroupApprovals() {
+    const bodies: Record<string, unknown>[] = [];
+    server.use(
+      http.post("*/groups/:groupId/conversations/:gcId/approve", async ({ request }) => {
+        bodies.push((await request.json()) as Record<string, unknown>);
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    return bodies;
+  }
+
+  function serveGroupStatus(body: Record<string, unknown>) {
+    server.use(
+      http.get("*/groups/:groupId/conversations/gc-1/approval-status", () =>
+        HttpResponse.json({ groupConversationId: "gc-1", state: "AWAITING_APPROVAL", ...body }),
+      ),
+    );
+  }
+
+  it("sends the group's pause id when its approval-status reports one", async () => {
+    serveGroupQueue();
+    serveGroupStatus({ pausedAt: groupPause.pausedAt, pauseType: "PHASE", pauseId: "1782900000000" });
+    const approvals = recordGroupApprovals();
+    const user = userEvent.setup();
+    renderWithProviders(<ApprovalsPage />);
+
+    await approveRow(user, "gc-1");
+
+    await waitFor(() => expect(approvals).toHaveLength(1));
+    expect(approvals[0]).toEqual({ decision: { verdict: "APPROVED", pauseId: "1782900000000" } });
+  });
+
+  it("refuses a group-row approval once the discussion paused again", async () => {
+    serveGroupQueue();
+    serveGroupStatus({ pausedAt: "2026-07-01T10:03:00.000Z", pauseType: "TASK" });
+    const approvals = recordGroupApprovals();
+    const user = userEvent.setup();
+    renderWithProviders(<ApprovalsPage />);
+
+    await approveRow(user, "gc-1");
+
+    await waitFor(() =>
+      expect(toastMock.error).toHaveBeenCalledWith(expect.stringMatching(/changed since you opened it/)),
+    );
+    expect(approvals).toEqual([]);
+  });
+
+  it("reads the group approve's wrong-state 409 as a changed request and refreshes the group queue", async () => {
+    let listReads = 0;
+    serveGroupQueue(() => listReads++);
+    serveGroupStatus({ pausedAt: groupPause.pausedAt, pauseType: "PHASE", pauseId: "1" });
+    server.use(
+      http.post("*/groups/:groupId/conversations/:gcId/approve", () =>
+        new HttpResponse(
+          "Group conversation is not awaiting approval — it may have been resolved, cancelled, or timed out already.",
+          { status: 409, headers: { "Content-Type": "text/plain" } },
+        ),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<ApprovalsPage />);
+    await screen.findByTestId("approve-gc-1");
+    const before = listReads;
+
+    await approveRow(user, "gc-1");
+
+    await waitFor(() =>
+      expect(toastMock.error).toHaveBeenCalledWith(expect.stringMatching(/changed since you opened it/)),
+    );
+    await waitFor(() => expect(listReads).toBeGreaterThan(before));
+  });
+});
+
 describe("per-row pending state", () => {
   it("keeps a row disabled while its own decision is in flight, even after another row is decided", async () => {
     let releaseFirst: () => void = () => {};
