@@ -470,6 +470,40 @@ primary    → NUMBER | FUNCTION '(' args ')' | '(' expression ')' | CONSTANT
 
 ---
 
+## Runtime Template Engine
+
+**Applies to:** every Qute template EDDI renders at runtime — system prompts, output texts and quick replies, httpcall URLs/headers/bodies, property instructions, MCP tool arguments, group-discussion prompts and the template preview endpoint.
+
+### Templates are author text; data is never a template
+
+A template string comes from agent configuration. Everything that reaches a template at render time — the user's message, conversation properties, context, API and MCP responses, model output — is **data**: it is substituted into the template and written out literally, whatever braces it contains. EDDI keeps that boundary in three places where it used to be crossed:
+
+- **Property instructions.** A value read through `fromObjectPath` (in `property.json`, and in the `postResponse.propertyInstructions` of httpcalls, LLM and MCP tasks) is stored exactly as found. Only `valueString` and the property `name` are rendered as templates. A configuration that relied on a navigated value being rendered a second time no longer gets that; write the template in `valueString` instead.
+- **Output built from a response.** Output and quick replies that a `postResponse` builds (`outputBuildInstructions`, `qrBuildInstructions`) are rendered once — the author's `outputValue` with the response substituted — and marked as already rendered. The templating task (`eddi://ai.labs.templating`) leaves them alone; output authored in an output configuration is rendered as before.
+- **Generated agents.** The system prompt a model chooses for a sub-agent (`create_sub_agent`) is stored inside a Qute unparsed block, so the new agent receives exactly the text the model wrote. Parameter names from an OpenAPI specification (MCP API tools, the setup wizard) are reduced to plain identifiers (`[A-Za-z_][A-Za-z0-9_]*`, e.g. `pet-id` → `pet_id`) before they become `{...}` placeholders.
+
+### A restricted engine
+
+Runtime templates are **not** rendered by the Qute engine Quarkus injects — that engine is built for an application's own, build-time-checked templates. `RuntimeTemplateEngineFactory` builds a separate engine from it, through allow-lists:
+
+| Feature | Runtime templates |
+|---|---|
+| Namespaces | `vault`, `eddivault`, `connection`, `vars`, `caller` (pass-through references), `uuidUtils`, `json`, `encoder` (EDDI extensions), `str`, `time` (Qute helpers). **`config:`, `inject:` and `cdi:` resolve to nothing**, so they cannot read configuration, environment variables or beans |
+| Sections | `{#if}`, `{#for}`/`{#each}`, `{#let}`/`{#set}`, `{#with}`, `{#when}`/`{#switch}`. No `{#include}`, `{#insert}`, `{#eval}`, `{#fragment}`, `{#cache}` or user tags; `str:eval` is removed |
+| Object access | Maps, lists and EDDI's string methods as before. On other objects only properties are read — record components, public no-argument getters (`getX`/`isX`/`hasX`) and public fields. Methods with arguments and non-getter methods are never invoked, and reflection-sensitive types (`Class`, class loaders, threads, `java.lang.reflect`, …) are never reachable |
+| Missing values | Always render as an empty string (never `NOT_FOUND`), independent of `quarkus.qute.property-not-found-strategy` |
+
+### Render limits
+
+| Property | Default | Bounds |
+|---|---|---|
+| `eddi.templating.max-output-chars` | `2000000` | Characters one render may produce, and the length of any single string an expression evaluates to while rendering |
+| `eddi.templating.max-iterations` | `100000` | Loop iterations per render, summed over all (nested) loops; an iterable larger than this is rejected before the loop starts |
+
+A render that exceeds a limit fails like any other malformed template: the output path substitutes an empty string and logs it, and every other caller handles it exactly as it handles a template syntax error. `0` disables a limit — only do that for a deployment whose agent configurations are fully trusted.
+
+---
+
 ## Tool Execution Pipeline
 
 All tool invocations — both built-in and HTTP-call-based — are routed through `ToolExecutionService.executeToolWrapped()`. This ensures consistent security and operational controls:

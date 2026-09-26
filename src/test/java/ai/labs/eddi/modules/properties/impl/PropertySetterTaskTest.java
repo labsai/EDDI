@@ -502,7 +502,7 @@ class PropertySetterTaskTest {
         }
 
         @Test
-        @DisplayName("fromObjectPath with String value — templates and stores as Property")
+        @DisplayName("fromObjectPath with String value — stores verbatim as Property")
         void fromObjectPathStringValue() throws Exception {
             var memory = mock(IConversationMemory.class);
             var currentStep = mock(IWritableConversationStep.class);

@@ -14,6 +14,7 @@ import ai.labs.eddi.engine.setup.AgentSetupService;
 import ai.labs.eddi.engine.setup.AgentSetupService.AgentSetupException;
 import ai.labs.eddi.engine.setup.SetupAgentRequest;
 import ai.labs.eddi.engine.setup.SetupResult;
+import ai.labs.eddi.modules.templating.TemplateEscaping;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import jakarta.enterprise.inject.Vetoed;
@@ -241,9 +242,14 @@ public class CreateSubAgentTool {
 
             // --- Build and execute setup ---
             String prefixedName = parentAgentId + "/" + name.trim();
+            // The prompt is the MODEL's text, not an author's: the stored system
+            // message is rendered as a Qute template on every turn of the new agent,
+            // so any template syntax in it — put there by the model, or by whatever
+            // injected the model — would be evaluated. An unparsed block keeps it
+            // literal; the rendered prompt is byte-identical to what the model wrote.
             SetupAgentRequest request = new SetupAgentRequest(
                     prefixedName,
-                    systemPrompt,
+                    TemplateEscaping.unparsedBlock(systemPrompt),
                     resolvedProvider,
                     resolvedModel,
                     inheritedApiKey, // the parent's vault reference, or null if it has none

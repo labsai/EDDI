@@ -109,14 +109,19 @@ public class PrePostUtils {
                     Property.Scope scope = propertyInstruction.getScope();
                     Object propertyValue;
                     try {
-                        if (!isNullOrEmpty(path)) {
+                        // Only the author-written valueString is a template. A value reached
+                        // through fromObjectPath is DATA — an API response, a model's reply, an
+                        // MCP tool result — and rendering it would evaluate whatever template
+                        // syntax that upstream content carries.
+                        boolean fromPath = !isNullOrEmpty(path);
+                        if (fromPath) {
                             propertyValue = PathNavigator.getValue(path, templateDataObjects);
                         } else {
                             propertyValue = propertyInstruction.getValueString();
                         }
 
                         if (!isNullOrEmpty(propertyValue) && propertyValue instanceof String propertyValueString) {
-                            var value = templateValues(propertyValueString, templateDataObjects);
+                            var value = fromPath ? propertyValueString : templateValues(propertyValueString, templateDataObjects);
                             var valueTrimmed = value.trim();
                             if (propertyInstruction.getConvertToObject() && valueTrimmed.startsWith("{") && valueTrimmed.endsWith("}")) {
                                 try {

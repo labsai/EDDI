@@ -94,7 +94,10 @@ public class OutputTemplateTask implements ILifecycleTask {
         outputDataList.forEach(output -> {
             String outputKey = output.getKey();
             TemplateMode templateMode = resolveTemplateMode(outputKey);
-            if (templateMode == null) {
+            if (templateMode == null || output.isPreRendered()) {
+                // Pre-rendered entries are data that was already rendered once (e.g. a
+                // postResponse's output built from an API response). A second render
+                // would evaluate template syntax that arrived inside that data.
                 return;
             }
 
@@ -174,6 +177,9 @@ public class OutputTemplateTask implements ILifecycleTask {
     private void templatingQuickReplies(IWritableConversationStep currentStep, List<IData<List<QuickReply>>> quickReplyDataList,
                                         Map<String, Object> contextMap) {
         quickReplyDataList.forEach(quickReplyData -> {
+            if (quickReplyData.isPreRendered()) {
+                return;
+            }
             var preTemplating = quickReplyData.getResult();
             var templating = templatingFunction(contextMap, TemplateMode.TEXT, quickReplyData.getKey());
             var postTemplating = copyQuickReplies(preTemplating).stream().map(quickReply -> {

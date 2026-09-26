@@ -185,9 +185,12 @@ public class PropertySetterTask implements ILifecycleTask {
                                     templatedObj = PathNavigator.getValue(fromObjectPath, templateDataObjects);
                                     if (!isNullOrEmpty(toObjectPath)) {
                                         PathNavigator.setValue(toObjectPath, templateDataObjects, templatedObj);
-                                    } else if (templatedObj instanceof String) {
-                                        templateString = templatingEngine.processTemplate(templatedObj.toString(), templateDataObjects);
-                                        conversationProperties.put(name, new Property(name, templateString, scope));
+                                    } else if (templatedObj instanceof String valueFromPath) {
+                                        // A value reached through fromObjectPath is DATA — typically
+                                        // the user's own message — and is stored as it is. Rendering it
+                                        // would evaluate whatever template syntax it carries; only
+                                        // author-written fields (valueString, name) are templates.
+                                        conversationProperties.put(name, new Property(name, valueFromPath, scope));
                                     } else if (templatedObj instanceof Map<?, ?>) {
                                         @SuppressWarnings("unchecked")
                                         var valueMap = (Map<String, Object>) templatedObj;
