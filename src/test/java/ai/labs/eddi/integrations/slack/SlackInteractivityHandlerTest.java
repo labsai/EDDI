@@ -5,19 +5,29 @@
 package ai.labs.eddi.integrations.slack;
 
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
+import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
 import ai.labs.eddi.engine.internal.GroupApprovalRequest;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
+import ai.labs.eddi.integrations.slack.hitl.ISlackApprovalRecordStore;
+import ai.labs.eddi.integrations.slack.hitl.ISlackApprovalRecordStore.SlackApprovalRecord;
+import ai.labs.eddi.integrations.slack.hitl.InMemorySlackApprovalRecordStore;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.HashMap;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -33,11 +43,14 @@ import static org.mockito.Mockito.*;
 class SlackInteractivityHandlerTest {
 
     private static final String INT_NAME = "acme-int";
+    private static final Instant PAUSED_AT = Instant.parse("2026-09-01T10:00:00Z");
+    private static final String GROUP_SUBJECT = SlackHitlSupport.GROUP_VALUE_PREFIX + "gc-7";
 
     private ChannelTargetRouter router;
     private IConversationService conversationService;
     private IGroupConversationService groupConversationService;
     private SlackWebApiClient slackApi;
+    private InMemorySlackApprovalRecordStore approvalRecords;
     private SlackInteractivityHandler handler;
 
     @BeforeEach
@@ -46,8 +59,41 @@ class SlackInteractivityHandlerTest {
         conversationService = mock(IConversationService.class);
         groupConversationService = mock(IGroupConversationService.class);
         slackApi = mock(SlackWebApiClient.class);
+        approvalRecords = new InMemorySlackApprovalRecordStore();
         handler = new SlackInteractivityHandler(router, conversationService,
-                groupConversationService, slackApi, new ObjectMapper());
+                groupConversationService, slackApi, new ObjectMapper(), approvalRecords);
+        // Default fixture: both subjects are paused, and INT_NAME posted a card for
+        // exactly that pause — the state a genuine button click arrives in.
+        notified(INT_NAME, "conv-1", PAUSED_AT);
+        notified(INT_NAME, GROUP_SUBJECT, PAUSED_AT);
+        conversationPausedAt("conv-1", PAUSED_AT);
+        groupPausedAt("gc-7", PAUSED_AT);
+    }
+
+    private void notified(String integrationName, String subject, Instant pausedAt) {
+        approvalRecords.tryRecord(integrationName, subject, ISlackApprovalRecordStore.pauseEpochOf(pausedAt), "C_APPROVAL");
+    }
+
+    private void conversationPausedAt(String conversationId, Instant pausedAt) {
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setConversationState(ConversationState.AWAITING_HUMAN);
+        snapshot.setHitlPausedAt(pausedAt);
+        try {
+            when(conversationService.getConversationMemorySnapshot(conversationId)).thenReturn(snapshot);
+        } catch (Exception e) {
+            throw new AssertionError(e);
+        }
+    }
+
+    private void groupPausedAt(String groupConversationId, Instant pausedAt) {
+        var gc = new GroupConversation();
+        gc.setState(GroupConversationState.AWAITING_APPROVAL);
+        gc.setPausedAt(pausedAt);
+        try {
+            when(groupConversationService.readGroupConversation(groupConversationId)).thenReturn(gc);
+        } catch (Exception e) {
+            throw new AssertionError(e);
+        }
     }
 
     private ChannelIntegrationConfiguration integrationWith(String name, String approverIds, String signingSecret) {
@@ -267,6 +313,147 @@ class SlackInteractivityHandlerTest {
 
         verify(slackApi).updateMessage(anyString(), eq("C_APPROVAL"), anyString(),
                 contains("already been resolved"), any());
+    }
+
+    // ─── Subject binding: the decision must name a subject THIS integration
+    // posted a card for, for the pause it is in now ───
+
+    @Test
+    void subjectNeverNotified_isRefused() throws Exception {
+        bindIntegration(integrationWith(INT_NAME, "U_APPROVER", "s"));
+        conversationPausedAt("conv-foreign", PAUSED_AT);
+
+        // A signed, authorized click whose value names a paused conversation this
+        // integration never posted a card for — e.g. an edited button value.
+        handler.handlePayload(approvePayload("U_APPROVER", value("conv-foreign")));
+
+        verify(conversationService, never()).resumeConversation(any(), any(), any());
+        verify(slackApi, never()).updateMessage(anyString(), anyString(), anyString(), anyString(), any());
+    }
+
+    @Test
+    void subjectNotifiedByAnotherIntegration_isRefused() throws Exception {
+        bindIntegration(integrationWith(INT_NAME, "U_APPROVER", "s"));
+        notified("other-int", "conv-other", PAUSED_AT);
+        conversationPausedAt("conv-other", PAUSED_AT);
+
+        handler.handlePayload(approvePayload("U_APPROVER", value("conv-other")));
+
+        verify(conversationService, never()).resumeConversation(any(), any(), any());
+    }
+
+    @Test
+    void cardFromEarlierPause_doesNotResolveTheCurrentOne() throws Exception {
+        bindIntegration(integrationWith(INT_NAME, "U_APPROVER", "s"));
+        // conv-1 was resumed and paused again: the old card must not approve the
+        // new pause.
+        conversationPausedAt("conv-1", PAUSED_AT.plusSeconds(60));
+
+        handler.handlePayload(approvePayload("U_APPROVER", value("conv-1")));
+
+        verify(conversationService, never()).resumeConversation(any(), any(), any());
+        verify(slackApi).updateMessage(anyString(), eq("C_APPROVAL"), anyString(),
+                contains("already been resolved"), any());
+    }
+
+    @Test
+    void subjectNoLongerPaused_isMarkedResolvedWithoutResuming() throws Exception {
+        bindIntegration(integrationWith(INT_NAME, "U_APPROVER", "s"));
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setConversationState(ConversationState.READY);
+        when(conversationService.getConversationMemorySnapshot("conv-1")).thenReturn(snapshot);
+
+        handler.handlePayload(approvePayload("U_APPROVER", value("conv-1")));
+
+        verify(conversationService, never()).resumeConversation(any(), any(), any());
+        verify(slackApi).updateMessage(anyString(), eq("C_APPROVAL"), anyString(),
+                contains("already been resolved"), any());
+    }
+
+    @Test
+    void unknownPauseRecord_matchesOnlyAPauseThatBeganBeforeIt() throws Exception {
+        bindIntegration(integrationWith(INT_NAME, "U_APPROVER", "s"));
+        Instant now = Instant.now();
+        // Card posted before the bookmark was readable: no pause epoch, written now.
+        approvalRecords.put(new SlackApprovalRecord(INT_NAME, "conv-2", ISlackApprovalRecordStore.UNKNOWN_PAUSE,
+                "C_APPROVAL", now, now.plus(Duration.ofDays(1))));
+
+        // A pause that began after the card was written cannot be the one it was for.
+        conversationPausedAt("conv-2", now.plusSeconds(30));
+        handler.handlePayload(approvePayload("U_APPROVER", value("conv-2")));
+        verify(conversationService, never()).resumeConversation(eq("conv-2"), any(), any());
+
+        // The pause that was already running when the card was posted is.
+        conversationPausedAt("conv-2", now.minusMillis(200));
+        handler.handlePayload(approvePayload("U_APPROVER", value("conv-2")));
+        verify(conversationService).resumeConversation(eq("conv-2"), any(), isNull());
+    }
+
+    @Test
+    void expiredRecord_isRefused() throws Exception {
+        bindIntegration(integrationWith(INT_NAME, "U_APPROVER", "s"));
+        Instant longAgo = PAUSED_AT.minus(Duration.ofDays(60));
+        approvalRecords.put(new SlackApprovalRecord(INT_NAME, "conv-3", ISlackApprovalRecordStore.pauseEpochOf(longAgo),
+                "C_APPROVAL", longAgo, longAgo.plus(Duration.ofDays(30))));
+        conversationPausedAt("conv-3", longAgo);
+
+        handler.handlePayload(approvePayload("U_APPROVER", value("conv-3")));
+
+        verify(conversationService, never()).resumeConversation(any(), any(), any());
+    }
+
+    @Test
+    void recordStoreFailure_failsClosed() throws Exception {
+        var failing = mock(ISlackApprovalRecordStore.class);
+        when(failing.findBySubject(any(), any())).thenThrow(new IllegalStateException("db down"));
+        var failingHandler = new SlackInteractivityHandler(router, conversationService,
+                groupConversationService, slackApi, new ObjectMapper(), failing);
+        bindIntegration(integrationWith(INT_NAME, "U_APPROVER", "s"));
+
+        failingHandler.handlePayload(approvePayload("U_APPROVER", value("conv-1")));
+
+        verify(conversationService, never()).resumeConversation(any(), any(), any());
+        // The card is left intact so the approver can retry.
+        verify(slackApi, never()).updateMessage(anyString(), anyString(), anyString(), anyString(), any());
+    }
+
+    @Test
+    void groupNeverNotified_isRefused() throws Exception {
+        bindIntegration(integrationWith(INT_NAME, "U_APPROVER", "s"));
+        groupPausedAt("gc-foreign", PAUSED_AT);
+
+        handler.handlePayload(approvePayload("U_APPROVER",
+                value(SlackHitlSupport.GROUP_VALUE_PREFIX + "gc-foreign")));
+
+        verify(groupConversationService, never()).resumeDiscussion(any(), any(), any());
+    }
+
+    @Test
+    void groupCardFromEarlierPause_isRefused() throws Exception {
+        bindIntegration(integrationWith(INT_NAME, "U_APPROVER", "s"));
+        groupPausedAt("gc-7", PAUSED_AT.plusSeconds(5));
+
+        handler.handlePayload(approvePayload("U_APPROVER", value(GROUP_SUBJECT)));
+
+        verify(groupConversationService, never()).resumeDiscussion(any(), any(), any());
+        verify(slackApi).updateMessage(anyString(), eq("C_APPROVAL"), anyString(),
+                contains("already been resolved"), any());
+    }
+
+    @Test
+    void matchesPause_exactEpochOrUnknownWrittenAfterPause() {
+        var exact = new SlackApprovalRecord(INT_NAME, "c", ISlackApprovalRecordStore.pauseEpochOf(PAUSED_AT), null,
+                PAUSED_AT, PAUSED_AT.plusSeconds(10));
+        assertTrue(exact.matchesPause(PAUSED_AT));
+        assertFalse(exact.matchesPause(PAUSED_AT.plusMillis(1)));
+        assertFalse(exact.matchesPause(null));
+
+        var unknown = new SlackApprovalRecord(INT_NAME, "c", ISlackApprovalRecordStore.UNKNOWN_PAUSE, null,
+                PAUSED_AT, PAUSED_AT.plusSeconds(10));
+        assertTrue(unknown.matchesPause(PAUSED_AT));
+        assertTrue(unknown.matchesPause(PAUSED_AT.minusSeconds(1)));
+        assertFalse(unknown.matchesPause(PAUSED_AT.plusSeconds(1)));
+        assertEquals(List.of(), approvalRecords.findBySubject(INT_NAME, "nothing"));
     }
 
     // ─── Ignored payloads ───

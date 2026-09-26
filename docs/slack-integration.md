@@ -191,8 +191,18 @@ ChannelTargetRouter (60s cache refresh)
   └─ allSigningSecrets set (for webhook verification)
         │
         ├──→ RestSlackWebhook: verify(signature, allSigningSecrets)
+        │      then verify(signature, secret of the integration that owns event.channel)
         └──→ SlackEventHandler: postMessage(resolvedBotToken, ...)
 ```
+
+**Signatures are bound to the channel's owner.** The pooled check only proves that
+*some* configured Slack app signed the request. Once the body is parsed, an event
+for a configured channel must also verify against the signing secret of the
+integration (or legacy connector) that owns that channel, otherwise it is rejected
+with HTTP 403 — so the holder of one integration's secret cannot drive another
+integration's agents. An owned channel whose owner has no signing secret is
+rejected rather than re-admitted through the pool. An event in a channel nobody
+owns (a DM) is attributed to the integration whose secret actually signed it.
 
 ---
 
@@ -216,7 +226,7 @@ Send a message directly to the bot — no @mention needed:
 Hello, what can you do?
 ```
 
-DMs are automatically routed to the default agent from any configured Slack integration. Since DM channel IDs are dynamic (unique per user-bot pair), they don't need explicit channel configuration — EDDI resolves to the first available Slack integration's default target.
+DMs are automatically routed to the default agent of the Slack integration whose signing secret signed the event — i.e. the Slack app the user DMed. Since DM channel IDs are dynamic (unique per user-bot pair), they don't need explicit channel configuration. (Only when a legacy per-agent connector signed the DM does EDDI fall back to the first available integration's default target.)
 
 > **Note**: DMs use `message.im` events (Slack does not fire `app_mention` in DMs). Make sure `message.im` is subscribed in your Slack app's event settings.
 
@@ -438,7 +448,36 @@ Agent responses often contain standard Markdown. The `SlackWebApiClient` automat
 
 ### Multi-Workspace Support
 
-Each `ChannelIntegrationConfiguration` can use different bot tokens and signing secrets, allowing a single EDDI instance to serve multiple Slack workspaces. The `ChannelTargetRouter` caches all credentials and the `SlackSignatureVerifier` tries all known signing secrets during webhook verification.
+Each `ChannelIntegrationConfiguration` can use different bot tokens and signing secrets, allowing a single EDDI instance to serve multiple Slack workspaces. The `ChannelTargetRouter` caches all credentials; the webhook first checks the signature against all known signing secrets, then against the secret of the integration that owns the event's channel.
+
+### Slack User Identity
+
+A Slack user is stored in EDDI as `slack:<team_id>:<user_id>` (for example
+`slack:T024BE7LD:U0ALICE`) — the id that owns their conversations, long-term
+memories and GDPR records. Earlier releases used the raw Slack user id
+(`U0ALICE`), which shares a namespace with OIDC principals and REST callers: a
+Keycloak user whose principal equalled a Slack id shared that Slack user's
+memories and passed ownership checks on their conversations. Slack ids are also
+only unique per workspace.
+
+Data stored under the raw id keeps working, without a migration step:
+
+- **Ongoing threads** — the thread's conversation mapping is found under the raw
+  id, re-keyed to the namespaced id, and the thread keeps its conversation. That
+  conversation still carries the raw id as its owner (it is not rewritten), so it
+  keeps loading the memories it always did.
+- **New conversations** — before one starts, long-term memory entries stored
+  under the raw id are **moved** to the namespaced id, so the new conversation
+  still remembers them. Only ids shaped like a Slack user id (`U…`/`W…`) are
+  migrated; if the namespaced identity already holds an entry for the same key
+  and agent, it wins and the legacy copy is dropped. A still-running legacy
+  conversation that writes under the raw id later is picked up by the next new
+  conversation.
+
+For **GDPR erasure or export** of a Slack user, address the namespaced id; until
+their legacy conversations have ended, also address the raw id. Group
+discussions started from Slack are owned by the namespaced id. The audit label
+`decidedBy: slack:<userId>` for Slack HITL decisions is unchanged.
 
 ### Retry Logic
 
@@ -593,7 +632,7 @@ During a multi-agent group discussion, individual Slack post failures do **not**
 | `message.im` subscribed? | Add `message.im` to Bot Events in Slack app settings |
 | `im:history` scope? | Add `im:history` to Bot Token Scopes and reinstall the app |
 | `im:write` scope? | Add `im:write` to Bot Token Scopes and reinstall the app |
-| Any Slack integration configured? | DMs fall back to the first available Slack integration's default target |
+| Any Slack integration configured? | DMs route to the default target of the integration whose signing secret signed them |
 
 ### Signature verification fails (HTTP 403)
 
@@ -603,6 +642,7 @@ During a multi-agent group discussion, individual Slack post failures do **not**
 | Clock drift? | Timestamp validation uses 5-minute window — sync clocks |
 | Reverse proxy stripping body? | The raw body must reach EDDI unchanged for HMAC verification |
 | No agents configured? | At least one deployed agent must have a Slack integration with `signingSecret` |
+| Event in a configured channel? | It must be signed with **that channel's** integration secret. Two integrations on the same channel id, or a channel configured under a different Slack app than the one sending the events, are rejected — the log reads "not signed by the integration that owns it" |
 
 ### Messages appear duplicated
 

@@ -37,8 +37,13 @@ import java.util.Set;
  * are delegated to {@link SlackEventHandler} for async processing.</li>
  * </ul>
  * <p>
- * Signing secrets are resolved from {@link ChannelTargetRouter}. The verifier
- * tries all known secrets (supporting multi-workspace deployments).
+ * Signing secrets are resolved from {@link ChannelTargetRouter}. Verification
+ * is two-stage: the pooled set of all known secrets first rejects anything no
+ * configured app signed, then — once the event's channel has been read — the
+ * signature must match the secret of the integration that OWNS that channel. A
+ * holder of one integration's secret therefore cannot drive another
+ * integration's channel. An event whose channel nobody owns (a DM) is routed to
+ * the integration whose secret actually signed it.
  * <p>
  * Critical: Slack expects HTTP 200 within 3 seconds. This endpoint responds
  * immediately and processes events asynchronously.
@@ -52,6 +57,7 @@ import java.util.Set;
 public class RestSlackWebhook {
 
     private static final Logger LOGGER = Logger.getLogger(RestSlackWebhook.class);
+    private static final String CHANNEL_TYPE_SLACK = "slack";
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
 
@@ -125,8 +131,20 @@ public class RestSlackWebhook {
                     String eventType = (String) event.get("type");
                     LOGGER.debugf("Slack event received: type=%s, event_id=%s", sanitize(eventType), sanitize(eventId));
 
+                    // Step 3a: bind the signature to the integration that owns the
+                    // routed channel (or, for an unowned channel, find which one
+                    // signed it).
+                    var origin = verifyOrigin(event, rawBody, signature, timestamp);
+                    if (origin == null) {
+                        return Response.status(Response.Status.FORBIDDEN)
+                                .entity("{\"error\":\"Invalid signature\"}")
+                                .build();
+                    }
+
                     // Delegate to handler (async — returns immediately)
-                    eventHandler.handleEventAsync(eventId, event, botUserId(payload));
+                    eventHandler.handleEventAsync(eventId, event, botUserId(payload),
+                            new SlackEventHandler.EventOrigin(stringOrNull(payload.get("team_id")),
+                                    origin.signingIntegrationName()));
                 }
             }
 
@@ -139,6 +157,64 @@ public class RestSlackWebhook {
                     .entity("{\"error\":\"Invalid payload\"}")
                     .build();
         }
+    }
+
+    /**
+     * What the second verification stage established about an event.
+     *
+     * @param signingIntegrationName
+     *            for an event in a channel nobody owns, the integration whose
+     *            secret signed it ({@code null} for a legacy connector, or when the
+     *            channel is owned and routing goes by channel)
+     */
+    private record VerifiedOrigin(String signingIntegrationName) {
+    }
+
+    /**
+     * Second verification stage, after the pooled check: bind the signature to the
+     * event's channel.
+     * <ul>
+     * <li>A channel owned by an integration (or legacy connector) must be signed
+     * with THAT owner's secret. An owner with no secret cannot be verified and is
+     * refused — never re-admitted through the pool.</li>
+     * <li>A channel nobody owns — a DM, whose D-prefixed id is never configured —
+     * is attributed to the integration whose secret signed it, and the handler
+     * routes the DM to that integration's default target.</li>
+     * </ul>
+     *
+     * @return the verified origin, or {@code null} to reject with 403
+     */
+    private VerifiedOrigin verifyOrigin(Map<String, Object> event, String rawBody, String signature,
+                                        String timestamp) {
+        String channel = stringOrNull(event.get("channel"));
+        if (channel == null) {
+            // Nothing channel-bound to act on: the handler drops events without a
+            // channel, so the pooled check is all there is to bind.
+            return new VerifiedOrigin(null);
+        }
+        if (channelTargetRouter.isChannelOwned(CHANNEL_TYPE_SLACK, channel)) {
+            var ownerSecret = channelTargetRouter.getSigningSecretForChannel(CHANNEL_TYPE_SLACK, channel);
+            if (ownerSecret.isEmpty()
+                    || !signatureVerifier.verifyWithSecret(timestamp, rawBody, signature, ownerSecret.get())) {
+                LOGGER.warnf("Slack event for channel %s was not signed by the integration that owns it — rejecting",
+                        sanitize(channel));
+                return null;
+            }
+            return new VerifiedOrigin(null);
+        }
+        for (var identity : channelTargetRouter.getSigningIdentities(CHANNEL_TYPE_SLACK)) {
+            if (signatureVerifier.verifyWithSecret(timestamp, rawBody, signature, identity.signingSecret())) {
+                return new VerifiedOrigin(identity.integrationName());
+            }
+        }
+        // The pooled check passed a moment ago, so this is a refresh racing the
+        // request. Refuse rather than guess.
+        LOGGER.warnf("Slack event for unowned channel %s matched no signing identity — rejecting", sanitize(channel));
+        return null;
+    }
+
+    private static String stringOrNull(Object value) {
+        return value instanceof String s && !s.isBlank() ? s : null;
     }
 
     /**
