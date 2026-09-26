@@ -10,6 +10,7 @@ import org.apache.pdfbox.contentstream.operator.Operator;
 import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.io.MemoryUsageSetting;
 import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.encryption.InvalidPasswordException;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.apache.pdfbox.text.TextPosition;
@@ -40,8 +41,8 @@ import java.util.List;
  * figure.</li>
  * <li><b>Memory, per page.</b> Text is laid out a page at a time and a page's
  * glyphs are held until it is done. A page may claim millions of them, so the
- * count is capped a little above what the character budget could ever
- * keep.</li>
+ * count is capped a little above what the character budget could ever keep; a
+ * page stopped there still gives the text it laid out.</li>
  * <li><b>Time.</b> The page's program is checked against a deadline every few
  * hundred operators, so a page written to loop the parser ends with a message
  * rather than holding the ingestion worker indefinitely.</li>
@@ -129,23 +130,21 @@ public class PdfTextExtractor implements DocumentTextExtractor {
                 stripper.setStartPage(page);
                 stripper.setEndPage(page);
                 stripper.allowGlyphs(limits.maxCharacters() - markdown.length() + GLYPH_SLACK);
-                String text;
-                try {
-                    text = stripper.getText(document).strip();
-                } catch (PageTooLong e) {
-                    // Everything this page could contribute is past the character cap
-                    // anyway. Stop here with what the earlier pages gave.
+                String text = stripper.getText(document).strip();
+                if (!text.isEmpty()) {
+                    if (!markdown.isEmpty()) {
+                        markdown.append("\n\n");
+                    }
+                    markdown.append(text);
+                }
+                // An empty page is a scanned one with no text layer, skipped silently:
+                // a document of them produces nothing, which the caller reports as empty.
+                if (stripper.pageWasCut()) {
+                    // The page held more glyphs than the character cap could keep. What
+                    // it laid out before it was stopped is kept above; no later page is
+                    // read.
                     break;
                 }
-                if (text.isEmpty()) {
-                    // A scanned page with no text layer. Skipped silently: a document
-                    // of them produces nothing, which the caller reports as empty.
-                    continue;
-                }
-                if (!markdown.isEmpty()) {
-                    markdown.append("\n\n");
-                }
-                markdown.append(text);
             }
             return Extraction.capped(markdown.toString(), limits.maxCharacters());
         } catch (InvalidPasswordException e) {
@@ -166,6 +165,7 @@ public class PdfTextExtractor implements DocumentTextExtractor {
 
         private final Instant deadline;
         private long glyphsLeft;
+        private boolean pageWasCut;
         private int operatorsSinceCheck;
 
         BoundedTextStripper(Instant deadline) {
@@ -174,6 +174,34 @@ public class PdfTextExtractor implements DocumentTextExtractor {
 
         void allowGlyphs(long glyphs) {
             this.glyphsLeft = glyphs;
+            this.pageWasCut = false;
+        }
+
+        /** Whether the last page was stopped at its glyph allowance. */
+        boolean pageWasCut() {
+            return pageWasCut;
+        }
+
+        /**
+         * A page stopped at its glyph allowance still lays out the glyphs it gave
+         * before that. Dropping them made a readable PDF whose first page is dense — a
+         * small-font table, a large drawing — look like a scan with no text layer,
+         * since the upload probe allows only a few dozen characters.
+         *
+         * <p>
+         * {@link PDFTextStripper#processPage} is startPage, the page's program,
+         * writePage, endPage; the program is what {@link PageTooLong} leaves, so the
+         * remaining two are done here on what was collected.
+         */
+        @Override
+        public void processPage(PDPage page) throws IOException {
+            try {
+                super.processPage(page);
+            } catch (PageTooLong e) {
+                pageWasCut = true;
+                writePage();
+                endPage(page);
+            }
         }
 
         @Override

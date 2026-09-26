@@ -115,11 +115,13 @@ by one uploaded file. This fixes them. Every behaviour below is documented in
   reading it. The new `RequestBodyLimitGuard` holds every other endpoint to
   `eddi.http.limits.default-max-body-size` (default `25M`), raised automatically to fit an attachment
   at `eddi.attachments.max-size-bytes` base64-encoded (4/3 + 1 MB, about 27.7 MB for the default
-  20 MiB), so inline attachments and operators raising the attachment limit are not refused. A body
-  with no `Content-Length` (chunked, or HTTP/2 data without the header) is refused with 411 on every
-  endpoint but the upload — counting bytes as they arrive is not possible from a Vert.x filter,
-  because the REST layer replaces the request's data handler; `eddi.http.limits.refuse-unsized-bodies`
-  turns that off. Refusals send `Connection: close`. The upload exemption is matched below
+  20 MiB), so inline attachments and operators raising the attachment limit are not refused. A
+  chunked HTTP/1.1 body (no `Content-Length`) is refused with 411 on every endpoint but the upload —
+  counting bytes as they arrive is not possible from a Vert.x filter, because the REST layer replaces
+  the request's data handler; `eddi.http.limits.refuse-unsized-bodies` turns that off. An HTTP/2
+  request without a `content-length` is left to the global ceiling: a filter cannot tell it from a
+  request with no body. HTTP/1.x refusals send `Connection: close`; HTTP/2 ones do not, since HTTP/2
+  forbids the header. The upload exemption is matched below
   `quarkus.http.root-path`. A ZIP import is held to the same limit (as it was before 60M).
 - **U5 — concurrent uploads cannot overshoot the limits.** Each file is measured against a fresh
   listing under a per-source (striped) lock on this instance; across instances a new file that finds
@@ -128,6 +130,26 @@ by one uploaded file. This fixes them. Every behaviour below is documented in
   adding different files to a source with one slot left can both see it full and both refuse; the
   uploader retries. Identical bytes under one name, from two instances, into a full source, in the
   same instant, remain indistinguishable.
+### Review follow-ups
+
+- **A dense first page no longer reads as a scan.** A page stopped at its glyph allowance dropped the
+  text it had laid out. The upload probe asks for 64 characters, so the first page may lay out about
+  20,000 glyphs; a denser one (a small-font table, a large drawing) came back empty and the upload was
+  refused as "no text layer". `PdfTextExtractor`'s stripper now finishes such a page on what it
+  collected (`writePage` on the glyphs gathered before `PageTooLong`) and stops there.
+- **One dead link no longer blocks the orphan sweep for good.** `sweepOrphans` waited for a run with no
+  failure, and `failed` counts 404/410s and files with no text — definitive answers after which no old
+  chunk needs keeping. It now waits on the new `Collector.inconclusive`: content-unknown crawl errors,
+  embedding failures, and failed removals of an unreadable file's old chunks.
+- **A failure settling a source after a run still reports the run.** `cleanUpAfterRun` has its own
+  guard in the worker's `finally`, so `onFinished` — and with it a scheduled run's `FAILED` fire-log
+  entry — always runs.
+- **`RequestBodyLimitGuard` broke agent sync (Integration Tests: `AgentSyncIT`, five failures, 502).**
+  The JDK client sends its GETs to the other instance over h2c. The guard read "HTTP/2 and not yet
+  ended" as a body without a length, but a bodyless GET is not ended yet when a filter runs either, so
+  it answered 411 — with `Connection: close`, which HTTP/2 forbids, so the client discarded the
+  response as malformed. The HTTP/2 inference is gone, and the header is sent on HTTP/1.x only.
+
 ### Not in this branch
 
 - **R8** (redirect bodies in `SafeHttpClient`) belongs to `fix/outbound-http-hardening`, which closes
@@ -144,8 +166,9 @@ by one uploaded file. This fixes them. Every behaviour below is documented in
 - The budget relies on replacing entries in PDFBox's `FilterFactory` by reflection. A PDFBox upgrade
   that renames that field makes every PDF refused (loudly, with an ERROR at first use), never read
   unbounded; `DocumentExtractorsTest` fails in that case.
-- A body without a `Content-Length` is refused rather than counted; a client that cannot send one
-  needs `eddi.http.limits.refuse-unsized-bodies=false`, which leaves it to the global 60 MB.
+- A chunked body is refused rather than counted; a client that cannot send a length needs
+  `eddi.http.limits.refuse-unsized-bodies=false`, which leaves it to the global 60 MB. An HTTP/2 body
+  without a `content-length` is always bounded by that global 60 MB alone.
 - A run in flight when its source is removed can write one more document between the purge and its
   next ownership check; `cleanUpAfterRun` removes it once the run ends.
 

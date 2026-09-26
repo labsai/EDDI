@@ -184,7 +184,16 @@ public class RagSourceIngestionService {
                 report = IngestionReport.failed(runId, source.effectiveId(), "The run threw: " + t);
             } finally {
                 inFlight.remove(runId);
-                cleanUpAfterRun(ragConfigId, knowledgeBase, source);
+                try {
+                    cleanUpAfterRun(ragConfigId, knowledgeBase, source);
+                } catch (RuntimeException e) {
+                    // Its own guard: settling a source that changed under the run touches
+                    // the state store, and a failure there used to skip the report below
+                    // — so a scheduled run that failed left no FAILED entry in the fire
+                    // log, only a stack trace from a dead virtual thread.
+                    LOGGER.warnf(e, "Could not settle source '%s' after ingestion run %s",
+                            LogSanitizer.sanitize(source.getName()), LogSanitizer.sanitize(runId));
+                }
                 try {
                     onFinished.accept(report);
                 } catch (RuntimeException e) {

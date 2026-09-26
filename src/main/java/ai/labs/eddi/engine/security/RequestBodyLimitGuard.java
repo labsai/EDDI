@@ -8,6 +8,7 @@ import io.quarkus.runtime.configuration.MemorySize;
 import io.quarkus.vertx.http.runtime.filters.Filters;
 import io.vertx.core.http.HttpHeaders;
 import io.vertx.core.http.HttpServerRequest;
+import io.vertx.core.http.HttpServerResponse;
 import io.vertx.core.http.HttpVersion;
 import io.vertx.ext.web.RoutingContext;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -40,14 +41,21 @@ import java.util.regex.Pattern;
  *
  * <h2>Bodies without a length</h2>
  * <p>
- * A chunked request, or an HTTP/2 request that sends data without a
- * {@code content-length}, declares nothing to judge. Counting its bytes as they
+ * A chunked request declares nothing to judge. Counting its bytes as they
  * arrive is not possible from here: the REST layer installs its own handler on
- * the request later and would replace a counting one. So such a body is refused
- * with 411 on every endpoint but the upload, before any of it is read — JSON
- * clients and browsers send the length. {@code
+ * the request later and would replace a counting one. So a chunked HTTP/1.1
+ * body is refused with 411 on every endpoint but the upload, before any of it
+ * is read — JSON clients and browsers send the length. {@code
  * eddi.http.limits.refuse-unsized-bodies=false} turns that off for a client
  * that cannot, leaving those bodies to the global ceiling.
+ *
+ * <p>
+ * An HTTP/2 request without a {@code content-length} is left to the global
+ * ceiling as well. It cannot be told apart from one with no body here: a
+ * bodyless GET is not yet ended when a filter sees it either, so treating "not
+ * ended" as "a body is coming" refused ordinary reads — agent sync's GETs to
+ * another instance, which the JDK client sends over h2c, were refused, and the
+ * sync failed with 502.
  *
  * <p>
  * Every refusal closes the connection, so the server does not go on draining a
@@ -115,24 +123,29 @@ public class RequestBodyLimitGuard {
     }
 
     /**
-     * A body is on its way without a declared length: chunked on HTTP/1.1, or data
-     * still to come on HTTP/2, where a request with no body ends with its headers.
+     * A body is on its way without a declared length: chunked, which only HTTP/1.1
+     * has. Not "an HTTP/2 request that has not ended" — see the class comment.
      */
     private static boolean carriesUnsizedBody(HttpServerRequest request) {
-        if (request.getHeader(HttpHeaders.TRANSFER_ENCODING) != null) {
-            return true;
-        }
-        HttpVersion version = request.version();
-        return version != null && version != HttpVersion.HTTP_1_0 && version != HttpVersion.HTTP_1_1
-                && !request.isEnded();
+        return request.getHeader(HttpHeaders.TRANSFER_ENCODING) != null;
     }
 
     private static void refuse(RoutingContext context, int status, String message) {
-        context.response()
+        HttpServerResponse response = context.response()
                 .setStatusCode(status)
-                .putHeader(HttpHeaders.CONTENT_TYPE, "application/json")
-                .putHeader(HttpHeaders.CONNECTION, "close")
-                .end("{\"error\":\"" + message + "\"}");
+                .putHeader(HttpHeaders.CONTENT_TYPE, "application/json");
+        if (isHttp1(context.request().version())) {
+            // HTTP/2 forbids connection-specific headers (RFC 9113 §8.2.2), and a
+            // client that enforces it — the JDK's does — discards the whole response
+            // as malformed, so the refusal never reaches it. There the stream ends
+            // with the response; the connection is shared and stays.
+            response.putHeader(HttpHeaders.CONNECTION, "close");
+        }
+        response.end("{\"error\":\"" + message + "\"}");
+    }
+
+    private static boolean isHttp1(HttpVersion version) {
+        return version == HttpVersion.HTTP_1_0 || version == HttpVersion.HTTP_1_1;
     }
 
     private boolean mayCarryLargeBody(RoutingContext context) {
