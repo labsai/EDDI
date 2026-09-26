@@ -273,11 +273,15 @@ class ContextualToolsProvider implements ToolSourceProvider {
     }
 
     static List<String> resolveGroupIds(IConversationMemory memory, LiveDiscussionRegistry registry) {
+        // Exact-key lookups throughout (getData / getExactDataPerStep), never the
+        // prefix-matching getLatestData / getAllLatestData: those would also return a
+        // client-sent context:groupIdSuffix, which is not a reserved key and so
+        // survives the strip, as this conversation's group (CodeRabbit on PR #831).
         String contextKey = "context:" + ReservedContextKeys.GROUP_ID;
 
         var currentStep = memory.getCurrentStep();
         if (currentStep != null) {
-            String fromCurrent = contextValueAsString(currentStep.getLatestData(contextKey));
+            String fromCurrent = contextValueAsString(currentStep.getData(contextKey));
             if (fromCurrent != null) {
                 return List.of(fromCurrent);
             }
@@ -287,8 +291,8 @@ class ContextualToolsProvider implements ToolSourceProvider {
         if (registry == null || allSteps == null) {
             return List.of();
         }
-        List<IData<Object>> priorGroupIds = allSteps.getAllLatestData(contextKey);
-        List<IData<Object>> priorDiscussions = allSteps.getAllLatestData("context:" + ReservedContextKeys.GROUP_CONVERSATION_ID);
+        List<IData<Object>> priorGroupIds = allSteps.getExactDataPerStep(contextKey);
+        List<IData<Object>> priorDiscussions = allSteps.getExactDataPerStep("context:" + ReservedContextKeys.GROUP_CONVERSATION_ID);
         if (priorGroupIds == null || priorDiscussions == null || priorGroupIds.size() != priorDiscussions.size()) {
             return List.of();
         }

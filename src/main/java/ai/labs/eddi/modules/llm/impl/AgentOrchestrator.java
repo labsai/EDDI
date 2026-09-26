@@ -1178,13 +1178,13 @@ class AgentOrchestrator implements IAgentOrchestrator {
      * discussion. Read defensively — this runs on every turn, group or not, and a
      * malformed context value must not cost the agent its entire tool set.
      */
-    private static String groupConversationIdOf(IConversationMemory memory) {
+    static String groupConversationIdOf(IConversationMemory memory) {
         try {
             var currentStep = memory.getCurrentStep();
             if (currentStep == null) {
                 return null;
             }
-            var data = currentStep.getLatestData("context:" + ReservedContextKeys.GROUP_CONVERSATION_ID);
+            var data = currentStep.getData("context:" + ReservedContextKeys.GROUP_CONVERSATION_ID);
             if (data != null && data.getResult() instanceof Context ctx && ctx.getValue() != null) {
                 return String.valueOf(ctx.getValue());
             }

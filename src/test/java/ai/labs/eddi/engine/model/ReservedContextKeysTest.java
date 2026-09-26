@@ -10,8 +10,10 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
@@ -92,6 +94,68 @@ class ReservedContextKeysTest {
         assertTrue(ReservedContextKeys.isReserved("dynamicAgentConfig"));
         assertFalse(ReservedContextKeys.isReserved("lang"));
         assertFalse(ReservedContextKeys.isReserved(null));
+    }
+
+    /**
+     * Defence in depth for the prefix-matching step lookups (CodeRabbit on PR
+     * #831): a key that merely starts with a reserved name — {@code groupIdSuffix},
+     * {@code dynamicAgentConfigX}, {@code delegationDepthX} — is stored as
+     * {@code context:groupIdSuffix} and so on, which {@code getLatestData} on the
+     * reserved key would also return.
+     */
+    @Test
+    @DisplayName("keys that start with a reserved name are dropped too; a key that is only a prefix of one is kept")
+    void stripsKeysThatExtendAReservedName() {
+        Map<String, Context> input = new HashMap<>();
+        input.put("groupIdSuffix", text("another-teams-group"));
+        input.put("dynamicAgentConfigX", text("{}"));
+        input.put("delegationDepthX", text("0"));
+        input.put("dynamicCreatedAgentIdsX", text("victim"));
+        input.put("group", text("kept"));
+        input.put("lang", text("en"));
+
+        Map<String, Context> stripped = ReservedContextKeys.stripFromExternal(input, "test");
+
+        assertEquals(Set.of("group", "lang"), stripped.keySet());
+        assertTrue(ReservedContextKeys.shadowsReserved("groupConversationIdX"));
+        assertFalse(ReservedContextKeys.shadowsReserved("group"));
+        assertFalse(ReservedContextKeys.shadowsReserved(null));
+        assertFalse(ReservedContextKeys.isReserved("groupIdSuffix"), "isReserved stays exact");
+    }
+
+    /**
+     * Every reader of a reserved context key must look it up exactly. The step's
+     * {@code getLatestData} and the stack's {@code getAllLatestData} match by
+     * prefix, so a context-key read through either accepts a client-chosen
+     * extension of the name. {@code context:*} keys are client-writable, which
+     * makes a prefix read of one a bug even for keys that are not reserved today.
+     * Comment lines are skipped.
+     */
+    @Test
+    @DisplayName("no main source reads a context key through a prefix-matching lookup")
+    void noPrefixLookupOfAContextKey() throws IOException {
+        Pattern prefixRead = Pattern.compile("get(?:All)?LatestData\\(([^)]*)\\)");
+        List<String> offenders = new ArrayList<>();
+        List<Path> sources;
+        try (Stream<Path> walk = Files.walk(Path.of("src/main/java"))) {
+            sources = walk.filter(path -> path.toString().endsWith(".java")).toList();
+        }
+        for (Path source : sources) {
+            List<String> lines = Files.readAllLines(source);
+            for (int i = 0; i < lines.size(); i++) {
+                String line = lines.get(i).trim();
+                if (line.startsWith("*") || line.startsWith("//") || line.startsWith("/*")) {
+                    continue;
+                }
+                Matcher matcher = prefixRead.matcher(line);
+                while (matcher.find()) {
+                    if (matcher.group(1).toLowerCase(Locale.ROOT).contains("context")) {
+                        offenders.add(source + ":" + (i + 1) + ": " + line);
+                    }
+                }
+            }
+        }
+        assertTrue(offenders.isEmpty(), "use getData / getExactDataPerStep for context keys: " + offenders);
     }
 
     /**

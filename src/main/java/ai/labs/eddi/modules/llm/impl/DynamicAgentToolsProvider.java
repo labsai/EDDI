@@ -445,7 +445,15 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
         return collected;
     }
 
-    /** Context key {@code MemberTurnExecutor} injects the group's policy under. */
+    /**
+     * Context key {@code MemberTurnExecutor} injects the group's policy under.
+     * <p>
+     * Every reserved context key in this class is read with an exact-key lookup
+     * ({@code getData} / {@code getExactDataPerStep}). The prefix-matching
+     * {@code getLatestData} would also return a client-sent
+     * {@code context:dynamicAgentConfigX} — not a reserved key by name — and hand a
+     * standalone agent a group policy of the client's choosing.
+     */
     static final String CONTEXT_DYNAMIC_AGENT_CONFIG = "context:" + ReservedContextKeys.DYNAMIC_AGENT_CONFIG;
 
     /**
@@ -476,7 +484,7 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
         if (currentStep == null) {
             return false;
         }
-        var contextData = currentStep.getLatestData(CONTEXT_DYNAMIC_AGENT_CONFIG);
+        var contextData = currentStep.getData(CONTEXT_DYNAMIC_AGENT_CONFIG);
         return contextData != null && contextData.getResult() instanceof Context ctx && ctx.getValue() != null;
     }
 
@@ -522,7 +530,7 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
         if (currentStep == null) {
             return createDefaultDynamicConfig();
         }
-        var contextData = currentStep.getLatestData(CONTEXT_DYNAMIC_AGENT_CONFIG);
+        var contextData = currentStep.getData(CONTEXT_DYNAMIC_AGENT_CONFIG);
         if (contextData == null || !(contextData.getResult() instanceof Context ctx) || ctx.getValue() == null) {
             // No group context — a standalone agent whose operator whitelisted these
             // tools deliberately.
@@ -646,7 +654,7 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
 
         var currentStep = memory.getCurrentStep();
         if (currentStep != null) {
-            IData<Object> contextData = currentStep.getLatestData(CONTEXT_DYNAMIC_CREATED_AGENT_IDS);
+            IData<Object> contextData = currentStep.getData(CONTEXT_DYNAMIC_CREATED_AGENT_IDS);
             if (contextData != null && contextData.getResult() instanceof Context ctx) {
                 collectAgentIds(ctx.getValue(), seeded);
             }
@@ -729,7 +737,7 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
 
         var currentStep = memory.getCurrentStep();
         if (currentStep != null) {
-            Integer depth = parseDelegationDepth(currentStep.getLatestData(contextKey));
+            Integer depth = parseDelegationDepth(currentStep.getData(contextKey));
             if (depth != null) {
                 return depth;
             }
@@ -737,7 +745,7 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
 
         var allSteps = memory.getAllSteps();
         if (allSteps != null) {
-            List<IData<Object>> priorEntries = allSteps.getAllLatestData(contextKey);
+            List<IData<Object>> priorEntries = allSteps.getExactDataPerStep(contextKey);
             if (priorEntries != null) {
                 int deepest = 0;
                 for (IData<Object> entry : priorEntries) {
