@@ -37,8 +37,11 @@ import java.util.Optional;
  * <li>{@code eddi.self.base-url}, when set. Needed where loopback is genuinely
  * wrong — TLS terminated in-process, a sidecar that must be addressed by
  * service name, an in-cluster hostname a mesh requires.</li>
- * <li>Otherwise {@code http://127.0.0.1:${quarkus.http.port}} — the same
- * address
+ * <li>Otherwise {@code http://127.0.0.1:${quarkus.http.port}} when the HTTP
+ * listener binds a wildcard or loopback address (the default), and
+ * {@code http://${quarkus.http.host}:${quarkus.http.port}} when it binds one
+ * specific non-loopback address — see {@link #derivedBaseUrl}. The loopback
+ * form is the same address
  * {@link ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory} has
  * always used for EDDI's internal loopback hop, and the same one the
  * container's own health check probes. It is correct behind a reverse proxy and
@@ -70,7 +73,10 @@ public class SelfUrlResolver {
     /** {@link #source()} when {@link #CONFIG_KEY} supplied the value. */
     public static final String SOURCE_CONFIGURED = "configured";
 
-    /** {@link #source()} when the value was derived from the HTTP port. */
+    /**
+     * {@link #source()} when the value was derived from the HTTP listener — its
+     * port, and its bind address when that is one specific non-loopback host.
+     */
     public static final String SOURCE_LOOPBACK = "loopback";
 
     /**
@@ -95,8 +101,9 @@ public class SelfUrlResolver {
      */
     @Inject
     public SelfUrlResolver(@ConfigProperty(name = CONFIG_KEY) Optional<String> configuredBaseUrl,
-            @ConfigProperty(name = "quarkus.http.port", defaultValue = "7070") int httpPort) {
-        String loopback = httpPort > 0 ? "http://127.0.0.1:" + httpPort : null;
+            @ConfigProperty(name = "quarkus.http.port", defaultValue = "7070") int httpPort,
+            @ConfigProperty(name = "quarkus.http.host", defaultValue = "0.0.0.0") String httpHost) {
+        String loopback = httpPort > 0 ? derivedBaseUrl(httpHost, httpPort) : null;
         String candidate = configuredBaseUrl.map(String::trim).filter(value -> !value.isEmpty()).orElse(null);
         String resolved = loopback;
         String resolvedSource = loopback != null ? SOURCE_LOOPBACK : SOURCE_UNRESOLVED;
@@ -116,13 +123,52 @@ public class SelfUrlResolver {
                         + "this process can reach itself at.", CONFIG_KEY, candidate);
             }
         }
-        if (resolved == null) {
+        if (resolved == null && httpPort <= 0) {
             LOGGER.warnf("quarkus.http.port is %d (random), so this deployment's own address cannot be derived. "
                     + "Set %s for the Platform Operator's tools to have a target.", httpPort, CONFIG_KEY);
         }
         this.baseUrl = resolved;
         this.origin = resolved != null ? OriginMatcher.normalize(URI.create(resolved)) : null;
         this.source = resolvedSource;
+    }
+
+    /** As the injected constructor, for a listener bound to every interface. */
+    public SelfUrlResolver(Optional<String> configuredBaseUrl, int httpPort) {
+        this(configuredBaseUrl, httpPort, "0.0.0.0");
+    }
+
+    /**
+     * The address this process's own listener answers on.
+     * <p>
+     * {@code 127.0.0.1} is right whenever the listener binds a wildcard address
+     * (Quarkus' production default, {@code 0.0.0.0}) or loopback itself — and wrong
+     * when {@code quarkus.http.host} names one specific other address: then EDDI is
+     * not listening on {@code 127.0.0.1:port} at all, and whatever else is — a
+     * sidecar, another tenant's process on a shared host — would be treated as
+     * "this process" by {@link #isSelf}, and handed the caller's bearer token by
+     * {@code ${caller:token}}'s self release. So a specific bind address is used as
+     * the host instead, and a specific loopback address ({@code 127.0.0.5},
+     * {@code ::1}) is used verbatim rather than assumed to be {@code 127.0.0.1}.
+     *
+     * @return the derived base URL, or {@code null} when the bind address cannot
+     *         form one
+     */
+    static String derivedBaseUrl(String httpHost, int httpPort) {
+        String host = httpHost == null ? "" : httpHost.trim();
+        if (host.isEmpty() || host.equals("0.0.0.0") || host.equals("::") || host.equals("[::]") || host.equals("*")
+                || host.equalsIgnoreCase("localhost")) {
+            return "http://127.0.0.1:" + httpPort;
+        }
+        String bare = host.startsWith("[") && host.endsWith("]") ? host.substring(1, host.length() - 1) : host;
+        String authorityHost = bare.contains(":") ? "[" + bare + "]" : bare;
+        String candidate = "http://" + authorityHost + ":" + httpPort;
+        String normalized = normalize(candidate);
+        if (normalized == null) {
+            LOGGER.warnf("quarkus.http.host '%s' does not form a usable address, so this deployment's own address cannot be "
+                    + "derived. Set %s.", host, CONFIG_KEY);
+            return null;
+        }
+        return normalized;
     }
 
     /**
