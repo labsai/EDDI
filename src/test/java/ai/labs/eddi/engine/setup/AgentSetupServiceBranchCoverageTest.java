@@ -339,6 +339,33 @@ class AgentSetupServiceBranchCoverageTest {
             assertThrows(AgentSetupService.AgentSetupException.class, () -> service.setupAgent(req));
         }
 
+        /**
+         * gemini-vertex needs projectId and location, which the request cannot carry.
+         * Setup used to demand an API key it never writes, vault that key, and create
+         * an agent that fails on its first turn.
+         */
+        @Test
+        @DisplayName("gemini-vertex is refused before anything is vaulted or created")
+        void geminiVertexRefused() {
+            var req = new SetupAgentRequest("Agent", "prompt", " Gemini-Vertex ", "gemini-2.5-flash",
+                    "unused-key", null, null, null, null, null, null, null, null, null, null, null);
+            var ex = assertThrows(AgentSetupService.AgentSetupException.class, () -> service.setupAgent(req));
+            assertTrue(ex.getMessage().contains("projectId and location"), ex.getMessage());
+            verifyNoInteractions(secretProvider);
+            verifyNoInteractions(restInterfaceFactory);
+        }
+
+        @Test
+        @DisplayName("gemini-vertex is refused for an API agent too")
+        void geminiVertexRefusedForApiAgent() {
+            var req = new CreateApiAgentRequest("Agent", "prompt", "openapi: 3.0", "gemini-vertex", "gemini-2.5-flash",
+                    "unused-key", null, null, null, null, null, null, null, null, null, null, null, null, null);
+            var ex = assertThrows(AgentSetupService.AgentSetupException.class, () -> service.createApiAgent(req));
+            assertTrue(ex.getMessage().contains("projectId and location"), ex.getMessage());
+            verifyNoInteractions(secretProvider);
+            verifyNoInteractions(restInterfaceFactory);
+        }
+
         @Test
         @DisplayName("null system prompt throws")
         void nullSystemPrompt() {
