@@ -228,7 +228,7 @@ public final class StanceSummaryEngine {
     private static StanceResult summarize(GroupConversation gc, String agentId, List<TranscriptEntry> entries,
                                           int coverage, StanceSummaryConfig config,
                                           SummarizationService summarizationService, int maxChars) {
-        String content = renderForSummarizer(entries);
+        String content = renderForSummarizer(entries, config.maxInputChars(), config.maxEntryChars());
         if (content.isBlank()) {
             return null;
         }
@@ -385,27 +385,27 @@ public final class StanceSummaryEngine {
     }
 
     /**
-     * G3: the most one contribution contributes to summarizer input. A member's
-     * turn can be arbitrarily long (a task result, a pasted document); the stance
-     * is one sentence, and its lead paragraphs carry the position.
+     * G3 defaults for {@link StanceSummaryConfig#maxEntryChars()} and
+     * {@link StanceSummaryConfig#maxInputChars()}. The summarizer input used to be
+     * every contribution the member made this discussion, concatenated — growing
+     * with the discussion, re-sent at every boundary the member spoke at, and
+     * eventually past the summarizer's context window, where every call fails (and
+     * bills). The newest contributions are kept: a stance is where the member
+     * stands NOW.
      */
-    static final int MAX_SUMMARIZER_ENTRY_CHARS = 2_000;
+    static final int MAX_SUMMARIZER_ENTRY_CHARS = StanceSummaryConfig.DEFAULT_MAX_ENTRY_CHARS;
+    static final int MAX_SUMMARIZER_INPUT_CHARS = StanceSummaryConfig.DEFAULT_MAX_INPUT_CHARS;
 
-    /**
-     * G3: the whole summarizer input for one member. It used to be every
-     * contribution the member made this discussion, concatenated — growing with the
-     * discussion, re-sent at every boundary the member spoke at, and eventually
-     * past the summarizer's context window, where every call fails (and bills). The
-     * newest contributions are kept: a stance is where the member stands NOW.
-     */
-    static final int MAX_SUMMARIZER_INPUT_CHARS = 8_000;
+    static String renderForSummarizer(List<TranscriptEntry> entries) {
+        return renderForSummarizer(entries, MAX_SUMMARIZER_INPUT_CHARS, MAX_SUMMARIZER_ENTRY_CHARS);
+    }
 
     /**
      * Renders one member's contributions as summarizer input, newest last, bounded
-     * by {@link #MAX_SUMMARIZER_INPUT_CHARS} (oldest dropped first, with a marker
-     * saying how many) and {@link #MAX_SUMMARIZER_ENTRY_CHARS} per contribution.
+     * by {@code maxInputChars} (oldest dropped first, with a marker saying how
+     * many) and {@code maxEntryChars} per contribution.
      */
-    static String renderForSummarizer(List<TranscriptEntry> entries) {
+    static String renderForSummarizer(List<TranscriptEntry> entries, int maxInputChars, int maxEntryChars) {
         var blocks = new ArrayList<String>();
         int used = 0;
         int omitted = 0;
@@ -414,21 +414,21 @@ public final class StanceSummaryEngine {
             if (e.content() == null || e.content().isBlank()) {
                 continue;
             }
-            if (used >= MAX_SUMMARIZER_INPUT_CHARS) {
+            if (used >= maxInputChars) {
                 omitted++;
                 continue;
             }
             String content = e.content().strip();
-            if (content.length() > MAX_SUMMARIZER_ENTRY_CHARS) {
-                content = content.substring(0, MAX_SUMMARIZER_ENTRY_CHARS) + " […]";
+            if (content.length() > maxEntryChars) {
+                content = content.substring(0, maxEntryChars) + " […]";
             }
             String block = "[" + (e.phaseName() == null ? "" : e.phaseName()) + "] " + content;
-            int room = MAX_SUMMARIZER_INPUT_CHARS - used;
+            int room = maxInputChars - used;
             if (block.length() > room) {
                 if (room < 200) {
                     // Too little left for a meaningful slice — count it as omitted.
                     omitted++;
-                    used = MAX_SUMMARIZER_INPUT_CHARS;
+                    used = maxInputChars;
                     continue;
                 }
                 block = block.substring(0, room) + " […]";

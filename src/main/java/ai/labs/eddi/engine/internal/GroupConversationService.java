@@ -1079,7 +1079,8 @@ public class GroupConversationService implements IGroupConversationService {
                     // plumbing convergence uses. Applied BEFORE the persist below so
                     // the table and the turns that produced it share one write.
                     if (phase.type() == PhaseType.PROPOSAL || phase.type() == PhaseType.BARGAIN) {
-                        NegotiationEngine.applyRepeat(gc, repeatEntries, transcriptSizeBeforeRepeat, repeat);
+                        NegotiationEngine.applyRepeat(gc, repeatEntries, transcriptSizeBeforeRepeat, repeat,
+                                config.getNegotiationConfig());
                         if (phase.type() == PhaseType.BARGAIN
                                 && NegotiationEngine.checkAndRecordAgreement(gc, speakers, config.getModeratorAgentId(), phase.name())) {
                             outcome = PhaseOutcome.endRepeats("Unanimous acceptance — agreement reached");
