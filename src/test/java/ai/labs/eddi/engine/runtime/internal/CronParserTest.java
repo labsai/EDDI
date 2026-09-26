@@ -10,6 +10,8 @@ import org.junit.jupiter.api.Test;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -357,5 +359,87 @@ class CronParserTest {
         Instant base = ZonedDateTime.of(2024, 1, 1, 0, 0, 0, 0, UTC).toInstant();
         Instant next = CronParser.computeNextFire("0 0 */2 * 1", base, UTC);
         assertEquals(ZonedDateTime.of(2024, 1, 15, 0, 0, 0, 0, UTC).toInstant(), next);
+    }
+
+    // --- DST transitions (M-Q1) ---
+
+    private static final ZoneId BERLIN = ZoneId.of("Europe/Berlin");
+
+    /** Collects successive fires the way the poller does: each from the last. */
+    private static List<Instant> firesBetween(String cron, ZonedDateTime from, ZonedDateTime to) {
+        List<Instant> fires = new ArrayList<>();
+        Instant cursor = from.toInstant();
+        while (true) {
+            cursor = CronParser.computeNextFire(cron, cursor, from.getZone());
+            if (!cursor.isBefore(to.toInstant())) {
+                return fires;
+            }
+            fires.add(cursor);
+        }
+    }
+
+    @Test
+    void computeNextFire_fixedTime_fallBack_firesOnceNotTwice() {
+        // 2026-10-25: Berlin clocks go 03:00 CEST -> 02:00 CET, so 02:30 happens twice.
+        var fires = firesBetween("30 2 * * *", ZonedDateTime.of(2026, 10, 24, 12, 0, 0, 0, BERLIN),
+                ZonedDateTime.of(2026, 10, 26, 12, 0, 0, 0, BERLIN));
+        assertEquals(2, fires.size(), "one fire on the 25th, one on the 26th: " + fires);
+        // The fire on the 25th is the FIRST 02:30 (summer time, +02:00).
+        assertEquals(Instant.parse("2026-10-25T00:30:00Z"), fires.get(0));
+        assertEquals(Instant.parse("2026-10-26T01:30:00Z"), fires.get(1));
+    }
+
+    @Test
+    void computeNextFire_fixedTime_fallBack_fromInsideTheRepeatedHour_doesNotRefire() {
+        // Completion is recorded a few seconds after the first 02:30 fired; the next
+        // fire must be tomorrow, not the repeated 02:30 one hour later.
+        Instant justAfterFirstFire = Instant.parse("2026-10-25T00:30:05Z");
+        Instant next = CronParser.computeNextFire("30 2 * * *", justAfterFirstFire, BERLIN);
+        assertEquals(Instant.parse("2026-10-26T01:30:00Z"), next);
+    }
+
+    @Test
+    void computeNextFire_fixedTime_springForward_firesAtTransitionInsteadOfSkipping() {
+        // 2026-03-29: Berlin clocks go 02:00 CET -> 03:00 CEST, so 02:30 never exists.
+        var fires = firesBetween("30 2 * * *", ZonedDateTime.of(2026, 3, 28, 12, 0, 0, 0, BERLIN),
+                ZonedDateTime.of(2026, 3, 30, 12, 0, 0, 0, BERLIN));
+        assertEquals(2, fires.size(), "the day of the gap must still fire: " + fires);
+        // Fires at the transition instant (03:00 CEST == 01:00Z).
+        assertEquals(Instant.parse("2026-03-29T01:00:00Z"), fires.get(0));
+        assertEquals(Instant.parse("2026-03-30T00:30:00Z"), fires.get(1));
+    }
+
+    @Test
+    void computeNextFire_fixedTime_springForward_gapAndFollowingHourStayDistinct() {
+        // 02:30 (skipped -> transition, 03:00 CEST) and 03:30 are both still delivered.
+        var fires = firesBetween("30 2,3 * * *", ZonedDateTime.of(2026, 3, 29, 0, 0, 0, 0, BERLIN),
+                ZonedDateTime.of(2026, 3, 29, 12, 0, 0, 0, BERLIN));
+        assertEquals(List.of(Instant.parse("2026-03-29T01:00:00Z"), Instant.parse("2026-03-29T01:30:00Z")), fires);
+    }
+
+    @Test
+    void computeNextFire_wildcardHour_fallBack_keepsRealTimeCadence() {
+        // "5 * * * *" is hourly in real time: through the repeated hour it fires at
+        // 02:05 CEST AND 02:05 CET, one real hour apart.
+        var fires = firesBetween("5 * * * *", ZonedDateTime.of(2026, 10, 25, 1, 30, 0, 0, BERLIN),
+                ZonedDateTime.of(2026, 10, 25, 3, 30, 0, 0, BERLIN));
+        assertEquals(List.of(Instant.parse("2026-10-25T00:05:00Z"), Instant.parse("2026-10-25T01:05:00Z"),
+                Instant.parse("2026-10-25T02:05:00Z")), fires);
+    }
+
+    @Test
+    void computeNextFire_wildcardMinute_springForward_skipsMissingLocalMinutes() {
+        // "*/30 * * * *" keeps a 30-real-minute cadence across the gap.
+        var fires = firesBetween("*/30 * * * *", ZonedDateTime.of(2026, 3, 29, 1, 15, 0, 0, BERLIN),
+                ZonedDateTime.of(2026, 3, 29, 3, 45, 0, 0, BERLIN));
+        assertEquals(List.of(Instant.parse("2026-03-29T00:30:00Z"), Instant.parse("2026-03-29T01:00:00Z"),
+                Instant.parse("2026-03-29T01:30:00Z")), fires);
+    }
+
+    @Test
+    void computeNextFire_fixedTime_utcUnaffected() {
+        var fires = firesBetween("30 2 * * *", ZonedDateTime.of(2026, 10, 24, 12, 0, 0, 0, UTC),
+                ZonedDateTime.of(2026, 10, 26, 12, 0, 0, 0, UTC));
+        assertEquals(List.of(Instant.parse("2026-10-25T02:30:00Z"), Instant.parse("2026-10-26T02:30:00Z")), fires);
     }
 }
