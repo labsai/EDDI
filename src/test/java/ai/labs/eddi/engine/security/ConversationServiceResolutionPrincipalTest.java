@@ -97,7 +97,7 @@ class ConversationServiceResolutionPrincipalTest {
         tenantQuotaService = mock(TenantQuotaService.class);
 
         cacheFactory = mock(ICacheFactory.class);
-        doReturn(mock(ICache.class)).when(cacheFactory).getCache("conversationState");
+        doReturn(mock(ICache.class)).when(cacheFactory).getCache("conversationState", ConversationService.CONVERSATION_STATE_CACHE_TTL);
 
         // A real CallerIdentityContext built without a SecurityIdentity: capture()
         // finds no active request and falls back to whatever this thread has bound,

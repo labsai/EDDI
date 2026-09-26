@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.memory.model.ConversationState;
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
@@ -84,6 +85,37 @@ class PostgresConversationMemoryStoreUnitTest {
 
         assertEquals("conv-123", id);
         verify(preparedStatement).setString(5, "conv-123");
+    }
+
+    /**
+     * E4 parity with the MongoDB store: ending a conversation does not move
+     * {@code _rev}, so the full-row UPDATE must itself refuse a stored ENDED unless
+     * the write ends the conversation too.
+     */
+    @Test
+    void storeSnapshot_fullUpdateRefusesAStoredEnded() throws Exception {
+        ConversationMemorySnapshot snapshot = createSnapshot("conv-123");
+        when(jsonSerialization.serialize(snapshot)).thenReturn("{\"test\":true}");
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        store.storeConversationMemorySnapshot(snapshot);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, atLeastOnce()).prepareStatement(sql.capture());
+        String update = sql.getAllValues().stream().filter(s -> s.contains("UPDATE conversation_memories")).findFirst().orElseThrow();
+        assertTrue(update.contains("conversation_state IS DISTINCT FROM 'ENDED' OR ? = 'ENDED'"),
+                "the full-row update must not replace a stored ENDED, got: " + update);
+        verify(preparedStatement).setString(7, snapshot.getConversationState().name());
+    }
+
+    @Test
+    void getRevision_readsTheRevisionAndAnswersNullWhenMissing() throws Exception {
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(true, false);
+        when(resultSet.getLong("rev")).thenReturn(4L);
+
+        assertEquals(4L, store.getRevision("conv-123"));
+        assertNull(store.getRevision("conv-123"));
     }
 
     /**

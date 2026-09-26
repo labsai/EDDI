@@ -126,7 +126,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
             // the latest rewrite. An append in flight elsewhere reads this to learn that
             // re-applying its push would no longer land on the history it was built on.
             snapshot.setHistoryRevision(expectedRevision + 1);
-            var result = conversationCollectionObject.replaceOne(revisionFilter(conversationId, expectedRevision), snapshot);
+            var result = conversationCollectionObject.replaceOne(fullReplaceFilter(conversationId, expectedRevision, snapshot), snapshot);
             // No upsert on purpose: a missing document means the conversation was
             // deleted while the turn was running (GDPR erasure, retention sweep).
             // Ignoring matchedCount discarded the turn's memory silently and still
@@ -187,6 +187,28 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
         }
         snapshot.setPersistedStepCount(snapshot.getConversationSteps().size());
         return true;
+    }
+
+    /**
+     * The revision guard of a full-document write, plus: never over a stored
+     * {@code ENDED} unless this write ends the conversation itself.
+     * <p>
+     * {@link #setConversationState} ends a conversation with a narrow {@code $set}
+     * that leaves {@code _rev} alone, so the revision filter cannot see it. A turn
+     * that was already running when the conversation was ended — a rerun, or any
+     * memory whose append baseline is unknown and therefore takes this path — would
+     * otherwise replace the whole document, terminal state included, and bring the
+     * conversation back to READY with post-termination side effects. The append
+     * path has refused this from the start ({@link #appendPreconditions}); this is
+     * the same rule for the other write shape. {@code $ne} also matches a document
+     * with no state field, so legacy documents stay writable.
+     */
+    private static Bson fullReplaceFilter(String conversationId, long expectedRevision, ConversationMemorySnapshot snapshot) {
+        Bson revision = revisionFilter(conversationId, expectedRevision);
+        if (snapshot.getConversationState() == ENDED) {
+            return revision;
+        }
+        return Filters.and(revision, Filters.ne(KEY_CONVERSATION_STATE, ENDED.name()));
     }
 
     /**
@@ -518,6 +540,13 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
             return ConversationState.valueOf(conversationMemoryDocument.get(KEY_CONVERSATION_STATE).toString());
         }
         return null;
+    }
+
+    @Override
+    public Long getRevision(String conversationId) {
+        Document stored = conversationCollectionDocument.find(Filters.eq(OBJECT_ID, new ObjectId(conversationId)))
+                .projection(new Document(KEY_REVISION, 1)).first();
+        return stored == null ? null : longOrUnversioned(stored.get(KEY_REVISION));
     }
 
     @Override

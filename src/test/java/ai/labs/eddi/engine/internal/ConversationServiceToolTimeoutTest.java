@@ -136,7 +136,7 @@ class ConversationServiceToolTimeoutTest {
     @SuppressWarnings("unchecked")
     void setUp() throws Exception {
         MockitoAnnotations.openMocks(this);
-        doReturn(conversationStateCache).when(cacheFactory).getCache("conversationState");
+        doReturn(conversationStateCache).when(cacheFactory).getCache("conversationState", ConversationService.CONVERSATION_STATE_CACHE_TTL);
         conversationService = new ConversationService(
                 agentFactory, conversationMemoryStore, conversationDescriptorStore,
                 userMemoryStore, conversationCoordinator, conversationSetup,

@@ -66,6 +66,7 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import java.time.Duration;
 import java.util.*;
 import java.util.List;
 import java.util.concurrent.*;
@@ -94,6 +95,15 @@ public class ConversationService implements IConversationService {
 
     private static final String RESOURCE_URI = "eddi://ai.labs.conversation/conversationstore/conversations/";
     private static final String CACHE_NAME_CONVERSATION_STATE = "conversationState";
+    /**
+     * How long a cached conversation state is served before the store is asked
+     * again. The cache used to keep entries until size eviction, and several
+     * writers never touch it — another instance, the HITL timeout and crash
+     * recovery paths, a narrow state write — so a stale entry could be served for
+     * the lifetime of the process. Short enough to bound that staleness, long
+     * enough to absorb a client polling the state of a running turn.
+     */
+    public static final Duration CONVERSATION_STATE_CACHE_TTL = Duration.ofSeconds(30);
     private static final String USER_ID = "userId";
 
     private final IAgentFactory agentFactory;
@@ -255,7 +265,7 @@ public class ConversationService implements IConversationService {
         this.scheduleStore = scheduleStore;
         this.agentStore = agentStore;
         this.jsonSerialization = jsonSerialization;
-        this.conversationStateCache = cacheFactory.getCache(CACHE_NAME_CONVERSATION_STATE);
+        this.conversationStateCache = cacheFactory.getCache(CACHE_NAME_CONVERSATION_STATE, CONVERSATION_STATE_CACHE_TTL);
         this.runtime = runtime;
         this.contextLogger = contextLogger;
         this.callerIdentityContext = callerIdentityContext;
@@ -615,6 +625,12 @@ public class ConversationService implements IConversationService {
                                 + " POST /agents/" + conversationId + "/resume (or cancel) before new input is accepted");
             }
 
+            // M-E1: an ended conversation is refused BEFORE getAgent, whose lazy redeploy
+            // would otherwise bring back an agent an operator undeployed — without the
+            // tenant gate or a deployment-store write — just to tell the caller the
+            // conversation is over.
+            rejectIfEnded(conversationMemory);
+
             IAgent agent = getAgent(environment, agentId, agentVersion);
             if (agent == null) {
                 String msg = "Agent not deployed (environment=%s, conversationId=%s, version=%s)";
@@ -639,24 +655,6 @@ public class ConversationService implements IConversationService {
             admittedTurn = new ProcessingTurn(processingConversationCount);
             final ProcessingTurn processingTurn = admittedTurn;
 
-            // Set the audit collector on memory (if auditing is enabled)
-            if (auditLedgerService.isEnabled()) {
-                String envName = environment.toString();
-                conversationMemory.setAuditCollector(entry -> auditLedgerService.submit(entry.withEnvironment(envName)));
-            }
-
-            final IConversation conversation = agent.continueConversation(conversationMemory,
-                    createPropertiesHandler(conversationMemory.getUserId(), agent.getUserMemoryConfig()), returnConversationMemory -> {
-                        SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemorySnapshot(returnConversationMemory,
-                                returnDetailed, returnCurrentStepOnly, returningFields);
-                        memorySnapshot.setEnvironment(environment);
-                        cacheConversationState(conversationId, memorySnapshot.getConversationState());
-                        conversationDescriptorStore.updateTimeStamp(conversationId);
-                        recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
-                        processingTurn.release();
-                        responseHandler.onComplete(memorySnapshot);
-                    });
-
             // Handler contract: a skipped turn (pause/busy committed by the time the
             // queued turn executed) must still complete the response — with the
             // persisted state and WITHOUT the metrics reference leaking.
@@ -669,35 +667,58 @@ public class ConversationService implements IConversationService {
                 responseHandler.onSkipped(memorySnapshot);
             };
 
-            if (conversation.isEnded()) {
-                throw new ConversationEndedException("Conversation has ended!");
-            }
+            // Everything bound to one memory instance lives in the builder, so a queued
+            // turn can be rebuilt over the current document when it finally runs (H13a).
+            ConversationStepRunner.TurnBuilder turnBuilder = memory -> {
+                // Set the audit collector on memory (if auditing is enabled)
+                if (auditLedgerService.isEnabled()) {
+                    String envName = environment.toString();
+                    memory.setAuditCollector(entry -> auditLedgerService.submit(entry.withEnvironment(envName)));
+                }
 
-            Callable<Void> executeConversation;
-            if (rerunOnly) {
-                executeConversation = () -> {
-                    try {
-                        contextLogger.setLoggingContext(loggingContext);
-                        conversation.rerun(inputData.getContext());
-                    } catch (LifecycleException | IConversation.ConversationNotReadyException e) {
-                        LOGGER.error(e.getLocalizedMessage(), e);
-                    }
-                    return null;
-                };
-            } else {
-                executeConversation = () -> {
-                    try {
-                        contextLogger.setLoggingContext(loggingContext);
-                        conversation.say(inputData.getInput(), inputData.getContext());
-                    } catch (LifecycleException | IConversation.ConversationNotReadyException e) {
-                        LOGGER.error(e.getLocalizedMessage(), e);
-                    }
-                    return null;
-                };
-            }
+                final IConversation conversation = agent.continueConversation(memory,
+                        createPropertiesHandler(memory.getUserId(), agent.getUserMemoryConfig()), returnConversationMemory -> {
+                            SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemorySnapshot(returnConversationMemory,
+                                    returnDetailed, returnCurrentStepOnly, returningFields);
+                            memorySnapshot.setEnvironment(environment);
+                            cacheConversationState(conversationId, memorySnapshot.getConversationState());
+                            conversationDescriptorStore.updateTimeStamp(conversationId);
+                            recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
+                            processingTurn.release();
+                            responseHandler.onComplete(memorySnapshot);
+                        });
+
+                if (conversation.isEnded()) {
+                    throw new ConversationEndedException("Conversation has ended!");
+                }
+
+                Callable<Void> executeConversation;
+                if (rerunOnly) {
+                    executeConversation = () -> {
+                        try {
+                            contextLogger.setLoggingContext(loggingContext);
+                            conversation.rerun(inputData.getContext());
+                        } catch (LifecycleException | IConversation.ConversationNotReadyException e) {
+                            LOGGER.error(e.getLocalizedMessage(), e);
+                        }
+                        return null;
+                    };
+                } else {
+                    executeConversation = () -> {
+                        try {
+                            contextLogger.setLoggingContext(loggingContext);
+                            conversation.say(inputData.getInput(), inputData.getContext());
+                        } catch (LifecycleException | IConversation.ConversationNotReadyException e) {
+                            LOGGER.error(e.getLocalizedMessage(), e);
+                        }
+                        return null;
+                    };
+                }
+                return withResolutionPrincipal(memory, executeConversation);
+            };
 
             Callable<Void> processUserInput = processConversationStep(environment, conversationMemory, conversationId, loggingContext,
-                    withResolutionPrincipal(conversationMemory, executeConversation), notifySkipped, processingTurn);
+                    turnBuilder, notifySkipped, processingTurn);
 
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
         } catch (ProcessingRestrictedException | ProcessingRestrictionUnavailableException | QuotaExceededException
@@ -772,6 +793,12 @@ public class ConversationService implements IConversationService {
                                 + " POST /agents/" + conversationId + "/resume (or cancel) before new input is accepted");
             }
 
+            // M-E1: an ended conversation is refused BEFORE getAgent, whose lazy redeploy
+            // would otherwise bring back an agent an operator undeployed — without the
+            // tenant gate or a deployment-store write — just to tell the caller the
+            // conversation is over.
+            rejectIfEnded(conversationMemory);
+
             IAgent agent = getAgent(environment, agentId, agentVersion);
             if (agent == null) {
                 String msg = "Agent not deployed (environment=%s, conversationId=%s, version=%s)";
@@ -845,40 +872,45 @@ public class ConversationService implements IConversationService {
                 }
             };
 
-            // Set the event sink on memory so LifecycleManager and tasks can use it
-            conversationMemory.setEventSink(eventSink);
+            // Everything bound to one memory instance lives in the builder, so a queued
+            // turn can be rebuilt over the current document when it finally runs (H13a).
+            ConversationStepRunner.TurnBuilder turnBuilder = memory -> {
+                // Set the event sink on memory so LifecycleManager and tasks can use it
+                memory.setEventSink(eventSink);
 
-            // Set the audit collector on memory (if auditing is enabled)
-            if (auditLedgerService.isEnabled()) {
-                String envName = environment.toString();
-                conversationMemory.setAuditCollector(entry -> auditLedgerService.submit(entry.withEnvironment(envName)));
-            }
-
-            final IConversation conversation = agent.continueConversation(conversationMemory,
-                    createPropertiesHandler(conversationMemory.getUserId(), agent.getUserMemoryConfig()), returnConversationMemory -> {
-                        SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemorySnapshot(returnConversationMemory,
-                                returnDetailed, returnCurrentStepOnly, returningFields);
-                        memorySnapshot.setEnvironment(environment);
-                        cacheConversationState(conversationId, memorySnapshot.getConversationState());
-                        conversationDescriptorStore.updateTimeStamp(conversationId);
-                        recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
-                        processingTurn.release();
-                        streamingHandler.onComplete(memorySnapshot);
-                    });
-
-            if (conversation.isEnded()) {
-                throw new ConversationEndedException("Conversation has ended!");
-            }
-
-            Callable<Void> executeConversation = () -> {
-                try {
-                    contextLogger.setLoggingContext(loggingContext);
-                    conversation.say(inputData.getInput(), inputData.getContext());
-                } catch (LifecycleException | IConversation.ConversationNotReadyException e) {
-                    LOGGER.error(e.getLocalizedMessage(), e);
-                    streamingHandler.onError(e);
+                // Set the audit collector on memory (if auditing is enabled)
+                if (auditLedgerService.isEnabled()) {
+                    String envName = environment.toString();
+                    memory.setAuditCollector(entry -> auditLedgerService.submit(entry.withEnvironment(envName)));
                 }
-                return null;
+
+                final IConversation conversation = agent.continueConversation(memory,
+                        createPropertiesHandler(memory.getUserId(), agent.getUserMemoryConfig()), returnConversationMemory -> {
+                            SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemorySnapshot(returnConversationMemory,
+                                    returnDetailed, returnCurrentStepOnly, returningFields);
+                            memorySnapshot.setEnvironment(environment);
+                            cacheConversationState(conversationId, memorySnapshot.getConversationState());
+                            conversationDescriptorStore.updateTimeStamp(conversationId);
+                            recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
+                            processingTurn.release();
+                            streamingHandler.onComplete(memorySnapshot);
+                        });
+
+                if (conversation.isEnded()) {
+                    throw new ConversationEndedException("Conversation has ended!");
+                }
+
+                Callable<Void> executeConversation = () -> {
+                    try {
+                        contextLogger.setLoggingContext(loggingContext);
+                        conversation.say(inputData.getInput(), inputData.getContext());
+                    } catch (LifecycleException | IConversation.ConversationNotReadyException e) {
+                        LOGGER.error(e.getLocalizedMessage(), e);
+                        streamingHandler.onError(e);
+                    }
+                    return null;
+                };
+                return withResolutionPrincipal(memory, executeConversation);
             };
 
             // Handler contract (mirrors say()): a skipped turn must terminate the
@@ -893,7 +925,7 @@ public class ConversationService implements IConversationService {
             };
 
             Callable<Void> processUserInput = processConversationStep(environment, conversationMemory, conversationId, loggingContext,
-                    withResolutionPrincipal(conversationMemory, executeConversation), notifySkipped, processingTurn);
+                    turnBuilder, notifySkipped, processingTurn);
 
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
         } catch (ProcessingRestrictedException | ProcessingRestrictionUnavailableException | QuotaExceededException
@@ -1320,10 +1352,17 @@ public class ConversationService implements IConversationService {
     // on this class, and ConversationHitlService calls the rest by name.
 
     private IDiscardableTask processConversationStep(Environment environment, IConversationMemory conversationMemory, String conversationId,
-                                                     Map<String, String> loggingContext, Callable<Void> executeConversation,
-                                                     Consumer<IConversationMemory> skipNotifier, ProcessingTurn processingTurn) {
+                                                     Map<String, String> loggingContext, ConversationStepRunner.TurnBuilder turnBuilder,
+                                                     Consumer<IConversationMemory> skipNotifier, ProcessingTurn processingTurn)
+            throws Exception {
         return conversationStepRunner.processConversationStep(environment, conversationMemory, conversationId,
-                loggingContext, executeConversation, skipNotifier, processingTurn);
+                loggingContext, turnBuilder, skipNotifier, processingTurn);
+    }
+
+    private static void rejectIfEnded(IConversationMemory conversationMemory) throws ConversationEndedException {
+        if (conversationMemory.getConversationState() == ConversationState.ENDED) {
+            throw new ConversationEndedException("Conversation has ended!");
+        }
     }
 
     void waitForExecutionFinishOrTimeout(Map<String, String> loggingContext, String conversationId, Future<Void> future) {
