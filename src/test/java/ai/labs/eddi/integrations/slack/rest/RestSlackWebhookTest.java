@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.integrations.slack.rest;
 
+import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
 import ai.labs.eddi.integrations.slack.SlackEventHandler;
 import ai.labs.eddi.integrations.slack.SlackInteractivityHandler;
@@ -15,6 +16,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -218,8 +220,20 @@ class RestSlackWebhookTest {
             verifyNoInteractions(eventHandler);
         }
 
+        private ChannelIntegrationConfiguration withTeam(String teamId) {
+            var cfg = new ChannelIntegrationConfiguration();
+            cfg.setName("int-b");
+            cfg.setChannelType("slack");
+            var pc = new HashMap<String, String>();
+            if (teamId != null) {
+                pc.put("teamId", teamId);
+            }
+            cfg.setPlatformConfig(pc);
+            return cfg;
+        }
+
         @Test
-        @DisplayName("a DM is attributed to the integration whose secret signed it")
+        @DisplayName("a DM is attributed to the signing integration and its DECLARED workspace")
         void dmIsAttributedToTheSigningIntegration() {
             pooledCheckPasses();
             when(channelTargetRouter.getSigningIdentities("slack")).thenReturn(List.of(
@@ -227,12 +241,48 @@ class RestSlackWebhookTest {
                     new ChannelTargetRouter.SigningIdentity("int-b", "secret-b")));
             when(signatureVerifier.verifyWithSecret("ts", DM_EVENT, "sig", "secret-a")).thenReturn(false);
             when(signatureVerifier.verifyWithSecret("ts", DM_EVENT, "sig", "secret-b")).thenReturn(true);
+            // int-b declares workspace T1 and the payload agrees → dispatched as T1.
+            when(channelTargetRouter.getIntegrationByName("slack", "int-b")).thenReturn(Optional.of(withTeam("T1")));
 
             Response response = webhook.handleEvents(DM_EVENT, "sig", "ts");
 
             assertEquals(200, response.getStatus());
             verify(eventHandler).handleEventAsync(eq("evt-10"), any(), isNull(),
                     eq(new SlackEventHandler.EventOrigin("T1", "int-b")));
+        }
+
+        @Test
+        @DisplayName("residual #1: a forged team that disagrees with the integration's declared workspace is rejected")
+        void dmForgedTeamAgainstDeclaredWorkspaceIsRejected() {
+            pooledCheckPasses();
+            when(channelTargetRouter.getSigningIdentities("slack")).thenReturn(List.of(
+                    new ChannelTargetRouter.SigningIdentity("int-b", "secret-b")));
+            when(signatureVerifier.verifyWithSecret("ts", DM_EVENT, "sig", "secret-b")).thenReturn(true);
+            // int-b really serves workspace T-REAL; the event forges team_id=T1.
+            when(channelTargetRouter.getIntegrationByName("slack", "int-b")).thenReturn(Optional.of(withTeam("T-REAL")));
+
+            Response response = webhook.handleEvents(DM_EVENT, "sig", "ts");
+
+            assertEquals(403, response.getStatus());
+            verifyNoInteractions(eventHandler);
+        }
+
+        @Test
+        @DisplayName("residual #1: a forged team on a teamId-less integration resolves to no victim workspace")
+        void dmForgedTeamOnTeamlessIntegrationResolvesToNoVictim() {
+            pooledCheckPasses();
+            when(channelTargetRouter.getSigningIdentities("slack")).thenReturn(List.of(
+                    new ChannelTargetRouter.SigningIdentity("int-b", "secret-b")));
+            when(signatureVerifier.verifyWithSecret("ts", DM_EVENT, "sig", "secret-b")).thenReturn(true);
+            // int-b declares no teamId; the event's team_id=T1 (the victim's) must NOT
+            // be trusted — the identity is team-less, so slack:T1:U1 is never reached.
+            when(channelTargetRouter.getIntegrationByName("slack", "int-b")).thenReturn(Optional.of(withTeam(null)));
+
+            Response response = webhook.handleEvents(DM_EVENT, "sig", "ts");
+
+            assertEquals(200, response.getStatus());
+            verify(eventHandler).handleEventAsync(eq("evt-10"), any(), isNull(),
+                    eq(new SlackEventHandler.EventOrigin(null, "int-b")));
         }
 
         @Test

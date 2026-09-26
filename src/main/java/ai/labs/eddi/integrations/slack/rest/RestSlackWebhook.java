@@ -142,14 +142,34 @@ public class RestSlackWebhook {
                                 .build();
                     }
 
-                    // Delegate to handler (async — returns immediately)
-                    // Pin the workspace to the SIGNING integration's configured teamId
-                    // where it has one, so a validly-signed event cannot name a
-                    // different workspace's namespace (Finding B). Fall back to the
-                    // payload team_id only when no teamId is configured.
-                    String teamId = origin.pinnedTeamId() != null
-                            ? origin.pinnedTeamId()
-                            : stringOrNull(payload.get("team_id"));
+                    // Pin the workspace to the SIGNING/owning integration's declared
+                    // teamId. A validly-signed event whose claimed workspace disagrees
+                    // with that declaration is forged — reject it (review residual #1).
+                    String payloadTeam = stringOrNull(payload.get("team_id"));
+                    String eventTeam = stringOrNull(event.get("team"));
+                    if (origin.pinnedTeamId() != null
+                            && ((payloadTeam != null && !origin.pinnedTeamId().equals(payloadTeam))
+                                    || (eventTeam != null && !origin.pinnedTeamId().equals(eventTeam)))) {
+                        LOGGER.warnf("Slack event claims a workspace the signing integration does not declare "
+                                + "— rejecting");
+                        return Response.status(Response.Status.FORBIDDEN)
+                                .entity("{\"error\":\"Invalid signature\"}")
+                                .build();
+                    }
+                    String teamId;
+                    if (origin.pinnedTeamId() != null) {
+                        teamId = origin.pinnedTeamId();
+                    } else if (origin.owned()) {
+                        // Owned channel signed by its own owner: the payload team_id is
+                        // trustworthy (only the owner's secret validates the event).
+                        teamId = payloadTeam;
+                    } else {
+                        // Unowned channel (a DM) whose signing integration declares no
+                        // teamId: the workspace is unbindable. Do NOT trust the payload
+                        // team — a team-less identity is used so a forged team cannot
+                        // reach a victim's slack:<team>:<user> memories (review #1).
+                        teamId = null;
+                    }
                     eventHandler.handleEventAsync(eventId, event, botUserId(payload),
                             new SlackEventHandler.EventOrigin(teamId, origin.signingIntegrationName()));
                 }
@@ -176,9 +196,14 @@ public class RestSlackWebhook {
      * @param pinnedTeamId
      *            the workspace the signing/owning integration declares
      *            ({@code platformConfig.teamId}), or {@code null} when it declares
-     *            none — the caller then falls back to the payload {@code team_id}
+     *            none
+     * @param owned
+     *            whether the event's channel is owned by a configured integration
+     *            (as opposed to a DM routed by signing secret). Only an owned
+     *            channel's payload {@code team_id} is trusted when no
+     *            {@code teamId} is declared; an unowned channel's is not
      */
-    private record VerifiedOrigin(String signingIntegrationName, String pinnedTeamId) {
+    private record VerifiedOrigin(String signingIntegrationName, String pinnedTeamId, boolean owned) {
     }
 
     /**
@@ -201,7 +226,7 @@ public class RestSlackWebhook {
         if (channel == null) {
             // Nothing channel-bound to act on: the handler drops events without a
             // channel, so the pooled check is all there is to bind.
-            return new VerifiedOrigin(null, null);
+            return new VerifiedOrigin(null, null, false);
         }
         if (channelTargetRouter.isChannelOwned(CHANNEL_TYPE_SLACK, channel)) {
             var ownerSecret = channelTargetRouter.getSigningSecretForChannel(CHANNEL_TYPE_SLACK, channel);
@@ -212,13 +237,14 @@ public class RestSlackWebhook {
                 return null;
             }
             return new VerifiedOrigin(null,
-                    configuredTeamId(channelTargetRouter.getIntegration(CHANNEL_TYPE_SLACK, channel).orElse(null)));
+                    configuredTeamId(channelTargetRouter.getIntegration(CHANNEL_TYPE_SLACK, channel).orElse(null)),
+                    true);
         }
         for (var identity : channelTargetRouter.getSigningIdentities(CHANNEL_TYPE_SLACK)) {
             if (signatureVerifier.verifyWithSecret(timestamp, rawBody, signature, identity.signingSecret())) {
                 var config = channelTargetRouter.getIntegrationByName(CHANNEL_TYPE_SLACK, identity.integrationName())
                         .orElse(null);
-                return new VerifiedOrigin(identity.integrationName(), configuredTeamId(config));
+                return new VerifiedOrigin(identity.integrationName(), configuredTeamId(config), false);
             }
         }
         // The pooled check passed a moment ago, so this is a refresh racing the

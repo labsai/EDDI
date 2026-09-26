@@ -14,8 +14,6 @@ import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
-import ai.labs.eddi.configs.properties.model.Property.Visibility;
-import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import ai.labs.eddi.integrations.openai.model.ChatCompletionRequest;
@@ -28,7 +26,6 @@ import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
 import java.util.Date;
-import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;

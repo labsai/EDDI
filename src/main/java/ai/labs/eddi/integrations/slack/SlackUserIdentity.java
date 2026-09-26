@@ -24,19 +24,17 @@ import java.util.regex.Pattern;
  * {@code slack:<user_id>}, still out of the shared namespace.)
  * <p>
  * <b>Compatibility with data stored under the raw id.</b> Handled in
- * {@link SlackEventHandler}:
- * <ul>
- * <li>A thread whose conversation mapping was stored under the raw id keeps its
- * conversation: the mapping is found by the raw id, re-keyed to the namespaced
- * id, and the conversation continues. That conversation still carries the raw
- * id as its owner — it is not rewritten — so it keeps loading the memories it
- * always did.</li>
- * <li>Before a NEW conversation starts for a Slack user, long-term memory
- * entries stored under the raw id are moved to the namespaced id, so the new
- * conversation still remembers them. Only ids shaped like a Slack user id are
- * migrated, and an entry the namespaced identity already holds for the same key
- * and agent wins over the legacy copy.</li>
- * </ul>
+ * {@link SlackEventHandler} and it is <b>adopt-only</b>: a thread whose
+ * conversation mapping was stored under the raw id keeps its conversation — the
+ * mapping is found by the raw id, re-keyed to the namespaced id, and the
+ * conversation continues. That conversation still carries the raw id as its
+ * owner (it is not rewritten), so it keeps loading the memories it always did.
+ * There is deliberately <b>no</b> standalone move of long-term memory out of
+ * the bare Slack-id namespace: that id carries no workspace and the namespace
+ * is shared across every source, so a move keyed on the (attacker-supplied in a
+ * signed event) team could relocate a victim's memories into another namespace
+ * (review Finding B). A brand-new conversation therefore does not inherit
+ * memories the raw id accumulated before namespacing.
  */
 public final class SlackUserIdentity {
 

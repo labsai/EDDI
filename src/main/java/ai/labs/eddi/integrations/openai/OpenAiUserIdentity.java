@@ -26,11 +26,15 @@ package ai.labs.eddi.integrations.openai;
  * identity and the second is operator config, not caller-controlled.
  * <p>
  * <b>Compatibility with data stored under the raw header id.</b> Handled in
- * {@link OpenAiConversationBridge}, mirroring the Slack migration: a chat whose
+ * {@link OpenAiConversationBridge} and it is <b>adopt-only</b>: a chat whose
  * conversation mapping was stored under the raw id is re-keyed to the
- * namespaced id (the conversation keeps its raw-id owner, and with it its
- * memories), and before a NEW conversation starts, long-term memory entries
- * under the raw id are moved to the namespaced id so it still remembers them.
+ * namespaced id, and because that conversation keeps its raw-id owner its
+ * long-term memories load with no move. There is deliberately <b>no</b>
+ * standalone move of memory out of the bare-id namespace — that namespace is
+ * shared with OIDC principals and the raw id is caller-supplied, so a move
+ * could relocate and erase another user's memories (review Finding A). A
+ * brand-new chat therefore does not inherit memories the raw id accumulated
+ * before namespacing.
  */
 public final class OpenAiUserIdentity {
 

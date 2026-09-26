@@ -182,10 +182,44 @@ store also gains real-MongoDB coverage (`MongoSlackApprovalRecordStoreTest`:
 [`ChannelTargetRouter.java`](../../src/main/java/ai/labs/eddi/integrations/channels/ChannelTargetRouter.java),
 [`RestChannelIntegrationStore.java`](../../src/main/java/ai/labs/eddi/configs/channels/rest/RestChannelIntegrationStore.java).
 
+### Re-review cleanups (residual #1 + doc/nit)
+
+The re-review shipped A/B/C but flagged that team_id pinning was incomplete: when a
+signing integration declared no `teamId`, the webhook still fell back to the
+attacker-controlled payload `team_id`/event `team`, so an operator of any registered
+integration could craft a validly-signed event for an **unowned** channel (a DM)
+with a forged team+user and make the bot LOAD and echo that victim's long-term
+memories (read-only now that the erase is gone, but still a cross-tenant read).
+
+Completed the pin (`RestSlackWebhook` + `SlackEventHandler.slackUser`):
+- A signed event whose payload `team_id` or event `team` **disagrees** with the
+  signing/owning integration's declared `teamId` is now rejected (403).
+- The workspace comes only from the webhook-pinned `origin.teamId()`; the
+  `event.get("team")` fallback in `slackUser` is removed.
+- An **unowned** channel whose signing integration declares no `teamId` is treated
+  as **unbindable**: the payload team is not trusted and the identity is team-less
+  (`slack:<user>`), which reaches no victim's `slack:<team>:<user>`. An **owned**
+  channel with no declared `teamId` still trusts its own payload `team_id` (only the
+  owner's secret validates that event), so per-workspace ids keep working there.
+
+Also: removed two now-unused test imports in `OpenAiConversationBridgeTest`, and
+corrected the `OpenAiUserIdentity`/`SlackUserIdentity` Javadoc that still described
+the removed "memories are moved to the namespaced id" behavior — both now describe
+the adopt-only reality.
+
+Test `RestSlackWebhookTest.dmForgedTeamAgainstDeclaredWorkspaceIsRejected` (403) and
+`dmForgedTeamOnTeamlessIntegrationResolvesToNoVictim` (team-less identity) cover the
+residual; the second is mutation-checked.
+
 ```decision-log
 | 2026-09-26 | Slack HITL decisions require a persisted record of the card the owning integration posted, matched to the subject's current pause | Signature and approver list bound the integration, not the subject | In-memory marker (lost on restart); trusting the button value |
 | 2026-09-26 | Slack users are `slack:<team_id>:<user_id>` in EDDI; raw-id data is re-keyed/moved lazily | Raw Slack ids shared the OIDC principal namespace | Keeping raw ids for existing users (leaves the collision open); a one-shot bulk migration |
 | 2026-09-26 | OpenAI-compat header users are `openwebui:<id>` in EDDI; raw-id data is re-keyed lazily | `X-OpenWebUI-User-Id` shared the OIDC principal namespace, so a shared-key holder reached OIDC users | Namespacing OIDC principals too (they are already canonical); a one-shot bulk migration |
 | 2026-09-27 | Removed the standalone bare-id memory MOVE for both OpenAI-compat and Slack; kept adopt/rekey only | The move read the shared bare-id namespace on an attacker-chosen id and could relocate+erase an OIDC user's memories (review Finding A/B) | A mapping-gated move (still leaks on a bare-id string collision with an OIDC principal) |
 | 2026-09-27 | HITL owner binding refuses an ambiguous integration name and enforces global per-type name uniqueness | Integration display names were not unique, so a copied name could bind a decision to the attacker's config (review Finding C) | Keying everything on a unique resource id (larger blast radius on a security branch) |
+| 2026-09-27 | Slack webhook rejects an event whose claimed workspace disagrees with the signing integration's declared teamId; a teamId-less unowned (DM) event is bound team-less, not to the payload team | Payload team_id was attacker-controllable in a validly-signed DM event → cross-tenant memory read (review residual #1) | Trusting the payload team when the integration declares none |
+```
+
+```regression-note
+| 2026-09-27 | Updating either of two pre-existing duplicate-named channel integrations of the same type now fails validation until one is renamed | New global per-type name uniqueness check on create/update (Finding C) — benign migration: rename one integration | Rename one of the clashing integrations, then update | fix/security-channel-identity |
 ```

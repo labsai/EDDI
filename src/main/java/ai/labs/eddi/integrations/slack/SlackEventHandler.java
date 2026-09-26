@@ -341,7 +341,7 @@ public class SlackEventHandler {
             LOGGER.debugf("Incomplete Slack event — missing text/user/channel");
             return;
         }
-        SlackUser user = slackUser(event, origin, slackUserId);
+        SlackUser user = slackUser(origin, slackUserId);
 
         // Strip bot mention prefix: "<@U0123BOTID> hello" → "hello"
         text = stripBotMention(text);
@@ -465,7 +465,7 @@ public class SlackEventHandler {
         if (slackUserId == null) {
             return false;
         }
-        SlackUser user = slackUser(event, origin, slackUserId);
+        SlackUser user = slackUser(origin, slackUserId);
         // Slack delivers a channel mention TWICE: once as `message` and once as
         // `app_mention`. `app_mention` is the one that routes, so observing the
         // `message` copy would answer the same sentence a second time, possibly
@@ -1095,12 +1095,14 @@ public class SlackEventHandler {
     record SlackUser(String slackUserId, String eddiUserId) {
     }
 
-    private static SlackUser slackUser(Map<String, Object> event, EventOrigin origin, String slackUserId) {
-        String teamId = origin.teamId();
-        if ((teamId == null || teamId.isBlank()) && event.get("team") instanceof String eventTeam) {
-            teamId = eventTeam;
-        }
-        return new SlackUser(slackUserId, SlackUserIdentity.eddiUserId(teamId, slackUserId));
+    private static SlackUser slackUser(EventOrigin origin, String slackUserId) {
+        // The workspace comes ONLY from the webhook-pinned origin.teamId() (the
+        // signing/owning integration's declared teamId, or null when unbindable).
+        // The event's own `team` field is attacker-supplied in a validly-signed
+        // event and is deliberately NOT trusted here (review residual #1) — trusting
+        // it let a forged team map a caller onto a victim's slack:<team>:<user>
+        // memories. A null teamId yields a team-less identity that reaches no victim.
+        return new SlackUser(slackUserId, SlackUserIdentity.eddiUserId(origin.teamId(), slackUserId));
     }
 
     /**
