@@ -1703,7 +1703,13 @@
     "grantAcknowledge": "I understand these agents will not deploy again until they are added back or their configuration stops using this secret.",
     "grantSaved": "Access updated for “{{key}}”",
     "grantImpactFailed": "Could not check which deployed agents use this secret, so any of them may lose access.",
-    "grantAcknowledgeUnchecked": "Save anyway without knowing which deployed agents this affects."
+    "grantAcknowledgeUnchecked": "Save anyway without knowing which deployed agents this affects.",
+    "rotateNotFound": "This secret no longer exists, so there is nothing to rotate. Add it again instead.",
+    "keyExists": "A secret named \"{{key}}\" already exists. Adding it again would replace its value — use Rotate to change the value and keep who may use it.",
+    "keyExistsRotate": "Rotate this secret instead",
+    "keyExistsPicker": "A secret named \"{{key}}\" already exists. Pick it from the vault list, or choose another name.",
+    "rotateKeepsGrantAll": "Every agent keeps access, as now.",
+    "rotateKeepsGrant": "Access stays limited to: {{agents}}"
   },
   "variables": {
     "deleteKey": "Delete {{key}}",
@@ -1743,7 +1749,8 @@
     "infoLine1": "Use {{vars.<key>}} in system prompts or ${vars:<key>} anywhere in agent configurations.",
     "infoLine2": "Changes take effect within 2 minutes (cache TTL). For sensitive values, use the Secrets Vault instead.",
     "tableTitle_one": "{{count}} variable",
-    "tableTitle_other": "{{count}} variables"
+    "tableTitle_other": "{{count}} variables",
+    "keyExists": "A variable named \"{{key}}\" already exists. Edit it from the list instead."
   },
   "audit": {
     "title": "Audit Trail",
@@ -1777,17 +1784,35 @@
     "autoRefreshToggle": "Toggle auto-refresh (every 10s)",
     "autoRefreshOn": "Auto",
     "autoRefreshOff": "Auto",
-    "integrityVerified": "All entries cryptographically signed",
-    "integrityVerifiedDesc": "{{count}} of {{total}} entries have HMAC-SHA256 signatures",
-    "integrityPass": "SIGNED",
-    "integrityPartial": "Partially signed audit trail",
-    "integrityPartialDesc": "{{count}} of {{total}} entries have HMAC signatures",
-    "integrityNone": "Unsigned audit entries",
     "integrityNoneDesc": "Configure a vault master key to enable automatic HMAC-SHA256 signing on all future audit entries.",
     "signed": "Signed",
     "allSigned": "All signed",
     "decidedBy": "by",
-    "automated": "automated"
+    "automated": "automated",
+    "verify": {
+      "entryInvalid": "Signature does not match",
+      "entryUnproven": "Not verified",
+      "signatureCount": "{{count}} of {{total}} loaded entries carry a signature.",
+      "loading": "Verifying signatures…",
+      "errorTitle": "Integrity not verified",
+      "errorDesc": "The verification request failed, so nothing here has been checked.",
+      "checked": "Checked the {{count}} most recent entries.",
+      "verifiedTitle": "Signatures verified",
+      "chainIntact": "No entry is missing from the sequence.",
+      "chainNotApplicable": "Across conversations only signatures are checked, not the sequence.",
+      "verifiedBadge": "VERIFIED",
+      "tamperedTitle": "Integrity check failed",
+      "tamperedInvalid": "{{count}} entry signature(s) do not match their content — the entries were changed after they were written.",
+      "tamperedChain": "Entries are missing from the sequence ({{sequences}}) — the record has been shortened.",
+      "disabledTitle": "Signatures cannot be verified",
+      "reasonUnsigned": "{{count}} unsigned entry(ies)",
+      "reasonUnknownKey": "{{count}} signed with a key this deployment no longer holds",
+      "reasonSkipped": "{{count}} older entry(ies) not checked",
+      "reasonChain": "the sequence could not be fully established",
+      "reasonDuplicates": "duplicate sequence numbers",
+      "unverifiedTitle": "Not fully verified",
+      "unverifiedDesc": "No signature was disproven, but not everything could be checked: {{reasons}}."
+    }
   },
   "schedules": {
     "cronHelp": "5-field format: minute hour day-of-month month day-of-week",
@@ -3324,7 +3349,6 @@
     "agentIdPlaceholder": "Agent ID to handle messages",
     "botToken": "Bot Token",
     "botTokenHint": "Bot User OAuth Token. Use a vault reference for security.",
-    "botTokenPlaceholder": "xoxb-… or ${vault:slack-bot-token}",
     "channel": "channel",
     "channelId": "Slack Channel ID",
     "channelIdCol": "Channel ID",
@@ -3345,7 +3369,6 @@
     "searchPlaceholder": "Search channels...",
     "signingSecret": "Signing Secret",
     "signingSecretHint": "From your Slack App's Basic Information page.",
-    "signingSecretPlaceholder": "Hex string or ${vault:slack-signing-secret}",
     "slackSetupGuide": "Slack Setup Guide",
     "slackSetupSummary": "Create a Slack App, configure Bot Token Scopes (app_mentions:read, chat:write, im:history, channels:history, groups:history), then paste credentials here.",
     "target": "target",
@@ -3399,7 +3422,9 @@
     "typeAgent": "Agent",
     "typeGroup": "Group",
     "selectGroup": "Select a group…",
-    "unknownGroup": "{{id}} (not found)"
+    "unknownGroup": "{{id}} (not found)",
+    "plaintextSecret": "Store {{fields}} in the secrets vault and reference it as ${vault:…} — plaintext credentials are not saved.",
+    "plaintextStored": "This channel stores {{fields}} in plaintext. Move it to the secrets vault and save to replace it with a reference."
   },
   "hitl": {
     "loadingApprovalDetails": "Loading approval details…",
@@ -3489,7 +3514,8 @@
     "decidedProgress": "{{decided}} of {{total}} decided",
     "groupLinkUnavailable": "This group could not be located, so there is no safe link to it.",
     "confirmApproveGroupDescription": "Approve the whole paused phase and resume the discussion. Every task waiting on this pause is approved with it — open the group to decide them individually.",
-    "confirmRejectGroupDescription": "Reject the whole paused phase. Every task waiting on this pause is rejected with it, and the discussion does not continue past it — open the group to decide them individually."
+    "confirmRejectGroupDescription": "Reject the whole paused phase. Every task waiting on this pause is rejected with it, and the discussion does not continue past it — open the group to decide them individually.",
+    "pauseChanged": "This request changed since you opened it — nothing was decided. Review it again."
   },
   "chatDrawer": {
     "deploying": "Deploying agent…",
@@ -3576,7 +3602,8 @@
     "conversationsTruncated_one": "Conversations were capped — the user has {{count}} in total.",
     "conversationsTruncated_other": "Conversations were capped — the user has {{count}} in total.",
     "failedConversations_one": "{{count}} conversation could not be read and is absent from the bundle.",
-    "failedConversations_other": "{{count}} conversations could not be read and are absent from the bundle."
+    "failedConversations_other": "{{count}} conversations could not be read and are absent from the bundle.",
+    "deleteIncomplete": "Erasure incomplete — some of this user's data may still exist. Do not report it as fulfilled."
   },
   "mockBanner": {
     "message": "Demo Mode — Displaying sample data. Connect an EDDI backend for real data."
@@ -4886,7 +4913,12 @@
       "space": "Workspace",
       "spaceHint": "Everyone in this resource's workspace.",
       "published": "Published",
-      "publishedHint": "Everyone with access to this deployment."
+      "publishedHint": "Everyone with access to this deployment.",
+      "confirmTitle": "Change visibility to {{visibility}}?",
+      "cascadeLabel": "Also apply it to the workflows and configurations this references",
+      "cascadeWarning": "Each referenced resource you own gets this visibility, replacing whatever it was set to on its own. Their previous settings are not kept.",
+      "noCascadeWarning": "Only this resource changes. Anyone who can now see it may still be unable to open what it references.",
+      "apply": "Change visibility"
     },
     "share": {
       "title": "Share",

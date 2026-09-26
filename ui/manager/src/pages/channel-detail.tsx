@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { parseChannelResourceUri } from "@/lib/api/channels";
@@ -9,13 +9,14 @@ import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
 import {
   Cable, Save, Trash2, ArrowLeft, Plus, X, Copy, Check,
   Bot, Users, ChevronDown, ChevronUp, Hash,
-  ExternalLink, Star,
+  ExternalLink, Star, AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
+import { plaintextSecretFields, redactPlaintextSecrets } from "@/lib/channel-secrets";
 import { AgentPicker } from "@/components/shared/agent-picker";
 import { useEnrichedGroupDescriptors } from "@/hooks/use-groups";
 import { useChannel, useUpdateChannel, useDeleteChannel } from "@/hooks/use-channels";
@@ -225,12 +226,41 @@ export function ChannelDetailPage() {
   const [rawOpen, setRawOpen] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  useEffect(() => { if (config) setDraft({ ...config }); }, [config]);
+  /*
+   * Seed the draft once per channel version — not on every `config` object.
+   * A refetch (window focus, the list invalidation after any channel save)
+   * hands back a new object with the stored values, and copying it over the
+   * draft threw away whatever the operator was in the middle of typing. A new
+   * version (this page's own save moves the URL on) or another channel does
+   * reseed.
+   */
+  const seededFor = useRef<string | null>(null);
+  useEffect(() => {
+    const key = `${id}@${version}`;
+    if (config && seededFor.current !== key) {
+      seededFor.current = key;
+      setDraft({ ...config });
+    }
+  }, [config, id, version]);
 
   const webhookUrl = `${window.location.origin}/integrations/slack/events`;
 
   const handleSave = async () => {
     if (!draft || !id) return;
+    // Bot token and signing secret are references only. A plaintext value is
+    // returned verbatim by GET /channelstore/channels/{id} to anyone who can
+    // read the channel and travels into every export; the backend only logs a
+    // warning, so the Manager is where it gets refused.
+    const literal = plaintextSecretFields(draft.platformConfig);
+    if (literal.length > 0) {
+      toast.error(
+        t("channelDetail.plaintextSecret", {
+          fields: literal.join(", "),
+          defaultValue: `Store ${literal.join(", ")} in the secrets vault and reference it as \${vault:…} — plaintext credentials are not saved.`,
+        }),
+      );
+      return;
+    }
     try {
       const result = await updateMutation.mutateAsync({ id, version, config: draft });
       // Update URL to new version so subsequent saves don't conflict
@@ -355,6 +385,25 @@ export function ChannelDetailPage() {
         </div>
       )}
 
+      {/* A channel saved before credentials became reference-only still holds
+          them in plaintext — returned by every read of it and in exports — until
+          it is re-saved. Say so rather than leave it for the next save to find. */}
+      {config && plaintextSecretFields(config.platformConfig).length > 0 && (
+        <div
+          className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/5 px-4 py-3 text-sm"
+          role="alert"
+          data-testid="channel-plaintext-warning"
+        >
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
+          <span>
+            {t("channelDetail.plaintextStored", {
+              fields: plaintextSecretFields(config.platformConfig).join(", "),
+              defaultValue: `This channel stores {{fields}} in plaintext. Move it to the secrets vault and save to replace it with a reference.`,
+            })}
+          </span>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="icon" onClick={() => navigate("/manage/channels")}><ArrowLeft className="h-4 w-4" /></Button>
@@ -397,11 +446,11 @@ export function ChannelDetailPage() {
           </div>
           <div className="space-y-1">
             <label className="text-xs font-medium">{t("channelDetail.botToken", "Bot Token")}</label>
-            <SecretKeyPicker value={draft.platformConfig.botToken ?? ""} onChange={(v) => setDraft({ ...draft, platformConfig: { ...draft.platformConfig, botToken: v } })} placeholder="xoxb-… or ${vault:slack-bot-token}" />
+            <SecretKeyPicker key={`${id}-bot-token`} referenceOnly testId="channel-bot-token" value={draft.platformConfig.botToken ?? ""} onChange={(v) => setDraft((prev) => prev ? { ...prev, platformConfig: { ...prev.platformConfig, botToken: v } } : prev)} placeholder="${vault:slack-bot-token}" />
           </div>
           <div className="space-y-1">
             <label className="text-xs font-medium">{t("channelDetail.signingSecret", "Signing Secret")}</label>
-            <SecretKeyPicker value={draft.platformConfig.signingSecret ?? ""} onChange={(v) => setDraft({ ...draft, platformConfig: { ...draft.platformConfig, signingSecret: v } })} placeholder="${vault:slack-signing-secret}" />
+            <SecretKeyPicker key={`${id}-signing-secret`} referenceOnly testId="channel-signing-secret" value={draft.platformConfig.signingSecret ?? ""} onChange={(v) => setDraft((prev) => prev ? { ...prev, platformConfig: { ...prev.platformConfig, signingSecret: v } } : prev)} placeholder="${vault:slack-signing-secret}" />
           </div>
 
           {/* Human-in-the-Loop approvals (optional) — routes HITL approval cards
@@ -483,7 +532,7 @@ export function ChannelDetailPage() {
         </button>
         {rawOpen && (
           <div className="border-t border-border/30 p-4">
-            <pre className="text-xs font-mono bg-muted/30 p-4 rounded-lg overflow-auto max-h-96">{JSON.stringify(draft, null, 2)}</pre>
+            <pre className="text-xs font-mono bg-muted/30 p-4 rounded-lg overflow-auto max-h-96">{JSON.stringify(redactPlaintextSecrets(draft), null, 2)}</pre>
           </div>
         )}
       </section>

@@ -1663,7 +1663,13 @@
     "grantAcknowledge": "これらのエージェントは、再度追加されるか設定がこのシークレットを使わなくなるまでデプロイできないことを理解しました。",
     "grantSaved": "「{{key}}」のアクセスを更新しました",
     "grantImpactFailed": "このシークレットを使用しているデプロイ済みエージェントを確認できなかったため、どのエージェントもアクセスを失う可能性があります。",
-    "grantAcknowledgeUnchecked": "影響を受けるデプロイ済みエージェントが分からないまま保存します。"
+    "grantAcknowledgeUnchecked": "影響を受けるデプロイ済みエージェントが分からないまま保存します。",
+    "rotateNotFound": "このシークレットはもう存在しないため、ローテーションするものがありません。代わりに再度追加してください。",
+    "keyExists": "「{{key}}」という名前のシークレットは既に存在します。再度追加すると値が置き換えられます。値を変更して利用者の設定を維持するには「ローテーション」を使用してください。",
+    "keyExistsRotate": "代わりにこのシークレットをローテーション",
+    "keyExistsPicker": "「{{key}}」という名前のシークレットは既に存在します。ボールトの一覧から選択するか、別の名前にしてください。",
+    "rotateKeepsGrantAll": "すべてのエージェントが現在と同じくアクセスを維持します。",
+    "rotateKeepsGrant": "アクセスは引き続き次に限定されます: {{agents}}"
   },
   "audit": {
     "title": "監査ログ",
@@ -1697,17 +1703,35 @@
     "autoRefreshToggle": "Toggle auto-refresh (every 10s)",
     "autoRefreshOn": "Auto",
     "autoRefreshOff": "Auto",
-    "integrityVerified": "All entries cryptographically signed",
-    "integrityVerifiedDesc": "{{count}} of {{total}} entries have HMAC-SHA256 signatures",
-    "integrityPass": "SIGNED",
-    "integrityPartial": "Partially signed audit trail",
-    "integrityPartialDesc": "{{count}} of {{total}} entries have HMAC signatures",
-    "integrityNone": "Unsigned audit entries",
-    "integrityNoneDesc": "Configure a vault master key to enable automatic HMAC-SHA256 signing on all future audit entries.",
+    "integrityNoneDesc": "ボールトのマスターキーを設定すると、今後のすべての監査エントリに HMAC-SHA256 署名が自動で付与されます。",
     "signed": "Signed",
     "allSigned": "All signed",
     "decidedBy": "実行者",
-    "automated": "自動"
+    "automated": "自動",
+    "verify": {
+      "entryInvalid": "署名が一致しません",
+      "entryUnproven": "未検証",
+      "signatureCount": "読み込んだ {{total}} 件中 {{count}} 件に署名があります。",
+      "loading": "署名を検証中…",
+      "errorTitle": "整合性は未検証です",
+      "errorDesc": "検証リクエストが失敗したため、ここでは何も確認されていません。",
+      "checked": "最新の {{count}} 件を確認しました。",
+      "verifiedTitle": "署名を検証しました",
+      "chainIntact": "シーケンスに欠けているエントリはありません。",
+      "chainNotApplicable": "会話をまたぐ場合は署名のみを確認し、シーケンスは確認しません。",
+      "verifiedBadge": "検証済み",
+      "tamperedTitle": "整合性チェックに失敗しました",
+      "tamperedInvalid": "{{count}} 件のエントリ署名が内容と一致しません。書き込み後にエントリが変更されています。",
+      "tamperedChain": "シーケンスからエントリが欠落しています（{{sequences}}）。記録が短縮されています。",
+      "disabledTitle": "署名を検証できません",
+      "reasonUnsigned": "署名のないエントリ {{count}} 件",
+      "reasonUnknownKey": "このデプロイメントが保持していないキーで署名されたもの {{count}} 件",
+      "reasonSkipped": "未確認の古いエントリ {{count}} 件",
+      "reasonChain": "シーケンスを完全には確定できませんでした",
+      "reasonDuplicates": "重複したシーケンス番号",
+      "unverifiedTitle": "完全には検証されていません",
+      "unverifiedDesc": "否定された署名はありませんが、すべてを確認できたわけではありません: {{reasons}}。"
+    }
   },
   "schedules": {
     "cronHelp": "5 フィールド形式: 分 時 日 月 曜日",
@@ -3284,7 +3308,6 @@
     "agentIdPlaceholder": "メッセージを処理するエージェント ID",
     "botToken": "ボットトークン",
     "botTokenHint": "ボットユーザー OAuth トークン。セキュリティのためにボールト参照を使用してください。",
-    "botTokenPlaceholder": "xoxb-… または ${vault:slack-bot-token}",
     "channel": "チャネル",
     "channelId": "Slack チャネル ID",
     "channelIdCol": "チャネル ID",
@@ -3305,7 +3328,6 @@
     "searchPlaceholder": "チャネルを検索…",
     "signingSecret": "署名シークレット",
     "signingSecretHint": "Slack アプリの基本情報ページから取得します。",
-    "signingSecretPlaceholder": "16進数文字列または ${vault:slack-signing-secret}",
     "slackSetupGuide": "Slack セットアップガイド",
     "slackSetupSummary": "Slack アプリを作成し、ボットトークンスコープ（app_mentions:read、chat:write、im:history、channels:history、groups:history）を設定し、資格情報をここに貼り付けてください。",
     "target": "ターゲット",
@@ -3359,7 +3381,9 @@
     "typeAgent": "エージェント",
     "typeGroup": "グループ",
     "selectGroup": "グループを選択…",
-    "unknownGroup": "{{id}}（見つかりません）"
+    "unknownGroup": "{{id}}（見つかりません）",
+    "plaintextSecret": "{{fields}} はシークレットボールトに保存し、${vault:…} で参照してください。平文の認証情報は保存されません。",
+    "plaintextStored": "このチャネルは {{fields}} を平文で保存しています。シークレットボールトに移し、保存して参照に置き換えてください。"
   },
   "hitl": {
     "loadingApprovalDetails": "承認の詳細を読み込んでいます…",
@@ -3449,7 +3473,8 @@
     "decidedProgress": "{{total}} 件中 {{decided}} 件を判断済み",
     "groupLinkUnavailable": "このグループが見つからないため、確実なリンクを表示できません。",
     "confirmApproveGroupDescription": "停止中のフェーズ全体を承認し、ディスカッションを再開します。保留中のタスクもすべて併せて承認されます。個別に判断するにはグループを開いてください。",
-    "confirmRejectGroupDescription": "一時停止中のフェーズ全体を却下します。この一時停止を待っているタスクもすべて却下され、議論はこれ以上進みません。個別に判断するにはグループを開いてください。"
+    "confirmRejectGroupDescription": "一時停止中のフェーズ全体を却下します。この一時停止を待っているタスクもすべて却下され、議論はこれ以上進みません。個別に判断するにはグループを開いてください。",
+    "pauseChanged": "開いた後にこのリクエストが変更されました。何も決定されていません。もう一度確認してください。"
   },
   "chatDrawer": {
     "deploying": "エージェントをデプロイ中…",
@@ -3536,7 +3561,8 @@
     "conversationsTruncated_other": "会話は上限で打ち切られました — このユーザーの総数は {{count}} 件です。",
     "failedConversations_other": "{{count}} 件の会話を読み取れず、バンドルに含まれていません。",
     "conversationsTruncated_one": "会話は上限で打ち切られました — このユーザーの総数は {{count}} 件です。",
-    "failedConversations_one": "{{count}} 件の会話を読み取れず、バンドルに含まれていません。"
+    "failedConversations_one": "{{count}} 件の会話を読み取れず、バンドルに含まれていません。",
+    "deleteIncomplete": "消去は完了していません。このユーザーのデータの一部がまだ残っている可能性があります。完了として報告しないでください。"
   },
   "mockBanner": {
     "message": "デモモード — サンプルデータを表示しています。実際のデータには EDDI バックエンドを接続してください。"
@@ -3683,7 +3709,8 @@
     "copyVars": "${vars:…} 参照をコピー",
     "refCopied": "コピーしました: {{ref}}",
     "infoLine1": "システムプロンプトでは {{vars.<key>}} を、エージェント設定の任意の場所では ${vars:<key>} を使用します。",
-    "infoLine2": "変更は 2 分以内に反映されます（キャッシュ TTL）。機密値にはシークレット保管庫をご利用ください。"
+    "infoLine2": "変更は 2 分以内に反映されます（キャッシュ TTL）。機密値にはシークレット保管庫をご利用ください。",
+    "keyExists": "「{{key}}」という名前の変数は既に存在します。代わりに一覧から編集してください。"
   },
   "workflowEditor": {
     "endpoints": "エンドポイント",
@@ -4886,7 +4913,12 @@
       "space": "ワークスペース",
       "spaceHint": "このリソースのワークスペースの全員。",
       "published": "公開",
-      "publishedHint": "このデプロイにアクセスできる全員。"
+      "publishedHint": "このデプロイにアクセスできる全員。",
+      "confirmTitle": "公開範囲を{{visibility}}に変更しますか？",
+      "cascadeLabel": "参照しているワークフローと設定にも適用する",
+      "cascadeWarning": "あなたが所有する参照先リソースすべてにこの公開範囲が設定され、個別の設定は置き換えられます。以前の設定は残りません。",
+      "noCascadeWarning": "このリソースだけが変更されます。新たに閲覧できる人でも、参照先を開けない場合があります。",
+      "apply": "公開範囲を変更"
     },
     "share": {
       "title": "共有",

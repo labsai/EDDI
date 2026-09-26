@@ -1751,7 +1751,13 @@
     "grantAcknowledge": "أدرك أن هؤلاء الوكلاء لن يُنشروا مرة أخرى حتى يُعادوا إلى القائمة أو يتوقف تكوينهم عن استخدام هذا السر.",
     "grantSaved": "تم تحديث الوصول لـ «{{key}}»",
     "grantImpactFailed": "تعذّر التحقق من الوكلاء المنشورين الذين يستخدمون هذا السر، لذا قد يفقد أيٌّ منهم الوصول.",
-    "grantAcknowledgeUnchecked": "الحفظ على أي حال دون معرفة الوكلاء المنشورين المتأثرين."
+    "grantAcknowledgeUnchecked": "الحفظ على أي حال دون معرفة الوكلاء المنشورين المتأثرين.",
+    "rotateNotFound": "هذا السر لم يعد موجودًا، لذا لا يوجد ما يمكن تدويره. أضفه من جديد بدلًا من ذلك.",
+    "keyExists": "يوجد سر باسم \"{{key}}\" بالفعل. ستؤدي إضافته مرة أخرى إلى استبدال قيمته — استخدم التدوير لتغيير القيمة مع الإبقاء على من يمكنه استخدامه.",
+    "keyExistsRotate": "دوّر هذا السر بدلًا من ذلك",
+    "keyExistsPicker": "يوجد سر باسم \"{{key}}\" بالفعل. اختره من قائمة الخزنة أو اختر اسمًا آخر.",
+    "rotateKeepsGrantAll": "يحتفظ كل الوكلاء بالوصول كما هو الآن.",
+    "rotateKeepsGrant": "يبقى الوصول مقتصرًا على: {{agents}}"
   },
   "audit": {
     "title": "سجل التدقيق",
@@ -1785,17 +1791,35 @@
     "autoRefreshToggle": "Toggle auto-refresh (every 10s)",
     "autoRefreshOn": "Auto",
     "autoRefreshOff": "Auto",
-    "integrityVerified": "All entries cryptographically signed",
-    "integrityVerifiedDesc": "{{count}} of {{total}} entries have HMAC-SHA256 signatures",
-    "integrityPass": "SIGNED",
-    "integrityPartial": "Partially signed audit trail",
-    "integrityPartialDesc": "{{count}} of {{total}} entries have HMAC signatures",
-    "integrityNone": "Unsigned audit entries",
-    "integrityNoneDesc": "Configure a vault master key to enable automatic HMAC-SHA256 signing on all future audit entries.",
+    "integrityNoneDesc": "اضبط مفتاحًا رئيسيًا للخزنة لتفعيل التوقيع التلقائي بـ HMAC-SHA256 لكل إدخالات التدقيق المستقبلية.",
     "signed": "Signed",
     "allSigned": "All signed",
     "decidedBy": "بواسطة",
-    "automated": "آلي"
+    "automated": "آلي",
+    "verify": {
+      "entryInvalid": "التوقيع غير مطابق",
+      "entryUnproven": "غير متحقق منه",
+      "signatureCount": "{{count}} من أصل {{total}} إدخالًا محمّلًا تحمل توقيعًا.",
+      "loading": "جارٍ التحقق من التواقيع…",
+      "errorTitle": "لم يتم التحقق من السلامة",
+      "errorDesc": "فشل طلب التحقق، لذا لم يتم فحص أي شيء هنا.",
+      "checked": "تم فحص أحدث {{count}} إدخالًا.",
+      "verifiedTitle": "تم التحقق من التواقيع",
+      "chainIntact": "لا يوجد إدخال مفقود من التسلسل.",
+      "chainNotApplicable": "عبر المحادثات يتم فحص التواقيع فقط وليس التسلسل.",
+      "verifiedBadge": "تم التحقق",
+      "tamperedTitle": "فشل فحص السلامة",
+      "tamperedInvalid": "{{count}} من تواقيع الإدخالات لا تطابق محتواها — تم تغيير الإدخالات بعد كتابتها.",
+      "tamperedChain": "توجد إدخالات مفقودة من التسلسل ({{sequences}}) — تم تقصير السجل.",
+      "disabledTitle": "لا يمكن التحقق من التواقيع",
+      "reasonUnsigned": "{{count}} إدخال غير موقّع",
+      "reasonUnknownKey": "{{count}} موقّع بمفتاح لم يعد هذا النشر يحتفظ به",
+      "reasonSkipped": "{{count}} إدخال أقدم لم يتم فحصه",
+      "reasonChain": "تعذّر إثبات التسلسل بالكامل",
+      "reasonDuplicates": "أرقام تسلسل مكررة",
+      "unverifiedTitle": "لم يتم التحقق بالكامل",
+      "unverifiedDesc": "لم يثبت بطلان أي توقيع، لكن تعذّر فحص كل شيء: {{reasons}}."
+    }
   },
   "schedules": {
     "cronHelp": "تنسيق من 5 حقول: الدقيقة الساعة يوم-الشهر الشهر يوم-الأسبوع",
@@ -3424,7 +3448,6 @@
     "agentIdPlaceholder": "معرف الوكيل لمعالجة الرسائل",
     "botToken": "رمز البوت",
     "botTokenHint": "رمز OAuth للبوت. استخدم مرجع الخزنة لمزيد من الأمان.",
-    "botTokenPlaceholder": "xoxb-… أو ${vault:slack-bot-token}",
     "channel": "قناة",
     "channelId": "معرف قناة Slack",
     "channelIdCol": "معرف القناة",
@@ -3445,7 +3468,6 @@
     "searchPlaceholder": "بحث في القنوات…",
     "signingSecret": "سر التوقيع",
     "signingSecretHint": "من صفحة المعلومات الأساسية لتطبيق Slack.",
-    "signingSecretPlaceholder": "سلسلة ست عشرية أو ${vault:slack-signing-secret}",
     "slackSetupGuide": "دليل إعداد Slack",
     "slackSetupSummary": "أنشئ تطبيق Slack، وكوّن نطاقات رمز البوت (app_mentions:read، chat:write، im:history، channels:history، groups:history)، ثم الصق بيانات الاعتماد هنا.",
     "target": "هدف",
@@ -3499,7 +3521,9 @@
     "typeAgent": "وكيل",
     "typeGroup": "مجموعة",
     "selectGroup": "اختر مجموعة…",
-    "unknownGroup": "{{id}} (غير موجودة)"
+    "unknownGroup": "{{id}} (غير موجودة)",
+    "plaintextSecret": "خزّن {{fields}} في خزنة الأسرار وأشر إليه بـ ${vault:…} — لا يتم حفظ بيانات الاعتماد بنص صريح.",
+    "plaintextStored": "تخزّن هذه القناة {{fields}} بنص صريح. انقله إلى خزنة الأسرار واحفظ لاستبداله بمرجع."
   },
   "hitl": {
     "loadingApprovalDetails": "جارٍ تحميل تفاصيل الموافقة…",
@@ -3589,7 +3613,8 @@
     "decidedProgress": "تم البت في {{decided}} من {{total}}",
     "groupLinkUnavailable": "تعذّر العثور على هذه المجموعة، لذا لا يوجد رابط موثوق إليها.",
     "confirmApproveGroupDescription": "الموافقة على المرحلة المتوقفة بالكامل واستئناف النقاش. تُعتمد معها كل مهمة معلَّقة — افتح المجموعة للبتّ فيها فرديًا.",
-    "confirmRejectGroupDescription": "رفض المرحلة المتوقفة بالكامل. تُرفض معها كل مهمة تنتظر هذا التوقف، ولا تتجاوزه المناقشة — افتح المجموعة لاتخاذ القرار في كل مهمة على حدة."
+    "confirmRejectGroupDescription": "رفض المرحلة المتوقفة بالكامل. تُرفض معها كل مهمة تنتظر هذا التوقف، ولا تتجاوزه المناقشة — افتح المجموعة لاتخاذ القرار في كل مهمة على حدة.",
+    "pauseChanged": "تغيّر هذا الطلب منذ أن فتحته — لم يُتخذ أي قرار. راجعه مرة أخرى."
   },
   "chatDrawer": {
     "deploying": "جارٍ نشر الوكيل…",
@@ -3684,7 +3709,8 @@
     "failedConversations_two": "تعذّرت قراءة محادثتين وهما غائبتان عن الحزمة.",
     "failedConversations_few": "تعذّرت قراءة {{count}} محادثات وهي غائبة عن الحزمة.",
     "failedConversations_many": "تعذّرت قراءة {{count}} محادثةً وهي غائبة عن الحزمة.",
-    "failedConversations_other": "تعذّرت قراءة {{count}} محادثة وهي غائبة عن الحزمة."
+    "failedConversations_other": "تعذّرت قراءة {{count}} محادثة وهي غائبة عن الحزمة.",
+    "deleteIncomplete": "المحو غير مكتمل — قد تظل بعض بيانات هذا المستخدم موجودة. لا تبلّغ عنه على أنه مُنجز."
   },
   "mockBanner": {
     "message": "الوضع التجريبي — عرض بيانات نموذجية. اتصل بخلفية EDDI للحصول على بيانات حقيقية."
@@ -3839,7 +3865,8 @@
     "copyVars": "نسخ مرجع ${vars:…}",
     "refCopied": "تم النسخ: {{ref}}",
     "infoLine1": "استخدم {{vars.<key>}} في مطالبات النظام أو ${vars:<key>} في أي مكان ضمن إعدادات الوكلاء.",
-    "infoLine2": "تسري التغييرات خلال دقيقتين (مدة صلاحية ذاكرة التخزين المؤقت). للقيم الحساسة استخدم خزنة الأسرار بدلاً من ذلك."
+    "infoLine2": "تسري التغييرات خلال دقيقتين (مدة صلاحية ذاكرة التخزين المؤقت). للقيم الحساسة استخدم خزنة الأسرار بدلاً من ذلك.",
+    "keyExists": "يوجد متغير باسم \"{{key}}\" بالفعل. عدّله من القائمة بدلًا من ذلك."
   },
   "workflowEditor": {
     "endpoints": "نقاط نهاية",
@@ -5062,7 +5089,12 @@
       "space": "مساحة العمل",
       "spaceHint": "كل من في مساحة عمل هذا المورد.",
       "published": "منشور",
-      "publishedHint": "كل من لديه وصول إلى هذا التثبيت."
+      "publishedHint": "كل من لديه وصول إلى هذا التثبيت.",
+      "confirmTitle": "هل تريد تغيير الظهور إلى {{visibility}}؟",
+      "cascadeLabel": "طبّقه أيضًا على مسارات العمل والإعدادات التي يشير إليها",
+      "cascadeWarning": "كل مورد مُشار إليه تملكه سيحصل على هذا الظهور بدلًا من إعداده الخاص. لا يتم الاحتفاظ بإعداداته السابقة.",
+      "noCascadeWarning": "يتغير هذا المورد فقط. قد لا يتمكن من أصبح بإمكانه رؤيته من فتح ما يشير إليه.",
+      "apply": "تغيير الظهور"
     },
     "share": {
       "title": "مشاركة",

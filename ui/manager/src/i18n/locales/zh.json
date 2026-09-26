@@ -1663,7 +1663,13 @@
     "grantAcknowledge": "我明白，除非重新添加这些智能体，或其配置不再使用此密钥，它们将无法再次部署。",
     "grantSaved": "已更新“{{key}}”的访问权限",
     "grantImpactFailed": "无法检查哪些已部署的智能体使用此密钥，因此其中任何一个都可能失去访问权限。",
-    "grantAcknowledgeUnchecked": "仍然保存，但不知道会影响哪些已部署的智能体。"
+    "grantAcknowledgeUnchecked": "仍然保存，但不知道会影响哪些已部署的智能体。",
+    "rotateNotFound": "此密钥已不存在，因此无需轮换。请重新添加。",
+    "keyExists": "名为“{{key}}”的密钥已存在。再次添加会替换其值 — 请使用“轮换”来更改值并保留可使用者。",
+    "keyExistsRotate": "改为轮换此密钥",
+    "keyExistsPicker": "名为“{{key}}”的密钥已存在。请从保险库列表中选择它，或换一个名称。",
+    "rotateKeepsGrantAll": "所有代理保持访问权限，与现在相同。",
+    "rotateKeepsGrant": "访问权限仍仅限于：{{agents}}"
   },
   "audit": {
     "title": "审计日志",
@@ -1697,17 +1703,35 @@
     "autoRefreshToggle": "Toggle auto-refresh (every 10s)",
     "autoRefreshOn": "Auto",
     "autoRefreshOff": "Auto",
-    "integrityVerified": "All entries cryptographically signed",
-    "integrityVerifiedDesc": "{{count}} of {{total}} entries have HMAC-SHA256 signatures",
-    "integrityPass": "SIGNED",
-    "integrityPartial": "Partially signed audit trail",
-    "integrityPartialDesc": "{{count}} of {{total}} entries have HMAC signatures",
-    "integrityNone": "Unsigned audit entries",
-    "integrityNoneDesc": "Configure a vault master key to enable automatic HMAC-SHA256 signing on all future audit entries.",
+    "integrityNoneDesc": "配置保险库主密钥，以便对今后所有审计条目自动进行 HMAC-SHA256 签名。",
     "signed": "Signed",
     "allSigned": "All signed",
     "decidedBy": "由",
-    "automated": "自动"
+    "automated": "自动",
+    "verify": {
+      "entryInvalid": "签名不匹配",
+      "entryUnproven": "未验证",
+      "signatureCount": "已加载的 {{total}} 个条目中有 {{count}} 个带有签名。",
+      "loading": "正在验证签名…",
+      "errorTitle": "完整性未验证",
+      "errorDesc": "验证请求失败，因此此处的内容均未经过检查。",
+      "checked": "已检查最近的 {{count}} 个条目。",
+      "verifiedTitle": "签名已验证",
+      "chainIntact": "序列中没有缺失的条目。",
+      "chainNotApplicable": "跨对话时仅检查签名，不检查序列。",
+      "verifiedBadge": "已验证",
+      "tamperedTitle": "完整性检查失败",
+      "tamperedInvalid": "{{count}} 个条目的签名与其内容不匹配 — 这些条目在写入后被修改过。",
+      "tamperedChain": "序列中缺少条目（{{sequences}}）— 记录已被截短。",
+      "disabledTitle": "无法验证签名",
+      "reasonUnsigned": "{{count}} 个未签名条目",
+      "reasonUnknownKey": "{{count}} 个使用本部署已不再持有的密钥签名",
+      "reasonSkipped": "{{count}} 个较早条目未检查",
+      "reasonChain": "无法完整确定序列",
+      "reasonDuplicates": "重复的序列号",
+      "unverifiedTitle": "未完全验证",
+      "unverifiedDesc": "没有签名被证伪，但并非所有内容都能检查：{{reasons}}。"
+    }
   },
   "schedules": {
     "cronHelp": "5 字段格式：分 时 日 月 星期",
@@ -3284,7 +3308,6 @@
     "agentIdPlaceholder": "处理消息的代理 ID",
     "botToken": "机器人令牌",
     "botTokenHint": "机器人用户 OAuth 令牌。使用保管库引用以提高安全性。",
-    "botTokenPlaceholder": "xoxb-… 或 ${vault:slack-bot-token}",
     "channel": "频道",
     "channelId": "Slack 频道 ID",
     "channelIdCol": "频道 ID",
@@ -3305,7 +3328,6 @@
     "searchPlaceholder": "搜索频道…",
     "signingSecret": "签名密钥",
     "signingSecretHint": "来自您的 Slack 应用基本信息页面。",
-    "signingSecretPlaceholder": "十六进制字符串或 ${vault:slack-signing-secret}",
     "slackSetupGuide": "Slack 设置指南",
     "slackSetupSummary": "创建 Slack 应用，配置机器人令牌范围（app_mentions:read、chat:write、im:history、channels:history、groups:history），然后在此处粘贴凭据。",
     "target": "目标",
@@ -3359,7 +3381,9 @@
     "typeAgent": "智能体",
     "typeGroup": "群组",
     "selectGroup": "选择群组…",
-    "unknownGroup": "{{id}}（未找到）"
+    "unknownGroup": "{{id}}（未找到）",
+    "plaintextSecret": "请将 {{fields}} 存入密钥保险库，并以 ${vault:…} 引用 — 明文凭据不会被保存。",
+    "plaintextStored": "此渠道以明文存储 {{fields}}。请将其移入密钥保险库并保存，以替换为引用。"
   },
   "hitl": {
     "loadingApprovalDetails": "正在加载审批详情…",
@@ -3449,7 +3473,8 @@
     "decidedProgress": "已决定 {{decided}}/{{total}}",
     "groupLinkUnavailable": "未找到该群组，因此无法提供可靠的链接。",
     "confirmApproveGroupDescription": "批准整个暂停阶段并继续讨论。该暂停下等待的每项任务都会一并批准；如需逐项决定，请打开该群组。",
-    "confirmRejectGroupDescription": "拒绝整个暂停阶段。等待该暂停的每项任务都会一并被拒绝，讨论也不会继续往下进行。如需逐项决定，请打开该群组。"
+    "confirmRejectGroupDescription": "拒绝整个暂停阶段。等待该暂停的每项任务都会一并被拒绝，讨论也不会继续往下进行。如需逐项决定，请打开该群组。",
+    "pauseChanged": "此请求在你打开后已发生变化 — 未做出任何决定。请重新审核。"
   },
   "chatDrawer": {
     "deploying": "正在部署智能体…",
@@ -3536,7 +3561,8 @@
     "conversationsTruncated_other": "会话已被截断 — 该用户共有 {{count}} 个。",
     "failedConversations_other": "有 {{count}} 个会话无法读取，未包含在数据包中。",
     "conversationsTruncated_one": "会话已被截断 — 该用户共有 {{count}} 个。",
-    "failedConversations_one": "有 {{count}} 个会话无法读取，未包含在数据包中。"
+    "failedConversations_one": "有 {{count}} 个会话无法读取，未包含在数据包中。",
+    "deleteIncomplete": "删除未完成 — 该用户的部分数据可能仍然存在。请勿报告为已完成。"
   },
   "mockBanner": {
     "message": "演示模式——显示示例数据。连接 EDDI 后端以获取真实数据。"
@@ -3683,7 +3709,8 @@
     "copyVars": "复制 ${vars:…} 引用",
     "refCopied": "已复制：{{ref}}",
     "infoLine1": "在系统提示中使用 {{vars.<key>}}，或在代理配置的任何位置使用 ${vars:<key>}。",
-    "infoLine2": "更改将在 2 分钟内生效（缓存 TTL）。敏感值请改用密钥保管库。"
+    "infoLine2": "更改将在 2 分钟内生效（缓存 TTL）。敏感值请改用密钥保管库。",
+    "keyExists": "名为“{{key}}”的变量已存在。请改为在列表中编辑它。"
   },
   "workflowEditor": {
     "endpoints": "端点",
@@ -4886,7 +4913,12 @@
       "space": "工作区",
       "spaceHint": "该资源所在工作区的所有人。",
       "published": "已发布",
-      "publishedHint": "所有能访问此部署的人。"
+      "publishedHint": "所有能访问此部署的人。",
+      "confirmTitle": "将可见性更改为{{visibility}}？",
+      "cascadeLabel": "同时应用于其引用的工作流和配置",
+      "cascadeWarning": "你拥有的每个被引用资源都会采用此可见性，替换其各自的设置。之前的设置不会保留。",
+      "noCascadeWarning": "只更改此资源。现在能看到它的人可能仍无法打开它引用的内容。",
+      "apply": "更改可见性"
     },
     "share": {
       "title": "共享",

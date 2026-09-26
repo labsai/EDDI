@@ -1663,7 +1663,13 @@
     "grantAcknowledge": "मैं समझता हूँ कि ये एजेंट तब तक पुनः तैनात नहीं हो पाएंगे जब तक उन्हें फिर से जोड़ा न जाए या उनका कॉन्फ़िगरेशन इस सीक्रेट का उपयोग बंद न कर दे।",
     "grantSaved": "“{{key}}” की पहुँच अपडेट कर दी गई",
     "grantImpactFailed": "यह जाँचा नहीं जा सका कि कौन-से तैनात एजेंट इस सीक्रेट का उपयोग करते हैं, इसलिए इनमें से कोई भी पहुँच खो सकता है।",
-    "grantAcknowledgeUnchecked": "यह जाने बिना सहेजें कि किन तैनात एजेंटों पर असर पड़ेगा।"
+    "grantAcknowledgeUnchecked": "यह जाने बिना सहेजें कि किन तैनात एजेंटों पर असर पड़ेगा।",
+    "rotateNotFound": "यह सीक्रेट अब मौजूद नहीं है, इसलिए रोटेट करने के लिए कुछ नहीं है। इसके बजाय इसे फिर से जोड़ें।",
+    "keyExists": "\"{{key}}\" नाम का सीक्रेट पहले से मौजूद है। इसे फिर से जोड़ने पर इसका मान बदल जाएगा — मान बदलने और इसे कौन उपयोग कर सकता है यह बनाए रखने के लिए रोटेट का उपयोग करें।",
+    "keyExistsRotate": "इसके बजाय इस सीक्रेट को रोटेट करें",
+    "keyExistsPicker": "\"{{key}}\" नाम का सीक्रेट पहले से मौजूद है। इसे वॉल्ट सूची से चुनें, या कोई दूसरा नाम चुनें।",
+    "rotateKeepsGrantAll": "हर एजेंट की पहुँच अभी की तरह बनी रहती है।",
+    "rotateKeepsGrant": "पहुँच इन तक सीमित रहती है: {{agents}}"
   },
   "audit": {
     "title": "ऑडिट लॉग",
@@ -1697,17 +1703,35 @@
     "autoRefreshToggle": "Toggle auto-refresh (every 10s)",
     "autoRefreshOn": "Auto",
     "autoRefreshOff": "Auto",
-    "integrityVerified": "All entries cryptographically signed",
-    "integrityVerifiedDesc": "{{count}} of {{total}} entries have HMAC-SHA256 signatures",
-    "integrityPass": "SIGNED",
-    "integrityPartial": "Partially signed audit trail",
-    "integrityPartialDesc": "{{count}} of {{total}} entries have HMAC signatures",
-    "integrityNone": "Unsigned audit entries",
-    "integrityNoneDesc": "Configure a vault master key to enable automatic HMAC-SHA256 signing on all future audit entries.",
+    "integrityNoneDesc": "भविष्य की सभी ऑडिट प्रविष्टियों पर स्वचालित HMAC-SHA256 हस्ताक्षर सक्षम करने के लिए वॉल्ट मास्टर की कॉन्फ़िगर करें।",
     "signed": "Signed",
     "allSigned": "All signed",
     "decidedBy": "द्वारा",
-    "automated": "स्वचालित"
+    "automated": "स्वचालित",
+    "verify": {
+      "entryInvalid": "हस्ताक्षर मेल नहीं खाता",
+      "entryUnproven": "सत्यापित नहीं",
+      "signatureCount": "लोड की गई {{total}} प्रविष्टियों में से {{count}} पर हस्ताक्षर है।",
+      "loading": "हस्ताक्षर सत्यापित किए जा रहे हैं…",
+      "errorTitle": "अखंडता सत्यापित नहीं हुई",
+      "errorDesc": "सत्यापन अनुरोध विफल रहा, इसलिए यहाँ कुछ भी जाँचा नहीं गया है।",
+      "checked": "सबसे हाल की {{count}} प्रविष्टियाँ जाँची गईं।",
+      "verifiedTitle": "हस्ताक्षर सत्यापित",
+      "chainIntact": "क्रम से कोई प्रविष्टि गायब नहीं है।",
+      "chainNotApplicable": "कई बातचीतों में केवल हस्ताक्षर जाँचे जाते हैं, क्रम नहीं।",
+      "verifiedBadge": "सत्यापित",
+      "tamperedTitle": "अखंडता जाँच विफल",
+      "tamperedInvalid": "{{count}} प्रविष्टि हस्ताक्षर अपनी सामग्री से मेल नहीं खाते — प्रविष्टियाँ लिखे जाने के बाद बदली गईं।",
+      "tamperedChain": "क्रम से प्रविष्टियाँ गायब हैं ({{sequences}}) — रिकॉर्ड छोटा किया गया है।",
+      "disabledTitle": "हस्ताक्षर सत्यापित नहीं किए जा सकते",
+      "reasonUnsigned": "{{count}} बिना हस्ताक्षर वाली प्रविष्टि(याँ)",
+      "reasonUnknownKey": "{{count}} ऐसी की से हस्ताक्षरित जो इस डिप्लॉयमेंट के पास अब नहीं है",
+      "reasonSkipped": "{{count}} पुरानी प्रविष्टि(याँ) जाँची नहीं गईं",
+      "reasonChain": "क्रम पूरी तरह स्थापित नहीं किया जा सका",
+      "reasonDuplicates": "डुप्लिकेट क्रम संख्याएँ",
+      "unverifiedTitle": "पूरी तरह सत्यापित नहीं",
+      "unverifiedDesc": "कोई हस्ताक्षर गलत साबित नहीं हुआ, लेकिन सब कुछ जाँचा नहीं जा सका: {{reasons}}।"
+    }
   },
   "schedules": {
     "cronHelp": "5-फ़ील्ड प्रारूप: मिनट घंटा माह-का-दिन माह सप्ताह-का-दिन",
@@ -3284,7 +3308,6 @@
     "agentIdPlaceholder": "संदेश संभालने के लिए एजेंट ID",
     "botToken": "बॉट टोकन",
     "botTokenHint": "बॉट उपयोगकर्ता OAuth टोकन। सुरक्षा के लिए वॉल्ट संदर्भ का उपयोग करें।",
-    "botTokenPlaceholder": "xoxb-… या ${vault:slack-bot-token}",
     "channel": "चैनल",
     "channelId": "Slack चैनल ID",
     "channelIdCol": "चैनल ID",
@@ -3305,7 +3328,6 @@
     "searchPlaceholder": "चैनल खोजें…",
     "signingSecret": "साइनिंग सीक्रेट",
     "signingSecretHint": "आपके Slack ऐप के मूलभूत जानकारी पृष्ठ से।",
-    "signingSecretPlaceholder": "हेक्स स्ट्रिंग या ${vault:slack-signing-secret}",
     "slackSetupGuide": "Slack सेटअप गाइड",
     "slackSetupSummary": "एक Slack ऐप बनाएं, बॉट टोकन स्कोप कॉन्फ़िगर करें (app_mentions:read, chat:write, im:history, channels:history, groups:history), फिर क्रेडेंशियल यहाँ पेस्ट करें।",
     "target": "लक्ष्य",
@@ -3359,7 +3381,9 @@
     "typeAgent": "एजेंट",
     "typeGroup": "समूह",
     "selectGroup": "एक समूह चुनें…",
-    "unknownGroup": "{{id}} (नहीं मिला)"
+    "unknownGroup": "{{id}} (नहीं मिला)",
+    "plaintextSecret": "{{fields}} को सीक्रेट वॉल्ट में स्टोर करें और ${vault:…} के रूप में संदर्भित करें — सादे टेक्स्ट वाले क्रेडेंशियल सहेजे नहीं जाते।",
+    "plaintextStored": "यह चैनल {{fields}} को सादे टेक्स्ट में स्टोर करता है। इसे सीक्रेट वॉल्ट में ले जाएँ और संदर्भ से बदलने के लिए सहेजें।"
   },
   "hitl": {
     "loadingApprovalDetails": "अनुमोदन विवरण लोड हो रहा है…",
@@ -3449,7 +3473,8 @@
     "decidedProgress": "{{total}} में से {{decided}} तय",
     "groupLinkUnavailable": "यह समूह नहीं मिला, इसलिए इसका कोई भरोसेमंद लिंक नहीं है।",
     "confirmApproveGroupDescription": "पूरे रुके हुए चरण को स्वीकृत करें और चर्चा जारी रखें। इस विराम पर प्रतीक्षारत हर कार्य भी स्वीकृत हो जाएगा — अलग-अलग निर्णय के लिए समूह खोलें।",
-    "confirmRejectGroupDescription": "पूरे रुके हुए चरण को अस्वीकार करें। इस विराम पर प्रतीक्षा कर रहा हर कार्य इसके साथ अस्वीकार हो जाएगा और चर्चा आगे नहीं बढ़ेगी — अलग-अलग निर्णय लेने के लिए समूह खोलें।"
+    "confirmRejectGroupDescription": "पूरे रुके हुए चरण को अस्वीकार करें। इस विराम पर प्रतीक्षा कर रहा हर कार्य इसके साथ अस्वीकार हो जाएगा और चर्चा आगे नहीं बढ़ेगी — अलग-अलग निर्णय लेने के लिए समूह खोलें।",
+    "pauseChanged": "आपके खोलने के बाद यह अनुरोध बदल गया — कुछ भी तय नहीं किया गया। इसे फिर से समीक्षा करें।"
   },
   "chatDrawer": {
     "deploying": "एजेंट Deploy हो रहा है…",
@@ -3536,7 +3561,8 @@
     "conversationsTruncated_one": "वार्तालापों की सीमा लगी — उपयोगकर्ता के कुल {{count}} हैं।",
     "conversationsTruncated_other": "वार्तालापों की सीमा लगी — उपयोगकर्ता के कुल {{count}} हैं।",
     "failedConversations_one": "{{count}} वार्तालाप पढ़ा नहीं जा सका और बंडल में अनुपस्थित है।",
-    "failedConversations_other": "{{count}} वार्तालाप पढ़े नहीं जा सके और बंडल में अनुपस्थित हैं।"
+    "failedConversations_other": "{{count}} वार्तालाप पढ़े नहीं जा सके और बंडल में अनुपस्थित हैं।",
+    "deleteIncomplete": "मिटाना अधूरा है — इस उपयोगकर्ता का कुछ डेटा अभी भी मौजूद हो सकता है। इसे पूरा हुआ न बताएँ।"
   },
   "mockBanner": {
     "message": "डेमो मोड — नमूना डेटा प्रदर्शित हो रहा है। वास्तविक डेटा के लिए एक EDDI बैकएंड कनेक्ट करें।"
@@ -3683,7 +3709,8 @@
     "copyVars": "${vars:…} संदर्भ कॉपी करें",
     "refCopied": "कॉपी किया गया: {{ref}}",
     "infoLine1": "सिस्टम प्रॉम्प्ट में {{vars.<key>}} या एजेंट कॉन्फ़िगरेशन में कहीं भी ${vars:<key>} का उपयोग करें।",
-    "infoLine2": "परिवर्तन 2 मिनट के भीतर प्रभावी होते हैं (कैश TTL)। संवेदनशील मानों के लिए सीक्रेट वॉल्ट का उपयोग करें।"
+    "infoLine2": "परिवर्तन 2 मिनट के भीतर प्रभावी होते हैं (कैश TTL)। संवेदनशील मानों के लिए सीक्रेट वॉल्ट का उपयोग करें।",
+    "keyExists": "\"{{key}}\" नाम का वेरिएबल पहले से मौजूद है। इसके बजाय इसे सूची से संपादित करें।"
   },
   "workflowEditor": {
     "endpoints": "एंडपॉइंट",
@@ -4886,7 +4913,12 @@
       "space": "कार्यक्षेत्र",
       "spaceHint": "इस संसाधन के कार्यक्षेत्र में सभी।",
       "published": "प्रकाशित",
-      "publishedHint": "इस परिनियोजन तक पहुँच रखने वाले सभी।"
+      "publishedHint": "इस परिनियोजन तक पहुँच रखने वाले सभी।",
+      "confirmTitle": "दृश्यता को {{visibility}} में बदलें?",
+      "cascadeLabel": "इसे उन वर्कफ़्लो और कॉन्फ़िगरेशन पर भी लागू करें जिनका यह संदर्भ देता है",
+      "cascadeWarning": "आपके स्वामित्व वाले हर संदर्भित संसाधन को यह दृश्यता मिलेगी, जो उसकी अपनी सेटिंग की जगह लेगी। पिछली सेटिंग्स नहीं रखी जातीं।",
+      "noCascadeWarning": "केवल यह संसाधन बदलता है। जो अब इसे देख सकते हैं, वे शायद अब भी इसके संदर्भित संसाधन नहीं खोल पाएँगे।",
+      "apply": "दृश्यता बदलें"
     },
     "share": {
       "title": "साझा करें",

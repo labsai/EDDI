@@ -76,6 +76,13 @@ export interface HitlDecision {
   toolDecisions?: Record<string, ToolCallDecision>;
   /** Set server-side — not sent by the client. */
   decidedBy?: string;
+  /**
+   * The pause this decision was made for (`ApprovalStatusSummary.pauseId`).
+   * A backend that knows the field refuses the decision with 409 once the
+   * conversation has been resumed and paused again; an older one ignores it.
+   * See `lib/hitl-pause-binding.ts`.
+   */
+  pauseId?: string;
 }
 
 /** Summary of a conversation awaiting human approval.
@@ -192,6 +199,11 @@ export interface ApprovalStatusSummary {
   timeoutPolicy?: string;
   approvalTimeout?: string;
   pauseDetails?: PauseDetails | null;
+  /**
+   * Identity of the current pause (its start, in epoch milliseconds), `""` when
+   * not paused. Absent on a backend that predates decision binding.
+   */
+  pauseId?: string;
 }
 
 // ── Config types ──────────────────────────────────────────────────

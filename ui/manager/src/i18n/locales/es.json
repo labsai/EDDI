@@ -1685,7 +1685,13 @@
     "grantAcknowledge": "Entiendo que estos agentes no volverán a desplegarse hasta que se añadan de nuevo o su configuración deje de usar este secreto.",
     "grantSaved": "Acceso actualizado para «{{key}}»",
     "grantImpactFailed": "No se pudo comprobar qué agentes desplegados usan este secreto, así que cualquiera podría perder el acceso.",
-    "grantAcknowledgeUnchecked": "Guardar de todos modos sin saber a qué agentes desplegados afecta."
+    "grantAcknowledgeUnchecked": "Guardar de todos modos sin saber a qué agentes desplegados afecta.",
+    "rotateNotFound": "Este secreto ya no existe, así que no hay nada que rotar. Vuelve a añadirlo.",
+    "keyExists": "Ya existe un secreto llamado «{{key}}». Añadirlo de nuevo reemplazaría su valor: usa Rotar para cambiar el valor y mantener quién puede usarlo.",
+    "keyExistsRotate": "Rotar este secreto en su lugar",
+    "keyExistsPicker": "Ya existe un secreto llamado «{{key}}». Selecciónalo en la lista de la bóveda o elige otro nombre.",
+    "rotateKeepsGrantAll": "Todos los agentes mantienen el acceso, como ahora.",
+    "rotateKeepsGrant": "El acceso sigue limitado a: {{agents}}"
   },
   "audit": {
     "title": "Registro de auditoría",
@@ -1719,17 +1725,35 @@
     "autoRefreshToggle": "Toggle auto-refresh (every 10s)",
     "autoRefreshOn": "Auto",
     "autoRefreshOff": "Auto",
-    "integrityVerified": "All entries cryptographically signed",
-    "integrityVerifiedDesc": "{{count}} of {{total}} entries have HMAC-SHA256 signatures",
-    "integrityPass": "SIGNED",
-    "integrityPartial": "Partially signed audit trail",
-    "integrityPartialDesc": "{{count}} of {{total}} entries have HMAC signatures",
-    "integrityNone": "Unsigned audit entries",
-    "integrityNoneDesc": "Configure a vault master key to enable automatic HMAC-SHA256 signing on all future audit entries.",
+    "integrityNoneDesc": "Configura una clave maestra de bóveda para activar la firma HMAC-SHA256 automática de todas las entradas de auditoría futuras.",
     "signed": "Signed",
     "allSigned": "All signed",
     "decidedBy": "por",
-    "automated": "automatizado"
+    "automated": "automatizado",
+    "verify": {
+      "entryInvalid": "La firma no coincide",
+      "entryUnproven": "No verificado",
+      "signatureCount": "{{count}} de {{total}} entradas cargadas llevan firma.",
+      "loading": "Verificando firmas…",
+      "errorTitle": "Integridad no verificada",
+      "errorDesc": "La solicitud de verificación falló, así que aquí no se ha comprobado nada.",
+      "checked": "Se comprobaron las {{count}} entradas más recientes.",
+      "verifiedTitle": "Firmas verificadas",
+      "chainIntact": "No falta ninguna entrada en la secuencia.",
+      "chainNotApplicable": "Entre conversaciones solo se comprueban las firmas, no la secuencia.",
+      "verifiedBadge": "VERIFICADO",
+      "tamperedTitle": "Falló la comprobación de integridad",
+      "tamperedInvalid": "{{count}} firma(s) de entrada no coinciden con su contenido: las entradas se modificaron después de escribirse.",
+      "tamperedChain": "Faltan entradas en la secuencia ({{sequences}}): el registro se ha acortado.",
+      "disabledTitle": "No se pueden verificar las firmas",
+      "reasonUnsigned": "{{count}} entrada(s) sin firmar",
+      "reasonUnknownKey": "{{count}} firmada(s) con una clave que este despliegue ya no tiene",
+      "reasonSkipped": "{{count}} entrada(s) antigua(s) sin comprobar",
+      "reasonChain": "no se pudo establecer por completo la secuencia",
+      "reasonDuplicates": "números de secuencia duplicados",
+      "unverifiedTitle": "No verificado por completo",
+      "unverifiedDesc": "No se refutó ninguna firma, pero no se pudo comprobar todo: {{reasons}}."
+    }
   },
   "schedules": {
     "cronHelp": "Formato de 5 campos: minuto hora día-del-mes mes día-de-la-semana",
@@ -3319,7 +3343,6 @@
     "agentIdPlaceholder": "ID del agente para gestionar mensajes",
     "botToken": "Token del bot",
     "botTokenHint": "Token OAuth del bot. Use una referencia de bóveda para mayor seguridad.",
-    "botTokenPlaceholder": "xoxb-… o ${vault:slack-bot-token}",
     "channel": "canal",
     "channelId": "ID del canal de Slack",
     "channelIdCol": "ID del canal",
@@ -3340,7 +3363,6 @@
     "searchPlaceholder": "Buscar canales…",
     "signingSecret": "Secreto de firma",
     "signingSecretHint": "Desde la página de Información básica de su aplicación Slack.",
-    "signingSecretPlaceholder": "Cadena hex o ${vault:slack-signing-secret}",
     "slackSetupGuide": "Guía de configuración de Slack",
     "slackSetupSummary": "Cree una aplicación Slack, configure los permisos del token del bot (app_mentions:read, chat:write, im:history, channels:history, groups:history) y pegue las credenciales aquí.",
     "target": "destino",
@@ -3394,7 +3416,9 @@
     "typeAgent": "Agente",
     "typeGroup": "Grupo",
     "selectGroup": "Selecciona un grupo…",
-    "unknownGroup": "{{id}} (no encontrado)"
+    "unknownGroup": "{{id}} (no encontrado)",
+    "plaintextSecret": "Guarda {{fields}} en la bóveda de secretos y haz referencia con ${vault:…}: las credenciales en texto plano no se guardan.",
+    "plaintextStored": "Este canal guarda {{fields}} en texto plano. Muévelo a la bóveda de secretos y guarda para sustituirlo por una referencia."
   },
   "hitl": {
     "loadingApprovalDetails": "Cargando detalles de aprobación…",
@@ -3484,7 +3508,8 @@
     "decidedProgress": "{{decided}} de {{total}} decididas",
     "groupLinkUnavailable": "No se ha encontrado este grupo, así que no hay un enlace fiable hacia él.",
     "confirmApproveGroupDescription": "Aprobar toda la fase en pausa y reanudar el debate. Cada tarea pendiente se aprueba con ella; abre el grupo para decidirlas una por una.",
-    "confirmRejectGroupDescription": "Rechazar toda la fase en pausa. Cada tarea pendiente se rechaza con ella y el debate no continúa más allá; abre el grupo para decidirlas una por una."
+    "confirmRejectGroupDescription": "Rechazar toda la fase en pausa. Cada tarea pendiente se rechaza con ella y el debate no continúa más allá; abre el grupo para decidirlas una por una.",
+    "pauseChanged": "Esta solicitud cambió desde que la abriste: no se decidió nada. Revísala de nuevo."
   },
   "chatDrawer": {
     "deploying": "Desplegando agente…",
@@ -3573,7 +3598,8 @@
     "failedConversations_one": "No se pudo leer {{count}} conversación y falta en el paquete.",
     "failedConversations_other": "No se pudieron leer {{count}} conversaciones y faltan en el paquete.",
     "conversationsTruncated_many": "Las conversaciones se limitaron — el usuario tiene {{count}} en total.",
-    "failedConversations_many": "No se pudieron leer {{count}} conversaciones y faltan en el paquete."
+    "failedConversations_many": "No se pudieron leer {{count}} conversaciones y faltan en el paquete.",
+    "deleteIncomplete": "Borrado incompleto: algunos datos de este usuario pueden seguir existiendo. No lo notifiques como cumplido."
   },
   "mockBanner": {
     "message": "Modo demo — Se muestran datos de ejemplo. Conecte un backend de EDDI para ver datos reales."
@@ -3722,7 +3748,8 @@
     "copyVars": "Copiar referencia ${vars:…}",
     "refCopied": "Copiado: {{ref}}",
     "infoLine1": "Usa {{vars.<key>}} en los prompts del sistema o ${vars:<key>} en cualquier parte de las configuraciones de agentes.",
-    "infoLine2": "Los cambios se aplican en 2 minutos (TTL de caché). Para valores sensibles, usa la bóveda de secretos."
+    "infoLine2": "Los cambios se aplican en 2 minutos (TTL de caché). Para valores sensibles, usa la bóveda de secretos.",
+    "keyExists": "Ya existe una variable llamada «{{key}}». Edítala desde la lista."
   },
   "workflowEditor": {
     "endpoints": "endpoints",
@@ -4930,7 +4957,12 @@
       "space": "Espacio",
       "spaceHint": "Todos los del espacio de este recurso.",
       "published": "Publicado",
-      "publishedHint": "Cualquiera con acceso a esta instalación."
+      "publishedHint": "Cualquiera con acceso a esta instalación.",
+      "confirmTitle": "¿Cambiar la visibilidad a {{visibility}}?",
+      "cascadeLabel": "Aplicarla también a los flujos y configuraciones a los que hace referencia",
+      "cascadeWarning": "Cada recurso referenciado que te pertenece recibe esta visibilidad, que sustituye su propia configuración. La configuración anterior no se conserva.",
+      "noCascadeWarning": "Solo cambia este recurso. Quien pueda verlo ahora quizá no pueda abrir lo que referencia.",
+      "apply": "Cambiar visibilidad"
     },
     "share": {
       "title": "Compartir",

@@ -72,9 +72,6 @@ const EXEMPT: Record<string, string> = {
   "POST */snippetstore/snippets/:id":
     "DRIFT, tracked: the backend exposes put/get/delete on {id} for snippets, not post. parserstore does have post, which is probably where this was copied from.",
 
-  "POST */secretstore/secrets/:tenantId/:keyName/rotate":
-    "Anticipated absence, not drift: secrets.ts falls back to a plain PUT on 404/405, and says so. Worth knowing that the mock answering 200 means the fallback — the live path against a 6.3.0 backend — is never exercised by a test.",
-
   "GET */logs/recent":
     "Dead mock: production reads /administration/logs (logs.ts BASE + query string), which the snapshot does contain. Nothing calls this.",
 };

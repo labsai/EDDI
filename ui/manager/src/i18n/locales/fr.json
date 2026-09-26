@@ -1685,7 +1685,13 @@
     "grantAcknowledge": "Je comprends que ces agents ne pourront plus être déployés tant qu’ils n’auront pas été rajoutés à la liste ou que leur configuration n’aura pas cessé d’utiliser ce secret.",
     "grantSaved": "Accès mis à jour pour « {{key}} »",
     "grantImpactFailed": "Impossible de vérifier quels agents déployés utilisent ce secret : n’importe lequel pourrait perdre l’accès.",
-    "grantAcknowledgeUnchecked": "Enregistrer quand même, sans savoir quels agents déployés sont concernés."
+    "grantAcknowledgeUnchecked": "Enregistrer quand même, sans savoir quels agents déployés sont concernés.",
+    "rotateNotFound": "Ce secret n'existe plus, il n'y a donc rien à renouveler. Ajoutez-le de nouveau.",
+    "keyExists": "Un secret nommé « {{key}} » existe déjà. L'ajouter de nouveau remplacerait sa valeur — utilisez Renouveler pour changer la valeur en conservant qui peut l'utiliser.",
+    "keyExistsRotate": "Renouveler plutôt ce secret",
+    "keyExistsPicker": "Un secret nommé « {{key}} » existe déjà. Choisissez-le dans la liste du coffre ou choisissez un autre nom.",
+    "rotateKeepsGrantAll": "Tous les agents gardent l'accès, comme maintenant.",
+    "rotateKeepsGrant": "L'accès reste limité à : {{agents}}"
   },
   "audit": {
     "title": "Journal d’audit",
@@ -1719,17 +1725,35 @@
     "autoRefreshToggle": "Toggle auto-refresh (every 10s)",
     "autoRefreshOn": "Auto",
     "autoRefreshOff": "Auto",
-    "integrityVerified": "All entries cryptographically signed",
-    "integrityVerifiedDesc": "{{count}} of {{total}} entries have HMAC-SHA256 signatures",
-    "integrityPass": "SIGNED",
-    "integrityPartial": "Partially signed audit trail",
-    "integrityPartialDesc": "{{count}} of {{total}} entries have HMAC signatures",
-    "integrityNone": "Unsigned audit entries",
-    "integrityNoneDesc": "Configure a vault master key to enable automatic HMAC-SHA256 signing on all future audit entries.",
+    "integrityNoneDesc": "Configurez une clé maîtresse de coffre pour activer la signature HMAC-SHA256 automatique de toutes les futures entrées d'audit.",
     "signed": "Signed",
     "allSigned": "All signed",
     "decidedBy": "par",
-    "automated": "automatisé"
+    "automated": "automatisé",
+    "verify": {
+      "entryInvalid": "La signature ne correspond pas",
+      "entryUnproven": "Non vérifié",
+      "signatureCount": "{{count}} des {{total}} entrées chargées portent une signature.",
+      "loading": "Vérification des signatures…",
+      "errorTitle": "Intégrité non vérifiée",
+      "errorDesc": "La demande de vérification a échoué ; rien n'a donc été vérifié ici.",
+      "checked": "Les {{count}} entrées les plus récentes ont été vérifiées.",
+      "verifiedTitle": "Signatures vérifiées",
+      "chainIntact": "Aucune entrée ne manque dans la séquence.",
+      "chainNotApplicable": "Sur plusieurs conversations, seules les signatures sont vérifiées, pas la séquence.",
+      "verifiedBadge": "VÉRIFIÉ",
+      "tamperedTitle": "Échec du contrôle d'intégrité",
+      "tamperedInvalid": "{{count}} signature(s) d'entrée ne correspondent pas à leur contenu — les entrées ont été modifiées après leur écriture.",
+      "tamperedChain": "Des entrées manquent dans la séquence ({{sequences}}) — l'historique a été raccourci.",
+      "disabledTitle": "Les signatures ne peuvent pas être vérifiées",
+      "reasonUnsigned": "{{count}} entrée(s) non signée(s)",
+      "reasonUnknownKey": "{{count}} signée(s) avec une clé que ce déploiement ne détient plus",
+      "reasonSkipped": "{{count}} entrée(s) plus ancienne(s) non vérifiée(s)",
+      "reasonChain": "la séquence n'a pas pu être entièrement établie",
+      "reasonDuplicates": "numéros de séquence en double",
+      "unverifiedTitle": "Pas entièrement vérifié",
+      "unverifiedDesc": "Aucune signature n'a été invalidée, mais tout n'a pas pu être vérifié : {{reasons}}."
+    }
   },
   "schedules": {
     "cronHelp": "Format à 5 champs : minute heure jour-du-mois mois jour-de-la-semaine",
@@ -3319,7 +3343,6 @@
     "agentIdPlaceholder": "ID de l’agent pour traiter les messages",
     "botToken": "Jeton de bot",
     "botTokenHint": "Jeton OAuth du bot. Utilisez une référence coffre-fort pour la sécurité.",
-    "botTokenPlaceholder": "xoxb-… ou ${vault:slack-bot-token}",
     "channel": "canal",
     "channelId": "ID du canal Slack",
     "channelIdCol": "ID du canal",
@@ -3340,7 +3363,6 @@
     "searchPlaceholder": "Rechercher des canaux…",
     "signingSecret": "Secret de signature",
     "signingSecretHint": "Depuis la page Informations de base de votre application Slack.",
-    "signingSecretPlaceholder": "Chaîne hex ou ${vault:slack-signing-secret}",
     "slackSetupGuide": "Guide de configuration Slack",
     "slackSetupSummary": "Créez une application Slack, configurez les portées du jeton de bot (app_mentions:read, chat:write, im:history, channels:history, groups:history), puis collez les identifiants ici.",
     "target": "cible",
@@ -3394,7 +3416,9 @@
     "typeAgent": "Agent",
     "typeGroup": "Groupe",
     "selectGroup": "Choisir un groupe…",
-    "unknownGroup": "{{id}} (introuvable)"
+    "unknownGroup": "{{id}} (introuvable)",
+    "plaintextSecret": "Stockez {{fields}} dans le coffre à secrets et référencez-le avec ${vault:…} — les identifiants en clair ne sont pas enregistrés.",
+    "plaintextStored": "Ce canal stocke {{fields}} en clair. Déplacez-le dans le coffre à secrets et enregistrez pour le remplacer par une référence."
   },
   "hitl": {
     "loadingApprovalDetails": "Chargement des détails d’approbation…",
@@ -3484,7 +3508,8 @@
     "decidedProgress": "{{decided}} sur {{total}} décidés",
     "groupLinkUnavailable": "Ce groupe est introuvable ; aucun lien fiable ne peut être proposé.",
     "confirmApproveGroupDescription": "Approuver toute la phase en pause et reprendre la discussion. Chaque tâche en attente est approuvée avec elle ; ouvrez le groupe pour les décider une par une.",
-    "confirmRejectGroupDescription": "Rejeter toute la phase en pause. Chaque tâche en attente est rejetée avec elle et la discussion ne va pas plus loin ; ouvrez le groupe pour les décider une par une."
+    "confirmRejectGroupDescription": "Rejeter toute la phase en pause. Chaque tâche en attente est rejetée avec elle et la discussion ne va pas plus loin ; ouvrez le groupe pour les décider une par une.",
+    "pauseChanged": "Cette demande a changé depuis que vous l'avez ouverte — rien n'a été décidé. Examinez-la de nouveau."
   },
   "chatDrawer": {
     "deploying": "Déploiement de l'agent…",
@@ -3573,7 +3598,8 @@
     "failedConversations_one": "{{count}} conversation n’a pas pu être lue et est absente du paquet.",
     "failedConversations_other": "{{count}} conversations n’ont pas pu être lues et sont absentes du paquet.",
     "conversationsTruncated_many": "Les conversations ont été plafonnées — l’utilisateur en a {{count}} au total.",
-    "failedConversations_many": "{{count}} conversations n’ont pas pu être lues et sont absentes du paquet."
+    "failedConversations_many": "{{count}} conversations n’ont pas pu être lues et sont absentes du paquet.",
+    "deleteIncomplete": "Effacement incomplet — certaines données de cet utilisateur peuvent encore exister. Ne le déclarez pas comme accompli."
   },
   "mockBanner": {
     "message": "Mode démo — Affichage de données d'exemple. Connectez un backend EDDI pour des données réelles."
@@ -3722,7 +3748,8 @@
     "copyVars": "Copier la référence ${vars:…}",
     "refCopied": "Copié : {{ref}}",
     "infoLine1": "Utilisez {{vars.<key>}} dans les prompts système ou ${vars:<key>} n'importe où dans les configurations d'agents.",
-    "infoLine2": "Les modifications prennent effet sous 2 minutes (TTL du cache). Pour les valeurs sensibles, utilisez plutôt le coffre-fort de secrets."
+    "infoLine2": "Les modifications prennent effet sous 2 minutes (TTL du cache). Pour les valeurs sensibles, utilisez plutôt le coffre-fort de secrets.",
+    "keyExists": "Une variable nommée « {{key}} » existe déjà. Modifiez-la plutôt depuis la liste."
   },
   "workflowEditor": {
     "endpoints": "endpoints",
@@ -4930,7 +4957,12 @@
       "space": "Espace",
       "spaceHint": "Tous les membres de l'espace de cette ressource.",
       "published": "Publié",
-      "publishedHint": "Toute personne ayant accès à cette installation."
+      "publishedHint": "Toute personne ayant accès à cette installation.",
+      "confirmTitle": "Changer la visibilité en {{visibility}} ?",
+      "cascadeLabel": "L'appliquer aussi aux workflows et configurations référencés",
+      "cascadeWarning": "Chaque ressource référencée qui vous appartient reçoit cette visibilité, qui remplace son réglage propre. Les réglages précédents ne sont pas conservés.",
+      "noCascadeWarning": "Seule cette ressource change. Les personnes qui peuvent désormais la voir ne pourront peut-être pas ouvrir ce qu'elle référence.",
+      "apply": "Changer la visibilité"
     },
     "share": {
       "title": "Partager",

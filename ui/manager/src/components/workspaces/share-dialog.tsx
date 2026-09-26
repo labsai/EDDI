@@ -156,15 +156,19 @@ export function ShareDialog({ open, onClose, resourceId, resourceName }: ShareDi
     [resourceId, afterChange, t]
   );
 
+  /** Resolves to null once applied, or to the error message — the confirm panel stays up on a failure. */
   const handleVisibility = useCallback(
-    async (visibility: ResourceVisibility) => {
+    async (visibility: ResourceVisibility, cascade: boolean): Promise<string | null> => {
       setBusy(true);
       try {
-        const result = await setResourceVisibility(resourceId, visibility);
+        const result = await setResourceVisibility(resourceId, visibility, cascade);
         await afterChange(result, "visibility");
         toast.success(t("workspaces.share.visibilityUpdated", "Visibility updated"));
+        return null;
       } catch (e) {
-        toast.error(getErrorMessage(e));
+        const message = getErrorMessage(e);
+        toast.error(message);
+        return message;
       } finally {
         setBusy(false);
       }
@@ -227,7 +231,12 @@ export function ShareDialog({ open, onClose, resourceId, resourceName }: ShareDi
 
             {isOwner && (
               <>
-                <VisibilityChooser current={info.visibility} busy={busy} onChange={handleVisibility} />
+                <VisibilityChooser
+                  key={resourceId}
+                  current={info.visibility}
+                  busy={busy}
+                  onChange={handleVisibility}
+                />
 
                 <section className="space-y-2">
                   <h3 className="text-sm font-medium">
@@ -474,6 +483,17 @@ function OwnerLine({ ownerId, spaceId }: { ownerId: string | null; spaceId: stri
   );
 }
 
+/**
+ * Pick a visibility — and confirm it before anything is written.
+ *
+ * A visibility change is not one resource's setting: by default it cascades
+ * through every workflow and configuration the resource references, and it
+ * REPLACES each one's visibility rather than merging with it. Whatever those
+ * documents were set to individually is gone, and nothing records it. The
+ * buttons used to fire that on a single click. Now a click only proposes the
+ * change; it says what will happen, lets the owner keep it to this resource
+ * alone, and applies it on an explicit confirm.
+ */
 function VisibilityChooser({
   current,
   busy,
@@ -481,9 +501,13 @@ function VisibilityChooser({
 }: {
   current: ResourceVisibility;
   busy: boolean;
-  onChange: (v: ResourceVisibility) => void;
+  onChange: (v: ResourceVisibility, cascade: boolean) => Promise<string | null>;
 }) {
   const { t } = useTranslation();
+  const [proposed, setProposed] = useState<ResourceVisibility | null>(null);
+  const [cascade, setCascade] = useState(true);
+  /** Why the last apply failed — shown in the still-open panel so a retry is one click. */
+  const [applyError, setApplyError] = useState<string | null>(null);
   const options: { value: ResourceVisibility; icon: typeof Lock; label: string; hint: string }[] = [
     {
       value: "private",
@@ -504,6 +528,7 @@ function VisibilityChooser({
       hint: t("workspaces.visibility.publishedHint", "Everyone with access to this deployment."),
     },
   ];
+  const proposedLabel = options.find((o) => o.value === proposed)?.label ?? "";
 
   return (
     <section className="space-y-2">
@@ -512,18 +537,29 @@ function VisibilityChooser({
         {options.map((opt) => {
           const Icon = opt.icon;
           const selected = current === opt.value;
+          const pending = proposed === opt.value;
           return (
             <button
               key={opt.value}
               type="button"
               disabled={busy}
-              onClick={() => onChange(opt.value)}
+              onClick={() => {
+                // Choosing what is already set is not a change, and must not
+                // re-cascade it over resources that differ on purpose.
+                setProposed(selected ? null : opt.value);
+                setCascade(true);
+                setApplyError(null);
+              }}
               aria-pressed={selected}
               data-testid={`visibility-${opt.value}`}
               className={[
                 "flex flex-col gap-1 rounded-md border p-3 text-start transition-colors",
                 "focus:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60",
-                selected ? "border-primary bg-primary/5" : "border-border hover:bg-accent",
+                selected
+                  ? "border-primary bg-primary/5"
+                  : pending
+                    ? "border-warning bg-warning/5"
+                    : "border-border hover:bg-accent",
               ].join(" ")}
             >
               <span className="flex items-center gap-2 text-sm font-medium">
@@ -535,6 +571,78 @@ function VisibilityChooser({
           );
         })}
       </div>
+
+      {proposed && (
+        <div
+          className="space-y-2 rounded-md border border-warning/40 bg-warning/5 p-3"
+          role="alert"
+          data-testid="visibility-confirm"
+        >
+          <p className="text-sm">
+            {t("workspaces.visibility.confirmTitle", "Change visibility to {{visibility}}?", {
+              visibility: proposedLabel,
+            })}
+          </p>
+          <label className="flex items-start gap-2 text-xs">
+            <input
+              type="checkbox"
+              checked={cascade}
+              onChange={(e) => setCascade(e.target.checked)}
+              className="mt-0.5"
+              data-testid="visibility-cascade"
+            />
+            {t(
+              "workspaces.visibility.cascadeLabel",
+              "Also apply it to the workflows and configurations this references",
+            )}
+          </label>
+          <p className="text-xs text-muted-foreground">
+            {cascade
+              ? t(
+                  "workspaces.visibility.cascadeWarning",
+                  "Each referenced resource you own gets this visibility, replacing whatever it was set to on its own. Their previous settings are not kept.",
+                )
+              : t(
+                  "workspaces.visibility.noCascadeWarning",
+                  "Only this resource changes. Anyone who can now see it may still be unable to open what it references.",
+                )}
+          </p>
+          {applyError && (
+            <p className="text-xs text-destructive" data-testid="visibility-apply-error">
+              {applyError}
+            </p>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={busy}
+              onClick={() => {
+                setProposed(null);
+                setApplyError(null);
+              }}
+              data-testid="visibility-cancel"
+            >
+              {t("common.cancel", "Cancel")}
+            </Button>
+            <Button
+              size="sm"
+              disabled={busy}
+              onClick={async () => {
+                const target = proposed;
+                const error = await onChange(target, cascade);
+                // Closed only once the change is applied: a failed PUT leaves
+                // the proposal, and the reason, where the operator can retry.
+                setApplyError(error);
+                if (error === null) setProposed((open) => (open === target ? null : open));
+              }}
+              data-testid="visibility-apply"
+            >
+              {t("workspaces.visibility.apply", "Change visibility")}
+            </Button>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

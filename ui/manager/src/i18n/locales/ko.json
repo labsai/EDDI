@@ -1663,7 +1663,13 @@
     "grantAcknowledge": "이 에이전트들은 다시 추가되거나 설정에서 이 시크릿을 더 이상 사용하지 않을 때까지 배포할 수 없다는 사실을 이해합니다.",
     "grantSaved": "‘{{key}}’의 접속 권한을 업데이트했습니다",
     "grantImpactFailed": "이 시크릿을 사용하는 배포된 에이전트를 확인할 수 없어, 어느 에이전트든 접속 권한을 잃을 수 있습니다.",
-    "grantAcknowledgeUnchecked": "어떤 배포된 에이전트가 영향을 받는지 모르는 채로 저장합니다."
+    "grantAcknowledgeUnchecked": "어떤 배포된 에이전트가 영향을 받는지 모르는 채로 저장합니다.",
+    "rotateNotFound": "이 시크릿은 더 이상 존재하지 않아 교체할 대상이 없습니다. 대신 다시 추가하세요.",
+    "keyExists": "\"{{key}}\" 이름의 시크릿이 이미 있습니다. 다시 추가하면 값이 대체됩니다. 사용 권한을 유지한 채 값을 바꾸려면 교체를 사용하세요.",
+    "keyExistsRotate": "대신 이 시크릿 교체",
+    "keyExistsPicker": "\"{{key}}\" 이름의 시크릿이 이미 있습니다. 볼트 목록에서 선택하거나 다른 이름을 사용하세요.",
+    "rotateKeepsGrantAll": "모든 에이전트가 지금처럼 접근 권한을 유지합니다.",
+    "rotateKeepsGrant": "접근은 계속 다음으로 제한됩니다: {{agents}}"
   },
   "audit": {
     "title": "감사 로그",
@@ -1697,17 +1703,35 @@
     "autoRefreshToggle": "Toggle auto-refresh (every 10s)",
     "autoRefreshOn": "Auto",
     "autoRefreshOff": "Auto",
-    "integrityVerified": "All entries cryptographically signed",
-    "integrityVerifiedDesc": "{{count}} of {{total}} entries have HMAC-SHA256 signatures",
-    "integrityPass": "SIGNED",
-    "integrityPartial": "Partially signed audit trail",
-    "integrityPartialDesc": "{{count}} of {{total}} entries have HMAC signatures",
-    "integrityNone": "Unsigned audit entries",
-    "integrityNoneDesc": "Configure a vault master key to enable automatic HMAC-SHA256 signing on all future audit entries.",
+    "integrityNoneDesc": "볼트 마스터 키를 구성하면 이후 모든 감사 항목에 HMAC-SHA256 서명이 자동으로 적용됩니다.",
     "signed": "Signed",
     "allSigned": "All signed",
     "decidedBy": "처리자",
-    "automated": "자동화됨"
+    "automated": "자동화됨",
+    "verify": {
+      "entryInvalid": "서명이 일치하지 않음",
+      "entryUnproven": "검증되지 않음",
+      "signatureCount": "불러온 {{total}}개 항목 중 {{count}}개에 서명이 있습니다.",
+      "loading": "서명 검증 중…",
+      "errorTitle": "무결성이 검증되지 않음",
+      "errorDesc": "검증 요청이 실패하여 여기에서는 아무것도 확인되지 않았습니다.",
+      "checked": "최근 {{count}}개 항목을 확인했습니다.",
+      "verifiedTitle": "서명 검증됨",
+      "chainIntact": "순서에서 누락된 항목이 없습니다.",
+      "chainNotApplicable": "여러 대화에 걸쳐서는 순서가 아닌 서명만 확인합니다.",
+      "verifiedBadge": "검증됨",
+      "tamperedTitle": "무결성 검사 실패",
+      "tamperedInvalid": "{{count}}개 항목의 서명이 내용과 일치하지 않습니다. 기록된 후 항목이 변경되었습니다.",
+      "tamperedChain": "순서에서 항목이 누락되었습니다({{sequences}}). 기록이 줄어들었습니다.",
+      "disabledTitle": "서명을 검증할 수 없음",
+      "reasonUnsigned": "서명되지 않은 항목 {{count}}개",
+      "reasonUnknownKey": "이 배포에 더 이상 없는 키로 서명된 항목 {{count}}개",
+      "reasonSkipped": "확인하지 않은 이전 항목 {{count}}개",
+      "reasonChain": "순서를 완전히 확인할 수 없었습니다",
+      "reasonDuplicates": "중복된 순서 번호",
+      "unverifiedTitle": "완전히 검증되지 않음",
+      "unverifiedDesc": "반증된 서명은 없지만 모든 것을 확인하지는 못했습니다: {{reasons}}."
+    }
   },
   "schedules": {
     "cronHelp": "5필드 형식: 분 시 일 월 요일",
@@ -3284,7 +3308,6 @@
     "agentIdPlaceholder": "메시지를 처리할 에이전트 ID",
     "botToken": "봇 토큰",
     "botTokenHint": "봇 사용자 OAuth 토큰. 보안을 위해 볼트 참조를 사용하세요.",
-    "botTokenPlaceholder": "xoxb-… 또는 ${vault:slack-bot-token}",
     "channel": "채널",
     "channelId": "Slack 채널 ID",
     "channelIdCol": "채널 ID",
@@ -3305,7 +3328,6 @@
     "searchPlaceholder": "채널 검색…",
     "signingSecret": "서명 비밀",
     "signingSecretHint": "Slack 앱의 기본 정보 페이지에서 확인할 수 있습니다.",
-    "signingSecretPlaceholder": "16진수 문자열 또는 ${vault:slack-signing-secret}",
     "slackSetupGuide": "Slack 설정 가이드",
     "slackSetupSummary": "Slack 앱을 만들고, 봇 토큰 범위(app_mentions:read, chat:write, im:history, channels:history, groups:history)를 구성한 후 여기에 자격 증명을 붙여넣으세요.",
     "target": "대상",
@@ -3359,7 +3381,9 @@
     "typeAgent": "에이전트",
     "typeGroup": "그룹",
     "selectGroup": "그룹 선택…",
-    "unknownGroup": "{{id}} (찾을 수 없음)"
+    "unknownGroup": "{{id}} (찾을 수 없음)",
+    "plaintextSecret": "{{fields}}을(를) 시크릿 볼트에 저장하고 ${vault:…}로 참조하세요. 평문 자격 증명은 저장되지 않습니다.",
+    "plaintextStored": "이 채널은 {{fields}}을(를) 평문으로 저장하고 있습니다. 시크릿 볼트로 옮긴 뒤 저장하여 참조로 바꾸세요."
   },
   "hitl": {
     "loadingApprovalDetails": "승인 세부 정보를 불러오는 중…",
@@ -3449,7 +3473,8 @@
     "decidedProgress": "{{total}}건 중 {{decided}}건 결정됨",
     "groupLinkUnavailable": "이 그룹을 찾을 수 없어 안전한 링크를 제공할 수 없습니다.",
     "confirmApproveGroupDescription": "일시 중지된 단계 전체를 승인하고 토론을 재개합니다. 대기 중인 모든 작업도 함께 승인됩니다. 개별 결정은 그룹에서 하세요.",
-    "confirmRejectGroupDescription": "일시 중지된 단계 전체를 거부합니다. 이 일시 중지를 기다리는 모든 작업이 함께 거부되며 논의는 더 진행되지 않습니다. 개별적으로 결정하려면 그룹을 여세요."
+    "confirmRejectGroupDescription": "일시 중지된 단계 전체를 거부합니다. 이 일시 중지를 기다리는 모든 작업이 함께 거부되며 논의는 더 진행되지 않습니다. 개별적으로 결정하려면 그룹을 여세요.",
+    "pauseChanged": "이 요청은 연 이후 변경되었습니다. 아무것도 결정되지 않았습니다. 다시 검토하세요."
   },
   "chatDrawer": {
     "deploying": "에이전트 배포 중…",
@@ -3536,7 +3561,8 @@
     "conversationsTruncated_other": "대화가 상한에 걸렸습니다 — 이 사용자는 총 {{count}}개를 가지고 있습니다.",
     "failedConversations_other": "{{count}}개의 대화를 읽을 수 없어 번들에 포함되지 않았습니다.",
     "conversationsTruncated_one": "대화가 상한에 걸렸습니다 — 이 사용자는 총 {{count}}개를 가지고 있습니다.",
-    "failedConversations_one": "{{count}}개의 대화를 읽을 수 없어 번들에 포함되지 않았습니다."
+    "failedConversations_one": "{{count}}개의 대화를 읽을 수 없어 번들에 포함되지 않았습니다.",
+    "deleteIncomplete": "삭제가 완료되지 않았습니다. 이 사용자의 일부 데이터가 아직 남아 있을 수 있습니다. 완료된 것으로 보고하지 마세요."
   },
   "mockBanner": {
     "message": "데모 모드 — 샘플 데이터를 표시합니다. 실제 데이터를 보려면 EDDI 백엔드에 연결하세요."
@@ -3683,7 +3709,8 @@
     "copyVars": "${vars:…} 참조 복사",
     "refCopied": "복사됨: {{ref}}",
     "infoLine1": "시스템 프롬프트에서는 {{vars.<key>}}를, 에이전트 구성의 어디에서든 ${vars:<key>}를 사용하세요.",
-    "infoLine2": "변경 사항은 2분 이내에 적용됩니다(캐시 TTL). 민감한 값에는 시크릿 저장소를 사용하세요."
+    "infoLine2": "변경 사항은 2분 이내에 적용됩니다(캐시 TTL). 민감한 값에는 시크릿 저장소를 사용하세요.",
+    "keyExists": "\"{{key}}\" 이름의 변수가 이미 있습니다. 대신 목록에서 편집하세요."
   },
   "workflowEditor": {
     "endpoints": "엔드포인트",
@@ -4886,7 +4913,12 @@
       "space": "작업 공간",
       "spaceHint": "이 리소스의 작업 공간에 속한 모든 사람.",
       "published": "게시됨",
-      "publishedHint": "이 배포에 접근할 수 있는 모든 사람."
+      "publishedHint": "이 배포에 접근할 수 있는 모든 사람.",
+      "confirmTitle": "공개 범위를 {{visibility}}(으)로 변경하시겠습니까?",
+      "cascadeLabel": "참조하는 워크플로와 구성에도 적용",
+      "cascadeWarning": "소유한 참조 리소스마다 이 공개 범위가 적용되어 개별 설정을 대체합니다. 이전 설정은 보존되지 않습니다.",
+      "noCascadeWarning": "이 리소스만 변경됩니다. 이제 볼 수 있게 된 사람도 참조 대상을 열지 못할 수 있습니다.",
+      "apply": "공개 범위 변경"
     },
     "share": {
       "title": "공유",

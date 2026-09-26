@@ -3782,6 +3782,16 @@ export const secretsHandlers = [
     return HttpResponse.json(filtered);
   }),
 
+  // One key's metadata (never its value); 404 when the key does not exist.
+  http.get("*/secretstore/secrets/:tenantId/:keyName", ({ params }) => {
+    const found = MOCK_SECRETS.find(
+      (s) => s.tenantId === params.tenantId && s.keyName === params.keyName,
+    );
+    return found
+      ? HttpResponse.json(found)
+      : HttpResponse.json({ error: "Secret not found" }, { status: 404 });
+  }),
+
   // Update a secret's agent grant. Registered BEFORE the generic secret PUT so
   // the more specific path wins; it echoes the requested list back and reports no
   // affected agents, which is the "widening a grant" case. A test that needs the
@@ -3858,18 +3868,8 @@ export const secretsHandlers = [
     HttpResponse.json({ status: "UP", provider: "VaultSecretProvider", available: true }),
   ),
 
-  // Rotate secret
-  http.post("*/secretstore/secrets/:tenantId/:keyName/rotate", ({ params }) => {
-    const tenantId = params.tenantId as string;
-    const keyName = params.keyName as string;
-    const ref = tenantId === "default"
-      ? `\${vault:${keyName}}`
-      : `\${vault:${tenantId}/${keyName}}`;
-    return HttpResponse.json(
-      { reference: ref, tenantId, keyName },
-      { status: 200 },
-    );
-  }),
+  // No rotate handler: EDDI has no rotate endpoint. A rotation is a PUT of the
+  // new value with the current grant (see `rotateSecret`), answered above.
 ];
 
 // ─── Audit Trail Handlers ────────────────────────────────────────────────────
@@ -3974,7 +3974,37 @@ const MOCK_AUDIT_ENTRIES = [
   },
 ];
 
+/** A clean `AuditVerificationReport` for the mock entries — every signature recomputes. */
+function mockAuditVerification(scope: "conversation" | "agent", scopeId: string) {
+  return {
+    scope,
+    scopeId,
+    signingEnabled: true,
+    entriesChecked: MOCK_AUDIT_ENTRIES.length,
+    valid: MOCK_AUDIT_ENTRIES.length,
+    recovered: 0,
+    recoverySkipped: 0,
+    invalid: 0,
+    unsigned: 0,
+    chainStatus: scope === "conversation" ? "INTACT" : "NOT_APPLICABLE",
+    missingSequences: [],
+    undeliveredSequences: [],
+    duplicateSequences: [],
+    problems: [],
+    verifiedAt: new Date().toISOString(),
+  };
+}
+
 export const auditHandlers = [
+  // Integrity verification — registered before `/:conversationId`, which would
+  // otherwise never see these two-segment paths anyway, but keeps the intent plain.
+  http.get("*/auditstore/verify/agent/:agentId", ({ params }) =>
+    HttpResponse.json(mockAuditVerification("agent", params.agentId as string)),
+  ),
+  http.get("*/auditstore/verify/:conversationId", ({ params }) =>
+    HttpResponse.json(mockAuditVerification("conversation", params.conversationId as string)),
+  ),
+
   // Get audit trail by conversation
   http.get("*/auditstore/:conversationId/count", () => {
     return HttpResponse.json(MOCK_AUDIT_ENTRIES.length);

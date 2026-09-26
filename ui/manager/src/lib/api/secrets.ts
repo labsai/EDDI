@@ -1,4 +1,4 @@
-import { api } from "../api-client";
+import { api, ApiClientError } from "../api-client";
 
 /* ─── Types ─── */
 
@@ -131,6 +131,20 @@ export interface VaultHealth {
 const BASE = "/secretstore/secrets";
 
 /**
+ * `/{tenantId}/{keyName}` with both segments percent-encoded.
+ *
+ * Both are free text typed into the Manager. Spliced in raw, a key called
+ * `a/b` addressed `…/a/b` — a different resource — and one containing `?`
+ * turned the rest of the name into a query string, so the PUT or DELETE landed
+ * on something the operator never named. `updateSecretGrant` already encoded
+ * its segments; the raw `fetch` calls here did not.
+ */
+function secretPath(tenantId: string, keyName?: string): string {
+  const tenant = `${BASE}/${encodeURIComponent(tenantId)}`;
+  return keyName === undefined ? tenant : `${tenant}/${encodeURIComponent(keyName)}`;
+}
+
+/**
  * Stable code for "the backend has no secret provider configured".
  *
  * The API layer cannot call `t()` — it has no React context — so it raises a
@@ -183,7 +197,7 @@ export async function listSecrets(
   tenantId: string,
 ): Promise<SecretMetadata[]> {
   const res = await fetch(
-    `${api.getBaseUrl()}${BASE}/${tenantId}`,
+    `${api.getBaseUrl()}${secretPath(tenantId)}`,
     { headers: api.getAuthHeader() },
   );
   // Throw on non-OK so callers can distinguish a real failure (500/503/403)
@@ -208,7 +222,7 @@ export async function storeSecret(
   if (allowedAgents) body.allowedAgents = allowedAgents;
 
   const res = await fetch(
-    `${api.getBaseUrl()}${BASE}/${tenantId}/${keyName}`,
+    `${api.getBaseUrl()}${secretPath(tenantId, keyName)}`,
     {
       method: "PUT",
       headers: { "Content-Type": "application/json", ...api.getAuthHeader() },
@@ -252,10 +266,8 @@ export async function updateSecretGrant(args: {
   // Through ApiClient rather than the raw `fetch` the rest of this module still
   // uses (AGENTS.md names that as debt): it attaches auth, and turns the backend's
   // `{"error": …}` body into the error message with the status kept.
-  const tenant = encodeURIComponent(args.tenantId);
-  const key = encodeURIComponent(args.keyName);
   const query = args.dryRun ? "?dryRun=true" : "";
-  return api.put<SecretGrantResponse>(`${BASE}/${tenant}/${key}/grant${query}`, body);
+  return api.put<SecretGrantResponse>(`${secretPath(args.tenantId, args.keyName)}/grant${query}`, body);
 }
 
 /** Delete a secret from the vault. */
@@ -264,7 +276,7 @@ export async function deleteSecret(
   keyName: string,
 ): Promise<void> {
   const res = await fetch(
-    `${api.getBaseUrl()}${BASE}/${tenantId}/${keyName}`,
+    `${api.getBaseUrl()}${secretPath(tenantId, keyName)}`,
     { method: "DELETE", headers: api.getAuthHeader() },
   );
   if (!res.ok && res.status !== 204) {
@@ -297,35 +309,82 @@ export async function getVaultHealth(): Promise<VaultHealth> {
   }
 }
 
-/** Rotate a secret — store a new value and mark the rotation timestamp. */
+/**
+ * Replace a secret's value, keeping who may use it.
+ *
+ * There is no rotate endpoint: EDDI rotates by storing a new value under the
+ * same key (`lastRotatedAt` moves on any PUT to an existing key). The Manager
+ * used to POST to a `/rotate` path that has never existed and fall back to a
+ * bare PUT on the 404 — and on a backend before the vault-key-safety fix, a PUT
+ * without `allowedAgents` stores `["*"]` and a blank description. Every
+ * rotation from this screen opened a narrowed secret to every agent.
+ *
+ * So the grant and description go along explicitly, taken from `current`,
+ * which the caller must have read just before (`useRotateSecret` re-reads it).
+ * A newer backend keeps both when they are omitted, so sending them changes
+ * nothing there; on the older one it is the only thing that preserves them.
+ */
 export async function rotateSecret(
   tenantId: string,
   keyName: string,
   newValue: string,
-  description?: string,
+  current: Pick<SecretMetadata, "allowedAgents" | "description">,
 ): Promise<SecretStoreResponse> {
-  // The backend POST endpoint handles rotation (sets lastRotatedAt)
-  const body: SecretStoreRequest = { value: newValue };
-  if (description) body.description = description;
-
-  const res = await fetch(
-    `${api.getBaseUrl()}${BASE}/${tenantId}/${keyName}/rotate`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...api.getAuthHeader() },
-      body: JSON.stringify(body),
-    },
+  // An empty or missing list means "every agent" to the backend, exactly like
+  // the wildcard — send the wildcard rather than a list it could read either way.
+  const allowedAgents = grantsAllAgents(current.allowedAgents)
+    ? [ALL_AGENTS]
+    : current.allowedAgents;
+  return storeSecret(
+    tenantId,
+    keyName,
+    newValue,
+    current.description ?? undefined,
+    allowedAgents,
   );
-  if (!res.ok) {
-    // Ordered deliberately: a 503 is a configuration problem and must surface as
-    // one, while a 404/405 only means this backend predates the rotate endpoint
-    // and a plain PUT achieves the same thing.
-    if (res.status === 404 || res.status === 405) {
-      return storeSecret(tenantId, keyName, newValue, description);
+}
+
+/**
+ * Stable code for "this key is already in the vault" on a create.
+ *
+ * The store endpoint is an upsert with no create-only mode, so "Add Secret"
+ * typed over an existing name replaced a live credential — and, on an older
+ * backend, reset its grant to every agent — behind a green toast.
+ */
+export const SECRET_EXISTS = "SECRET_EXISTS";
+
+/**
+ * Stable code for a rotation whose key is no longer in the vault. Rotation is
+ * a PUT, and a PUT creates: rotating a key someone deleted in the meantime
+ * would bring it back open to every agent.
+ */
+export const SECRET_NOT_FOUND = "SECRET_NOT_FOUND";
+
+/**
+ * The key's current metadata, read fresh, or null when it does not exist.
+ *
+ * `GET /{tenantId}/{keyName}` — an exact lookup of one key's metadata (never
+ * its value), cheaper than listing the tenant. A 404 means "no such key"; every
+ * other failure is raised, because "could not check" must not read as "free to
+ * create".
+ */
+export async function findSecret(
+  tenantId: string,
+  keyName: string,
+): Promise<SecretMetadata | null> {
+  try {
+    return await api.get<SecretMetadata>(secretPath(tenantId, keyName));
+  } catch (err) {
+    if (err instanceof ApiClientError && err.status === 404) return null;
+    if (err instanceof ApiClientError && err.status === 503) {
+      throw new SecretsError(
+        "Secrets vault is not configured. Set up a secret provider in the EDDI backend.",
+        VAULT_NOT_CONFIGURED,
+        503,
+      );
     }
-    await throwVaultError(res, "rotate secret");
+    throw err;
   }
-  return res.json();
 }
 
 /* ─── Key lifecycle (crypto-key operations) ─── */
@@ -337,7 +396,7 @@ export async function rotateSecret(
  */
 export async function rotateDek(tenantId: string): Promise<RotateDekResponse> {
   const res = await fetch(
-    `${api.getBaseUrl()}${BASE}/${tenantId}/rotate-dek`,
+    `${api.getBaseUrl()}${secretPath(tenantId)}/rotate-dek`,
     { method: "POST", headers: api.getAuthHeader() },
   );
   if (!res.ok) {
@@ -384,7 +443,7 @@ export async function resetTenant(
   tenantId: string,
 ): Promise<ResetTenantResponse> {
   const res = await fetch(
-    `${api.getBaseUrl()}${BASE}/${tenantId}/reset`,
+    `${api.getBaseUrl()}${secretPath(tenantId)}/reset`,
     { method: "POST", headers: api.getAuthHeader() },
   );
   if (!res.ok) {

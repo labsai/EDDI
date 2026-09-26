@@ -1663,7 +1663,13 @@
     "grantAcknowledge": "ข้าพเจ้าเข้าใจว่าเอเจนต์เหล่านี้จะดีพลอยอีกไม่ได้ จนกระทั่งจะเพิ่มกลับเข้าไปหรือการตั้งค่าเลิกใช้ความลับนี้",
     "grantSaved": "อัพเดตการเข้าถึงของ “{{key}}” แล้ว",
     "grantImpactFailed": "ไม่สามารถตรวจสอบได้ว่าเอเจนต์ที่ดีพลอยแล้วตัวใดใช้ความลับนี้ เอเจนต์ใดก็อาจหมดสิทธิ์เข้าถึงได้",
-    "grantAcknowledgeUnchecked": "บันทึกต่อไปโดยไม่ทราบว่าเอเจนต์ที่ดีพลอยแล้วตัวใดได้รับผลกระทบ"
+    "grantAcknowledgeUnchecked": "บันทึกต่อไปโดยไม่ทราบว่าเอเจนต์ที่ดีพลอยแล้วตัวใดได้รับผลกระทบ",
+    "rotateNotFound": "ความลับนี้ไม่มีอยู่แล้ว จึงไม่มีอะไรให้หมุนเวียน ให้เพิ่มใหม่แทน",
+    "keyExists": "มีความลับชื่อ \"{{key}}\" อยู่แล้ว การเพิ่มอีกครั้งจะแทนที่ค่าของมัน — ใช้การหมุนเวียนเพื่อเปลี่ยนค่าและคงสิทธิ์ผู้ใช้เดิมไว้",
+    "keyExistsRotate": "หมุนเวียนความลับนี้แทน",
+    "keyExistsPicker": "มีความลับชื่อ \"{{key}}\" อยู่แล้ว เลือกจากรายการในห้องนิรภัย หรือใช้ชื่ออื่น",
+    "rotateKeepsGrantAll": "เอเจนต์ทุกตัวยังเข้าถึงได้เหมือนเดิม",
+    "rotateKeepsGrant": "การเข้าถึงยังจำกัดเฉพาะ: {{agents}}"
   },
   "audit": {
     "title": "บันทึกการตรวจสอบ",
@@ -1697,17 +1703,35 @@
     "autoRefreshToggle": "Toggle auto-refresh (every 10s)",
     "autoRefreshOn": "Auto",
     "autoRefreshOff": "Auto",
-    "integrityVerified": "All entries cryptographically signed",
-    "integrityVerifiedDesc": "{{count}} of {{total}} entries have HMAC-SHA256 signatures",
-    "integrityPass": "SIGNED",
-    "integrityPartial": "Partially signed audit trail",
-    "integrityPartialDesc": "{{count}} of {{total}} entries have HMAC signatures",
-    "integrityNone": "Unsigned audit entries",
-    "integrityNoneDesc": "Configure a vault master key to enable automatic HMAC-SHA256 signing on all future audit entries.",
+    "integrityNoneDesc": "ตั้งค่ามาสเตอร์คีย์ของห้องนิรภัยเพื่อเปิดใช้การลงนาม HMAC-SHA256 อัตโนมัติสำหรับรายการตรวจสอบทั้งหมดในอนาคต",
     "signed": "Signed",
     "allSigned": "All signed",
     "decidedBy": "โดย",
-    "automated": "อัตโนมัติ"
+    "automated": "อัตโนมัติ",
+    "verify": {
+      "entryInvalid": "ลายเซ็นไม่ตรงกัน",
+      "entryUnproven": "ยังไม่ได้ยืนยัน",
+      "signatureCount": "{{count}} จาก {{total}} รายการที่โหลดมีลายเซ็น",
+      "loading": "กำลังตรวจสอบลายเซ็น…",
+      "errorTitle": "ยังไม่ได้ตรวจสอบความสมบูรณ์",
+      "errorDesc": "คำขอตรวจสอบล้มเหลว จึงยังไม่มีสิ่งใดที่นี่ได้รับการตรวจสอบ",
+      "checked": "ตรวจสอบ {{count}} รายการล่าสุดแล้ว",
+      "verifiedTitle": "ยืนยันลายเซ็นแล้ว",
+      "chainIntact": "ไม่มีรายการใดขาดหายไปจากลำดับ",
+      "chainNotApplicable": "เมื่อข้ามหลายบทสนทนา จะตรวจสอบเฉพาะลายเซ็น ไม่ตรวจสอบลำดับ",
+      "verifiedBadge": "ยืนยันแล้ว",
+      "tamperedTitle": "การตรวจสอบความสมบูรณ์ล้มเหลว",
+      "tamperedInvalid": "ลายเซ็นของ {{count}} รายการไม่ตรงกับเนื้อหา — รายการเหล่านั้นถูกแก้ไขหลังจากเขียน",
+      "tamperedChain": "มีรายการขาดหายจากลำดับ ({{sequences}}) — บันทึกถูกตัดให้สั้นลง",
+      "disabledTitle": "ไม่สามารถยืนยันลายเซ็นได้",
+      "reasonUnsigned": "{{count}} รายการที่ไม่มีลายเซ็น",
+      "reasonUnknownKey": "{{count}} รายการลงนามด้วยคีย์ที่ระบบนี้ไม่มีแล้ว",
+      "reasonSkipped": "{{count}} รายการเก่าที่ยังไม่ได้ตรวจสอบ",
+      "reasonChain": "ไม่สามารถยืนยันลำดับได้ครบถ้วน",
+      "reasonDuplicates": "หมายเลขลำดับซ้ำ",
+      "unverifiedTitle": "ยังยืนยันไม่ครบถ้วน",
+      "unverifiedDesc": "ไม่มีลายเซ็นใดถูกพิสูจน์ว่าผิด แต่ไม่สามารถตรวจสอบได้ทั้งหมด: {{reasons}}"
+    }
   },
   "schedules": {
     "cronHelp": "รูปแบบ 5 ฟิลด์: นาที ชั่วโมง วันของเดือน เดือน วันของสัปดาห์",
@@ -3284,7 +3308,6 @@
     "agentIdPlaceholder": "ID เอเจนต์สำหรับจัดการข้อความ",
     "botToken": "โทเค็นบอท",
     "botTokenHint": "โทเค็น OAuth ของบอท ใช้การอ้างอิงตู้นิรภัยเพื่อความปลอดภัย",
-    "botTokenPlaceholder": "xoxb-… หรือ ${vault:slack-bot-token}",
     "channel": "ช่อง",
     "channelId": "ID ช่อง Slack",
     "channelIdCol": "ID ช่อง",
@@ -3305,7 +3328,6 @@
     "searchPlaceholder": "ค้นหาช่อง…",
     "signingSecret": "ความลับในการลงนาม",
     "signingSecretHint": "จากหน้าข้อมูลพื้นฐานของแอป Slack",
-    "signingSecretPlaceholder": "สตริงฐานสิบหกหรือ ${vault:slack-signing-secret}",
     "slackSetupGuide": "คู่มือการตั้งค่า Slack",
     "slackSetupSummary": "สร้างแอป Slack กำหนดขอบเขตโทเค็นบอท (app_mentions:read, chat:write, im:history, channels:history, groups:history) แล้ววางข้อมูลประจำตัวที่นี่",
     "target": "เป้าหมาย",
@@ -3359,7 +3381,9 @@
     "typeAgent": "เอเจนต์",
     "typeGroup": "กลุ่ม",
     "selectGroup": "เลือกกลุ่ม…",
-    "unknownGroup": "{{id}} (ไม่พบ)"
+    "unknownGroup": "{{id}} (ไม่พบ)",
+    "plaintextSecret": "จัดเก็บ {{fields}} ในห้องนิรภัยความลับแล้วอ้างอิงเป็น ${vault:…} — ข้อมูลรับรองแบบข้อความธรรมดาจะไม่ถูกบันทึก",
+    "plaintextStored": "ช่องทางนี้จัดเก็บ {{fields}} เป็นข้อความธรรมดา ย้ายไปไว้ในห้องนิรภัยความลับแล้วบันทึกเพื่อแทนที่ด้วยการอ้างอิง"
   },
   "hitl": {
     "loadingApprovalDetails": "กำลังโหลดรายละเอียดการอนุมัติ…",
@@ -3449,7 +3473,8 @@
     "decidedProgress": "ตัดสินใจแล้ว {{decided}} จาก {{total}}",
     "groupLinkUnavailable": "ไม่พบกลุ่มนี้ จึงไม่มีลิงก์ที่เชื่อถือได้",
     "confirmApproveGroupDescription": "อนุมัติทั้งเฟสที่หยุดไว้และดำเนินการอภิปรายต่อ งานที่รออยู่ทั้งหมดจะได้รับการอนุมัติไปด้วย เปิดกลุ่มเพื่อตัดสินแยกรายการ",
-    "confirmRejectGroupDescription": "ปฏิเสธทั้งเฟสที่หยุดชั่วคราว งานทุกงานที่รอการหยุดนี้จะถูกปฏิเสธไปด้วย และการอภิปรายจะไม่ดำเนินต่อไป — เปิดกลุ่มเพื่อตัดสินใจทีละงาน"
+    "confirmRejectGroupDescription": "ปฏิเสธทั้งเฟสที่หยุดชั่วคราว งานทุกงานที่รอการหยุดนี้จะถูกปฏิเสธไปด้วย และการอภิปรายจะไม่ดำเนินต่อไป — เปิดกลุ่มเพื่อตัดสินใจทีละงาน",
+    "pauseChanged": "คำขอนี้เปลี่ยนไปตั้งแต่คุณเปิด — ยังไม่มีการตัดสินใจใดๆ โปรดตรวจสอบอีกครั้ง"
   },
   "chatDrawer": {
     "deploying": "กำลังปรับใช้เอเจนต์…",
@@ -3536,7 +3561,8 @@
     "conversationsTruncated_other": "การสนทนาถูกจำกัด — ผู้ใช้มีทั้งหมด {{count}} รายการ",
     "failedConversations_other": "ไม่สามารถอ่านการสนทนา {{count}} รายการ และไม่อยู่ในชุดข้อมูล",
     "conversationsTruncated_one": "การสนทนาถูกจำกัด — ผู้ใช้มีทั้งหมด {{count}} รายการ",
-    "failedConversations_one": "ไม่สามารถอ่านการสนทนา {{count}} รายการ และไม่อยู่ในชุดข้อมูล"
+    "failedConversations_one": "ไม่สามารถอ่านการสนทนา {{count}} รายการ และไม่อยู่ในชุดข้อมูล",
+    "deleteIncomplete": "การลบยังไม่สมบูรณ์ — ข้อมูลบางส่วนของผู้ใช้นี้อาจยังคงอยู่ อย่ารายงานว่าดำเนินการเสร็จแล้ว"
   },
   "mockBanner": {
     "message": "โหมดสาธิต — กำลังแสดงข้อมูลตัวอย่าง เชื่อมต่อแบ็กเอนด์ EDDI เพื่อดูข้อมูลจริง"
@@ -3683,7 +3709,8 @@
     "copyVars": "คัดลอกการอ้างอิง ${vars:…}",
     "refCopied": "คัดลอกแล้ว: {{ref}}",
     "infoLine1": "ใช้ {{vars.<key>}} ในพรอมต์ระบบ หรือ ${vars:<key>} ที่ใดก็ได้ในการตั้งค่าเอเจนต์",
-    "infoLine2": "การเปลี่ยนแปลงจะมีผลภายใน 2 นาที (TTL ของแคช) สำหรับค่าที่ละเอียดอ่อน ให้ใช้ที่เก็บความลับแทน"
+    "infoLine2": "การเปลี่ยนแปลงจะมีผลภายใน 2 นาที (TTL ของแคช) สำหรับค่าที่ละเอียดอ่อน ให้ใช้ที่เก็บความลับแทน",
+    "keyExists": "มีตัวแปรชื่อ \"{{key}}\" อยู่แล้ว ให้แก้ไขจากรายการแทน"
   },
   "workflowEditor": {
     "endpoints": "เอนด์พอยต์",
@@ -4886,7 +4913,12 @@
       "space": "พื้นที่ทำงาน",
       "spaceHint": "ทุกคนในพื้นที่ทำงานของทรัพยากรนี้",
       "published": "เผยแพร่แล้ว",
-      "publishedHint": "ทุกคนที่เข้าถึงการติดตั้งนี้ได้"
+      "publishedHint": "ทุกคนที่เข้าถึงการติดตั้งนี้ได้",
+      "confirmTitle": "เปลี่ยนการมองเห็นเป็น {{visibility}} หรือไม่",
+      "cascadeLabel": "นำไปใช้กับเวิร์กโฟลว์และการกำหนดค่าที่อ้างอิงถึงด้วย",
+      "cascadeWarning": "ทรัพยากรที่ถูกอ้างอิงซึ่งคุณเป็นเจ้าของจะได้รับการมองเห็นนี้ แทนที่การตั้งค่าเดิมของแต่ละรายการ การตั้งค่าเดิมจะไม่ถูกเก็บไว้",
+      "noCascadeWarning": "เปลี่ยนเฉพาะทรัพยากรนี้ ผู้ที่มองเห็นได้ในตอนนี้อาจยังเปิดสิ่งที่อ้างอิงไม่ได้",
+      "apply": "เปลี่ยนการมองเห็น"
     },
     "share": {
       "title": "แชร์",

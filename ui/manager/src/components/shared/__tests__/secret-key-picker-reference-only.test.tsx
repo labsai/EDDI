@@ -368,6 +368,35 @@ describe("SecretKeyPicker in reference-only mode", () => {
   });
 });
 
+describe("a plaintext value the field was loaded with stays masked", () => {
+  /** A parent that can swap the value in from outside, as a page loading another channel does. */
+  function SwappablePicker() {
+    const [value, setValue] = useState("xoxb-channel-a");
+    return (
+      <>
+        <SecretKeyPicker value={value} onChange={setValue} referenceOnly />
+        <button type="button" onClick={() => setValue("xoxb-channel-b")}>
+          load other
+        </button>
+      </>
+    );
+  }
+
+  it("masks a loaded literal, shows what is typed, and masks again when the parent swaps the value", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<SwappablePicker />);
+    const input = screen.getByTestId("secret-key-picker-input");
+    expect(input).toHaveAttribute("type", "password");
+
+    await user.type(input, "x");
+    expect(input).toHaveAttribute("type", "text");
+
+    await user.click(screen.getByRole("button", { name: "load other" }));
+    expect(screen.getByTestId("secret-key-picker-input")).toHaveValue("xoxb-channel-b");
+    expect(screen.getByTestId("secret-key-picker-input")).toHaveAttribute("type", "password");
+  });
+});
+
 describe("SecretKeyPicker default mode is unchanged", () => {
   const onChange = vi.fn();
 
