@@ -281,6 +281,28 @@ class RestGroupWorkspaceTest {
     }
 
     @Test
+    @DisplayName("review #5: a cadence delete that loses its write answers 409 and leaves the schedule alone")
+    void deleteCadence_retriesExhausted_409_keepsSchedule() throws Exception {
+        workspace();
+        // Every read is a fresh document that still holds the cadence (a real store
+        // never hands back the instance a lost write already mutated).
+        when(workspaceStore.find(GROUP_ID)).thenAnswer(inv -> {
+            var fresh = new GroupWorkspace();
+            fresh.setId("ws-1");
+            fresh.setGroupId(GROUP_ID);
+            fresh.addCadence(new Cadence("c-1", "sched-9", null, 5, null, "pm"));
+            return fresh;
+        });
+        when(workspaceStore.casRevision(any())).thenReturn(false);
+
+        var response = rest.deleteCadence(GROUP_ID, "c-1");
+
+        assertEquals(409, response.getStatus());
+        verify(workspaceStore, times(RestGroupWorkspace.MAX_CAS_ATTEMPTS)).casRevision(any());
+        verify(scheduleStore, never()).deleteSchedule(anyString());
+    }
+
+    @Test
     @DisplayName("an unparseable cron fails at creation, not silently at fire time")
     void addCadence_invalidCron_400() throws Exception {
         workspace();
