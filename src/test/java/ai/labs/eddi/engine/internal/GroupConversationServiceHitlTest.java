@@ -744,7 +744,7 @@ class GroupConversationServiceHitlTest {
             assertEquals(GroupConversationState.CANCELLED, gc.getState(),
                     "Paused GC should be CANCELLED via DB write");
             // verify update was called (the DB-write branch)
-            verify(conversationStore, atLeastOnce()).update(gc);
+            verify(conversationStore).updateIfState(gc, GroupConversationState.AWAITING_APPROVAL);
         }
     }
 

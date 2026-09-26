@@ -14,6 +14,7 @@ import ai.labs.eddi.configs.groups.model.GroupWorkspace.MemberStats;
 import ai.labs.eddi.configs.groups.model.SharedTaskList;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskStatus;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.internal.GroupConversationService;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
@@ -32,6 +33,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Predicate;
 
 /**
  * Executes team cadences (I13): scheduled pulls from a {@link GroupWorkspace}'s
@@ -216,49 +218,44 @@ public class TeamCadenceService {
                 return CadenceResult.skipped(groupId, cadenceId, "No executable backlog tasks");
             }
 
-            // 3. Run — started BEFORE the claim so the claim can carry the real
-            // discussion id, then claimed BEFORE any task turns can complete.
-            // startCadenceDiscussionAsync creates the conversation synchronously
-            // and only then submits the discussion to the executor, so the id
-            // exists here while no work has run yet; if the claim then loses,
-            // the just-started discussion is cancelled before its first turn.
+            // 3. Prepare — the conversation is created so the claim can carry the
+            // real discussion id, but NOTHING runs yet. It used to be created and
+            // submitted in one call, so a lost claim could only cancel a leg that
+            // might already be inside phase 0 (and a graceful cancel lets the
+            // current phase finish): an unclaimed run spent money and worked tasks
+            // another run now owned.
             String question = renderQuestion(cadence, workspace, pulled);
             String userId = cadence.createdBy() != null && !cadence.createdBy().isBlank()
                     ? cadence.createdBy()
                     : FALLBACK_USER_ID;
-            GroupConversation gc = groupConversationService.startCadenceDiscussionAsync(
+            GroupConversationService.CadenceDiscussion prepared = groupConversationService.prepareCadenceDiscussion(
                     groupId, question, userId, toTaskDefinitions(pulled), cadence.maxCostPerRun(), null);
+            GroupConversation gc = prepared.conversation();
 
-            // 4. Claim: conditional on the persisted idle marker.
-            String before = workspace.getRunningDiscussionId();
-            workspace.setRunningDiscussionId(gc.getId());
-            // Stamped with the claim so reconcile can tell a long-running discussion
-            // from a wedged one. Set here, next to the id it belongs to, and cleared
-            // in settle() alongside it — the two are one fact.
-            workspace.setClaimedAt(Instant.now());
-            workspace.setPulledTaskIds(pulled.stream().map(TaskItem::id).toList());
-            for (TaskItem task : pulled) {
-                workspace.getBacklog().updateTask(withStatus(task, TaskStatus.IN_PROGRESS));
-            }
+            // 4. Claim: a revision-checked write (H14c), retried against a fresh read
+            // while the workspace is still idle and every pulled task still waits.
             boolean claimed;
             try {
-                claimed = workspaceStore.casRunningDiscussion(workspace, before);
+                claimed = claim(workspace, gc.getId(), pulled);
             } catch (Exception e) {
                 // A store failure during the claim leaves a discussion nobody
-                // references — cancel it before failing, or it runs unclaimed to
-                // completion with outcomes no writeback will ever collect.
-                cancelQuietly(gc.getId());
+                // references — retire it before failing, or a later fire could never
+                // tell it from a live run.
+                prepared.abandon();
                 throw e;
             }
             if (!claimed) {
-                // Another pod claimed between our read and our write — cancel the
-                // discussion this fire started and stand down.
-                LOGGER.infof("Cadence %s for group %s lost the run claim — cancelling its just-started discussion %s",
+                // Another pod claimed (or the pulled tasks moved) between our read and
+                // our write — retire the discussion this fire prepared and stand down.
+                LOGGER.infof("Cadence %s for group %s lost the run claim — retiring its unlaunched discussion %s",
                         LogSanitizer.sanitize(cadenceId), LogSanitizer.sanitize(groupId), gc.getId());
-                cancelQuietly(gc.getId());
+                prepared.abandon();
                 cadenceRunsSkipped.increment();
                 return CadenceResult.skipped(groupId, cadenceId, "Lost the run claim to a concurrent fire");
             }
+
+            // 5. Run — only now, with the claim won.
+            prepared.launch();
 
             cadenceRunsStarted.increment();
             LOGGER.infof("Cadence %s for group %s started discussion %s with %d backlog task(s)",
@@ -269,6 +266,57 @@ public class TeamCadenceService {
                     LogSanitizer.sanitize(groupId), LogSanitizer.sanitize(cadenceId));
             return CadenceResult.failed(groupId, cadenceId, e.getClass().getSimpleName() + ": " + e.getMessage());
         }
+    }
+
+    /**
+     * Bound on re-read-and-retry for a claim or settle lost to an unrelated write.
+     */
+    static final int MAX_WRITE_ATTEMPTS = 3;
+
+    /**
+     * Claims the workspace for {@code discussionId}. The write is revision-checked,
+     * so it also loses to an unrelated concurrent write (a backlog add, a cadence
+     * edit) — which is not a lost claim. On such a loss the fresh document is
+     * re-checked: still idle, and every pulled task still executable, means the
+     * claim is still ours to take and it is re-applied to the fresh copy. Anything
+     * else is a genuine loss.
+     *
+     * @return {@code true} once the claim is persisted
+     */
+    private boolean claim(GroupWorkspace workspace, String discussionId, List<TaskItem> pulled)
+            throws IResourceStore.ResourceStoreException {
+        GroupWorkspace current = workspace;
+        for (int attempt = 0; attempt < MAX_WRITE_ATTEMPTS; attempt++) {
+            if (attempt > 0) {
+                current = workspaceStore.find(workspace.getGroupId());
+                if (current == null || !isIdle(current)) {
+                    return false;
+                }
+                var executable = current.getBacklog().findExecutableTasks().stream().map(TaskItem::id).toList();
+                if (!pulled.stream().map(TaskItem::id).allMatch(executable::contains)) {
+                    return false;
+                }
+            }
+            String before = current.getRunningDiscussionId();
+            current.setRunningDiscussionId(discussionId);
+            // Stamped with the claim so reconcile can tell a long-running discussion
+            // from a wedged one. Set here, next to the id it belongs to, and cleared
+            // in settle() alongside it — the two are one fact.
+            current.setClaimedAt(Instant.now());
+            current.setPulledTaskIds(pulled.stream().map(TaskItem::id).toList());
+            for (TaskItem task : pulled) {
+                TaskItem fresh = current.getBacklog().findById(task.id());
+                current.getBacklog().updateTask(withStatus(fresh != null ? fresh : task, TaskStatus.IN_PROGRESS));
+            }
+            if (workspaceStore.casRunningDiscussion(current, before)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isIdle(GroupWorkspace workspace) {
+        return workspace.getRunningDiscussionId() == null || workspace.getRunningDiscussionId().isEmpty();
     }
 
     /**
@@ -367,6 +415,10 @@ public class TeamCadenceService {
      * which is the cross-run retry loop.
      */
     boolean writebackCompleted(GroupWorkspace workspace, GroupConversation gc) {
+        return writebackCompleted(workspace, gc, 0);
+    }
+
+    private boolean writebackCompleted(GroupWorkspace workspace, GroupConversation gc, int attempt) {
         String settledDiscussionId = workspace.getRunningDiscussionId();
         SharedTaskList discussionTasks = gc.getTaskList();
         for (String pulledId : workspace.getPulledTaskIds()) {
@@ -404,7 +456,7 @@ public class TeamCadenceService {
                 }
             }
         }
-        return settle(workspace, gc, settledDiscussionId);
+        return settle(workspace, gc, settledDiscussionId, attempt, fresh -> writebackCompleted(fresh, gc, attempt + 1));
     }
 
     /**
@@ -412,6 +464,10 @@ public class TeamCadenceService {
      * returns to PENDING untouched — the work simply did not happen.
      */
     boolean writebackFailure(GroupWorkspace workspace, GroupConversation gc) {
+        return writebackFailure(workspace, gc, 0);
+    }
+
+    private boolean writebackFailure(GroupWorkspace workspace, GroupConversation gc, int attempt) {
         String settledDiscussionId = workspace.getRunningDiscussionId();
         for (String pulledId : workspace.getPulledTaskIds()) {
             TaskItem backlogTask = workspace.getBacklog().findById(pulledId);
@@ -419,7 +475,7 @@ public class TeamCadenceService {
                 workspace.getBacklog().updateTask(withStatus(backlogTask, TaskStatus.PENDING));
             }
         }
-        return settle(workspace, gc, settledDiscussionId);
+        return settle(workspace, gc, settledDiscussionId, attempt, fresh -> writebackFailure(fresh, gc, attempt + 1));
     }
 
     /**
@@ -431,7 +487,8 @@ public class TeamCadenceService {
      *         unwritten — an unconditional write here clobbered a live claim,
      *         orphaning its discussion's outcomes (final-review finding).
      */
-    private boolean settle(GroupWorkspace workspace, GroupConversation gc, String settledDiscussionId) {
+    private boolean settle(GroupWorkspace workspace, GroupConversation gc, String settledDiscussionId, int attempt,
+                           Predicate<GroupWorkspace> redoOnFresh) {
         var metrics = workspace.getMetrics();
         metrics.setDiscussions(metrics.getDiscussions() + 1);
         metrics.setLastRunAt(Instant.now());
@@ -443,6 +500,16 @@ public class TeamCadenceService {
         workspace.setPulledTaskIds(List.of());
         try {
             if (!workspaceStore.casRunningDiscussion(workspace, settledDiscussionId)) {
+                // H14c: the write is revision-checked, so it also loses to an
+                // unrelated write (a backlog add, a cadence edit). If the fresh
+                // document still names this discussion, nobody settled it — redo
+                // the writeback on the fresh copy instead of dropping it.
+                if (attempt + 1 < MAX_WRITE_ATTEMPTS && settledDiscussionId != null && !settledDiscussionId.isEmpty()) {
+                    GroupWorkspace fresh = workspaceStore.find(workspace.getGroupId());
+                    if (fresh != null && settledDiscussionId.equals(fresh.getRunningDiscussionId())) {
+                        return redoOnFresh.test(fresh);
+                    }
+                }
                 LOGGER.infof("Cadence writeback for group %s lost the settle race on discussion %s — another "
                         + "reconciler settled it (or a new run claimed the workspace); dropping stale mutations",
                         LogSanitizer.sanitize(workspace.getGroupId()), settledDiscussionId);
@@ -532,14 +599,13 @@ public class TeamCadenceService {
 
     private void cancelQuietly(String discussionId) {
         try {
-            // Explicitly graceful. A null mode already resolved to CANCEL_GRACEFUL —
-            // only CANCEL_IMMEDIATE takes the other branch — but this method now has a
-            // second caller (the stale-claim reclaim), and "which cancel is this?" is
-            // not a question either call site should have to answer by reading
-            // GroupHitlCoordinator.
+            // Explicitly graceful: the stale-claim reclaim stops a run that did real
+            // work, and lets its current phase finish. (A lost claim no longer
+            // cancels anything — the run it prepared never launched; see
+            // processScheduledFire.)
             groupConversationService.cancelDiscussion(discussionId, ControlSignal.CANCEL_GRACEFUL);
         } catch (Exception e) {
-            LOGGER.warnf("Could not cancel discussion %s after a lost or expired cadence claim: %s", discussionId, e.getMessage());
+            LOGGER.warnf("Could not cancel discussion %s after an expired cadence claim: %s", discussionId, e.getMessage());
         }
     }
 }

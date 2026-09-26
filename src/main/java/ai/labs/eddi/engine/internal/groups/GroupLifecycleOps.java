@@ -24,6 +24,7 @@ import ai.labs.eddi.engine.api.IGroupConversationService.GroupExecutionException
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupMemberNotFoundException;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupTimeoutException;
 import ai.labs.eddi.engine.internal.GroupConversationService;
+import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.DiscussionControlToken;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -153,6 +154,21 @@ public class GroupLifecycleOps {
         }
         try {
             GroupConversation gc = conversationStore.read(groupConversationId);
+            // H14b: deleting a RUNNING discussion must stop it. The guard above never
+            // sees one — the first discuss() leg is not an "operation in progress" —
+            // so the teardown below used to end its members and delete its ephemeral
+            // agents mid-run, and the leg's next write (then an upsert) recreated the
+            // deleted document. Signal the leg on this node now; its next write finds
+            // the document gone (update() no longer recreates one) and it ends as a
+            // cancel. A leg on another node has no token here and is stopped by that
+            // same write.
+            DiscussionControlToken runningLeg = activeTokens.get(groupConversationId);
+            if (runningLeg != null) {
+                runningLeg.setSignal(ControlSignal.CANCEL_IMMEDIATE);
+                runningLeg.cancelActiveFuture();
+                LOGGER.infof("Deleting group conversation %s while it runs — cancelling the running leg first",
+                        LogSanitizer.sanitize(groupConversationId));
+            }
             // #12: deleting a paused discussion must run the same cleanup as
             // cancel-of-paused. executeDiscussion's finally deliberately skipped
             // cleanup while AWAITING_APPROVAL, so without this the armed timeout
@@ -683,8 +699,9 @@ public class GroupLifecycleOps {
 
     public void failConversation(GroupConversation gc) {
         // Never write unconditionally: conversationStore.update() is a whole-document
-        // UPSERT, so it would RE-CREATE a conversation another pod deleted and would
-        // clobber a terminal state (e.g. a cross-pod CANCELLED) with FAILED.
+        // replace, so it would clobber a terminal state (e.g. a cross-pod CANCELLED)
+        // with FAILED. (It no longer re-creates a deleted conversation — it throws
+        // GroupConversationGoneException — but the terminal-state race remains.)
         //
         // The CAS expectation must come from the PERSISTED state, not the in-memory
         // one:

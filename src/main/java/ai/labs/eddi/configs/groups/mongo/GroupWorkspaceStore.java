@@ -134,17 +134,6 @@ public class GroupWorkspaceStore implements IGroupWorkspaceStore {
     }
 
     @Override
-    public void update(GroupWorkspace workspace) throws IResourceStore.ResourceStoreException {
-        try {
-            workspace.setLastModified(Instant.now());
-            IResourceStorage.IResource<GroupWorkspace> resource = storage.newResource(workspace.getId(), SINGLE_VERSION, workspace);
-            storage.store(resource);
-        } catch (IOException e) {
-            throw new IResourceStore.ResourceStoreException("Failed to update group workspace: " + e.getMessage(), e);
-        }
-    }
-
-    @Override
     public void deleteByGroupId(String groupId) throws IResourceStore.ResourceStoreException {
         GroupWorkspace workspace = find(groupId);
         if (workspace != null && workspace.getId() != null) {
@@ -155,6 +144,44 @@ public class GroupWorkspaceStore implements IGroupWorkspaceStore {
 
     @Override
     public boolean casRevision(GroupWorkspace workspace) throws IResourceStore.ResourceStoreException {
+        // The caller did not touch runningDiscussionId, so the value it holds is the
+        // one it read — the right guard for a document that predates the revision.
+        return conditionalWrite(workspace, workspace.getRunningDiscussionId());
+    }
+
+    @Override
+    public boolean casRunningDiscussion(GroupWorkspace workspace, String expectedRunning)
+            throws IResourceStore.ResourceStoreException {
+        return conditionalWrite(workspace, expectedRunning);
+    }
+
+    /**
+     * The single conditional-write scheme every workspace write goes through
+     * (H14c).
+     * <p>
+     * There used to be three: {@code casRevision} compared the revision,
+     * {@code casRunningDiscussion} compared the run claim, and cadence edits wrote
+     * unconditionally — each a whole-document replace that ignored the others'
+     * field. A backlog add read before a cadence claim then passed its revision
+     * check after it, writing the claim away (runningDiscussionId cleared, the
+     * pulled tasks back to PENDING): the run was orphaned and its tasks were pulled
+     * a second time. The claim, in turn, wrote back a backlog that no longer held a
+     * concurrently added task.
+     * <p>
+     * Now the revision is the one guard. Every write compares it and bumps it, so a
+     * write lands only if nothing at all changed since the caller's read — which is
+     * also exactly what "the claim is still what I read" means. The run-claim value
+     * is only the fallback guard for a document written before revisions existed
+     * ({@code null} revision), and that same write stamps one.
+     *
+     * @param legacyExpectedRunning
+     *            the persisted {@code runningDiscussionId} the caller read,
+     *            compared only on a pre-revision document
+     * @return {@code false} if any concurrent write landed first (re-read before
+     *         retrying), or the workspace was deleted
+     */
+    private boolean conditionalWrite(GroupWorkspace workspace, String legacyExpectedRunning)
+            throws IResourceStore.ResourceStoreException {
         String expected = workspace.getRevision();
         String bumped;
         if (expected == null) {
@@ -174,48 +201,29 @@ public class GroupWorkspaceStore implements IGroupWorkspaceStore {
         }
         workspace.setRevision(bumped);
         workspace.setLastModified(Instant.now());
-        if (expected == null) {
-            // Pre-revision document: no field to compare against. One plain write
-            // stamps the revision; every later write on this document is CAS'd.
-            update(workspace);
-            return true;
-        }
         try {
             IResourceStorage.IResource<GroupWorkspace> resource = storage.newResource(workspace.getId(), SINGLE_VERSION, workspace);
-            storage.storeIfFieldEquals(resource, "revision", expected);
-            return true;
-        } catch (IResourceStore.ResourceModifiedException e) {
-            workspace.setRevision(expected);
-            return false;
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            LOGGER.warnf("Workspace %s disappeared during a revision-checked write", LogSanitizer.sanitize(workspace.getGroupId()));
-            workspace.setRevision(expected);
-            return false;
-        } catch (IOException e) {
-            throw new IResourceStore.ResourceStoreException("Failed revision-checked workspace update: " + e.getMessage(), e);
-        }
-    }
-
-    @Override
-    public boolean casRunningDiscussion(GroupWorkspace workspace, String expectedRunning)
-            throws IResourceStore.ResourceStoreException {
-        try {
-            workspace.setLastModified(Instant.now());
-            IResourceStorage.IResource<GroupWorkspace> resource = storage.newResource(workspace.getId(), SINGLE_VERSION, workspace);
-            // Conditional on the PERSISTED value — same cross-process atomicity as
+            // Conditional on the PERSISTED value — cross-process atomicity, same as
             // GroupConversationStore.updateIfState. An in-JVM check would only
-            // serialize one pod's cadence fires against itself.
-            storage.storeIfFieldEquals(resource, "runningDiscussionId",
-                    expectedRunning != null ? expectedRunning : GroupWorkspace.NO_RUNNING_DISCUSSION);
+            // serialize one pod's writers against each other.
+            if (expected != null) {
+                storage.storeIfFieldEquals(resource, "revision", expected);
+            } else {
+                storage.storeIfFieldEquals(resource, "runningDiscussionId",
+                        legacyExpectedRunning != null ? legacyExpectedRunning : GroupWorkspace.NO_RUNNING_DISCUSSION);
+            }
             return true;
         } catch (IResourceStore.ResourceModifiedException e) {
+            workspace.setRevision(expected);
             return false;
         } catch (IResourceStore.ResourceNotFoundException e) {
-            // Workspace deleted (group teardown) while a claim was in flight —
-            // treat as a lost claim rather than an error; the run must not start.
-            LOGGER.warnf("Workspace %s disappeared during a run claim", LogSanitizer.sanitize(workspace.getGroupId()));
+            // Workspace deleted (group teardown) while a write was in flight — a lost
+            // write rather than an error; a run claim in particular must not start.
+            LOGGER.warnf("Workspace %s disappeared during a conditional write", LogSanitizer.sanitize(workspace.getGroupId()));
+            workspace.setRevision(expected);
             return false;
         } catch (IOException e) {
+            workspace.setRevision(expected);
             throw new IResourceStore.ResourceStoreException("Failed conditional workspace update: " + e.getMessage(), e);
         }
     }

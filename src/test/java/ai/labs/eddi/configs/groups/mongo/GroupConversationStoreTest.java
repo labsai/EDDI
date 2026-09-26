@@ -118,7 +118,27 @@ class GroupConversationStoreTest {
         when(storage.newResource("gc-1", 1, conversation)).thenReturn(resource);
 
         assertDoesNotThrow(() -> store.update(conversation));
-        verify(storage).store(resource);
+        // A replace of the existing row only — never the upserting store().
+        verify(storage).storeIfCurrentVersion(resource, 1);
+        verify(storage, never()).store(any(IResourceStorage.IResource.class));
+    }
+
+    /**
+     * H9b: update() was an upsert, so a discussion still running when a GDPR
+     * erasure (or the delete endpoint) removed its document wrote the whole
+     * transcript back on its next phase.
+     */
+    @Test
+    @DisplayName("update — a deleted document is not recreated; the writer is told it is gone")
+    void updateDoesNotResurrectADeletedDocument() throws Exception {
+        GroupConversation conversation = new GroupConversation();
+        conversation.setId("gc-1");
+        IResourceStorage.IResource<GroupConversation> resource = mock(IResourceStorage.IResource.class);
+        when(storage.newResource("gc-1", 1, conversation)).thenReturn(resource);
+        doThrow(new IResourceStore.ResourceModifiedException("no row")).when(storage).storeIfCurrentVersion(resource, 1);
+
+        assertThrows(GroupConversationGoneException.class, () -> store.update(conversation));
+        verify(storage, never()).store(any(IResourceStorage.IResource.class));
     }
 
     // ==================== delete ====================
