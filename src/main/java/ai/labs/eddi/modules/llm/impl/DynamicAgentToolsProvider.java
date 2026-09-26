@@ -331,10 +331,16 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
             // agent as this user, through the engine-internal start that runs no USE
             // gate — so the gate runs here. An agent this conversation (or its
             // discussion) created is exempt: the engine built it for this user, and a
-            // setup-created agent may carry no descriptor to check.
+            // setup-created agent may carry no descriptor to check. "Created" is
+            // proven by the agent's own dynamicOrigin, not by the tracked list
+            // alone: that list is seeded from earlier steps, which a conversation
+            // stored before the reserved-context fix may have filled from forged
+            // client context. Same proof teardown_agent requires.
             BiPredicate<String, String> delegationUseCheck = useCheck == null
                     ? null
-                    : (agentId, principal) -> sharedCreatedIds.contains(agentId) || useCheck.test(agentId, principal);
+                    : (agentId, principal) -> (sharedCreatedIds.contains(agentId)
+                            && createdHere(agentId, callerConversationId, groupConversationId))
+                            || useCheck.test(agentId, principal);
             tools.add(new ConverseWithAgentTool(conversationService, userId, dynamicConfig, delegationDepth, delegatedConversationIds,
                     delegationUseCheck));
             delegationTrackingUsed = true;
@@ -582,6 +588,26 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
         config.setAllowRecruitment(false);
         config.setAllowDelegation(false);
         return config;
+    }
+
+    /**
+     * Whether the agent's current configuration carries a {@code dynamicOrigin}
+     * naming this conversation or its discussion. Anything unreadable is
+     * {@code false}, so the caller falls back to the ordinary USE check.
+     */
+    private boolean createdHere(String agentId, String conversationId, String groupConversationId) {
+        if (agentStore == null) {
+            return false;
+        }
+        try {
+            var current = agentStore.getCurrentResourceId(agentId);
+            var configuration = current != null ? agentStore.read(agentId, current.getVersion()) : null;
+            var origin = configuration != null ? configuration.getDynamicOrigin() : null;
+            return origin != null && origin.namesConversationOrDiscussion(conversationId, groupConversationId);
+        } catch (Exception e) {
+            LOGGER.debugf("[DYNAMIC] Could not read agent '%s' to verify its origin: %s", sanitize(agentId), e.getMessage());
+            return false;
+        }
     }
 
     /**

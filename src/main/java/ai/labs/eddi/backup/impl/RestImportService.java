@@ -1060,6 +1060,11 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     }
 
     private URI createNewAgent(AgentConfiguration agentConfiguration, ImportTransaction transaction) {
+        // dynamicOrigin names a conversation on the instance the ZIP came from; the
+        // imported agent gets a fresh id and was provisioned by an import, not by
+        // create_sub_agent here. (A merge that updates an existing agent goes
+        // through RestAgentStore.updateAgent, which keeps the local marker.)
+        agentConfiguration.setDynamicOrigin(null);
         URI createdAgentUri = createResourceDirect(IAgentStore.class, agentConfiguration, IRestAgentStore.resourceURI, transaction);
         registerCapabilities(createdAgentUri, agentConfiguration);
         return createdAgentUri;

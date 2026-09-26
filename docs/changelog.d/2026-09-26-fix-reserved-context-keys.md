@@ -45,7 +45,22 @@ Independent pre-push review of the entry above; every finding addressed:
 
 Compatibility: `CallerIdentity` gained a trailing `admin` component; the 3- and 4-arg constructors remain (non-admin). Ephemeral cleanup no longer deletes unmarked agents — a discussion that created sub-agents before this change leaves them undeployed rather than deleted.
 
+## 🔒 fix(engine): `dynamicOrigin` is engine-owned on every write path; delegation exemption needs the marker (2026-09-26)
+
+**Repo:** EDDI (`fix/reserved-context-keys`)
+
+PR #831 review (CodeRabbit, Major + security-architecture notes):
+
+1. **An agent update replaced the marker.** `RestAgentStore.updateAgent` persisted the body's `dynamicOrigin`, so an editor could erase it (the sub-agent then outlives its discussion: teardown refuses it, cleanup only undeploys) or plant one. **Fixed:** [`RestAgentStore.updateAgent`](../../src/main/java/ai/labs/eddi/configs/agents/rest/RestAgentStore.java) now reads the current stored version and keeps its `dynamicOrigin`; a store failure on that read fails the update instead of dropping the marker. Every other agent-rewriting path — `updateResourceInAgent`, a merge ZIP import (`RestImportService.createOrUpdateAgent`), `UpgradeExecutor`, the MCP admin tools — goes through `updateAgent`, so one choke point covers them.
+2. **Copies inherited provenance.** `duplicateAgent` and a ZIP import that creates a new agent (`RestImportService.createNewAgent`, which writes through `IAgentStore` directly) now drop `dynamicOrigin`: the copy is a new agent a person made, and the source marker names a conversation on the source (or no longer relevant) instance.
+3. **Delegation USE exemption trusted the tracked list alone.** The list is seeded from earlier steps, which a conversation stored before the reserved-context fix may have filled from forged context. [`DynamicAgentToolsProvider`](../../src/main/java/ai/labs/eddi/modules/llm/impl/DynamicAgentToolsProvider.java) now exempts a tracked agent only when its `dynamicOrigin` names this conversation or its discussion (the proof `teardown_agent` requires; shared via `DynamicOrigin.namesConversationOrDiscussion`); anything else goes through the ordinary USE check.
+
+Create is left as is: `AgentSetupService` stamps the marker through the loopback `POST /agentstore/agents`, so the create body must carry it. A client-supplied marker on create lands on a brand-new agent the caller owns, under an id no server-written created list contains, so it grants nothing.
+
+Tests: `RestAgentStoreTest$DynamicOriginIsEngineOwned` (5), `DynamicAgentCrossTurnStateTest.trackedIdWithoutMatchingOriginIsNotExempt`; all mutation-checked.
+
 ```decision-log
 | 2026-09-26 | Strip engine-reserved context keys at the external entry points and keep the internal `startConversation`/agent-id `say` trusting | Clients could set `dynamicAgentConfig`/`dynamicCreatedAgentIds`/`groupId` and act as the group orchestrator (C3a–c) | A trusted side channel on `InputData` (touches every internal caller and the stored step format); filtering inside `Conversation` (cannot tell who wrote the map) |
+| 2026-09-26 | `RestAgentStore.updateAgent` keeps the stored `dynamicOrigin`; duplicate and new-agent ZIP import drop it; create still accepts it | The marker authorizes permanent deletion, so only the engine may write it; setup writes it through the loopback REST create | Stripping on create (breaks `AgentSetupService`); a separate engine-only store field (larger change, same outcome) |
 | 2026-09-26 | `teardown_agent` and end-of-discussion cleanup require a `dynamicOrigin` marker on the target agent in addition to the created-ids list | The list alone decided and could be forged; deletion is permanent | Trusting the list once the context channel is closed (one leak away from deleting a person's agent) |
 ```
