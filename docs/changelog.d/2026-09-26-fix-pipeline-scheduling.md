@@ -22,7 +22,7 @@ Seven review findings in the scheduler, two pipeline conditions/tasks and agent 
   - The Javadoc and [`capability-match-guide.md`](../capability-match-guide.md) no longer describe a "known limitation". Double-brace values were never resolved, so no stored config that worked before changes behaviour, with one theoretical exception:
   - One theoretical behaviour change: a *literal* skill or strategy name containing `{` followed by an identifier (say `c{sharp}`) is now rendered as a template instead of used verbatim. Nothing documented produces such a name. Qute's `{|…|}` keeps one literal if ever needed.
 - **M-Q3: batch fan-out was uncapped.** A fire-and-forget `preRequest.batchRequests` sent one request per element of an array that usually comes from an upstream response or from an LLM.
-  - New config field `batchRequests.maxBatchSize`. Unset or `<= 0` means the deployment default (`100`). Saving a value above the deployment ceiling (`1000`) is **refused with 400** by `RestApiCallsStore`. A value stored before an operator lowered the ceiling runs at the ceiling, with a WARN. Both numbers are operator-configurable: `eddi.httpcalls.batch.default-max-size` and `eddi.httpcalls.batch.max-size-ceiling`, in [`configuration-reference.md`](../configuration-reference.md) and `application.properties`. Raising the default restores the old behaviour for a deployment without editing stored configs. The keys sit under `eddi.httpcalls.*` next to the existing httpcalls knobs. The review suggested `eddi.apicalls.batch.*` only as an example.
+  - New config field `batchRequests.maxBatchSize`. Unset or `<= 0` means the deployment default (`100`). Saving a value above the deployment ceiling (`1000`) is **refused with 400** by `RestApiCallsStore`, on create, update and duplicate alike. A value stored before an operator lowered the ceiling runs at the ceiling, with a WARN. Both numbers are operator-configurable: `eddi.httpcalls.batch.default-max-size` and `eddi.httpcalls.batch.max-size-ceiling`, in [`configuration-reference.md`](../configuration-reference.md) and `application.properties`. Raising the default restores the old behaviour for a deployment without editing stored configs. The keys sit under `eddi.httpcalls.*` next to the existing httpcalls knobs. The review suggested `eddi.apicalls.batch.*` only as an example.
   - A batch over the limit is **refused as a whole**, before any request is built or sent. The turn fails with a message that names the knob. A truncated batch would have reported success while dropping the tail.
   - Files: [`ApiCallExecutor.java`](../../src/main/java/ai/labs/eddi/modules/apicalls/impl/ApiCallExecutor.java), [`BatchRequestBuildingInstruction.java`](../../src/main/java/ai/labs/eddi/configs/apicalls/model/BatchRequestBuildingInstruction.java), [`httpcalls.md`](../httpcalls.md), test `ApiCallExecutorBatchCapTest`.
 - **M-Q4: unsorted due query.** The reviewer confirmed the verified downgrade: this was never starvation, only fairness once more than one poll batch (100) is due.
@@ -44,7 +44,7 @@ Seven review findings in the scheduler, two pipeline conditions/tasks and agent 
   - The executor now walks a lagging descriptor forward one version at a time, at most 50 versions in one run. Every skipped resource version gets the descriptor that a deployment of that version looks up.
   - The "heals" test now uses a real lagging fixture.
 - **G5: sync counters.**
-  - Rewritten workflows, and extensions their new version references, count as `updated` only once the **agent** that loads them has been written. An agent write the store refuses without throwing is now reported as a failure instead of leaving a null URI. Earlier, an extension counted as `updated` as soon as it was written.
+  - Rewritten workflows, and extensions their new version references, count as `updated` only once the **agent** that loads them has been written and its descriptor moved to the new version. An agent write the store refuses without throwing is now reported as a failure instead of leaving a null URI. Earlier, an extension counted as `updated` as soon as it was written.
   - A changed workflow the operator **deselected** is no longer counted as `skipped`, which means "identical".
   - A snippet create counts as `created` only when the store accepted it (201) and its descriptor was written. Before, it could appear under both `created` and `failures`.
 
@@ -54,7 +54,7 @@ Seven review findings in the scheduler, two pipeline conditions/tasks and agent 
 - **REST:** `POST /schedulestore/schedules/{id}/dismiss` answers 409 for a schedule that is not dead-lettered. It used to answer 200, after silently resetting whatever state the schedule was in.
 - `PUT /schedulestore/schedules/{id}` on a RAG-ingestion schedule now answers 409; on a team-cadence schedule it needs EDIT on the group.
 - **Properties:** new `eddi.httpcalls.batch.default-max-size` (100) and `eddi.httpcalls.batch.max-size-ceiling` (1000).
-- **REST, httpcalls:** create/update of an apicalls config whose `maxBatchSize` exceeds the ceiling answers 400.
+- **REST, httpcalls:** create/update/duplicate of an apicalls config whose `maxBatchSize` exceeds the ceiling answers 400.
 - `PUT /schedulestore/schedules/{id}`: omitted `metadata`, `tenantId` and `allowSelfScheduling` are kept instead of being nulled or reset to false.
 
 ### Coordination

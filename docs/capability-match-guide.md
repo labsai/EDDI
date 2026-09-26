@@ -87,7 +87,7 @@
 
 ## Template Variables
 
-Config values are **Qute template expressions** (single braces, as everywhere else in EDDI), resolved against the conversation memory at evaluation time, enabling dynamic routing:
+The `skill` and `strategy` values are **Qute template expressions** (single braces, as everywhere else in EDDI), resolved against the conversation memory at evaluation time, enabling dynamic routing. `minResults` is not templated: it is read as a literal integer when the rule is loaded, and a value that is not a number falls back to `1`.
 
 ```json
 {
