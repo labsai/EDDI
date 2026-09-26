@@ -1,8 +1,15 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useDebugStore, buildCascadeSteps, type PipelineTurn, type PipelineEvent } from "@/hooks/use-debug-events";
-import { useQuery } from "@tanstack/react-query";
-import { getAuditTrail, type AuditEntry } from "@/lib/api/audit";
+import {
+  useDebugStore,
+  buildCascadeSteps,
+  resolveLiveTurnSteps,
+  type AuditStepMatch,
+  type PipelineTurn,
+  type PipelineEvent,
+} from "@/hooks/use-debug-events";
+import type { AuditEntry } from "@/lib/api/audit";
+import { AUDIT_FLUSH_DELAY_MS, useDebuggerAudit } from "@/hooks/use-debugger-audit";
 import { cn, formatDuration, formatUsd } from "@/lib/utils";
 import { CascadeStepTrace } from "@/components/cascade-step-trace";
 import { Clock, Zap, ChevronDown, AlertTriangle, ArrowUp, ArrowDown } from "lucide-react";
@@ -53,12 +60,28 @@ export function PipelineTrace({ conversationId }: PipelineTraceProps) {
   const selectedTurnIndex = useDebugStore((s) => s.selectedTurnIndex);
   const setSelectedTurn = useDebugStore((s) => s.setSelectedTurn);
 
-  const { data: auditEntries, isError: auditError } = useQuery({
-    queryKey: ["audit", "debugger", conversationId],
-    queryFn: () => getAuditTrail(conversationId!, 0, 200),
-    enabled: !!conversationId,
-    staleTime: 30_000,
-  });
+  // One shared, incrementally refreshed trail (see useDebuggerAudit). While a
+  // finished live turn has no audit step yet — the ledger flushes a few seconds
+  // after the turn — keep re-reading, for up to a minute after that turn.
+  const { data: audit, isError: auditError } = useDebuggerAudit(
+    conversationId,
+    (query) => {
+      const matches = resolveLiveTurnSteps(turns, query.state.data?.entries);
+      const waiting = matches.some(
+        (m, i) =>
+          m.status === "pending" &&
+          Date.now() - (turns[i]!.startTime + turns[i]!.totalDurationMs) <
+            PENDING_AUDIT_POLL_WINDOW_MS
+      );
+      return waiting ? AUDIT_FLUSH_DELAY_MS : false;
+    }
+  );
+  const auditEntries = audit?.entries;
+
+  const liveMatches = useMemo(
+    () => resolveLiveTurnSteps(turns, auditEntries),
+    [turns, auditEntries]
+  );
 
   const historicalTurns = useMemo(() => {
     if (!auditEntries?.length) return [];
@@ -114,7 +137,14 @@ export function PipelineTrace({ conversationId }: PipelineTraceProps) {
         showLiveEvents ? (
           <LiveEventsChart events={currentTurnEvents} auditEntries={auditEntries ?? []} />
         ) : displayTurn ? (
-          <TurnChart turn={displayTurn} auditEntries={auditEntries ?? []} />
+          <TurnChart
+            turn={displayTurn}
+            auditEntries={auditEntries ?? []}
+            stepIndex={
+              displayTurn.stepIndex ??
+              stepOf(liveMatches[turns.indexOf(displayTurn)])
+            }
+          />
         ) : (
           <div className="flex flex-col items-center gap-2 py-6 text-center">
             <Zap className="h-8 w-8 text-muted-foreground/30" />
@@ -130,9 +160,18 @@ export function PipelineTrace({ conversationId }: PipelineTraceProps) {
 
 // ==================== Turn Chart ====================
 
-function TurnChart({ turn, auditEntries }: { turn: PipelineTurn; auditEntries: AuditEntry[] }) {
+function TurnChart({
+  turn,
+  auditEntries,
+  stepIndex,
+}: {
+  turn: PipelineTurn;
+  auditEntries: AuditEntry[];
+  /** The audit step this turn is, or undefined when it is not (yet) known. */
+  stepIndex: number | undefined;
+}) {
   const { t } = useTranslation();
-  const tasks = useMemo(() => buildTaskBars(turn.events, auditEntries, turn.turnIndex), [turn.events, auditEntries, turn.turnIndex]);
+  const tasks = useMemo(() => buildTaskBars(turn.events, auditEntries, stepIndex), [turn.events, auditEntries, stepIndex]);
   const maxDuration = Math.max(...tasks.map((bar) => bar.durationMs), 1);
   const totalCost = tasks.reduce((sum, task) => sum + (task.auditEntry?.cost ?? 0), 0);
   
@@ -187,7 +226,12 @@ function TurnChart({ turn, auditEntries }: { turn: PipelineTurn; auditEntries: A
 
 function LiveEventsChart({ events, auditEntries }: { events: PipelineEvent[]; auditEntries: AuditEntry[] }) {
   const { t } = useTranslation();
-  const tasks = useMemo(() => buildTaskBars(events, auditEntries, undefined), [events, auditEntries]);
+  // An in-flight turn is never matched to the ledger: its partial fingerprint
+  // fits almost every earlier step, and its own entries are not written yet.
+  const tasks = useMemo(
+    () => buildTaskBars(events, auditEntries, undefined),
+    [events, auditEntries]
+  );
   const maxDuration = Math.max(...tasks.map((bar) => bar.durationMs || 100), 1);
 
   return (
@@ -387,11 +431,20 @@ function TaskBar({ task, maxDuration }: { task: TaskBarData; maxDuration: number
 
 // ==================== Helpers ====================
 
+/** Keep polling for a finished turn's audit entries for this long. */
+const PENDING_AUDIT_POLL_WINDOW_MS = 60_000;
+
+function stepOf(match: AuditStepMatch | undefined): number | undefined {
+  return match?.status === "matched" ? match.stepIndex : undefined;
+}
+
 function buildTaskBars(events: PipelineEvent[], auditEntries: AuditEntry[], stepIndex?: number): TaskBarData[] {
   const tasks: TaskBarData[] = [];
   const started = new Map<string, PipelineEvent>();
   
-  const stepEntries = stepIndex !== undefined ? auditEntries.filter(a => a.stepIndex === stepIndex) : auditEntries;
+  // An unknown step gets NO audit data. Falling back to every entry attached
+  // the first (taskType, taskIndex) match from any turn — usually turn one's.
+  const stepEntries = stepIndex !== undefined ? auditEntries.filter(a => a.stepIndex === stepIndex) : [];
 
   for (const event of events) {
     const key = `${event.taskType}-${event.index}`;
@@ -477,6 +530,7 @@ function auditEntriesToTurns(entries: AuditEntry[]): PipelineTurn[] {
     const totalDurationMs = stepEntries.reduce((sum, e) => sum + (e.durationMs ?? 0), 0);
     turns.push({
       turnIndex: stepIndex,
+      stepIndex,
       events,
       totalDurationMs,
       startTime: new Date(stepEntries[0]!.timestamp).getTime(),

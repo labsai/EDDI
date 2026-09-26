@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useOnboarding } from "@/hooks/use-onboarding";
+import { useDebounce } from "@/hooks/use-debounce";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
 import {
@@ -24,7 +25,6 @@ import { cn } from "@/lib/utils";
 import {
   useConversationDescriptors,
   useDeleteConversation,
-  useConversationStepCount,
 } from "@/hooks/use-conversations";
 import { useAgentDescriptors, groupAgentsByName, useAgentVersions } from "@/hooks/use-agents";
 import { parseConversationUri, MAX_CONVERSATION_LIMIT, type ConversationState } from "@/lib/api/conversations";
@@ -57,6 +57,8 @@ const STATE_FILTER_VALUES: (ConversationState | "ALL")[] = [
   "ALL", "READY", "IN_PROGRESS", "ENDED", "EXECUTION_INTERRUPTED", "ERROR", "AWAITING_HUMAN",
 ];
 
+const SEARCH_DEBOUNCE_MS = 300;
+
 /** Page-size options offered to the user (backend clamps `limit` to 100). */
 const PAGE_SIZE_OPTIONS = [25, 50, MAX_CONVERSATION_LIMIT];
 
@@ -64,6 +66,10 @@ export function ConversationsPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
+  // The search is a server-side filter: without a debounce every keystroke was
+  // a list request (each of which walks descriptors and loads their memory
+  // snapshots on the backend).
+  const debouncedSearch = useDebounce(search.trim(), SEARCH_DEBOUNCE_MS);
   const maybeAutoStart = useOnboarding((s) => s.maybeAutoStart);
   useEffect(() => { const t = setTimeout(() => maybeAutoStart("conversations"), 500); return () => clearTimeout(t); }, [maybeAutoStart]);
   const [stateFilter, setStateFilter] = useState<ConversationState | "ALL">("ALL");
@@ -93,7 +99,7 @@ export function ConversationsPage() {
   // stale high page index yields an empty result on the new criteria.
   useEffect(() => {
     setPage(0);
-  }, [search, stateFilter, agentFilter, versionFilter, pageSize]);
+  }, [debouncedSearch, stateFilter, agentFilter, versionFilter, pageSize]);
 
   // Reset the version sub-filter whenever the agent changes (versions belong to
   // a specific agent).
@@ -112,7 +118,7 @@ export function ConversationsPage() {
     useConversationDescriptors(
       pageSize,
       page,
-      search,
+      debouncedSearch,
       agentFilter,
       stateFilter === "ALL" ? undefined : stateFilter,
       versionFilter
@@ -367,7 +373,7 @@ export function ConversationsPage() {
 
                     {/* Step count badge */}
                     <div className="mt-2">
-                      <StepCountBadge conversationId={convId} />
+                      <StepCountBadge count={conv.conversationStepSize} />
                     </div>
 
                     {/* Footer */}
@@ -455,7 +461,7 @@ export function ConversationsPage() {
                           </span>
                         </td>
                         <td className="px-5 py-3">
-                          <StepCountBadge conversationId={convId} />
+                          <StepCountBadge count={conv.conversationStepSize} />
                         </td>
                         <td className="px-5 py-3">
                           <span className="text-sm text-muted-foreground">
@@ -586,14 +592,16 @@ export function ConversationsPage() {
   );
 }
 
-/** Lazily loads and displays the step count for a conversation. */
-function StepCountBadge({ conversationId }: { conversationId: string }) {
+/**
+ * The step count the listing already carries (`conversationStepSize`, filled
+ * from the memory snapshot by the backend for every row it returns).
+ *
+ * It used to be fetched per row — one full conversation-log request each, up to
+ * 100 per page, re-issued on every page change and search keystroke — to show a
+ * number the list response had in it all along.
+ */
+function StepCountBadge({ count }: { count?: number }) {
   const { t } = useTranslation();
-  const { data: count, isLoading } = useConversationStepCount(conversationId);
-
-  if (isLoading) {
-    return <span className="inline-block h-4 w-8 animate-pulse rounded bg-secondary" />;
-  }
 
   if (count === undefined || count === null) return <span className="text-xs text-muted-foreground">—</span>;
 

@@ -781,6 +781,8 @@ describe("ChatPanel — shared live status line", () => {
     useChatStore.getState().addMessage({ id: "u1", role: "user", content: "hi", timestamp: Date.now() });
     useChatStore.getState().setProcessing(true);
     useDebugStore.setState({
+      // Not bound to an earlier test's conversation: the turn is conv1's own.
+      boundConversationId: null,
       currentTurnEvents: [
         { type: "task_start", taskType: "ai.labs.httpcalls", taskId: "1", index: 0, timestamp: Date.now() },
       ],

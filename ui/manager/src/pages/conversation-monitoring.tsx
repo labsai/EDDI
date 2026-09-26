@@ -132,8 +132,64 @@ export function ConversationMonitoringPage() {
     });
   }
 
-  function confirmEndSelected() {
-    const statuses: ConversationStatus[] = selectedStatuses;
+  // The state sent with /end must be the state NOW, not the last poll's. The
+  // backend acts on the body's conversationState, and the list can be up to one
+  // poll interval old: a conversation that paused for approval since then was
+  // sent as IN_PROGRESS and ended without its pending approval being cleaned up
+  // (UI side of C1b). So re-read the list first and send what it says.
+  const [refreshingForEnd, setRefreshingForEnd] = useState(false);
+  async function confirmEndSelected() {
+    setRefreshingForEnd(true);
+    let fresh: ConversationStatus[] | undefined;
+    try {
+      const result = await refetch();
+      fresh = result.isError ? undefined : result.data;
+    } finally {
+      setRefreshingForEnd(false);
+    }
+    if (!fresh) {
+      toast.error(
+        t(
+          "conversations.endStateUnavailable",
+          "Could not re-check the conversations' current state, so nothing was ended. Try again."
+        )
+      );
+      return;
+    }
+
+    const statuses: ConversationStatus[] = fresh.filter((r) =>
+      selected.has(r.conversationId)
+    );
+    // A paused conversation the dialog did not warn about: the operator
+    // confirmed without being told its approval would be cancelled. Compared
+    // by id, not by count — one resuming while another pauses keeps the count
+    // but changes what is being cancelled. The dialog is re-rendered from the
+    // fresh list, so leave it open for a second look.
+    const warnedPaused = new Set(
+      selectedStatuses
+        .filter((s) => s.conversationState === "AWAITING_HUMAN")
+        .map((s) => s.conversationId)
+    );
+    const unwarned = statuses.some(
+      (s) =>
+        s.conversationState === "AWAITING_HUMAN" &&
+        !warnedPaused.has(s.conversationId)
+    );
+    if (unwarned) {
+      toast.warning(
+        t(
+          "conversations.endStateChanged",
+          "A selected conversation is now waiting for approval. Review the selection and confirm again."
+        )
+      );
+      return;
+    }
+    if (statuses.length === 0) {
+      setSelected(new Set());
+      setConfirmEnd(false);
+      return;
+    }
+
     endMutation.mutate(statuses, {
       onSuccess: () => {
         toast.success(
@@ -446,8 +502,8 @@ export function ConversationMonitoringPage() {
         )}
         confirmLabel={t("conversations.endSelected", "End selected")}
         cancelLabel={t("common.cancel")}
-        onConfirm={confirmEndSelected}
-        isPending={endMutation.isPending}
+        onConfirm={() => void confirmEndSelected()}
+        isPending={endMutation.isPending || refreshingForEnd}
       >
         {pausedSelectedCount > 0 && (
           <p className="rounded-lg border border-orange-500/30 bg-orange-500/10 p-3 text-sm text-foreground">

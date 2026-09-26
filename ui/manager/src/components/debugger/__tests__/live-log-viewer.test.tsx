@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
+import { act, screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { LiveLogViewer } from "@/components/debugger/live-log-viewer";
 
@@ -31,6 +31,11 @@ const mockCreateLogEventSource = vi.mocked(createLogEventSource);
 const mockGetRecentLogs = vi.mocked(getRecentLogs);
 
 describe("LiveLogViewer", () => {
+  beforeEach(() => {
+    mockGetRecentLogs.mockClear();
+    mockCreateLogEventSource.mockClear();
+  });
+
   it("shows empty state when no agentId", () => {
     renderWithProviders(
       <LiveLogViewer agentId={null} conversationId={null} />
@@ -216,5 +221,86 @@ describe("LiveLogViewer", () => {
     );
     const status = screen.getByRole("status");
     expect(status).toHaveAttribute("aria-label", "Disconnected");
+  });
+
+  // ── Regressions ────────────────────────────────────────────────────────
+
+  function latestSource() {
+    const results = mockCreateLogEventSource.mock.results;
+    return results[results.length - 1]!.value as {
+      onmessage: ((e: MessageEvent) => void) | null;
+      onopen: (() => void) | null;
+    };
+  }
+
+  function emit(entry: Record<string, unknown>) {
+    act(() => {
+      latestSource().onmessage?.(
+        new MessageEvent("message", { data: JSON.stringify(entry) })
+      );
+    });
+  }
+
+  const line = (timestamp: number, message: string) => ({
+    timestamp,
+    level: "INFO",
+    loggerName: "com.example.L",
+    message,
+  });
+
+  it("merges the initial fetch with live lines instead of replacing them, oldest first", async () => {
+    let resolveSeed: (v: unknown[]) => void = () => {};
+    mockGetRecentLogs.mockImplementationOnce(
+      () => new Promise((r) => (resolveSeed = r as typeof resolveSeed)) as never
+    );
+
+    renderWithProviders(
+      <LiveLogViewer agentId="agent-merge" conversationId={null} />
+    );
+
+    // A live line lands before the REST seed resolves…
+    emit(line(3000, "live line"));
+    expect(screen.getByText("live line")).toBeInTheDocument();
+
+    // …and the seed (newest-first from the backend, overlapping the replay)
+    // must neither discard it nor render upside down.
+    await act(async () => {
+      resolveSeed([line(2000, "second"), line(1000, "first"), line(3000, "live line")]);
+    });
+
+    const messages = screen
+      .getAllByTestId("log-entry")
+      .map((el) => el.textContent ?? "");
+    expect(messages).toHaveLength(3);
+    expect(messages[0]).toContain("first");
+    expect(messages[1]).toContain("second");
+    expect(messages[2]).toContain("live line");
+  });
+
+  it("pause freezes the view but keeps collecting, so resume shows what arrived meanwhile", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <LiveLogViewer agentId="agent-pause" conversationId={null} />
+    );
+    emit(line(1000, "before pause"));
+
+    await user.click(screen.getByTestId("log-pause"));
+    emit(line(2000, "during pause"));
+    expect(screen.queryByText("during pause")).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId("log-pause"));
+    expect(screen.getByText("during pause")).toBeInTheDocument();
+    expect(screen.getByText("before pause")).toBeInTheDocument();
+  });
+
+  it("re-seeds on a reconnect, not only on mount", async () => {
+    renderWithProviders(
+      <LiveLogViewer agentId="agent-reopen" conversationId={null} />
+    );
+    expect(mockGetRecentLogs).toHaveBeenCalledTimes(1);
+    act(() => latestSource().onopen?.()); // first open — seed already running
+    expect(mockGetRecentLogs).toHaveBeenCalledTimes(1);
+    act(() => latestSource().onopen?.()); // reconnect after a drop
+    expect(mockGetRecentLogs).toHaveBeenCalledTimes(2);
   });
 });

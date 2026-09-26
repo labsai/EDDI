@@ -135,3 +135,54 @@ describe("ConversationsPage — filters", () => {
     });
   });
 });
+
+describe("ConversationsPage — list cost", () => {
+  beforeEach(() => {
+    requests = [];
+  });
+
+  // Each row used to fetch the conversation's full log to count its steps —
+  // up to 100 extra requests per page for a number the listing already has.
+  it("shows each row's step count from the listing without fetching any conversation log", async () => {
+    let logRequests = 0;
+    server.use(
+      http.get("*/conversationstore/conversations/simple/:id", () => {
+        logRequests++;
+        return HttpResponse.json({ conversationSteps: [] });
+      }),
+      http.get("*/conversationstore/conversations", ({ request }) => {
+        requests.push(new URL(request.url).searchParams);
+        return HttpResponse.json([
+          {
+            resource: "eddi://ai.labs.conversation/conversationstore/conversations/c7",
+            createdOn: Date.now(),
+            lastModifiedOn: Date.now(),
+            agentResource: "eddi://ai.labs.agent/agentstore/agents/agent1?version=1",
+            conversationState: "READY",
+            conversationStepSize: 7,
+            agentName: "Support Agent",
+          },
+        ]);
+      })
+    );
+
+    renderWithProviders(<ConversationsPage />);
+    await waitFor(() => expect(screen.getByText(/7 steps/)).toBeInTheDocument());
+    expect(logRequests).toBe(0);
+  });
+
+  it("debounces the search so typing a word is one list request, not one per key", async () => {
+    useCapturingListHandler();
+    renderWithProviders(<ConversationsPage />);
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByTestId("conversation-grid")).toBeInTheDocument());
+
+    requests = [];
+    await user.type(screen.getByTestId("conversation-search"), "refund");
+
+    await waitFor(() => expect(lastRequest().get("filter")).toBe("refund"));
+    const withFilter = requests.filter((r) => r.get("filter"));
+    expect(withFilter).toHaveLength(1);
+  });
+});
+

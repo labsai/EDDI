@@ -308,8 +308,12 @@ export function parseCron(expression: string): ParsedCron | null {
     doms,
     months,
     dows,
-    domRestricted: parts[2] !== "*",
-    dowRestricted: parts[4] !== "*",
+    // A day field is "starred" (unrestricted) when it BEGINS with "*", so a
+    // stepped star counts as starred. That is Vixie's DOM_STAR/DOW_STAR flag and
+    // exactly what the backend's CronParser checks; comparing against a bare "*"
+    // made a stepped star "restricted" and previewed an OR where the server ANDs.
+    domRestricted: !parts[2]!.startsWith("*"),
+    dowRestricted: !parts[4]!.startsWith("*"),
   };
 }
 
@@ -369,13 +373,16 @@ function zonedWallToInstant(
   return new Date(asIfUtc - offset);
 }
 
+// Mirrors the backend's CronParser.dayMatches: OR when BOTH day fields are
+// restricted (Vixie semantics), otherwise the AND of the two sets. A starred
+// field with a step is not the full range, so it must still be honoured —
+// ignoring it previewed every Monday for "0 9 */2 * MON" where the server fires
+// only on the odd-numbered Mondays.
 function dayMatches(p: ParsedCron, dom: number, dow: number): boolean {
   if (p.domRestricted && p.dowRestricted) {
     return p.doms.has(dom) || p.dows.has(dow); // Vixie cron OR semantics
   }
-  if (p.domRestricted) return p.doms.has(dom);
-  if (p.dowRestricted) return p.dows.has(dow);
-  return true;
+  return p.doms.has(dom) && p.dows.has(dow);
 }
 
 /**

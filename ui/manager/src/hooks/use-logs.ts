@@ -1,5 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   getRecentLogs,
   getHistoryLogs,
@@ -8,9 +8,11 @@ import {
   type LogEntry,
   type LogFilters,
   type HistoryFilters,
+  type DatabaseLogEntry,
 } from "@/lib/api/logs";
 import type { BearerEventSource } from "@/lib/bearer-event-source";
 import { useSessionLogStore, connect as connectSessionLogStream } from "@/hooks/session-log-store";
+import { historyEntryKey, mergeNewestFirst, newByMultiplicity } from "@/lib/log-entries";
 
 // ==================== Query Keys ====================
 
@@ -29,11 +31,62 @@ export function useRecentLogs(filters: LogFilters = {}) {
   });
 }
 
+/** Rows per history page. The backend defaults to 100 as well. */
+export const HISTORY_PAGE_SIZE = 100;
+
+/**
+ * Database log history, newest first, one page at a time.
+ *
+ * This used to be a single query for `limit=100` with no way to ask for more,
+ * so the History tab could never show anything older than the newest 100 rows
+ * of a filter — exactly where an operator goes looking for what happened
+ * yesterday. `skip` is a row offset on both backends, so each further page asks
+ * for the next `limit` rows. Rows written between two page loads shift the
+ * window, so pages are merged de-duplicated.
+ */
 export function useHistoryLogs(filters: HistoryFilters = {}) {
-  return useQuery({
+  const pageSize = filters.limit ?? HISTORY_PAGE_SIZE;
+  const startSkip = filters.skip ?? 0;
+  const query = useInfiniteQuery({
     queryKey: KEYS.history(filters),
-    queryFn: () => getHistoryLogs(filters),
+    initialPageParam: startSkip,
+    queryFn: ({ pageParam }) =>
+      getHistoryLogs({ ...filters, skip: pageParam, limit: pageSize }),
+    // A short page is the last page.
+    getNextPageParam: (lastPage, allPages) =>
+      lastPage.length < pageSize
+        ? undefined
+        : startSkip + allPages.length * pageSize,
   });
+
+  const data = useMemo(() => {
+    if (!query.data) return undefined;
+    // Rows written between two page loads shift the window, so a page can
+    // repeat rows from the end of the previous one. Counted by multiplicity so
+    // genuinely repeated lines inside a page survive.
+    let rows: DatabaseLogEntry[] = [];
+    for (const page of query.data.pages) {
+      rows = rows.concat(newByMultiplicity(rows, page, historyEntryKey));
+    }
+    return rows;
+  }, [query.data]);
+
+  const { fetchNextPage } = query;
+  const loadMore = useCallback(() => {
+    void fetchNextPage();
+  }, [fetchNextPage]);
+
+  return {
+    data,
+    isLoading: query.isLoading,
+    isError: query.isError,
+    isSuccess: query.isSuccess,
+    error: query.error,
+    refetch: query.refetch,
+    hasMore: query.hasNextPage,
+    isLoadingMore: query.isFetchingNextPage,
+    loadMore,
+  };
 }
 
 export function useInstanceId() {
@@ -47,6 +100,7 @@ export function useInstanceId() {
 // ==================== SSE Hook ====================
 
 const MAX_LOG_ENTRIES = 500; // Max entries in the live view
+const FILTERED_RESEED_LIMIT = 200;
 
 /** Are any filter fields set? */
 function hasFilters(f: LogFilters): boolean {
@@ -84,31 +138,24 @@ export function useLogStream(filters: LogFilters = {}) {
   // ── Filtered SSE path ────────────────────────────────────────
   const [filteredEntries, setFilteredEntries] = useState<LogEntry[]>([]);
   const [filteredConnected, setFilteredConnected] = useState(false);
-  const [paused, setPaused] = useState(false);
   const eventSourceRef = useRef<BearerEventSource | null>(null);
-  const pausedRef = useRef(false);
   const filterKey = JSON.stringify(filters);
-
-  // Keep ref in sync
-  useEffect(() => {
-    pausedRef.current = paused;
-  }, [paused]);
 
   const connect = useCallback(() => {
     try {
       const es = createLogEventSource(filters);
       eventSourceRef.current = es;
 
+      // Lines keep arriving while the view is paused — pausing freezes what is
+      // SHOWN (below), it does not drop what is logged meanwhile. Dropping them
+      // made "Resume" silently skip everything logged during the pause.
       const handleEvent = (event: MessageEvent) => {
-        if (pausedRef.current) return;
         try {
           const entry = JSON.parse(event.data) as LogEntry;
-          setFilteredEntries((prev) => {
-            const next = [entry, ...prev];
-            return next.length > MAX_LOG_ENTRIES
-              ? next.slice(0, MAX_LOG_ENTRIES)
-              : next;
-          });
+          // De-duplicated: every (re)connect replays up to 50 recent lines.
+          setFilteredEntries((prev) =>
+            mergeNewestFirst(prev, [entry], MAX_LOG_ENTRIES)
+          );
         } catch {
           // ignore parse errors
         }
@@ -130,6 +177,17 @@ export function useLogStream(filters: LogFilters = {}) {
 
       es.onopen = () => {
         setFilteredConnected(true);
+        // Same gap as the session store: what was logged while the stream was
+        // down never arrives on it, so re-fetch the ring buffer on every open.
+        getRecentLogs({ ...filters, limit: FILTERED_RESEED_LIMIT })
+          .then((recent) =>
+            setFilteredEntries((prev) =>
+              mergeNewestFirst(prev, recent, MAX_LOG_ENTRIES)
+            )
+          )
+          .catch(() => {
+            /* the live stream still works; the gap just stays unfilled */
+          });
       };
     } catch {
       setFilteredConnected(false);
@@ -157,6 +215,31 @@ export function useLogStream(filters: LogFilters = {}) {
     }
   }, [filtered]);
 
+  // Pause freezes the DISPLAYED list in both modes. It used to be implemented
+  // only on the filtered path (by discarding events), so in the default
+  // unfiltered view — which reads the shared session store — the button toggled
+  // its label and the list kept scrolling underneath.
+  const [pausedSnapshot, setPausedSnapshot] = useState<LogEntry[] | null>(null);
+  const paused = pausedSnapshot !== null;
+
+  const liveEntries = useMemo(
+    () => (filtered ? filteredEntries : sessionEntries.slice(0, MAX_LOG_ENTRIES)),
+    [filtered, filteredEntries, sessionEntries]
+  );
+
+  const setPaused = useCallback(
+    (next: boolean) => setPausedSnapshot(next ? liveEntries : null),
+    [liveEntries]
+  );
+
+  // A different filter is a different list; a snapshot of the old one would
+  // show results that do not match the filter bar.
+  const [snapshotFilterKey, setSnapshotFilterKey] = useState(filterKey);
+  if (snapshotFilterKey !== filterKey) {
+    setSnapshotFilterKey(filterKey);
+    setPausedSnapshot(null);
+  }
+
   const clearEntries = useCallback(() => {
     if (filtered) {
       setFilteredEntries([]);
@@ -164,13 +247,11 @@ export function useLogStream(filters: LogFilters = {}) {
       // For unfiltered, clearing just resets the session store
       useSessionLogStore.setState({ entries: [] });
     }
+    setPausedSnapshot((s) => (s === null ? null : []));
   }, [filtered]);
 
-  // Return session store data when unfiltered, own data when filtered
   return {
-    entries: filtered
-      ? filteredEntries
-      : sessionEntries.slice(0, MAX_LOG_ENTRIES),
+    entries: pausedSnapshot ?? liveEntries,
     sseConnected: filtered ? filteredConnected : sessionConnected,
     seeded: filtered ? true : sessionSeeded,
     paused,

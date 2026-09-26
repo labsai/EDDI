@@ -154,6 +154,27 @@ describe("nextCronFires", () => {
     const fires = nextCronFires("0 9 * * *", 1, from, "Europe/Vienna");
     expect(fires[0]!.toISOString()).toBe("2026-07-20T07:00:00.000Z");
   });
+
+  // Mirrors CronParser.computeNextFire: a day field that BEGINS with "*" is
+  // starred even with a step, so the two day fields are ANDed, not ORed.
+  it("ANDs a stepped day-of-month with a restricted weekday, like the backend", () => {
+    const from = new Date("2026-07-14T10:00:00Z"); // Tuesday
+    const fires = nextCronFires("0 9 */2 * MON", 2, from, "UTC");
+    // Odd-numbered Mondays only: 27 July, then 3 August (20 July is even).
+    expect(fires.map((d) => d.toISOString())).toEqual([
+      "2026-07-27T09:00:00.000Z",
+      "2026-08-03T09:00:00.000Z",
+    ]);
+    expect(parseCron("0 9 */2 * MON")!.domRestricted).toBe(false);
+  });
+
+  it("ANDs a restricted day-of-month with a stepped weekday, like the backend", () => {
+    const from = new Date("2026-07-14T10:00:00Z");
+    // The 1st of the month, only when it falls on Sun/Tue/Thu/Sat.
+    // 1 August 2026 is a Saturday.
+    const fires = nextCronFires("0 9 1 * */2", 1, from, "UTC");
+    expect(fires[0]!.toISOString()).toBe("2026-08-01T09:00:00.000Z");
+  });
 });
 
 describe("cronMinIntervalSeconds", () => {
