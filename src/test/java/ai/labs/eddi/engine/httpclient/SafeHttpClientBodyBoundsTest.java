@@ -24,8 +24,10 @@ import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -187,6 +189,46 @@ class SafeHttpClientBodyBoundsTest {
         assertEquals(200, response.statusCode());
         assertEquals("ok", response.body());
         assertEquals(List.of(200), handedToCaller);
+    }
+
+    @Test
+    @DisplayName("an oversized redirect body is dropped after a bounded read and the redirect still completes")
+    void oversizedRedirectBodyIsDroppedNotDownloaded() throws Exception {
+        CountDownLatch redirectBodyCutOff = new CountDownLatch(1);
+        server.createContext("/moved", exchange -> {
+            // Chunked, so the discard has to trip mid-stream: 10 MiB, far past its cap.
+            exchange.getResponseHeaders().set("Location", "http://127.0.0.1:" + port + "/final");
+            exchange.sendResponseHeaders(302, 0);
+            byte[] chunk = new byte[64 * 1024];
+            try (OutputStream out = exchange.getResponseBody()) {
+                for (int i = 0; i < 160; i++) {
+                    out.write(chunk);
+                }
+            } catch (IOException e) {
+                redirectBodyCutOff.countDown();
+            }
+        });
+        server.createContext("/final", exchange -> {
+            byte[] body = "ok".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+
+        SafeHttpClient spy = Mockito.spy(new SafeHttpClient(10_000));
+        doNothing().when(spy).validateRedirectTarget(anyString());
+
+        // The caller's bound is far below the redirect body, and must not apply to it.
+        HttpResponse<String> response = spy.send(
+                HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/moved")).GET().build(),
+                BoundedBodyHandlers.ofString(16));
+
+        assertEquals(200, response.statusCode());
+        assertEquals("ok", response.body());
+        // The server's write fails once the client drops the connection; give its
+        // handler thread a moment to observe that.
+        assertTrue(redirectBodyCutOff.await(5, TimeUnit.SECONDS), "the redirect body must not be read to the end");
     }
 
     @Test

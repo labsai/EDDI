@@ -96,6 +96,22 @@ public final class BoundedBodyHandlers {
     }
 
     /**
+     * Reads and throws away at most {@code maxBytes} of a body, then completes with
+     * {@code null}. Unlike {@link #ofByteArray} it never fails: past the limit — or
+     * on a declared {@code Content-Length} above it — it cancels the subscription,
+     * which closes the connection, and completes normally. For a body nobody reads,
+     * such as a redirect's, where an oversized body must neither be downloaded nor
+     * fail the exchange.
+     *
+     * @throws IllegalArgumentException
+     *             if {@code maxBytes} is negative or above {@link #MAX_LIMIT}
+     */
+    static <T> HttpResponse.BodySubscriber<T> discarding(long maxBytes, OptionalLong declaredLength) {
+        requireValidLimit(maxBytes);
+        return new DiscardingSubscriber<>(maxBytes, declaredLength);
+    }
+
+    /**
      * The body lands in one array, so the limit is bounded by what an array holds.
      */
     static final long MAX_LIMIT = Integer.MAX_VALUE - 8;
@@ -222,6 +238,66 @@ public final class BoundedBodyHandlers {
 
         private void reject() {
             result.completeExceptionally(new ResponseTooLargeException(maxBytes));
+            subscription.cancel();
+        }
+    }
+
+    /**
+     * Drops the body, reading at most {@code maxBytes} of it. Package-private so it
+     * can be driven without a server.
+     */
+    static final class DiscardingSubscriber<T> implements HttpResponse.BodySubscriber<T> {
+        private final long maxBytes;
+        private final OptionalLong declaredLength;
+        private final CompletableFuture<T> result = new CompletableFuture<>();
+        private Flow.Subscription subscription;
+        private long total;
+
+        DiscardingSubscriber(long maxBytes, OptionalLong declaredLength) {
+            this.maxBytes = maxBytes;
+            this.declaredLength = declaredLength;
+        }
+
+        @Override
+        public CompletionStage<T> getBody() {
+            return result;
+        }
+
+        @Override
+        public void onSubscribe(Flow.Subscription subscription) {
+            this.subscription = subscription;
+            if (declaredLength.isPresent() && declaredLength.getAsLong() > maxBytes) {
+                stop();
+                return;
+            }
+            subscription.request(Long.MAX_VALUE);
+        }
+
+        @Override
+        public void onNext(List<ByteBuffer> items) {
+            if (result.isDone()) {
+                return;
+            }
+            for (ByteBuffer item : items) {
+                total += item.remaining();
+            }
+            if (total > maxBytes) {
+                stop();
+            }
+        }
+
+        @Override
+        public void onError(Throwable throwable) {
+            result.completeExceptionally(throwable);
+        }
+
+        @Override
+        public void onComplete() {
+            result.complete(null);
+        }
+
+        private void stop() {
+            result.complete(null);
             subscription.cancel();
         }
     }
