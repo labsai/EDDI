@@ -16,6 +16,7 @@ import ai.labs.eddi.engine.runtime.internal.CronParser;
 import ai.labs.eddi.engine.runtime.internal.DreamService;
 import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
 import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
+import ai.labs.eddi.engine.runtime.internal.TeamCadenceService;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
@@ -264,6 +265,14 @@ public class RestScheduleStore implements IRestScheduleStore {
             Response guard = requireAdminForHitl(stored, "update");
             if (guard != null) {
                 return guard;
+            }
+
+            // Judged on the STORED row, for the same reason as the HITL guard: a PUT
+            // that omits metadata keeps the stored markers (carryOverNonEditableFields),
+            // so the body alone cannot say what the schedule will be after the write.
+            Response managedGuard = guardManagedSchedule(stored);
+            if (managedGuard != null) {
+                return managedGuard;
             }
 
             // Same USE gate as create: an update can re-point an existing schedule at a
@@ -652,8 +661,10 @@ public class RestScheduleStore implements IRestScheduleStore {
      * cadence, RAG ingestion, HITL timeout — so a client that does not echo it (the
      * Manager's schedule editor never did) silently turned an edited system
      * schedule into a plain chat schedule that messaged the agent instead of
-     * crawling or consolidating. A body that names the field — an empty map
-     * included — still sets it; only absence means "keep".
+     * crawling or consolidating. A body that names the field still sets it —
+     * {@code "metadata": null} and {@code {}} both clear it — and only absence
+     * means "keep". {@code tenantId} has no such marker: null (or absent) keeps the
+     * stored tenant, because a PUT is not how a schedule changes tenant.
      * <p>
      * {@code stored} is null only when the schedule is genuinely absent, in which
      * case there is nothing to carry over and the store's own update is about to
@@ -674,7 +685,7 @@ public class RestScheduleStore implements IRestScheduleStore {
         schedule.setNextRetryAt(stored.getNextRetryAt());
         schedule.setPersistentConversationId(stored.getPersistentConversationId());
 
-        if (schedule.getMetadata() == null) {
+        if (!schedule.hasMetadata()) {
             schedule.setMetadata(stored.getMetadata());
         }
         if (schedule.getTenantId() == null) {
@@ -698,6 +709,48 @@ public class RestScheduleStore implements IRestScheduleStore {
         } catch (RuntimeException e) {
             return SCHEDULER_USER_ID;
         }
+    }
+
+    /**
+     * Update rules for schedules another resource owns, judged on the stored row.
+     * <ul>
+     * <li><b>RAG ingestion</b> — refused for everyone. The row is minted from a
+     * knowledge base's ingestion source ({@code RagSourceIngestionService}), whose
+     * {@code cron} is the source of truth, and a fire crawls, re-embeds and can
+     * tombstone that knowledge base — which the ingestion endpoints gate on EDIT of
+     * it. Once a metadata-less PUT stopped stripping the marker, an edit here let
+     * anyone with USE on some agent and VIEW on the knowledge base re-cron it to
+     * fire every minute. Change the cadence on the knowledge base instead.</li>
+     * <li><b>Team cadence</b> — requires EDIT on the group, the same gate
+     * {@code RestGroupWorkspace.addCadence} applies. There is no cadence update
+     * endpoint, so this PUT is the only way to change a cadence's cron, and it must
+     * not be open to someone who could not have created the cadence.</li>
+     * </ul>
+     *
+     * @return a response to short-circuit with, or null when the update may
+     *         proceed; a missing EDIT grant surfaces as the guard's
+     *         {@link ForbiddenException}
+     */
+    private Response guardManagedSchedule(ScheduleConfiguration stored) {
+        Map<String, Object> md = stored != null ? stored.getMetadata() : null;
+        if (RagIngestionSchedules.isIngestionSchedule(md)) {
+            LOGGER.warnf("Refused update of ingestion schedule %s — it is managed by knowledge base %s",
+                    sanitize(stored.getId()), sanitize(RagIngestionSchedules.ragConfigId(md)));
+            return Response.status(Response.Status.CONFLICT)
+                    .entity("This schedule is managed by knowledge base '" + RagIngestionSchedules.ragConfigId(md)
+                            + "'. Change the ingestion source's cron on the knowledge base instead; "
+                            + "it re-creates this schedule when saved.")
+                    .build();
+        }
+        if (TeamCadenceService.isTeamCadenceSchedule(md)) {
+            Object groupId = md.get(TeamCadenceService.METADATA_GROUP_ID_KEY);
+            if (groupId == null || groupId.toString().isBlank()) {
+                return Response.status(Response.Status.BAD_REQUEST)
+                        .entity("This team cadence schedule names no group and cannot be updated.").build();
+            }
+            resourceAccessGuard.requireAccess(groupId.toString(), AccessLevel.EDIT, "group");
+        }
+        return null;
     }
 
     /** True if the schedule carries the HITL approval-timeout metadata marker. */
