@@ -3449,7 +3449,8 @@
     "decidedProgress": "已决定 {{decided}}/{{total}}",
     "groupLinkUnavailable": "未找到该群组，因此无法提供可靠的链接。",
     "confirmApproveGroupDescription": "批准整个暂停阶段并继续讨论。该暂停下等待的每项任务都会一并批准；如需逐项决定，请打开该群组。",
-    "confirmRejectGroupDescription": "拒绝整个暂停阶段。等待该暂停的每项任务都会一并被拒绝，讨论也不会继续往下进行。如需逐项决定，请打开该群组。"
+    "confirmRejectGroupDescription": "拒绝整个暂停阶段。等待该暂停的每项任务都会一并被拒绝，讨论也不会继续往下进行。如需逐项决定，请打开该群组。",
+    "pauseChanged": "此请求在你打开后已发生变化 — 未做出任何决定。请重新审核。"
   },
   "chatDrawer": {
     "deploying": "正在部署智能体…",

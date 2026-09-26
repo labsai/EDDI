@@ -3489,7 +3489,8 @@
     "decidedProgress": "{{decided}} of {{total}} decided",
     "groupLinkUnavailable": "This group could not be located, so there is no safe link to it.",
     "confirmApproveGroupDescription": "Approve the whole paused phase and resume the discussion. Every task waiting on this pause is approved with it — open the group to decide them individually.",
-    "confirmRejectGroupDescription": "Reject the whole paused phase. Every task waiting on this pause is rejected with it, and the discussion does not continue past it — open the group to decide them individually."
+    "confirmRejectGroupDescription": "Reject the whole paused phase. Every task waiting on this pause is rejected with it, and the discussion does not continue past it — open the group to decide them individually.",
+    "pauseChanged": "This request changed since you opened it — nothing was decided. Review it again."
   },
   "chatDrawer": {
     "deploying": "Deploying agent…",

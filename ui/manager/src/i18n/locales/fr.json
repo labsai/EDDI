@@ -3484,7 +3484,8 @@
     "decidedProgress": "{{decided}} sur {{total}} décidés",
     "groupLinkUnavailable": "Ce groupe est introuvable ; aucun lien fiable ne peut être proposé.",
     "confirmApproveGroupDescription": "Approuver toute la phase en pause et reprendre la discussion. Chaque tâche en attente est approuvée avec elle ; ouvrez le groupe pour les décider une par une.",
-    "confirmRejectGroupDescription": "Rejeter toute la phase en pause. Chaque tâche en attente est rejetée avec elle et la discussion ne va pas plus loin ; ouvrez le groupe pour les décider une par une."
+    "confirmRejectGroupDescription": "Rejeter toute la phase en pause. Chaque tâche en attente est rejetée avec elle et la discussion ne va pas plus loin ; ouvrez le groupe pour les décider une par une.",
+    "pauseChanged": "Cette demande a changé depuis que vous l'avez ouverte — rien n'a été décidé. Examinez-la de nouveau."
   },
   "chatDrawer": {
     "deploying": "Déploiement de l'agent…",

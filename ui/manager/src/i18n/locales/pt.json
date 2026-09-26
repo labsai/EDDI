@@ -3484,7 +3484,8 @@
     "decidedProgress": "{{decided}} de {{total}} decididas",
     "groupLinkUnavailable": "Este grupo não foi encontrado, por isso não há uma ligação fiável para ele.",
     "confirmApproveGroupDescription": "Aprovar toda a fase em pausa e retomar a discussão. Cada tarefa pendente é aprovada com ela — abra o grupo para as decidir individualmente.",
-    "confirmRejectGroupDescription": "Rejeitar toda a fase em pausa. Cada tarefa pendente é rejeitada com ela e a discussão não avança para além dela — abra o grupo para as decidir individualmente."
+    "confirmRejectGroupDescription": "Rejeitar toda a fase em pausa. Cada tarefa pendente é rejeitada com ela e a discussão não avança para além dela — abra o grupo para as decidir individualmente.",
+    "pauseChanged": "Este pedido mudou desde que o abriu — nada foi decidido. Reveja-o novamente."
   },
   "chatDrawer": {
     "deploying": "Implantando agente…",
