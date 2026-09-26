@@ -48,6 +48,18 @@ class RestGdprAdminTest {
     void deleteUserData_rejectsBlankUserId() {
         assertThrows(BadRequestException.class,
                 () -> restAdmin.deleteUserData("   "));
+    }
+
+    /**
+     * Review m5: __service__ owns every tenant's service grants; it is not a user.
+     */
+    @Test
+    void deleteUserData_rejectsTheServicePrincipal() {
+        assertThrows(BadRequestException.class,
+                () -> restAdmin.deleteUserData("__service__"));
+        assertThrows(BadRequestException.class,
+                () -> restAdmin.exportUserData("__service__"));
+        verifyNoInteractions(gdprService);
         verifyNoInteractions(gdprService);
     }
 

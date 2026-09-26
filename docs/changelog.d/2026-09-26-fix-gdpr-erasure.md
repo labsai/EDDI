@@ -74,6 +74,41 @@ restriction without the audited endpoint. `unrestrictProcessing` removed only on
 - Save-time rejection of a property-setter config that names a `_gdpr_` key was not
   added. It is skipped at runtime.
 
+### Pre-push review follow-up
+
+- **Deleted mid-run.** A running discussion whose document is deleted mid-run now ends
+  as a cancel. `executeDiscussion` handles `GroupConversationGoneException`, also when
+  it arrives wrapped, from any write inside the leg. The R2 cancel branch tolerates a
+  document that is already gone. The listener gets `onCancelled` rather than
+  `onGroupError`, and the leg no longer logs an ERROR, bumps the failure metric or
+  throws a 5xx. Previously the second `update()` inside the catch threw Gone again and
+  left SSE streams hanging. `GroupLifecycleOps.failConversation` has a corrected
+  comment.
+- **Late audit entries.** A cancelled turn still flushes its audit buffer while it
+  unwinds. `AuditLedgerService.markUserErased` makes this node write the user's
+  pseudonym for one hour, both at submit and when queued entries are drained. The
+  v3 HMAC still verifies, because it covers the identity token, not the raw id.
+- **Pending OAuth flows.** `IOAuthStateStore.deleteByPrincipal` (Mongo, Postgres)
+  runs as step `oauthStates`, before the grants are deleted. A late callback can no
+  longer mint a grant for an erased principal.
+- **Signalling continues past errors.** `GroupConversationService.stopInFlightWork`
+  keeps signalling after a store read error and reports the failure once, at the end.
+- **Stricter restriction check.** A row counts as an Art. 18 restriction only if it
+  also has no `sourceAgentId`, which is the shape only `restrictProcessing` writes.
+- **`__service__` is refused.** Erasure and export reject this system principal:
+  400 on REST, an error on MCP, and an `IllegalArgumentException` in the service.
+- **LIKE escape character.** The Postgres LIKE escape is now `!`, which does not
+  depend on `standard_conforming_strings`.
+- **Access check before key check.** REST `upsertMemory` runs the ownership check
+  before the reserved-key 400.
+- **Docs.** Stale "GDPR delete-all" wording in `IRestUserMemoryStore` (OpenAPI),
+  `docs/user-memory.md` and `docs/mcp-server.md` is fixed, and the step numbering in
+  `docs/gdpr-compliance.md` is corrected.
+- **Remaining residuals.** A turn or callback still in flight on another replica is
+  not covered. Neither is a callback that claimed its state before step `oauthStates`
+  and stores its grant after step `connectionGrants`, a window the length of one token
+  exchange.
+
 ### Compatibility
 
 - REST/MCP shapes only gain fields: `connectionGrantsDeleted`, and `connectionGrants`

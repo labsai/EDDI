@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.connections.grants.ConnectionGrant;
 import ai.labs.eddi.connections.grants.IConnectionGrantStore;
 import ai.labs.eddi.connections.grants.InMemoryConnectionGrantStore;
+import ai.labs.eddi.connections.oauth.IOAuthStateStore;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.IAuditStore;
@@ -48,6 +49,8 @@ class GdprErasureInFlightAndGrantsTest {
     private InMemoryConnectionGrantStore grantStore;
     private Instance<IConnectionGrantStore> grantStoreInstance;
     private final List<UserErasureParticipant> participants = new ArrayList<>();
+    private IOAuthStateStore stateStore;
+    private AuditLedgerService auditLedger;
     private GdprComplianceService service;
 
     @BeforeEach
@@ -61,10 +64,15 @@ class GdprErasureInFlightAndGrantsTest {
         Instance<IAttachmentStore> attachments = mock(Instance.class);
         Instance<GroupConversationStore> groups = mock(Instance.class);
         Instance<ISharedArtifactStore> artifacts = mock(Instance.class);
+        stateStore = mock(IOAuthStateStore.class);
+        Instance<IOAuthStateStore> stateStoreInstance = mock(Instance.class);
+        when(stateStoreInstance.isResolvable()).thenReturn(true);
+        when(stateStoreInstance.get()).thenReturn(stateStore);
+        auditLedger = mock(AuditLedgerService.class);
         service = new GdprComplianceService(userMemoryStore, mock(IConversationMemoryStore.class), mock(IUserConversationStore.class),
-                mock(IDatabaseLogs.class), mock(IAuditStore.class), mock(AuditLedgerService.class), attachments,
+                mock(IDatabaseLogs.class), mock(IAuditStore.class), auditLedger, attachments,
                 mock(IHitlToolJournalStore.class), mock(IConversationDescriptorStore.class), mock(IConversationCheckpointStore.class),
-                groups, artifacts, mock(IScheduleStore.class), grantStoreInstance, participants, new CacheFactory(), 0L);
+                groups, artifacts, mock(IScheduleStore.class), grantStoreInstance, stateStoreInstance, participants, new CacheFactory(), 0L);
     }
 
     private ConnectionGrant grant(String tenant, String connection, String principal) {
@@ -168,5 +176,59 @@ class GdprErasureInFlightAndGrantsTest {
 
         order.verify(userMemoryStore, times(2)).deleteAllForUser(USER_ID);
         assertTrue(grantStore.findAllByPrincipal(USER_ID).isEmpty());
+    }
+
+    /**
+     * A pending authorization flow carries the principal its grant will be bound
+     * to; a callback completing after the erasure would mint a fresh grant. The
+     * states go before the grants.
+     */
+    @Test
+    void deleteUserData_invalidatesPendingOAuthFlowsBeforeDeletingGrants() {
+        var grants = mock(IConnectionGrantStore.class);
+        when(grantStoreInstance.get()).thenReturn(grants);
+
+        var result = service.deleteUserData(USER_ID);
+
+        assertTrue(result.complete(), result.failedSteps().toString());
+        InOrder order = inOrder(stateStore, grants);
+        order.verify(stateStore).deleteByPrincipal(USER_ID);
+        order.verify(grants).deleteAllByPrincipal(USER_ID);
+    }
+
+    @Test
+    void deleteUserData_aFailedStateDeleteIsAFailedStep() {
+        when(stateStore.deleteByPrincipal(USER_ID)).thenThrow(new IllegalStateException("store down"));
+
+        var result = service.deleteUserData(USER_ID);
+
+        assertTrue(result.failedSteps().contains("oauthStates"), result.failedSteps().toString());
+    }
+
+    /** Late audit entries of cancelled work must not land with the raw id. */
+    @Test
+    void deleteUserData_tellsTheAuditLedgerBeforeStoppingInFlightWork() {
+        var participant = mock(UserErasureParticipant.class);
+        participants.add(participant);
+
+        service.deleteUserData(USER_ID);
+
+        InOrder order = inOrder(auditLedger, participant);
+        order.verify(auditLedger).markUserErased(USER_ID);
+        order.verify(participant).stopInFlightWork(USER_ID);
+    }
+
+    /**
+     * __service__ owns every tenant's service-bound grants; erasing it as if it
+     * were a user would disconnect every agent using a service connection.
+     */
+    @Test
+    void theServicePrincipalCannotBeErasedOrExported() {
+        grant("default", "gmail", "__service__");
+        grant("tenant-b", "jira", "__service__");
+
+        assertThrows(IllegalArgumentException.class, () -> service.deleteUserData("__service__"));
+        assertThrows(IllegalArgumentException.class, () -> service.exportUserData("__service__"));
+        assertEquals(2, grantStore.findAllByPrincipal("__service__").size());
     }
 }

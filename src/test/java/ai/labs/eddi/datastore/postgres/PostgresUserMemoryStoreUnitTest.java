@@ -156,7 +156,7 @@ class PostgresUserMemoryStoreUnitTest {
         var statements = sql.getAllValues().stream().filter(q -> q.startsWith("DELETE")).toList();
         assertEquals(2, statements.size(), statements.toString());
         for (String q : statements) {
-            assertTrue(q.contains("key NOT LIKE '\\_gdpr\\_%' ESCAPE '\\'"), q);
+            assertTrue(q.contains("key NOT LIKE '!_gdpr!_%' ESCAPE '!'"), q);
         }
     }
 

@@ -5,7 +5,6 @@
 package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.agents.AgentSigningService;
-import ai.labs.eddi.engine.gdpr.UserErasureParticipant;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
@@ -38,6 +37,7 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.gdpr.UserErasureParticipant;
 import ai.labs.eddi.engine.internal.groups.StanceSummaryEngine;
 import ai.labs.eddi.engine.internal.groups.DebateVerdictParser;
 import ai.labs.eddi.engine.internal.groups.FacilitatorEngine;
@@ -1478,15 +1478,18 @@ public class GroupConversationService implements IGroupConversationService, User
 
             return gc;
 
+        } catch (IGroupConversationStore.GroupConversationGoneException e) {
+            // A mid-run write found the document gone: a GDPR erasure or the delete
+            // endpoint removed it while this leg ran (update() no longer recreates it).
+            return stopAsDeleted(gc, listener);
         } catch (GroupDiscussionException e) {
+            if (isDeletedWhileRunning(e)) {
+                return stopAsDeleted(gc, listener);
+            }
             // R2: If the exception was caused by a cancel, route to CANCELLED
             var cancelToken = activeTokens.get(gc.getId());
             if (cancelToken != null && cancelToken.isCancelled()) {
-                gc.setState(GroupConversationState.CANCELLED);
-                gc.setLastModified(Instant.now());
-                conversationStore.update(gc);
-                notifyCancelled(gc, listener);
-                return gc;
+                return persistCancelled(gc, listener);
             }
             LOGGER.errorf(e, "Group discussion %s failed", LogSanitizer.sanitize(gc.getId()));
             failConversation(gc);
@@ -1506,14 +1509,13 @@ public class GroupConversationService implements IGroupConversationService, User
             }
             throw new GroupExecutionException(e.getMessage(), e);
         } catch (Exception e) {
+            if (isDeletedWhileRunning(e)) {
+                return stopAsDeleted(gc, listener);
+            }
             // R2: If the exception was caused by a cancel, route to CANCELLED
             var cancelToken = activeTokens.get(gc.getId());
             if (cancelToken != null && cancelToken.isCancelled()) {
-                gc.setState(GroupConversationState.CANCELLED);
-                gc.setLastModified(Instant.now());
-                conversationStore.update(gc);
-                notifyCancelled(gc, listener);
-                return gc;
+                return persistCancelled(gc, listener);
             }
             LOGGER.errorf(e, "Group discussion %s failed", LogSanitizer.sanitize(gc.getId()));
             failConversation(gc);
@@ -1586,6 +1588,56 @@ public class GroupConversationService implements IGroupConversationService, User
 
     private void notifyCancelled(GroupConversation gc, GroupDiscussionEventListener listener) {
         hitlCoordinator.notifyCancelled(gc, listener);
+    }
+
+    /**
+     * The R2 cancel branch: persist CANCELLED and tell the listener. The persist
+     * can find the document gone — a GDPR erasure cancels the discussion AND
+     * deletes it — and that must still end the leg as a cancel, not escape from
+     * inside the catch block with the listener never told.
+     */
+    private GroupConversation persistCancelled(GroupConversation gc, GroupDiscussionEventListener listener)
+            throws IResourceStore.ResourceStoreException {
+        gc.setState(GroupConversationState.CANCELLED);
+        gc.setLastModified(Instant.now());
+        try {
+            conversationStore.update(gc);
+        } catch (IGroupConversationStore.GroupConversationGoneException e) {
+            LOGGER.infof("Group discussion %s was cancelled and deleted while running — nothing left to persist",
+                    LogSanitizer.sanitize(gc.getId()));
+        }
+        notifyCancelled(gc, listener);
+        return gc;
+    }
+
+    /**
+     * Ends a leg whose document was deleted under it (GDPR erasure, the delete
+     * endpoint, possibly on another node). Not a failure: no ERROR log, no failure
+     * metric, no 5xx. The in-memory state becomes CANCELLED so the finally block
+     * releases ephemeral agents, and the listener gets a terminal event instead of
+     * a stream that never ends. Nothing is written — there is no document to write.
+     */
+    private GroupConversation stopAsDeleted(GroupConversation gc, GroupDiscussionEventListener listener) {
+        LOGGER.infof("Group discussion %s was deleted while running — stopping without persisting", LogSanitizer.sanitize(gc.getId()));
+        gc.setState(GroupConversationState.CANCELLED);
+        gc.setLastModified(Instant.now());
+        notifyCancelled(gc, listener);
+        return gc;
+    }
+
+    /**
+     * Whether the failure is, anywhere in its cause chain, the document being gone.
+     */
+    static boolean isDeletedWhileRunning(Throwable failure) {
+        for (Throwable t = failure; t != null; t = t.getCause()) {
+            if (t instanceof IGroupConversationStore.GroupConversationGoneException) {
+                return true;
+            }
+            if (t.getCause() == t) {
+                break;
+            }
+        }
+        return false;
     }
 
     private boolean persistedTerminalOverride(GroupConversation gc, GroupDiscussionEventListener listener) {
@@ -2324,6 +2376,7 @@ public class GroupConversationService implements IGroupConversationService, User
             return 0;
         }
         int signalled = 0;
+        IllegalStateException failure = null;
         for (String groupConversationId : List.copyOf(activeTokens.keySet())) {
             try {
                 GroupConversation gc = conversationStore.read(groupConversationId);
@@ -2332,9 +2385,19 @@ public class GroupConversationService implements IGroupConversationService, User
                 }
             } catch (IResourceStore.ResourceNotFoundException e) {
                 // finished and removed between the snapshot of ids and this read
-            } catch (IResourceStore.ResourceStoreException e) {
-                throw new IllegalStateException("Could not read running group discussion " + groupConversationId, e);
+            } catch (IResourceStore.ResourceStoreException | RuntimeException e) {
+                // Keep signalling the rest: one unreadable discussion must not leave the
+                // others running. The failure is reported once, after the sweep, so the
+                // cascade names the step as incomplete.
+                if (failure == null) {
+                    failure = new IllegalStateException("Could not read running group discussion " + groupConversationId, e);
+                } else {
+                    failure.addSuppressed(e);
+                }
             }
+        }
+        if (failure != null) {
+            throw failure;
         }
         return signalled;
     }

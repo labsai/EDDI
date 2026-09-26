@@ -241,11 +241,13 @@ curl "http://localhost:7070/usermemorystore/memories/user-123/visible?agentId=ag
 | `count_user_memories` | `eddi-viewer` | Count entries |
 | `upsert_user_memory` | `eddi-admin` | Insert or update an entry |
 | `delete_user_memory` | `eddi-admin` | Delete a specific entry |
-| `delete_all_user_memories` | `eddi-admin` | GDPR delete-all (requires `CONFIRM`) |
+| `delete_all_user_memories` | `eddi-admin` | Delete all memories except the `_gdpr_` bookkeeping entries (requires `CONFIRM`) |
 
 ### GDPR Compliance
 
-The `delete_all_user_memories` MCP tool and `DELETE /{userId}` REST endpoint permanently remove **all** memory entries and legacy properties for a user. The MCP tool requires an explicit `confirmation="CONFIRM"` parameter as a safety gate.
+The `delete_all_user_memories` MCP tool and `DELETE /{userId}` REST endpoint permanently remove a user's memory entries and legacy properties, **except** the GDPR bookkeeping entries (keys starting with `_gdpr_`, such as an Art. 18 processing restriction), which only the GDPR admin endpoints set or lift. They are memory housekeeping, not an Art. 17 erasure — for that use `DELETE /admin/gdpr/{userId}` (MCP: `delete_user_data`), which removes everything, including those entries, across every store. The MCP tool requires an explicit `confirmation="CONFIRM"` parameter as a safety gate.
+
+Keys starting with `_gdpr_` are reserved: agents, property setters and the memory/property REST and MCP endpoints cannot write or delete them.
 
 ## Dream Consolidation
 

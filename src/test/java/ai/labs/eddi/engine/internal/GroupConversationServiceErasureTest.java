@@ -83,6 +83,22 @@ class GroupConversationServiceErasureTest {
         assertEquals(0, service.stopInFlightWork("erased-user"));
     }
 
+    /**
+     * Review m1: one unreadable discussion must not leave the rest of the user's
+     * discussions running; the failure is reported once, after the sweep.
+     */
+    @Test
+    void stopInFlightWork_keepsSignallingPastAReadFailureAndReportsItAfterwards() throws Exception {
+        activeTokens.put("gc-broken", new DiscussionControlToken());
+        when(conversationStore.read("gc-broken")).thenThrow(new IResourceStore.ResourceStoreException("db down"));
+        running("gc-erased", "erased-user");
+
+        assertThrows(IllegalStateException.class, () -> service.stopInFlightWork("erased-user"));
+
+        assertEquals(ControlSignal.CANCEL_IMMEDIATE, activeTokens.get("gc-erased").getSignal(),
+                "the readable discussion must be cancelled even though another read failed");
+    }
+
     @Test
     void stopInFlightWork_ignoresANullUser() {
         assertEquals(0, service.stopInFlightWork(null));

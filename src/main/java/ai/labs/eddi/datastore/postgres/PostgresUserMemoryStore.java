@@ -44,9 +44,12 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
      * keys}. The underscores are escaped because {@code _} is LIKE's
      * single-character wildcard: the unescaped {@code '_gdpr_%'} this replaced also
      * matched any key whose second to fifth characters spell "gdpr" (say
-     * {@code agdpr1}), so the retention sweep silently never pruned those.
+     * {@code agdpr1}), so the retention sweep silently never pruned those. The
+     * escape character is {@code !}, not a backslash: a backslash inside a string
+     * literal means something else again under
+     * {@code standard_conforming_strings=off}.
      */
-    static final String NOT_RESERVED_KEY = "key NOT LIKE '\\_gdpr\\_%' ESCAPE '\\'";
+    static final String NOT_RESERVED_KEY = "key NOT LIKE '!_gdpr!_%' ESCAPE '!'";
 
     private static final String CREATE_TABLE = """
             CREATE TABLE IF NOT EXISTS usermemories (

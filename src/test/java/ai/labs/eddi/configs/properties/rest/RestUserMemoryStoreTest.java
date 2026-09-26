@@ -226,6 +226,19 @@ class RestUserMemoryStoreTest {
         verify(store, never()).upsert(any());
     }
 
+    /**
+     * Review N3: a caller without access gets the ordinary 403, not a 400 revealing
+     * key rules.
+     */
+    @Test
+    void upsertMemory_checksOwnershipBeforeTheReservedKeyRule() {
+        var entry = new UserMemoryEntry(null, "someone-else", "_gdpr_processing_restricted", "false", "fact",
+                Visibility.global, null, List.of(), null, false, 0, null, null);
+        doThrow(new ForbiddenException("no")).when(ownershipValidator).validateUserAccess(any(), eq("someone-else"));
+
+        assertThrows(ForbiddenException.class, () -> rest.upsertMemory(entry));
+    }
+
     @Test
     void deleteMemory_refusesTheRestrictionRowWith400() throws Exception {
         var row = new UserMemoryEntry("e1", "user-1", "_gdpr_processing_restricted", "true", "gdpr",
