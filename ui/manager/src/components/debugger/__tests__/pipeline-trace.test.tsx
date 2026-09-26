@@ -429,3 +429,103 @@ describe("PipelineTrace", () => {
   });
 });
 
+// ── Audit matching must never guess ─────────────────────────────────────
+
+function auditRow(conv: string, stepIndex: number, taskType: string, taskIndex: number, durationMs: number, cost: number) {
+  return {
+    id: `${conv}-${stepIndex}-${taskIndex}`,
+    conversationId: conv, agentId: "a", agentVersion: 1, userId: null,
+    environment: "production", stepIndex, taskId: taskType, taskType, taskIndex,
+    durationMs, input: null, output: null, llmDetail: null, toolCalls: null,
+    actions: null, cost, timestamp: new Date(1000 + stepIndex).toISOString(),
+    hmac: null, agentSignature: null,
+  };
+}
+
+describe("PipelineTrace — audit matching", () => {
+  beforeEach(() => {
+    useDebugStore.setState({ turns: [], currentTurnEvents: [], currentTurnStart: 0, selectedTurnIndex: null });
+  });
+
+  const fastTurn: PipelineTurn = {
+    turnIndex: 0,
+    events: [
+      { type: "task_start", taskId: "p", taskType: "ai.labs.parser", index: 0, timestamp: 1 },
+      { type: "task_complete", taskId: "p", taskType: "ai.labs.parser", index: 0, durationMs: 0, timestamp: 1 },
+      { type: "task_start", taskId: "o", taskType: "ai.labs.output", index: 1, timestamp: 1 },
+      { type: "task_complete", taskId: "o", taskType: "ai.labs.output", index: 1, durationMs: 0, timestamp: 1 },
+    ],
+    totalDurationMs: 0,
+    startTime: 0,
+  };
+
+  // Every step of a rule-based agent has the same all-zero fingerprint; the
+  // turn used to be given the newest step's data with full confidence.
+  it("shows no audit data when two steps have the same all-zero fingerprint", async () => {
+    let served = false;
+    server.use(
+      http.get("*/auditstore/:conversationId", () => {
+        served = true;
+        return HttpResponse.json([
+          auditRow("c0", 1, "ai.labs.parser", 0, 0, 0),
+          auditRow("c0", 1, "ai.labs.output", 1, 0, 0.9),
+          auditRow("c0", 2, "ai.labs.parser", 0, 0, 0),
+          auditRow("c0", 2, "ai.labs.output", 1, 0, 0.5),
+        ]);
+      })
+    );
+    useDebugStore.setState({ turns: [fastTurn] });
+    renderTrace("c0");
+    await waitFor(() => expect(served).toBe(true));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByText(formatUsd(0.5))).not.toBeInTheDocument();
+    expect(screen.queryByText(formatUsd(0.9))).not.toBeInTheDocument();
+  });
+
+  it("does not attach audit data to the in-flight turn", async () => {
+    let served = false;
+    server.use(
+      http.get("*/auditstore/:conversationId", () => {
+        served = true;
+        return HttpResponse.json([auditRow("c1", 1, "ai.labs.parser", 0, 42, 0.7)]);
+      })
+    );
+    useDebugStore.setState({
+      currentTurnEvents: [
+        { type: "task_start", taskId: "p", taskType: "ai.labs.parser", index: 0, timestamp: 1 },
+        { type: "task_complete", taskId: "p", taskType: "ai.labs.parser", index: 0, durationMs: 42, timestamp: 43 },
+      ],
+    });
+    renderTrace("c1");
+    await waitFor(() => expect(served).toBe(true));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByText(formatUsd(0.7))).not.toBeInTheDocument();
+  });
+
+  // The ledger flushes a few seconds after the turn. A read made at turn end
+  // missed it and was then kept until the next turn.
+  it("re-reads the ledger until a just-finished turn's entries appear", async () => {
+    let reads = 0;
+    server.use(
+      http.get("*/auditstore/:conversationId", () => {
+        reads++;
+        return HttpResponse.json(
+          reads === 1
+            ? []
+            : [
+                auditRow("c2", 3, "ai.labs.parser", 0, 42, 0),
+                auditRow("c2", 3, "ai.labs.llm", 1, 250, 0.0123),
+              ]
+        );
+      })
+    );
+    useDebugStore.setState({ turns: [{ ...mockTurn, startTime: Date.now() }] });
+    renderTrace("c2");
+    await waitFor(
+      () => expect(screen.getAllByText(formatUsd(0.0123)).length).toBeGreaterThan(0),
+      { timeout: 8000 }
+    );
+    expect(reads).toBeGreaterThanOrEqual(2);
+  }, 10_000);
+});
+

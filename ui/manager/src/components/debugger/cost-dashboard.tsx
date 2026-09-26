@@ -1,7 +1,6 @@
 import { useTranslation } from "react-i18next";
-import { useQuery } from "@tanstack/react-query";
 import type { AuditEntry } from "@/lib/api/audit";
-import { getWholeAuditTrail } from "@/lib/audit-pages";
+import { useDebuggerAudit } from "@/hooks/use-debugger-audit";
 import { useConversationCosts } from "@/hooks/use-tool-metrics";
 import { cn, formatDuration, formatUsd } from "@/lib/utils";
 import { Coins, Clock, Activity, Database, ArrowUp, ArrowDown } from "lucide-react";
@@ -18,12 +17,8 @@ export function CostDashboard({ conversationId, isActive = false }: CostDashboar
   const { t } = useTranslation();
   const { data: costs, isError: costsError } = useConversationCosts(conversationId, isActive);
 
-  const { data: audit } = useQuery({
-    queryKey: ["audit", "costDash", conversationId],
-    queryFn: () => getWholeAuditTrail(conversationId!),
-    enabled: !!conversationId,
-    staleTime: 10_000,
-  });
+  // Shared with the pipeline trace — one incrementally refreshed trail.
+  const { data: audit } = useDebuggerAudit(conversationId);
   const auditEntries = audit?.entries;
   const partial = audit ? !audit.complete : false;
 

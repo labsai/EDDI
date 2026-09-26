@@ -59,7 +59,7 @@ export interface PipelineTurn {
   /**
    * The conversation step (audit `stepIndex`) this turn is, when known. Set for
    * turns rebuilt from the audit trail; unset for live turns, whose step is
-   * resolved against the audit entries by {@link resolveAuditStepIndex}.
+   * resolved against the audit entries by {@link resolveLiveTurnSteps}.
    */
   stepIndex?: number;
   events: PipelineEvent[];
@@ -284,19 +284,21 @@ export const useDebugStore = create<DebugState>((set) => ({
     set((s) => {
       if (s.boundConversationId === conversationId) return s;
       // null → X is the conversation being created for the turn that is
-      // already recording: keep that turn. Any other change is a different
-      // conversation, whose turns must not be mixed with these.
+      // already recording: keep that turn.
       if (s.boundConversationId === null) {
         return { ...s, boundConversationId: conversationId };
       }
-      // Only the FINISHED turns are dropped. The in-flight turn belongs to
-      // whatever is streaming right now, which the chat store owns and which is
-      // the conversation being switched to (the chat drawer can start a turn
-      // before this panel mounts and binds).
+      // A different conversation: drop everything, the running turn included —
+      // a switch mid-stream leaves that turn with the conversation it came
+      // from, not the one being switched to.
       return {
         ...s,
         boundConversationId: conversationId,
         turns: [],
+        currentTurnEvents: [],
+        currentTurnStart: 0,
+        liveToolCalls: [],
+        liveToolsSettled: false,
         selectedTurnIndex: null,
       };
     }),
@@ -353,55 +355,74 @@ export function isInternalTask(taskType: string): boolean {
   return INTERNAL_INFRA_TASKS.has(taskType.toLowerCase());
 }
 
+/** How a live turn was matched to the audit ledger. */
+export type AuditStepMatch =
+  | { status: "matched"; stepIndex: number }
+  /** No step carries this turn yet — the ledger flushes asynchronously. */
+  | { status: "pending" }
+  /** Several steps fit equally well; showing any of them would be a guess. */
+  | { status: "ambiguous" };
+
+function fingerprint(pairs: Array<[string, number]>): string {
+  return pairs
+    .map(([type, ms]) => `${type}|${ms}`)
+    .sort()
+    .join(",");
+}
+
 /**
- * Which audit step a LIVE turn is, or undefined when it cannot be told.
+ * Match FINISHED live turns to audit steps, in order, never guessing.
  *
  * Live turns used to be matched to audit entries by `turnIndex` — a count of
- * turns seen in THIS session, starting at 0 — against the audit's
- * `stepIndex`, the conversation's own step number (step 0 is the
- * CONVERSATION_START greeting). The two agree almost never: every turn showed
- * the costs and model of a different turn, and a live turn with no `stepIndex`
- * picked the first matching entry from ANY step.
+ * turns seen in THIS session — against the audit's `stepIndex`, the
+ * conversation's own step number, so every turn showed another turn's costs
+ * and model.
  *
  * The backend measures each task's duration once and sends the same number to
  * the stream (`task_complete.durationMs`) and to the audit ledger
  * (`AuditEntry.durationMs`), so the multiset of (taskType, durationMs) pairs
- * fingerprints a turn. The step whose entries account for every completed task
- * of the live turn is the one; ties go to the newest step. No match — the
- * ledger has not caught up yet, say — returns undefined rather than a guess.
+ * fingerprints a turn — but only when it is distinctive. A rule-based turn is
+ * typically parser|0, behavior|0, output|1, templating|0, identical on every
+ * step. So:
+ * - a step matches only if its entries are EXACTLY the turn's completed tasks
+ *   (same count, same pairs), not merely a superset;
+ * - more than one unclaimed candidate is "ambiguous" — no audit data is shown;
+ * - live turns are chronological and so are steps: each step is claimed at
+ *   most once, and a later turn only considers steps after the last one
+ *   claimed;
+ * - no candidate yet is "pending" (the ledger flushes every few seconds), and
+ *   the caller re-reads until it resolves.
+ * In-flight turns are never resolved: a partial fingerprint fits almost any
+ * earlier step.
  */
-export function resolveAuditStepIndex(
-  events: PipelineEvent[],
-  auditEntries: AuditEntry[]
-): number | undefined {
-  const live = new Map<string, number>();
-  for (const e of events) {
-    if (e.type !== "task_complete" || e.durationMs == null) continue;
-    const k = `${e.taskType}|${e.durationMs}`;
-    live.set(k, (live.get(k) ?? 0) + 1);
+export function resolveLiveTurnSteps(
+  turns: PipelineTurn[],
+  auditEntries: AuditEntry[] | undefined
+): AuditStepMatch[] {
+  const bySteps = new Map<number, Array<[string, number]>>();
+  for (const a of auditEntries ?? []) {
+    if (a.stepIndex == null) continue;
+    const list = bySteps.get(a.stepIndex) ?? [];
+    list.push([a.taskType, a.durationMs]);
+    bySteps.set(a.stepIndex, list);
   }
-  if (live.size === 0) return undefined;
+  const stepPrints = [...bySteps.entries()]
+    .map(([step, pairs]) => ({ step, print: fingerprint(pairs) }))
+    .sort((x, y) => x.step - y.step);
 
-  const bySteps = new Map<number, Map<string, number>>();
-  for (const a of auditEntries) {
-    const step = a.stepIndex;
-    if (step == null) continue;
-    const m = bySteps.get(step) ?? new Map<string, number>();
-    const k = `${a.taskType}|${a.durationMs}`;
-    m.set(k, (m.get(k) ?? 0) + 1);
-    bySteps.set(step, m);
-  }
-
-  let best: number | undefined;
-  for (const [step, counts] of bySteps) {
-    let covers = true;
-    for (const [k, n] of live) {
-      if ((counts.get(k) ?? 0) < n) {
-        covers = false;
-        break;
-      }
-    }
-    if (covers && (best === undefined || step > best)) best = step;
-  }
-  return best;
+  let floor = -1;
+  return turns.map((turn) => {
+    const pairs: Array<[string, number]> = turn.events
+      .filter((e) => e.type === "task_complete" && e.durationMs != null)
+      .map((e) => [e.taskType, e.durationMs!]);
+    if (pairs.length === 0) return { status: "ambiguous" as const };
+    const print = fingerprint(pairs);
+    const candidates = stepPrints.filter(
+      (s) => s.step > floor && s.print === print
+    );
+    if (candidates.length === 0) return { status: "pending" as const };
+    if (candidates.length > 1) return { status: "ambiguous" as const };
+    floor = candidates[0]!.step;
+    return { status: "matched" as const, stepIndex: floor };
+  });
 }
