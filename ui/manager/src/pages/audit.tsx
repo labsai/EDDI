@@ -1,5 +1,5 @@
 import { formatUsd } from "@/lib/utils";
-import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { createContext, useContext, useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
 import {
@@ -26,9 +26,17 @@ import {
   ChevronsUpDown,
   Fingerprint,
   ShieldAlert,
+  ShieldX,
   HandMetal,
 } from "lucide-react";
 import { useAuditTrail, useAuditTrailByAgent } from "@/hooks/use-audit";
+import { useAuditVerification } from "@/hooks/use-audit-verification";
+import {
+  auditVerdict,
+  unknownKeyCount,
+  type AuditEntryStatus,
+  type AuditVerificationReport,
+} from "@/lib/api/audit-verify";
 import { ErrorState } from "@/components/shared/error-state";
 import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
 import type { AuditEntry } from "@/lib/api/audit";
@@ -51,6 +59,13 @@ const DEFAULT_STYLE = { bg: "bg-gray-500/15", text: "text-gray-400", icon: Hash 
 const PAGE_SIZE = 100;
 
 type SearchMode = "agent" | "conversation";
+
+/**
+ * Entries the last verification did not prove, by entry id. Read by the task
+ * cards so a failed entry is marked where it is shown; a context rather than a
+ * prop because the cards sit two component levels below the page.
+ */
+const AuditProblemsContext = createContext<ReadonlyMap<string, AuditEntryStatus>>(new Map());
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -196,6 +211,7 @@ function HitlDecisionSummary({
 }
 
 function TaskCard({ entry, t }: { entry: AuditEntry; t: ReturnType<typeof useTranslation>["t"] }) {
+  const problem = useContext(AuditProblemsContext).get(entry.id);
   const style = getTaskStyle(entry.taskType);
   const Icon = style.icon;
   const costStr = formatCost(entry.cost);
@@ -242,10 +258,31 @@ function TaskCard({ entry, t }: { entry: AuditEntry; t: ReturnType<typeof useTra
           </span>
         )}
 
-        {/* HMAC signing indicator — only shown when signed (absence = unsigned) */}
+        {/* Verification outcome for an entry the backend could not prove. */}
+        {problem === "INVALID" && (
+          <span
+            className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 text-[11px] font-medium text-destructive"
+            data-testid="entry-verify-invalid"
+          >
+            <ShieldX className="h-3 w-3" />
+            {t("audit.verify.entryInvalid", "Signature does not match")}
+          </span>
+        )}
+        {problem !== undefined && problem !== "INVALID" && (
+          <span
+            className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400"
+            data-testid="entry-verify-unproven"
+          >
+            <ShieldAlert className="h-3 w-3" />
+            {t("audit.verify.entryUnproven", "Not verified")}
+          </span>
+        )}
+
+        {/* HMAC present. Neutral on purpose: carrying a signature is not the
+            same as the signature being valid — that is the banner's verdict. */}
         {entry.hmac && (
           <span
-            className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400 cursor-help"
+            className="inline-flex items-center gap-1 rounded-full bg-foreground/5 px-2 py-0.5 text-[11px] font-medium text-foreground/60 cursor-help"
             title={`HMAC: ${entry.hmac.slice(0, 16)}…${entry.hmac.slice(-8)}${entry.agentSignature ? `\nAgent Signature: ${entry.agentSignature.slice(0, 16)}…` : ""}`}
             data-testid="hmac-badge"
           >
@@ -431,7 +468,7 @@ function ConversationGroup({
             <span
               className={`hidden sm:inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${
                 signedCount === entries.length
-                  ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                  ? "bg-foreground/5 text-foreground/60"
                   : "bg-amber-500/10 text-amber-600 dark:text-amber-400"
               }`}
             >
@@ -635,6 +672,19 @@ export function AuditPage() {
 
   // Auto-refresh
   const [autoRefresh, setAutoRefresh] = useState(false);
+
+  // Integrity: asked of the backend, never inferred from `hmac` being present.
+  const verification = useAuditVerification({
+    mode,
+    id: mode === "conversation" ? searchValue : activeAgentId,
+    agentVersion: activeAgentVersion,
+    refetchInterval: autoRefresh ? 10_000 : false,
+  });
+  const problemsById = useMemo(() => {
+    const map = new Map<string, AuditEntryStatus>();
+    for (const problem of verification.data?.problems ?? []) map.set(problem.entryId, problem.status);
+    return map;
+  }, [verification.data]);
   const activeQueryFn = mode === "conversation" ? convQuery.refetch : agentQuery.refetch;
   const autoRefreshRef = useRef(autoRefresh);
   autoRefreshRef.current = autoRefresh;
@@ -858,74 +908,16 @@ export function AuditPage() {
         </div>
       )}
 
-      {/* Integrity trust banner */}
+      {/* Integrity banner — the backend's verification, not a count of hmac fields */}
       {hasSearched && entries.length > 0 && (
-        <div
-          className={`flex items-center gap-3 rounded-xl border px-4 py-3 ${
-            stats.signed === stats.count
-              ? "border-emerald-500/30 bg-emerald-500/5"
-              : stats.signed > 0
-                ? "border-amber-500/30 bg-amber-500/5"
-                : "border-border bg-card"
-          }`}
-          data-testid="integrity-banner"
-        >
-          {stats.signed === stats.count ? (
-            <>
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-500/15 shrink-0">
-                <Fingerprint className="h-4 w-4 text-emerald-500" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
-                  {t("audit.integrityVerified", "All entries cryptographically signed")}
-                </p>
-                <p className="text-xs text-emerald-600/70 dark:text-emerald-400/60">
-                  {t("audit.integrityVerifiedDesc", "{{count}} of {{total}} entries have HMAC-SHA256 signatures", { count: stats.signed, total: stats.count })}
-                </p>
-              </div>
-              <div className="shrink-0 flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1">
-                <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
-                <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-                  {t("audit.integrityPass", "SIGNED")}
-                </span>
-              </div>
-            </>
-          ) : stats.signed > 0 ? (
-            <>
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-amber-500/15 shrink-0">
-                <ShieldAlert className="h-4 w-4 text-amber-500" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
-                  {t("audit.integrityPartial", "Partially signed audit trail")}
-                </p>
-                <p className="text-xs text-amber-600/70 dark:text-amber-400/60">
-                  {t("audit.integrityPartialDesc", "{{count}} of {{total}} entries have HMAC signatures", { count: stats.signed, total: stats.count })}
-                </p>
-              </div>
-              <div className="shrink-0 flex items-center gap-1.5 rounded-full bg-amber-500/10 px-2.5 py-1">
-                <Fingerprint className="h-3.5 w-3.5 text-amber-500" />
-                <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">
-                  {stats.signed}/{stats.count}
-                </span>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-foreground/5 shrink-0">
-                <Shield className="h-4 w-4 text-muted-foreground" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-foreground/70">
-                  {t("audit.integrityNone", "Unsigned audit entries")}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {t("audit.integrityNoneDesc", "Configure a vault master key to enable automatic HMAC-SHA256 signing on all future audit entries.")}
-                </p>
-              </div>
-            </>
-          )}
-        </div>
+        <IntegrityBanner
+          report={verification.data}
+          isLoading={verification.isLoading}
+          isError={verification.isError}
+          onRetry={() => void verification.refetch()}
+          signed={stats.signed}
+          total={stats.count}
+        />
       )}
 
       {/* Loading state — only for the first page; later pages keep prior rows. */}
@@ -976,6 +968,7 @@ export function AuditPage() {
 
       {/* Timeline view */}
       {hasSearched && entries.length > 0 && (
+        <AuditProblemsContext.Provider value={problemsById}>
         <div className="space-y-4" data-testid="audit-timeline">
           {mode === "agent" && conversationGroups.size > 0 ? (
             /* Agent mode with multiple conversations — group by conversation */
@@ -1015,7 +1008,197 @@ export function AuditPage() {
             </div>
           )}
         </div>
+        </AuditProblemsContext.Provider>
       )}
+    </div>
+  );
+}
+
+/**
+ * The integrity verdict for what the screen shows.
+ *
+ * Green only for a report the backend produced and `auditVerdict` calls
+ * verified. Loading, a failed request, a deployment without a signing key and
+ * anything not fully proven are all explicitly NOT green: on a compliance
+ * screen "we could not check" must never read as "checked and fine".
+ */
+function IntegrityBanner({
+  report,
+  isLoading,
+  isError,
+  onRetry,
+  signed,
+  total,
+}: {
+  report: AuditVerificationReport | undefined;
+  isLoading: boolean;
+  isError: boolean;
+  onRetry: () => void;
+  signed: number;
+  total: number;
+}) {
+  const { t } = useTranslation();
+  const signatureLine = t("audit.verify.signatureCount", {
+    count: signed,
+    total,
+    defaultValue: "{{count}} of {{total}} loaded entries carry a signature.",
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3" data-testid="integrity-banner" data-verdict="loading">
+        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+        <p className="text-sm text-muted-foreground">{t("audit.verify.loading", "Verifying signatures…")}</p>
+      </div>
+    );
+  }
+
+  if (isError || !report) {
+    return (
+      <div className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3" data-testid="integrity-banner" data-verdict="error">
+        <Shield className="h-4 w-4 shrink-0 text-muted-foreground" />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium text-foreground/70">
+            {t("audit.verify.errorTitle", "Integrity not verified")}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {t("audit.verify.errorDesc", "The verification request failed, so nothing here has been checked.")} {signatureLine}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onRetry}
+          className="shrink-0 text-xs font-medium text-primary hover:underline"
+          data-testid="integrity-retry"
+        >
+          {t("common.retry", "Retry")}
+        </button>
+      </div>
+    );
+  }
+
+  const verdict = auditVerdict(report);
+  const checked = t("audit.verify.checked", {
+    count: report.entriesChecked,
+    defaultValue: "Checked the {{count}} most recent entries.",
+  });
+
+  if (verdict === "verified") {
+    return (
+      <div className="flex items-center gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-4 py-3" data-testid="integrity-banner" data-verdict="verified">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-500/15">
+          <Fingerprint className="h-4 w-4 text-emerald-500" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
+            {t("audit.verify.verifiedTitle", "Signatures verified")}
+          </p>
+          <p className="text-xs text-emerald-600/70 dark:text-emerald-400/60">
+            {checked}{" "}
+            {report.chainStatus === "INTACT"
+              ? t("audit.verify.chainIntact", "No entry is missing from the sequence.")
+              : t("audit.verify.chainNotApplicable", "Across conversations only signatures are checked, not the sequence.")}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1">
+          <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
+          <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+            {t("audit.verify.verifiedBadge", "VERIFIED")}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  if (verdict === "tampered") {
+    const disproven = Math.max(
+      0,
+      report.invalid - Math.min(report.recoverySkipped, report.invalid) - unknownKeyCount(report),
+    );
+    return (
+      <div className="flex items-start gap-3 rounded-xl border border-destructive/40 bg-destructive/5 px-4 py-3" data-testid="integrity-banner" data-verdict="tampered" role="alert">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-destructive/15">
+          <ShieldX className="h-4 w-4 text-destructive" />
+        </div>
+        <div className="min-w-0 flex-1 space-y-0.5">
+          <p className="text-sm font-medium text-destructive">
+            {t("audit.verify.tamperedTitle", "Integrity check failed")}
+          </p>
+          {disproven > 0 && (
+            <p className="text-xs text-foreground">
+              {t("audit.verify.tamperedInvalid", {
+                count: disproven,
+                defaultValue: "{{count}} entry signature(s) do not match their content — the entries were changed after they were written.",
+              })}
+            </p>
+          )}
+          {report.chainStatus === "BROKEN" && (
+            <p className="text-xs text-foreground">
+              {t("audit.verify.tamperedChain", {
+                sequences: report.missingSequences.slice(0, 10).join(", "),
+                defaultValue: "Entries are missing from the sequence ({{sequences}}) — the record has been shortened.",
+              })}
+            </p>
+          )}
+          <p className="text-xs text-muted-foreground">{checked}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (verdict === "signing-disabled") {
+    return (
+      <div className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3" data-testid="integrity-banner" data-verdict="signing-disabled">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-foreground/5">
+          <Shield className="h-4 w-4 text-muted-foreground" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium text-foreground/70">
+            {t("audit.verify.disabledTitle", "Signatures cannot be verified")}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {t("audit.integrityNoneDesc", "Configure a vault master key to enable automatic HMAC-SHA256 signing on all future audit entries.")}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // unverified — nothing disproven, but not everything proven either
+  const reasons: string[] = [];
+  if (report.unsigned > 0) {
+    reasons.push(t("audit.verify.reasonUnsigned", { count: report.unsigned, defaultValue: "{{count}} unsigned entry(ies)" }));
+  }
+  const unknown = unknownKeyCount(report);
+  if (unknown > 0) {
+    reasons.push(t("audit.verify.reasonUnknownKey", { count: unknown, defaultValue: "{{count}} signed with a key this deployment no longer holds" }));
+  }
+  if (report.recoverySkipped > 0) {
+    reasons.push(t("audit.verify.reasonSkipped", { count: report.recoverySkipped, defaultValue: "{{count}} older entry(ies) not checked" }));
+  }
+  if (report.chainStatus === "INCOMPLETE" || report.chainStatus === "UNAVAILABLE") {
+    reasons.push(t("audit.verify.reasonChain", "the sequence could not be fully established"));
+  }
+  if ((report.duplicateSequences?.length ?? 0) > 0) {
+    reasons.push(t("audit.verify.reasonDuplicates", "duplicate sequence numbers"));
+  }
+  return (
+    <div className="flex items-start gap-3 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3" data-testid="integrity-banner" data-verdict="unverified">
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber-500/15">
+        <ShieldAlert className="h-4 w-4 text-amber-500" />
+      </div>
+      <div className="min-w-0 flex-1 space-y-0.5">
+        <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
+          {t("audit.verify.unverifiedTitle", "Not fully verified")}
+        </p>
+        <p className="text-xs text-amber-600/80 dark:text-amber-400/70">
+          {t("audit.verify.unverifiedDesc", {
+            reasons: reasons.join("; "),
+            defaultValue: "No signature was disproven, but not everything could be checked: {{reasons}}.",
+          })}
+        </p>
+        <p className="text-xs text-muted-foreground">{checked}</p>
+      </div>
     </div>
   );
 }
