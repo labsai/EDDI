@@ -235,8 +235,14 @@ public class ConversationMemoryUtilities {
                 var newConversationOutput = newConversationOutputs.get(index);
 
                 for (var key : conversationOutput.keySet()) {
-                    if (key.startsWith(INPUT_INITIAL.key()) || key.startsWith(ACTIONS.key()) || key.startsWith(OUTPUT_PREFIX)
-                            || key.startsWith(QUICK_REPLIES_PREFIX)) {
+                    // "input" is the DISPLAY copy of the user's message: Conversation
+                    // writes "<secret input>" there for a turn the client flagged
+                    // secretInput, while input:initial (in the steps) stays raw. A client
+                    // rebuilding a transcript needs it to mask that turn after a reload,
+                    // undo or rerun — without it the only copy on the wire is the
+                    // plaintext.
+                    if (key.startsWith(INPUT_INITIAL.key()) || key.equals(INPUT.key()) || key.startsWith(ACTIONS.key())
+                            || key.startsWith(OUTPUT_PREFIX) || key.startsWith(QUICK_REPLIES_PREFIX)) {
                         newConversationOutput.put(key, conversationOutput.get(key));
                     }
                 }
