@@ -260,6 +260,7 @@
     "deployAndChat": "部署并聊天",
     "openExternalChat": "在新标签页中打开",
     "liveIn": "在 {{environment}} 中运行",
+    "liveInVersion": "在 {{environment}} 中以版本 {{version}} 运行",
     "chatIn": "在 {{environment}} 中聊天",
     "openExternalChatIn": "在新标签页中打开 {{environment}} 聊天",
     "deployToProduction": "部署到生产环境",
@@ -2951,7 +2952,7 @@
     "value": "值",
     "deleteAll": "全部删除",
     "deleteAllTitle": "删除所有属性",
-    "deleteAllDesc": "将永久删除该用户的所有属性。",
+    "deleteAllDesc": "这将永久删除该用户的所有全局属性：包括代理保存的每一条全局用户记忆条目，而不仅是此处列出的行。",
     "deleted": "属性已删除",
     "noResults": "未找到属性",
     "showingCount": "{{count}} 个属性"

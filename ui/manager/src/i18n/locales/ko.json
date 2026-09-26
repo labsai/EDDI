@@ -260,6 +260,7 @@
     "deployAndChat": "배포 후 채팅",
     "openExternalChat": "새 탭에서 열기",
     "liveIn": "{{environment}}에서 실행 중",
+    "liveInVersion": "{{environment}}에서 버전 {{version}} 실행 중",
     "chatIn": "{{environment}}에서 채팅",
     "openExternalChatIn": "{{environment}} 채팅을 새 탭에서 열기",
     "deployToProduction": "프로덕션에 배포",
@@ -2951,7 +2952,7 @@
     "value": "값",
     "deleteAll": "모두 삭제",
     "deleteAllTitle": "모든 속성 삭제",
-    "deleteAllDesc": "이 사용자의 모든 속성이 영구 삭제됩니다.",
+    "deleteAllDesc": "이 사용자의 모든 전역 속성이 영구 삭제됩니다. 여기에 표시된 행뿐 아니라 에이전트가 저장한 항목을 포함한 모든 전역 사용자 메모리 항목이 대상입니다.",
     "deleted": "속성이 삭제되었습니다",
     "noResults": "속성을 찾을 수 없습니다",
     "showingCount": "{{count}}개 속성"

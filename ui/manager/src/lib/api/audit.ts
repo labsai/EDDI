@@ -17,12 +17,70 @@ export interface AuditEntry {
   input: Record<string, unknown> | null;
   output: Record<string, unknown> | null;
   llmDetail: Record<string, unknown> | null;
-  toolCalls: Array<Record<string, unknown>> | null;
+  /**
+   * The raw tool trace. On the wire this is a MAP, `{ calls: [...] }`
+   * (`LlmTask.accumulateToolCalls` → `AuditEntry.toolCalls: Map<String,Object>`),
+   * whose `calls` are trace events — `{type:"tool_call", tool, arguments}`,
+   * `{type:"tool_result", tool, result}`, plus budget/cap markers. It was typed as
+   * an array of `{name, arguments}`, so no tool call ever rendered. Read it
+   * through {@link auditToolCalls}, never directly.
+   */
+  toolCalls: Record<string, unknown> | Array<Record<string, unknown>> | null;
   actions: string[] | null;
   cost: number;
   timestamp: string; // ISO instant
   hmac: string | null;
   agentSignature: string | null;
+}
+
+/** One tool invocation recorded in an audit entry, with its result when the trace has one. */
+export interface AuditToolCall {
+  tool: string;
+  /** The model's arguments — a JSON string as recorded, already secret-redacted. */
+  arguments: unknown;
+  result?: unknown;
+  /** Which LLM sub-task issued the call, when the entry merges several. */
+  llmTaskId?: string;
+}
+
+/**
+ * The tool calls of an audit entry, in order, each paired with its result.
+ *
+ * Accepts the backend's `{ calls: [...] }` map and, defensively, a bare array.
+ * Events without a type are treated as calls (a hand-written or older entry);
+ * budget, cap and HITL markers are skipped — they are not invocations. A
+ * `tool_result` attaches to the most recent unanswered call of the same tool,
+ * the same pairing `RestToolHistory` uses.
+ */
+export function auditToolCalls(entry: Pick<AuditEntry, "toolCalls"> | null | undefined): AuditToolCall[] {
+  const raw = entry?.toolCalls;
+  const events: unknown[] = Array.isArray(raw)
+    ? raw
+    : raw && typeof raw === "object" && Array.isArray((raw as { calls?: unknown }).calls)
+      ? (raw as { calls: unknown[] }).calls
+      : [];
+  const calls: AuditToolCall[] = [];
+  for (const event of events) {
+    if (!event || typeof event !== "object") continue;
+    const e = event as Record<string, unknown>;
+    const tool = typeof e.tool === "string" ? e.tool : typeof e.name === "string" ? e.name : null;
+    const type = typeof e.type === "string" ? e.type : undefined;
+    if (type === "tool_result") {
+      for (let i = calls.length - 1; i >= 0; i--) {
+        const call = calls[i]!;
+        if (call.tool === tool && call.result === undefined) {
+          call.result = e.result;
+          break;
+        }
+      }
+      continue;
+    }
+    if ((type !== undefined && type !== "tool_call") || tool === null) continue;
+    const call: AuditToolCall = { tool, arguments: e.arguments };
+    if (typeof e.llmTaskId === "string") call.llmTaskId = e.llmTaskId;
+    calls.push(call);
+  }
+  return calls;
 }
 
 /* ─── API Functions ─── */

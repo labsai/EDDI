@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useDebugStore, buildCascadeSteps, type PipelineTurn, type PipelineEvent } from "@/hooks/use-debug-events";
 import { useQuery } from "@tanstack/react-query";
-import { getAuditTrail, type AuditEntry } from "@/lib/api/audit";
+import { auditToolCalls, getAuditTrail, type AuditEntry } from "@/lib/api/audit";
 import { cn, formatDuration, formatUsd } from "@/lib/utils";
 import { CascadeStepTrace } from "@/components/cascade-step-trace";
 import { Clock, Zap, ChevronDown, AlertTriangle, ArrowUp, ArrowDown } from "lucide-react";
@@ -231,7 +231,8 @@ function TaskBar({ task, maxDuration }: { task: TaskBarData; maxDuration: number
   const widthPercent = Math.max((task.durationMs / maxDuration) * 100, 8);
   
   const audit = task.auditEntry;
-  const isLLM = task.taskType.includes("langchain") || task.taskType.includes("llm");
+  const toolCalls = auditToolCalls(audit);
+  const isLLM =task.taskType.includes("langchain") || task.taskType.includes("llm");
   
   let inputTk = 0, outputTk = 0;
   if (audit?.llmDetail?.tokenUsage) {
@@ -321,19 +322,26 @@ function TaskBar({ task, maxDuration }: { task: TaskBarData; maxDuration: number
               </div>
             )}
             
-            {audit?.toolCalls && audit.toolCalls.length > 0 && (
+            {toolCalls.length > 0 && (
               <div>
                 <span className="font-medium">{t("debugDrawer.toolCalls", "Tools")}:</span>
                 <div className="space-y-1 mt-1">
-                  {audit.toolCalls.map((tc, idx) => (
-                    <div key={idx} className="bg-muted/30 p-1 rounded font-mono text-[9px]">
-                      <span className="text-primary font-semibold">{String(tc.name || "tool")}</span>
-                      <span className="text-muted-foreground ms-1">
-                        {JSON.stringify(tc.arguments || {}).substring(0, 80)}
-                        {JSON.stringify(tc.arguments || {}).length > 80 ? "..." : ""}
-                      </span>
-                    </div>
-                  ))}
+                  {toolCalls.map((tc, idx) => {
+                    // Recorded arguments are already a JSON string; stringifying
+                    // them again would wrap them in quotes and escape every one.
+                    const args = typeof tc.arguments === "string"
+                      ? tc.arguments
+                      : JSON.stringify(tc.arguments ?? {});
+                    return (
+                      <div key={idx} className="bg-muted/30 p-1 rounded font-mono text-[9px]" data-testid="trace-tool-call">
+                        <span className="text-primary font-semibold">{tc.tool}</span>
+                        <span className="text-muted-foreground ms-1">
+                          {args.substring(0, 80)}
+                          {args.length > 80 ? "..." : ""}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -372,7 +380,7 @@ function TaskBar({ task, maxDuration }: { task: TaskBarData; maxDuration: number
               </div>
             )}
             
-            {(!audit?.input && !audit?.output && !audit?.toolCalls && !audit?.llmDetail && !task.actions?.length && task.confidence == null) && (
+            {(!audit?.input && !audit?.output && toolCalls.length === 0 && !audit?.llmDetail && !task.actions?.length && task.confidence == null) && (
               <p>
                 <span className="font-medium">{t("debugDrawer.duration", "Duration")}:</span>{" "}
                 {formatDuration(task.durationMs)}

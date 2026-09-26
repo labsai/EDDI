@@ -550,45 +550,6 @@ const RESOURCE_SCHEMAS: Record<string, object> = {
   },
 };
 
-// ─── Audit mock data generator ─────────────────────────────────────
-const TASK_TYPES = ["langchain", "behavior", "output", "httpcalls", "propertysetter", "expressions"];
-function generateMockAuditEntries(conversationId: string, count: number) {
-  const now = Date.now();
-  return Array.from({ length: count }, (_, i) => ({
-    id: `audit-${conversationId}-${i}`,
-    conversationId,
-    agentId: "agent1",
-    agentVersion: 1,
-    userId: "manager-user",
-    environment: i % 3 === 0 ? "production" : "test",
-    stepIndex: Math.floor(i / 2),
-    taskId: `task-${i}`,
-    taskType: TASK_TYPES[i % TASK_TYPES.length]!,
-    taskIndex: i % 2,
-    durationMs: 50 + Math.floor(Math.random() * 500),
-    input: i === 0 ? { "input:initial": "Tell me about the weather" } : null,
-    output: i % 2 === 0 ? { "output:text": "Here's the latest weather information..." } : null,
-    llmDetail: TASK_TYPES[i % TASK_TYPES.length] === "langchain" ? {
-      model: "gpt-5.4-mini",
-      modelName: "gpt-5.4-mini",
-      provider: "openai",
-      tokens: { input: 128, output: 64 },
-      tokenUsage: { inputTokens: 128, outputTokens: 64 },
-      compiledPrompt: JSON.stringify([
-        { role: "system", content: "You are a helpful weather assistant." },
-        { role: "user", content: "Tell me about the weather in Vienna" },
-      ]),
-      modelResponse: "The weather in Vienna is currently sunny with a temperature of 22°C and humidity of 45%.",
-    } : null,
-    toolCalls: i === 3 ? [{ name: "fetch_weather", args: { city: "Vienna" }, result: "sunny 22°C" }] : null,
-    actions: ["greet", "respond"].slice(0, (i % 2) + 1),
-    cost: TASK_TYPES[i % TASK_TYPES.length] === "langchain" ? 0.003 + Math.random() * 0.01 : 0,
-    timestamp: new Date(now - (count - i) * 60000).toISOString(),
-    hmac: i % 4 === 0 ? "a1b2c3d4e5f6a1b2c3d4e5f6789012345678901234567890abcdef" : null,
-    agentSignature: i % 4 === 0 ? "ed25519:sig_" + conversationId + "_" + i : null,
-  }));
-}
-
 /**
  * A finished DEBATE, reproducing the two things a real one does that the tidy
  * `gconv1` fixture does not — both of which broke the board in a demo:
@@ -859,6 +820,18 @@ export const handlers = [
   // dictionaries). Echoes the id so a test can tell which one it asked for.
   http.get("*/descriptorstore/descriptors/:id", ({ params, request }) => {
     const version = Number(new URL(request.url).searchParams.get("version") ?? 1);
+    // A known agent or workflow answers with its own fixture at the asked
+    // version — this is how version lists are read now (one descriptor read
+    // per version), so detail pages keep showing the fixture's real name.
+    const known = [...AGENTS_MOCK, ...WORKFLOWS_MOCK].find((d) =>
+      d.resource.includes(`/${String(params.id)}?`),
+    );
+    if (known) {
+      return HttpResponse.json({
+        ...known,
+        resource: known.resource.replace(/version=\d+/, `version=${version}`),
+      });
+    }
     return HttpResponse.json({
       resource: `eddi://ai.labs.mock/descriptorstore/descriptors/${params.id}?version=${version}`,
       name: `Mock descriptor ${params.id}`,
@@ -977,7 +950,10 @@ export const handlers = [
       (a, b) => b.lastModifiedOn - a.lastModifiedOn,
     );
 
-    return HttpResponse.json(ordered.slice(index, index + limit));
+    // `index` is a PAGE index: the backend skips `index * limit` rows
+    // (DescriptorStore.readDescriptors). Slicing at `index` as a row offset let
+    // the app send `allPages.length * 50` as the page and still pass.
+    return HttpResponse.json(ordered.slice(index * limit, index * limit + limit));
   }),
 
   // Get agent
@@ -1097,6 +1073,23 @@ export const handlers = [
     return HttpResponse.json({ status: "READY" });
   }),
 
+  // Every deployed agent in an environment, each at its highest deployed
+  // version (AgentFactory.getAllLatestAgents) — consistent with the READY the
+  // per-agent handler above answers for every agent.
+  http.get("*/administration/:env/deploymentstatus", ({ params }) =>
+    HttpResponse.json(
+      AGENTS_MOCK.map((a) => {
+        const match = /agents\/([^?]+)\?version=(\d+)/.exec(a.resource);
+        return {
+          environment: params.env,
+          agentId: match?.[1] ?? "",
+          agentVersion: Number(match?.[2] ?? 1),
+          status: "READY",
+        };
+      }),
+    ),
+  ),
+
   // Deploy agent
   http.post("*/administration/:env/deploy/:agentId", () => {
     return new HttpResponse(null, { status: 200 });
@@ -1170,8 +1163,13 @@ export const handlers = [
   }),
 
   // Workflow descriptors
-  http.get("*/workflowstore/workflows/descriptors", () => {
-    return HttpResponse.json(WORKFLOWS_MOCK);
+  // `limit`/`index` honoured with the backend's page-index semantics (skip
+  // `index * limit`), so a hook that sends a row offset gets an empty page.
+  http.get("*/workflowstore/workflows/descriptors", ({ request }) => {
+    const url = new URL(request.url);
+    const limit = Number(url.searchParams.get("limit") ?? "20");
+    const index = Number(url.searchParams.get("index") ?? "0");
+    return HttpResponse.json(WORKFLOWS_MOCK.slice(index * limit, index * limit + limit));
   }),
 
   // Get package
@@ -1249,7 +1247,13 @@ export const handlers = [
     if (agentId) result = result.filter((c) => c.agentId === agentId);
     if (conversationId) result = result.filter((c) => c.resource.includes(conversationId));
     if (conversationState) result = result.filter((c) => c.conversationState === conversationState);
-    return HttpResponse.json(result);
+    // RestConversationStore.readConversationDescriptors defaults `limit` to 20
+    // and CLAMPS it to 100 — a caller asking for 1000 gets 100, and a mock that
+    // returned everything hid that the dashboard reported the clamp as a total.
+    const rawLimit = Number(url.searchParams.get("limit") ?? "20");
+    const limit = Math.min(rawLimit < 1 ? 20 : rawLimit, 100);
+    const index = Math.max(0, Number(url.searchParams.get("index") ?? "0"));
+    return HttpResponse.json(result.slice(index * limit, index * limit + limit));
   }),
 
   // Simple conversation log
@@ -1498,77 +1502,12 @@ export const handlers = [
     });
   }),
 
-  // --- Backup / Import / Export ---
-  http.post("*/backup/export/:agentId", () => {
-    return new HttpResponse(null, {
-      status: 200,
-      headers: { Location: "/backup/export/test-agent-1.zip" },
-    });
-  }),
-
-  http.get("*/backup/export/:filename", () => {
-    return new HttpResponse(new Blob(["fake-zip"]), {
-      status: 200,
-      headers: { "Content-Type": "application/zip" },
-    });
-  }),
-
-  http.post("*/backup/import/preview", () => {
-    return HttpResponse.json({
-      agentOriginId: "origin-agent-1",
-      agentName: "Weather Agent",
-      resources: [
-        {
-          originId: "origin-agent-1",
-          resourceType: "agent",
-          name: "Weather Agent",
-          action: "UPDATE",
-          localId: "agent1",
-          localVersion: 1,
-        },
-        {
-          originId: "origin-wf-1",
-          resourceType: "package",
-          name: "Main Workflow",
-          action: "UPDATE",
-          localId: "wf1",
-          localVersion: 1,
-        },
-        {
-          originId: "origin-beh-1",
-          resourceType: "behavior",
-          name: "Greeting Rules",
-          action: "CREATE",
-          localId: null,
-          localVersion: null,
-        },
-        {
-          originId: "origin-dict-1",
-          resourceType: "dictionary",
-          name: "English Dictionary",
-          action: "UPDATE",
-          localId: "dict1",
-          localVersion: 1,
-        },
-      ],
-    });
-  }),
-
-  // NOTE: This generic handler must come AFTER the /preview handler
-  http.post("*/backup/import", ({ request }) => {
-    const url = new URL(request.url);
-    const strategy = url.searchParams.get("strategy");
-    if (strategy === "merge") {
-      return new HttpResponse(null, {
-        status: 200,
-        headers: { Location: "/agentstore/agents/agent1?version=2" },
-      });
-    }
-    return new HttpResponse(null, {
-      status: 200,
-      headers: { Location: "/agentstore/agents/imported-agent?version=1" },
-    });
-  }),
+  // Undo / redo — RestAgentEngine.undo/redo answer an EMPTY 200 when the step
+  // moved (409 when there was nothing to move). No snapshot body: tests used to
+  // mock one, which is how the app came to read `.conversationSteps` off
+  // `undefined` against the real backend.
+  http.post("*/agents/:conversationId/undo", () => new HttpResponse(null, { status: 200 })),
+  http.post("*/agents/:conversationId/redo", () => new HttpResponse(null, { status: 200 })),
 
   // --- Extension Store ---
   http.get("*/extensionstore/extensions", () => {
@@ -1650,7 +1589,8 @@ export const handlers = [
     }
 
     const all = ["res1", "res2", "res3"].map((id, i) => descriptor(id, i + 1));
-    return HttpResponse.json(all.slice(index, index + limit));
+    // Page index, not row offset — see the agent descriptors handler.
+    return HttpResponse.json(all.slice(index * limit, index * limit + limit));
   }),
 
   // Specific handlers for behavior and httpcalls with realistic mock data
@@ -3182,71 +3122,10 @@ function createResourceHandlers(
   plural: string,
   label: string
 ) {
-  // Per-type descriptors with meaningful names
-  const descriptorsByType: Record<string, { id: string; name: string; desc: string }[]> = {
-    rules: [
-      { id: "beh1", name: "Intent Classification Rules", desc: "Routes user input to intents based on expression patterns" },
-      { id: "beh2", name: "Escalation Rules", desc: "Detects frustration signals and triggers live-agent handoff" },
-      { id: "beh3", name: "Fallback Handler", desc: "Catches unrecognized input and offers guided alternatives" },
-    ],
-    apicalls: [
-      { id: "hc1", name: "Weather API Integration", desc: "Fetches current weather from OpenWeatherMap for any city" },
-      { id: "hc2", name: "Payment Gateway", desc: "Stripe payment intent creation and status check" },
-      { id: "hc3", name: "CRM Lookup", desc: "Queries Salesforce for customer account details by email" },
-      { id: "hc4", name: "Email Notification Service", desc: "Sends transactional emails via SendGrid API" },
-    ],
-    output: [
-      { id: "out1", name: "English Responses", desc: "Standard conversational responses in English" },
-      { id: "out2", name: "German Responses", desc: "Localized German output set for DACH market" },
-      { id: "out3", name: "Quick Reply Templates", desc: "Pre-built quick reply options for common intents" },
-    ],
-    dictionary: [
-      { id: "dict1", name: "English Intent Dictionary", desc: "Core NLP expressions for greetings, farewells, and common queries" },
-      { id: "dict2", name: "Medical Terminology", desc: "Symptom and condition phrases for healthcare triage scenarios" },
-      { id: "dict3", name: "Financial Glossary", desc: "Banking and investment terms for financial advisor agents" },
-    ],
-    llm: [
-      { id: "llm1", name: "GPT-5.4 Support Config", desc: "OpenAI GPT-5.4 with tool calling enabled for customer support" },
-      { id: "llm2", name: "Claude Analysis Config", desc: "Anthropic Claude for document analysis and summarization" },
-      { id: "llm3", name: "Gemini Creative Writing", desc: "Google Gemini 2.5 Flash for creative content generation" },
-    ],
-    propertysetter: [
-      { id: "ps1", name: "Session Tracker", desc: "Persists user session context: language, timezone, last topic" },
-      { id: "ps2", name: "User Profile Builder", desc: "Extracts and stores user preferences from conversation history" },
-      { id: "ps3", name: "Context Enrichment", desc: "Adds metadata (channel, device, region) to conversation memory" },
-    ],
-    mcpcalls: [
-      { id: "mcp1", name: "Document Search Server", desc: "MCP server providing semantic search over enterprise documents" },
-      { id: "mcp2", name: "Calendar Integration", desc: "Google Calendar read/write via MCP for appointment scheduling" },
-    ],
-    rag: [
-      { id: "rag1", name: "Product Knowledge Base", desc: "Vector store of 10k product descriptions with pgvector embeddings" },
-      { id: "rag2", name: "Legal Document Store", desc: "Contract clauses and regulatory texts for compliance review" },
-      { id: "rag3", name: "Employee Handbook", desc: "HR policies, benefits info, and onboarding procedures" },
-    ],
-    parser: [
-      { id: "par1", name: "Default Parser", desc: "Standard expression parser" },
-    ],
-    snippets: [
-      { id: "snip1", name: "Cautious Mode", desc: "Makes the agent more careful and hedging in responses" },
-      { id: "snip2", name: "Compliance Disclaimer", desc: "Adds regulatory compliance disclaimers to financial advice" },
-      { id: "snip3", name: "Friendly Persona", desc: "Sets a warm, approachable conversational tone" },
-    ],
-  };
-
-  const items = descriptorsByType[label] ?? [
-    { id: "res1", name: `${label} Config 1`, desc: `First ${label} configuration` },
-    { id: "res2", name: `${label} Config 2`, desc: `Second ${label} configuration` },
-  ];
-
-  const mockDescriptors = items.map((item, i) => ({
-    resource: `eddi://ai.labs.${label}/${store}/${plural}/${item.id}?version=1`,
-    name: item.name,
-    description: item.desc,
-    createdOn: Date.now() - (items.length - i) * 3 * 86400000,
-    lastModifiedOn: Date.now() - i * 12 * 3600000,
-  }));
-
+  // No `/descriptors` handler here: the generic `*/:store/:plural/descriptors`
+  // registered earlier answers every one of these stores, so a copy here was
+  // unreachable (it once carried an `includePreviousVersions` branch no test
+  // could ever hit).
   return [
     // JSON Schema endpoint
     http.get(`*/${store}/${plural}/jsonSchema`, () => {
@@ -3260,32 +3139,6 @@ function createResourceHandlers(
         title: `${label}Configuration`,
         properties: {},
       });
-    }),
-    http.get(`*/${store}/${plural}/descriptors`, ({ request }) => {
-      const url = new URL(request.url);
-      const includePrevious = url.searchParams.get("includePreviousVersions");
-      const filter = url.searchParams.get("filter");
-
-      if (includePrevious === "true" && filter) {
-        // Return multiple versions for a specific resource
-        return HttpResponse.json([
-          {
-            resource: `eddi://ai.labs.${label}/${store}/${plural}/${filter}?version=2`,
-            name: `${label} Config`,
-            description: `${label} configuration`,
-            createdOn: Date.now() - 86400000,
-            lastModifiedOn: Date.now(),
-          },
-          {
-            resource: `eddi://ai.labs.${label}/${store}/${plural}/${filter}?version=1`,
-            name: `${label} Config`,
-            description: `${label} configuration`,
-            createdOn: Date.now() - 172800000,
-            lastModifiedOn: Date.now() - 86400000,
-          },
-        ]);
-      }
-      return HttpResponse.json(mockDescriptors);
     }),
     http.get(`*/${store}/${plural}/:id`, () => {
       return HttpResponse.json({ type: label, config: {} });
@@ -3943,7 +3796,13 @@ const MOCK_AUDIT_ENTRIES = [
       },
       temperature: 0.7,
     },
-    toolCalls: null,
+    // AuditEntry.toolCalls is a MAP on the wire: trace events under `calls`.
+    toolCalls: {
+      calls: [
+        { type: "tool_call", tool: "get_weather", arguments: "{\"city\":\"Vienna\"}" },
+        { type: "tool_result", tool: "get_weather", result: "sunny, 22°C" },
+      ],
+    },
     actions: ["greet", "chat"],
     cost: 0.003,
     timestamp: new Date(Date.now() - 57000).toISOString(),
@@ -4033,351 +3892,18 @@ export const quotaHandlers = [
   }),
 ];
 
-// ─── Schedule Handlers ───────────────────────────────────────────────────────
+// ─── Misc handlers (exported as `scheduleHandlers`) ─────────────────────────
 
-const SCHEDULES_MOCK = [
-  {
-    id: "sched-1",
-    name: "Daily Health Check",
-    triggerType: "CRON",
-    agentId: "agent1",
-    agentVersion: 0,
-    environment: "production",
-    cronExpression: "0 9 * * MON-FRI",
-    cronDescription: "At 09:00 AM, Monday through Friday",
-    message: "health_check",
-    conversationStrategy: "new",
-    enabled: true,
-    nextFire: Date.now() + 3600000,
-    lastFired: Date.now() - 86400000,
-    fireStatus: "COMPLETED",
-    failCount: 0,
-    createdAt: Date.now() - 604800000,
-    updatedAt: Date.now() - 86400000,
-  },
-  {
-    id: "sched-2",
-    name: "Heartbeat Monitor",
-    triggerType: "HEARTBEAT",
-    agentId: "agent2",
-    agentVersion: 0,
-    environment: "production",
-    heartbeatIntervalSeconds: 300,
-    message: "ping",
-    conversationStrategy: "persistent",
-    enabled: true,
-    nextFire: Date.now() + 60000,
-    lastFired: Date.now() - 300000,
-    fireStatus: "PENDING",
-    failCount: 0,
-    createdAt: Date.now() - 172800000,
-    updatedAt: Date.now() - 300000,
-  },
-  {
-    id: "sched-3",
-    name: "Weekly Summary Report",
-    triggerType: "CRON",
-    agentId: "agent1",
-    agentVersion: 0,
-    environment: "production",
-    cronExpression: "0 8 * * 1",
-    cronDescription: "Every Monday at 8:00 AM",
-    message: "generate_weekly_summary",
-    conversationStrategy: "new",
-    enabled: false,
-    nextFire: null,
-    lastFired: Date.now() - 7200000,
-    fireStatus: "DEAD_LETTERED",
-    failCount: 3,
-    createdAt: Date.now() - 259200000,
-    updatedAt: Date.now() - 7200000,
-  },
-  {
-    id: "sched-4",
-    name: "Nightly Invoice Processing",
-    triggerType: "CRON",
-    agentId: "agent4",
-    agentVersion: 0,
-    environment: "production",
-    cronExpression: "0 2 * * *",
-    cronDescription: "Every day at 2:00 AM",
-    message: "process_pending_invoices",
-    conversationStrategy: "new",
-    enabled: true,
-    nextFire: Date.now() + 18000000,
-    lastFired: Date.now() - 68400000,
-    fireStatus: "COMPLETED",
-    failCount: 0,
-    createdAt: Date.now() - 1209600000,
-    updatedAt: Date.now() - 68400000,
-  },
-  {
-    id: "sched-5",
-    name: "Knowledge Base Reindex",
-    triggerType: "CRON",
-    agentId: "agent7",
-    agentVersion: 0,
-    environment: "production",
-    cronExpression: "0 4 * * SUN",
-    cronDescription: "Every Sunday at 4:00 AM",
-    message: "reindex_knowledge_base",
-    conversationStrategy: "new",
-    enabled: true,
-    nextFire: Date.now() + 432000000,
-    lastFired: Date.now() - 172800000,
-    fireStatus: "COMPLETED",
-    failCount: 0,
-    createdAt: Date.now() - 2592000000,
-    updatedAt: Date.now() - 172800000,
-  },
-  {
-    id: "sched-6",
-    name: "Product Catalog Sync",
-    triggerType: "HEARTBEAT",
-    agentId: "agent5",
-    agentVersion: 0,
-    environment: "production",
-    heartbeatIntervalSeconds: 900,
-    message: "sync_catalog",
-    conversationStrategy: "persistent",
-    enabled: true,
-    nextFire: Date.now() + 420000,
-    lastFired: Date.now() - 480000,
-    fireStatus: "COMPLETED",
-    failCount: 0,
-    createdAt: Date.now() - 864000000,
-    updatedAt: Date.now() - 480000,
-  },
-];
-
-const FIRE_LOGS_MOCK = [
-  {
-    id: "fire-1",
-    scheduleId: "sched-1",
-    fireId: "f-1-1",
-    fireTime: new Date(Date.now() - 86400000).toISOString(),
-    startedAt: new Date(Date.now() - 86400000).toISOString(),
-    completedAt: new Date(Date.now() - 86399000).toISOString(),
-    status: "COMPLETED",
-    conversationId: "conv-123",
-    attemptNumber: 1,
-    cost: 0.001,
-  },
-  {
-    id: "fire-2",
-    scheduleId: "sched-1",
-    fireId: "f-1-2",
-    fireTime: new Date(Date.now() - 172800000).toISOString(),
-    startedAt: new Date(Date.now() - 172800000).toISOString(),
-    completedAt: new Date(Date.now() - 172799500).toISOString(),
-    status: "FAILED",
-    conversationId: "conv-124",
-    errorMessage: "Connection timeout",
-    attemptNumber: 2,
-    cost: 0,
-  },
-];
-
+// Despite the name, this block no longer holds schedule handlers: those, and the
+// setup / vault-health / coordinator / audit / quota / currentversion /
+// descriptor copies that used to sit here, were exact duplicates of handlers
+// registered EARLIER (in `handlers` or their own export). MSW answers with the
+// first match, so every one of them was dead fixture that looked authoritative —
+// `descriptor-handlers.test.ts` now fails if a handler is shadowed again.
 export const scheduleHandlers = [
-  // List all schedules
-  http.get("*/schedulestore/schedules", ({ request }) => {
-    const url = new URL(request.url);
-    const agentId = url.searchParams.get("agentId");
-    if (agentId) {
-      return HttpResponse.json(SCHEDULES_MOCK.filter((s) => s.agentId === agentId));
-    }
-    return HttpResponse.json(SCHEDULES_MOCK);
-  }),
-
-  // Get single schedule
-  http.get("*/schedulestore/schedules/:id", ({ params, request }) => {
-    const url = new URL(request.url);
-    // Skip sub-paths like /fires, /enable, etc.
-    if (url.pathname.includes("/fires") || url.pathname.includes("/admin")) return;
-    const schedule = SCHEDULES_MOCK.find((s) => s.id === params.id);
-    if (schedule) return HttpResponse.json(schedule);
-    return new HttpResponse(null, { status: 404 });
-  }),
-
-  // Create schedule
-  http.post("*/schedulestore/schedules", () => {
-    return new HttpResponse(null, {
-      status: 201,
-      headers: { Location: "/schedulestore/schedules/new-sched-1" },
-    });
-  }),
-
-  // Update schedule
-  http.put("*/schedulestore/schedules/:id", () => {
-    return new HttpResponse(null, { status: 200 });
-  }),
-
-  // Delete schedule
-  http.delete("*/schedulestore/schedules/:id", () => {
-    return new HttpResponse(null, { status: 204 });
-  }),
-
-  // Enable
-  http.post("*/schedulestore/schedules/:id/enable", () => {
-    return new HttpResponse(null, { status: 200 });
-  }),
-
-  // Disable
-  http.post("*/schedulestore/schedules/:id/disable", () => {
-    return new HttpResponse(null, { status: 200 });
-  }),
-
-  // Fire now
-  http.post("*/schedulestore/schedules/:id/fire", () => {
-    return new HttpResponse(null, { status: 200 });
-  }),
-
-  // Fire logs
-  http.get("*/schedulestore/schedules/:id/fires", () => {
-    return HttpResponse.json(FIRE_LOGS_MOCK);
-  }),
-
-  // Admin - failed fires
-  http.get("*/schedulestore/schedules/admin/failed", () => {
-    return HttpResponse.json(
-      FIRE_LOGS_MOCK.filter((l) => l.status !== "COMPLETED")
-    );
-  }),
-
-  // Retry dead letter
-  http.post("*/schedulestore/schedules/:id/retry", () => {
-    return new HttpResponse(null, { status: 200 });
-  }),
-
-  // Dismiss dead letter
-  http.post("*/schedulestore/schedules/:id/dismiss", () => {
-    return new HttpResponse(null, { status: 200 });
-  }),
-
-  // --- Agent Setup Wizard ---
-  http.post("*/administration/agents/setup", async ({ request }) => {
-    const body = (await request.json()) as Record<string, unknown>;
-    return HttpResponse.json(
-      {
-        action: "setup_complete",
-        agentId: `agent-${Date.now()}`,
-        agentName: body.name ?? "New Agent",
-        provider: body.provider ?? "anthropic",
-        model: body.model ?? "claude-sonnet-4-6",
-        deployed: body.deploy !== false,
-        deploymentStatus: body.deploy !== false ? "READY" : undefined,
-        quickRepliesEnabled: body.enableQuickReplies ?? false,
-        sentimentAnalysisEnabled: body.enableSentimentAnalysis ?? false,
-        resources: { agentLocation: "/agentstore/agents/mock-agent?version=1" },
-      },
-      { status: 201 },
-    );
-  }),
-
-
-  // ==========================================
-  // === Secrets Vault Mocks ===
-  // ==========================================
-
-  // Vault health check (health endpoint is only here, not in secretsHandlers)
-  http.get("*/secretstore/secrets/health", () => {
-    return HttpResponse.json({
-      status: "UP",
-      provider: "VaultSecretProvider",
-      available: true,
-    });
-  }),
-
-  // List/Store/Delete secrets are in the secretsHandlers export (used by server.ts)
-
-  // ==========================================
-  // === Coordinator Mocks ===
-  // ==========================================
-
-  // Coordinator status
-  http.get("*/administration/coordinator/status", () => {
-    return HttpResponse.json({
-      coordinatorType: "nats",
-      connected: true,
-      connectionStatus: "CONNECTED",
-      activeConversations: 24,
-      totalProcessed: 142_897,
-      totalDeadLettered: 7,
-      queueDepths: {
-        "conv-abc123": 1,
-        "conv-def456": 2,
-        "conv-ghi789": 3,
-      },
-    });
-  }),
-
-  // Coordinator dead-letters
-  http.get("*/administration/coordinator/dead-letters", () => {
-    return HttpResponse.json([
-      {
-        id: "dl-001",
-        conversationId: "conv-failed-1",
-        error: "LLM provider timeout after 30s — model gpt-5.4-mini did not respond",
-        timestamp: Date.now() - 3600000,
-        payload: JSON.stringify({ input: "What is the weather?", agentId: "agent1", step: 2 }),
-      },
-      {
-        id: "dl-002",
-        conversationId: "conv-failed-2",
-        error: "HttpCallTask failed: 503 Service Unavailable from https://api.weather.com",
-        timestamp: Date.now() - 7200000,
-        payload: JSON.stringify({ input: "Book a flight", agentId: "agent2", step: 1 }),
-      },
-    ]);
-  }),
-
-  // Replay dead-letter
-  http.post("*/administration/coordinator/dead-letters/:id/replay", () => {
-    return new HttpResponse(null, { status: 200 });
-  }),
-
-  // Discard dead-letter
-  http.delete("*/administration/coordinator/dead-letters/:id", () => {
-    return new HttpResponse(null, { status: 204 });
-  }),
-
-  // Purge all dead-letters
-  http.delete("*/administration/coordinator/dead-letters", () => {
-    return HttpResponse.json(2);
-  }),
-
   // Coordinator SSE stream
   http.get("*/administration/coordinator/stream", () => {
     return new HttpResponse(null, { status: 200, headers: { "Content-Type": "text/event-stream" } });
-  }),
-
-  // ==========================================
-  // === Audit Trail Mocks ===
-  // ==========================================
-
-  // Audit by conversation
-  http.get("*/auditstore/:conversationId", ({ request, params }) => {
-    const url = new URL(request.url);
-    // Don't match /count sub-path
-    if (url.pathname.endsWith("/count")) return;
-    const convId = params.conversationId as string;
-    // Don't match the /agent/ path
-    if (convId === "agent") return;
-    if (convId === "recent") {
-      // Recent entries endpoint
-      return HttpResponse.json(generateMockAuditEntries("conv-recent-1", 10));
-    }
-    return HttpResponse.json(generateMockAuditEntries(convId, 5));
-  }),
-
-  // Audit by agent
-  http.get("*/auditstore/agent/:agentId", () => {
-    return HttpResponse.json(generateMockAuditEntries("conv-from-agent", 8));
-  }),
-
-  // Audit count
-  http.get("*/auditstore/:conversationId/count", () => {
-    return HttpResponse.json(5);
   }),
 
   // ==========================================
@@ -4385,35 +3911,6 @@ export const scheduleHandlers = [
   // ==========================================
   // NOTE: Group config handlers (descriptors, detail, styles, schema, CRUD) are
   // in the main `handlers` export. Only group *conversation* handlers are here.
-
-  // List group conversations
-  http.get("*/groups/:groupId/conversations", ({ request }) => {
-    const url = new URL(request.url);
-    const pathParts = url.pathname.split("/");
-    // Don't match specific conversation GETs (which have an extra path segment)
-    if (pathParts.length > 4 && !url.pathname.endsWith("/conversations")) return;
-    return HttpResponse.json([
-      {
-        id: "gconv1",
-        groupId: "group1",
-        userId: "manager-user",
-        state: "COMPLETED",
-        originalQuestion: "Should we expand into the European market this quarter?",
-        transcript: [],
-        memberConversationIds: {},
-        currentPhaseIndex: 2,
-        currentPhaseName: "Synthesis",
-        synthesizedAnswer: "After careful consideration, the panel recommends a phased European market expansion starting in Q3.",
-        depth: 0,
-        taskList: null,
-        dynamicMembers: [],
-        createdAgentIds: [],
-        retainedAgentIds: [],
-        created: new Date(Date.now() - 3600000).toISOString(),
-        lastModified: new Date(Date.now() - 1800000).toISOString(),
-      },
-    ]);
-  }),
 
   // Cross-group HITL inbox (GET /groups/pending-approvals). Group summaries
   // carry a groupId (that drives the "Group" badge / View link on the queue).
@@ -4528,29 +4025,6 @@ export const scheduleHandlers = [
       transcriptSummary:
         "The panel opened with independent positions: Marketing saw brand opportunity but flagged GDPR; Sales pointed to demand in Germany and France; Product estimated three months of localization; Tech priced EU hosting at ~$50k/month; Legal warned against rushing compliance.",
     });
-  }),
-
-  // Start group discussion
-  http.post("*/groups/:groupId/conversations", () => {
-    return HttpResponse.json({
-      id: `gconv-${Date.now()}`,
-      groupId: "group1",
-      userId: "manager-user",
-      state: "IN_PROGRESS",
-      originalQuestion: "New discussion started",
-      transcript: [],
-      memberConversationIds: {},
-      currentPhaseIndex: 0,
-      currentPhaseName: "Initial Opinions",
-      synthesizedAnswer: null,
-      depth: 0,
-      taskList: null,
-      dynamicMembers: [],
-      createdAgentIds: [],
-      retainedAgentIds: [],
-      created: new Date().toISOString(),
-      lastModified: new Date().toISOString(),
-    }, { status: 201 });
   }),
 
   // SSE stream group discussion
@@ -4674,25 +4148,43 @@ export const scheduleHandlers = [
   }),
 
   // Tool history
+  // A `ToolExecutionTrace` OBJECT (RestToolHistory.getToolHistory), not an array:
+  // the calls sit under `toolCalls`, with `arguments` as the JSON string the
+  // model sent.
   http.get("*/llm/tools/history/:convId", () => {
-    return HttpResponse.json([
+    const toolCalls = [
       {
         toolName: "fetch_weather",
-        args: { city: "Vienna" },
+        arguments: '{"city":"Vienna"}',
         result: '{"temp": 22, "condition": "sunny"}',
-        durationMs: 156,
+        executionTimeMs: 156,
+        error: null,
+        success: true,
         cost: 0.0005,
-        timestamp: new Date().toISOString(),
+        fromCache: false,
+        timestamp: Date.now(),
       },
       {
         toolName: "websearch",
-        args: { query: "EDDI AI platform" },
+        arguments: '{"query":"EDDI AI platform"}',
         result: '{"results": [{"title": "EDDI docs", "url": "https://docs.labs.ai"}]}',
-        durationMs: 342,
+        executionTimeMs: 342,
+        error: null,
+        success: true,
         cost: 0.001,
-        timestamp: new Date().toISOString(),
+        fromCache: false,
+        timestamp: Date.now(),
       },
-    ]);
+    ];
+    return HttpResponse.json({
+      toolCalls,
+      totalExecutionTimeMs: 498,
+      hasErrors: false,
+      totalCost: 0.0015,
+      cacheHits: 0,
+      cacheMisses: 0,
+      toolMetrics: {},
+    });
   }),
 
   // Global tool costs
@@ -4704,26 +4196,6 @@ export const scheduleHandlers = [
   }),
 
   // Rerun last conversation step (replay) — handler at end of file uses /rerun path
-
-  // Detailed conversation (memory inspector)
-  http.get("*/agents/:convId", ({ request }) => {
-    const url = new URL(request.url);
-    if (url.searchParams.get("returnDetailed") === "true") {
-      return HttpResponse.json({
-        conversationSteps: [
-          {
-            conversationStep: [
-              { key: "actions", value: ["greet"], timestamp: new Date().toISOString(), originWorkflowId: null },
-              { key: "output:text:en", value: "Hello!", timestamp: new Date().toISOString(), originWorkflowId: "wf-1" },
-            ],
-            timestamp: new Date().toISOString(),
-          },
-        ],
-        conversationProperties: { environment: "test" },
-      });
-    }
-    return HttpResponse.json({});
-  }),
 
   // Recent logs (log viewer)
   http.get("*/logs/recent", () => {
@@ -4737,176 +4209,6 @@ export const scheduleHandlers = [
     return new HttpResponse(null, { status: 200, headers: { "Content-Type": "text/event-stream" } });
   }),
 
-  // ─── Quotas ───────────────────────────────────────────────────────
-  http.get("*/administration/quotas/:tenantId/usage", () => {
-    return HttpResponse.json({
-      tenantId: "default",
-      conversationsToday: 3842,
-      apiCallsThisMinute: 312,
-      monthlyCostUsd: 1847.63,
-      minuteWindowStart: new Date().toISOString(),
-      dayStart: new Date().toISOString(),
-    });
-  }),
-
-  http.get("*/administration/quotas/:tenantId", () => {
-    return HttpResponse.json({
-      tenantId: "default",
-      maxConversationsPerDay: 5000,
-      maxAgentsPerTenant: 100,
-      maxApiCallsPerMinute: 500,
-      maxMonthlyCostUsd: 2500,
-      enabled: true,
-    });
-  }),
-
-  http.put("*/administration/quotas/:tenantId", async ({ request }) => {
-    const body = await request.json();
-    return HttpResponse.json(body);
-  }),
-
-  http.post("*/administration/quotas/:tenantId/usage/reset", () => {
-    return new HttpResponse(null, { status: 204 });
-  }),
-
-  // ─── Currentversion endpoints (used by version pickers) ─────────
-  // Returns mock latest version for any resource type
-  ...[
-    "agentstore/agents", "workflowstore/workflows",
-    "rulestore/rulesets", "apicallstore/apicalls", "outputstore/outputsets",
-    "dictionarystore/dictionaries", "parserstore/parsers", "llmstore/llms",
-    "propertysetterstore/propertysetters", "mcpcallsstore/mcpcalls",
-    "ragstore/rags", "snippetstore/snippets",
-  ].map((storePath) =>
-    http.get(`*/${storePath}/:id/currentversion`, () => {
-      // Return 2 as default latest version for test data
-      return HttpResponse.text("2", { headers: { "Content-Type": "text/plain" } });
-    })
-  ),
-
-  // ─── Generic resource store descriptors ──────────────────────────
-  // One handler per resource store type to avoid catching agent/workflow descriptors.
-  // For filter lookups, return filtered results.
-  // For list requests, return sample data so the resource-list test has items.
-  ...["rulestore/rulesets", "apicallstore/apicalls", "outputstore/outputsets",
-      "dictionarystore/dictionaries", "parserstore/parsers", "llmstore/llms", "propertysetterstore/propertysetters",
-      "mcpcallsstore/mcpcalls", "ragstore/rags", "snippetstore/snippets"].map((storePath) => {
-    const store = storePath.split("/")[0];
-    const plural = storePath.split("/")[1];
-    return http.get(`*/${storePath}/descriptors`, ({ request }) => {
-      const url = new URL(request.url);
-      const filter = url.searchParams.get("filter");
-
-      if (filter) {
-        // Version or filter lookup — return a descriptor matching the filter ID
-        return HttpResponse.json([
-          {
-            resource: `eddi://ai.labs.resource/${store}/${plural}/${filter}?version=1`,
-            name: `Resource ${filter}`,
-            description: "A resource",
-            createdOn: Date.now() - 86400000,
-            lastModifiedOn: Date.now() - 3600000,
-          },
-        ]);
-      }
-
-      // Normal list request
-      return HttpResponse.json([
-        {
-          resource: `eddi://ai.labs.resource/${store}/${plural}/res1?version=1`,
-          name: "Sample Resource 1",
-          description: "A sample resource for testing",
-          createdOn: Date.now() - 86400000,
-          lastModifiedOn: Date.now() - 3600000,
-        },
-        {
-          resource: `eddi://ai.labs.resource/${store}/${plural}/res2?version=2`,
-          name: "Sample Resource 2",
-          description: "Another sample resource",
-          createdOn: Date.now() - 2 * 86400000,
-          lastModifiedOn: Date.now() - 7200000,
-        },
-      ]);
-    });
-  }),
-
-  // ─── Tool Metrics (Cost Dashboard / Debugger) ────────────────────
-  http.get("*/llm/tools/costs/conversation/:conversationId", ({ params }) => {
-    const conversationId = params.conversationId as string;
-    return HttpResponse.json({
-      conversationId,
-      totalCost: 0.0847,
-      toolCallCount: 14,
-      toolUsage: {
-        "fetch_weather": 5,
-        "search_products": 4,
-        "create_ticket": 3,
-        "send_email": 2,
-      },
-    });
-  }),
-
-  http.get("*/llm/tools/ratelimit/:toolName", ({ params }) => {
-    const toolName = params.toolName as string;
-    return HttpResponse.json({
-      tool: toolName,
-      limit: 60,
-      remaining: 42,
-      resetTimeMs: Date.now() + 45_000,
-    });
-  }),
-
-  http.get("*/llm/tools/cache/stats", () => {
-    return HttpResponse.json({
-      size: 425,
-      hits: 328,
-      misses: 97,
-      hitRate: 0.772,
-      perToolStats: {
-        "fetch_weather": { hits: 145, misses: 32 },
-        "search_products": { hits: 98, misses: 41 },
-        "create_ticket": { hits: 85, misses: 24 },
-      },
-      details: "Cache: 425 entries, 328 hits, 97 misses (77.2%)",
-    });
-  }),
-
-  http.get("*/llm/tools/history/:conversationId", () => {
-    const now = Date.now();
-    return HttpResponse.json([
-      {
-        toolName: "fetch_weather",
-        args: { city: "Vienna", units: "metric" },
-        result: "Sunny, 22°C, humidity 45%",
-        durationMs: 187,
-        cost: 0.0025,
-        timestamp: new Date(now - 120_000).toISOString(),
-      },
-      {
-        toolName: "search_products",
-        args: { query: "summer jackets", limit: 5 },
-        result: "Found 5 matching products",
-        durationMs: 342,
-        cost: 0.0024,
-        timestamp: new Date(now - 90_000).toISOString(),
-      },
-      {
-        toolName: "create_ticket",
-        args: { title: "Return request #4521", priority: "high" },
-        result: "Ticket JIRA-4521 created",
-        durationMs: 520,
-        cost: 0.014,
-        timestamp: new Date(now - 60_000).toISOString(),
-      },
-    ]);
-  }),
-
-  http.get("*/llm/tools/costs", () => {
-    return HttpResponse.json({
-      totalCost: 1.247,
-      summary: "Tool Cost Summary:\nTotal Cost: $1.2470\nPer-Tool Costs:\n  - fetch_weather: 312 calls\n  - search_products: 245 calls\n  - create_ticket: 189 calls\n  - send_email: 146 calls\n",
-    });
-  }),
 ];
 
 // ─── GDPR Admin Handlers ────────────────────────────────────────────────────
@@ -5129,21 +4431,32 @@ export const userMemoryHandlers = [
 
 // ─── Properties Handlers ────────────────────────────────────────────────────
 
+// RAW values, keyed by property name — what MongoUserMemoryStore.readProperties
+// returns (the `value` of each global user-memory entry). The previous fixture
+// used `Property` wrappers (`valueString`, `valueInt`, …) the endpoint never
+// sends, so the page's type column was verified against a shape that only
+// existed here.
 const MOCK_PROPERTIES = {
-  user_name: { name: "user_name", scope: "longTerm", valueString: "Jane Doe" },
-  email: { name: "email", scope: "longTerm", valueString: "jane.doe@acme-corp.com" },
-  age: { name: "age", scope: "longTerm", valueInt: 32 },
-  is_vip: { name: "is_vip", scope: "longTerm", valueBoolean: true },
-  company: { name: "company", scope: "longTerm", valueString: "Acme Corp" },
-  department: { name: "department", scope: "longTerm", valueString: "Engineering" },
-  preferences: { name: "preferences", scope: "longTerm", valueObject: { theme: "dark", lang: "en", notifications: true, timezone: "Europe/Vienna" } },
-  tags: { name: "tags", scope: "longTerm", valueList: ["loyal", "premium", "early-adopter"] },
-  last_login: { name: "last_login", scope: "conversation", valueString: new Date(Date.now() - 3600000).toISOString() },
-  session_count: { name: "session_count", scope: "longTerm", valueInt: 147 },
+  user_name: "Jane Doe",
+  email: "jane.doe@acme-corp.com",
+  age: 32,
+  is_vip: true,
+  company: "Acme Corp",
+  department: "Engineering",
+  preferences: { theme: "dark", lang: "en", notifications: true, timezone: "Europe/Vienna" },
+  tags: ["loyal", "premium", "early-adopter"],
+  last_login: new Date(Date.now() - 3600000).toISOString(),
+  session_count: 147,
 };
 
+/** A user id the mock treats as having no properties — the backend answers 204. */
+export const MOCK_PROPERTIES_EMPTY_USER = "user-without-properties";
+
 export const propertiesHandlers = [
-  http.get("*/propertiesstore/properties/:userId", () => {
+  http.get("*/propertiesstore/properties/:userId", ({ params }) => {
+    if (params.userId === MOCK_PROPERTIES_EMPTY_USER) {
+      return new HttpResponse(null, { status: 204 });
+    }
     return HttpResponse.json(MOCK_PROPERTIES);
   }),
 
@@ -5372,10 +4685,19 @@ export const backupSyncHandlers = [
   }),
 
   // Import execute (create, merge, or upgrade)
-  http.post("*/backup/import", () => {
+  // RestImportService.importAgentZipFile answers 201 Created with the agent's
+  // URI in Location. A merge lands on the existing agent as a new version.
+  http.post("*/backup/import", ({ request }) => {
+    const url = new URL(request.url);
+    if (url.searchParams.get("strategy") === "merge") {
+      return new HttpResponse(null, {
+        status: 201,
+        headers: { Location: "/agentstore/agents/agent1?version=2" },
+      });
+    }
     const newId = `imported-${Date.now()}`;
     return new HttpResponse(null, {
-      status: 202,
+      status: 201,
       headers: { Location: `/agentstore/agents/${newId}?version=1` },
     });
   }),
