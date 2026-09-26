@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
+import type { CascadeContext } from "@/lib/api/cascade-save";
 import { getAgentDescriptors, getAgent, parseResourceUri, type AgentDescriptor } from "@/lib/api/agents";
 import { getWorkflow } from "@/lib/api/workflows";
 import { PipelineRailroad } from "@/components/studio/pipeline-railroad";
@@ -83,10 +84,32 @@ export function AgentStudioPage() {
   }, [descriptors, agentId]);
 
   // Get agent version from descriptor
-  const agentVersion = useMemo(() => {
+  const descriptorAgentVersion = useMemo(() => {
     if (!agentDescriptor) return 1;
     return parseResourceUri(agentDescriptor.resource).version;
   }, [agentDescriptor]);
+
+  /**
+   * The versions the last stage save produced — owned here, not by the editor
+   * panel, because every stage shares them.
+   *
+   * Each stage's panel is its own mount. When the panel kept these, selecting a
+   * second stage mounted a panel seeded from this page's stale versions (the
+   * descriptor query is cached for a minute and the workflow query was keyed by
+   * id alone), so its first save 409'd on the workflow — after the resource had
+   * already been written, leaving an orphaned resource version behind.
+   *
+   * Only ever moves forward: a descriptor that reports a NEWER agent version
+   * than this (an edit made elsewhere) wins, and this is dropped.
+   */
+  const [savedContext, setSavedContext] = useState<CascadeContext | null>(null);
+  const liveSavedContext =
+    savedContext &&
+    savedContext.agentId === agentId &&
+    savedContext.agentVersion >= descriptorAgentVersion
+      ? savedContext
+      : null;
+  const agentVersion = liveSavedContext?.agentVersion ?? descriptorAgentVersion;
 
   // Fetch agent config — must pass version for the API to return data
   const {
@@ -99,25 +122,47 @@ export function AgentStudioPage() {
     queryFn: () => getAgent(agentId!, agentVersion),
     enabled: !!agentId && !!agentDescriptor,
     staleTime: 30_000,
+    // Keep the pipeline on screen while a saved version loads, rather than
+    // replacing the whole studio (and the open editor) with a spinner.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[2] === agentId ? previous : undefined,
   });
 
   // Get the first workflow URI and fetch its pipeline
   const workflowUri = agentConfig?.workflows?.[0];
-  const { workflowId, workflowVersion } = useMemo(() => {
-    if (!workflowUri) return { workflowId: null, workflowVersion: 1 };
+  const { workflowId, workflowVersion, agentWorkflowVersion } = useMemo(() => {
+    if (!workflowUri) {
+      return { workflowId: null, workflowVersion: 1, agentWorkflowVersion: undefined };
+    }
     const parsed = parseResourceUri(workflowUri);
-    return { workflowId: parsed.id, workflowVersion: parsed.version };
-  }, [workflowUri]);
+    // A save's versions win until the refetched agent catches up with them.
+    if (
+      liveSavedContext &&
+      liveSavedContext.workflowId === parsed.id &&
+      liveSavedContext.workflowVersion >= parsed.version
+    ) {
+      return {
+        workflowId: parsed.id,
+        workflowVersion: liveSavedContext.workflowVersion,
+        agentWorkflowVersion: liveSavedContext.agentWorkflowVersion,
+      };
+    }
+    return { workflowId: parsed.id, workflowVersion: parsed.version, agentWorkflowVersion: undefined };
+  }, [workflowUri, liveSavedContext]);
 
   const {
     data: workflowConfig,
     isError: workflowError,
     refetch: refetchWorkflow,
   } = useQuery({
-    queryKey: ["studio", "workflow", workflowId],
+    // The version is part of the key: keyed by id alone, the pipeline kept
+    // showing the pre-save step URIs, so reopening a stage edited its old version.
+    queryKey: ["studio", "workflow", workflowId, workflowVersion],
     queryFn: () => getWorkflow(workflowId!, workflowVersion),
     enabled: !!workflowId,
     staleTime: 30_000,
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[2] === workflowId ? previous : undefined,
   });
 
   const workflowSteps = (workflowConfig?.workflowSteps ?? []) as WorkflowStep[];
@@ -270,6 +315,8 @@ export function AgentStudioPage() {
                 agentVersion={agentVersion}
                 workflowId={workflowId}
                 workflowVersion={workflowVersion}
+                agentWorkflowVersion={agentWorkflowVersion}
+                onCascadeContextChange={setSavedContext}
               />
             ) : (
               <StudioEditorEmpty />
@@ -302,6 +349,8 @@ export function AgentStudioPage() {
                     agentVersion={agentVersion}
                     workflowId={workflowId}
                     workflowVersion={workflowVersion}
+                    agentWorkflowVersion={agentWorkflowVersion}
+                    onCascadeContextChange={setSavedContext}
                   />
                 ) : (
                   <StudioEditorEmpty />

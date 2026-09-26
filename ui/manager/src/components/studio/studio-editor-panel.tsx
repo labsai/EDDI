@@ -5,6 +5,11 @@ import { getErrorMessage } from "@/lib/api-client";
 import { parseResourceUri } from "@/lib/api/agents";
 import { getResourceType, type ResourceTypeConfig } from "@/lib/api/resources";
 import {
+  cascadePartialResult,
+  nextCascadeContext,
+  type CascadeContext,
+} from "@/lib/api/cascade-save";
+import {
   useResource,
   useResourceVersions,
   useCascadeSave,
@@ -34,6 +39,21 @@ interface StudioEditorPanelProps {
   workflowId: string;
   /** Workflow version for cascade context */
   workflowVersion: number;
+  /**
+   * The workflow version the agent references, when a save that stopped after
+   * the workflow hop left it behind `workflowVersion` (see `CascadeContext`).
+   */
+  agentWorkflowVersion?: number;
+  /**
+   * Called with the cascade context the NEXT save must use — after a save, and
+   * after one that failed partway, with the versions that now exist.
+   *
+   * The page owns these versions because every stage shares them: each stage's
+   * panel is a separate mount, so versions kept here were lost the moment the
+   * user selected the next stage, whose first save then 409'd on the workflow
+   * and left an orphaned resource version behind.
+   */
+  onCascadeContextChange?: (next: CascadeContext) => void;
 }
 
 // ==================== Component ====================
@@ -44,6 +64,8 @@ export function StudioEditorPanel({
   agentVersion,
   workflowId,
   workflowVersion,
+  agentWorkflowVersion,
+  onCascadeContextChange,
 }: StudioEditorPanelProps) {
   const { t } = useTranslation();
 
@@ -107,23 +129,15 @@ export function StudioEditorPanel({
       })
     : [{ version: currentVersion }];
 
-  // Cascade context for auto-propagation to parent workflow and agent
-  // Track versions in local state so they update after cascade saves
-  const [localWorkflowVersion, setLocalWorkflowVersion] = useState(workflowVersion);
-  const [localAgentVersion, setLocalAgentVersion] = useState(agentVersion);
-
-  // Reset when the parent re-mounts with different props
-  useEffect(() => {
-    setLocalWorkflowVersion(workflowVersion);
-    setLocalAgentVersion(agentVersion);
-  }, [workflowVersion, agentVersion]);
-
-  const cascadeContext = useMemo(() => ({
+  // Cascade context for auto-propagation to parent workflow and agent. The
+  // versions come from the page (see `onCascadeContextChange`).
+  const cascadeContext = useMemo<CascadeContext>(() => ({
     workflowId,
-    workflowVersion: localWorkflowVersion,
+    workflowVersion,
     agentId,
-    agentVersion: localAgentVersion,
-  }), [workflowId, localWorkflowVersion, agentId, localAgentVersion]);
+    agentVersion,
+    ...(agentWorkflowVersion !== undefined ? { agentWorkflowVersion } : {}),
+  }), [workflowId, workflowVersion, agentId, agentVersion, agentWorkflowVersion]);
 
   const handleSave = useCallback(
     (jsonString: string) => {
@@ -141,11 +155,19 @@ export function StudioEditorPanel({
               toast.success(t("editor.saved", "Saved successfully"));
               setSaveSuccess(true);
               setCurrentVersion(result.newResourceVersion);
-              // Update cascade context versions so next save uses correct versions
-              if (result.newWorkflowVersion) setLocalWorkflowVersion(result.newWorkflowVersion);
-              if (result.newAgentVersion) setLocalAgentVersion(result.newAgentVersion);
+              // The next save — of this stage or any other — builds on these.
+              onCascadeContextChange?.(nextCascadeContext(cascadeContext, result));
             },
             onError: (err) => {
+              // A cascade that failed partway already bumped the resource (and
+              // perhaps the workflow): adopt those, or every retry 409s.
+              const partial = cascadePartialResult(err);
+              if (partial?.newResourceVersion !== undefined) {
+                setCurrentVersion(partial.newResourceVersion);
+              }
+              if (partial?.retryContext) {
+                onCascadeContextChange?.(partial.retryContext);
+              }
               toast.error(getErrorMessage(err));
             },
           },
@@ -154,7 +176,7 @@ export function StudioEditorPanel({
         toast.error(t("editor.invalidJson", "Invalid JSON"));
       }
     },
-    [resourceId, currentVersion, cascadeSave, cascadeContext, t],
+    [resourceId, currentVersion, cascadeSave, cascadeContext, onCascadeContextChange, t],
   );
 
   // ---- No URI / unsupported type ----
