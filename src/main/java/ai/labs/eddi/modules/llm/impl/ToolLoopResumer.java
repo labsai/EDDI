@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.ToolCallDecision;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.modules.apicalls.impl.ResolvedRequest;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolApprovalGateSupport;
@@ -85,6 +86,14 @@ class ToolLoopResumer {
      * Moved here with its only two callers; nothing else ever used it.
      */
     private static final ObjectMapper ENVELOPE_MAPPER = new ObjectMapper();
+
+    /**
+     * Reads the approver binding the resume path set. Safe to share: the bindings
+     * {@code CallerIdentityContext} manages live in static {@code ThreadLocal}s, so
+     * every instance sees the same state (the pattern
+     * {@code McpToolProviderManager} uses for its unbound context).
+     */
+    private static final CallerIdentityContext CALLER_CONTEXT = new CallerIdentityContext(null, null);
 
     private final AgentOrchestrator orchestrator;
     private final ToolLoopRunner toolLoopRunner;
@@ -243,9 +252,13 @@ class ToolLoopResumer {
                 ToolExecutionRequest req = rebuiltRequest(c, args);
                 // Full per-request pipeline (checkpoint, budget, executeToolWrapped,
                 // truncation, trace). Its own auto-checkpoint fires ONLY here.
-                String result = toolLoopRunner.executeSingleToolCallResult(req, memory, trace, toolExecutors, toolRateLimits,
-                        toolCanonicalNames, toolSources, defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching,
-                        enableCostTracking, task, isLazy, builtInSpecs, activeSpecs);
+                // Executed as the approver when somebody other than the owner
+                // approved: this call is exactly what they saw, so a caller-bound
+                // credential on it is theirs to spend — and ONLY on it. The rest of
+                // the resumed turn runs with no caller (ConversationHitlService).
+                String result = CALLER_CONTEXT.callAsApprover(() -> toolLoopRunner.executeSingleToolCallResult(req, memory, trace,
+                        toolExecutors, toolRateLimits, toolCanonicalNames, toolSources, defaultRateLimit, maxBudget, conversationId,
+                        enableRateLimiting, enableCaching, enableCostTracking, task, isLazy, builtInSpecs, activeSpecs));
                 journalStore.markExecuted(conversationId, pauseEpoch, c.getCallId(),
                         ToolApprovalGateSupport.capUtf8(result, AgentOrchestrator.JOURNAL_RESULT_MAX_BYTES));
                 String envelope = amended != null ? amendedEnvelope(result) : result;

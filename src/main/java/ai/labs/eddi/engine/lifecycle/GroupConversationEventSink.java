@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.lifecycle;
 
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 
+import java.time.Instant;
 import java.util.List;
 
 /**
@@ -152,7 +153,18 @@ public final class GroupConversationEventSink {
     public record CancelledEvent(String reason, String cancelledBy) {
     }
 
-    public record HitlPauseEvent(int phaseIndex, String phaseName, String reason, String granularity) {
+    /**
+     * @param pausedAt
+     *            when the pause started — its identity (see
+     *            {@code HitlDecision.pauseIdOf}); an approval surface binds a
+     *            decision to it. {@code null} when unknown.
+     */
+    public record HitlPauseEvent(int phaseIndex, String phaseName, String reason, String granularity, Instant pausedAt) {
+
+        /** A pause event whose start time is unknown. */
+        public HitlPauseEvent(int phaseIndex, String phaseName, String reason, String granularity) {
+            this(phaseIndex, phaseName, reason, granularity, null);
+        }
     }
 
     public record HitlResumeEvent(String verdict, String note, String decidedBy) {

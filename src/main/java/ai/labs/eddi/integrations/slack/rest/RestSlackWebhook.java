@@ -5,6 +5,7 @@
 package ai.labs.eddi.integrations.slack.rest;
 
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
+import ai.labs.eddi.integrations.slack.SlackEventEnvelope;
 import ai.labs.eddi.integrations.slack.SlackEventHandler;
 import ai.labs.eddi.integrations.slack.SlackInteractivityHandler;
 import ai.labs.eddi.integrations.slack.SlackSignatureVerifier;
@@ -38,7 +39,9 @@ import java.util.Set;
  * </ul>
  * <p>
  * Signing secrets are resolved from {@link ChannelTargetRouter}. The verifier
- * tries all known secrets (supporting multi-workspace deployments).
+ * tries all known secrets (supporting multi-workspace deployments) and reports
+ * which one matched; the handler then acts only on integrations that secret
+ * belongs to.
  * <p>
  * Critical: Slack expects HTTP 200 within 3 seconds. This endpoint responds
  * immediately and processes events asynchronously.
@@ -92,9 +95,13 @@ public class RestSlackWebhook {
                                  @HeaderParam("X-Slack-Signature") String signature,
                                  @HeaderParam("X-Slack-Request-Timestamp") String timestamp) {
 
-        // Step 1: Verify signature against all known signing secrets
+        // Step 1: Verify signature against all known signing secrets, remembering
+        // WHICH one matched. The event may only act on integrations that secret
+        // belongs to — the handler checks every route it takes against it, so one
+        // integration's secret can never drive another integration's channels.
         Set<String> signingSecrets = channelTargetRouter.getSigningSecrets("slack");
-        if (!signatureVerifier.verify(timestamp, rawBody, signature, signingSecrets)) {
+        String verifiedSecret = signatureVerifier.matchingSecret(timestamp, rawBody, signature, signingSecrets);
+        if (verifiedSecret == null) {
             LOGGER.warnf("Slack signature verification failed (timestamp=%s)", sanitize(timestamp));
             return Response.status(Response.Status.FORBIDDEN)
                     .entity("{\"error\":\"Invalid signature\"}")
@@ -126,7 +133,8 @@ public class RestSlackWebhook {
                     LOGGER.debugf("Slack event received: type=%s, event_id=%s", sanitize(eventType), sanitize(eventId));
 
                     // Delegate to handler (async — returns immediately)
-                    eventHandler.handleEventAsync(eventId, event, botUserId(payload));
+                    eventHandler.handleEventAsync(eventId, event, new SlackEventEnvelope(verifiedSecret,
+                            stringField(payload, "team_id"), stringField(payload, "api_app_id"), botUserId(payload)));
                 }
             }
 
@@ -246,6 +254,10 @@ public class RestSlackWebhook {
      * {@code null} when the envelope does not carry one — an older payload shape,
      * or a user-token authorization. Callers must degrade rather than depend on it.
      */
+    private static String stringField(Map<String, Object> payload, String key) {
+        return payload.get(key) instanceof String value && !value.isBlank() ? value : null;
+    }
+
     private static String botUserId(Map<String, Object> payload) {
         Object authorizations = payload.get("authorizations");
         if (!(authorizations instanceof List<?> list)) {

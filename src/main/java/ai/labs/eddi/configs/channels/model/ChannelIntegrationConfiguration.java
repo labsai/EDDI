@@ -66,8 +66,11 @@ public class ChannelIntegrationConfiguration {
      * Platform-specific credentials and identifiers. Keys depend on
      * {@link #channelType}:
      * <ul>
-     * <li><b>slack:</b> {@code channelId}, {@code botToken},
-     * {@code signingSecret}</li>
+     * <li><b>slack:</b> {@code channelId}, {@code botToken}, {@code signingSecret};
+     * optionally {@code teamId} and {@code appId} — when set, inbound events and
+     * approval clicks must carry that {@code team_id} / {@code api_app_id} (an
+     * event is always bound to the integration whose own {@code signingSecret}
+     * verified it)</li>
      * <li><b>teams:</b> {@code channelId}, {@code appId}, {@code appPassword},
      * {@code serviceUrl}</li>
      * <li><b>discord:</b> {@code guildId}, {@code channelId}, {@code botToken},

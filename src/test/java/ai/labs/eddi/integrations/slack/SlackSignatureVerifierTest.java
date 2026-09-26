@@ -50,6 +50,22 @@ class SlackSignatureVerifierTest {
                 List.of(SIGNING_SECRET_2, SIGNING_SECRET)));
     }
 
+    /**
+     * H4a: the events webhook needs to know WHICH app signed the body, so it can
+     * bind the event to that app's integrations only.
+     */
+    @Test
+    void matchingSecret_returnsTheSecretThatSigned() {
+        String timestamp = String.valueOf(Instant.now().getEpochSecond());
+        String signature = computeHmac(SIGNING_SECRET_2, "v0:" + timestamp + ":" + TEST_BODY);
+
+        assertEquals(SIGNING_SECRET_2, verifier.matchingSecret(timestamp, TEST_BODY, signature,
+                List.of(SIGNING_SECRET, SIGNING_SECRET_2)));
+        assertNull(verifier.matchingSecret(timestamp, TEST_BODY, signature, List.of(SIGNING_SECRET)));
+        assertNull(verifier.matchingSecret(String.valueOf(Instant.now().getEpochSecond() - 600), TEST_BODY, signature,
+                List.of(SIGNING_SECRET_2)));
+    }
+
     @Test
     void verify_noMatchingSecret_returnsFalse() {
         String timestamp = String.valueOf(Instant.now().getEpochSecond());

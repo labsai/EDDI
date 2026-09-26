@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionRecord;
 import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionType;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.utils.LogSanitizer;
 import org.jboss.logging.Logger;
 
@@ -419,16 +420,22 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
             if (hitlApprovalChannel == null || hitlApprovalChannel.isBlank() || groupConversationId == null) {
                 return;
             }
-            boolean includeButtons = !SlackHitlSupport.parseApproverUserIds(hitlApproverUserIds).isEmpty();
+            boolean hasApprovers = !SlackHitlSupport.parseApproverUserIds(hitlApproverUserIds).isEmpty();
+            // The pause id binds a click to THIS pause, so a card left in the channel
+            // cannot approve a later one. Without it the buttons could only be bound
+            // to "whatever is paused now" — so none are rendered.
+            String pauseId = HitlDecision.pauseIdOf(event.pausedAt());
+            boolean includeButtons = hasApprovers && pauseId != null;
             String phase = event.phaseName() != null ? event.phaseName() : ("phase " + event.phaseIndex());
             // The button value carries the owning integration name so the group
             // decision is bound to THIS integration at the interactivity endpoint.
             String actionValue = SlackHitlSupport.buildActionValue(integrationName,
-                    SlackHitlSupport.GROUP_VALUE_PREFIX + groupConversationId);
+                    SlackHitlSupport.GROUP_VALUE_PREFIX + groupConversationId, pauseId);
             var blocks = SlackHitlSupport.buildApprovalBlocks(
                     "⏸️ Discussion awaiting approval", "Discussion", groupConversationId,
                     phase, event.reason(), null,
-                    actionValue, includeButtons);
+                    actionValue, includeButtons, null, null,
+                    hasApprovers ? SlackHitlSupport.PAUSE_UNIDENTIFIED_NOTICE : SlackHitlSupport.NO_APPROVERS_NOTICE);
             String fallback = "Group discussion " + groupConversationId + " is awaiting human approval.";
             try {
                 slackApi.postBlocksMessage(authToken, hitlApprovalChannel, null, blocks, fallback);

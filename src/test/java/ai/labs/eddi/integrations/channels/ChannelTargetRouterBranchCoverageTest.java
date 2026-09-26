@@ -293,14 +293,14 @@ class ChannelTargetRouterBranchCoverageTest {
         @Test
         @DisplayName("no integration → null (empty maps)")
         void noIntegration() {
-            var result = router.resolveDefaultForDm("slack", "hello");
+            var result = router.resolveDefaultForDm("slack", "hello", "sig", Map.of());
             assertNull(result);
         }
 
         @Test
         @DisplayName("null channelType → empty prefix")
         void nullChannelType() {
-            var result = router.resolveDefaultForDm(null, "hello");
+            var result = router.resolveDefaultForDm(null, "hello", "sig", Map.of());
             assertNull(result);
         }
     }

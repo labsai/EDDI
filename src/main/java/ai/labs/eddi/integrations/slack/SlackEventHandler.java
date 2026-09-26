@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
@@ -78,6 +79,14 @@ public class SlackEventHandler {
      */
     private static final Pattern ANY_MENTION_PATTERN = Pattern.compile("<@[A-Z0-9]+(\\|[^>]*)?>");
 
+    /**
+     * Start-context keys a Slack-started conversation carries. The intent is the
+     * thread mapping key; the integration name binds the conversation to the
+     * integration that started it, for HITL decisions.
+     */
+    static final String CONTEXT_CHANNEL_INTENT = "channelIntent";
+    static final String CONTEXT_CHANNEL_INTEGRATION = "channelIntegration";
+
     /** Maximum Slack message length (safe limit under 4000). */
     private static final int MAX_SLACK_MESSAGE_LENGTH = 3900;
 
@@ -118,7 +127,7 @@ public class SlackEventHandler {
      * to prevent unbounded growth — follow-ups are only useful shortly after a
      * discussion finishes.
      */
-    private final ICache<String, SlackGroupDiscussionListener> activeGroupListeners;
+    private final ICache<String, GroupFollowUp> activeGroupListeners;
 
     /**
      * pause-identity key ({@code conversationId + '|' + hitlPausedAt-epochMillis})
@@ -182,13 +191,13 @@ public class SlackEventHandler {
      *            the parsed event JSON as a Map
      */
     /**
-     * @param botUserId
-     *            this app's own Slack user id, from the event envelope, or
-     *            {@code null} when it did not carry one. Used only to tell a
-     *            message addressed to this bot from one that merely mentions
-     *            somebody — see {@code handleObservedMessage}.
+     * @param envelope
+     *            who sent the event: the signing secret that verified it plus the
+     *            envelope's team/app ids and this app's own bot user id. Every
+     *            integration the event reaches is checked against it — see
+     *            {@link ChannelTargetRouter#matchesInbound}.
      */
-    public void handleEventAsync(String eventId, Map<String, Object> event, String botUserId) {
+    public void handleEventAsync(String eventId, Map<String, Object> event, SlackEventEnvelope envelope) {
         // De-duplicate: Slack retries events up to 3 times
         if (eventDedup.get(eventId) != null) {
             LOGGER.debugf("Duplicate Slack event %s — skipping", sanitize(eventId));
@@ -198,7 +207,7 @@ public class SlackEventHandler {
 
         executorService.submit(() -> {
             try {
-                handleEvent(event, botUserId);
+                handleEvent(event, envelope);
             } catch (Exception e) {
                 LOGGER.errorf(e, "Error handling Slack event %s", sanitize(eventId));
 
@@ -210,7 +219,10 @@ public class SlackEventHandler {
                 // ticket and a one-line config change.
                 String channelId = (String) event.get("channel");
                 String threadTs = getThreadTs(event);
-                if (channelId != null) {
+                // Only into a channel the sender's own integration serves: the
+                // apology goes out with that channel's bot token.
+                if (channelId != null && envelope != null && channelTargetRouter.channelMatchesInbound("slack", channelId,
+                        envelope.verifiedSigningSecret(), envelope.inboundIds())) {
                     boolean timedOut = hasCause(e, TimeoutException.class);
                     String notice = timedOut
                             ? "⏳ That took longer than " + slackConfig.getRequestTimeoutSeconds()
@@ -241,7 +253,15 @@ public class SlackEventHandler {
         return false;
     }
 
-    private void handleEvent(Map<String, Object> event, String botUserId) throws Exception {
+    // Package-private for unit testing: the routing checks are verified directly
+    // against this method rather than through the async executor.
+    void handleEvent(Map<String, Object> event, SlackEventEnvelope envelope) throws Exception {
+        if (envelope == null || envelope.verifiedSigningSecret() == null) {
+            // Nothing authenticated this event to any integration — act on none.
+            LOGGER.warn("[SLACK] Event without a verified signing secret — ignoring");
+            return;
+        }
+        String botUserId = envelope.botUserId();
         String eventType = (String) event.get("type");
         String eventSubtype = (String) event.get("subtype");
         String eventChannel = (String) event.get("channel");
@@ -274,7 +294,7 @@ public class SlackEventHandler {
                 // an observer is configured for the channel, which is the one case
                 // where the bot may speak without being addressed. A channel with no
                 // observers behaves exactly as it did before observe mode existed.
-                if (handleObservedMessage(event, eventChannel, botUserId)) {
+                if (handleObservedMessage(event, eventChannel, envelope)) {
                     return;
                 }
                 LOGGER.debugf("[SLACK] Ignoring top-level message event (use @mention)");
@@ -289,13 +309,14 @@ public class SlackEventHandler {
         }
 
         String text = (String) event.get("text");
-        String userId = (String) event.get("user");
+        String slackUserId = (String) event.get("user");
         String channelId = (String) event.get("channel");
 
-        if (text == null || text.isBlank() || userId == null || channelId == null) {
+        if (text == null || text.isBlank() || slackUserId == null || channelId == null) {
             LOGGER.debugf("Incomplete Slack event — missing text/user/channel");
             return;
         }
+        SlackUser user = slackUser(event, envelope);
 
         // Strip bot mention prefix: "<@U0123BOTID> hello" → "hello"
         text = stripBotMention(text);
@@ -303,7 +324,7 @@ public class SlackEventHandler {
         String threadTs = getThreadTs(event);
 
         if (text.isBlank()) {
-            postHelp(channelId, threadTs, null);
+            postHelpIfOwned(channelId, threadTs, envelope);
             return;
         }
 
@@ -313,11 +334,22 @@ public class SlackEventHandler {
 
         if (parentTs != null) {
             resolved = channelTargetRouter.resolveThreadTarget("slack", channelId, parentTs);
+            if (resolved != null && isDirectMessage && resolved.integration() == null
+                    && resolved.legacySigningSecret() == null) {
+                // A DM channel is named by no integration, so the lock alone carries
+                // no credentials. Attach the integration that owns DMs for the app
+                // that sent this event — the same one that took the first message.
+                var dmIntegration = channelTargetRouter.integrationForDm("slack",
+                        envelope.verifiedSigningSecret(), envelope.inboundIds());
+                if (dmIntegration.isPresent()) {
+                    resolved = new ResolvedTarget(resolved.target(), null, dmIntegration.get(), null, null);
+                }
+            }
         }
 
         // 2. Check group follow-up (thread root was a group discussion)
         if (resolved == null && parentTs != null
-                && tryHandleAgentFollowUp(parentTs, channelId, userId, text, threadTs)) {
+                && tryHandleAgentFollowUp(parentTs, channelId, user, text, threadTs, envelope)) {
             return;
         }
 
@@ -326,15 +358,27 @@ public class SlackEventHandler {
             resolved = channelTargetRouter.resolveTarget("slack", channelId, text);
         }
 
-        // 4. DM fallback: if no explicit config for this channel (DMs use dynamic
-        // D-prefixed IDs), fall back to any configured Slack integration's default
-        // target
+        // 4. DM fallback: DMs use dynamic D-prefixed ids no integration names, so
+        // fall back to the default target of the integration the SENDING app's
+        // credentials belong to (H4d — never simply "the first one").
         if (resolved == null && isDirectMessage) {
-            resolved = channelTargetRouter.resolveDefaultForDm("slack", text);
+            resolved = channelTargetRouter.resolveDefaultForDm("slack", text,
+                    envelope.verifiedSigningSecret(), envelope.inboundIds());
         }
 
         if (resolved == null) {
-            postHelp(channelId, threadTs, null);
+            postHelpIfOwned(channelId, threadTs, envelope);
+            return;
+        }
+
+        // 5. The route must belong to the app that sent the event (H4a). The body
+        // names the channel, and the signature only proves that SOME configured app
+        // signed it — so without this, anyone holding one integration's signing
+        // secret could run turns, as any Slack user, against another integration's
+        // agents, answered with that integration's bot token.
+        if (!ChannelTargetRouter.matchesInbound(resolved, envelope.verifiedSigningSecret(), envelope.inboundIds())) {
+            LOGGER.warnf("[SLACK] Event for channel %s was signed by a different integration's app — ignoring",
+                    sanitize(channelId));
             return;
         }
 
@@ -346,9 +390,65 @@ public class SlackEventHandler {
         // Resolve bot token once — passed explicitly to all post methods
         String botToken = resolved.botToken();
         switch (resolved.target().getType()) {
-            case AGENT -> handleAgentConversation(resolved, channelId, userId, threadTs, text, botToken);
-            case GROUP -> handleGroupDiscussion(resolved, channelId, userId, threadTs, text, botToken);
+            case AGENT -> handleAgentConversation(resolved, channelId, user, threadTs, text, botToken);
+            case GROUP -> handleGroupDiscussion(resolved, channelId, user, threadTs, text, botToken);
             default -> LOGGER.warnf("Unsupported target type: %s", resolved.target().getType());
+        }
+    }
+
+    /**
+     * The Slack user behind an event, as EDDI identifies them.
+     *
+     * @param eddiUserId
+     *            the userId conversations, memories and group discussions are keyed
+     *            by
+     * @param legacyUserId
+     *            the id an earlier release used for the same person — the raw Slack
+     *            id — when it differs from {@code eddiUserId}, else {@code null}.
+     *            Only ever used to find a thread's EXISTING conversation, so an
+     *            upgrade does not fork every open thread.
+     */
+    record SlackUser(String eddiUserId, String legacyUserId) {
+    }
+
+    /**
+     * Resolve {@link SlackUser} for an event.
+     * <p>
+     * Slack user ids are unique within a workspace, not across workspaces, and EDDI
+     * keyed conversations and long-term memory by the bare id. With one deployment
+     * serving several workspaces, two different people could share an id — and so
+     * each other's memories. Namespacing by the user's team
+     * ({@code slack:<teamId>:<userId>}) makes the key unique. The team is the
+     * event's {@code user_team} (set for Slack Connect users from another org),
+     * else {@code team}, else the envelope's {@code team_id}; with none of them, or
+     * with {@code eddi.slack.namespace-user-ids=false}, the bare id is kept.
+     */
+    SlackUser slackUser(Map<String, Object> event, SlackEventEnvelope envelope) {
+        String rawUserId = (String) event.get("user");
+        if (!slackConfig.isNamespaceUserIds()) {
+            return new SlackUser(rawUserId, null);
+        }
+        String team = firstNonBlank(stringValue(event.get("user_team")),
+                firstNonBlank(stringValue(event.get("team")), envelope != null ? envelope.teamId() : null));
+        if (team == null || team.isBlank()) {
+            return new SlackUser(rawUserId, null);
+        }
+        return new SlackUser("slack:" + team + ":" + rawUserId, rawUserId);
+    }
+
+    private static String stringValue(Object value) {
+        return value instanceof String s && !s.isBlank() ? s : null;
+    }
+
+    /**
+     * Post the help message only into a channel served by the integration whose app
+     * sent the event — the reply goes out with that channel's bot token, and a
+     * foreign app must not be able to make this bot speak in it.
+     */
+    private void postHelpIfOwned(String channelId, String threadTs, SlackEventEnvelope envelope) {
+        if (channelTargetRouter.channelMatchesInbound("slack", channelId, envelope.verifiedSigningSecret(),
+                envelope.inboundIds())) {
+            postHelp(channelId, threadTs, null);
         }
     }
 
@@ -365,9 +465,9 @@ public class SlackEventHandler {
      * @return {@code true} when an observer took the message, so the caller stops
      */
     private boolean handleObservedMessage(Map<String, Object> event, String channelId,
-                                          String botUserId) {
+                                          SlackEventEnvelope envelope) {
         try {
-            return observeMessage(event, channelId, botUserId);
+            return observeMessage(event, channelId, envelope);
         } catch (RuntimeException e) {
             // Selection runs synchronously inside handleEvent, whose catch posts
             // a user-visible apology into the channel. Nobody addressed the bot
@@ -397,10 +497,11 @@ public class SlackEventHandler {
     }
 
     private boolean observeMessage(Map<String, Object> event, String channelId,
-                                   String botUserId) {
+                                   SlackEventEnvelope envelope) {
         if (channelId == null) {
             return false;
         }
+        String botUserId = envelope.botUserId();
         String subtype = (String) event.get("subtype");
         if (!isObservableSubtype(subtype)) {
             LOGGER.debugf("[OBSERVE] Ignoring subtype %s in channel %s",
@@ -411,12 +512,20 @@ public class SlackEventHandler {
         if (candidates.isEmpty()) {
             return false;
         }
-
-        String text = (String) event.get("text");
-        String userId = (String) event.get("user");
-        if (userId == null) {
+        // Same rule as an addressed message (H4a): only the app whose integration
+        // serves this channel may make its observers speak.
+        if (!channelTargetRouter.channelMatchesInbound("slack", channelId, envelope.verifiedSigningSecret(),
+                envelope.inboundIds())) {
+            LOGGER.warnf("[OBSERVE] Event for channel %s was signed by a different integration's app — ignoring",
+                    sanitize(channelId));
             return false;
         }
+
+        String text = (String) event.get("text");
+        if (event.get("user") == null) {
+            return false;
+        }
+        SlackUser user = slackUser(event, envelope);
         // Slack delivers a channel mention TWICE: once as `message` and once as
         // `app_mention`. `app_mention` is the one that routes, so observing the
         // `message` copy would answer the same sentence a second time, possibly
@@ -472,7 +581,7 @@ public class SlackEventHandler {
             String conversationId = null;
             OptionalDouble costBefore = OptionalDouble.empty();
             try {
-                conversationId = observedConversationId(resolved, channelId, userId, threadTs);
+                conversationId = observedConversationId(resolved, channelId, user, threadTs);
                 costBefore = conversationCost(conversationId);
                 sendAndDeliver(resolved, conversationId, target.getTargetId(), channelId, threadTs,
                         message, botToken);
@@ -594,7 +703,7 @@ public class SlackEventHandler {
      * Handle a standard 1:1 agent conversation routed via ChannelTargetRouter.
      */
     private void handleAgentConversation(ResolvedTarget resolved, String channelId,
-                                         String userId, String threadTs, String originalText,
+                                         SlackUser user, String threadTs, String originalText,
                                          String botToken)
             throws Exception {
         String agentId = resolved.target().getTargetId();
@@ -610,7 +719,7 @@ public class SlackEventHandler {
         // (thread replies from resolveThreadTarget have strippedMessage=null)
         String message = resolved.strippedMessage() != null ? resolved.strippedMessage() : originalText;
 
-        String conversationId = getOrCreateConversation(agentId, userId, intent);
+        String conversationId = getOrCreateConversation(agentId, user, intent, integrationName(resolved));
         sendAndDeliver(resolved, conversationId, agentId, channelId, threadTs, message, botToken);
     }
 
@@ -619,13 +728,17 @@ public class SlackEventHandler {
      * addressed turn would use, so an observer and a mention in the same channel
      * and thread share one conversation rather than talking past each other.
      */
-    private String observedConversationId(ResolvedTarget resolved, String channelId, String userId,
+    private String observedConversationId(ResolvedTarget resolved, String channelId, SlackUser user,
                                           String threadTs)
             throws Exception {
         String agentId = resolved.target().getTargetId();
         String threadKey = threadTs != null ? threadTs : "main";
         String intent = "channel:slack:" + channelId + ":" + agentId + ":" + threadKey;
-        return getOrCreateConversation(agentId, userId, intent);
+        return getOrCreateConversation(agentId, user, intent, integrationName(resolved));
+    }
+
+    private static String integrationName(ResolvedTarget resolved) {
+        return resolved != null && resolved.integration() != null ? resolved.integration().getName() : null;
     }
 
     /**
@@ -783,7 +896,16 @@ public class SlackEventHandler {
         }
 
         String approverIds = platformConfig.get(SlackHitlSupport.CFG_HITL_APPROVER_USER_IDS);
-        boolean includeButtons = !SlackHitlSupport.parseApproverUserIds(approverIds).isEmpty();
+        boolean hasApprovers = !SlackHitlSupport.parseApproverUserIds(approverIds).isEmpty();
+        // H4b: the buttons carry the id of THIS pause, and the interactivity handler
+        // refuses a click whose pause is no longer current — so a card left in the
+        // channel cannot approve a later, different request. When the bookmark read
+        // could not identify the pause, a button could only mean "whatever is paused
+        // now"; none is rendered and the card says to decide elsewhere.
+        String pauseId = bookmark != null && bookmark.getConversationState() == ConversationState.AWAITING_HUMAN
+                ? HitlDecision.pauseIdOf(bookmark.getHitlPausedAt())
+                : null;
+        boolean includeButtons = hasApprovers && pauseId != null;
 
         String pauseReason = bookmark != null ? bookmark.getHitlPauseReason() : null;
         String timeoutInfo = bookmark != null
@@ -794,13 +916,14 @@ public class SlackEventHandler {
 
         // The button value carries the owning integration name so the decision is
         // bound to THIS integration at the interactivity endpoint (IDOR-safe).
-        String actionValue = SlackHitlSupport.buildActionValue(integration.getName(), conversationId);
+        String actionValue = SlackHitlSupport.buildActionValue(integration.getName(), conversationId, pauseId);
         String pauseType = bookmark != null ? bookmark.getHitlPauseType() : null;
         var pendingToolCalls = bookmark != null ? bookmark.getHitlPendingToolCalls() : null;
         var blocks = SlackHitlSupport.buildApprovalBlocks(
                 "⏸️ Conversation awaiting approval", "Conversation", conversationId,
                 agentId, pauseReason, timeoutInfo, actionValue, includeButtons,
-                pauseType, pendingToolCalls);
+                pauseType, pendingToolCalls,
+                hasApprovers ? SlackHitlSupport.PAUSE_UNIDENTIFIED_NOTICE : SlackHitlSupport.NO_APPROVERS_NOTICE);
         String fallback = "Conversation " + conversationId + " is awaiting human approval.";
 
         // H6: never send "Bearer null". If neither the resolved integration token
@@ -847,7 +970,7 @@ public class SlackEventHandler {
      * Handle a group discussion trigger routed via ChannelTargetRouter.
      */
     private void handleGroupDiscussion(ResolvedTarget resolved, String channelId,
-                                       String userId, String threadTs, String originalText,
+                                       SlackUser user, String threadTs, String originalText,
                                        String botToken) {
         String groupId = resolved.target().getTargetId();
 
@@ -881,12 +1004,12 @@ public class SlackEventHandler {
             LOGGER.infof("Starting group discussion in channel %s, group %s, question: %s",
                     sanitize(channelId), sanitize(groupId), sanitize(question.substring(0, Math.min(80, question.length()))));
 
-            groupConversationService.startAndDiscussAsync(groupId, question, userId, listener);
+            groupConversationService.startAndDiscussAsync(groupId, question, user.eddiUserId(), listener);
 
             // Only register for follow-up routing in expanded mode (compact has no
             // channel-level messages)
             if (listener.isExpandedMode()) {
-                executorService.submit(() -> registerAgentThreadMappings(listener));
+                executorService.submit(() -> registerAgentThreadMappings(listener, resolved, channelId));
             }
 
         } catch (Exception e) {
@@ -901,7 +1024,8 @@ public class SlackEventHandler {
      * Wait for the group discussion to complete, then register all agent message ts
      * mappings for follow-up routing.
      */
-    private void registerAgentThreadMappings(SlackGroupDiscussionListener listener) {
+    private void registerAgentThreadMappings(SlackGroupDiscussionListener listener, ResolvedTarget resolved,
+                                             String channelId) {
         // Wait for the group discussion to complete via the listener's latch
         int groupTimeout = slackConfig.getGroupCompletionTimeoutSeconds();
         boolean completed = listener.awaitCompletion(groupTimeout, TimeUnit.SECONDS);
@@ -913,11 +1037,27 @@ public class SlackEventHandler {
                     + "— follow-up routing may be incomplete", groupTimeout);
         }
 
-        // Register all agent message ts → listener for follow-up detection
+        // Register all agent message ts → listener for follow-up detection, together
+        // with the route that started the discussion: a follow-up is accepted only in
+        // the same channel and only from the app that route belongs to.
+        var followUp = new GroupFollowUp(listener, resolved, channelId);
         for (String ts : listener.getAgentMessageTsMap().values()) {
-            activeGroupListeners.put(ts, listener);
+            activeGroupListeners.put(ts, followUp);
             LOGGER.debugf("Registered agent thread ts=%s for follow-up routing", ts);
         }
+    }
+
+    /**
+     * A group discussion's agent thread, open for follow-ups.
+     *
+     * @param resolved
+     *            the route that started the discussion — its integration (or legacy
+     *            credentials) decide which app may continue the thread, and which
+     *            bot token answers
+     * @param channelId
+     *            the channel the discussion ran in
+     */
+    record GroupFollowUp(SlackGroupDiscussionListener listener, ResolvedTarget resolved, String channelId) {
     }
 
     // ─── Agent Thread Follow-up ───
@@ -929,12 +1069,25 @@ public class SlackEventHandler {
      * @return true if this was handled as a follow-up, false otherwise
      */
     private boolean tryHandleAgentFollowUp(String parentTs, String channelId,
-                                           String userId, String text, String threadTs)
+                                           SlackUser user, String text, String threadTs,
+                                           SlackEventEnvelope envelope)
             throws Exception {
-        SlackGroupDiscussionListener listener = activeGroupListeners.get(parentTs);
-        if (listener == null) {
+        GroupFollowUp followUp = activeGroupListeners.get(parentTs);
+        if (followUp == null) {
             return false; // Not a thread from a group discussion
         }
+        // The thread key is a bare Slack timestamp, so the event must also be in the
+        // discussion's channel and come from the app whose route started it (H4a).
+        if (!channelId.equals(followUp.channelId())
+                || !ChannelTargetRouter.matchesInbound(followUp.resolved(), envelope.verifiedSigningSecret(),
+                        envelope.inboundIds())) {
+            LOGGER.warnf("[SLACK] Follow-up for thread %s does not match the discussion's channel or app — ignoring",
+                    sanitize(parentTs));
+            return true;
+        }
+        SlackGroupDiscussionListener listener = followUp.listener();
+        String botToken = followUp.resolved().botToken();
+        String userId = user.eddiUserId();
 
         String agentId = listener.getAgentIdForMessageTs(parentTs);
         if (agentId == null) {
@@ -954,19 +1107,19 @@ public class SlackEventHandler {
 
         // Route to the specific agent from the group discussion
         String intent = "channel:followup:" + channelId + ":" + parentTs;
-        String conversationId = getOrCreateConversation(agentId, userId, intent);
+        String conversationId = getOrCreateConversation(agentId, user, intent, integrationName(followUp.resolved()));
 
-        // Follow-ups have no ResolvedTarget/integration config, so no approver
-        // notification is sent — but the pause notice and "still awaiting" handling
-        // still apply so the user is never left with a generic error.
+        // Follow-ups post no approver notification — but the pause notice and "still
+        // awaiting" handling still apply so the user is never left with a generic
+        // error.
         try {
             SimpleConversationMemorySnapshot snapshot = sendAndWait(conversationId, enrichedInput);
             if (snapshot == SKIPPED_STILL_AWAITING) {
-                postMessage(channelId, threadTs, SlackHitlSupport.STILL_AWAITING_NOTICE, null);
+                postMessage(channelId, threadTs, SlackHitlSupport.STILL_AWAITING_NOTICE, botToken);
                 return true;
             }
             if (snapshot == SKIPPED_NOT_ACTIVE) {
-                postMessage(channelId, threadTs, SlackHitlSupport.CONVERSATION_NOT_ACTIVE_NOTICE, null);
+                postMessage(channelId, threadTs, SlackHitlSupport.CONVERSATION_NOT_ACTIVE_NOTICE, botToken);
                 return true;
             }
             boolean paused = snapshot != null
@@ -974,14 +1127,14 @@ public class SlackEventHandler {
             String response = SlackHitlSupport.extractSlackResponseText(snapshot);
             if (paused) {
                 if (response != null && !response.startsWith("_")) {
-                    postMessageChunked(channelId, threadTs, response, null);
+                    postMessageChunked(channelId, threadTs, response, botToken);
                 }
-                postMessage(channelId, threadTs, buildPauseNotice(loadHitlBookmark(conversationId)), null);
+                postMessage(channelId, threadTs, buildPauseNotice(loadHitlBookmark(conversationId)), botToken);
             } else {
-                postMessageChunked(channelId, threadTs, response, null);
+                postMessageChunked(channelId, threadTs, response, botToken);
             }
         } catch (IConversationService.ConversationAwaitingApprovalException e) {
-            postMessage(channelId, threadTs, SlackHitlSupport.STILL_AWAITING_NOTICE, null);
+            postMessage(channelId, threadTs, SlackHitlSupport.STILL_AWAITING_NOTICE, botToken);
         }
 
         return true;
@@ -1015,20 +1168,36 @@ public class SlackEventHandler {
      * {@link IUserConversationStore} with intent key composed from integration +
      * target + thread.
      */
-    private String getOrCreateConversation(String agentId, String slackUserId,
-                                           String intent)
+    private String getOrCreateConversation(String agentId, SlackUser user, String intent, String integrationName)
             throws Exception {
+        String slackUserId = user.eddiUserId();
         // Try existing — readUserConversation returns null when not found,
         // throws ResourceStoreException only on real DB errors (which should propagate)
         UserConversation existing = userConversationStore.readUserConversation(intent, slackUserId);
         if (existing != null) {
             return existing.getConversationId();
         }
+        // A thread that was already running before user ids were namespaced is
+        // mapped under the bare Slack id. Keep using that conversation rather than
+        // forking the thread on upgrade; every NEW conversation is namespaced.
+        if (user.legacyUserId() != null) {
+            UserConversation legacy = userConversationStore.readUserConversation(intent, user.legacyUserId());
+            if (legacy != null) {
+                return legacy.getConversationId();
+            }
+        }
 
-        // Create new conversation
+        // Create new conversation. channelIntegration records which integration
+        // started it: a Slack approval decision is accepted only from THAT
+        // integration (SlackInteractivityHandler), so one integration's approvers
+        // cannot decide another's conversations — or ones Slack never started.
+        Map<String, Context> context = new HashMap<>();
+        context.put(CONTEXT_CHANNEL_INTENT, new Context(Context.ContextType.string, intent));
+        if (integrationName != null && !integrationName.isBlank()) {
+            context.put(CONTEXT_CHANNEL_INTEGRATION, new Context(Context.ContextType.string, integrationName));
+        }
         var result = conversationService.startConversation(
-                Deployment.Environment.production, agentId, slackUserId,
-                Map.of("channelIntent", new Context(Context.ContextType.string, intent)));
+                Deployment.Environment.production, agentId, slackUserId, context);
 
         // Store mapping
         var mapping = new UserConversation(intent, slackUserId,

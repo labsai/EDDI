@@ -16,6 +16,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
@@ -207,8 +208,10 @@ class ConversationServiceResumeTest {
             // An internally driven resume — a group approving on its own thread — has
             // no request to capture from, only the binding the dispatcher left. If the
             // service captured from the request alone it would get null, and a null
-            // identity now MASKS rather than inherits, erasing that binding.
-            var dispatcher = new CallerIdentity("tok", "approver", "https://eddi.example:443");
+            // identity now MASKS rather than inherits, erasing that binding. The
+            // dispatcher is the conversation's owner here: only then does the approving
+            // identity carry the whole turn (H5 — see the non-owner test below).
+            var dispatcher = new CallerIdentity("tok", USER_ID, "https://eddi.example:443");
             callerIdentityContext.bind(dispatcher);
 
             // Capture the callable submitted to the coordinator so we can execute it
@@ -261,12 +264,14 @@ class ConversationServiceResumeTest {
         }
 
         @Test
-        @DisplayName("the resumed turn runs under the STORED conversation principal and the approver's caller identity")
+        @DisplayName("H5: a non-owner approver is bound only for the approved calls; the turn itself has no caller")
         void approvedResume_bindsStoredPrincipalAndApproversCaller() throws Exception {
-            // The two are different people by design: the approver drives the request
-            // (audit, ${caller:token}), the conversation's owner owns the PER_USER
-            // credentials the approved call may spend. Reading the request identity
-            // for the principal ran approved calls against the approver's SaaS account.
+            // The two are different people by design: the approver decided, the
+            // conversation's owner owns the PER_USER credentials the approved call may
+            // spend. Reading the request identity for the principal ran approved calls
+            // against the approver's SaaS account. And binding the approver as the
+            // turn's caller handed every later ${caller:token} call — calls nobody
+            // previewed — the approver's token (H5).
             var principalContext = new ResolutionPrincipalContext();
             principalContext.clear();
             conversationService.resolutionPrincipalContext = principalContext;
@@ -282,9 +287,14 @@ class ConversationServiceResumeTest {
             doReturn(conversation).when(agent).continueConversation(any(IConversationMemory.class), any(), any());
             var principalDuringResume = new AtomicReference<ResolutionPrincipal>();
             var callerDuringResume = new AtomicReference<CallerIdentity>();
+            var approverDuringResume = new AtomicReference<CallerIdentity>();
+            var callerOfApprovedCall = new AtomicReference<CallerIdentity>();
             doAnswer(inv -> {
                 principalDuringResume.set(principalContext.current());
                 callerDuringResume.set(callerIdentityContext.current());
+                approverDuringResume.set(callerIdentityContext.approver());
+                // What ToolLoopResumer does around each approved call.
+                callerOfApprovedCall.set(callerIdentityContext.callAsApprover(callerIdentityContext::current));
                 return null;
             }).when(conversation).resume(any());
 
@@ -309,9 +319,73 @@ class ConversationServiceResumeTest {
 
             assertEquals(new ResolutionPrincipal(USER_ID, ResolutionPrincipal.Provenance.VERIFIED), principalDuringResume.get(),
                     "the principal must come from the STORED conversation — its owner and provenance — never from the resuming request");
-            assertEquals(approver, callerDuringResume.get(),
-                    "the caller must be the approver who drove the resume, for audit and ${caller:token}");
+            assertNull(callerDuringResume.get(),
+                    "a non-owner approver must not be the resumed turn's caller — later calls were never previewed");
+            assertEquals(approver, approverDuringResume.get(), "the approver is bound for the approved calls");
+            assertEquals(approver, callerOfApprovedCall.get(), "an approved call runs as the approver");
             assertNull(principalContext.current(), "the pooled thread must be left with no principal");
+            assertNull(callerIdentityContext.approver(), "the pooled thread must be left with no approver");
+        }
+
+        @Test
+        @DisplayName("H4b: a decision naming an earlier pause is refused before the CAS")
+        void staleDecision_refusedBeforeCas() throws Exception {
+            var snapshot = createResumeSnapshot();
+            snapshot.setHitlPausedAt(Instant.ofEpochMilli(2_000L));
+            doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+            HitlDecision decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.APPROVED);
+            decision.setPauseId(HitlDecision.pauseIdOf(Instant.ofEpochMilli(1_000L)));
+
+            assertThrows(IConversationService.PauseMismatchException.class,
+                    () -> conversationService.resumeConversation(CONVERSATION_ID, decision, null));
+
+            verify(conversationMemoryStore, never()).compareAndSetState(any(), any(), any());
+            verify(conversationCoordinator, never()).submitInOrder(any(), any());
+        }
+
+        @Test
+        @DisplayName("H4b: a pause that changes between the pre-check and the CAS is restored, not resumed")
+        void pauseChangedAfterPreCheck_restoredNotResumed() throws Exception {
+            doReturn(true).when(conversationMemoryStore).compareAndSetState(
+                    CONVERSATION_ID, ConversationState.AWAITING_HUMAN, ConversationState.IN_PROGRESS);
+            doReturn(true).when(conversationMemoryStore).compareAndSetState(
+                    CONVERSATION_ID, ConversationState.IN_PROGRESS, ConversationState.AWAITING_HUMAN);
+            var reviewed = createResumeSnapshot();
+            reviewed.setHitlPausedAt(Instant.ofEpochMilli(1_000L));
+            var repaused = createResumeSnapshot();
+            repaused.setHitlPausedAt(Instant.ofEpochMilli(2_000L));
+            doReturn(reviewed, repaused).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+            HitlDecision decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.APPROVED);
+            decision.setPauseId(HitlDecision.pauseIdOf(Instant.ofEpochMilli(1_000L)));
+
+            assertThrows(IConversationService.PauseMismatchException.class,
+                    () -> conversationService.resumeConversation(CONVERSATION_ID, decision, null));
+
+            verify(conversationMemoryStore).compareAndSetState(
+                    CONVERSATION_ID, ConversationState.IN_PROGRESS, ConversationState.AWAITING_HUMAN);
+            verify(conversationCoordinator, never()).submitInOrder(any(), any());
+        }
+
+        @Test
+        @DisplayName("H4b: a decision naming the current pause proceeds")
+        void matchingPauseId_proceeds() throws Exception {
+            doReturn(true).when(conversationMemoryStore).compareAndSetState(
+                    CONVERSATION_ID, ConversationState.AWAITING_HUMAN, ConversationState.IN_PROGRESS);
+            var snapshot = createResumeSnapshot();
+            snapshot.setHitlPausedAt(Instant.ofEpochMilli(1_000L));
+            doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+            IAgent agent = mock(IAgent.class);
+            doReturn(agent).when(agentFactory).getAgent(ENV, AGENT_ID, AGENT_VERSION);
+            doReturn(mock(IConversation.class)).when(agent).continueConversation(any(IConversationMemory.class), any(), any());
+            HitlDecision decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.APPROVED);
+            decision.setPauseId(HitlDecision.pauseIdOf(Instant.ofEpochMilli(1_000L)));
+
+            conversationService.resumeConversation(CONVERSATION_ID, decision, null);
+
+            verify(conversationCoordinator).submitInOrder(eq(CONVERSATION_ID), any());
         }
 
         @Test

@@ -254,6 +254,7 @@ public class CallerIdentityContext {
      */
     public void clear() {
         CURRENT.remove();
+        APPROVER.remove();
     }
 
     /** The identity bound to this thread, or {@code null}. */
@@ -293,12 +294,95 @@ public class CallerIdentityContext {
      * resume, where the two identities are different people).
      */
     public <T> Callable<T> propagate(Callable<T> work) {
-        return withIdentity(current(), PRINCIPALS.propagate(work));
+        return withIdentity(current(), withApprover(approver(), PRINCIPALS.propagate(work)));
     }
 
     /** {@link #propagate(Callable)} for work dispatched as a {@link Runnable}. */
     public Runnable propagate(Runnable work) {
-        return withIdentity(current(), PRINCIPALS.propagate(work));
+        return withIdentity(current(), withApprover(approver(), PRINCIPALS.propagate(work)));
+    }
+
+    // ─── The approver of a HITL resume ─────────────────────────────────────────
+
+    /**
+     * The person who approved the tool calls a resumed turn is about to replay,
+     * when that person is NOT the conversation's owner.
+     * <p>
+     * A separate binding from {@link #CURRENT} on purpose. A resumed turn runs with
+     * no caller when somebody other than the owner approved it — see
+     * {@code ConversationHitlService#resumeConversation} — because the approver saw
+     * the gated calls and nothing else: every other call the turn makes, including
+     * everything after a RULE pause, was never shown to them. Only the resume loop
+     * promotes this to the caller, and only around the execution of a call the
+     * approver explicitly approved ({@link #callAsApprover}).
+     */
+    private static final ThreadLocal<CallerIdentity> APPROVER = new ThreadLocal<>();
+
+    /** The approver bound to this thread, or {@code null}. */
+    public CallerIdentity approver() {
+        return APPROVER.get();
+    }
+
+    /**
+     * Bind {@code approver} (or nothing, for {@code null}) around {@code work},
+     * restoring the previous binding afterwards — the same contract as
+     * {@link #withIdentity(CallerIdentity, Callable)}.
+     */
+    public <T> Callable<T> withApprover(CallerIdentity approver, Callable<T> work) {
+        return () -> {
+            final CallerIdentity previous = APPROVER.get();
+            bindApprover(approver);
+            try {
+                return work.call();
+            } finally {
+                bindApprover(previous);
+            }
+        };
+    }
+
+    /** {@link #withApprover(CallerIdentity, Callable)} for a {@link Runnable}. */
+    public Runnable withApprover(CallerIdentity approver, Runnable work) {
+        return () -> {
+            final CallerIdentity previous = APPROVER.get();
+            bindApprover(approver);
+            try {
+                work.run();
+            } finally {
+                bindApprover(previous);
+            }
+        };
+    }
+
+    /**
+     * Run {@code work} — the execution of ONE human-approved tool call — as the
+     * approver, when an approver is bound; otherwise under whatever caller the turn
+     * already has (which is the approver themselves when they own the
+     * conversation).
+     */
+    public <T> T callAsApprover(Supplier<T> work) {
+        CallerIdentity approver = APPROVER.get();
+        if (approver == null) {
+            return work.get();
+        }
+        return withIdentitySupplying(approver, work).get();
+    }
+
+    /**
+     * Whether {@code identity} is the user {@code userId} — the test for "the
+     * approver owns the conversation they are deciding". Anonymous identities and
+     * ownerless conversations never match.
+     */
+    public static boolean isSameUser(CallerIdentity identity, String userId) {
+        return identity != null && identity.userId() != null && !identity.userId().isBlank()
+                && identity.userId().equals(userId);
+    }
+
+    private static void bindApprover(CallerIdentity approver) {
+        if (approver == null) {
+            APPROVER.remove();
+        } else {
+            APPROVER.set(approver);
+        }
     }
 
     /**

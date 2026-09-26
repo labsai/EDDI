@@ -63,29 +63,46 @@ public class SlackSignatureVerifier {
      */
     public boolean verify(String timestamp, String rawBody, String signature,
                           Collection<String> signingSecrets) {
+        return matchingSecret(timestamp, rawBody, signature, signingSecrets) != null;
+    }
+
+    /**
+     * Verify the request against the pool of signing secrets and return WHICH
+     * secret authenticated it.
+     * <p>
+     * Knowing that some secret matched is not enough for the events webhook: the
+     * secret identifies the Slack app that sent the request, and the event may only
+     * act on integrations that app's secret belongs to. A boolean answer let the
+     * holder of any one integration's secret address every other integration's
+     * channels, simply by naming them in the body.
+     *
+     * @return the matching secret, or {@code null} when none matches, a header is
+     *         missing, or the timestamp is stale
+     */
+    public String matchingSecret(String timestamp, String rawBody, String signature,
+                                 Collection<String> signingSecrets) {
         if (timestamp == null || rawBody == null || signature == null) {
             LOGGER.warn("Slack signature verification: missing required headers");
-            return false;
+            return null;
         }
 
         if (signingSecrets == null || signingSecrets.isEmpty()) {
             LOGGER.warn("Slack signature verification: no signing secrets configured");
-            return false;
+            return null;
         }
 
         if (!isTimestampFresh(timestamp)) {
-            return false;
+            return null;
         }
 
-        // Try each signing secret — return true on first match
         for (String secret : signingSecrets) {
             if (matchesSecret(timestamp, rawBody, signature, secret)) {
-                return true;
+                return secret;
             }
         }
 
         LOGGER.debug("Slack signature verification failed: no matching signing secret");
-        return false;
+        return null;
     }
 
     /**

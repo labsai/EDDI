@@ -458,6 +458,13 @@ public class RestAgentEngine implements IRestAgentEngine {
             LOGGER.infof("Resume of conversation %s rejected (invalid request): %s", sanitize(conversationId), e.getMessage());
             return Response.status(Response.Status.BAD_REQUEST).type(TEXT_PLAIN)
                     .entity(e.getMessage()).build();
+        } catch (IConversationService.PauseMismatchException e) {
+            // The decision named a pause (pauseId) that is no longer the current one.
+            // Fixed text: the current pause is untouched and awaits a fresh decision.
+            return Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN)
+                    .entity("The pending approval changed since this decision was made (pauseId no longer current) — "
+                            + "re-read approval-status and decide again.")
+                    .build();
         } catch (IllegalStateException e) {
             // wrong state (already resumed/cancelled/timed out, agent not deployed).
             // Contract (docs/hitl.md): the 409 body names the CURRENT state so the
@@ -518,6 +525,9 @@ public class RestAgentEngine implements IRestAgentEngine {
             summary.put("conversationId", conversationId);
             summary.put("state", snapshot.getConversationState().name());
             summary.put("pausedAt", paused && snapshot.getHitlPausedAt() != null ? snapshot.getHitlPausedAt().toString() : "");
+            // The id a decision passes back as HitlDecision.pauseId, so it applies only
+            // to the pause the reviewer is looking at.
+            summary.put("pauseId", paused && snapshot.getHitlPausedAt() != null ? HitlDecision.pauseIdOf(snapshot.getHitlPausedAt()) : "");
             summary.put("pauseReason", paused && snapshot.getHitlPauseReason() != null ? snapshot.getHitlPauseReason() : "");
             summary.put("timeoutPolicy", paused && snapshot.getHitlTimeoutPolicy() != null ? snapshot.getHitlTimeoutPolicy().name() : "");
             summary.put("approvalTimeout", paused && snapshot.getHitlApprovalTimeout() != null ? snapshot.getHitlApprovalTimeout() : "");

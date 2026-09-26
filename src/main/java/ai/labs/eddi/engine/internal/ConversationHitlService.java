@@ -213,6 +213,24 @@ class ConversationHitlService {
             super(message);
         }
     }
+
+    /**
+     * Refuse a decision that names a pause other than the one that started at
+     * {@code currentPausedAt} — see {@code HitlDecision#pauseId}.
+     */
+    private static void requireDecisionMatchesPause(String conversationId, HitlDecision decision, Instant currentPausedAt) {
+        if (!decision.appliesToPause(currentPausedAt)) {
+            throw pauseMismatch(conversationId);
+        }
+    }
+
+    private static IConversationService.PauseMismatchException pauseMismatch(String conversationId) {
+        LOGGER.infof("Refusing a HITL decision for conversation %s: it names a pause that is no longer current",
+                sanitize(conversationId));
+        return new IConversationService.PauseMismatchException(
+                "The pending approval changed since this decision was made — the conversation was resumed and has "
+                        + "paused again on a different request. Review the current request and decide again.");
+    }
     public void resumeConversation(String conversationId,
                                    HitlDecision decision,
                                    ConversationResponseHandler handler)
@@ -243,10 +261,19 @@ class ConversationHitlService {
         // this path (the 404 check above uses the cheaper getConversationState), and
         // it is skipped entirely when toolDecisions is absent so the overwhelmingly
         // common plain-verdict resume incurs no extra load.
-        if (decision != null && decision.getToolDecisions() != null && !decision.getToolDecisions().isEmpty()) {
+        boolean hasToolDecisions = decision.getToolDecisions() != null && !decision.getToolDecisions().isEmpty();
+        boolean namesPause = decision.getPauseId() != null && !decision.getPauseId().isBlank();
+        if (hasToolDecisions || namesPause) {
             var preCasSnapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
             if (preCasSnapshot != null) {
-                validateToolDecisions(decision, preCasSnapshot);
+                // A decision made for an earlier pause must not consume this one.
+                // Checked before the CAS so the common stale-card case never even
+                // flickers the state; re-checked after it against the snapshot the
+                // resume actually runs on, which closes the window in between.
+                requireDecisionMatchesPause(conversationId, decision, preCasSnapshot.getHitlPausedAt());
+                if (hasToolDecisions) {
+                    validateToolDecisions(decision, preCasSnapshot);
+                }
             }
         }
         if (!conversationMemoryStore.compareAndSetState(conversationId,
@@ -291,6 +318,14 @@ class ConversationHitlService {
             // (Exception e) below, which restores the pause exactly like any other
             // pre-conversion failure on this path.
             snapshot = ConversationSchemaMigrations.prepareForResume(snapshot);
+            if (!decision.appliesToPause(snapshot.getHitlPausedAt())) {
+                // Lost the race the pre-CAS check narrows: the pause changed between
+                // that read and the CAS. The CAS consumed THIS (different) pause, so
+                // put it back untouched — its timeout schedule is still armed, since
+                // the delete happens only once the resume is committed below.
+                restorePauseAfterFailedResume(conversationId, null, false);
+                throw pauseMismatch(conversationId);
+            }
             memory = convertConversationMemorySnapshot(snapshot);
             memory.setConversationState(ConversationState.AWAITING_HUMAN);
             agentId = snapshot.getAgentId();
@@ -300,8 +335,8 @@ class ConversationHitlService {
             prePauseBatch = memory.getHitlPendingToolCalls();
             prePauseFingerprint = prePauseBatch != null ? prePauseBatch.getFingerprint() : null;
             prePauseAutoApproveCount = prePauseBatch != null ? prePauseBatch.getAutoApproveCount() : 0;
-        } catch (ResourceNotFoundException e) {
-            throw e; // genuinely deleted — nothing to restore into
+        } catch (ResourceNotFoundException | IConversationService.PauseMismatchException e) {
+            throw e; // genuinely deleted, or already restored above
         } catch (Exception e) {
             // transient store failure loading the snapshot — restore the pause. No
             // re-arm needed: the timeout schedule is deleted only after this load
@@ -363,12 +398,24 @@ class ConversationHitlService {
 
             Map<String, String> loggingContext = contextLogger.createLoggingContext(environment, agentId, conversationId, memory.getUserId());
 
-            // The resume is itself an authenticated request, so the pipeline it
-            // continues should run as the person who approved — captured here, on
-            // the request thread, for the same reason as in the say path. Falls back
-            // to the thread binding for an internally driven resume, which has no
+            // Whose credentials does the resumed turn carry? Captured here, on the
+            // request thread, for the same reason as in the say path; falls back to
+            // the thread binding for an internally driven resume, which has no
             // request to capture from.
-            final CallerIdentity resumeCallerIdentity = callerIdentityContext.captureOrCurrent();
+            //
+            // The approver's identity covers exactly what the approver saw. When the
+            // approver IS the conversation's owner nothing changes hands, so the
+            // whole turn runs as them, as a say would. When it is somebody else — an
+            // admin or an eddi-approver deciding a user's pause — binding them for
+            // the whole turn handed every later ${caller:token} call the approver's
+            // token, including calls made after a RULE pause that nobody previewed.
+            // So the turn runs with no caller (caller-bound calls fail closed, as on
+            // a scheduled turn), and the approver is bound only around the tool calls
+            // they explicitly approved — see ToolLoopResumer.
+            final CallerIdentity approverIdentity = callerIdentityContext.captureOrCurrent();
+            final boolean approverOwnsConversation = CallerIdentityContext.isSameUser(approverIdentity, memory.getUserId());
+            final CallerIdentity resumeCallerIdentity = approverOwnsConversation ? approverIdentity : null;
+            final CallerIdentity approvedCallsIdentity = approverOwnsConversation ? null : approverIdentity;
 
             Callable<Void> resumeCallable = () -> {
                 // #3: a cancel or a terminal end may have landed between the CAS
@@ -497,18 +544,18 @@ class ConversationHitlService {
             IDiscardableTask guardedResume = new IDiscardableTask() {
                 public Void call() {
                     try {
-                        // The resume runs as the caller who approved: the identity was
-                        // captured on the REST request thread above, because this body
-                        // already runs on a pool thread with no request context.
-                        // Both bindings, because the approver drives the request but the
-                        // conversation owner owns the credentials: the CallerIdentity is
-                        // what audit and ${caller:token} must see, while a PER_USER
-                        // credential the resumed turn spends belongs to the user who
-                        // asked — never to the administrator who approved on their
-                        // behalf.
+                        // The identities were captured on the REST request thread
+                        // above, because this body already runs on a pool thread with
+                        // no request context. Three bindings: the turn's caller (the
+                        // approver only when they own the conversation), the approver
+                        // for the calls they approved, and the conversation owner's
+                        // resolution principal — a PER_USER credential the resumed turn
+                        // spends belongs to the user who asked, never to the
+                        // administrator who approved on their behalf.
                         conversationService.waitForExecutionFinishOrTimeout(loggingContext, conversationId,
                                 runtime.submitCallable(withConversationPrincipal(memory,
-                                        callerIdentityContext.withIdentity(resumeCallerIdentity, resumeCallable)),
+                                        callerIdentityContext.withIdentity(resumeCallerIdentity,
+                                                callerIdentityContext.withApprover(approvedCallsIdentity, resumeCallable))),
                                         resumeFinished, null));
                     } finally {
                         // value-conditional: never evict a newer execution's registration

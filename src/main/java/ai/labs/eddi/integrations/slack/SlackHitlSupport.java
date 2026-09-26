@@ -103,19 +103,34 @@ public final class SlackHitlSupport {
      * produced (backward compat with cards posted before this change).
      */
     public static String buildActionValue(String integrationName, String subject) {
-        if (integrationName == null || integrationName.isBlank()) {
-            return subject;
-        }
-        return integrationName + VALUE_SEPARATOR + subject;
+        return buildActionValue(integrationName, subject, null);
+    }
+
+    /**
+     * {@link #buildActionValue(String, String)} additionally carrying the id of the
+     * pause the card was posted for: {@code <integrationName>|<subject>|<pauseId>}.
+     * <p>
+     * The pause id is what makes a click apply to the request the approver was
+     * shown. Without it, a card left in the channel approved whatever pause the
+     * conversation happened to be in when somebody clicked — a later, different
+     * request included. The interactivity handler refuses a decision whose pause id
+     * does not match the current pause, and refuses a card that carries none.
+     */
+    public static String buildActionValue(String integrationName, String subject, String pauseId) {
+        String base = integrationName == null || integrationName.isBlank()
+                ? subject
+                : integrationName + VALUE_SEPARATOR + subject;
+        return pauseId == null || pauseId.isBlank() ? base : base + VALUE_SEPARATOR + pauseId;
     }
 
     /**
      * Parse an approval button value into the owning integration name (may be null
-     * for legacy bare values) and the subject (conversationId or
-     * {@code group:<id>}). Only the FIRST separator splits — integration names must
-     * not contain {@code |} (validated at the integration store), but a subject id
-     * never does, so splitting on the first separator is safe. Returns {@code null}
-     * only for a null/blank value.
+     * for legacy bare values), the subject (conversationId or {@code group:<id>})
+     * and the pause id (may be null for cards posted before pause ids existed).
+     * Integration names must not contain {@code |} (validated at the integration
+     * store) and subject ids never do, so the first separator ends the name and a
+     * second one ends the subject. Returns {@code null} only for a null/blank
+     * value.
      */
     public static ActionValue parseActionValue(String value) {
         if (value == null || value.isBlank()) {
@@ -124,11 +139,18 @@ public final class SlackHitlSupport {
         int sep = value.indexOf(VALUE_SEPARATOR);
         if (sep < 0) {
             // Legacy bare value — no integration binding available.
-            return new ActionValue(null, value);
+            return new ActionValue(null, value, null);
         }
         String integrationName = value.substring(0, sep);
-        String subject = value.substring(sep + VALUE_SEPARATOR.length());
-        return new ActionValue(integrationName.isBlank() ? null : integrationName, subject);
+        String rest = value.substring(sep + VALUE_SEPARATOR.length());
+        String pauseId = null;
+        int pauseSep = rest.indexOf(VALUE_SEPARATOR);
+        if (pauseSep >= 0) {
+            pauseId = rest.substring(pauseSep + VALUE_SEPARATOR.length());
+            rest = rest.substring(0, pauseSep);
+        }
+        return new ActionValue(integrationName.isBlank() ? null : integrationName, rest,
+                pauseId == null || pauseId.isBlank() ? null : pauseId);
     }
 
     /**
@@ -139,8 +161,11 @@ public final class SlackHitlSupport {
      *            value (no integration binding — treated as unverifiable)
      * @param subject
      *            the conversationId, or {@code group:<groupConversationId>}
+     * @param pauseId
+     *            the pause the card was posted for, or {@code null} for a card that
+     *            predates pause ids (refused: it cannot be bound to a pause)
      */
-    public record ActionValue(String integrationName, String subject) {
+    public record ActionValue(String integrationName, String subject, String pauseId) {
         /** Whether the subject targets a group discussion. */
         public boolean isGroup() {
             return subject != null && subject.startsWith(GROUP_VALUE_PREFIX);
@@ -243,6 +268,30 @@ public final class SlackHitlSupport {
                                                                 String title, String subjectLabel, String subjectId, String agentLabel,
                                                                 String pauseReason, String timeoutInfo, String actionValue, boolean includeButtons,
                                                                 String pauseType, PendingToolCallBatch pendingToolCalls) {
+        return buildApprovalBlocks(title, subjectLabel, subjectId, agentLabel, pauseReason, timeoutInfo, actionValue,
+                includeButtons, pauseType, pendingToolCalls, NO_APPROVERS_NOTICE);
+    }
+
+    /** The no-buttons notice when no approver list is configured. */
+    public static final String NO_APPROVERS_NOTICE = "No approver user ids configured — approve or reject via the API.";
+
+    /**
+     * The no-buttons notice when the pause could not be identified, so a button
+     * could not be bound to it (see
+     * {@link #buildActionValue(String, String, String)}).
+     */
+    public static final String PAUSE_UNIDENTIFIED_NOTICE = "The pending request could not be identified for this card — "
+            + "approve or reject via the API or the Manager.";
+
+    /**
+     * The full builder. {@code noButtonsNotice} is the context line shown in place
+     * of the buttons when {@code includeButtons} is false, so the card says why
+     * nobody can decide from it.
+     */
+    public static List<Map<String, Object>> buildApprovalBlocks(
+                                                                String title, String subjectLabel, String subjectId, String agentLabel,
+                                                                String pauseReason, String timeoutInfo, String actionValue, boolean includeButtons,
+                                                                String pauseType, PendingToolCallBatch pendingToolCalls, String noButtonsNotice) {
 
         var blocks = new ArrayList<Map<String, Object>>();
 
@@ -276,8 +325,7 @@ public final class SlackHitlSupport {
                     button("⛔ Reject", ACTION_REJECT, actionValue, "danger")));
             blocks.add(actions);
         } else {
-            blocks.add(context(
-                    "No approver user ids configured — approve or reject via the API."));
+            blocks.add(context(noButtonsNotice != null ? noButtonsNotice : NO_APPROVERS_NOTICE));
         }
 
         return blocks;
