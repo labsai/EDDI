@@ -16,6 +16,7 @@ import ai.labs.eddi.engine.internal.GroupApprovalRequest;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -74,6 +75,7 @@ public class SlackInteractivityHandler {
     private final IGroupConversationService groupConversationService;
     private final SlackWebApiClient slackApi;
     private final ObjectMapper objectMapper;
+    private final IUserConversationStore userConversationStore;
     private final ExecutorService executorService;
 
     @Inject
@@ -81,11 +83,13 @@ public class SlackInteractivityHandler {
             IConversationService conversationService,
             IGroupConversationService groupConversationService,
             SlackWebApiClient slackApi,
+            IUserConversationStore userConversationStore,
             ObjectMapper objectMapper) {
         this.channelTargetRouter = channelTargetRouter;
         this.conversationService = conversationService;
         this.groupConversationService = groupConversationService;
         this.slackApi = slackApi;
+        this.userConversationStore = userConversationStore;
         this.objectMapper = objectMapper;
         this.executorService = Executors.newVirtualThreadPerTaskExecutor();
     }
@@ -171,8 +175,15 @@ public class SlackInteractivityHandler {
                 ? platformConfig.get(SlackHitlSupport.CFG_HITL_APPROVER_USER_IDS)
                 : null;
 
-        // AUTHZ (fail-closed): the acting user must be an approver.
-        if (!SlackHitlSupport.isAuthorizedApprover(parsed.slackUserId(), approverIds)) {
+        // AUTHZ (fail-closed): the acting user must be an approver. An approver entry
+        // may be team-scoped (T…:U…), and when the integration pins its workspace, a
+        // clicking user who belongs to another team (Slack Connect) is refused even
+        // if their bare id happens to be on the list — ids are unique per team only.
+        String pinnedTeam = platformConfig != null ? platformConfig.get(ChannelTargetRouter.CFG_TEAM_ID) : null;
+        boolean foreignTeamUser = pinnedTeam != null && !pinnedTeam.isBlank() && parsed.slackUserTeamId() != null
+                && !pinnedTeam.trim().equals(parsed.slackUserTeamId());
+        if (foreignTeamUser
+                || !SlackHitlSupport.isAuthorizedApprover(parsed.slackUserId(), parsed.slackUserTeamId(), approverIds)) {
             LOGGER.warnf("Unauthorized Slack HITL decision attempt by user %s on channel %s",
                     sanitize(parsed.slackUserId()), sanitize(parsed.approvalChannelId()));
             postAuthzDenied(botToken, parsed.approvalChannelId(), parsed.slackUserId());
@@ -218,29 +229,23 @@ public class SlackInteractivityHandler {
      * <p>
      * A conversation belongs to an integration when (a) its agent is one of the
      * integration's targets, and (b) it was started by that integration — the
-     * {@code channelIntegration} start context the Slack adapter records. A
-     * conversation started before that context existed is accepted when its
-     * {@code channelIntent} names the integration's own channel.
+     * {@code channelIntegrationId} start context the Slack adapter records, holding
+     * the integration's store resource id. The id, not the name: a name can be
+     * renamed away and re-used by a newly created integration, which would then
+     * inherit the old one's paused conversations. A conversation started before the
+     * binding existed carries no id and is not decidable from Slack (the card for
+     * it is posted without buttons); it stays decidable from the Manager and the
+     * API.
      */
     static boolean conversationBelongsTo(ChannelIntegrationConfiguration integration, ConversationMemorySnapshot snapshot) {
-        if (snapshot == null || integration == null || integration.getName() == null) {
+        if (snapshot == null || integration == null || integration.getResourceId() == null) {
             return false;
         }
         boolean agentIsTarget = integration.getTargets() != null && integration.getTargets().stream()
                 .anyMatch(t -> t.getType() == ChannelTarget.TargetType.AGENT
                         && t.getTargetId() != null && t.getTargetId().equals(snapshot.getAgentId()));
-        if (!agentIsTarget) {
-            return false;
-        }
-        Map<?, ?> startContext = startContext(snapshot);
-        Object startedBy = startContext.get(SlackEventHandler.CONTEXT_CHANNEL_INTEGRATION);
-        if (startedBy != null) {
-            return integration.getName().equals(startedBy);
-        }
-        String channelId = integration.getPlatformConfig() != null ? integration.getPlatformConfig().get("channelId") : null;
-        return channelId != null && !channelId.isBlank()
-                && startContext.get(SlackEventHandler.CONTEXT_CHANNEL_INTENT) instanceof String intent
-                && intent.startsWith("channel:slack:" + channelId + ":");
+        return agentIsTarget
+                && integration.getResourceId().equals(startContext(snapshot).get(SlackEventHandler.CONTEXT_CHANNEL_INTEGRATION_ID));
     }
 
     /**
@@ -257,13 +262,25 @@ public class SlackInteractivityHandler {
 
     /**
      * H4c for a group discussion: its group must be one of the integration's
-     * targets.
+     * targets, AND the discussion must have been started through this integration —
+     * recorded by the Slack adapter as an origin mapping keyed by the integration's
+     * resource id. "The group is a target" alone would let any integration listing
+     * the group decide every discussion of it, including ones started over REST, by
+     * other users, or through another integration.
      */
-    static boolean groupBelongsTo(ChannelIntegrationConfiguration integration, GroupConversation gc) {
-        return gc != null && integration != null && integration.getTargets() != null
-                && integration.getTargets().stream()
-                        .anyMatch(t -> t.getType() == ChannelTarget.TargetType.GROUP
-                                && t.getTargetId() != null && t.getTargetId().equals(gc.getGroupId()));
+    boolean groupBelongsTo(ChannelIntegrationConfiguration integration, GroupConversation gc) throws Exception {
+        if (gc == null || integration == null || integration.getResourceId() == null || integration.getTargets() == null) {
+            return false;
+        }
+        boolean groupIsTarget = integration.getTargets().stream()
+                .anyMatch(t -> t.getType() == ChannelTarget.TargetType.GROUP
+                        && t.getTargetId() != null && t.getTargetId().equals(gc.getGroupId()));
+        if (!groupIsTarget || gc.getId() == null) {
+            return false;
+        }
+        var origin = userConversationStore.readUserConversation(SlackEventHandler.GROUP_ORIGIN_INTENT_PREFIX + gc.getId(),
+                SlackEventHandler.GROUP_ORIGIN_USER_PREFIX + integration.getResourceId());
+        return origin != null && gc.getId().equals(origin.getConversationId());
     }
 
     /**
@@ -287,6 +304,7 @@ public class SlackInteractivityHandler {
         String actionId = action.path("action_id").asText("");
         String rawValue = action.path("value").asText("");
         String slackUserId = payload.path("user").path("id").asText("");
+        String slackUserTeamId = blankToNull(payload.path("user").path("team_id").asText(null));
         String approvalChannelId = payload.path("channel").path("id").asText("");
         String messageTs = payload.path("message").path("ts").asText(null);
         var inboundIds = new HashMap<String, String>();
@@ -303,7 +321,7 @@ public class SlackInteractivityHandler {
             LOGGER.warn("Slack HITL action missing value — ignoring");
             return null;
         }
-        return new ParsedAction(verdict, value, slackUserId, approvalChannelId, messageTs, inboundIds);
+        return new ParsedAction(verdict, value, slackUserId, slackUserTeamId, approvalChannelId, messageTs, inboundIds);
     }
 
     private static String blankToNull(String value) {
@@ -419,7 +437,8 @@ public class SlackInteractivityHandler {
      * A parsed, actionable HITL decision from a block_actions payload.
      */
     private record ParsedAction(HitlVerdict verdict, SlackHitlSupport.ActionValue value,
-            String slackUserId, String approvalChannelId, String messageTs, Map<String, String> inboundIds) {
+            String slackUserId, String slackUserTeamId, String approvalChannelId, String messageTs,
+            Map<String, String> inboundIds) {
     }
 
     /**

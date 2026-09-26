@@ -8,6 +8,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
+import java.util.Optional;
+
 /**
  * Runtime configuration for the Slack channel ({@code eddi.slack.*}).
  * <p>
@@ -44,12 +46,22 @@ public class SlackConfig {
     private final int apiMaxRetries;
     private final long apiRetryBaseMs;
     private final boolean namespaceUserIds;
+    private final String legacyTeamId;
 
     /**
-     * The four tunables, with user ids namespaced by team — the shipped default.
+     * The four tunables, with bare Slack user ids — the shipped default.
      */
     public SlackConfig(int requestTimeoutSeconds, int groupCompletionTimeoutSeconds, int apiMaxRetries, long apiRetryBaseMs) {
-        this(requestTimeoutSeconds, groupCompletionTimeoutSeconds, apiMaxRetries, apiRetryBaseMs, true);
+        this(requestTimeoutSeconds, groupCompletionTimeoutSeconds, apiMaxRetries, apiRetryBaseMs, false, Optional.empty());
+    }
+
+    /**
+     * The four tunables plus the namespacing switch, with no configured legacy
+     * team.
+     */
+    public SlackConfig(int requestTimeoutSeconds, int groupCompletionTimeoutSeconds, int apiMaxRetries, long apiRetryBaseMs,
+            boolean namespaceUserIds) {
+        this(requestTimeoutSeconds, groupCompletionTimeoutSeconds, apiMaxRetries, apiRetryBaseMs, namespaceUserIds, Optional.empty());
     }
 
     @Inject
@@ -60,8 +72,10 @@ public class SlackConfig {
                             defaultValue = "" + DEFAULT_GROUP_COMPLETION_TIMEOUT_SECONDS) int groupCompletionTimeoutSeconds,
             @ConfigProperty(name = "eddi.slack.api-max-retries", defaultValue = "" + DEFAULT_API_MAX_RETRIES) int apiMaxRetries,
             @ConfigProperty(name = "eddi.slack.api-retry-base-ms", defaultValue = "" + DEFAULT_API_RETRY_BASE_MS) long apiRetryBaseMs,
-            @ConfigProperty(name = "eddi.slack.namespace-user-ids", defaultValue = "true") boolean namespaceUserIds) {
+            @ConfigProperty(name = "eddi.slack.namespace-user-ids", defaultValue = "false") boolean namespaceUserIds,
+            @ConfigProperty(name = "eddi.slack.legacy-team-id") Optional<String> legacyTeamId) {
         this.namespaceUserIds = namespaceUserIds;
+        this.legacyTeamId = legacyTeamId != null ? legacyTeamId.map(String::trim).filter(s -> !s.isEmpty()).orElse(null) : null;
 
         // A non-positive timeout would make every Slack turn fail instantly, and a
         // negative retry budget would skip the first attempt entirely. Fall back to the
@@ -99,10 +113,26 @@ public class SlackConfig {
      * rather than by the bare Slack id. Slack ids are unique only within a
      * workspace, so with several workspaces on one deployment the bare id can name
      * two different people — who would then share conversations and long-term
-     * memory. {@code false} restores the bare id, for a single-workspace deployment
-     * that wants to keep memories stored under it before this setting existed.
+     * memory.
+     * <p>
+     * Off by default: switching an existing deployment over changes every Slack
+     * user's EDDI id, which templates ({@code {userInfo.userId}}), long-term memory
+     * and GDPR requests are keyed by. A multi-workspace deployment opts in; see
+     * {@link #getLegacyTeamId()} for carrying existing memories over.
      */
     public boolean isNamespaceUserIds() {
         return namespaceUserIds;
+    }
+
+    /**
+     * The workspace that bare Slack ids stored before namespacing belonged to, or
+     * {@code null}. When set (or derivable because every routed integration pins
+     * the same {@code teamId}), a user of that workspace keeps their bare-id
+     * threads and has their bare-id long-term memories copied to the namespaced id
+     * on first contact. Without it nothing is aliased: in a multi-workspace
+     * deployment a bare id may already mix two people's data.
+     */
+    public String getLegacyTeamId() {
+        return legacyTeamId;
     }
 }

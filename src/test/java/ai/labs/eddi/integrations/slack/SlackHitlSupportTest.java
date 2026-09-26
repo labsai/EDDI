@@ -39,6 +39,16 @@ class SlackHitlSupportTest {
     }
 
     @Test
+    void isAuthorizedApprover_teamScopedEntries() {
+        String list = "U_BARE, T1:U_SCOPED";
+        assertTrue(SlackHitlSupport.isAuthorizedApprover("U_BARE", "T9", list), "a bare entry matches any team");
+        assertTrue(SlackHitlSupport.isAuthorizedApprover("U_SCOPED", "T1", list));
+        assertFalse(SlackHitlSupport.isAuthorizedApprover("U_SCOPED", "T2", list), "same id, other team");
+        assertFalse(SlackHitlSupport.isAuthorizedApprover("U_SCOPED", null, list), "a scoped entry needs a team");
+        assertFalse(SlackHitlSupport.isAuthorizedApprover("U_SCOPED", list), "the two-arg form carries no team");
+    }
+
+    @Test
     void isAuthorizedApprover_failsClosed_whenListUnset() {
         assertFalse(SlackHitlSupport.isAuthorizedApprover("U1", null));
         assertFalse(SlackHitlSupport.isAuthorizedApprover("U1", ""));

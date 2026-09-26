@@ -329,7 +329,8 @@ Full guide: [slack-integration.md](slack-integration.md).
 | `eddi.slack.group-completion-timeout-seconds` | `300` | How long a whole group discussion may take before follow-up routing gives up |
 | `eddi.slack.api-max-retries` | `3` | Attempts, including the first, for a Slack Web API call |
 | `eddi.slack.api-retry-base-ms` | `500` | Base delay for the exponential backoff between those attempts |
-| `eddi.slack.namespace-user-ids` | `true` | Identify a Slack user as `slack:<teamId>:<userId>` rather than the bare Slack id, which is unique only within one workspace. `false` keeps the bare id — for a single-workspace deployment that wants to keep reading long-term memories stored under it. Threads already running under a bare id keep their conversation either way |
+| `eddi.slack.namespace-user-ids` | `false` | Identify a Slack user as `slack:<teamId>:<userId>` rather than the bare Slack id, which is unique only within one workspace. Opt-in: turning it on changes every Slack user's EDDI id (`{userInfo.userId}`, long-term memory keys, GDPR requests) — see [slack-integration.md](slack-integration.md#slack-user-ids-across-workspaces). A startup warning is logged when it is off and more than one Slack app is configured |
+| `eddi.slack.legacy-team-id` | _(unset)_ | With namespacing on: the workspace whose users' bare-id data is carried over (running threads kept, long-term memories copied on first contact). Unset, it is derived when every routed Slack integration pins the same `teamId`; otherwise nothing is aliased |
 
 ### OpenAI-compatible API
 

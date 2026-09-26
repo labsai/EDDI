@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.channels.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.util.ArrayList;
@@ -30,6 +31,7 @@ public class ChannelIntegrationConfiguration {
     private Map<String, String> platformConfig;
     private List<ChannelTarget> targets;
     private String defaultTargetName;
+    private transient String resourceId;
 
     public ChannelIntegrationConfiguration() {
         this.platformConfig = new HashMap<>();
@@ -122,5 +124,24 @@ public class ChannelIntegrationConfiguration {
 
     public void setDefaultTargetName(String defaultTargetName) {
         this.defaultTargetName = defaultTargetName;
+    }
+
+    /**
+     * The store resource id of this integration, set by the channel router on its
+     * cached copies. Runtime-only — never stored, never serialized — so a stored
+     * document or REST body cannot carry one.
+     * <p>
+     * It is what a Slack-started conversation or discussion records as the
+     * integration that started it: unlike the name, it cannot be renamed onto or
+     * reused by a different integration.
+     */
+    @JsonIgnore
+    public String getResourceId() {
+        return resourceId;
+    }
+
+    @JsonIgnore
+    public void setResourceId(String resourceId) {
+        this.resourceId = resourceId;
     }
 }
