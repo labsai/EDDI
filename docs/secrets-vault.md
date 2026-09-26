@@ -306,8 +306,11 @@ When the **client flags input as secret** (via the `secretInput` context key):
 
 1. `Conversation.isSecretInputFlagged()` checks for `{"secretInput": {"type": "string", "value": "true"}}` in the context map
 2. `storeUserInputInMemory()` replaces the display value with `<secret input>` in conversation output
-3. The actual plaintext still flows through lifecycle data so `PropertySetterTask` can vault it
-4. The conversation log and API responses show `<secret input>` — **plaintext is never persisted**
+3. The actual plaintext still flows through lifecycle data for the whole turn, so tasks — the parser, `PropertySetterTask` — can use or vault it
+4. When the turn ends (completed, stopped, paused or failed), `Conversation.scrubSecretClientInput()` replaces `input:initial` and `input:normalized` with `<secret input>`, clears the parsed expressions and intents derived from it, re-asserts `<secret input>` as the displayed `input` (the parser overwrites it with the normalized text mid-turn), and removes the raw and normalized text (8+ characters) from every other datum and output of the step. The audit ledger records the placeholder and redacts both forms
+5. So the stored step, API responses, the streamed `done` frame and the audit ledger show `<secret input>`. Clients can rely on the turn output's `input` being the **masked display copy**
+
+**Not scrubbed:** a conversation property the agent designer captured the input into (`{memory.current.input}`, the wizard pattern). Keeping it is the designer's explicit choice; use `scope: "secret"` to have it vaulted instead. A task that runs after a HITL resume of the turn sees the placeholder.
 
 When the **client sends a credential as context** — for example the caller's token for a
 downstream API — it marks that context entry `"secret": true`. The value works for that one
