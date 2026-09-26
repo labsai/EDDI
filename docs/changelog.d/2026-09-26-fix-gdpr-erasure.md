@@ -109,6 +109,25 @@ restriction without the audited endpoint. `unrestrictProcessing` removed only on
   and stores its grant after step `connectionGrants`, a window the length of one token
   exchange.
 
+### CodeQL follow-up
+
+- **Two `java/sensitive-log` alerts in `GroupHitlCoordinator.cancelDiscussion`.**
+  The erasure sweep (`GroupConversationService.stopInFlightWork`) walks the keys of
+  the map of running discussions, then named `activeTokens`. CodeQL's heuristic reads
+  any variable whose name contains "token" as a credential, so each key it yielded
+  counted as a secret, and the two log lines in `cancelDiscussion` that print the
+  conversation id became alerts. The keys are group-conversation ids and the values
+  are cooperative stop flags (`DiscussionControlToken`); nothing secret is logged.
+  The map is renamed `discussionControls` in the five classes that share it (the
+  reflective test handles follow), which states what it holds and removes the false
+  source, instead of suppressing the alert. The two log lines also now pass the id
+  through `LogSanitizer`, like the rest of the class. No behaviour changes.
+- **`McpMemoryToolsBranchCoverageTest` still expected the old delete.** Two of its
+  cases stubbed `countEntries` and verified `deleteAllForUser`, which
+  `delete_all_user_memories` no longer calls since it switched to
+  `deleteAllExceptReserved`. They now stub and verify that method, and assert that
+  `deleteAllForUser` is never called from this surface.
+
 ### Compatibility
 
 - REST/MCP shapes only gain fields: `connectionGrantsDeleted`, and `connectionGrants`
