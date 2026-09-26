@@ -784,6 +784,25 @@ class McpConversationToolsTest {
     }
 
     @Test
+    void chatManaged_triggerNoLongerVisible_refusesButKeepsTheMapping() throws Exception {
+        // The trigger still exists but now routes to an agent this caller may not use
+        // (review finding: a refusal used to read as "deleted" and destroy the
+        // mapping).
+        var existing = new UserConversation(
+                "support", "user1", Environment.production, AGENT_ID, CONV_ID);
+        when(userConversationStore.readUserConversation("support", "user1")).thenReturn(existing);
+        doAnswer(inv -> {
+            throw new IRestAgentTriggerStore.TriggerNotVisibleException("No agent trigger for this intent.");
+        }).when(AgentTriggerStore).readAgentTrigger("support");
+
+        String result = tools.chatManaged("support", "user1", "hello", "production");
+
+        assertTrue(result.contains("error"));
+        verify(userConversationStore, never()).deleteUserConversation(any(), any());
+        verify(conversationService, never()).startConversation(any(), any(), any(), anyMap());
+    }
+
+    @Test
     void chatManaged_conversationCreationFails_returnsError() throws Exception {
         // No existing UserConversation
         when(userConversationStore.readUserConversation("support", "user1"))

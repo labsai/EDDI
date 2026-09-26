@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.schedule.mongo;
 
 import ai.labs.eddi.engine.hitl.HitlSchedules;
+import ai.labs.eddi.engine.runtime.internal.TeamCadenceService;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
@@ -457,6 +458,10 @@ public class MongoScheduleStore implements IScheduleStore {
                 // The prefix carries no regex metacharacters, so it is used as-is.
                 regex(USER_ID, "^" + ListingScope.SYSTEM_IDENTITY_PREFIX));
         Bson admittedUnowned = scope.includeUnowned() ? unowned : and(unowned, eq(CREATED_BY, scope.principal()));
+        if (scope.includeTeamCadences()) {
+            Bson cadence = eq(METADATA + "." + TeamCadenceService.METADATA_TYPE_KEY, TeamCadenceService.METADATA_TYPE_CADENCE);
+            return and(filter, or(eq(USER_ID, scope.principal()), admittedUnowned, cadence));
+        }
         return and(filter, or(eq(USER_ID, scope.principal()), admittedUnowned));
     }
 

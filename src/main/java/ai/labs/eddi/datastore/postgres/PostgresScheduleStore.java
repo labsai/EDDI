@@ -7,6 +7,7 @@ package ai.labs.eddi.datastore.postgres;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
+import ai.labs.eddi.engine.runtime.internal.TeamCadenceService;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
@@ -724,19 +725,6 @@ public class PostgresScheduleStore implements IScheduleStore {
     }
 
     /**
-     * The HITL approval-timeout exclusion as a SQL fragment introduced by
-     * {@code keyword} ({@code " WHERE "} or {@code " AND "}), or an empty string
-     * when the caller may see those schedules. Built entirely from compile-time
-     * literals — no caller input reaches it — and pushed into the query rather than
-     * applied to the returned page, so {@code limit}/{@code offset} count the rows
-     * the caller can actually see; see
-     * {@link IScheduleStore#readAllSchedules(int, int, boolean)}.
-     * <p>
-     * {@code IS DISTINCT FROM} rather than {@code <>}: a schedule with no metadata,
-     * or none carrying {@code hitlType}, yields SQL NULL there, and {@code <>}
-     * would drop every one of those rows — which is every ordinary schedule.
-     */
-    /**
      * The caller's {@link ListingScope} as a SQL fragment introduced by
      * {@code keyword}, or an empty string when unrestricted. Only placeholders
      * carry caller data; {@link #bindScope} fills them. See {@code ListingScope}
@@ -748,7 +736,10 @@ public class PostgresScheduleStore implements IScheduleStore {
         }
         String unowned = "(user_id IS NULL OR user_id = '' OR user_id LIKE '" + ListingScope.SYSTEM_IDENTITY_PREFIX + "%')";
         String admittedUnowned = scope.includeUnowned() ? unowned : "(" + unowned + " AND created_by = ?)";
-        return keyword + "(user_id = ? OR " + admittedUnowned + ")";
+        String cadence = scope.includeTeamCadences()
+                ? " OR metadata->>'" + TeamCadenceService.METADATA_TYPE_KEY + "' = '" + TeamCadenceService.METADATA_TYPE_CADENCE + "'"
+                : "";
+        return keyword + "(user_id = ? OR " + admittedUnowned + cadence + ")";
     }
 
     /**
@@ -766,6 +757,19 @@ public class PostgresScheduleStore implements IScheduleStore {
         return index;
     }
 
+    /**
+     * The HITL approval-timeout exclusion as a SQL fragment introduced by
+     * {@code keyword} ({@code " WHERE "} or {@code " AND "}), or an empty string
+     * when the caller may see those schedules. Built entirely from compile-time
+     * literals — no caller input reaches it — and pushed into the query rather than
+     * applied to the returned page, so {@code limit}/{@code offset} count the rows
+     * the caller can actually see; see
+     * {@link IScheduleStore#readAllSchedules(int, int, boolean)}.
+     * <p>
+     * {@code IS DISTINCT FROM} rather than {@code <>}: a schedule with no metadata,
+     * or none carrying {@code hitlType}, yields SQL NULL there, and {@code <>}
+     * would drop every one of those rows — which is every ordinary schedule.
+     */
     private static String hitlRedactionClause(boolean excludeHitlTimeouts, String keyword) {
         if (!excludeHitlTimeouts) {
             return "";

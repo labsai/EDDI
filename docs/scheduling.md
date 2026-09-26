@@ -178,12 +178,41 @@ Heartbeats are **drift-proof** — the next fire is the time this fire was *due*
 > comes back. The fire itself continues, and the schedule stays claimed until it
 > ends — a retry in the meantime answers `409`.
 
+### Who Can See and Manage a Schedule
+
+With authorization on, schedule access follows who the schedule **runs as**:
+
+- A schedule whose `userId` names a real user (a per-user dream schedule, a
+  schedule created with your own `userId`) belongs to that user. Other non-admin
+  callers do not see it in the listing, cannot read it or its fire logs, and cannot
+  update, fire, enable, disable, delete, retry or dismiss it — **with workspaces on
+  or off**. Administrators see and manage everything.
+- A **team cadence** schedule runs as the cadence's creator but belongs to its
+  group: callers with VIEW on the group can read it, and callers with EDIT can
+  enable, disable or delete it. Firing or re-pointing it still takes the creator
+  (or an admin). With workspaces off every cadence is listed; with them on, a
+  co-editor reaches another member's cadence by id or through the group workspace,
+  not through the listing.
+- An **unowned** schedule (`userId` absent, `system:scheduler` or any other
+  `system:` identity) is open to every editor while workspaces are off. With
+  workspaces enforced it belongs to its creator (`createdBy`) and to whoever holds
+  EDIT (VIEW, to read it) on what it drives: the agent, the knowledge base of an
+  ingestion schedule, or the group of a cadence.
+- **Listing under enforcement.** The listing filter runs inside the database
+  query, so it cannot ask about agent access row by row. Without `?agentId=`, a
+  non-admin sees their own schedules and the unowned ones they created. To see a
+  team's other unowned schedules — including ones created before `createdBy` was
+  recorded — list with `?agentId=` of an agent you may edit, or open them by id.
+- The failed-fires view (`/admin/failed`) shows non-admins only the entries of
+  schedules they can see, so a page can hold fewer entries than `limit`.
+- Agent export and its preview leave out schedules that run as another user.
+
 ### Admin Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/schedulestore/schedules/{id}/fires` | Read fire history, newest first (`?limit=` default 20, must be > 0, capped at 500) |
-| `GET` | `/schedulestore/schedules/admin/failed` | List all failed/dead-lettered fires (`?limit=` default 50, must be > 0, capped at 500) |
+| `GET` | `/schedulestore/schedules/admin/failed` | List failed/dead-lettered fires (`?limit=` default 50, must be > 0, capped at 500); non-admins get only the entries of schedules they can see |
 | `POST` | `/schedulestore/schedules/{id}/retry` | Re-queue a dead-lettered schedule |
 | `POST` | `/schedulestore/schedules/{id}/dismiss` | Reset dead-letter without immediate retry |
 

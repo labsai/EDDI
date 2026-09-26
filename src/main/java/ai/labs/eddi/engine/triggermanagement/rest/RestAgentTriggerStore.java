@@ -72,7 +72,7 @@ public class RestAgentTriggerStore implements IRestAgentTriggerStore {
             // Same visibility rule as the listing, and answered like an absent intent so
             // the endpoint cannot be used to probe which intents another team routes.
             if (!holdsOnEveryTarget(agentTriggerConfiguration, AccessLevel.USE)) {
-                throw new IResourceStore.ResourceNotFoundException("No agent trigger for this intent.");
+                throw new TriggerNotVisibleException("No agent trigger for this intent.");
             }
 
             return agentTriggerConfiguration;

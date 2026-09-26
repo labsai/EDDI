@@ -61,6 +61,34 @@ true and behaviour is unchanged); the items marked **always** apply whenever aut
   another process and would have received `${caller:token}`'s self release. Wildcard and localhost
   binds keep `127.0.0.1`; a specific loopback or IPv6 address is used verbatim.
 
+### Pre-push review follow-ups
+
+- **Failed-fires view.** `GET /schedulestore/schedules/admin/failed` stays complete for admins; for
+  anyone else each entry is kept only if its schedule passes the same read rule as
+  `/{id}/fires`. A page can therefore hold fewer entries than `limit`, which is documented.
+- **Export and preview** leave out schedules that run as another user (admins export everything).
+- **Team cadences belong to their group.** A cadence runs as its creator, but callers with VIEW on
+  the group can read it and callers with EDIT can toggle or delete it. With workspaces off every
+  cadence is listed (`ListingScope.includeTeamCadences`); under enforcement co-editors reach them
+  by id or through the group workspace. Firing and re-pointing still act as the creator.
+- **Refused trigger reads** throw `IRestAgentTriggerStore.TriggerNotVisibleException`, a subclass
+  of the not-found exception, so HTTP clients still get a 404 while MCP `chat_managed` no longer
+  deletes the caller's conversation mapping on a refusal.
+- **Group approvals.** `approveGroupPhase` (plain and streaming) USE-gates a transcript owner who
+  is neither admin nor approver, so access revoked during a pause cannot drive the run to the end.
+- **`/v1`.** A refused exact id match stops at "unknown" instead of falling through to name/slug
+  matching.
+- `requireOwnUserId` now exempts every `system:` identity, the same test the listing and `mayAccess`
+  use.
+- Streaming discuss refuses a missing USE grant with a plain 403 before the stream opens, the same
+  contract `continueDiscussionStreaming` has for its ownership check (the review suggested the
+  opposite direction; the existing continuation test documents the 403 contract).
+- `ResourceAccessGuard.currentLevel` keeps VIEW for a resource with no descriptor: `VIEW.includes(USE)`
+  holds, so it already agrees with `requireLegacyFallback`. A test now pins `hasAccess(USE)` for it.
+- Testcontainers cases for the scoped listing in `datastore/mongo/MongoScheduleStoreTest` and
+  `datastore/postgres/PostgresScheduleStoreTest`, plus docs in `scheduling.md`, `hitl.md`,
+  `import-export-an-agent.md` and AGENTS.md.
+
 ### Design decisions
 
 - `ResourceAccessGuard` gained `currentLevel`/`hasAccess` (non-throwing, current descriptor) for

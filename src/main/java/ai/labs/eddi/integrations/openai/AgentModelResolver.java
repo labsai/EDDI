@@ -232,15 +232,18 @@ public class AgentModelResolver {
 
         Catalogue catalogue = catalogue();
 
-        // 1. canonical model id
+        // 1. canonical model id, then 2. bare agentId. An exact id match that the
+        // caller may not use ends resolution as "unknown" rather than falling through
+        // to the name and slug steps: a request naming a private agent's id must not
+        // quietly land on some other agent whose display name happens to equal it.
         Entry entry = catalogue.byModelId().get(id.toLowerCase(Locale.ROOT));
-        if (entry != null && mayUse(entry.agentId())) {
-            return toResolved(entry, raw, stateless);
+        if (entry == null) {
+            entry = catalogue.byAgentId().get(id);
         }
-
-        // 2. bare agentId
-        entry = catalogue.byAgentId().get(id);
-        if (entry != null && mayUse(entry.agentId())) {
+        if (entry != null) {
+            if (!mayUse(entry.agentId())) {
+                throw unknownModel(id);
+            }
             return toResolved(entry, raw, stateless);
         }
 
@@ -256,7 +259,15 @@ public class AgentModelResolver {
             return toResolved(requireUnique(bySlug, id, "slug"), raw, stateless);
         }
 
-        throw new UnknownModelException("No deployed agent matches model '" + id
+        throw unknownModel(id);
+    }
+
+    /**
+     * The one "unknown model" answer, so a refused agent reads exactly like an
+     * absent one.
+     */
+    private static UnknownModelException unknownModel(String id) {
+        return new UnknownModelException("No deployed agent matches model '" + id
                 + "'. Call GET /v1/models for the available ids.");
     }
 

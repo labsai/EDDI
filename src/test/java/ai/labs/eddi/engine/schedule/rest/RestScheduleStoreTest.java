@@ -1576,7 +1576,7 @@ class RestScheduleStoreTest {
 
         // Workspaces off: another user's personal schedules are excluded, system ones
         // kept.
-        verify(scheduleStore).readAllSchedules(50, 0, true, new ListingScope("editor-1", true));
+        verify(scheduleStore).readAllSchedules(50, 0, true, new ListingScope("editor-1", true, true));
     }
 
     @Test
@@ -1618,6 +1618,93 @@ class RestScheduleStoreTest {
         when(scheduleStore.readSchedule("s-team")).thenReturn(systemSchedule("s-team", "colleague"));
 
         assertEquals(204, rest.deleteSchedule("s-team").getStatus());
+    }
+
+    private static ScheduleFireLog failedFire(String scheduleId) {
+        return new ScheduleFireLog("f-" + scheduleId, scheduleId, "fire-1", Instant.now(), Instant.now(), Instant.now(),
+                "DEAD_LETTERED", "i-1", "conv-" + scheduleId, "boom", 3, 0);
+    }
+
+    private static ScheduleConfiguration cadenceSchedule(String id, String creator, String groupId) {
+        var s = makeCronSchedule(id);
+        s.setUserId(creator);
+        s.setMetadata(Map.of("teamCadenceType", "team_cadence", "groupId", groupId, "cadenceId", "c1"));
+        return s;
+    }
+
+    @Test
+    void readFailedFires_showsANonAdminOnlyTheSchedulesTheyCanSee() throws Exception {
+        asEditor("editor-1");
+        when(scheduleStore.readFailedFireLogs(anyInt())).thenReturn(List.of(
+                failedFire("s-mine"), failedFire("s-theirs"), failedFire("s-mine"), failedFire("s-gone")));
+        when(scheduleStore.readSchedule("s-mine")).thenReturn(dreamSchedule("s-mine", "editor-1"));
+        when(scheduleStore.readSchedule("s-theirs")).thenReturn(dreamSchedule("s-theirs", "victim-42"));
+        when(scheduleStore.readSchedule("s-gone")).thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+
+        List<ScheduleFireLog> visible = rest.readFailedFires(50);
+
+        assertEquals(List.of("s-mine", "s-mine"), visible.stream().map(ScheduleFireLog::scheduleId).toList(),
+                "another user's failed dream run must not leak its conversation id and error text");
+        verify(scheduleStore, times(1)).readSchedule("s-mine");
+    }
+
+    @Test
+    void readFailedFires_adminSeesEverything() throws Exception {
+        asAdmin("root");
+        when(scheduleStore.readFailedFireLogs(anyInt())).thenReturn(List.of(failedFire("s-theirs"), failedFire("s-gone")));
+
+        assertEquals(2, rest.readFailedFires(50).size());
+        verify(scheduleStore, never()).readSchedule(any());
+    }
+
+    @Test
+    void teamCadence_isReadableWithViewAndManageableWithEditOnTheGroup() throws Exception {
+        asEditor("editor-1");
+        ResourceAccessGuard guard = enforcedGuard();
+        when(scheduleStore.readSchedule("c1")).thenReturn(cadenceSchedule("c1", "creator", "g1"));
+        when(guard.hasAccess("g1", AccessLevel.VIEW)).thenReturn(true);
+
+        assertEquals("c1", rest.readSchedule("c1").getId(), "a co-member of the group sees the cadence");
+        assertEquals(403, rest.disableSchedule("c1").getStatus(), "VIEW does not let them toggle it");
+
+        when(guard.hasAccess("g1", AccessLevel.EDIT)).thenReturn(true);
+        assertEquals(200, rest.disableSchedule("c1").getStatus(), "a co-editor may toggle it");
+    }
+
+    @Test
+    void teamCadence_withWorkspacesOff_isVisibleAndListedForEveryEditor() throws Exception {
+        asEditor("editor-1");
+        when(scheduleStore.readSchedule("c1")).thenReturn(cadenceSchedule("c1", "creator", "g1"));
+        when(scheduleStore.readAllSchedules(anyInt(), anyInt(), anyBoolean(), any())).thenReturn(List.of());
+
+        assertEquals("c1", rest.readSchedule("c1").getId());
+        rest.readAllSchedules(null, 50, 0);
+        verify(scheduleStore).readAllSchedules(50, 0, true, new ListingScope("editor-1", true, true));
+    }
+
+    @Test
+    void anotherUsersPersonalSchedule_isNotAdmittedByGroupAccess() throws Exception {
+        // Only a cadence is reachable through its group; a dream schedule is personal.
+        asEditor("editor-1");
+        when(scheduleStore.readSchedule("d1")).thenReturn(dreamSchedule("d1", "victim-42"));
+
+        assertThrows(NotFoundException.class, () -> rest.readSchedule("d1"));
+    }
+
+    @Test
+    void anySystemIdentity_isTreatedAsUnownedByUpdateToo() throws Exception {
+        // requireOwnUserId used to exempt only system:scheduler, so a
+        // system:team-cadence
+        // row was listed as unowned and then refused as somebody else's.
+        asEditor("editor-1");
+        var stored = makeCronSchedule("s1");
+        stored.setUserId("system:team-cadence");
+        when(scheduleStore.readSchedule("s1")).thenReturn(stored);
+        var body = makeCronSchedule("s1");
+        body.setUserId("system:team-cadence");
+
+        assertEquals(200, rest.updateSchedule("s1", body).getStatus());
+        verify(scheduleStore).updateSchedule(eq("s1"), any());
     }
 
     @Test

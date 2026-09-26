@@ -92,6 +92,20 @@ public class RestGroupConversation implements IRestGroupConversation {
         resourceAccessGuard.requireUseAccess(groupId, "group");
     }
 
+    /**
+     * The USE gate on resuming a paused discussion. An approval resumes the run —
+     * every remaining member turn, at the group owner's cost — so an owner whose
+     * access to the group was revoked while it was paused must not be able to drive
+     * it to completion. Admins and designated approvers decide approvals by role,
+     * independently of group access, and keep doing so.
+     */
+    private void requireResumeUseAccess(String groupId) {
+        if (ownershipValidator.isAdmin(identity) || ownershipValidator.isApprover(identity)) {
+            return;
+        }
+        requireGroupUseAccess(groupId);
+    }
+
     @PreDestroy
     void shutdown() {
         executorService.shutdown();
@@ -224,15 +238,10 @@ public class RestGroupConversation implements IRestGroupConversation {
             closeQuietly(eventSink);
             return;
         }
-        try {
-            requireGroupUseAccess(groupId);
-        } catch (ForbiddenException e) {
-            // A streaming endpoint has no Response to carry the 403: surface the refusal
-            // as a terminal SSE error, curated like every other event on this stream.
-            sendErrorEvent(eventSink, sse, "Access denied: you do not have access to this group.");
-            closeQuietly(eventSink);
-            return;
-        }
+        // Thrown, not turned into an SSE event: nothing has been written to the sink
+        // yet, so the refusal still reaches the client as a plain 403 — the same
+        // contract continueDiscussionStreaming has for its ownership check.
+        requireGroupUseAccess(groupId);
         try {
             String userId = ownershipValidator.validateAndResolveUserId(identity, request.userId());
             if (userId == null || userId.isBlank())
@@ -457,6 +466,7 @@ public class RestGroupConversation implements IRestGroupConversation {
                     .build();
         }
         validateGroupConversationOwnership(groupId, gcId, true);
+        requireResumeUseAccess(groupId);
         setDecidedByFromIdentity(request);
         try {
             var gc = groupConversationService.resumeDiscussion(gcId, request, null);
@@ -692,6 +702,7 @@ public class RestGroupConversation implements IRestGroupConversation {
             closeQuietly(eventSink);
             return;
         }
+        requireResumeUseAccess(groupId);
         setDecidedByFromIdentity(request);
         var listener = createStreamingListener(eventSink, sse);
         try {
