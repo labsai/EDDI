@@ -12,6 +12,8 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 /**
  * Builds the GridFS attachment metadata indexes when the application starts, on
  * the MongoDB datastore only.
@@ -45,7 +47,7 @@ public class GridFsIndexInitializer {
         try {
             attachmentStore.get().ensureIndexes();
         } catch (RuntimeException e) {
-            LOGGER.warnf("Could not prepare the attachment indexes; attachment lookups fall back to a scan: %s", e.getMessage());
+            LOGGER.warnf("Could not prepare the attachment indexes; attachment lookups fall back to a scan: %s", sanitize(e.getMessage()));
         }
     }
 }

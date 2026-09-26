@@ -1611,7 +1611,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         String snippetName = snippet.getName();
                         IResourceId matched = existingSnippetsByName.get(snippetName);
                         if (!isSnippetSelected(selectedSet, snippetArchiveId(snippetFilePath), matched)) {
-                            LOGGER.debugf("Snippet '%s' left out of selectedResources, skipping", snippetName);
+                            LOGGER.debugf("Snippet '%s' left out of selectedResources, skipping", LogSanitizer.sanitize(snippetName));
                             skippedCount++;
                             continue;
                         }
@@ -1627,15 +1627,15 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                                         transaction);
                                 if (updated != null) {
                                     LOGGER.debugf("Updated existing snippet '%s' (id=%s, v=%d)",
-                                            snippetName, localResId.getId(), localResId.getVersion());
+                                            LogSanitizer.sanitize(snippetName), localResId.getId(), localResId.getVersion());
                                     importedCount++;
                                     continue;
                                 }
                                 // Update failed (e.g., version conflict) — fall through to create
-                                LOGGER.warnf("Update failed for snippet '%s', creating new", snippetName);
+                                LOGGER.warnf("Update failed for snippet '%s', creating new", LogSanitizer.sanitize(snippetName));
                             } else {
                                 // Create strategy: snippet already exists globally, skip to avoid duplicates
-                                LOGGER.debugf("Snippet '%s' already exists, skipping (create strategy)", snippetName);
+                                LOGGER.debugf("Snippet '%s' already exists, skipping (create strategy)", LogSanitizer.sanitize(snippetName));
                                 skippedCount++;
                                 continue;
                             }
@@ -1646,7 +1646,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         checkIfCreatedResponse(createResp);
                         recordCreatedSnippet(createResp, transaction);
                         importedCount++;
-                        LOGGER.debugf("Created new snippet '%s'", snippetName);
+                        LOGGER.debugf("Created new snippet '%s'", LogSanitizer.sanitize(snippetName));
                     } catch (Exception e) {
                         LOGGER.warnf("Failed to import snippet from %s: %s", snippetFilePath, e.getMessage());
                     }

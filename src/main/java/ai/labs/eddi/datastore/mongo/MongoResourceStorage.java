@@ -32,6 +32,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 
 /**
@@ -307,7 +308,8 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
                     Filters.and(Filters.eq(ID_FIELD, historyRowId), Filters.eq(DELETED_FIELD, true)),
                     Updates.unset(DELETED_FIELD));
         } catch (MongoException e) {
-            LOGGER.warnf("Could not clear a stale deleted flag on history row %s: %s", historyRowId, e.getMessage());
+            LOGGER.warnf("Could not clear a stale deleted flag on history row %s: %s", sanitize(String.valueOf(historyRowId)),
+                    sanitize(e.getMessage()));
         }
     }
 
@@ -367,7 +369,8 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         } catch (MongoException e) {
             // Still unreachable. The next successful update of this version clears the
             // flag (see clearStaleTombstone).
-            LOGGER.warnf("Delete of %s v%d failed and its tombstone could not be checked: %s", id, version, e.getMessage());
+            LOGGER.warnf("Delete of %s v%d failed and its tombstone could not be checked: %s", sanitize(id), version,
+                    sanitize(e.getMessage()));
         }
     }
 

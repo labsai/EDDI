@@ -24,6 +24,9 @@ import java.util.ArrayList;
 
 import com.mongodb.client.FindIterable;
 import static ai.labs.eddi.configs.migration.MigrationManager.*;
+import static ai.labs.eddi.utils.LogCaptureSupport.FORGED_RECORD;
+import static ai.labs.eddi.utils.LogCaptureSupport.assertNoForgedRecordBoundary;
+import static ai.labs.eddi.utils.LogCaptureSupport.captureLogsOf;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
@@ -504,6 +507,47 @@ class MigrationManagerTest {
 
             verify(propertySetters, never()).find();
             verify(migrationLogStore).createMigrationLog(argThat((MigrationLog log) -> MIGRATION_CONFIRMATION.equals(log.getName())));
+        }
+
+        /**
+         * CWE-117: the failure lines log a document id and a driver exception message.
+         * A legacy id is whatever was stored, and a driver quotes back what it was
+         * handed, so neither may start a new log record.
+         */
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("a document that cannot be migrated does not forge a log record")
+        void migrationFailureLinesAreSanitized() {
+            MongoCollection<Document> defaultColl = mock(MongoCollection.class, "defaultColl");
+            MongoCollection<Document> propertySetters = mock(MongoCollection.class, "propertySetters");
+            when(database.getCollection(anyString())).thenReturn(defaultColl);
+            when(database.getCollection(COLLECTION_PROPERTYSETTER)).thenReturn(propertySetters);
+            FindIterable<Document> noDocuments = iterableOf();
+            when(defaultColl.find()).thenReturn(noDocuments);
+            var first = new HashMap<String, Object>();
+            first.put("value", "hello");
+            Document one = buildPropertySetterDoc(first);
+            one.put("_id", "first" + FORGED_RECORD);
+            var second = new HashMap<String, Object>();
+            second.put("value", "world");
+            Document two = buildPropertySetterDoc(second);
+            two.put("_id", new ObjectId());
+            FindIterable<Document> twoDocuments = iterableOf(one, two);
+            when(propertySetters.find()).thenReturn(twoDocuments);
+            // Both fail. The first - a legacy id that is not an ObjectId - reaches the
+            // line that logs the id; the second reaches the line that logs the driver's
+            // message.
+            when(propertySetters.replaceOne(any(Bson.class), any(Document.class)))
+                    .thenThrow(new MongoException("write failed" + FORGED_RECORD));
+            var manager = new MigrationManager(database, migrationLogStore, true, false);
+            when(migrationLogStore.readMigrationLog(MIGRATION_CONFIRMATION)).thenReturn(null);
+
+            List<String> captured = captureLogsOf(MigrationManager.class, () -> manager.startMigrationIfFirstTimeRun(() -> {
+            }));
+
+            assertTrue(captured.stream().anyMatch(value -> value.contains("either")),
+                    "the second-failure line must have been logged, captured: " + captured);
+            assertNoForgedRecordBoundary(captured, "the migration failure lines");
         }
     }
 

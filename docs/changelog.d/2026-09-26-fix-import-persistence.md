@@ -95,6 +95,14 @@ selection and rollback, and the delete version predicate.
   `metadata.conversationId` and `metadata.grants` at boot, each bounded by a 10 s
   operation timeout; none is unique (legacy blobs have no `storageRef`) and a refusal
   is logged, not fatal.
+- **Log injection (CWE-117, code scanning alert #557).** Every log line this change
+  adds routes its caller- or driver-supplied values through `LogSanitizer.sanitize`:
+  the tombstone-healing WARNs in `MongoResourceStorage` (resource id, history row id,
+  driver message), the index WARNs in `GridFsAttachmentStore` and
+  `GridFsIndexInitializer`, the per-document failure lines in `MigrationManager`, and
+  the snippet-name lines in `RestImportService`'s snippet import. Covered by
+  `MongoResourceStorageLogInjectionTest` and
+  `MigrationManagerTest.migrationFailureLinesAreSanitized`.
 
 ### Decisions
 
