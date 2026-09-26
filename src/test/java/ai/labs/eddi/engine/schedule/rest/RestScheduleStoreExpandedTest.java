@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.schedule.rest;
 
+import ai.labs.eddi.engine.schedule.IScheduleStore.ListingScope;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
@@ -165,7 +166,7 @@ class RestScheduleStoreExpandedTest {
         @Test
         @DisplayName("should throw InternalServerError when store fails")
         void storeError() throws Exception {
-            when(scheduleStore.readAllSchedules(500, 0, false))
+            when(scheduleStore.readAllSchedules(500, 0, false, ListingScope.UNRESTRICTED))
                     .thenThrow(new RuntimeException("db error"));
 
             assertThrows(InternalServerErrorException.class, () -> sut.readAllSchedules(null, 500, 0));
@@ -174,12 +175,12 @@ class RestScheduleStoreExpandedTest {
         @Test
         @DisplayName("should handle blank agentId as null (read all)")
         void blankAgentId() throws Exception {
-            when(scheduleStore.readAllSchedules(500, 0, false)).thenReturn(List.of());
+            when(scheduleStore.readAllSchedules(500, 0, false, ListingScope.UNRESTRICTED)).thenReturn(List.of());
 
             sut.readAllSchedules("  ", 500, 0);
 
-            verify(scheduleStore).readAllSchedules(500, 0, false);
-            verify(scheduleStore, never()).readSchedulesByAgentId(anyString(), anyInt(), anyInt(), anyBoolean());
+            verify(scheduleStore).readAllSchedules(500, 0, false, ListingScope.UNRESTRICTED);
+            verify(scheduleStore, never()).readSchedulesByAgentId(anyString(), anyInt(), anyInt(), anyBoolean(), any());
         }
     }
 
