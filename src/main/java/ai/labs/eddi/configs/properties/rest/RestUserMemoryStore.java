@@ -118,6 +118,9 @@ public class RestUserMemoryStore implements IRestUserMemoryStore {
         if (entry.key().length() > 255) {
             return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", "key must not exceed 255 characters")).build();
         }
+        if (IUserMemoryStore.isReservedKey(entry.key())) {
+            return reservedKeyRefusal(entry.key());
+        }
         ownershipValidator.validateUserAccess(identity, entry.userId());
         try {
             String id = userMemoryStore.upsert(entry);
@@ -136,6 +139,11 @@ public class RestUserMemoryStore implements IRestUserMemoryStore {
                 throw new NotFoundException("Memory entry not found: " + entryId);
             }
             ownershipValidator.validateUserAccess(identity, entry.get().userId());
+            if (IUserMemoryStore.isReservedKey(entry.get().key())) {
+                // Deleting the Art. 18 row is what the admin unrestrict endpoint does,
+                // with an audit entry. Here it let a restricted user release themselves.
+                return reservedKeyRefusal(entry.get().key());
+            }
             userMemoryStore.deleteEntry(entryId);
             return Response.noContent().build();
         } catch (NotFoundException e) {
@@ -150,7 +158,9 @@ public class RestUserMemoryStore implements IRestUserMemoryStore {
     public Response deleteAllForUser(String userId) {
         ownershipValidator.validateUserAccess(identity, userId);
         try {
-            userMemoryStore.deleteAllForUser(userId);
+            // Housekeeping, not an Art. 17 erasure (that is the GDPR admin endpoint):
+            // the GDPR bookkeeping rows survive it.
+            userMemoryStore.deleteAllExceptReserved(userId);
             return Response.noContent().build();
         } catch (IResourceStore.ResourceStoreException e) {
             LOGGER.error("Failed to delete all memories for user: " + userId, e);
@@ -168,5 +178,10 @@ public class RestUserMemoryStore implements IRestUserMemoryStore {
             LOGGER.error("Failed to count memories for user: " + userId, e);
             throw new InternalServerErrorException(e.getLocalizedMessage());
         }
+    }
+
+    private static Response reservedKeyRefusal(String key) {
+        return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", new IUserMemoryStore.ReservedMemoryKeyException(key).getMessage()))
+                .build();
     }
 }

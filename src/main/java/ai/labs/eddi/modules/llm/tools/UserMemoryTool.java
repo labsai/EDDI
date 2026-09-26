@@ -45,7 +45,9 @@ public class UserMemoryTool {
      */
     private static final String ON_CAP_EVICT_OLDEST = "evict_oldest";
     /** GDPR bookkeeping keys are never evicted (mirrors the retention sweep). */
-    private static final String GDPR_KEY_PREFIX = "_gdpr_";
+    private static final String GDPR_KEY_PREFIX = IUserMemoryStore.RESERVED_KEY_PREFIX;
+    private static final String RESERVED_KEY_REFUSAL = "⚠️ Keys starting with '%s' are reserved for GDPR bookkeeping and cannot be "
+            + "written or forgotten by an agent.";
 
     private final IUserMemoryStore store;
     private final String userId;
@@ -86,6 +88,14 @@ public class UserMemoryTool {
         }
         if (key.length() > guardrails.getMaxKeyLength()) {
             return "⚠️ Key too long. Maximum %d characters.".formatted(guardrails.getMaxKeyLength());
+        }
+        // Checked here as well as in the store so the model gets a readable refusal
+        // instead of a store failure. Without it a model could write
+        // _gdpr_processing_restricted=true and lock its own user out with a GDPR 403
+        // no admin had applied — or, as a global entry, overwrite the admin's real
+        // restriction row in place.
+        if (IUserMemoryStore.isReservedKey(key.trim())) {
+            return RESERVED_KEY_REFUSAL.formatted(IUserMemoryStore.RESERVED_KEY_PREFIX);
         }
 
         // Guardrail: value length
@@ -173,6 +183,11 @@ public class UserMemoryTool {
     public String forgetFact(@P("The key name of the memory to forget") String key) {
         if (key == null || key.isBlank()) {
             return "⚠️ Key must not be empty.";
+        }
+        // A model must not be able to lift an Art. 18 restriction either: deleting the
+        // row is what the admin unrestrict endpoint does, with an audit entry.
+        if (IUserMemoryStore.isReservedKey(key.trim())) {
+            return RESERVED_KEY_REFUSAL.formatted(IUserMemoryStore.RESERVED_KEY_PREFIX);
         }
 
         try {

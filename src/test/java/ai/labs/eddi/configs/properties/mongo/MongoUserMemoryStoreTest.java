@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.properties.mongo;
 
+import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Properties;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
@@ -46,6 +47,44 @@ class MongoUserMemoryStoreTest {
         collection = mock(MongoCollection.class);
         when(database.getCollection("usermemories")).thenReturn(collection);
         store = new MongoUserMemoryStore(database);
+    }
+
+    // ==================== reserved keys (H9c) ====================
+
+    @Test
+    @DisplayName("upsert — refuses a reserved _gdpr_ key before touching the collection")
+    void upsert_refusesReservedKey() {
+        var forged = new UserMemoryEntry(null, TEST_USER, "_gdpr_processing_restricted", "true", "fact",
+                Visibility.self, TEST_AGENT, List.of(), null, false, 0, null, null);
+
+        assertThrows(IUserMemoryStore.ReservedMemoryKeyException.class, () -> store.upsert(forged));
+        verify(collection, never()).updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class));
+    }
+
+    @Test
+    @DisplayName("upsertReserved — writes a reserved key, refuses any other")
+    void upsertReserved_onlyAcceptsReservedKeys() {
+        when(collection.updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class)))
+                .thenReturn(UpdateResult.acknowledged(0, 0L, new BsonObjectId(TEST_OID)));
+        // self visibility only to keep the mock minimal (a global write reads first)
+        var flag = new UserMemoryEntry(null, TEST_USER, "_gdpr_processing_restricted", "true", "gdpr",
+                Visibility.self, TEST_AGENT, List.of(), null, false, 0, null, null);
+        var ordinary = new UserMemoryEntry(null, TEST_USER, "favorite_color", "blue", "preference",
+                Visibility.self, TEST_AGENT, List.of(), null, false, 0, null, null);
+
+        assertEquals(TEST_OID.toHexString(), assertDoesNotThrow(() -> store.upsertReserved(flag)));
+        assertThrows(IllegalArgumentException.class, () -> store.upsertReserved(ordinary));
+    }
+
+    @Test
+    @DisplayName("mergeProperties — a reserved key refuses the whole merge, nothing is written")
+    void mergeProperties_refusesReservedKeyBeforeWriting() {
+        var properties = new Properties();
+        properties.put("language", "en");
+        properties.put("_gdpr_processing_restricted", "false");
+
+        assertThrows(IUserMemoryStore.ReservedMemoryKeyException.class, () -> store.mergeProperties(TEST_USER, properties));
+        verify(collection, never()).updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class));
     }
 
     // ==================== readProperties ====================

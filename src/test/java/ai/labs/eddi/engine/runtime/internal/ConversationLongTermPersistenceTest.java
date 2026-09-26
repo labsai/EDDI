@@ -117,6 +117,27 @@ class ConversationLongTermPersistenceTest {
         verify(userMemoryStore, times(1)).upsert(any(UserMemoryEntry.class));
     }
 
+    /**
+     * H9c: a property setter naming a {@code _gdpr_} key must not reach the store
+     * (which refuses it, failing the turn) and must not stop the turn's other
+     * longTerm writes from landing.
+     */
+    @Test
+    @DisplayName("H9c — a reserved _gdpr_ longTerm property is never written back; the others still are")
+    void reservedLongTermPropertyIsNotWritten() throws Exception {
+        Conversation conversation = nextTurn();
+        memory.getConversationProperties().put("_gdpr_processing_restricted",
+                new Property("_gdpr_processing_restricted", "false", Scope.longTerm));
+        memory.getConversationProperties().put("dietary_restriction", new Property("dietary_restriction", "vegan", Scope.longTerm));
+
+        assertDoesNotThrow(() -> conversation.say("I am vegan", new LinkedHashMap<>()));
+
+        ArgumentCaptor<UserMemoryEntry> entry = ArgumentCaptor.forClass(UserMemoryEntry.class);
+        verify(userMemoryStore).upsert(entry.capture());
+        assertEquals("dietary_restriction", entry.getValue().key());
+        verify(userMemoryStore, never()).upsertReserved(any());
+    }
+
     /** A workflow whose lifecycle does {@code action} and nothing else. */
     private IExecutableWorkflow workflowThat(ThrowingAction action) throws Exception {
         IExecutableWorkflow workflow = mock(IExecutableWorkflow.class);

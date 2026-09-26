@@ -94,6 +94,23 @@ class RestPropertiesStoreTest {
         assertThrows(RuntimeException.class, () -> restPropertiesStore.mergeProperties("user-1", props));
     }
 
+    /**
+     * H9c: a merge is a global upsert keyed on (userId, key), so
+     * {@code _gdpr_processing_restricted: "false"} overwrote an admin's Art. 18
+     * restriction in place — a user releasing themselves with no audit entry.
+     */
+    @Test
+    void mergeProperties_refusesAReservedKeyWith400() throws Exception {
+        Properties props = new Properties();
+        props.put("language", "en");
+        props.put("_gdpr_processing_restricted", "false");
+
+        Response response = restPropertiesStore.mergeProperties("user-1", props);
+
+        assertEquals(400, response.getStatus());
+        verify(userMemoryStore, never()).mergeProperties(anyString(), any(Properties.class));
+    }
+
     // === deleteProperties ===
 
     @Test
