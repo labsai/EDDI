@@ -46,7 +46,7 @@ import static org.mockito.Mockito.when;
  */
 class PrePostUtilsSecretScopeTest {
 
-    private static final String TOKEN = "tok-live-0123456789abcdef";
+    private static final String TOKEN = "tok-live-aaaaaaaaaaaaaaaa";
 
     private ISecretProvider secretProvider;
     private IJsonSerialization jsonSerialization;
