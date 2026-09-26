@@ -87,7 +87,7 @@ cd EDDI
 # On Linux: sudo systemctl start mongod
 
 # Run EDDI in dev mode
-./mvnw compile quarkus:dev
+./mvnw compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'
 
 # Access dashboard
 open http://localhost:7070

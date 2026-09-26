@@ -37,7 +37,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * The guard used to count only {@code ## … (YYYY-MM-DD} headings, so an entry
  * added in place with no date, or with a setext {@code ---} underline, went
  * straight through; and the whole job was skipped for any head branch
- * <em>named</em> {@code chore/collate-changelog}.
+ * <em>named</em> {@code chore/collate-changelog}. Widening the count must not
+ * catch what the collator ignores, so lines inside a fenced code block — a
+ * quoted {@code ## Example}, a YAML {@code ---} — are not counted either.
  */
 @DisplayName("Changelog Discipline CI job")
 class ChangelogDisciplineJobTest {
@@ -61,6 +63,8 @@ class ChangelogDisciplineJobTest {
         assertEquals(1, runGuard(" \n+New thing\n+---------\n+\n+Body.\n"), "a setext h2");
         assertEquals(1, runGuard("+**New thing (2026-09-26)**\n+===\n"), "a setext h1 under emphasis");
         assertEquals(1, runGuard("+| 2026-09-26 | decided | why | rejected |\n"), "a register row");
+        assertEquals(1, runGuard("+```text\n+example\n+```\n+## Real entry (2026-09-26)\n"),
+                "a heading after a closed fence is structure again");
     }
 
     @Test
@@ -74,6 +78,13 @@ class ChangelogDisciplineJobTest {
         assertEquals(0, runGuard("+### A sub-heading inside an existing entry\n"), "an h3");
         assertEquals(0, runGuard("-| 2026-01-01 | old |\n+| 2026-01-01 | fixed |\n"), "a register row correction");
         assertEquals(0, runGuard(""), "no change to the file");
+        assertEquals(0, runGuard(" Existing text.\n+\n+```markdown\n+## Example (2026-01-01)\n+```\n"),
+                "a heading quoted inside a fenced example");
+        assertEquals(0, runGuard("+~~~yaml\n+a: 1\n+---\n+b: 2\n+~~~\n"), "a YAML document separator in a fence");
+        assertEquals(0, runGuard("+````\n+```decision-log\n+| 2026-09-26 | a |\n+```\n+````\n"),
+                "a register row inside a nested example fence");
+        assertEquals(0, runGuard(" ```text\n+## not a heading\n ```\n"),
+                "a line added inside a fence the context already opened");
     }
 
     @Test

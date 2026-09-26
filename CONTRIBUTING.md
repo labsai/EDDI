@@ -62,7 +62,7 @@ cd EDDI
 docker run -d --name mongodb -p 27017:27017 mongo:7
 
 # 4. Run in dev mode (hot-reload enabled)
-./mvnw compile quarkus:dev
+./mvnw compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'
 
 # 5. Open in browser
 # http://localhost:7070

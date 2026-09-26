@@ -1481,18 +1481,32 @@ class BuildQualityGatesTest {
         assertEquals(pomVersion.group(1), ciVersion.group(1), "ci.yml NODE_VERSION must equal pom.xml node.version");
         assertEquals(pomVersion.group(1), miseVersion.group(1), "mise.toml's node must equal pom.xml node.version");
 
+        // Any workflow, not just ci.yml. `env.NODE_VERSION` resolves only inside the
+        // workflow that declares it — an undeclared one is an empty string, which
+        // setup-node treats as "no version" — so a workflow that uses it must also
+        // declare it, at the pom's value.
+        Pattern declared = Pattern.compile("(?m)^\\s+NODE_VERSION: \"([^\"]+)\"$");
         List<String> floating = new ArrayList<>();
         try (Stream<Path> workflows = Files.list(WORKFLOWS)) {
             for (Path workflow : workflows.filter(p -> p.toString().endsWith(".yml")).toList()) {
-                for (String line : read(workflow).lines().toList()) {
-                    if (line.strip().startsWith("node-version:")
-                            && !line.contains("${{ env.NODE_VERSION }}")) {
+                String body = read(workflow);
+                Matcher declaration = declared.matcher(body);
+                String version = declaration.find() ? declaration.group(1) : null;
+                for (String line : body.lines().toList()) {
+                    if (!line.strip().startsWith("node-version:")) {
+                        continue;
+                    }
+                    if (!line.contains("${{ env.NODE_VERSION }}")) {
                         floating.add(workflow.getFileName() + ": " + line.strip());
+                    } else if (!pomVersion.group(1).equals(version)) {
+                        floating.add(workflow.getFileName() + " uses env.NODE_VERSION but declares "
+                                + (version == null ? "none" : "\"" + version + "\""));
                     }
                 }
             }
         }
-        assertEquals(List.of(), floating, "every setup-node must use ${{ env.NODE_VERSION }}");
+        assertEquals(List.of(), floating, "every setup-node must use ${{ env.NODE_VERSION }}, declared in the same"
+                + " workflow as \"" + pomVersion.group(1) + "\" (pom.xml node.version)");
 
         assertTrue(Pattern.compile("(?m)^  NODE_SHA256_LINUX_X64: \"[0-9a-f]{64}\"$").matcher(ci).find(),
                 CI_WORKFLOW + " must pin NODE_SHA256_LINUX_X64 to the archive's SHA-256");
@@ -1525,6 +1539,10 @@ class BuildQualityGatesTest {
         assertTrue(gitIgnores(".claude/settings.local.json"), "the root .claude/ is ignored apart from skills/");
         assertFalse(gitIgnores(".claude/skills/ship-pr/SKILL.md"), "the root .claude/skills/ is tracked");
         assertFalse(gitIgnores("ui/manager/.claude/skills/eddi-ui/SKILL.md"), "the Manager's skills are tracked");
+        assertFalse(gitIgnores("ui/manager/.claude/launch.json"), "the Manager's launch.json is tracked");
+        assertTrue(gitIgnores("ui/manager/.claude/settings.local.json"), "the Manager's local settings are ignored");
+        assertTrue(gitIgnores("ui/manager/.claude/worktrees/x/pom.xml"),
+                "a worktree Claude Code creates under ui/manager/.claude must be ignored");
     }
 
     /**
