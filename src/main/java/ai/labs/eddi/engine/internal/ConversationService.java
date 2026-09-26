@@ -66,6 +66,7 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import java.net.URI;
 import java.util.*;
 import java.util.List;
 import java.util.concurrent.*;
@@ -444,7 +445,7 @@ public class ConversationService implements IConversationService {
             }
             var conversationUri = createURI(RESOURCE_URI, conversationId);
 
-            conversationSetup.createConversationDescriptor(agentId, latestAgent, userId, conversationId, conversationUri);
+            createDescriptorOrDiscard(agentId, latestAgent, userId, conversationId, conversationUri);
 
             return new ConversationResult(conversationId, conversationUri);
         } catch (AgentNotReadyException e) {
@@ -455,6 +456,38 @@ public class ConversationService implements IConversationService {
             throw new ResourceStoreException(e.getLocalizedMessage(), e);
         } finally {
             recordMetrics(timerConversationStart, counterConversationStart, startTime);
+        }
+    }
+
+    /**
+     * Writes the new conversation's descriptor, and removes the just-stored memory
+     * again if that fails.
+     * <p>
+     * The descriptor is where the conversation's owner is recorded, and it can only
+     * be written after the memory is stored (the store assigns the id). If it
+     * failed, the caller got an error but the snapshot stayed behind with no owner
+     * on record: a conversation nobody could be checked against. Discarding it
+     * keeps "every conversation has a descriptor" true, which is what
+     * {@code ConversationAccessGuard} relies on to deny everyone but admins access
+     * to a conversation without one.
+     */
+    private void createDescriptorOrDiscard(String agentId, IAgent latestAgent, String userId, String conversationId, URI conversationUri)
+            throws ResourceStoreException, ResourceNotFoundException {
+        try {
+            conversationSetup.createConversationDescriptor(agentId, latestAgent, userId, conversationId, conversationUri);
+        } catch (ResourceStoreException | ResourceNotFoundException | RuntimeException e) {
+            LOGGER.errorf("Could not write the descriptor of new conversation %s — discarding its memory: %s",
+                    sanitize(conversationId), e.getMessage());
+            try {
+                // A pause on the CONVERSATION_START turn armed a timeout already.
+                conversationHitlService.deleteHitlTimeoutSchedule(conversationId);
+                conversationMemoryStore.deleteConversationMemorySnapshot(conversationId);
+                conversationStateCache.remove(conversationId);
+            } catch (Exception cleanupFailure) {
+                LOGGER.errorf(cleanupFailure, "Could not discard the memory of conversation %s after its descriptor failed",
+                        sanitize(conversationId));
+            }
+            throw e;
         }
     }
 
@@ -1160,13 +1193,15 @@ public class ConversationService implements IConversationService {
 
     @Override
     public Boolean isUndoAvailable(String conversationId) throws ResourceStoreException, ResourceNotFoundException {
-        var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+        // requireSnapshot, not the raw load: a missing conversation was a null
+        // dereference here, i.e. a 500 where every sibling endpoint answers 404.
+        var snapshot = requireSnapshot(conversationId);
         return isUndoAvailable(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId);
     }
 
     @Override
     public boolean undo(String conversationId) throws ResourceStoreException, ResourceNotFoundException {
-        var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+        var snapshot = requireSnapshot(conversationId);
         try {
             return undo(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId);
         } catch (AgentMismatchException e) {
@@ -1177,13 +1212,13 @@ public class ConversationService implements IConversationService {
 
     @Override
     public Boolean isRedoAvailable(String conversationId) throws ResourceStoreException, ResourceNotFoundException {
-        var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+        var snapshot = requireSnapshot(conversationId);
         return isRedoAvailable(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId);
     }
 
     @Override
     public boolean redo(String conversationId) throws ResourceStoreException, ResourceNotFoundException {
-        var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+        var snapshot = requireSnapshot(conversationId);
         try {
             return redo(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId);
         } catch (AgentMismatchException e) {

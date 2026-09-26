@@ -318,6 +318,37 @@ class ConversationServiceTest {
             verify(conversationStateCache).put(eq(CONVERSATION_ID), eq(ConversationState.READY));
             verify(conversationSetup).createConversationDescriptor(eq(AGENT_ID), eq(agent), eq(USER_ID), eq(CONVERSATION_ID), any());
         }
+
+        @Test
+        @DisplayName("C1c: a failed descriptor write discards the just-stored memory instead of leaving it ownerless")
+        void descriptorFailure_discardsStoredMemory() throws Exception {
+            IAgent agent = mock(IAgent.class);
+            IConversation conversation = mock(IConversation.class);
+            IConversationMemory memory = mock(IConversationMemory.class);
+            Map<String, Context> context = new LinkedHashMap<>();
+
+            doReturn(USER_ID).when(conversationSetup).computeAnonymousUserIdIfEmpty(eq(USER_ID), isNull());
+            doReturn(false).when(gdprComplianceService).isProcessingRestricted(USER_ID);
+            doReturn(agent).when(agentFactory).getLatestReadyAgent(ENV, AGENT_ID);
+            doReturn(new QuotaCheckResult(true, null)).when(tenantQuotaService).acquireConversationSlot();
+            doReturn(conversation).when(agent).startConversation(eq(USER_ID), eq(context), any(), isNull());
+            doReturn(memory).when(conversation).getConversationMemory();
+            doReturn(ConversationState.READY).when(memory).getConversationState();
+            doReturn(new Stack<>()).when(memory).getRedoCache();
+            doReturn(mock(IConversationMemory.IConversationStepStack.class)).when(memory).getAllSteps();
+            doReturn(new ConversationProperties(memory)).when(memory).getConversationProperties();
+            doReturn(CONVERSATION_ID).when(conversationMemoryStore).storeConversationMemorySnapshot(any());
+            doThrow(new ResourceStoreException("descriptor write failed"))
+                    .when(conversationSetup).createConversationDescriptor(any(), any(), any(), any(), any());
+
+            assertThrows(ResourceStoreException.class,
+                    () -> conversationService.startConversation(ENV, AGENT_ID, USER_ID, context));
+
+            // The descriptor is where the owner is recorded: a snapshot without one
+            // belongs to nobody. It must not outlive the failed start.
+            verify(conversationMemoryStore).deleteConversationMemorySnapshot(CONVERSATION_ID);
+            verify(conversationStateCache).remove(CONVERSATION_ID);
+        }
     }
 
     // =========================================================================
@@ -807,6 +838,34 @@ class ConversationServiceTest {
     // =========================================================================
     // Single-arg isUndoAvailable / isRedoAvailable
     // =========================================================================
+
+    @Nested
+    @DisplayName("M-E5: undo/redo by conversationId on an unknown conversation is a 404, not a 500")
+    class UndoRedoUnknownConversation {
+
+        // The store answers null for an unknown id; the single-arg overloads
+        // dereferenced it (NullPointerException -> 500).
+
+        @Test
+        void isUndoAvailable_unknown_notFound() {
+            assertThrows(ConversationNotFoundException.class, () -> conversationService.isUndoAvailable(CONVERSATION_ID));
+        }
+
+        @Test
+        void isRedoAvailable_unknown_notFound() {
+            assertThrows(ConversationNotFoundException.class, () -> conversationService.isRedoAvailable(CONVERSATION_ID));
+        }
+
+        @Test
+        void undo_unknown_notFound() {
+            assertThrows(ConversationNotFoundException.class, () -> conversationService.undo(CONVERSATION_ID));
+        }
+
+        @Test
+        void redo_unknown_notFound() {
+            assertThrows(ConversationNotFoundException.class, () -> conversationService.redo(CONVERSATION_ID));
+        }
+    }
 
     @Nested
     @DisplayName("isUndoAvailable(conversationId) — single-arg overload")
