@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
 import ai.labs.eddi.modules.llm.model.EvaluationStrategy;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.HeuristicConfig;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -14,6 +15,7 @@ import dev.langchain4j.data.message.UserMessage;
 import org.jboss.logging.Logger;
 
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -246,6 +248,7 @@ class ConfidenceEvaluator {
             return evaluateHeuristic(response, heuristicConfig);
         }
 
+        Map<String, Object> judgeUsage = null;
         try {
             String judgePrompt = String.format("Rate the following AI response on a scale of 0.0 (completely unhelpful/incorrect/evasive) "
                     + "to 1.0 (fully confident, complete, and accurate). " + "Respond with ONLY a JSON object: {\"confidence\": <score>}\n\n"
@@ -254,6 +257,9 @@ class ConfidenceEvaluator {
             var judgeResponse = judgeModel.chat(
                     List.of(SystemMessage.from("You are a response quality evaluator. Output only valid JSON."), UserMessage.from(judgePrompt)));
 
+            if (judgeResponse.metadata() != null && judgeResponse.metadata().tokenUsage() != null) {
+                judgeUsage = ToolContextBudget.tokenUsageMap(judgeResponse.metadata().tokenUsage());
+            }
             String judgeText = judgeResponse.aiMessage() != null ? judgeResponse.aiMessage().text() : null;
             if (judgeText != null) {
                 // Prefer a real JSON parse of the judge's first object.
@@ -262,7 +268,7 @@ class ConfidenceEvaluator {
                     try {
                         JsonNode node = MAPPER.readTree(balanced);
                         if (node != null && node.has("confidence") && node.get("confidence").isNumber()) {
-                            return new EvaluationResult(response, clamp(node.get("confidence").asDouble()));
+                            return new EvaluationResult(response, clamp(node.get("confidence").asDouble()), judgeUsage);
                         }
                     } catch (Exception ignored) {
                         // fall through to regex
@@ -273,14 +279,15 @@ class ConfidenceEvaluator {
                 // output is our own controlled prompt, so there is no stray-confidence risk.
                 Matcher matcher = CONFIDENCE_JSON_PATTERN.matcher(judgeText);
                 if (matcher.find()) {
-                    return new EvaluationResult(response, clamp(Double.parseDouble(matcher.group(1))));
+                    return new EvaluationResult(response, clamp(Double.parseDouble(matcher.group(1))), judgeUsage);
                 }
             }
         } catch (Exception e) {
             LOGGER.warn("Judge model evaluation failed: " + e.getMessage() + ", falling back to heuristic");
         }
 
-        return evaluateHeuristic(response, heuristicConfig);
+        var heuristic = evaluateHeuristic(response, heuristicConfig);
+        return judgeUsage == null ? heuristic : new EvaluationResult(heuristic.response(), heuristic.confidence(), judgeUsage);
     }
 
     /**
@@ -420,7 +427,16 @@ class ConfidenceEvaluator {
      *            the actual response text (possibly unwrapped from JSON)
      * @param confidence
      *            confidence score 0.0–1.0
+     * @param judgeTokenUsage
+     *            token usage of the judge-model call that produced the score, or
+     *            null when no judge ran. Reported even when the judge's reply was
+     *            unusable and the score fell back to the heuristic — the tokens
+     *            were spent either way, and the cascade's cost ceiling has to see
+     *            them.
      */
-    record EvaluationResult(String response, double confidence) {
+    record EvaluationResult(String response, double confidence, Map<String, Object> judgeTokenUsage) {
+        EvaluationResult(String response, double confidence) {
+            this(response, confidence, null);
+        }
     }
 }

@@ -423,8 +423,22 @@ class AgentOrchestrator implements IAgentOrchestrator {
      * @param responseMetadata
      *            metadata about the execution (aggregate token usage across
      *            tool-loop iterations). Never null; empty when unavailable.
+     * @param toolExchange
+     *            the tool calls the loop executed and their results, in order
+     *            (never the history it started from, never the final answer). Never
+     *            null; empty when no tool ran or the path does not record it.
      */
-    record ExecutionResult(String response, List<Map<String, Object>> trace, Map<String, Object> responseMetadata) {
+    record ExecutionResult(String response, List<Map<String, Object>> trace, Map<String, Object> responseMetadata,
+            List<ChatMessage> toolExchange) {
+        ExecutionResult {
+            toolExchange = toolExchange != null ? List.copyOf(toolExchange) : List.of();
+        }
+
+        /** Convenience constructor — no tool exchange recorded. */
+        ExecutionResult(String response, List<Map<String, Object>> trace, Map<String, Object> responseMetadata) {
+            this(response, trace, responseMetadata, List.of());
+        }
+
         /** Convenience constructor — no response metadata (empty map). */
         ExecutionResult(String response, List<Map<String, Object>> trace) {
             this(response, trace, Map.of());
@@ -829,7 +843,7 @@ class AgentOrchestrator implements IAgentOrchestrator {
                                    JsonResponseFormatPolicy jsonPolicy)
             throws LifecycleException {
         return toolLoopRunner.runToolCallLoop(chatModel, initialMessages, activeSpecs, trace, startIteration, setup, isLazy,
-                task, memory, effectiveToolApprovals, llmTaskIndex, clearedCallIds, transcriptMaxBytes, tokenHolder, jsonPolicy);
+                task, memory, effectiveToolApprovals, llmTaskIndex, clearedCallIds, transcriptMaxBytes, tokenHolder, jsonPolicy, null);
     }
 
     // ─── In-turn tool-context budget (D6b) — extracted to ToolContextBudget (R2

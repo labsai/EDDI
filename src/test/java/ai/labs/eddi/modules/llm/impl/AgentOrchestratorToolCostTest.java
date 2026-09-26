@@ -9,8 +9,8 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
-import ai.labs.eddi.engine.caching.CacheFactory;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
+import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
@@ -25,6 +25,8 @@ import ai.labs.eddi.modules.llm.tools.ToolRateLimiter;
 import ai.labs.eddi.modules.llm.tools.impl.*;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
@@ -39,11 +41,13 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
 import java.lang.reflect.Field;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -384,14 +388,14 @@ class AgentOrchestratorToolCostTest {
     }
 
     /**
-     * {@code RetryConfiguration.executeWithRetry} replays the whole tool-call loop
-     * lambda, and the token accumulator lives outside it. Without an explicit reset
-     * the discarded attempt's tokens stay on the total, so a retried turn reports
-     * (and, once prices are configured, bills) roughly double what it used.
+     * A retry resends only the model request that failed. The tokens of the failed
+     * request were never reported (it threw), so the total is exactly the
+     * successful calls' tokens — neither the tool round that already succeeded
+     * twice, nor a phantom for the failed attempt.
      */
     @Test
-    @DisplayName("a retried tool loop reports one attempt's tokens, not both")
-    void retriedLoopDoesNotDoubleCountTokens() throws Exception {
+    @DisplayName("a retried model call reports each successful call's tokens exactly once")
+    void retriedModelCallDoesNotDoubleCountTokens() throws Exception {
         var task = webSearchTask();
         var retry = new RetryConfiguration();
         retry.setMaxAttempts(2);
@@ -400,11 +404,11 @@ class AgentOrchestratorToolCostTest {
 
         ChatModel chatModel = mock(ChatModel.class);
         when(chatModel.chat(any(ChatRequest.class)))
-                // attempt 1: one accounted model call, then a retryable failure
+                // iteration 0: one accounted model call that asks for a tool
                 .thenReturn(usage(toolBatch(), 10, 20, 30))
+                // iteration 1: a retryable failure ...
                 .thenThrow(new RuntimeException("rate limit exceeded"))
-                // attempt 2: replayed from scratch
-                .thenReturn(usage(toolBatch(), 10, 20, 30))
+                // ... and the retry of THAT request answers
                 .thenReturn(usage(text("done"), 1, 2, 3));
 
         var result = orchestrator.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), task, memory);
@@ -413,46 +417,73 @@ class AgentOrchestratorToolCostTest {
         @SuppressWarnings("unchecked")
         var tokenUsage = (Map<String, Object>) result.responseMetadata().get("tokenUsage");
         assertNotNull(tokenUsage);
-        assertEquals(11, tokenUsage.get("inputTokens"), "the abandoned attempt's 10 input tokens must not be counted");
+        assertEquals(11, tokenUsage.get("inputTokens"));
         assertEquals(22, tokenUsage.get("outputTokens"));
         assertEquals(33, tokenUsage.get("totalTokens"));
     }
 
-    private static ChatResponse usage(ChatResponse response, int in, int out, int total) {
-        return ChatResponse.builder().aiMessage(response.aiMessage())
-                .metadata(ChatResponseMetadata.builder().tokenUsage(new TokenUsage(in, out, total)).build())
-                .build();
+    /**
+     * H11a. The retry used to wrap the whole tool loop, so a retryable failure on a
+     * LATER model call restarted from the initial messages and re-executed every
+     * tool the earlier iterations had already run. With the cache off — the
+     * deployment where nothing masks it — that was a second real call and a second
+     * charge. Now only the failed request is resent, with the tool result already
+     * in its transcript.
+     */
+    @Test
+    @DisplayName("a retryable failure after a tool ran does not execute or charge that tool again")
+    void retryAfterToolRunDoesNotReplayTheTool() throws Exception {
+        var task = webSearchTask();
+        task.setEnableToolCaching(false);
+        var retry = new RetryConfiguration();
+        retry.setMaxAttempts(3);
+        retry.setBackoffDelayMs(1L);
+        task.setRetry(retry);
+
+        ChatModel chatModel = mock(ChatModel.class);
+        List<List<ChatMessage>> seen = new ArrayList<>();
+        int[] failuresLeft = {2};
+        // A model that behaves like a real one: asked from the user message, it
+        // calls the tool; shown the tool result, it answers. The first two requests
+        // that carry the result fail transiently. A whole-turn retry would restart
+        // from the user message, get the tool call again and run it a second time.
+        when(chatModel.chat(any(ChatRequest.class))).thenAnswer(inv -> {
+            List<ChatMessage> sent = ((ChatRequest) inv.getArgument(0)).messages();
+            seen.add(List.copyOf(sent));
+            if (!(sent.getLast() instanceof ToolExecutionResultMessage)) {
+                return toolBatch();
+            }
+            if (failuresLeft[0]-- > 0) {
+                throw new RuntimeException("503 service unavailable");
+            }
+            return text("done");
+        });
+
+        var result = orchestrator.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), task, memory);
+
+        assertEquals("done", result.response());
+        verify(webSearchTool, times(1)).searchWeb("eddi", 3);
+        assertEquals(SEARCH_PRICE, costTracker.getConversationCosts(CONVERSATION_ID).getTotalCost(), 1e-9);
+        assertEquals(1, result.trace().stream().filter(e -> "tool_call".equals(e.get("type"))).count(),
+                "the trace must record the one real call, not a replay");
+        // Every retry resent the transcript WITH the tool result, not the initial
+        // messages.
+        assertEquals(4, seen.size());
+        for (int i = 1; i < 4; i++) {
+            assertTrue(seen.get(i).get(seen.get(i).size() - 1) instanceof ToolExecutionResultMessage,
+                    "request " + i + " must continue from the tool result");
+        }
     }
 
     /**
-     * The counterpart of {@link #retriedLoopDoesNotDoubleCountTokens} for dollars,
-     * and the reason tool cost is deliberately NOT reset the way the token holder
-     * is: {@link ToolCostTracker} bills what was actually spent, not what was
-     * logically requested.
-     * <p>
-     * A replayed attempt re-issues the identical tool call, and
-     * {@code ToolExecutionService.executeToolWrapped} answers it from the cache the
-     * first attempt populated — returning at the cache-hit branch, <em>before</em>
-     * the {@code costTracker.trackToolCall} step. So the replay costs nothing real
-     * and is charged nothing: the conversation total is ONE call's price even
-     * though the loop dispatched the call twice.
-     * <p>
-     * Wired with a real {@link ToolCacheService} on purpose — the shared setup
-     * stubs the cache to miss forever, which models the
-     * {@code enableToolCaching: false} deployment where the replay genuinely
-     * re-executes the tool, genuinely spends the money again, and is therefore
-     * correctly charged again.
+     * Retries exhausted: the turn fails with the same message shape as before, and
+     * the tool that ran is still not replayed.
      */
     @Test
-    @DisplayName("a retried tool loop charges the replayed identical call once — the cache hit is free")
-    void retriedLoopChargesReplayedToolCallOnce() throws Exception {
-        ToolCacheService realCache = new ToolCacheService();
-        setField(realCache, "cacheFactory", new CacheFactory());
-        setField(realCache, "meterRegistry", new SimpleMeterRegistry());
-        realCache.init();
-        setField(toolExecutionService, "cacheService", realCache);
-
+    @DisplayName("exhausted retries fail the turn without replaying earlier tools")
+    void exhaustedRetriesFailWithoutReplay() {
         var task = webSearchTask();
+        task.setEnableToolCaching(false);
         var retry = new RetryConfiguration();
         retry.setMaxAttempts(2);
         retry.setBackoffDelayMs(1L);
@@ -460,23 +491,21 @@ class AgentOrchestratorToolCostTest {
 
         ChatModel chatModel = mock(ChatModel.class);
         when(chatModel.chat(any(ChatRequest.class)))
-                // attempt 1: the tool really runs and is really charged ...
                 .thenReturn(toolBatch())
-                // ... then the NEXT model call fails retryably, after the charge
-                .thenThrow(new RuntimeException("rate limit exceeded"))
-                // attempt 2: the whole lambda replays, re-issuing the identical call
-                .thenReturn(toolBatch())
-                .thenReturn(text("done"));
+                .thenThrow(new RuntimeException("rate limit exceeded"));
 
-        var result = orchestrator.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), task, memory);
+        var ex = assertThrows(LifecycleException.class,
+                () -> orchestrator.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), task, memory));
 
-        assertEquals("done", result.response());
+        assertTrue(ex.getMessage().contains("Agent execution failed"), ex.getMessage());
         verify(webSearchTool, times(1)).searchWeb("eddi", 3);
+        verify(chatModel, times(3)).chat(any(ChatRequest.class));
+    }
 
-        assertEquals(SEARCH_PRICE, costTracker.getConversationCosts(CONVERSATION_ID).getTotalCost(), 1e-9,
-                "the replayed call was served from cache and must not be charged a second time");
-        assertEquals(SEARCH_PRICE, (Double) result.responseMetadata().get("toolCostUsd"), 1e-9,
-                "the reported per-call delta must match the single real charge");
+    private static ChatResponse usage(ChatResponse response, int in, int out, int total) {
+        return ChatResponse.builder().aiMessage(response.aiMessage())
+                .metadata(ChatResponseMetadata.builder().tokenUsage(new TokenUsage(in, out, total)).build())
+                .build();
     }
 
     /**

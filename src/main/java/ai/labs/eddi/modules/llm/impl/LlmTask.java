@@ -26,7 +26,9 @@ import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.capability.ModelCapabilityService;
+import ai.labs.eddi.modules.llm.governance.ToolResultProvenance;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration.CascadeStep;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ResponseValidation;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.Task;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
@@ -47,7 +49,6 @@ import java.io.IOException;
 import java.net.URI;
 import java.util.*;
 import java.util.regex.Pattern;
-import dev.langchain4j.data.message.SystemMessage;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 import static ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.ConfigValue;
@@ -335,7 +336,7 @@ public class LlmTask implements ILifecycleTask {
                 String httpCallContext = capRagContext(executeHttpCallRag(memory, httpCallRag, userInput, templateDataObjects), maxRagContextChars,
                         "httpCall RAG '" + httpCallRag + "'");
                 if (httpCallContext != null) {
-                    systemMessage += "\n\n## Search Results:\n" + httpCallContext;
+                    systemMessage += "\n\n## Search Results:\n" + markRetrievedContext(task, "httpcall:" + httpCallRag, httpCallContext);
                     LOGGER.infof("httpCall RAG context injected for task '%s': %d chars", taskId, httpCallContext.length());
                     var traceData = dataFactory.createData("rag:httpcall:trace:" + taskId,
                             Map.of("httpCall", httpCallRag, "contextLength", httpCallContext.length()));
@@ -352,7 +353,7 @@ public class LlmTask implements ILifecycleTask {
                 String ragContext = capRagContext(ragContextProvider.retrieveContext(memory, task, userInput), maxRagContextChars,
                         "vector RAG for task '" + taskId + "'");
                 if (ragContext != null) {
-                    systemMessage += "\n\n## Relevant Context:\n" + ragContext;
+                    systemMessage += "\n\n## Relevant Context:\n" + markRetrievedContext(task, "knowledge-base", ragContext);
                     LOGGER.infof("RAG context injected for task '%s': %d chars", taskId, ragContext.length());
                 }
             } catch (Exception e) {
@@ -492,16 +493,20 @@ public class LlmTask implements ILifecycleTask {
         // Real model name of the cascade-selected step, for the audit ledger (#5).
         String cascadeAuditModel = null;
 
-        // Build chat messages without system message for agent mode
-        // (agent orchestrator adds system message internally)
-        List<ChatMessage> chatMessagesWithoutSystem = messages.stream().filter(m -> !(m instanceof SystemMessage))
-                .toList();
+        // Agent mode: the orchestrator adds the system message itself, so hand it the
+        // system message the history builder actually emitted — WITH the rolling
+        // summary — and strip only that leading message. Passing the pre-summary
+        // prompt and filtering every SystemMessage used to drop the summary, all the
+        // turns it covered (skipSteps had already cut them from the history), the
+        // windowing gap marker and system-role log parts.
+        String agentSystemMessage = ConversationHistoryBuilder.composeSystemMessage(systemMessage, summaryPrefix);
+        List<ChatMessage> chatMessagesWithoutSystem = ConversationHistoryBuilder.withoutLeadingSystemMessage(messages, agentSystemMessage);
 
         // === Multi-Model Cascade Branch ===
         if (cascadeActive) {
             boolean convertToObject = Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT));
             boolean allowLiveStreaming = eventSink != null && !addToOutputExplicitlyFalse;
-            var cascadeResult = cascadingModelExecutor.execute(cascadeConfig, messages, systemMessage, processedParams, task, memory,
+            var cascadeResult = cascadingModelExecutor.execute(cascadeConfig, messages, agentSystemMessage, processedParams, task, memory,
                     agentOrchestrator, templateDataObjects, jsonMode, convertToObject, allowLiveStreaming,
                     effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes);
 
@@ -588,7 +593,7 @@ public class LlmTask implements ILifecycleTask {
         } else if (skipCascade) {
             // Agent mode with cascade disabled — use normal agent flow. The streaming
             // bridge is handed ONLY to the tool loop — see runToolLoopIfEnabled.
-            var outcome = runToolLoopIfEnabled(chatModel, systemMessage, chatMessagesWithoutSystem, task, memory,
+            var outcome = runToolLoopIfEnabled(chatModel, agentSystemMessage, chatMessagesWithoutSystem, task, memory,
                     effectiveToolApprovals, llmTaskIndex, jsonPolicy, eventSink, addToOutputExplicitlyFalse,
                     resolvedType, processedParams);
             if (outcome != null) {
@@ -609,7 +614,7 @@ public class LlmTask implements ILifecycleTask {
 
         } else {
             // === Standard (non-cascade) execution path ===
-            var outcome = runToolLoopIfEnabled(chatModel, systemMessage, chatMessagesWithoutSystem, task, memory,
+            var outcome = runToolLoopIfEnabled(chatModel, agentSystemMessage, chatMessagesWithoutSystem, task, memory,
                     effectiveToolApprovals, llmTaskIndex, jsonPolicy, eventSink, addToOutputExplicitlyFalse,
                     resolvedType, processedParams);
 
@@ -665,15 +670,7 @@ public class LlmTask implements ILifecycleTask {
         currentStep.storeData(langchainData);
 
         if (Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT))) {
-            String trimmed = responseContent != null ? responseContent.trim() : "";
-            if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-                var contentAsObject = jsonSerialization.deserialize(responseContent, Map.class);
-                templateDataObjects.put(responseObjectName, contentAsObject);
-            } else {
-                // LLM returned plain text despite structured output instruction
-                LOGGER.warn("convertToObject=true but LLM response is not JSON, storing as string");
-                templateDataObjects.put(responseObjectName, responseContent);
-            }
+            templateDataObjects.put(responseObjectName, convertResponseToObject(responseContent, task.getId()));
         } else {
             templateDataObjects.put(responseObjectName, responseContent);
         }
@@ -1001,6 +998,63 @@ public class LlmTask implements ILifecycleTask {
     }
 
     /**
+     * Retrieved context, wrapped in a provenance envelope unless the task turned
+     * that off ({@code markRagProvenance: false}). See
+     * {@link ToolResultProvenance#markRetrieved}.
+     */
+    static String markRetrievedContext(Task task, String source, String context) {
+        return Boolean.FALSE.equals(task.getMarkRagProvenance()) ? context : ToolResultProvenance.markRetrieved(source, context);
+    }
+
+    /**
+     * The {@code convertToObject} view of a response: a JSON object becomes a Map,
+     * a JSON array a List, and anything else — plain text, or JSON the model
+     * truncated or malformed — stays the raw string.
+     * <p>
+     * An array used to be deserialized as a Map and a malformed object thrown
+     * straight out of the task, so a model that answered {@code [...]} or ran out
+     * of tokens mid-object failed the whole turn — after it had been paid for, and
+     * although the plain-text fallback right beside it existed for exactly this.
+     */
+    Object convertResponseToObject(String responseContent, String taskId) {
+        String trimmed = responseContent != null ? responseContent.trim() : "";
+        Class<?> target = trimmed.startsWith("{") ? Map.class : trimmed.startsWith("[") ? List.class : null;
+        if (target == null) {
+            // LLM returned plain text despite structured output instruction
+            LOGGER.warnf("convertToObject=true but the response of task '%s' is not JSON, storing as string", taskId);
+            return responseContent;
+        }
+        try {
+            return jsonSerialization.deserialize(trimmed, target);
+        } catch (IOException | RuntimeException e) {
+            LOGGER.warnf("convertToObject=true but the response of task '%s' is not valid JSON (%s), storing as string", taskId,
+                    e.getMessage());
+            return responseContent;
+        }
+    }
+
+    /**
+     * The cascade step whose tool loop raised this pause, or null to resume on the
+     * task's own model: no step recorded (no cascade, or a batch persisted before
+     * the field existed), the cascade since disabled, or the index out of range
+     * because the config changed during the pause — in which case the base model is
+     * the only defensible choice, and the drift is logged.
+     */
+    static CascadeStep pausedCascadeStep(Task task, PendingToolCallBatch batch) {
+        Integer stepIndex = batch.getCascadeStepIndex();
+        if (stepIndex == null) {
+            return null;
+        }
+        var cascade = task.getModelCascade();
+        var steps = cascade != null && cascade.isEnabled() ? cascade.getSteps() : null;
+        if (steps == null || stepIndex < 0 || stepIndex >= steps.size()) {
+            LOGGER.warnf("Paused cascade step %d of task '%s' no longer exists; resuming on the task's base model", stepIndex, task.getId());
+            return null;
+        }
+        return steps.get(stepIndex);
+    }
+
+    /**
      * Re-enter the paused LLM task after a HITL tool pause was resolved by a human.
      * <p>
      * This is the RESUME mirror of {@link #executeTask}: it rebuilds the chat model
@@ -1048,8 +1102,17 @@ public class LlmTask implements ILifecycleTask {
         }
 
         // === Rebuild the chat model for THIS task only (normal-path parity) ===
-        var processedParams = runTemplateEngineOnParams(task.getParameters(), templateDataObjects);
+        Map<String, String> processedParams = runTemplateEngineOnParams(task.getParameters(), templateDataObjects);
         var resolvedType = globalVariableResolver.resolveValue(task.getType());
+        // M-L1: a pause raised inside a cascade step resumes on THAT step's model.
+        // Rebuilding the task's base model continued an escalated step's tool loop
+        // on the cheaper model the cascade had already judged not good enough.
+        var cascadeStep = pausedCascadeStep(task, batch);
+        if (cascadeStep != null) {
+            var stepModel = cascadingModelExecutor.resolveStepModel(cascadeStep, task, processedParams, templateDataObjects);
+            resolvedType = stepModel.modelType();
+            processedParams = stepModel.params();
+        }
         var chatModel = chatModelRegistry.getOrCreate(resolvedType, processedParams);
 
         // === Hand off to the resume loop (Task 9) ===
@@ -1097,14 +1160,7 @@ public class LlmTask implements ILifecycleTask {
         currentStep.storeData(langchainData);
 
         if (Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT))) {
-            String trimmed = responseContent != null ? responseContent.trim() : "";
-            if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-                var contentAsObject = jsonSerialization.deserialize(responseContent, Map.class);
-                templateDataObjects.put(responseObjectName, contentAsObject);
-            } else {
-                LOGGER.warn("convertToObject=true but resumed LLM response is not JSON, storing as string");
-                templateDataObjects.put(responseObjectName, responseContent);
-            }
+            templateDataObjects.put(responseObjectName, convertResponseToObject(responseContent, task.getId()));
         } else {
             templateDataObjects.put(responseObjectName, responseContent);
         }

@@ -141,9 +141,24 @@ public class ConversationSummarizer {
         LOGGER.infof("[SUMMARY] Updating rolling summary for conversation='%s': steps %d→%d (recent window=%d)", sanitize(memory.getConversationId()),
                 alreadySummarized, summarizeThroughStep, recentWindow);
 
+        // Bound the batch (M-L3). An unbounded backlog eventually outgrew the
+        // summarizer's context window, and from then on every turn made a failing,
+        // billed summarizer call. Catch up at most maxTurnsPerUpdate turns at a time,
+        // then shrink the batch until it fits maxCharsPerUpdate.
+        summarizeThroughStep = Math.min(summarizeThroughStep, alreadySummarized + config.getMaxTurnsPerUpdate());
+        int maxChars = config.getMaxCharsPerUpdate();
+        String newTurnsText = renderTurns(memory.getConversationOutputs(), alreadySummarized, summarizeThroughStep);
+        while (newTurnsText.length() > maxChars && summarizeThroughStep > alreadySummarized + 1) {
+            summarizeThroughStep--;
+            newTurnsText = renderTurns(memory.getConversationOutputs(), alreadySummarized, summarizeThroughStep);
+        }
+        if (newTurnsText.length() > maxChars) {
+            // A single turn larger than the whole budget: summarize its head.
+            newTurnsText = newTurnsText.substring(0, maxChars) + "\n[... the rest of this turn was cut to fit the summarizer's input budget ...]";
+        }
+
         // Build content to summarize: previous summary + new unsummarized turns
         String existingSummary = readSummary(memory);
-        String newTurnsText = renderTurns(memory.getConversationOutputs(), alreadySummarized, summarizeThroughStep);
 
         String contentToSummarize;
         if (existingSummary != null && !existingSummary.isEmpty()) {
