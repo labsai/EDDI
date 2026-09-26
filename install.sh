@@ -987,6 +987,12 @@ EDDI_VERSION=$EDDI_VERSION
 # every API endpoint reachable without a token.
 # EDDI_BIND=127.0.0.1
 EOF
+  # Persist a non-default publish interface so `eddi start`/`restart` keep it.
+  # Left unset, the compose files default to 127.0.0.1 (localhost only); a remote
+  # install sets EDDI_BIND=0.0.0.0 in the environment before running this script.
+  if [[ -n "${EDDI_BIND:-}" ]]; then
+    echo "EDDI_BIND=$EDDI_BIND" >> "$EDDI_DIR/.env"
+  fi
   # Host ports for the containers the selected compose files publish. Only the
   # components that are part of this install get a line -- a stale KEYCLOAK_PORT
   # would otherwise outlive the overlay that used it.
@@ -1028,6 +1034,12 @@ start_eddi() {
   # Note: vault key is NOT exported — it's read from --env-file only
   export EDDI_PORT
   export EDDI_HTTPS_PORT
+  # EDDI_BIND controls the host interface EDDI is published on (default 127.0.0.1
+  # in the compose files). Exporting it — empty or set — lets docker compose read
+  # it; empty falls back to the compose default via ${EDDI_BIND:-127.0.0.1}. A
+  # remote install (e.g. the GCP provisioner) sets EDDI_BIND=0.0.0.0 so the VM's
+  # own IP is reachable; it is persisted to .env below so `eddi restart` keeps it.
+  export EDDI_BIND
 
   if [[ "$LOCAL_IMAGE" == "true" ]]; then
     echo "  Building local Docker image..."

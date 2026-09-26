@@ -79,3 +79,37 @@ guards never protected a default deployment. Fixes, config/script/YAML only:
 | 2026-09-26 | Helm: require explicit opt-in for /mcp and /secretstore when OIDC is off | Deriving the opt-outs from oidc.enabled silently opened the two highest-value surfaces, defeating HighValueSurfaceGuard |
 | 2026-09-26 | CI: sign the image digest and require the release tag to be an ancestor of main | A tag on any commit could publish and sign :latest, bypassing review; a digest signature cannot be moved by a later tag push |
 ```
+
+## 🔒 fix(infra): review follow-ups on the loopback default and demo image (2026-09-26)
+
+**Repo:** EDDI (`fix/security-infra`)
+
+### What changed and why
+
+Follow-ups from adversarial review of the change above:
+
+- **The loopback default broke the GCP remote-deploy path.** With EDDI bound to
+  `127.0.0.1`, the provisioner's health poll against `http://<external-ip>:7070`
+  never succeeded and the advertised dashboard/API/MCP were unreachable on the
+  VM. [`gcp/provision-vm.sh`](../../gcp/provision-vm.sh) now exports
+  `EDDI_BIND=0.0.0.0` into the VM startup script (off-box exposure stays governed
+  by the IP-scoped firewall and the auth/`--i-understand-public` gate);
+  [`install.sh`](../../install.sh) exports and persists `EDDI_BIND` to `.env` so
+  `eddi restart` keeps it. Monitoring (Grafana/Prometheus) stays loopback-bound on
+  the VM and the success banner now says SSH-tunnel/localhost instead of falsely
+  advertising the external IP; the pointless 3000/9090 firewall rule is dropped.
+- **`Dockerfile.demo`** now pre-creates `/opt/eddi/data` (`chown 185:0`) before
+  `USER 185`, mirroring the production image — a non-root process cannot create
+  the audit dead-letter directory at runtime, and the miss silently drops audit
+  entries.
+- **Helm `NOTES.txt`** warns that the shipped realm seeds `viewer/viewer` and
+  `user/user` with known passwords and that they must be disabled/re-passworded
+  for production (removing the seed users stays deferred — the Auth E2E tier needs
+  them; the tracked follow-up is to derive the E2E realm from a passwordless
+  shipped realm and disable ROPC on `eddi-frontend`).
+- **Cross-branch dependency:** the secrets branch adds a vault master-key strength
+  gate that rejects the placeholder key
+  [`docker-compose.openwebui.yml`](../../docker-compose.openwebui.yml) defaults
+  to; that file now sets `EDDI_VAULT_ALLOW_WEAK_MASTER_KEY=true` (an opt-out that
+  branch is adding; harmless as an unknown env var until it merges) so the demo
+  keeps booting.

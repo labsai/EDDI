@@ -67,8 +67,17 @@
 
     Or grant all three realm roles to an account of your own — eddi-viewer
     included, because EDDI has no role hierarchy and an administrator without
-    it is refused every read tool over MCP. The unprivileged fixtures
-    (viewer/viewer, user/user) still log straight in.
+    it is refused every read tool over MCP.
+
+  ⚠️  Disable the seeded demo logins before production.
+
+    The shipped realm seeds two accounts with known passwords — viewer/viewer
+    (eddi-viewer) and user/user (eddi-user) — so anyone who can reach Keycloak can
+    log in as them. They exist for local demos and the test suite. On any real
+    deployment, disable or re-password them:
+
+      Keycloak admin console → Users → viewer / user → Details (toggle Enabled off)
+      or → Credentials → Reset password
 
 {{- end }}
 

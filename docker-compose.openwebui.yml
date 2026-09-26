@@ -48,6 +48,10 @@ services:
       # DEMO ONLY, obviously: a master key committed to a compose file protects
       # nothing. Generate a real one per deployment:  openssl rand -base64 32
       - "EDDI_VAULT_MASTER_KEY=${EDDI_VAULT_MASTER_KEY:-demo-only-vault-master-key-not-for-production-use}"
+      # DEMO ONLY: EDDI's vault gates weak/known master keys and would refuse to
+      # boot on the placeholder above. This opt-out keeps the demo runnable; never
+      # set it on a real deployment (use a generated key instead).
+      - "EDDI_VAULT_ALLOW_WEAK_MASTER_KEY=true"
     # Loopback-only: this demo runs EDDI with auth disabled (see above), so its
     # port must not be reachable off-box. Open WebUI reaches it as http://eddi:7070.
     ports:

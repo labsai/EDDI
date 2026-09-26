@@ -315,10 +315,10 @@ setup_firewall_rules() {
       "8180" "EDDI Keycloak authentication portal (direct)"
   fi
 
-  if [[ "$WITH_MONITORING" == "true" ]]; then
-    ensure_firewall_rule "$FIREWALL_RULE_GRAFANA" \
-      "3000,9090" "EDDI Grafana + Prometheus"
-  fi
+  # Grafana (3000) and Prometheus (9090) are deliberately NOT opened: the
+  # monitoring compose publishes them on the VM's loopback only (neither has auth
+  # worth exposing — Grafana ships admin/admin), so they are reached over an SSH
+  # tunnel, not a firewall hole. See the SSH-tunnel note in print_success.
 
   # nginx ports — needed for Let's Encrypt HTTP-01 challenge and HTTPS traffic
   if [[ "$SETUP_HTTPS" == "true" ]]; then
@@ -511,6 +511,13 @@ export EDDI_BRANCH="${p_branch}"
 export EDDI_VERSION="${p_version}"
 export EDDI_PORT="${p_port}"
 export EDDI_HTTPS_PORT="${p_https_port}"
+# Publish EDDI on all interfaces INSIDE the VM. The compose files default to
+# 127.0.0.1 so a laptop install is not exposed by accident, but on a cloud VM the
+# whole point is to reach it at the VM's external IP — and the health poll, the
+# dashboard/API/MCP links and (behind nginx) the HTTPS proxy all need it bound to
+# 0.0.0.0. Off-box exposure is controlled by the now IP-scoped firewall and the
+# require_auth_or_public_ack gate, not by the bind address, so this is safe here.
+export EDDI_BIND="0.0.0.0"
 # Random Keycloak master-realm admin password (empty/unset without --with-auth),
 # consumed by docker-compose.auth.yml via install.sh's docker compose invocation.
 ${p_kc_admin_export}
@@ -880,8 +887,11 @@ print_success() {
 
   if [[ "$WITH_MONITORING" == "true" ]]; then
     echo ""
-    echo -e "  ${BOLD}Grafana${RESET}      ${CYAN}http://${EXTERNAL_IP}:3000${RESET}  ${DIM}(admin/admin — dev default, change it; port firewall-scoped to ${SOURCE_RANGES})${RESET}"
-    echo -e "  ${BOLD}Prometheus${RESET}   ${CYAN}http://${EXTERNAL_IP}:9090${RESET}"
+    echo -e "  ${BOLD}Monitoring${RESET} (Grafana 3000 / Prometheus 9090) is published on the VM's"
+    echo -e "  ${DIM}loopback only — neither has authentication worth exposing (Grafana ships${RESET}"
+    echo -e "  ${DIM}admin/admin). Reach them over an SSH tunnel:${RESET}"
+    echo -e "    ${CYAN}$(basename "$0") ssh ${VM_NAME} -- -L 3000:localhost:3000 -L 9090:localhost:9090${RESET}"
+    echo -e "  ${DIM}then open http://localhost:3000 (Grafana) and http://localhost:9090.${RESET}"
   fi
 
   echo ""
