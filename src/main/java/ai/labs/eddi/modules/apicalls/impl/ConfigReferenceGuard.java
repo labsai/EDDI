@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.apicalls.impl;
 
 import ai.labs.eddi.configs.properties.model.Property;
+import ai.labs.eddi.modules.properties.impl.SecretPropertyVault;
 import ai.labs.eddi.secrets.model.SecretReference;
 
 import java.util.LinkedHashSet;
@@ -29,9 +30,9 @@ import java.util.regex.Pattern;
  * <p>
  * The rule: every credential reference in the rendered value must also appear
  * in the configuration template of that same field — or be the value of a
- * property the template names that {@code PropertySetterTask.autoVaultSecret}
- * itself wrote, which {@link Property#getAutoVaulted()} records. Anything else
- * came from data, and the call is refused rather than resolved.
+ * property the template names that {@code SecretPropertyVault} itself wrote,
+ * which {@link Property#getAutoVaulted()} records. Anything else came from
+ * data, and the call is refused rather than resolved.
  * <p>
  * {@code ${vars:...}} is not itself a credential reference: global variables
  * hold configuration such as model names and base URLs, and resolving one a
@@ -43,7 +44,7 @@ import java.util.regex.Pattern;
  * class is unchanged by that: it only ever compares the references of a
  * configured value against the references of a rendered one.
  */
-final class ConfigReferenceGuard {
+public final class ConfigReferenceGuard {
 
     /** The references resolved after templating that release a credential. */
     static final Pattern CREDENTIAL_REFERENCE = Pattern.compile("\\$\\{(?:vault|eddivault|connection|caller):[^}]*\\}");
@@ -73,8 +74,8 @@ final class ConfigReferenceGuard {
      *             if {@code rendered} holds a credential reference the
      *             configuration did not write
      */
-    static void requireConfiguredReferences(String template, String rendered, String location, Map<String, Object> templateData,
-                                            Map<String, Property> conversationProperties) {
+    public static void requireConfiguredReferences(String template, String rendered, String location, Map<String, Object> templateData,
+                                                   Map<String, Property> conversationProperties) {
         if (rendered == null || !rendered.contains("${")) {
             return;
         }
@@ -104,24 +105,28 @@ final class ConfigReferenceGuard {
     /**
      * The auto-vault references of the properties {@code template} names.
      * <p>
-     * A property qualifies only when {@code PropertySetterTask.autoVaultSecret}
-     * wrote its value — the {@link Property#getAutoVaulted()} marker, which that
-     * method is the only writer of. This is a provenance test, not a shape test:
-     * the value a {@code scope: "secret"} instruction stores is a plain
-     * conversation-scoped string, character-for-character reproducible by anyone
-     * who can write a property, so no amount of inspecting the value can establish
-     * where it came from. Only a marker set at the moment of vaulting can.
+     * A property qualifies only when {@link SecretPropertyVault} wrote its value —
+     * the {@link Property#getAutoVaulted()} marker, which that class is the only
+     * writer of. This is a provenance test, not a shape test: the value a
+     * {@code scope: "secret"} instruction stores is a plain conversation-scoped
+     * string, character-for-character reproducible by anyone who can write a
+     * property, so no amount of inspecting the value can establish where it came
+     * from. Only a marker set at the moment of vaulting can.
      * <p>
      * <b>The marker is necessary, not sufficient.</b> The value must still be this
      * conversation's own auto-vault reference for the property the template names:
-     * key {@code <agentId>.<name>} for this conversation's agent, under this
-     * conversation's tenant. The marker already implies all three, because
-     * {@code autoVaultSecret} derives them itself — so the comparison is redundant
-     * by construction and deliberately kept anyway, as the bound that still holds
-     * if a marked {@code Property} ever reaches memory from somewhere other than
-     * that method (a restored document, a future writer). A marked property whose
-     * tenant has since been rewritten under it fails this comparison and the call
-     * is refused, which is the safe direction of that corner.
+     * {@link SecretPropertyVault#referenceFor} of this conversation's agent, this
+     * conversation and that property. The marker already implies all three, so the
+     * comparison is redundant by construction and deliberately kept anyway, as the
+     * bound that still holds if a marked {@code Property} ever reaches memory from
+     * somewhere other than that class (a restored document, a future writer).
+     * <p>
+     * A reference written under the old, per-agent key
+     * ({@code <agentId>.<property>}, shared by every conversation of the agent,
+     * optionally under a client-settable tenant) no longer qualifies: that entry
+     * held whichever user's value was written last, which is the defect the
+     * per-conversation key removes. Such a conversation has to have the secret
+     * entered again.
      * <p>
      * Built by string comparison rather than a pattern compiled per call, so there
      * is no dynamic regex to reason about.
@@ -132,11 +137,11 @@ final class ConfigReferenceGuard {
         if (template == null || templateData == null || conversationProperties == null || conversationProperties.isEmpty()) {
             return found;
         }
-        String agentId = agentId(templateData);
-        if (agentId == null) {
+        String agentId = conversationInfo(templateData, "agentId");
+        String conversationId = conversationInfo(templateData, "conversationId");
+        if (agentId == null || conversationId == null) {
             return found;
         }
-        String tenantId = tenantId(conversationProperties);
         Matcher access = PROPERTY_ACCESS.matcher(template);
         while (access.find()) {
             String name = access.group(1);
@@ -149,35 +154,18 @@ final class ConfigReferenceGuard {
                 continue;
             }
             String value = property.getValueString();
-            if (value == null) {
-                continue;
-            }
-            String key = SecretReference.DEFAULT_TENANT.equals(tenantId) ? agentId + "." + name : tenantId + "/" + agentId + "." + name;
-            // The legacy prefix too: a conversation property stored before the
-            // ${eddivault:…} → ${vault:…} rename still holds the old spelling, and the
-            // vault still resolves it.
-            if (value.equals("${vault:" + key + "}") || value.equals("${eddivault:" + key + "}")) {
+            SecretReference expected = SecretPropertyVault.referenceFor(agentId, conversationId, name);
+            if (value != null && expected != null && value.equals(expected.toReferenceString())) {
                 found.add(value);
             }
         }
         return found;
     }
 
-    private static String agentId(Map<String, Object> templateData) {
-        if (templateData.get("conversationInfo") instanceof Map<?, ?> info && info.get("agentId") != null) {
-            return String.valueOf(info.get("agentId"));
+    private static String conversationInfo(Map<String, Object> templateData, String key) {
+        if (templateData.get("conversationInfo") instanceof Map<?, ?> info && info.get(key) != null) {
+            return String.valueOf(info.get(key));
         }
         return null;
-    }
-
-    /**
-     * The conversation's tenant, read the same way
-     * {@code PropertySetterTask.autoVaultSecret} reads it: the {@code valueString}
-     * of the {@code tenantId} property, defaulting to {@code default}.
-     */
-    private static String tenantId(Map<String, Property> conversationProperties) {
-        Property tenant = conversationProperties.get("tenantId");
-        String tenantId = tenant != null ? tenant.getValueString() : null;
-        return tenantId != null && !tenantId.isBlank() ? tenantId : SecretReference.DEFAULT_TENANT;
     }
 }

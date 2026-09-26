@@ -96,7 +96,7 @@ class ApiCallExecutorConfigReferenceTest {
         secretResolver = mock(SecretResolver.class);
         when(secretResolver.resolveValue(any())).thenAnswer(inv -> {
             String value = inv.getArgument(0);
-            return value == null ? null : value.replace("${vault:api-key}", SECRET).replace("${vault:agent1.apiKey}", AUTO_VAULTED);
+            return value == null ? null : value.replace("${vault:api-key}", SECRET).replace("${vault:agent1.conv1.apiKey}", AUTO_VAULTED);
         });
         globalVariableResolver = mock(GlobalVariableResolver.class);
         when(globalVariableResolver.resolveValue(any())).thenAnswer(inv -> {
@@ -119,10 +119,10 @@ class ApiCallExecutorConfigReferenceTest {
         // The live properties, which is where the auto-vault provenance marker lives —
         // ConversationProperties.toMap() (what `data()` below stands in for) flattens
         // each Property to its raw value and loses it. Stored exactly as
-        // PropertySetterTask.autoVaultSecret stores one: the vault reference,
+        // SecretPropertyVault.vault stores one: the vault reference,
         // conversation scope, marked.
         conversationProperties = new ConversationProperties(memory);
-        conversationProperties.put("apiKey", autoVaulted("apiKey", "${vault:agent1.apiKey}"));
+        conversationProperties.put("apiKey", autoVaulted("apiKey", "${vault:agent1.conv1.apiKey}"));
         when(memory.getConversationProperties()).thenReturn(conversationProperties);
 
         request = mock(IRequest.class);
@@ -162,8 +162,8 @@ class ApiCallExecutorConfigReferenceTest {
     private static Map<String, Object> data(String userInput) {
         var data = new HashMap<String, Object>();
         data.put("memory", Map.of("current", Map.of("input", userInput)));
-        data.put("conversationInfo", Map.of("agentId", "agent1"));
-        data.put("properties", Map.of("apiKey", "${vault:agent1.apiKey}"));
+        data.put("conversationInfo", Map.of("agentId", "agent1", "conversationId", "conv1"));
+        data.put("properties", Map.of("apiKey", "${vault:agent1.conv1.apiKey}"));
         return data;
     }
 
@@ -242,14 +242,14 @@ class ApiCallExecutorConfigReferenceTest {
         // autoVaultSecret — a valueString of {memory.current.input} and a user who
         // typed the reference is enough — so it carries no marker, and the value alone
         // cannot tell the two apart.
-        conversationProperties.put("apiKey", new Property("apiKey", "${vault:agent1.apiKey}", Property.Scope.conversation));
+        conversationProperties.put("apiKey", new Property("apiKey", "${vault:agent1.conv1.apiKey}", Property.Scope.conversation));
 
         var failure = assertThrows(LifecycleException.class,
                 () -> executor.execute(call(Map.of("Authorization", "Bearer {properties.apiKey}"), "{}"), memory, data("hi"), SERVER));
 
         assertInstanceOf(IllegalArgumentException.class, failure.getCause());
-        assertTrue(failure.getMessage().contains("header 'Authorization' contains the reference ${vault:agent1.apiKey}"), failure.getMessage());
-        verify(secretResolver, never()).resolveValue(contains("${vault:agent1.apiKey}"));
+        assertTrue(failure.getMessage().contains("header 'Authorization' contains the reference ${vault:agent1.conv1.apiKey}"), failure.getMessage());
+        verify(secretResolver, never()).resolveValue(contains("${vault:agent1.conv1.apiKey}"));
         verify(request, never()).send();
     }
 
