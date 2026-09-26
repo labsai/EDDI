@@ -875,7 +875,7 @@ export function useSendMessage() {
         }
       }
     },
-    onError: (error, _variables, context) => {
+    onError: (error, variables, context) => {
       if (error instanceof SendBlockedError) {
         // Refused before it touched the transcript: say so, change nothing.
         toast.error(error.message);
@@ -910,8 +910,20 @@ export function useSendMessage() {
         state.setProcessing(false);
         state.setThinking(false);
         state.setQuickReplies([]);
-        // The question the refused message answered is still open.
-        if (answeredField) state.setInputField(answeredField);
+        // The question the refused message answered is still open, and the
+        // answer the user typed is handed back with it. The field unmounted
+        // when the send cleared it, so it remounts from `defaultValue`; the
+        // agent's own default would otherwise replace what was typed. Held in
+        // this in-memory store only, and gone with the next send.
+        if (answeredField) {
+          state.setInputField(
+            variables.isSecret ? { ...answeredField, defaultValue: variables.message } : answeredField,
+          );
+        } else if (variables.isSecret) {
+          // A 🔒-mode message: the input switched secret mode off as it sent.
+          // Switch it back on, or the retry would go out in clear, unflagged.
+          store.setState({ isSecretMode: true });
+        }
         if (error.paused) {
           // The localized pause banner (via isPaused), not an error bubble.
           state.setPaused(true, null);

@@ -28,7 +28,10 @@ findings, the built-in tool whitelist, L5, L6 and the agent-card undeploy.
 - *A refused secret answer lost its field.* The send clears the requested field
   up front. When the backend refuses the message without consuming it (a 409 or
   a coded stream refusal), the field is now given back, so the retry is not
-  typed into the plain textarea. The panel no longer clears the field itself:
+  typed into the plain textarea. It comes back holding the answer the user
+  typed, since the field remounts from its `defaultValue` (kept in the
+  in-memory store only, and gone with the next send). A refused 🔒-mode message
+  switches secret mode back on. The panel no longer clears the field itself:
   it did so before the send could read it.
 - *The field is named.* Its visible label is a `<label>` bound to the input, and
   without a label the placeholder (or the default secret prompt) is the input's
@@ -62,7 +65,8 @@ longer show in the new one's status line.
   the transcript. `useSendMessage` refuses a send while it is set, before
   anything is shown or sent, and toasts why (new key `chat.sendWhileLoading`).
   The panel and the drawer disable their input, secret field and quick replies
-  for the same interval, and a refused send keeps the typed draft.
+  for the same interval. A send refused this way keeps the typed draft or
+  secret, in the drawer as well as the panel.
 - *Detached streams are bounded.* A detached stream is drained so the turn the
   user already sent can finish (closing the stream cancels it on the server). It
   is aborted once `DETACHED_STREAM_GRACE_MS` (120 s) has passed since the switch.

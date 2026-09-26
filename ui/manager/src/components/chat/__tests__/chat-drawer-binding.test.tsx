@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { ChatDrawer } from "../chat-drawer";
 import { useChatDrawerStore } from "@/hooks/use-chat-drawer";
@@ -120,5 +120,61 @@ describe("ChatDrawer — only this agent's conversation, and the secret field", 
     // The field gives way to the normal input, and the bubble is masked.
     await waitFor(() => expect(screen.getByTestId("drawer-chat-input")).toBeInTheDocument());
     expect(screen.queryByText("sk-drawer-secret")).not.toBeInTheDocument();
+  });
+
+  describe("a refused secret answer keeps what was typed", () => {
+    beforeEach(() => {
+      useChatDrawerStore.setState({
+        isOpen: true,
+        agentId: "agent-1",
+        agentName: "Agent One",
+        step: "ready",
+        errorMessage: null,
+      });
+      useChatStore.getState().setSelectedAgent("agent-1", "Agent One");
+      useChatStore.getState().setConversationId("conv-s");
+      useChatStore.getState().setInputField({ subType: "password", label: "API Key", defaultValue: "" });
+    });
+
+    it("gives the field back with the answer after the backend refuses it", async () => {
+      const user = userEvent.setup();
+      server.use(
+        http.post("*/agents/conv-s", () => new HttpResponse("busy", { status: 409 })),
+        http.get("*/agents/conv-s", () =>
+          HttpResponse.json({ conversationState: "READY", conversationSteps: [], conversationOutputs: [] }),
+        ),
+      );
+
+      renderWithProviders(<ChatDrawer />);
+      await user.type(screen.getByLabelText("API Key"), "sk-drawer-secret");
+      await user.click(screen.getByTestId("secret-input-send"));
+
+      await waitFor(() => expect(useChatStore.getState().isProcessing).toBe(false));
+      await waitFor(() => expect(screen.getByLabelText("API Key")).toHaveValue("sk-drawer-secret"));
+      expect(screen.queryByTestId("drawer-chat-input")).not.toBeInTheDocument();
+    });
+
+    it("keeps the value when a load starts in the render gap before the send", async () => {
+      const user = userEvent.setup();
+      const posts: string[] = [];
+      server.use(
+        http.post("*/agents/conv-s", () => {
+          posts.push("conv-s");
+          return HttpResponse.json({ conversationState: "READY", conversationOutputs: [] });
+        }),
+      );
+
+      renderWithProviders(<ChatDrawer />);
+      const field = screen.getByLabelText("API Key");
+      await user.type(field, "sk-drawer-secret");
+
+      act(() => {
+        useChatStore.setState({ loadingConversationId: "conv-other" });
+        fireEvent.keyDown(field, { key: "Enter" });
+      });
+
+      expect(posts).toEqual([]);
+      expect(screen.getByLabelText("API Key")).toHaveValue("sk-drawer-secret");
+    });
   });
 });

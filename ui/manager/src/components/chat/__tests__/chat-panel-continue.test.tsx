@@ -1,5 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { renderWithProviders } from "@/test/test-utils";
@@ -142,7 +142,34 @@ describe("ChatPanel — Continue in Chat opens the named conversation", () => {
 
     await waitFor(() => expect(useChatStore.getState().isProcessing).toBe(false));
     await waitFor(() => expect(useChatStore.getState().messages).toEqual([]));
-    expect(screen.getByLabelText("API Key")).toBeInTheDocument();
+    expect(screen.getByLabelText("API Key")).toHaveValue("sk-live-key");
     expect(screen.queryByTestId("chat-input")).not.toBeInTheDocument();
+  });
+
+  it("keeps the typed secret when a load starts in the render gap before the send", async () => {
+    // The field is disabled while a load reads, but a load that begins between
+    // the last render and the keypress still sees it enabled.
+    useChatStore.getState().setSelectedAgent("agent1", "Support Agent");
+    useChatStore.getState().setConversationId("conv-current");
+    useChatStore.getState().setInputField({ subType: "password", label: "API Key" });
+    const says: string[] = [];
+    server.use(
+      http.post("*/agents/:conversationId", ({ params }) => {
+        says.push(String(params.conversationId));
+        return HttpResponse.json(snapshot(String(params.conversationId), "reply"));
+      }),
+    );
+
+    renderWithProviders(<ChatPanel />, { initialRoute: "/manage/chat" });
+    const field = screen.getByLabelText("API Key");
+    await userEvent.type(field, "sk-live-key");
+
+    act(() => {
+      useChatStore.setState({ loadingConversationId: "conv-older" });
+      fireEvent.keyDown(field, { key: "Enter" });
+    });
+
+    expect(says).toEqual([]);
+    expect(screen.getByLabelText("API Key")).toHaveValue("sk-live-key");
   });
 });

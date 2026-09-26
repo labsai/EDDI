@@ -111,7 +111,23 @@ describe("useSendMessage — a refused send is classified by the conversation's 
     result.current.mutate({ message: "sk-live-key", isSecret: true });
     await waitFor(() => expect(result.current.isError).toBe(true));
 
-    expect(useChatStore.getState().activeInputField).toEqual(field);
+    // With the typed answer: the field remounts from defaultValue, and the
+    // agent's own default would otherwise replace what the user entered.
+    expect(useChatStore.getState().activeInputField).toEqual({ ...field, defaultValue: "sk-live-key" });
+  });
+
+  it("switches secret mode back on when a 🔒-mode message is refused", async () => {
+    server.use(
+      http.post("*/agents/:conversationId", () => new HttpResponse("busy", { status: 409 })),
+      http.get("*/agents/:conversationId", () => snapshotIn("READY")),
+    );
+
+    const { result } = renderHook(() => useSendMessage(), { wrapper });
+    result.current.mutate({ message: "hunter2", isSecret: true });
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(useChatStore.getState().isSecretMode).toBe(true);
+    expect(useChatStore.getState().activeInputField).toBeNull();
   });
 
   it("does not revive a masked field the refused send was not answering", async () => {
@@ -125,6 +141,7 @@ describe("useSendMessage — a refused send is classified by the conversation's 
     await waitFor(() => expect(result.current.isError).toBe(true));
 
     expect(useChatStore.getState().activeInputField).toBeNull();
+    expect(useChatStore.getState().isSecretMode).toBe(false);
   });
 
   it("classifies a 409 on the streaming endpoint the same way", async () => {

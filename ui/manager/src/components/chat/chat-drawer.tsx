@@ -360,7 +360,10 @@ function QuickRepliesBar() {
         <button
           type="button"
           key={`${reply}-${i}`}
-          onClick={() => sendMessage.mutate({ message: reply })}
+          onClick={() => {
+            if (useChatStore.getState().loadingConversationId) return;
+            sendMessage.mutate({ message: reply });
+          }}
           className="rounded-full border border-primary/30 bg-primary/5 px-2.5 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/15"
           data-testid="drawer-quick-reply"
         >
@@ -391,10 +394,15 @@ function DrawerSecretInput({
       subType={field.subType}
       disabled={disabled}
       onSend={(value) => {
+        // Read live, not from the render: a load that began in the render gap
+        // still has the conversation being left on screen. Returning false
+        // keeps the typed value in the field.
+        if (useChatStore.getState().loadingConversationId) return false;
         // A secret turn never carries a file, so anything staged is dropped
         // rather than silently held for the next message.
         staging.discardAll();
         sendMessage.mutate({ message: value, isSecret: true });
+        return true;
       }}
     />
   );
@@ -422,6 +430,8 @@ function DrawerChatInput({
     // Attachment-only turns are allowed, matching the main panel; the guard
     // runs BEFORE draining so a no-op send never clears staged chips.
     if ((!trimmed && !hasReadyAttachment) || disabled || isProcessing || isUploading) return;
+    // Live, like the secret field: keep the draft and the staged files.
+    if (useChatStore.getState().loadingConversationId) return;
     const sent: SentAttachment[] = staging.takeForSend().map((a: ReadyAttachment) => ({
       storageRef: a.result.storageRef,
       fileName: a.result.fileName || a.file.name,
