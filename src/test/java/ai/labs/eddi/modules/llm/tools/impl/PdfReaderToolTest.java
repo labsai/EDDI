@@ -4,16 +4,17 @@
  */
 package ai.labs.eddi.modules.llm.tools.impl;
 
+import ai.labs.eddi.engine.httpclient.BodyHandlerProbe;
+import ai.labs.eddi.engine.httpclient.BoundedBodyHandlers.ResponseTooLargeException;
 import ai.labs.eddi.engine.httpclient.SafeHttpClient;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
-import java.util.Comparator;
 import java.util.GregorianCalendar;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -169,7 +170,7 @@ class PdfReaderToolTest {
         @org.junit.jupiter.api.DisplayName("extractTextFromPdf — non-200 status returns error")
         @SuppressWarnings("unchecked")
         void extractText_non200_returnsError() throws Exception {
-            var mockResponse = (HttpResponse<Path>) org.mockito.Mockito.mock(HttpResponse.class);
+            var mockResponse = (HttpResponse<byte[]>) org.mockito.Mockito.mock(HttpResponse.class);
             org.mockito.Mockito.when(mockResponse.statusCode()).thenReturn(404);
             org.mockito.Mockito.doReturn(mockResponse).when(mockedHttpClient).send(
                     org.mockito.ArgumentMatchers.any(HttpRequest.class),
@@ -185,7 +186,7 @@ class PdfReaderToolTest {
         @org.junit.jupiter.api.DisplayName("extractTextFromPdfPages — non-200 status returns error")
         @SuppressWarnings("unchecked")
         void extractPages_non200_returnsError() throws Exception {
-            var mockResponse = (HttpResponse<Path>) org.mockito.Mockito.mock(HttpResponse.class);
+            var mockResponse = (HttpResponse<byte[]>) org.mockito.Mockito.mock(HttpResponse.class);
             org.mockito.Mockito.when(mockResponse.statusCode()).thenReturn(500);
             org.mockito.Mockito.doReturn(mockResponse).when(mockedHttpClient).send(
                     org.mockito.ArgumentMatchers.any(HttpRequest.class),
@@ -201,7 +202,7 @@ class PdfReaderToolTest {
         @org.junit.jupiter.api.DisplayName("getPdfInfo — non-200 status returns error")
         @SuppressWarnings("unchecked")
         void pdfInfo_non200_returnsError() throws Exception {
-            var mockResponse = (HttpResponse<Path>) org.mockito.Mockito.mock(HttpResponse.class);
+            var mockResponse = (HttpResponse<byte[]>) org.mockito.Mockito.mock(HttpResponse.class);
             org.mockito.Mockito.when(mockResponse.statusCode()).thenReturn(403);
             org.mockito.Mockito.doReturn(mockResponse).when(mockedHttpClient).send(
                     org.mockito.ArgumentMatchers.any(HttpRequest.class),
@@ -262,6 +263,61 @@ class PdfReaderToolTest {
             String result = mockedTool.extractTextFromPdf("https://example.com/doc.pdf");
 
             assertTrue(result.startsWith("Error:"));
+        }
+    }
+
+    // === Download size ===
+
+    @org.junit.jupiter.api.Nested
+    @org.junit.jupiter.api.DisplayName("download size")
+    class DownloadSizeTests {
+
+        @Test
+        @org.junit.jupiter.api.DisplayName("the PDF download is bounded while reading, by the configured limit, with no temp file")
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        void downloadIsBounded() throws Exception {
+            // It used to stream to an unbounded temp file and then read the file
+            // whole into memory: disk first, heap second.
+            SafeHttpClient client = org.mockito.Mockito.mock(SafeHttpClient.class);
+            PdfReaderTool tool = new PdfReaderTool(client, new AttachmentTextExtractor(10000));
+            tool.maxDownloadBytes = 2048;
+            var response = (HttpResponse<byte[]>) org.mockito.Mockito.mock(HttpResponse.class);
+            org.mockito.Mockito.when(response.statusCode()).thenReturn(404);
+            org.mockito.Mockito.doReturn(response).when(client).send(
+                    org.mockito.ArgumentMatchers.any(HttpRequest.class),
+                    org.mockito.ArgumentMatchers.any());
+
+            tool.extractTextFromPdf("https://example.com/doc.pdf");
+
+            ArgumentCaptor<HttpResponse.BodyHandler> handler = ArgumentCaptor.forClass(HttpResponse.BodyHandler.class);
+            org.mockito.Mockito.verify(client).send(org.mockito.ArgumentMatchers.any(HttpRequest.class), handler.capture());
+            assertTrue(BodyHandlerProbe.streamed(handler.getValue(), 2049).refused());
+            assertTrue(BodyHandlerProbe.declared(handler.getValue(), 3L * 1024 * 1024 * 1024).refused());
+            assertFalse(BodyHandlerProbe.streamed(handler.getValue(), 2048).refused());
+        }
+
+        @Test
+        @org.junit.jupiter.api.DisplayName("an unusable configured limit fails at startup, naming the property")
+        void unusableLimitFailsAtStartup() {
+            PdfReaderTool tool = new PdfReaderTool(org.mockito.Mockito.mock(SafeHttpClient.class), new AttachmentTextExtractor(10000));
+            tool.maxDownloadBytes = -1;
+            IllegalArgumentException e = assertThrows(IllegalArgumentException.class, tool::validateLimits);
+            assertTrue(e.getMessage().contains("eddi.tools.pdf-reader.max-download-bytes"), e.getMessage());
+        }
+
+        @Test
+        @org.junit.jupiter.api.DisplayName("an oversized PDF is reported as an error, not an OutOfMemoryError")
+        void oversizedIsAnError() throws Exception {
+            SafeHttpClient client = org.mockito.Mockito.mock(SafeHttpClient.class);
+            PdfReaderTool tool = new PdfReaderTool(client, new AttachmentTextExtractor(10000));
+            org.mockito.Mockito.doThrow(new ResponseTooLargeException(PdfReaderTool.DEFAULT_MAX_DOWNLOAD_BYTES)).when(client).send(
+                    org.mockito.ArgumentMatchers.any(HttpRequest.class),
+                    org.mockito.ArgumentMatchers.any());
+
+            String result = tool.getPdfInfo("https://example.com/huge.pdf");
+
+            assertTrue(result.startsWith("Error:"), result);
+            assertTrue(result.contains("exceeds the limit"), result);
         }
     }
 
@@ -349,30 +405,11 @@ class PdfReaderToolTest {
 
         @SuppressWarnings("unchecked")
         private void mockHttpToServePdf(Path sourcePdf) throws Exception {
-            org.mockito.Mockito.doAnswer(invocation -> {
-                // downloadPdf() creates a temp file with prefix "eddi-pdf-" immediately
-                // before calling send(). Find that temp file and copy our PDF into it.
-                Path tempDir = Path.of(System.getProperty("java.io.tmpdir"));
-                Path target = Files.list(tempDir)
-                        .filter(p -> p.getFileName().toString().startsWith("eddi-pdf-")
-                                && p.getFileName().toString().endsWith(".pdf"))
-                        .max(Comparator.comparingLong(p -> {
-                            try {
-                                return Files.getLastModifiedTime(p).toMillis();
-                            } catch (Exception e) {
-                                return 0L;
-                            }
-                        }))
-                        .orElseThrow(() -> new RuntimeException("Could not find eddi-pdf temp file"));
-
-                Files.copy(sourcePdf, target,
-                        StandardCopyOption.REPLACE_EXISTING);
-
-                var mockResponse = (HttpResponse<Path>) org.mockito.Mockito.mock(HttpResponse.class);
-                org.mockito.Mockito.when(mockResponse.statusCode()).thenReturn(200);
-                org.mockito.Mockito.when(mockResponse.body()).thenReturn(target);
-                return mockResponse;
-            }).when(mockedHttpClient).send(
+            byte[] pdfBytes = Files.readAllBytes(sourcePdf);
+            var mockResponse = (HttpResponse<byte[]>) org.mockito.Mockito.mock(HttpResponse.class);
+            org.mockito.Mockito.when(mockResponse.statusCode()).thenReturn(200);
+            org.mockito.Mockito.when(mockResponse.body()).thenReturn(pdfBytes);
+            org.mockito.Mockito.doReturn(mockResponse).when(mockedHttpClient).send(
                     org.mockito.ArgumentMatchers.any(HttpRequest.class),
                     org.mockito.ArgumentMatchers.any());
         }

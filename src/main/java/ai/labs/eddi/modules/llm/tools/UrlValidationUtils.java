@@ -19,8 +19,9 @@ import java.util.regex.Pattern;
  * private/internal networks.
  * <p>
  * Covers: RFC 1918 (IPv4 private), RFC 4193 (IPv6 ULA), RFC 6598 (CGNAT),
- * IPv4-mapped IPv6, link-local, loopback, multicast, unspecified, and cloud
- * metadata endpoints.
+ * IPv4-mapped IPv6, IPv6 forms that embed an IPv4 address (NAT64, 6to4,
+ * IPv4-compatible), link-local, loopback, multicast, unspecified, reserved IPv4
+ * ranges, and cloud metadata endpoints.
  */
 public final class UrlValidationUtils {
 
@@ -231,8 +232,14 @@ public final class UrlValidationUtils {
             return true;
         }
         byte[] bytes = address.getAddress();
-        if (bytes.length == 16 && isIPv4Mapped(bytes)) {
-            bytes = Arrays.copyOfRange(bytes, 12, 16);
+        if (bytes.length == 16) {
+            // Any IPv6 spelling of an IPv4 address: 64:ff9b::169.254.169.254 on a
+            // NAT64 network, or 2002:a9fe:a9fe:: through a 6to4 relay, reaches
+            // the metadata service as surely as the dotted quad does.
+            byte[] embedded = embeddedIPv4(bytes);
+            if (embedded != null) {
+                bytes = embedded;
+            }
         }
         if (bytes.length == 4) {
             int b0 = bytes[0] & 0xFF;
@@ -267,8 +274,16 @@ public final class UrlValidationUtils {
      * <li>RFC 4193 IPv6 ULA (fc00::/7)</li>
      * <li>RFC 6598 CGNAT (100.64.0.0/10)</li>
      * <li>Link-local (169.254/16, fe80::/10)</li>
-     * <li>IPv4-mapped IPv6 (::ffff:x.x.x.x) — extracts and re-checks IPv4</li>
+     * <li>IPv6 forms embedding an IPv4 address — IPv4-mapped (::ffff:0:0/96),
+     * IPv4-compatible (::/96), NAT64 well-known prefix (64:ff9b::/96, RFC 6052) and
+     * 6to4 (2002::/16, RFC 3056) — extract and re-check the IPv4 address</li>
+     * <li>NAT64 local-use prefix (64:ff9b:1::/48, RFC 8215) — blocked whole: its
+     * embedding length is a per-network choice, so the IPv4 address inside cannot
+     * be located reliably</li>
      * <li>IPv4 multicast (224.0.0.0/4)</li>
+     * <li>Reserved IPv4: 240.0.0.0/4 (incl. broadcast), 192.0.0.0/24 (IETF protocol
+     * assignments). 198.18.0.0/15 is deliberately allowed — see
+     * {@link #isPrivateIPv4(byte[])}</li>
      * <li>Unspecified (0.0.0.0/8)</li>
      * <li>Cloud metadata (169.254.169.254)</li>
      * </ul>
@@ -323,6 +338,23 @@ public final class UrlValidationUtils {
             return true;
         }
 
+        // Reserved for future use (240.0.0.0/4, RFC 1112), which also holds the
+        // limited broadcast address 255.255.255.255
+        if ((b0 & 0xF0) == 240) {
+            return true;
+        }
+
+        // Deliberately NOT blocked: 198.18.0.0/15 (RFC 2544 benchmarking). It is
+        // not an internal network by definition, and fake-IP DNS proxies (Clash /
+        // mihomo, Surge and similar TUN setups) answer EVERY lookup with an address
+        // in it — blocking it would refuse every public URL on such a host.
+
+        // IETF protocol assignments (192.0.0.0/24, RFC 6890) — includes the
+        // DS-Lite and NAT64 discovery addresses
+        if (b0 == 192 && b1 == 0 && (bytes[2] & 0xFF) == 0) {
+            return true;
+        }
+
         // Cloud metadata (169.254.169.254)
         if (isCloudMetadataAddress(bytes)) {
             return true;
@@ -332,11 +364,16 @@ public final class UrlValidationUtils {
     }
 
     /**
-     * IPv6 private address checks covering ULA and IPv4-mapped addresses.
+     * IPv6 private address checks covering ULA and every IPv6 form that carries an
+     * IPv4 address.
      * <p>
-     * Teredo (2001::/32) and 6to4 (2002::/16) tunneling prefixes are NOT blocked —
-     * these are largely deprecated and the embedded IPv4 addresses would be caught
-     * by {@link #isPrivateIPv4(byte[])} if they were private.
+     * The embedded-address forms are the reason this is more than a prefix check.
+     * The JDK's predicates look only at the IPv6 address itself, so on a NAT64
+     * network {@code 64:ff9b::7f00:1} — which the gateway translates to 127.0.0.1 —
+     * passed as a public address, and so did {@code 2002:7f00:1::} via a 6to4
+     * relay. Each form is unwrapped and the IPv4 address inside is judged by the
+     * IPv4 rules. Teredo (2001::/32) is not unwrapped: its client address is
+     * obfuscated and its server address is a relay, so neither is the target.
      */
     private static boolean isPrivateIPv6(byte[] bytes) {
         // IPv6 ULA (fc00::/7) — RFC 4193
@@ -344,12 +381,13 @@ public final class UrlValidationUtils {
             return true;
         }
 
-        // IPv4-mapped IPv6 (::ffff:x.x.x.x)
-        // Bytes 0-9 are zero, bytes 10-11 are 0xFF
-        if (isIPv4Mapped(bytes)) {
-            byte[] ipv4 = new byte[4];
-            System.arraycopy(bytes, 12, ipv4, 0, 4);
+        // NAT64 local-use prefix (64:ff9b:1::/48) — RFC 8215
+        if (isNat64LocalUse(bytes)) {
+            return true;
+        }
 
+        byte[] ipv4 = embeddedIPv4(bytes);
+        if (ipv4 != null) {
             // Re-check the embedded IPv4 address against all IPv4 rules
             try {
                 InetAddress embedded = InetAddress.getByAddress(ipv4);
@@ -364,6 +402,60 @@ public final class UrlValidationUtils {
         }
 
         return false;
+    }
+
+    /**
+     * The IPv4 address an IPv6 address carries, or {@code null} if it carries none:
+     * <ul>
+     * <li>IPv4-mapped {@code ::ffff:a.b.c.d} and IPv4-compatible {@code ::a.b.c.d}
+     * (RFC 4291) — the last 32 bits</li>
+     * <li>NAT64 well-known prefix {@code 64:ff9b::a.b.c.d} (RFC 6052) — the last 32
+     * bits</li>
+     * <li>6to4 {@code 2002:AABB:CCDD::/48} (RFC 3056) — bits 16 to 47</li>
+     * </ul>
+     * Package-private for the test.
+     */
+    static byte[] embeddedIPv4(byte[] bytes) {
+        if (bytes.length != 16) {
+            return null;
+        }
+        if (isIPv4Mapped(bytes) || isIPv4Compatible(bytes) || isNat64WellKnown(bytes)) {
+            return Arrays.copyOfRange(bytes, 12, 16);
+        }
+        if ((bytes[0] & 0xFF) == 0x20 && (bytes[1] & 0xFF) == 0x02) {
+            return Arrays.copyOfRange(bytes, 2, 6);
+        }
+        return null;
+    }
+
+    /**
+     * {@code ::a.b.c.d}: 96 zero bits, then IPv4. {@code ::} and {@code ::1}
+     * included.
+     */
+    private static boolean isIPv4Compatible(byte[] bytes) {
+        for (int i = 0; i < 12; i++) {
+            if (bytes[i] != 0)
+                return false;
+        }
+        return true;
+    }
+
+    /** {@code 64:ff9b::/96}: 0064:ff9b, then 64 zero bits, then IPv4. */
+    private static boolean isNat64WellKnown(byte[] bytes) {
+        if (bytes[0] != 0 || bytes[1] != 0x64 || (bytes[2] & 0xFF) != 0xFF || (bytes[3] & 0xFF) != 0x9B) {
+            return false;
+        }
+        for (int i = 4; i < 12; i++) {
+            if (bytes[i] != 0)
+                return false;
+        }
+        return true;
+    }
+
+    /** {@code 64:ff9b:1::/48}. */
+    private static boolean isNat64LocalUse(byte[] bytes) {
+        return bytes[0] == 0 && bytes[1] == 0x64 && (bytes[2] & 0xFF) == 0xFF && (bytes[3] & 0xFF) == 0x9B
+                && bytes[4] == 0 && bytes[5] == 0x01;
     }
 
     /**

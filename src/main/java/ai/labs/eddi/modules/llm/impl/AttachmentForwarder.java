@@ -5,6 +5,8 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.httpclient.BoundedBodyHandlers;
+import ai.labs.eddi.engine.httpclient.BoundedBodyHandlers.ResponseTooLargeException;
 import ai.labs.eddi.engine.httpclient.SafeHttpClient;
 import ai.labs.eddi.engine.memory.AttachmentContextExtractor;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -33,6 +35,7 @@ import org.jboss.logging.Logger;
 import java.net.URI;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
@@ -107,7 +110,10 @@ public class AttachmentForwarder {
         // for anyone alerting on that meter.
         this.reinlinedCounter = meterRegistry != null ? meterRegistry.counter("eddi.attachment.reinlined") : null;
         this.errorsCounter = meterRegistry != null ? meterRegistry.counter("eddi.attachment.errors") : null;
-        this.maxForwardBytes = maxForwardBytes;
+        // Validated here, once: the value becomes a download limit, and a bad one
+        // would otherwise fail every URL attachment at call time instead of the
+        // deployment at startup.
+        this.maxForwardBytes = BoundedBodyHandlers.requireValidLimit("eddi.attachments.max-forward-bytes", maxForwardBytes);
         this.maxAggregateBytes = maxAggregateBytes;
     }
 
@@ -185,6 +191,9 @@ public class AttachmentForwarder {
      * {@code listAttachments}.
      */
     private static final int MAX_EARLIER_ATTACHMENTS_NOTED = 10;
+
+    /** Wall-clock budget for downloading one URL attachment, body included. */
+    static final Duration DOWNLOAD_TIMEOUT = Duration.ofSeconds(120);
 
     /**
      * How many earlier-turn IMAGES are re-inlined for a vision model on a later
@@ -413,17 +422,29 @@ public class AttachmentForwarder {
         return bytes;
     }
 
+    /**
+     * Downloads a URL attachment, reading at most {@code maxForwardBytes} of it.
+     * The per-file cap in {@link #resolveBytes} used to run only after the whole
+     * body was in memory, so a URL answering with gigabytes ended in an
+     * OutOfMemoryError — which no {@code catch (Exception)} sees — before the cap
+     * was ever consulted. Now the download itself stops at the cap.
+     */
     private byte[] download(String url, String name) throws ForwardSkipException {
         try {
             validateUrl(url);
-            HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).GET().build();
-            HttpResponse<byte[]> response = httpClient.sendValidated(request, HttpResponse.BodyHandlers.ofByteArray());
+            // An explicit, longer timeout: SafeHttpClient's deadline covers the body
+            // read, and the 30 s default is tight for a 10 MiB file on a slow link.
+            HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).timeout(DOWNLOAD_TIMEOUT).GET().build();
+            HttpResponse<byte[]> response = httpClient.sendValidated(request, BoundedBodyHandlers.ofByteArray(maxForwardBytes));
             if (response.statusCode() != 200) {
                 throw new ForwardSkipException("Attachment '" + name + "' download failed: HTTP " + response.statusCode());
             }
             return response.body();
         } catch (ForwardSkipException e) {
             throw e;
+        } catch (ResponseTooLargeException e) {
+            throw new ForwardSkipException(("Attachment '%s' exceeds the per-file forward limit of %d bytes "
+                    + "and was not sent. Use the readAttachment tool to access it.").formatted(name, maxForwardBytes));
         } catch (Exception e) {
             throw new ForwardSkipException("Attachment '" + name + "' could not be fetched: " + e.getMessage());
         }

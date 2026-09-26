@@ -4,12 +4,15 @@
  */
 package ai.labs.eddi.modules.llm.tools.impl;
 
+import ai.labs.eddi.engine.httpclient.BoundedBodyHandlers;
 import ai.labs.eddi.engine.httpclient.SafeHttpClient;
 import ai.labs.eddi.modules.ingestion.HtmlToMarkdownConverter;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
+import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -34,8 +37,31 @@ public class WebScraperTool {
     /** Cap on what a single extraction hands back to the model. */
     private static final int MAX_EXTRACTED_CHARACTERS = 5000;
 
+    /** Default for {@link #maxResponseBytes}: 5 MiB. */
+    static final long DEFAULT_MAX_RESPONSE_BYTES = 5L * 1024 * 1024;
+
     private final SafeHttpClient httpClient;
     private final HtmlToMarkdownConverter htmlToMarkdownConverter;
+
+    /**
+     * Largest page this tool will download. The tool returns a few thousand
+     * characters, but used to buffer whatever the server sent before looking at any
+     * of it — so a URL the model was handed could answer with gigabytes and take
+     * the JVM down with an OutOfMemoryError. Field-injected so the direct
+     * constructor keeps working for tests, with the default in place.
+     */
+    @ConfigProperty(name = "eddi.tools.web-scraper.max-response-bytes", defaultValue = "5242880")
+    long maxResponseBytes = DEFAULT_MAX_RESPONSE_BYTES;
+
+    /**
+     * Fails the deployment at startup on an unusable
+     * {@code eddi.tools.web-scraper.max-response-bytes}, instead of every call at
+     * call time.
+     */
+    @PostConstruct
+    void validateLimits() {
+        BoundedBodyHandlers.requireValidLimit("eddi.tools.web-scraper.max-response-bytes", maxResponseBytes);
+    }
 
     @Inject
     public WebScraperTool(SafeHttpClient httpClient, HtmlToMarkdownConverter htmlToMarkdownConverter) {
@@ -222,7 +248,7 @@ public class WebScraperTool {
                 .header("User-Agent", "Mozilla/5.0 (EDDI-Agent/1.0)")
                 .GET().build();
 
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> response = httpClient.send(request, BoundedBodyHandlers.ofString(maxResponseBytes));
 
         if (response.statusCode() != 200) {
             throw new IOException("HTTP " + response.statusCode() + " for URL: " + url);

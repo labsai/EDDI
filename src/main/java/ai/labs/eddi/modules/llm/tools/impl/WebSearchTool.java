@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.tools.impl;
 
+import ai.labs.eddi.engine.httpclient.BoundedBodyHandlers;
 import ai.labs.eddi.engine.httpclient.SafeHttpClient;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -33,6 +34,12 @@ import java.util.Optional;
 @ApplicationScoped
 public class WebSearchTool {
     private static final Logger LOGGER = Logger.getLogger(WebSearchTool.class);
+
+    /**
+     * Ceiling on a search provider's answer. A results page is tens of kilobytes;
+     * the limit only has to stop a misbehaving endpoint from filling the heap.
+     */
+    static final long MAX_RESPONSE_BYTES = 2L * 1024 * 1024;
     private final SafeHttpClient httpClient;
     private final ObjectMapper objectMapper;
 
@@ -88,7 +95,7 @@ public class WebSearchTool {
 
         HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(15)).GET().build();
 
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> response = httpClient.send(request, BoundedBodyHandlers.ofString(MAX_RESPONSE_BYTES));
 
         if (response.statusCode() != 200) {
             throw new IOException("Google search returned status: " + response.statusCode());
@@ -105,7 +112,7 @@ public class WebSearchTool {
         HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(15)).header("User-Agent", "EDDI-Agent/1.0")
                 .GET().build();
 
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> response = httpClient.send(request, BoundedBodyHandlers.ofString(MAX_RESPONSE_BYTES));
 
         if (response.statusCode() != 200) {
             throw new IOException("DuckDuckGo search returned status: " + response.statusCode());
@@ -223,7 +230,7 @@ public class WebSearchTool {
             HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(15)).header("User-Agent", "EDDI-Agent/1.0")
                     .GET().build();
 
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = httpClient.send(request, BoundedBodyHandlers.ofString(MAX_RESPONSE_BYTES));
 
             if (response.statusCode() != 200) {
                 throw new IOException("Wikipedia search returned status: " + response.statusCode());

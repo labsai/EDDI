@@ -8,6 +8,9 @@ import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.connections.ResolvedCredential;
+import ai.labs.eddi.engine.httpclient.BodyHandlerProbe;
+import ai.labs.eddi.engine.httpclient.BoundedBodyHandlers.ResponseTooLargeException;
+import ai.labs.eddi.engine.httpclient.SafeHttpClient;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
 import ai.labs.eddi.secrets.SecretResolver;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
@@ -15,11 +18,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.net.URI;
-import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.ArrayList;
@@ -27,6 +30,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -57,8 +61,8 @@ import static org.mockito.Mockito.when;
  * can catch a caller going its own way again.
  * <p>
  * The outbound client is a mock installed into the manager's field, so nothing
- * here binds a socket: the manager builds its {@code HttpClient} lazily and the
- * double-checked read returns whatever is already there.
+ * here binds a socket: the manager builds its {@code SafeHttpClient} lazily and
+ * the double-checked read returns whatever is already there.
  */
 @DisplayName("A2AToolProviderManager — what lands on the wire")
 class A2ATaskCredentialWiringTest {
@@ -76,7 +80,7 @@ class A2ATaskCredentialWiringTest {
     private GlobalVariableResolver globalVariableResolver;
     private SecretResolver secretResolver;
     private ConnectionResolver connectionResolver;
-    private HttpClient httpClient;
+    private SafeHttpClient httpClient;
 
     /** Every request the manager handed to the client, in order. */
     private final List<HttpRequest> sent = new ArrayList<>();
@@ -86,7 +90,7 @@ class A2ATaskCredentialWiringTest {
         globalVariableResolver = mock(GlobalVariableResolver.class);
         secretResolver = mock(SecretResolver.class);
         connectionResolver = mock(ConnectionResolver.class);
-        httpClient = mock(HttpClient.class);
+        httpClient = mock(SafeHttpClient.class);
         sent.clear();
         lenient().when(globalVariableResolver.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
         lenient().when(secretResolver.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
@@ -96,7 +100,7 @@ class A2ATaskCredentialWiringTest {
             HttpRequest request = invocation.getArgument(0);
             sent.add(request);
             return response(request.uri().toString().endsWith("/agent.json") ? AGENT_CARD : TASK_RESULT);
-        }).when(httpClient).send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
+        }).when(httpClient).sendNoRedirect(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
     }
 
     @SuppressWarnings("unchecked")
@@ -118,7 +122,7 @@ class A2ATaskCredentialWiringTest {
      * never talks to a peer does not pay for one; that same laziness is what lets a
      * test put a mock there instead of standing up a server.
      */
-    private static void installHttpClient(A2AToolProviderManager manager, HttpClient client) {
+    private static void installHttpClient(A2AToolProviderManager manager, SafeHttpClient client) {
         try {
             Field field = A2AToolProviderManager.class.getDeclaredField("httpClient");
             field.setAccessible(true);
@@ -251,7 +255,7 @@ class A2ATaskCredentialWiringTest {
             // circuit is that the fourth turn is skipped before resolution is even
             // attempted. Four attempts means the circuit stayed closed.
             verify(connectionResolver, times(4)).resolveForDiscovery(anyString(), any(URI.class));
-            verify(httpClient, never()).send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
+            verify(httpClient, never()).sendNoRedirect(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
         }
 
         @Test
@@ -260,7 +264,7 @@ class A2ATaskCredentialWiringTest {
             // The counterpart. Without it the test above would still pass if the
             // breaker had been switched off entirely.
             doThrow(new IOException("connection refused")).when(httpClient)
-                    .send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
+                    .sendNoRedirect(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
             var manager = manager();
             var config = config(null);
 
@@ -268,7 +272,50 @@ class A2ATaskCredentialWiringTest {
                 assertTrue(manager.discoverTools(List.of(config)).executors().isEmpty(), "turn " + turn);
             }
 
-            verify(httpClient, times(3)).send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
+            verify(httpClient, times(3)).sendNoRedirect(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
+        }
+    }
+
+    @Nested
+    @DisplayName("response size")
+    class ResponseSize {
+
+        @Test
+        @DisplayName("both the card fetch and the task call read at most 1 MiB, enforced while reading")
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        void bothCallsAreBounded() throws Exception {
+            // The size check used to run on a body the JDK client had already
+            // buffered whole — no limit at all against a peer answering with gigabytes.
+            var executor = manager().discoverTools(List.of(config(null))).executors().get("peer_lookup");
+            executor.execute(ToolExecutionRequest.builder().name("peer_lookup").arguments("{\"message\":\"hi\"}").build(), null);
+
+            ArgumentCaptor<HttpResponse.BodyHandler> handlers = ArgumentCaptor.forClass(HttpResponse.BodyHandler.class);
+            verify(httpClient, times(2)).sendNoRedirect(any(HttpRequest.class), handlers.capture());
+            for (HttpResponse.BodyHandler<?> handler : handlers.getAllValues()) {
+                assertTrue(BodyHandlerProbe.streamed(handler, 1_048_577).refused());
+                assertFalse(BodyHandlerProbe.streamed(handler, 1_048_576).refused());
+            }
+        }
+
+        @Test
+        @DisplayName("an oversized task answer is reported to the model, not buffered")
+        void oversizedTaskAnswer() throws Exception {
+            var executor = manager().discoverTools(List.of(config(null))).executors().get("peer_lookup");
+            doThrow(new ResponseTooLargeException(1_048_576)).when(httpClient)
+                    .sendNoRedirect(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
+
+            String answer = executor.execute(ToolExecutionRequest.builder().name("peer_lookup").arguments("{\"message\":\"hi\"}").build(), null);
+
+            assertEquals("A2A agent response exceeds size limit (1048576 bytes)", answer);
+        }
+
+        @Test
+        @DisplayName("an oversized agent card yields no tools")
+        void oversizedCard() throws Exception {
+            doThrow(new ResponseTooLargeException(1_048_576)).when(httpClient)
+                    .sendNoRedirect(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
+
+            assertTrue(manager().discoverTools(List.of(config(null))).executors().isEmpty());
         }
     }
 }
