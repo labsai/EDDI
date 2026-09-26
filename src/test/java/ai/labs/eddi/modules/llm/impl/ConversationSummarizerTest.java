@@ -350,6 +350,13 @@ class ConversationSummarizerTest {
         hugeFirst.getConversationOutputs().getFirst().put("input", "y".repeat(5000));
         summarizer.updateIfNeeded(hugeFirst, config, null);
         assertEquals(1, ConversationSummarizer.readSummaryThroughStep(hugeFirst));
+
+        // ...and the cut-notice fits inside the budget as well.
+        var inputs = ArgumentCaptor.forClass(String.class);
+        verify(summarizationService, times(2)).summarize(inputs.capture(), anyString(), anyString(), anyString(), any());
+        String cut = inputs.getAllValues().get(1);
+        assertTrue(cut.length() <= 1000, "oversized first-turn input was " + cut.length() + " chars");
+        assertTrue(cut.endsWith("input budget ...]"), "the cut is announced to the summarizer");
     }
     /**
      * A window with nothing to summarize is stepped over (no LLM call), so a

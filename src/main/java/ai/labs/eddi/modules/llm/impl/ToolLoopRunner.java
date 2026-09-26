@@ -229,7 +229,7 @@ class ToolLoopRunner {
             String id = "gen-" + UUID.randomUUID();
             pendingIds.computeIfAbsent(request.name(), n -> new ArrayDeque<>()).add(id);
             requests.add(ToolExecutionRequest.builder().id(id).name(request.name())
-                    .arguments(request.arguments() != null ? request.arguments() : "").build());
+                    .arguments(request.arguments() != null && !request.arguments().isBlank() ? request.arguments() : "{}").build());
         }
         return ai.toBuilder().toolExecutionRequests(requests).build();
     }
@@ -338,6 +338,7 @@ class ToolLoopRunner {
             // is a shared singleton and must stay stateless.
             Map<ChatMessage, Integer> toolContextTokenMemo = new IdentityHashMap<>();
             int maxIterations = task.getMaxToolIterations() != null ? task.getMaxToolIterations() : 10;
+            boolean modelAnswered = false;
 
             // Engine-enforced counterweight: strict mode caps iterations
             var counterweight = task.getCounterweight();
@@ -395,8 +396,21 @@ class ToolLoopRunner {
                 // a second created agent, a second memory write — and charged and traced
                 // them twice. Retrying the single request resends the same transcript,
                 // tool results included, so the model continues where it stopped.
-                ChatResponse chatResponse = AgentExecutionHelper.executeWithRetry(() -> chatModel.chat(chatRequest), task,
-                        "Agent execution", backoffSpentMs);
+                ChatResponse chatResponse;
+                try {
+                    chatResponse = AgentExecutionHelper.executeWithRetry(() -> chatModel.chat(chatRequest), task, "Agent execution",
+                            backoffSpentMs);
+                } catch (LifecycleException requestFailure) {
+                    // Nothing has executed in this run until the first request is
+                    // answered. Say so, so a caller that may retry the run (the cascade's
+                    // carried-exchange fallback) can tell "rejected up front" apart from
+                    // "failed after tools already ran", where a retry would replay them.
+                    if (!modelAnswered) {
+                        throw new FailedBeforeToolsException(requestFailure);
+                    }
+                    throw requestFailure;
+                }
+                modelAnswered = true;
                 AiMessage aiMessage = ToolApprovalGateSupport.normalizeToolCallIds(chatResponse.aiMessage(), effectiveToolApprovals);
                 currentMessages.add(aiMessage);
 
@@ -566,6 +580,17 @@ class ToolLoopRunner {
             throw e;
         } catch (Exception e) {
             throw wrapLoopFailure(e);
+        }
+    }
+
+    /**
+     * The loop's first model request failed, so no tool of this run executed.
+     * Carries the original failure's message and wraps it as the cause, so every
+     * caller that only sees a {@link LifecycleException} is unaffected.
+     */
+    static final class FailedBeforeToolsException extends LifecycleException {
+        FailedBeforeToolsException(LifecycleException failure) {
+            super(failure.getMessage(), failure);
         }
     }
 

@@ -47,9 +47,13 @@ tests that described the old replay semantics are rewritten, and
 - **Carried calls always have ids.** `ToolLoopRunner.toolExchange` gives a null-id call (Ollama and
   Gemini bindings pass the provider's id through, often null) a synthetic `gen-` id and gives the same
   id to the result that answers it, because OpenAI and Anthropic reject a tool call without one.
-- **Cross-provider rejection.** A step that fails with a client-side error (not a timeout, not a
-  transient 429/5xx, not a HITL pause) while carrying an exchange is retried **once from the
-  conversation alone**, the pre-carry behaviour. It is logged, recorded on the step trace as
+- **Cross-provider rejection.** A step carrying an exchange whose **first** model request is
+  rejected as a bad request (HTTP 400/422, `InvalidRequestException`) is retried **once from the
+  conversation alone**, the pre-carry behaviour. The first-request condition is carried by a marker
+  exception from `ToolLoopRunner` (`FailedBeforeToolsException`): a failure after that request was
+  answered may follow executed tools, and a retry could repeat their side effects. Authentication,
+  unknown-model and content-filter failures, timeouts, transient 429/5xx and HITL pauses never
+  trigger it. It is logged, recorded on the step trace as
   `carriedToolExchangeRejected`, and counted as
   `eddi.llm.cascade.step.errors{type=carried_exchange_rejected}`. This was chosen over carrying only
   between identical provider types: same-provider escalations (the common case) keep the no-replay
@@ -86,16 +90,16 @@ batch, so the second resume also stays on the step's model.
 ### M-L2 — the summarizer model override wrote only `modelName`
 
 New `ModelParameterKeys.withModel(params, provider, model)`. The override is written to every model
-key the inherited parameters already carry, and otherwise to the provider's own key (`model` for
+key the inherited parameters already carry, and always to the provider's own key (`model` for
 Ollama, `modelId` for Bedrock / HuggingFace / Vertex, `deploymentName` for Azure, `modelName` for
-the rest). It is never written to keys the builder does not read, since those would trip the
-unrecognised-parameter WARN. Both `SummarizationService` and `ToolResponseTruncator` use it.
+the rest) — parameters inherited from a task on another provider can carry only that provider's
+key. No other key is added, since it would trip the unrecognised-parameter WARN. Both `SummarizationService` and `ToolResponseTruncator` use it.
 
 ### M-L3 — unbounded summarizer batch
 
 `ConversationSummaryConfig` gains `maxTurnsPerUpdate` (20) and `maxCharsPerUpdate` (60 000). A
 backlog is caught up in bounded batches, each batch is shortened turn by turn to fit, and a single
-turn larger than the budget is cut. The stored `summary_through_step` records what the summary
+turn larger than the budget is cut (the cut notice counts toward the budget). The stored `summary_through_step` records what the summary
 actually covers. A window with no renderable text is stepped over without an LLM call, so a bounded
 batch cannot stall on it.
 
@@ -116,7 +120,9 @@ unsupported" falls back.
 `PromptSnippetService` no longer caches a failed load. It serves the last successfully loaded map
 (kept across invalidation and expiry). After a failure the store is left alone for 10 seconds
 (`FAILURE_BACKOFF_MS`), so an outage does not put a driver timeout on every turn; an explicit
-`invalidateCache()` retries at once. Unchecked store exceptions are covered too. Conflict note: `fix/template-injection` (C4c) also touches this class.
+`invalidateCache()` retries at once. A reload is single-flight (`ReentrantLock`): a caller that
+finds one in flight gets the last good map instead of starting its own store read, so an outage
+cannot tie up a burst of request threads before the first failure sets the back-off. Unchecked store exceptions are covered too. Conflict note: `fix/template-injection` (C4c) also touches this class.
 This change is confined to `getAll` / `loadAllSnippets`.
 
 ### Tool cache: HTTP / MCP / A2A tools were cached by default (NEW), and the key lacked agent and source (M-T3)
@@ -173,6 +179,10 @@ persisted `PendingToolCallBatch` gains nullable `cascadeStepIndex`. Stored confi
 REST shapes are otherwise unchanged. The Manager's LLM editor does not expose the new fields yet;
 they are editable in the JSON view (a follow-up for the Manager editors branch).
 
+`ToolLoopRunner.toolExchange` gives a rebuilt (null-id) call with null or blank arguments `{}`,
+since Gemini parses carried arguments as a JSON object. The stream-timeout dashboard panel shows its
+legend, now that it plots two series.
+
 **Docs:** `docs/langchain.md`, `docs/model-cascade.md`, `docs/security.md`, `docs/metrics.md`,
 `docs/monitoring/eddi-full-metrics-dashboard.json`.
 
@@ -187,5 +197,6 @@ they are editable in the JSON view (a follow-up for the Manager editors branch).
 ```decision-log
 | 2026-09-26 | Tool-loop retry wraps one model request, not the loop | H11a: whole-loop retry re-executed tools | Keeping whole-loop retry with a dedupe journal on the live path (more state, same result) |
 | 2026-09-26 | Cascade escalation carries the executed tool exchange to the next step (default on, `carryToolResultsOnEscalation`) | H11b: each escalation re-ran side-effecting tools | Refusing to escalate after any tool ran (defeats agent-mode cascades) |
+| 2026-09-26 | The carried-exchange fallback retries only a rejected FIRST request of a step, and only for a 400/422-class rejection | A failure after tools ran would re-run them; auth/model errors cannot be fixed by dropping the exchange | Retrying on any non-retryable failure (replays side effects, masks auth errors) |
 | 2026-09-26 | HTTP/MCP/A2A tool results are cached only when named in `toolCacheScopes` | A cache hit skips a write | A new `cacheableToolSources` list (extra field, same effect) |
 ```

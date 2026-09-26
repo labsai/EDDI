@@ -57,6 +57,15 @@ class ModelParameterKeysTest {
     }
 
     @Test
+    @DisplayName("a key inherited from another provider does not stop the selected provider's key from being set")
+    void crossProviderInheritanceStillSelectsModel() {
+        // An OpenAI task (modelName) whose conversation summary runs on Ollama (model).
+        var params = ModelParameterKeys.withModel(Map.of("modelName", "gpt-4o"), "ollama", "llama3:8b");
+        assertEquals("llama3:8b", params.get("model"), "the Ollama builder reads only 'model'");
+        assertEquals("llama3:8b", params.get("modelName"), "the inherited key cannot keep the parent's model either");
+    }
+
+    @Test
     @DisplayName("SummarizationService builds the summarizer on Ollama's own model key")
     void summarizationServiceUsesProviderKey() throws Exception {
         ChatModelRegistry registry = mock(ChatModelRegistry.class);

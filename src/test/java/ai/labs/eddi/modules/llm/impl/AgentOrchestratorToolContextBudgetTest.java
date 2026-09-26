@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
+import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
@@ -42,6 +43,9 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -458,5 +462,34 @@ class AgentOrchestratorToolContextBudgetTest {
 
         assertEquals(0, evict(messages, TIGHT_BUDGET, trace));
         assertTrue(trace.isEmpty());
+    }
+
+    // --- Review of #837: the "failed before any tool ran" marker ---
+
+    @Test
+    @DisplayName("a rejected FIRST request is marked as failing before any tool ran")
+    void firstRequestFailureIsMarked() {
+        stubToolResult("r");
+        ChatModel chatModel = mock(ChatModel.class);
+        when(chatModel.chat(any(ChatRequest.class))).thenThrow(new IllegalArgumentException("400 Bad Request"));
+
+        var thrown = assertThrows(LifecycleException.class,
+                () -> orchestrator.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), webSearchTask(), memory));
+
+        assertInstanceOf(ToolLoopRunner.FailedBeforeToolsException.class, thrown);
+        assertTrue(thrown.getMessage().contains("400 Bad Request"), thrown.getMessage());
+    }
+
+    @Test
+    @DisplayName("a request failing after a tool already ran is NOT marked")
+    void laterRequestFailureIsNotMarked() {
+        stubToolResult("r");
+        ChatModel chatModel = mock(ChatModel.class);
+        when(chatModel.chat(any(ChatRequest.class))).thenReturn(toolBatch("c1")).thenThrow(new IllegalArgumentException("400 Bad Request"));
+
+        var thrown = assertThrows(LifecycleException.class,
+                () -> orchestrator.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), webSearchTask(), memory));
+
+        assertFalse(thrown instanceof ToolLoopRunner.FailedBeforeToolsException, "a tool ran before this failure");
     }
 }
