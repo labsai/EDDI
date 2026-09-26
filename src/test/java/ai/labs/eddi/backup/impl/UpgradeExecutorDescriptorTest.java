@@ -20,6 +20,7 @@ import ai.labs.eddi.configs.llm.IRestLlmStore;
 import ai.labs.eddi.configs.snippets.IRestPromptSnippetStore;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
@@ -40,6 +41,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -178,14 +180,81 @@ class UpgradeExecutorDescriptorTest {
                             }
                         }));
         when(llmStore.updateLlm(eq(LLM_ID), eq(3), any())).thenReturn(Response.ok().build());
+        // The descriptor really does lag (G1): it exists at v2 and NOT at v3. The
+        // fixture used to answer a descriptor at any version, which made this test
+        // pass while the real store failed the bump on every sync.
+        givenLlmDescriptorOnlyAt(2);
+        List<String> moves = recordDescriptorMoves(LLM_ID);
 
         UpgradeResult result = withLlmStoreInCdi(() -> executor.executeUpgrade(sourceWithOneLlm(), AGENT_ID, null, null));
 
         assertTrue(result.failures().isEmpty(),
                 "the retry should have carried the write, got: " + result.failures());
         verify(llmStore).updateLlm(eq(LLM_ID), eq(3), any());
-        // And the descriptor is moved from the version that was actually written.
-        assertDescriptorMovedTo(LLM_ID, 3, 4);
+        // The descriptor is walked forward from where it actually is: v2 -> names v3,
+        // then v3 -> names v4 (the version this run wrote).
+        assertEquals(List.of("2->3", "3->4"), moves);
+        assertEquals(2, result.updated(), "the LLM and the workflow both landed");
+    }
+
+    @Test
+    @DisplayName("a descriptor lagging by more than one version is caught up, not left wedged")
+    void descriptorLaggingSeveralVersionsCatchesUp() throws Exception {
+        givenTargetAt(3);
+        when(llmStore.updateLlm(eq(LLM_ID), eq(2), any()))
+                .thenThrow(RestUtilities.createConflictException("eddi://ai.labs.llm/llmstore/llms/", resourceIdAt(LLM_ID, 5)));
+        when(llmStore.updateLlm(eq(LLM_ID), eq(5), any())).thenReturn(Response.ok().build());
+        givenLlmDescriptorOnlyAt(2);
+        List<String> moves = recordDescriptorMoves(LLM_ID);
+
+        UpgradeResult result = withLlmStoreInCdi(() -> executor.executeUpgrade(sourceWithOneLlm(), AGENT_ID, null, null));
+
+        assertTrue(result.failures().isEmpty(), "got: " + result.failures());
+        assertEquals(List.of("2->3", "3->4", "4->5", "5->6"), moves);
+    }
+
+    @Test
+    @DisplayName("a descriptor that is missing altogether is still reported")
+    void missingDescriptorStillFails() throws Exception {
+        givenTargetAt(3);
+        when(descriptorStore.readDescriptor(eq(LLM_ID), anyInt()))
+                .thenThrow(new IResourceStore.ResourceNotFoundException("no descriptor"));
+        when(descriptorStore.getCurrentResourceId(LLM_ID)).thenThrow(new IResourceStore.ResourceNotFoundException("no descriptor"));
+
+        UpgradeResult result = withLlmStoreInCdi(() -> executor.executeUpgrade(sourceWithOneLlm(), AGENT_ID, null, null));
+
+        assertTrue(result.failures().stream().anyMatch(f -> f.reason().contains("descriptor")), "got: " + result.failures());
+        assertEquals(1, result.updated(), "only the workflow landed");
+    }
+
+    // ==================== G5: counters ====================
+
+    @Test
+    @DisplayName("an extension the workflow could not be written for is not counted as updated")
+    void extensionWhoseWorkflowWasRefusedIsNotCounted() throws Exception {
+        givenTargetAt(3);
+        // The LLM is written and its descriptor moved, but the workflow that would
+        // reference the new version is refused: the agent keeps loading the old LLM.
+        when(workflowStore.updateWorkflow(eq(WF_ID), eq(2), any())).thenReturn(Response.status(409).build());
+
+        UpgradeResult result = withLlmStoreInCdi(() -> executor.executeUpgrade(sourceWithOneLlm(), AGENT_ID, null, null));
+
+        assertFalse(result.failures().isEmpty());
+        assertEquals(0, result.updated(), "nothing the agent loads changed, got updated=" + result.updated());
+    }
+
+    @Test
+    @DisplayName("a changed workflow the operator deselected is not counted as skipped (identical)")
+    void deselectedChangedWorkflowIsNotSkipped() throws Exception {
+        givenTargetAt(3);
+
+        // Only the agent row selected: the workflow (UPDATE) and the LLM are
+        // deselected.
+        UpgradeResult result = withLlmStoreInCdi(() -> executor.executeUpgrade(sourceWithOneLlm(), AGENT_ID, Set.of("src-agent"), null));
+
+        assertEquals(0, result.skipped(), "deselected is not identical");
+        assertEquals(0, result.updated());
+        assertTrue(result.failures().isEmpty(), "got: " + result.failures());
     }
 
     // ==================== Fixtures ====================
@@ -246,6 +315,51 @@ class UpgradeExecutorDescriptorTest {
                         new ExtensionSourceData("src-llm", "LLM", "langchain", "eddi://ai.labs.llm",
                                 "{\"model\":\"gpt-4\"}")))));
         return source;
+    }
+
+    /**
+     * The LLM's descriptor exists at {@code version} only; every later version
+     * reads as not found, like a real historized store whose descriptor bump was
+     * lost. Versions the executor has since written are readable once written.
+     */
+    private void givenLlmDescriptorOnlyAt(int version) throws Exception {
+        when(descriptorStore.readDescriptor(eq(LLM_ID), anyInt())).thenAnswer(invocation -> {
+            int requested = invocation.getArgument(1);
+            if (requested == version) {
+                return descriptorAt(LLM_ID, version);
+            }
+            throw new IResourceStore.ResourceNotFoundException("no descriptor at v" + requested);
+        });
+        when(descriptorStore.getCurrentResourceId(LLM_ID)).thenReturn(resourceIdAt(LLM_ID, version));
+    }
+
+    /**
+     * Records each descriptor rewrite of {@code resourceId} as "from->named" at
+     * call time.
+     */
+    private List<String> recordDescriptorMoves(String resourceId) throws Exception {
+        List<String> moves = new ArrayList<>();
+        when(descriptorStore.updateDescriptor(eq(resourceId), anyInt(), any())).thenAnswer(invocation -> {
+            DocumentDescriptor descriptor = invocation.getArgument(2);
+            String uri = descriptor.getResource().toString();
+            moves.add(invocation.getArgument(1) + "->" + uri.substring(uri.lastIndexOf('=') + 1));
+            return (Integer) invocation.getArgument(1) + 1;
+        });
+        return moves;
+    }
+
+    private static IResourceId resourceIdAt(String id, int version) {
+        return new IResourceId() {
+            @Override
+            public String getId() {
+                return id;
+            }
+
+            @Override
+            public Integer getVersion() {
+                return version;
+            }
+        };
     }
 
     private static DocumentDescriptor descriptorAt(String resourceId, Integer version) {
