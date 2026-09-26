@@ -23,6 +23,7 @@ import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.WebApplicationException;
 import java.net.URI;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -145,6 +146,23 @@ class RestDocumentDescriptorStoreTest {
 
         verify(documentDescriptorStore).setDescriptor("id1", 1, current);
         assertEquals("renamed", current.getName());
+    }
+
+    @Test
+    @DisplayName("patchDescriptor — a PUT that moves the descriptor on during the write is a 409, not a 204 into history")
+    void patchRacingAPutIsAConflict() throws Exception {
+        var written = new AtomicBoolean();
+        when(documentDescriptorStore.getCurrentResourceId("id1")).thenAnswer(i -> resourceId("id1", written.get() ? 2 : 1));
+        var current = new DocumentDescriptor();
+        when(documentDescriptorStore.readDescriptor("id1", 1)).thenReturn(current);
+        doAnswer(i -> {
+            written.set(true);
+            return null;
+        }).when(documentDescriptorStore).setDescriptor(eq("id1"), eq(1), any());
+
+        var thrown = assertThrows(WebApplicationException.class, () -> restStore.patchDescriptor("id1", 1, rename("late")));
+
+        assertEquals(409, thrown.getResponse().getStatus());
     }
 
     private static PatchInstruction<DocumentDescriptor> rename(String name) {

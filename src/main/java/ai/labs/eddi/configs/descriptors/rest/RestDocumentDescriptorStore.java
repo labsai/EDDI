@@ -149,6 +149,7 @@ public class RestDocumentDescriptorStore implements IRestDocumentDescriptorStore
             // the backfill migration.
             accessGuard.stampModification(documentDescriptor);
             documentDescriptorStore.setDescriptor(id, version, documentDescriptor);
+            requireStillCurrent(id, version);
         } catch (IResourceStore.ResourceStoreException e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
@@ -184,7 +185,26 @@ public class RestDocumentDescriptorStore implements IRestDocumentDescriptorStore
         }
         String message = "Version " + version + " of '" + id + "' is not its current version; patch the current version ("
                 + (live != null && live.getVersion() != null ? live.getVersion() : current.getVersion()) + ").";
-        throw new WebApplicationException(message, Response.status(Response.Status.CONFLICT)
+        throw conflict(message);
+    }
+
+    /**
+     * A {@code PUT} on the resource that lands between {@link #patchTargetVersion}
+     * and the write moves the descriptor on, and the rename then went into the
+     * history row of the version it was aimed at, answered with 204. Checked after
+     * the write, as {@code ResourceSharingService.writeBack} does, and reported as
+     * the 409 it is, so the client can re-read and retry.
+     */
+    private void requireStillCurrent(String id, Integer writtenVersion) throws IResourceStore.ResourceNotFoundException {
+        IResourceStore.IResourceId current = documentDescriptorStore.getCurrentResourceId(id);
+        if (writtenVersion != null && current != null && current.getVersion() != null && !current.getVersion().equals(writtenVersion)) {
+            throw conflict("The descriptor of '" + id + "' moved to version " + current.getVersion()
+                    + " while it was being patched; the change did not reach it. Re-read and patch again.");
+        }
+    }
+
+    private static WebApplicationException conflict(String message) {
+        return new WebApplicationException(message, Response.status(Response.Status.CONFLICT)
                 .entity(message)
                 .type(MediaType.TEXT_PLAIN)
                 .build());

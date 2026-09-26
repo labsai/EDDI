@@ -25,6 +25,7 @@ import java.io.OutputStream;
 import java.lang.reflect.Field;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -477,6 +478,20 @@ class GridFsAttachmentStoreTest {
         verify(files).createIndex(Indexes.ascending("metadata.storageRef"));
         verify(files).createIndex(Indexes.ascending("metadata.conversationId"));
         verify(files).createIndex(Indexes.ascending("metadata.grants"));
+    }
+
+    @Test
+    void ensureIndexes_eachIndexBuildIsTimeBounded() {
+        @SuppressWarnings("unchecked")
+        MongoCollection<Document> bounded = mock(MongoCollection.class);
+        when(filesCollection.withTimeout(GridFsAttachmentStore.INDEX_TIMEOUT_SECONDS, TimeUnit.SECONDS)).thenReturn(bounded);
+
+        sut.ensureIndexes();
+
+        // An unreachable database must cost a bounded wait, not a server-selection
+        // timeout per index.
+        verify(bounded).createIndex(Indexes.ascending("metadata.storageRef"));
+        verify(filesCollection, never()).createIndex(any(Bson.class));
     }
 
     @Test

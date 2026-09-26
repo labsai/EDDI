@@ -9,6 +9,7 @@ import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import com.mongodb.MongoClientSettings;
+import com.mongodb.MongoException;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
@@ -431,6 +432,63 @@ class MongoResourceStorageTest {
         InOrder inOrder = inOrder(durableHistory, durableCurrent);
         inOrder.verify(durableHistory).insertOne(any(Document.class));
         inOrder.verify(durableCurrent).replaceOne(any(Bson.class), any(Document.class));
+    }
+
+    @Test
+    @DisplayName("storeHistoryAndUpdate — clears a stale tombstone on the version it just replaced")
+    void storeHistoryAndUpdateClearsAStaleTombstone() throws Exception {
+        when(documentBuilder.toString(any())).thenReturn("{\"data\":\"test\"}");
+        var resource = storage.newResource(VALID_ID, 2, "test");
+        var history = storage.newHistoryResourceFor(storage.newResource(VALID_ID, 1, "test"), false);
+        MongoCollection<Document> durableCurrent = mock(MongoCollection.class);
+        when(currentCollection.withWriteConcern(any())).thenReturn(durableCurrent);
+        when(historyCollection.withWriteConcern(any())).thenReturn(mock(MongoCollection.class));
+        var updateResult = mock(UpdateResult.class);
+        when(updateResult.getMatchedCount()).thenReturn(1L);
+        when(durableCurrent.replaceOne(any(Bson.class), any(Document.class))).thenReturn(updateResult);
+
+        storage.storeHistoryAndUpdate(history, resource, 1);
+
+        // A failed delete may have left deleted:true on v1 while v1 was still live; the
+        // insert-if-absent archive would keep it, and v1 would read as 404 for ever.
+        ArgumentCaptor<Bson> filter = ArgumentCaptor.forClass(Bson.class);
+        verify(historyCollection).updateOne(filter.capture(), any(Bson.class));
+        String json = filter.getValue().toBsonDocument().toJson();
+        assertTrue(json.contains("\"_deleted\": true") && json.contains("\"_version\": 1"), json);
+    }
+
+    @Test
+    @DisplayName("storeHistoryAndRemove — a delete that fails mid-way takes its tombstone back while the version is still live")
+    void failedDeleteDoesNotLeaveAStrayTombstone() throws Exception {
+        when(documentBuilder.toString(any())).thenReturn("{\"data\":\"test\"}");
+        var history = storage.newHistoryResourceFor(storage.newResource(VALID_ID, 1, "test"), true);
+        MongoCollection<Document> durableCurrent = mock(MongoCollection.class);
+        MongoCollection<Document> durableHistory = mock(MongoCollection.class);
+        when(currentCollection.withWriteConcern(any())).thenReturn(durableCurrent);
+        when(historyCollection.withWriteConcern(any())).thenReturn(durableHistory);
+        when(durableCurrent.deleteOne(any(Bson.class))).thenThrow(new MongoException("write concern timeout"));
+        when(currentCollection.countDocuments(any(Bson.class))).thenReturn(1L);
+
+        assertThrows(MongoException.class, () -> storage.storeHistoryAndRemove(history, VALID_ID, 1));
+
+        verify(durableHistory).updateOne(any(Bson.class), any(Bson.class));
+    }
+
+    @Test
+    @DisplayName("storeHistoryAndRemove — a delete that failed after removing the row keeps its tombstone")
+    void failedDeleteOfAGoneResourceKeepsTheTombstone() throws Exception {
+        when(documentBuilder.toString(any())).thenReturn("{\"data\":\"test\"}");
+        var history = storage.newHistoryResourceFor(storage.newResource(VALID_ID, 1, "test"), true);
+        MongoCollection<Document> durableCurrent = mock(MongoCollection.class);
+        MongoCollection<Document> durableHistory = mock(MongoCollection.class);
+        when(currentCollection.withWriteConcern(any())).thenReturn(durableCurrent);
+        when(historyCollection.withWriteConcern(any())).thenReturn(durableHistory);
+        when(durableCurrent.deleteOne(any(Bson.class))).thenThrow(new MongoException("network error"));
+        when(currentCollection.countDocuments(any(Bson.class))).thenReturn(0L);
+
+        assertThrows(MongoException.class, () -> storage.storeHistoryAndRemove(history, VALID_ID, 1));
+
+        verify(durableHistory, never()).updateOne(any(Bson.class), any(Bson.class));
     }
 
     @Test
