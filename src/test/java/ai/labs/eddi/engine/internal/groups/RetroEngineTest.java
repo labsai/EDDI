@@ -306,4 +306,21 @@ class RetroEngineTest {
         assertDoesNotThrow(() -> RetroEngine.harvest(gc, new RetroConfig(),
                 List.of(retroEntry("{\"lessons\":[{\"lesson\":\"x\"}]}")), failing, "Retro", null));
     }
+
+    @Test
+    @DisplayName("M-G4: a harvested lesson is stored within the 1000-character memory-value cap, context trimmed first")
+    void parseLessons_boundsTheStoredValue() {
+        String json = "{\"lessons\": [{\"lesson\": \"" + "L".repeat(5_000) + "\", \"context\": \"ctx\"},"
+                + "{\"lesson\": \"short lesson\", \"context\": \"" + "C".repeat(5_000) + "\"}]}";
+
+        List<RetroEngine.Lesson> lessons = RetroEngine.parseLessons(json, 5);
+
+        assertEquals(2, lessons.size());
+        assertTrue(lessons.get(0).lesson().length() <= RetroEngine.MAX_LESSON_VALUE_CHARS,
+                "a retro lesson bypassed the cap every other agent-written memory value obeys");
+        assertNull(lessons.get(0).context(), "no room left for the context — dropped rather than squeezed");
+        assertEquals("short lesson", lessons.get(1).lesson());
+        String stored = lessons.get(1).lesson() + " (applies: " + lessons.get(1).context() + ")";
+        assertTrue(stored.length() <= RetroEngine.MAX_LESSON_VALUE_CHARS + 1, "stored value length " + stored.length());
+    }
 }

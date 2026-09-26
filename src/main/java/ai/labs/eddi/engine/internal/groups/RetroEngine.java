@@ -62,6 +62,15 @@ public final class RetroEngine {
      */
     static final String RETRO_SOURCE = "retro";
 
+    /**
+     * M-G4: the most a stored lesson value (lesson plus its "applies:" context) may
+     * hold — the same 1000-character bound {@code UserMemoryTool} enforces on every
+     * other agent-written memory value by default. A retro lesson is an LLM write
+     * to team memory that every later discussion of the team recalls, and it
+     * bypassed that cap entirely.
+     */
+    static final int MAX_LESSON_VALUE_CHARS = 1000;
+
     /** Idempotency-key prefix: {@code retro:<sha256(lesson)[0..15]>}. */
     static final String KEY_PREFIX = "retro:";
 
@@ -99,12 +108,31 @@ public final class RetroEngine {
                 continue;
             }
             String context = lessonNode.path("context").isTextual() ? lessonNode.path("context").asText().trim() : null;
-            lessons.add(new Lesson(lesson, context != null && !context.isBlank() ? context : null));
+            lessons.add(bounded(lesson, context != null && !context.isBlank() ? context : null));
             if (lessons.size() >= maxLessonsPerRun) {
                 break;
             }
         }
         return lessons;
+    }
+
+    /**
+     * Fits a lesson into {@link #MAX_LESSON_VALUE_CHARS} once rendered as the
+     * stored value. The lesson keeps priority; the context gets what is left and is
+     * dropped when nothing useful is. Truncated at parse time, so the idempotency
+     * key hashes exactly the text that is stored.
+     */
+    static Lesson bounded(String lesson, String context) {
+        String boundedLesson = truncate(lesson, MAX_LESSON_VALUE_CHARS);
+        if (context == null) {
+            return new Lesson(boundedLesson, null);
+        }
+        int room = MAX_LESSON_VALUE_CHARS - boundedLesson.length() - " (applies: )".length();
+        return new Lesson(boundedLesson, room >= 20 ? truncate(context, room) : null);
+    }
+
+    private static String truncate(String text, int max) {
+        return text.length() <= max ? text : text.substring(0, max - 1).strip() + "…";
     }
 
     /**

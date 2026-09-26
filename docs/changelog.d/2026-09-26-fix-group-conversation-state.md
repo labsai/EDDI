@@ -45,6 +45,24 @@ claim, so a lost claim could only cancel — gracefully — a leg that might alr
 id), nothing runs until `launch()` after the claim is won, and a lost claim calls `abandon()` (CAS
 `IN_PROGRESS → CANCELLED` of a discussion that never ran).
 
+**Group prompt and record bounds (M-G1, M-G2, M-G3, M-G4, G3).**
+- *M-G1* `NegotiationEngine`: one BARGAIN turn records at most 5 concessions, each stored truncated to the quoting
+  bound (600 chars); the ledger stops at 50 (WARN, earliest kept — they are the record the outcome quotes); a turn's
+  prompt quotes only the newest 20 with "(N earlier concession(s) omitted)", which also bounds ledgers stored before
+  the caps.
+- *M-G2* `VoteTallyEngine`: a contract-shaped ballot naming no option (`"votes": []`, `"vote": null`) is a non-vote —
+  it no longer falls through to the prose scan, which counted whatever option the free-text `statement` mentioned.
+  The prose scan (and the tiebreak's `resolveChoice`) match an option as a whole word/phrase, so "No" is not found
+  inside "not"/"know".
+- *M-G3* `PhaseExecutionEngine.setDecisionCarryingDissents`: earlier dissents are merged with the new decision's
+  (earlier first, identical ones once) instead of being replaced whenever the new decision carried any.
+- *M-G4* `RetroEngine`: a stored lesson value (lesson + "applies:" context) is bounded to 1000 chars — the default
+  cap `UserMemoryTool` applies to every other agent-written memory value. Truncated at parse time, so the idempotency
+  key hashes exactly what is stored; the context is dropped when too little room is left.
+- *G3* `StanceSummaryEngine`: summarizer input is the member's newest contributions within 8,000 chars (2,000 per
+  contribution), with "[N earlier contribution(s) omitted]" — it used to be every contribution concatenated, re-sent
+  at every boundary and eventually past the summarizer's context window.
+
 ### Compatibility
 
 No stored-JSON, REST or MCP shape changes. `IGroupWorkspaceStore.update` and

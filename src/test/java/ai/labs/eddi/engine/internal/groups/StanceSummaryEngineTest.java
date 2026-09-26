@@ -22,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.time.Instant;
+import java.util.ArrayList;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -738,5 +739,24 @@ class StanceSummaryEngineTest {
             MemberTurnExecutor.announceCost(gc, null, "Architect", listener);
             verify(listener, never()).onCostUpdated(any());
         }
+    }
+
+    @Test
+    @DisplayName("G3: summarizer input is bounded — newest contributions kept, per-entry and total caps, omission marked")
+    void renderForSummarizer_isBounded() {
+        var entries = new ArrayList<TranscriptEntry>();
+        for (int i = 0; i < 40; i++) {
+            entries.add(new TranscriptEntry("a1", "Alice", "turn-" + i + " " + "x".repeat(3_000), i, "Phase " + i,
+                    TranscriptEntryType.OPINION, Instant.now(), null, null));
+        }
+
+        String input = StanceSummaryEngine.renderForSummarizer(entries);
+
+        assertTrue(input.length() <= StanceSummaryEngine.MAX_SUMMARIZER_INPUT_CHARS + 200,
+                "it used to be every contribution concatenated: " + input.length());
+        assertTrue(input.contains("turn-39 "), "the newest contribution is where the member stands now");
+        assertFalse(input.contains("turn-0 "), "the oldest are dropped first");
+        assertTrue(input.startsWith("["), input.substring(0, 40));
+        assertTrue(input.contains("earlier contribution(s) omitted]"), "the omission is stated, not silent");
     }
 }
