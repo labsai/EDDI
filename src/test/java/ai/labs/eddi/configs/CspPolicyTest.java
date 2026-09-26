@@ -11,6 +11,7 @@ import java.io.Reader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Properties;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -36,6 +37,7 @@ class CspPolicyTest {
 
     private static final String DEFAULT_HEADER = "quarkus.http.filter.csp-default.header.\"Content-Security-Policy\"";
     private static final String SWAGGER_HEADER = "quarkus.http.filter.csp-swagger.header.\"Content-Security-Policy\"";
+    private static final String CHAT_HEADER = "quarkus.http.filter.csp-chat.header.\"Content-Security-Policy\"";
 
     private static final String GITHUB_API = "https://api.github.com";
 
@@ -129,5 +131,89 @@ class CspPolicyTest {
             assertFalse(directive(csp, "script-src").contains("api.github.com"),
                     key + " must not allow scripts from GitHub: " + csp);
         }
+    }
+
+    /**
+     * Which filter owns which path. Two matching filters send two CSP headers and
+     * the browser enforces their intersection, so /chat must match the chat filter
+     * and NOT the default one, and the swagger split must survive the new
+     * exclusion. Vert.x matches a filter's regex against the whole path.
+     */
+    @Test
+    @DisplayName("each path is matched by exactly one CSP filter")
+    void everyPathHasExactlyOnePolicy() throws Exception {
+        var properties = applicationProperties();
+        var defaultFilter = Pattern.compile(properties.getProperty("quarkus.http.filter.csp-default.matches"));
+        var swaggerFilter = Pattern.compile(properties.getProperty("quarkus.http.filter.csp-swagger.matches"));
+        var chatFilter = Pattern.compile(properties.getProperty("quarkus.http.filter.csp-chat.matches"));
+
+        for (var path : new String[]{"/chat", "/chat/", "/chat/production/6630a1b2c3d4e5f6a7b8c9d0"}) {
+            assertTrue(chatFilter.matcher(path).matches(), path + " must get the chat policy");
+            assertFalse(defaultFilter.matcher(path).matches(), path + " must not ALSO get the default policy");
+            assertFalse(swaggerFilter.matcher(path).matches(), path);
+        }
+        for (var path : new String[]{"/manage", "/manage/agents", "/", "/q/health/ready", "/chatter", "/agents/x"}) {
+            assertTrue(defaultFilter.matcher(path).matches(), path + " must get the default policy");
+            assertFalse(chatFilter.matcher(path).matches(), path + " must not get the chat policy");
+        }
+        for (var path : new String[]{"/q/swagger-ui", "/q/swagger-ui/index.html"}) {
+            assertTrue(swaggerFilter.matcher(path).matches(), path);
+            assertFalse(defaultFilter.matcher(path).matches(), path);
+            assertFalse(chatFilter.matcher(path).matches(), path);
+        }
+    }
+
+    /**
+     * {@code X-Frame-Options: DENY} used to be a global header, and
+     * {@code frame-ancestors 'none'} covered /chat as well — so the iframe embed
+     * the Chat UI documents could never render. The chat's framing is an operator
+     * setting now, still refusing every embedder by default; everything else keeps
+     * refusing to be framed.
+     */
+    @Test
+    @DisplayName("the chat's frame-ancestors is configurable and closed by default; the rest stays DENY")
+    void chatFramingIsConfigurableAndClosedByDefault() throws Exception {
+        var properties = applicationProperties();
+        assertNull(properties.getProperty("quarkus.http.header.X-Frame-Options.value"),
+                "X-Frame-Options must not be a global header — it also reaches /chat, where it cannot express an "
+                        + "allow-list and blocks the documented embed");
+        assertEquals("DENY", properties.getProperty("quarkus.http.filter.csp-default.header.X-Frame-Options"));
+        assertEquals("DENY", properties.getProperty("quarkus.http.filter.csp-swagger.header.X-Frame-Options"));
+
+        assertEquals("'none'", properties.getProperty("eddi.chat.frame-ancestors"),
+                "the chat must refuse every embedder until an operator lists one");
+        var chat = properties.getProperty(CHAT_HEADER);
+        assertNotNull(chat, CHAT_HEADER + " must be configured");
+        assertEquals("frame-ancestors ${eddi.chat.frame-ancestors:'none'}", directive(chat, "frame-ancestors"),
+                "the chat policy must take frame-ancestors from eddi.chat.frame-ancestors, falling back to 'none'");
+        for (var key : new String[]{DEFAULT_HEADER, SWAGGER_HEADER}) {
+            assertEquals("frame-ancestors 'none'", directive(properties.getProperty(key), "frame-ancestors"), key);
+        }
+        // The chat is otherwise the application policy: no script relaxation rides
+        // in with the framing change.
+        assertEquals(directive(properties.getProperty(DEFAULT_HEADER), "script-src"), directive(chat, "script-src"));
+        assertFalse(directive(chat, "connect-src").contains("api.github.com"),
+                "the chat never calls GitHub; only the Manager's update check does");
+    }
+
+    /**
+     * The Manager previews staged image attachments through
+     * {@code URL.createObjectURL}, and the agent wizard can fetch an OpenAPI spec
+     * from a URL. Under {@code img-src 'self' data:} every thumbnail was a broken
+     * image; the spec fetch has no host that could be named in advance, so it is an
+     * operator setting that stays empty (strict) unless set.
+     */
+    @Test
+    @DisplayName("the application policy renders blob: previews and takes extra connect sources from config")
+    void applicationPolicyAllowsBlobImagesAndConfiguredConnectSources() throws Exception {
+        var properties = applicationProperties();
+        var csp = properties.getProperty(DEFAULT_HEADER);
+        assertTrue(allows(directive(csp, "img-src"), "blob:"), "img-src must allow blob: previews: " + csp);
+        assertTrue(allows(directive(csp, "connect-src"), "${eddi.csp.extra-connect-sources:}"),
+                "connect-src must append eddi.csp.extra-connect-sources: " + csp);
+        assertEquals("", properties.getProperty("eddi.csp.extra-connect-sources"),
+                "extra connect sources must default to none — widening connect-src is an operator's call");
+        assertFalse(allows(directive(csp, "connect-src"), "https:"),
+                "connect-src must not allow every https host by default: " + csp);
     }
 }

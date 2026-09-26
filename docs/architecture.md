@@ -1002,7 +1002,7 @@ The escape hatch (`EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true`) exists for air-gap
 
 Production response headers (configured via `application.properties`):
 - `X-Content-Type-Options: nosniff`
-- `X-Frame-Options: DENY`
+- `X-Frame-Options: DENY` (everywhere except the embeddable Chat UI at `/chat`, whose framing is `eddi.chat.frame-ancestors`, default `'none'`)
 - `Referrer-Policy: strict-origin-when-cross-origin`
 - `X-XSS-Protection: 0`
 - `Permissions-Policy: camera=(), microphone=(), geolocation=()`
