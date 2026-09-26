@@ -444,6 +444,56 @@ class ChannelTargetRouterDeepBranchTest {
         }
 
         @Test
+        @DisplayName("#1: DM thread credentials only from an integration that has the locked target")
+        void dmThreadCredentialsRequireTheLockedTarget() throws Exception {
+            var targetOfB = createTarget("default", List.of());
+            targetOfB.setTargetId("agent-b");
+            var targetOfA = createTarget("default", List.of());
+            targetOfA.setTargetId("agent-a");
+            var a = createIntegration("default", List.of(targetOfA), Map.of("channelId", "CA", "signingSecret", "sig-a"));
+            a.setName("app-a");
+            var b = createIntegration("default", List.of(targetOfB), Map.of("channelId", "CB", "signingSecret", "sig-b"));
+            b.setName("app-b");
+            setField(router, "integrationMap", Map.of("slack:CA", a, "slack:CB", b));
+
+            // App A's secret cannot pick up a thread locked to app B's agent.
+            assertNull(router.threadCredentialsForDm("slack", targetOfB, "sig-a", Map.of()));
+            var own = router.threadCredentialsForDm("slack", targetOfB, "sig-b", Map.of());
+            assertNotNull(own);
+            assertEquals("app-b", own.integration().getName());
+            assertEquals(targetOfB, own.target());
+        }
+
+        @Test
+        @DisplayName("#7: a legacy connector's DM thread gets its own credentials")
+        void dmThreadCredentialsFromLegacyConnector() throws Exception {
+            var legacy = new LegacyTarget("agent-l", "xoxb-l", "sig-l", null);
+            setField(router, "legacyMap", Map.of("C9", legacy));
+
+            var resolved = router.threadCredentialsForDm("slack", legacy.toChannelTarget(), "sig-l", Map.of());
+            assertNotNull(resolved);
+            assertEquals("xoxb-l", resolved.botToken());
+            assertTrue(ChannelTargetRouter.matchesInbound(resolved, "sig-l", Map.of()));
+            assertNull(router.threadCredentialsForDm("slack", legacy.toChannelTarget(), "sig-other", Map.of()));
+        }
+
+        @Test
+        @DisplayName("the common pinned team is derived only when every routed integration pins the same one")
+        void commonPinnedTeam() throws Exception {
+            var t1 = createIntegration("default", List.of(), Map.of("channelId", "C1", ChannelTargetRouter.CFG_TEAM_ID, "T1"));
+            var t1b = createIntegration("default", List.of(), Map.of("channelId", "C2", ChannelTargetRouter.CFG_TEAM_ID, "T1"));
+            var t2 = createIntegration("default", List.of(), Map.of("channelId", "C3", ChannelTargetRouter.CFG_TEAM_ID, "T2"));
+            var none = createIntegration("default", List.of(), Map.of("channelId", "C4"));
+
+            setField(router, "integrationMap", Map.of("slack:C1", t1, "slack:C2", t1b));
+            assertEquals("T1", router.commonPinnedTeamId("slack"));
+            setField(router, "integrationMap", Map.of("slack:C1", t1, "slack:C3", t2));
+            assertNull(router.commonPinnedTeamId("slack"));
+            setField(router, "integrationMap", Map.of("slack:C1", t1, "slack:C4", none));
+            assertNull(router.commonPinnedTeamId("slack"));
+        }
+
+        @Test
         @DisplayName("two integrations with one name → getIntegrationByName binds to neither")
         void duplicateNameIsAmbiguous() throws Exception {
             var a = createIntegration("default", List.of(), Map.of("channelId", "C1", "signingSecret", "sig-a"));

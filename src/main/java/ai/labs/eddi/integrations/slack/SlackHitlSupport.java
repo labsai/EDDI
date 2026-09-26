@@ -199,10 +199,33 @@ public final class SlackHitlSupport {
      * comma-separated approver list. Fail-closed: an unset list authorizes nobody.
      */
     public static boolean isAuthorizedApprover(String slackUserId, String approverUserIdsCsv) {
+        return isAuthorizedApprover(slackUserId, null, approverUserIdsCsv);
+    }
+
+    /**
+     * Team-aware variant. An entry may be a bare user id ({@code U123}), which
+     * matches that user from any team, or {@code T456:U123}, which matches only
+     * that user of that team — the form to use when Slack Connect brings users of
+     * other organisations, whose ids are not unique across teams, into the approval
+     * channel. Fail-closed: an unset list authorizes nobody, and a team-scoped
+     * entry never matches a click that carries no team.
+     */
+    public static boolean isAuthorizedApprover(String slackUserId, String slackTeamId, String approverUserIdsCsv) {
         if (slackUserId == null || slackUserId.isBlank()) {
             return false;
         }
-        return parseApproverUserIds(approverUserIdsCsv).contains(slackUserId);
+        for (String entry : parseApproverUserIds(approverUserIdsCsv)) {
+            int sep = entry.indexOf(':');
+            if (sep < 0) {
+                if (entry.equals(slackUserId)) {
+                    return true;
+                }
+            } else if (slackTeamId != null && entry.substring(0, sep).equals(slackTeamId)
+                    && entry.substring(sep + 1).equals(slackUserId)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // ─── Block Kit builders ───
@@ -276,9 +299,15 @@ public final class SlackHitlSupport {
     public static final String NO_APPROVERS_NOTICE = "No approver user ids configured — approve or reject via the API.";
 
     /**
+     * The no-buttons notice when the conversation is not bound to the integration
+     * posting the card, so the interactivity handler would refuse a click.
+     */
+    public static final String NOT_BOUND_NOTICE = "This conversation was not started through this integration, so it "
+            + "cannot be decided from Slack — approve or reject via the Manager or the API.";
+
+    /**
      * The no-buttons notice when the pause could not be identified, so a button
-     * could not be bound to it (see
-     * {@link #buildActionValue(String, String, String)}).
+     * could not be bound to it.
      */
     public static final String PAUSE_UNIDENTIFIED_NOTICE = "The pending request could not be identified for this card — "
             + "approve or reject via the API or the Manager.";

@@ -317,6 +317,36 @@ class AgentOrchestratorResumeToolLoopTest {
         assertNull(callerDuringContinuation.get(), "nothing after it inherits them");
     }
 
+    @Test
+    @DisplayName("H5: when the owner approved, the approved call and the continuation both run as the owner")
+    void ownerApproverRunsWholeTurn() throws Exception {
+        var task = twoToolTask();
+        var r1 = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"6*7\"}").build();
+        var batch = batchWith(0, List.of(gatedCall("c1", "calculate", "{\"expression\":\"6*7\"}")), List.of(r1));
+        when(journalStore.tryClaim(eq("conv-1"), eq("epoch-1"), anyString(), eq("calculate"), eq("reviewer-1")))
+                .thenReturn(true);
+        var callerContext = new CallerIdentityContext(null, null);
+        var callerDuringApprovedCall = new AtomicReference<CallerIdentity>();
+        var callerDuringContinuation = new AtomicReference<CallerIdentity>();
+        when(calculatorTool.calculate("6*7")).thenAnswer(inv -> {
+            callerDuringApprovedCall.set(callerContext.current());
+            return "42";
+        });
+        ChatModel chatModel = mock(ChatModel.class);
+        when(chatModel.chat(any(ChatRequest.class))).thenAnswer(inv -> {
+            callerDuringContinuation.set(callerContext.current());
+            return text("42");
+        });
+        var owner = new CallerIdentity("owner-token", "owner", "https://eddi.example:443");
+
+        // What ConversationHitlService binds when the approver owns the conversation.
+        callerContext.withIdentity(owner, callerContext.withApprover(null,
+                () -> orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), true))).call();
+
+        assertEquals(owner, callerDuringApprovedCall.get());
+        assertEquals(owner, callerDuringContinuation.get());
+    }
+
     /**
      * The HITL resume path rebuilds its own {@code ToolSetup} and threads its own
      * copy of the canonical-name map. If it is missed, prices and cache TTLs are

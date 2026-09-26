@@ -426,8 +426,8 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                             && existing.getPlatformConfig().get("channelId") != null
                             && !existing.getPlatformConfig().get("channelId").isBlank()) {
                         throw new BadRequestException(
-                                "Another channel integration of type '" + channelType + "' is already named '"
-                                        + config.getName() + "'. Integration names must be unique.");
+                                "This channel integration name is not available — choose a different name. "
+                                        + "(Names must be unique; which integration holds it is not disclosed.)");
                     }
                 } catch (BadRequestException e) {
                     throw e; // re-throw validation errors

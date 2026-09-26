@@ -271,6 +271,89 @@ public class ChannelTargetRouter {
     }
 
     /**
+     * Credentials for a reply in a DM thread whose lock names {@code lockedTarget}
+     * — a lock on a D-channel carries no integration, because no integration names
+     * the channel.
+     * <p>
+     * Only an integration (or legacy connector) that the verified secret
+     * authenticates <b>and</b> that has {@code lockedTarget} among its own targets
+     * qualifies. Attaching "whichever integration the secret authenticates" instead
+     * would let the holder of one app's secret continue a thread locked to another
+     * app's agent — the check that follows would pass by construction.
+     *
+     * @return a resolved target carrying the locked target and those credentials,
+     *         or {@code null} when no qualifying integration or connector exists
+     */
+    public ResolvedTarget threadCredentialsForDm(String channelType, ChannelTarget lockedTarget, String verifiedSigningSecret,
+                                                 Map<String, String> inboundIds) {
+        refreshIfNeeded();
+        if (lockedTarget == null || verifiedSigningSecret == null || verifiedSigningSecret.isBlank()) {
+            return null;
+        }
+        String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
+        String prefix = normalizedType + ":";
+        ChannelIntegrationConfiguration best = null;
+        int bestPinned = -1;
+        for (var entry : integrationMap.entrySet()) {
+            var cfg = entry.getValue();
+            if (!entry.getKey().startsWith(prefix) || !matchesInbound(cfg, verifiedSigningSecret, inboundIds)
+                    || !hasTarget(cfg, lockedTarget)) {
+                continue;
+            }
+            int pinned = pinnedIdentifierCount(cfg, inboundIds);
+            if (best == null || pinned > bestPinned || (pinned == bestPinned && compareNames(cfg, best) < 0)) {
+                best = cfg;
+                bestPinned = pinned;
+            }
+        }
+        if (best != null) {
+            return new ResolvedTarget(lockedTarget, null, best, null, null);
+        }
+        if (CHANNEL_TYPE_SLACK.equals(normalizedType)) {
+            return legacyMap.entrySet().stream()
+                    .filter(e -> secretsEqual(e.getValue().signingSecret(), verifiedSigningSecret))
+                    .filter(e -> sameTarget(e.getValue().toChannelTarget(), lockedTarget))
+                    .sorted(Map.Entry.comparingByKey())
+                    .map(e -> new ResolvedTarget(lockedTarget, null, null, e.getValue().botToken(), e.getValue().signingSecret()))
+                    .findFirst()
+                    .orElse(null);
+        }
+        return null;
+    }
+
+    private static boolean hasTarget(ChannelIntegrationConfiguration cfg, ChannelTarget target) {
+        return cfg.getTargets() != null && cfg.getTargets().stream().anyMatch(t -> sameTarget(t, target));
+    }
+
+    private static boolean sameTarget(ChannelTarget a, ChannelTarget b) {
+        return a != null && b != null && a.getType() == b.getType() && a.getTargetId() != null
+                && a.getTargetId().equals(b.getTargetId());
+    }
+
+    /**
+     * The Slack workspace every routed integration of {@code channelType} pins, or
+     * {@code null} when any of them pins none or they pin different ones. A
+     * deployment where this is non-null serves exactly one workspace, so a bare
+     * Slack user id there can only ever have meant a user of that workspace.
+     */
+    public String commonPinnedTeamId(String channelType) {
+        refreshIfNeeded();
+        String prefix = (channelType != null ? channelType.toLowerCase(Locale.ROOT) : "") + ":";
+        String common = null;
+        for (var entry : integrationMap.entrySet()) {
+            if (!entry.getKey().startsWith(prefix)) {
+                continue;
+            }
+            String team = entry.getValue().getPlatformConfig().get(CFG_TEAM_ID);
+            if (team == null || team.isBlank() || (common != null && !common.equals(team.trim()))) {
+                return null;
+            }
+            common = team.trim();
+        }
+        return common;
+    }
+
+    /**
      * Whether an inbound request, authenticated with {@code verifiedSigningSecret}
      * and carrying {@code inboundIds}, may act on {@code integration}.
      * <p>
@@ -774,6 +857,7 @@ public class ChannelTargetRouter {
                         String channelId = config.getPlatformConfig().get("channelId");
                         if (channelId != null && !channelId.isBlank()) {
                             var copy = deepCopyConfig(config);
+                            copy.setResourceId(resId.getId());
                             resolvePlatformSecrets(copy);
                             String key = copy.getChannelType().toLowerCase(Locale.ROOT) + ":" + channelId;
                             newIntegrationMap.put(key, copy);
@@ -882,6 +966,7 @@ public class ChannelTargetRouter {
         copy.setName(src.getName());
         copy.setChannelType(src.getChannelType());
         copy.setDefaultTargetName(src.getDefaultTargetName());
+        copy.setResourceId(src.getResourceId());
         copy.setPlatformConfig(new HashMap<>(src.getPlatformConfig()));
         if (src.getTargets() != null) {
             copy.setTargets(new ArrayList<>(src.getTargets()));

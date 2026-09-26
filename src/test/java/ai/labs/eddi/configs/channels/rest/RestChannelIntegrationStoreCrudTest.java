@@ -402,7 +402,9 @@ class RestChannelIntegrationStoreCrudTest {
             when(channelStore.read("aabbccddeeff112233445566", 1)).thenReturn(existing);
 
             var ex = assertThrows(BadRequestException.class, () -> sut.createChannel(config));
-            assertTrue(ex.getMessage().contains("already named"));
+            assertTrue(ex.getMessage().contains("name is not available"));
+            // Generic: it must not name the integration that holds the name.
+            assertFalse(ex.getMessage().contains("Other"));
         }
 
         @Test

@@ -254,10 +254,6 @@ public class RestSlackWebhook {
      * {@code null} when the envelope does not carry one — an older payload shape,
      * or a user-token authorization. Callers must degrade rather than depend on it.
      */
-    private static String stringField(Map<String, Object> payload, String key) {
-        return payload.get(key) instanceof String value && !value.isBlank() ? value : null;
-    }
-
     private static String botUserId(Map<String, Object> payload) {
         Object authorizations = payload.get("authorizations");
         if (!(authorizations instanceof List<?> list)) {
@@ -272,6 +268,11 @@ public class RestSlackWebhook {
             }
         }
         return null;
+    }
+
+    /** A non-blank top-level string field of the envelope, or {@code null}. */
+    private static String stringField(Map<String, Object> payload, String key) {
+        return payload.get(key) instanceof String value && !value.isBlank() ? value : null;
     }
 
 }
