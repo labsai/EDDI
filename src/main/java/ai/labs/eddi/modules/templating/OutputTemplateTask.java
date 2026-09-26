@@ -94,7 +94,9 @@ public class OutputTemplateTask implements ILifecycleTask {
         outputDataList.forEach(output -> {
             String outputKey = output.getKey();
             TemplateMode templateMode = resolveTemplateMode(outputKey);
-            if (templateMode == null) {
+            if (templateMode == null || output.isVerbatim()) {
+                // Verbatim = supplied as data (turn context, postResponse), not authored:
+                // delivered exactly as it arrived. See IData#isVerbatim.
                 return;
             }
 
@@ -174,6 +176,9 @@ public class OutputTemplateTask implements ILifecycleTask {
     private void templatingQuickReplies(IWritableConversationStep currentStep, List<IData<List<QuickReply>>> quickReplyDataList,
                                         Map<String, Object> contextMap) {
         quickReplyDataList.forEach(quickReplyData -> {
+            if (quickReplyData.isVerbatim()) {
+                return;
+            }
             var preTemplating = quickReplyData.getResult();
             var templating = templatingFunction(contextMap, TemplateMode.TEXT, quickReplyData.getKey());
             var postTemplating = copyQuickReplies(preTemplating).stream().map(quickReply -> {

@@ -22,6 +22,7 @@ public class Data<T> implements IData<T> {
     private String originWorkflowId;
     private boolean isPublic;
     private boolean committed = true;
+    private boolean verbatim;
 
     public Data(String key, T result) {
         this(key, result, Collections.singletonList(result), new Date(System.currentTimeMillis()));
@@ -116,5 +117,15 @@ public class Data<T> implements IData<T> {
     @Override
     public void setCommitted(boolean committed) {
         this.committed = committed;
+    }
+
+    @Override
+    public boolean isVerbatim() {
+        return verbatim;
+    }
+
+    @Override
+    public void setVerbatim(boolean verbatim) {
+        this.verbatim = verbatim;
     }
 }
