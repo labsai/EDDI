@@ -222,9 +222,19 @@ said:
   "llmProvider": "openai",
   "llmModel": "gpt-4o-mini",
   "inputPricePer1M": 0.15,
-  "outputPricePer1M": 0.60
+  "outputPricePer1M": 0.60,
+  "maxInputChars": 8000,
+  "maxEntryChars": 2000
 }
 ```
+
+- **The summarizer's input is bounded.** It reads the member's **newest**
+  contributions within `maxInputChars` (default 8,000, ceiling 32,000), each cut
+  to `maxEntryChars` (default 2,000, ceiling 8,000), with an
+  `[N earlier contribution(s) omitted]` marker — a stance is where the member
+  stands now, and the whole history re-sent at every boundary eventually
+  overflows the summarizer's context window. Non-positive values take the
+  default.
 
 - **There is no `enabled` flag**, unlike `contextWindow`. Stances exist either
   way, so the only thing a flag could have meant is "may this spend money?" —
@@ -290,6 +300,20 @@ peer-hidden until their phase completes (commit-reveal).
   strict JSON → JSON embedded in prose → a reply naming exactly one option's
   text. Anything else is a non-ballot and **counts against quorum** — as do
   abstentions; a mostly-silent team has not reached quorum, and that is signal.
+  - **Only what was cast counts.** For a JSON ballot, only the `vote`/`votes`
+    values are read, never the free-text `statement`. A cast in a shape the
+    method did not ask for still counts when it names exactly one option (the
+    approval array `{"votes": ["X"]}` under `MAJORITY`, a string `"votes": "X"`
+    under `APPROVAL`).
+  - **An empty ballot is a non-vote.** `"votes": []`, `"vote": null` or a JSON
+    ballot with no vote field at all counts against quorum — even if its
+    statement mentions an option.
+  - **Options are matched as words.** In prose ballots (and the moderator's
+    tiebreak reply) an option must appear as a whole word or phrase,
+    case-insensitively: option `No` is not found inside "not" or "know". The
+    boundary applies only between words of scripts written with spaces — in
+    Chinese, Japanese, Thai and similar scripts a plain substring match is used,
+    so "我支持方案A。" is a vote for `方案A`.
 - **Options:** `EXPLICIT` is the reliable path. `LAST_SYNTHESIS` extracts
   `Option A: …` lines from the newest synthesis — instruct that synthesis to
   emit them (the default synthesis prompt does not). The line may be written the
@@ -432,6 +456,19 @@ single deterministic skip condition) ⑤ *Synthesis*.
   co-signatures; no new crypto.
 - No agreement → the arbitration runs and its conclusion becomes
   `decision: {type: "VERDICT", method: "arbitration"}`.
+- **The ledger is bounded** — it is an LLM write surface quoted into every
+  later turn. One BARGAIN turn records at most `maxConcessionsPerMove`
+  concessions (default 5, ceiling 20; each side of a concession is stored
+  truncated to 600 characters), the ledger stops at `maxLedgerConcessions`
+  (default 50, ceiling 500 — further concessions are dropped with a WARN; the
+  earliest are kept, they are the record the outcome quotes), and a turn's
+  prompt quotes only the newest `maxRenderedConcessions` (default 20, ceiling
+  100) with an "(N earlier concession(s) omitted)" line. `negotiationConfig` is
+  a default, not a switch: without it the defaults apply.
+
+```json
+"negotiationConfig": { "maxConcessionsPerMove": 5, "maxLedgerConcessions": 50, "maxRenderedConcessions": 20 }
+```
 
 ## Retro → group memory
 
@@ -442,7 +479,7 @@ knowledge that compounds run-over-run.
 
 ```json
 { "name": "Retro", "type": "RETRO", "participants": "MODERATOR" },
-"retroConfig": { "maxLessonsPerRun": 3, "maxStoredLessons": 50 }
+"retroConfig": { "maxLessonsPerRun": 3, "maxStoredLessons": 50, "maxLessonChars": 1000 }
 ```
 
 - The built-in template asks for `{"lessons": [{"lesson": "...", "context":
@@ -461,6 +498,10 @@ knowledge that compounds run-over-run.
   ceiling is only as bounded as the operator's typing.
 - `maxLessonsPerRun` bounds the whole harvest, not each contribution — a RETRO
   phase with several participants or repeats cannot multiply it.
+- `maxLessonChars` (default 1000 — the same default as an agent's
+  `memoryGuardrails.maxValueLength`; ceiling 4000) bounds one stored lesson
+  value, lesson plus its "applies:" context. Longer lessons are truncated, the
+  context first; the idempotency key still hashes the untruncated lesson.
 - Member conversations already load group-visible entries at init, so recall
   needs no new namespace. The `retro_recorded` SSE event reports each harvest.
 
@@ -1064,8 +1105,8 @@ summarizer's.
 | `GET` | `/groupstore/groups/{id}/workspace` | Read the standing-team workspace (I13) |
 | `GET` | `/groupstore/groups/{id}/workspace/backlog` | Read the team backlog |
 | `POST` | `/groupstore/groups/{id}/workspace/backlog` | File a backlog task |
-| `POST` | `/groupstore/groups/{id}/workspace/cadences` | Add a cron cadence |
-| `DELETE` | `/groupstore/groups/{id}/workspace/cadences/{cadenceId}` | Remove a cadence and its schedule |
+| `POST` | `/groupstore/groups/{id}/workspace/cadences` | Add a cron cadence (409 if the workspace keeps changing under three revision-checked attempts; the schedule it created is deleted again) |
+| `DELETE` | `/groupstore/groups/{id}/workspace/cadences/{cadenceId}` | Remove a cadence, then its schedule (409 as above; cadence and schedule then both stay) |
 
 ## SSE Events
 
@@ -1079,7 +1120,7 @@ speaker and phase pairs.
 | `group_start` | The discussion begins (carries group id and question) |
 | `phase_start` / `phase_complete` | A phase opens / closes |
 | `round_start` | A continuation round (round 2+) of the whole discussion begins — see `POST .../continue`. Phase repeats fire `phase_start` instead |
-| `speaker_start` / `speaker_complete` | A member's turn opens / closes (complete carries the content) |
+| `speaker_start` / `speaker_complete` | A member's turn opens / closes. `complete` carries the content, or — when the turn produced none — no content and an `outcome` of `TIMEOUT`, `SKIPPED` or `ERROR`. Every started turn is closed, including a parallel member released by the batch deadline |
 | `token` | Incremental token from a streaming member turn |
 | `synthesis_start` / `synthesis_complete` | The synthesis phase opens / closes |
 | `convergence_checked` / `convergence_reached` | A convergence judge ran / declared the phase converged (I2) |
