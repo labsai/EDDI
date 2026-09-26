@@ -33,6 +33,7 @@ import { useAuditTrail, useAuditTrailByAgent } from "@/hooks/use-audit";
 import { useAuditVerification } from "@/hooks/use-audit-verification";
 import {
   auditVerdict,
+  uncoveredCount,
   unknownKeyCount,
   type AuditEntryStatus,
   type AuditVerificationReport,
@@ -1077,7 +1078,8 @@ function IntegrityBanner({
     );
   }
 
-  const verdict = auditVerdict(report);
+  const verdict = auditVerdict(report, total);
+  const uncovered = uncoveredCount(report, total);
   const checked = t("audit.verify.checked", {
     count: report.entriesChecked,
     defaultValue: "Checked the {{count}} most recent entries.",
@@ -1181,6 +1183,9 @@ function IntegrityBanner({
   }
   if ((report.duplicateSequences?.length ?? 0) > 0) {
     reasons.push(t("audit.verify.reasonDuplicates", "duplicate sequence numbers"));
+  }
+  if (uncovered > 0) {
+    reasons.push(t("audit.verify.reasonUncovered", { count: uncovered, defaultValue: "{{count}} loaded entry(ies) older than the checked window" }));
   }
   return (
     <div className="flex items-start gap-3 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3" data-testid="integrity-banner" data-verdict="unverified">

@@ -1751,6 +1751,7 @@
       "reasonSkipped": "{{count}} entrée(s) plus ancienne(s) non vérifiée(s)",
       "reasonChain": "la séquence n'a pas pu être entièrement établie",
       "reasonDuplicates": "numéros de séquence en double",
+      "reasonUncovered": "{{count}} entrée(s) chargée(s) plus ancienne(s) que la plage vérifiée",
       "unverifiedTitle": "Pas entièrement vérifié",
       "unverifiedDesc": "Aucune signature n'a été invalidée, mais tout n'a pas pu être vérifié : {{reasons}}."
     }

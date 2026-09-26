@@ -86,15 +86,34 @@ export function verifyAgentAudit(agentId: string, agentVersion?: number | null):
  */
 export type AuditVerdict = "verified" | "tampered" | "unverified" | "signing-disabled";
 
-export function auditVerdict(report: AuditVerificationReport): AuditVerdict {
+export function auditVerdict(report: AuditVerificationReport, loadedCount = 0): AuditVerdict {
   if (!report.signingEnabled) return "signing-disabled";
   const unknownKey = unknownKeyCount(report);
   const disproven = Math.max(0, report.invalid - Math.min(report.recoverySkipped, report.invalid) - unknownKey);
   if (disproven > 0 || report.chainStatus === "BROKEN") return "tampered";
   const chainOk = report.chainStatus === "INTACT" || report.chainStatus === "NOT_APPLICABLE";
   const clean =
-    report.invalid === 0 && report.unsigned === 0 && chainOk && (report.duplicateSequences?.length ?? 0) === 0;
+    report.invalid === 0 &&
+    report.unsigned === 0 &&
+    chainOk &&
+    (report.duplicateSequences?.length ?? 0) === 0 &&
+    uncoveredCount(report, loadedCount) === 0;
   return clean ? "verified" : "unverified";
+}
+
+/**
+ * Loaded entries the report did not cover.
+ *
+ * The verify endpoints check a window of the most recent entries (1,000 unless
+ * a `limit` is sent), while the timeline pages in 100 at a time. Both read the
+ * same store query newest-first (`IAuditStore.getEntries` /
+ * `getEntriesByAgent`), so the checked window is the first `entriesChecked`
+ * loaded rows and anything past it — older pages, or rows that arrived after
+ * the report — was never looked at. A verdict over the window must not be
+ * shown as a verdict over everything on screen.
+ */
+export function uncoveredCount(report: AuditVerificationReport, loadedCount: number): number {
+  return Math.max(0, loadedCount - report.entriesChecked);
 }
 
 /** Entries signed with a key this deployment no longer holds. */

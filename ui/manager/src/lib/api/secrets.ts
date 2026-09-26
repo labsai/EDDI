@@ -323,6 +323,14 @@ export async function getVaultHealth(): Promise<VaultHealth> {
  * which the caller must have read just before (`useRotateSecret` re-reads it).
  * A newer backend keeps both when they are omitted, so sending them changes
  * nothing there; on the older one it is the only thing that preserves them.
+ *
+ * Known residual race: restating the grant is last-writer-wins. If another
+ * admin narrows the grant between the re-read and this PUT, the PUT puts the
+ * older, broader list back. The window is one round trip, and no UI-side check
+ * closes it — a read after the write cannot tell "restored by us" from "widened
+ * by them". It closes when the value PUT stops carrying the grant, which is
+ * only safe once every backend this Manager ships with keeps an omitted grant
+ * (the vault-key-safety change; `main` still stores `["*"]` for an omitted one).
  */
 export async function rotateSecret(
   tenantId: string,

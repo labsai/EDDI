@@ -1729,6 +1729,7 @@
       "reasonSkipped": "확인하지 않은 이전 항목 {{count}}개",
       "reasonChain": "순서를 완전히 확인할 수 없었습니다",
       "reasonDuplicates": "중복된 순서 번호",
+      "reasonUncovered": "확인 범위보다 오래된 로드된 항목 {{count}}개",
       "unverifiedTitle": "완전히 검증되지 않음",
       "unverifiedDesc": "반증된 서명은 없지만 모든 것을 확인하지는 못했습니다: {{reasons}}."
     }

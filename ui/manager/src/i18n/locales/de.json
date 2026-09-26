@@ -1729,6 +1729,7 @@
       "reasonSkipped": "{{count}} ältere(r) Eintrag/Einträge nicht geprüft",
       "reasonChain": "die Sequenz konnte nicht vollständig ermittelt werden",
       "reasonDuplicates": "doppelte Sequenznummern",
+      "reasonUncovered": "{{count}} geladene Einträge älter als der geprüfte Bereich",
       "unverifiedTitle": "Nicht vollständig verifiziert",
       "unverifiedDesc": "Keine Signatur wurde widerlegt, aber nicht alles konnte geprüft werden: {{reasons}}."
     }

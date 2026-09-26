@@ -4,7 +4,8 @@ import { http, HttpResponse } from "msw";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { AuditPage } from "@/pages/audit";
 import { server } from "@/test/mocks/server";
-import { auditVerdict, type AuditVerificationReport } from "@/lib/api/audit-verify";
+import { auditVerdict, uncoveredCount, type AuditVerificationReport } from "@/lib/api/audit-verify";
+import type { AuditEntry } from "@/lib/api/audit";
 
 /**
  * UI review High 9: the audit screen showed a green "SIGNED" shield whenever
@@ -115,6 +116,58 @@ describe("audit integrity banner", () => {
     expect(within(banner).getByTestId("integrity-retry")).toBeInTheDocument();
   });
 
+  it("stops claiming VERIFIED once loaded pages reach past the checked window", async () => {
+    // The verify endpoint checks the newest N entries (1,000 by default) while
+    // the timeline pages in 100 at a time — both newest-first over the same
+    // store query. Here the report covered 150 entries: page 1 (100 rows) sits
+    // inside that window, page 2 takes the loaded total to 200, and the 50
+    // oldest rows on screen were never checked.
+    const entry = (i: number): AuditEntry => ({
+      id: `e-${i}`,
+      conversationId: "conv1",
+      agentId: "agent1",
+      agentVersion: 1,
+      userId: null,
+      environment: null,
+      stepIndex: 0,
+      taskId: `task-${i}`,
+      taskType: "behavior",
+      taskIndex: i,
+      durationMs: 1,
+      input: null,
+      output: null,
+      llmDetail: null,
+      toolCalls: null,
+      actions: null,
+      cost: 0,
+      timestamp: "2026-09-26T10:00:00Z",
+      hmac: "h",
+      agentSignature: null,
+    });
+    server.use(
+      http.get("*/auditstore/:conversationId", ({ request }) => {
+        const url = new URL(request.url);
+        if (url.pathname.endsWith("/count")) return;
+        const skip = Number(url.searchParams.get("skip") ?? "0");
+        return HttpResponse.json(Array.from({ length: 100 }, (_, i) => entry(skip + i)));
+      }),
+    );
+    serveVerification(report({ entriesChecked: 150, valid: 150, chainStatus: "NOT_APPLICABLE" }));
+    await searchConversation();
+
+    // Every loaded row is inside the checked window: green is earned.
+    expect((await verdictShown()).dataset.verdict).toBe("verified");
+
+    await userEvent.setup().click(screen.getByTestId("load-more"));
+    await screen.findByTestId("audit-entry-e-199");
+
+    const banner = screen.getByTestId("integrity-banner");
+    await waitFor(() => expect(banner.dataset.verdict).toBe("unverified"));
+    expect(within(banner).queryByText("VERIFIED")).not.toBeInTheDocument();
+    expect(banner).toHaveTextContent(/50 loaded entry\(ies\) older than the checked window/);
+    expect(banner).toHaveTextContent(/Checked the 150 most recent entries/);
+  });
+
   it("says what could not be checked when nothing is disproven", async () => {
     serveVerification(report({ valid: 3, unsigned: 1 }));
     await searchConversation();
@@ -147,6 +200,16 @@ describe("auditVerdict", () => {
   it("does not count legacy entries the recovery budget skipped as disproven", () => {
     expect(auditVerdict(report({ invalid: 2, recoverySkipped: 2 }))).toBe("unverified");
     expect(auditVerdict(report({ invalid: 3, recoverySkipped: 2 }))).toBe("tampered");
+  });
+
+  it("downgrades a clean report when more entries are loaded than it checked", () => {
+    const clean = report({ entriesChecked: 1000, valid: 1000, chainStatus: "NOT_APPLICABLE" });
+    expect(auditVerdict(clean, 1000)).toBe("verified");
+    expect(auditVerdict(clean, 1001)).toBe("unverified");
+    expect(uncoveredCount(clean, 1100)).toBe(100);
+    expect(uncoveredCount(clean, 300)).toBe(0);
+    // A disproof over the window stays a disproof, however much is loaded.
+    expect(auditVerdict(report({ entriesChecked: 10, invalid: 1 }), 500)).toBe("tampered");
   });
 
   it("treats an agent sweep's not-applicable chain as clean and a missing key as unchecked", () => {

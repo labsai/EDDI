@@ -1729,6 +1729,7 @@
       "reasonSkipped": "未確認の古いエントリ {{count}} 件",
       "reasonChain": "シーケンスを完全には確定できませんでした",
       "reasonDuplicates": "重複したシーケンス番号",
+      "reasonUncovered": "確認範囲より古い読み込み済みエントリ {{count}} 件",
       "unverifiedTitle": "完全には検証されていません",
       "unverifiedDesc": "否定された署名はありませんが、すべてを確認できたわけではありません: {{reasons}}。"
     }

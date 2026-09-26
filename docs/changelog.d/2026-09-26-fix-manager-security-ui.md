@@ -31,7 +31,10 @@ more than was checked. Every change has a regression test that fails without it.
   and mirrors the report's `intact()` / `tamperingSuspected()`: green only for verified, red for
   disproven signatures or a broken chain, amber for anything unproven (unsigned, `UNKNOWN_KEY` from
   #836, skipped legacy rows, incomplete chain, duplicates), neutral while loading, on error and without
-  a signing key. Failing entries are marked in the timeline. The superseded strings are removed; fr/es/ja
+  a signing key. Failing entries are marked in the timeline. The verify call checks the newest 1,000
+  entries while the timeline pages in 100 at a time (both newest-first over the same store query), so
+  once more rows are loaded than the report checked, the banner turns amber and names how many loaded
+  entries are older than the checked window instead of keeping VERIFIED above them. The superseded strings are removed; fr/es/ja
   carried them in English.
 - **Share dialog.** A visibility click cascaded over the whole config graph immediately, replacing each
   resource's own visibility. It now proposes, explains, offers `cascade=false`, and applies on confirm; a
@@ -77,8 +80,10 @@ more than was checked. Every change has a regression test that fails without it.
   (`streamGroupApproval`) still send unbound decisions — other branches own those files.
 - "Add" is checked client-side against a fresh listing; closing the last race needs a create-only
   precondition on the secret and variable PUTs.
-- Rotation re-reads the grant but still sends it; on a backend with #836, omitting it would remove the
-  remaining read-then-write window.
+- Rotation re-reads the grant but still sends it: if another admin narrows the grant between that read
+  and the PUT, the PUT restores the older, broader list. No UI-side check closes that window (a read
+  after the write cannot tell who widened it). On `main` an omitted grant is still stored as `["*"]`, so
+  the grant must be sent until #836 (omitted = kept) merges; then rotation should stop sending it.
 - Land `feat/manager-adopt-master-key` (the lost-key UI) after #836.
 - A per-channel projection endpoint would let the channel list stop reading full configs.
 

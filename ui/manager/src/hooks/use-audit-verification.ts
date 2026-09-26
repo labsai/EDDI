@@ -7,7 +7,9 @@ import { verifyAgentAudit, verifyConversationAudit } from "@/lib/api/audit-verif
  * One query per scope: a conversation (HMACs and the sequence chain) or an
  * agent (HMACs only). Disabled until there is something to verify. The backend
  * checks the most recent entries (its default window), independent of how many
- * pages the screen has loaded — the report says how many it checked.
+ * pages the screen has loaded — the report says how many it checked, and the
+ * screen stops showing a verified verdict once it has loaded more rows than
+ * that (`uncoveredCount`).
  */
 export function useAuditVerification(args: {
   mode: "conversation" | "agent";

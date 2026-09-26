@@ -1817,6 +1817,7 @@
       "reasonSkipped": "{{count}} إدخال أقدم لم يتم فحصه",
       "reasonChain": "تعذّر إثبات التسلسل بالكامل",
       "reasonDuplicates": "أرقام تسلسل مكررة",
+      "reasonUncovered": "{{count}} من الإدخالات المحمّلة أقدم من النطاق الذي تم التحقق منه",
       "unverifiedTitle": "لم يتم التحقق بالكامل",
       "unverifiedDesc": "لم يثبت بطلان أي توقيع، لكن تعذّر فحص كل شيء: {{reasons}}."
     }

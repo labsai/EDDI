@@ -1751,6 +1751,7 @@
       "reasonSkipped": "{{count}} entrada(s) antiga(s) não verificada(s)",
       "reasonChain": "não foi possível estabelecer totalmente a sequência",
       "reasonDuplicates": "números de sequência duplicados",
+      "reasonUncovered": "{{count}} entrada(s) carregada(s) mais antiga(s) que o intervalo verificado",
       "unverifiedTitle": "Não totalmente verificado",
       "unverifiedDesc": "Nenhuma assinatura foi refutada, mas nem tudo pôde ser verificado: {{reasons}}."
     }

@@ -1729,6 +1729,7 @@
       "reasonSkipped": "{{count}} 个较早条目未检查",
       "reasonChain": "无法完整确定序列",
       "reasonDuplicates": "重复的序列号",
+      "reasonUncovered": "{{count}} 条已加载的条目早于已检查的范围",
       "unverifiedTitle": "未完全验证",
       "unverifiedDesc": "没有签名被证伪，但并非所有内容都能检查：{{reasons}}。"
     }
