@@ -78,7 +78,7 @@ class MigrationManagerBranchTest {
             var finished = mock(IMigrationManager.IMigrationFinished.class);
             migrationManager.startMigrationIfFirstTimeRun(finished);
 
-            verify(migrationLogStore).createMigrationLog(any(MigrationLog.class));
+            verify(migrationLogStore).createMigrationLog(argThat(log -> MIGRATION_CONFIRMATION.equals(log.getName())));
             verify(finished).onComplete();
         }
 

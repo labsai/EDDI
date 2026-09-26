@@ -402,7 +402,7 @@ class MigrationManagerTest {
             migrationManager.startMigrationIfFirstTimeRun(() -> completed[0] = true);
 
             assertTrue(completed[0], "onComplete should be called");
-            verify(migrationLogStore).createMigrationLog(any(MigrationLog.class));
+            verify(migrationLogStore).createMigrationLog(argThat((MigrationLog log) -> MIGRATION_CONFIRMATION.equals(log.getName())));
         }
 
         @SuppressWarnings("unchecked")
@@ -426,7 +426,7 @@ class MigrationManagerTest {
             managerWithMemories.startMigrationIfFirstTimeRun(() -> completed[0] = true);
 
             assertTrue(completed[0]);
-            verify(migrationLogStore).createMigrationLog(any(MigrationLog.class));
+            verify(migrationLogStore).createMigrationLog(argThat((MigrationLog log) -> MIGRATION_CONFIRMATION.equals(log.getName())));
             // Verify conversation memory collection was actually iterated
             verify(conversationMemoryColl).find();
         }
@@ -471,7 +471,39 @@ class MigrationManagerTest {
 
             assertTrue(completed[0], "startup must still be told the migration step finished");
             verify(propertySetters, times(2)).replaceOne(any(Bson.class), any(Document.class));
-            verify(migrationLogStore, never()).createMigrationLog(any());
+            verify(migrationLogStore, never()).createMigrationLog(argThat((MigrationLog log) -> MIGRATION_CONFIRMATION.equals(log.getName())
+                    || collectionConfirmation(COLLECTION_PROPERTYSETTER).equals(log.getName())));
+            // The collections that did complete are recorded, so only propertysetter is
+            // swept again.
+            verify(migrationLogStore).createMigrationLog(argThat((MigrationLog log) -> collectionConfirmation(COLLECTION_OUTPUTS)
+                    .equals(log.getName())));
+        }
+
+        /**
+         * A document that keeps failing used to re-sweep every collection on every
+         * start, conversation memories included, before agents deploy. Completed
+         * collections are now recorded and skipped.
+         */
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("a collection an earlier start completed is not swept again")
+        void completedCollectionIsNotSweptAgain() {
+            MongoCollection<Document> defaultColl = mock(MongoCollection.class, "defaultColl");
+            MongoCollection<Document> propertySetters = mock(MongoCollection.class, "propertySetters");
+            when(database.getCollection(anyString())).thenReturn(defaultColl);
+            when(database.getCollection(COLLECTION_PROPERTYSETTER)).thenReturn(propertySetters);
+            FindIterable<Document> noDocuments = iterableOf();
+            when(defaultColl.find()).thenReturn(noDocuments);
+            var manager = new MigrationManager(database, migrationLogStore, true, false);
+            when(migrationLogStore.readMigrationLog(MIGRATION_CONFIRMATION)).thenReturn(null);
+            when(migrationLogStore.readMigrationLog(collectionConfirmation(COLLECTION_PROPERTYSETTER)))
+                    .thenReturn(new MigrationLog(collectionConfirmation(COLLECTION_PROPERTYSETTER)));
+
+            manager.startMigrationIfFirstTimeRun(() -> {
+            });
+
+            verify(propertySetters, never()).find();
+            verify(migrationLogStore).createMigrationLog(argThat((MigrationLog log) -> MIGRATION_CONFIRMATION.equals(log.getName())));
         }
     }
 
