@@ -7,6 +7,7 @@ package ai.labs.eddi.secrets.model;
 import com.fasterxml.jackson.annotation.JsonFormat;
 
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.List;
 
 /**
@@ -85,5 +86,14 @@ public record SecretMetadata(String tenantId, String keyName, @JsonFormat(shape 
      */
     public static List<String> canonicalGrant(List<String> allowedAgents) {
         return grantsAllAgents(allowedAgents) ? List.of(WILDCARD_AGENT) : List.copyOf(allowedAgents);
+    }
+
+    /**
+     * Whether two grants mean the same thing: equal as sets, with every spelling of
+     * the wildcard equal to every other. The order ids happen to be listed in is
+     * not part of what a grant means.
+     */
+    public static boolean sameGrant(List<String> left, List<String> right) {
+        return new HashSet<>(canonicalGrant(left)).equals(new HashSet<>(canonicalGrant(right)));
     }
 }

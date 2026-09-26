@@ -75,7 +75,9 @@ public interface IRestSecretStore {
      * @param body
      *            the replacement grant list and an optional description
      * @return 200 with the new grant plus any deployed agents it strips access
-     *         from, 404 if the secret does not exist, 400 on a malformed grant list
+     *         from, 404 if the secret does not exist, 400 on a malformed grant
+     *         list, 409 with the current grant when
+     *         {@link GrantRequest#expectedAllowedAgents} no longer matches
      */
     @PUT
     @Path("/{tenantId}/{keyName}/grant")
@@ -86,7 +88,8 @@ public interface IRestSecretStore {
                description = "Replaces the secret's allowedAgents list (and optionally its description) without "
                        + "touching the encrypted value — no plaintext is accepted or required. Use [\"*\"] to allow "
                        + "every agent. The response names any deployed agent that references the secret and would no "
-                       + "longer be granted it; pass dryRun=true to see that without writing anything.")
+                       + "longer be granted it; pass dryRun=true to see that without writing anything. Send the grant you "
+                       + "loaded as expectedAllowedAgents to get 409 instead of overwriting a concurrent edit.")
     Response updateGrant(@PathParam("tenantId") String tenantId, @PathParam("keyName") String keyName,
                          @QueryParam("dryRun")
                          @DefaultValue("false") boolean dryRun, GrantRequest body);
@@ -208,9 +211,12 @@ public interface IRestSecretStore {
      * @param value
      *            the plaintext secret value
      * @param description
-     *            human-readable description (nullable)
+     *            human-readable description (nullable — omitted on an update, the
+     *            stored description is kept)
      * @param allowedAgents
-     *            list of agent IDs, or ["*"] for all (nullable → defaults to ["*"])
+     *            list of agent IDs, or ["*"] for all (nullable — omitted on a
+     *            create it defaults to ["*"]; omitted on an update the stored grant
+     *            is kept, so rotating a value never widens a narrowed grant)
      */
     record SecretRequest(String value, String description, List<String> allowedAgents) {
     }
@@ -232,8 +238,20 @@ public interface IRestSecretStore {
      * @param description
      *            the new description, or {@code null} to leave it as it is. An
      *            empty string clears it
+     * @param expectedAllowedAgents
+     *            optional precondition: the grant the editor loaded. When present
+     *            the update is applied only if the secret's grant is still that
+     *            list (compared as a set; every spelling of the wildcard is equal),
+     *            and answered with 409 and the current grant otherwise — so two
+     *            operators editing at once cannot silently undo each other.
+     *            Omitted, the update is unconditional, as it always was
      */
-    record GrantRequest(List<String> allowedAgents, String description) {
+    record GrantRequest(List<String> allowedAgents, String description, List<String> expectedAllowedAgents) {
+
+        /** An unconditional grant update. */
+        public GrantRequest(List<String> allowedAgents, String description) {
+            this(allowedAgents, description, null);
+        }
     }
 
     /**

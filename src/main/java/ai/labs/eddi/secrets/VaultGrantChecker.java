@@ -162,7 +162,10 @@ public class VaultGrantChecker {
         }
 
         List<String> violations = new ArrayList<>();
-        for (String reference : collectVaultReferences(agentConfiguration, violations)) {
+        // Unreadable workflows and extension configs are collected and then ignored
+        // here, exactly as before: this is the deploy gate, and what it does with a
+        // config it cannot read is its own decision, separate from reporting.
+        for (String reference : collectVaultReferences(agentConfiguration, violations, new ArrayList<>())) {
             if (!isGranted(reference, agentId)) {
                 violations.add(reference);
             }
@@ -171,8 +174,37 @@ public class VaultGrantChecker {
     }
 
     /**
+     * What {@link #checkReferences} could establish about one agent.
+     */
+    public enum ReferenceCheck {
+        /** The agent's configuration names the secret. */
+        REFERENCES,
+        /** Every part of the configuration was read, and none names the secret. */
+        DOES_NOT_REFERENCE,
+        /**
+         * Some part of the configuration could not be read — the agent, a workflow, an
+         * extension config or a connection — so the answer is not known. Reported
+         * separately because "does not reference" is a promise that narrowing the grant
+         * breaks nothing, and an unread config cannot back it.
+         */
+        UNKNOWN
+    }
+
+    /**
      * Whether {@code agentId}'s configuration names {@code secret} anywhere the
      * deploy-time check would look.
+     *
+     * @return true only when the reference was actually found; see
+     *         {@link #checkReferences} for the answer that distinguishes "no" from
+     *         "could not tell"
+     */
+    public boolean references(String agentId, Integer agentVersion, SecretReference secret) {
+        return checkReferences(agentId, agentVersion, secret) == ReferenceCheck.REFERENCES;
+    }
+
+    /**
+     * Whether {@code agentId}'s configuration names {@code secret} anywhere the
+     * deploy-time check would look — or that this could not be established.
      * <p>
      * Deliberately the inverse question to {@link #findUngrantedReferences}: it
      * asks what an agent <em>uses</em>, with no reference to what it is allowed to
@@ -183,15 +215,15 @@ public class VaultGrantChecker {
      * Reuses the same traversal, including the {@code ${connection:…}} hop and
      * {@code ${vars:…}} expansion, so an agent that reaches a secret indirectly
      * counts here exactly as it counts at deployment.
-     *
-     * @return false whenever the answer cannot be established — an unreadable
-     *         configuration, a reference that will not parse. This method feeds a
-     *         warning, not a gate, and guessing "yes" would cry wolf on agents that
-     *         have nothing to do with the secret
+     * <p>
+     * An unreadable configuration used to answer plain "no", and the impact
+     * analysis then reported an agent it had not been able to inspect as unaffected
+     * — with {@code complete=true}. It now answers {@link ReferenceCheck#UNKNOWN},
+     * unless the part that <em>could</em> be read already names the secret.
      */
-    public boolean references(String agentId, Integer agentVersion, SecretReference secret) {
+    public ReferenceCheck checkReferences(String agentId, Integer agentVersion, SecretReference secret) {
         if (agentId == null || secret == null) {
-            return false;
+            return ReferenceCheck.DOES_NOT_REFERENCE;
         }
         AgentConfiguration agentConfiguration;
         try {
@@ -199,21 +231,22 @@ public class VaultGrantChecker {
         } catch (Exception e) {
             LOGGER.debugf("Could not read agent '%s' v%s while looking for references to %s: %s", sanitize(agentId), agentVersion,
                     sanitize(secret.toReferenceString()), sanitize(e.getMessage()));
-            return false;
+            return ReferenceCheck.UNKNOWN;
         }
         if (agentConfiguration == null) {
-            return false;
+            return ReferenceCheck.UNKNOWN;
         }
-        for (String reference : collectVaultReferences(agentConfiguration, new ArrayList<>())) {
+        List<String> unreadable = new ArrayList<>();
+        for (String reference : collectVaultReferences(agentConfiguration, unreadable, unreadable)) {
             try {
                 if (secret.equals(SecretReference.parse(reference))) {
-                    return true;
+                    return ReferenceCheck.REFERENCES;
                 }
             } catch (IllegalArgumentException e) {
                 LOGGER.debugf("Ignoring unparseable vault reference %s in agent '%s'", sanitize(reference), sanitize(agentId));
             }
         }
-        return false;
+        return unreadable.isEmpty() ? ReferenceCheck.DOES_NOT_REFERENCE : ReferenceCheck.UNKNOWN;
     }
 
     /**
@@ -246,7 +279,8 @@ public class VaultGrantChecker {
      * rots: a new credential field is added somewhere and the scanner silently
      * stops covering it.
      */
-    private Set<String> collectVaultReferences(AgentConfiguration agentConfiguration, List<String> unreadableConnections) {
+    private Set<String> collectVaultReferences(AgentConfiguration agentConfiguration, List<String> unreadableConnections,
+                                               List<String> unreadableResources) {
         Set<String> references = new LinkedHashSet<>();
 
         // The agent document FIRST. AgentConfiguration.DreamConfig.parameters
@@ -260,7 +294,7 @@ public class VaultGrantChecker {
         }
 
         for (URI workflowUri : agentConfiguration.getWorkflows()) {
-            WorkflowConfiguration workflow = readWorkflow(workflowUri);
+            WorkflowConfiguration workflow = readWorkflow(workflowUri, unreadableResources);
             if (workflow == null || workflow.getWorkflowSteps() == null) {
                 continue;
             }
@@ -269,7 +303,7 @@ public class VaultGrantChecker {
                 if (step.getType() == null || configuredUri == null) {
                     continue;
                 }
-                Object extensionConfig = readExtensionConfig(step.getType().toString(), configuredUri.toString());
+                Object extensionConfig = readExtensionConfig(step.getType().toString(), configuredUri.toString(), unreadableResources);
                 if (extensionConfig != null) {
                     scanForVaultReferences(extensionConfig, references, ConnectionReference.DEFAULT_TENANT);
                     // A ${connection:name} is an INDIRECT vault reference: the
@@ -283,19 +317,20 @@ public class VaultGrantChecker {
         return references;
     }
 
-    private WorkflowConfiguration readWorkflow(URI workflowUri) {
+    private WorkflowConfiguration readWorkflow(URI workflowUri, List<String> unreadableResources) {
         try {
             IResourceId id = RestUtilities.extractResourceId(workflowUri);
             return id == null ? null : workflowStore.read(id.getId(), id.getVersion());
         } catch (Exception e) {
             LOGGER.debugf("Could not read workflow %s while checking vault grants: %s", sanitize(String.valueOf(workflowUri)),
                     sanitize(e.getMessage()));
+            unreadableResources.add(String.valueOf(workflowUri));
             return null;
         }
     }
 
     /** The extension config behind a workflow step, or {@code null}. */
-    private Object readExtensionConfig(String stepType, String configUri) {
+    private Object readExtensionConfig(String stepType, String configUri, List<String> unreadableResources) {
         try {
             IResourceId id = RestUtilities.extractResourceId(URI.create(configUri));
             if (id == null) {
@@ -318,6 +353,7 @@ public class VaultGrantChecker {
         } catch (Exception e) {
             LOGGER.debugf("Could not read %s config %s while checking vault grants: %s", sanitize(stepType), sanitize(configUri),
                     sanitize(e.getMessage()));
+            unreadableResources.add(configUri);
         }
         return null;
     }

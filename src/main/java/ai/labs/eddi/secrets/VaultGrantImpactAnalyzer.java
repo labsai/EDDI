@@ -40,7 +40,9 @@ import java.util.Set;
  * <b>What it cannot see.</b> {@link IAgentFactory} is a per-node runtime
  * registry, so in a cluster this reports the agents deployed on <em>this</em>
  * node. It is a warning, and it errs towards saying less rather than towards
- * guessing: an agent it cannot read is not reported.
+ * guessing: an agent it cannot read is not listed — but it does mark the answer
+ * incomplete, so "nothing breaks" is never claimed on the strength of a config
+ * nobody managed to read.
  */
 @ApplicationScoped
 public class VaultGrantImpactAnalyzer {
@@ -84,8 +86,8 @@ public class VaultGrantImpactAnalyzer {
      *            the deployed agents that reference the secret and would not be
      *            granted it, as far as the scan got
      * @param complete
-     *            false when any environment could not be listed, so the list may be
-     *            short
+     *            false when any environment could not be listed, or any deployed
+     *            agent's configuration could not be read, so the list may be short
      */
     public record GrantImpact(List<AffectedAgent> agentsLosingAccess, boolean complete) {
     }
@@ -136,8 +138,15 @@ public class VaultGrantImpactAnalyzer {
                 if (!seen.add(environment.name() + "/" + agentId + "/" + agent.getAgentVersion())) {
                     continue;
                 }
-                if (checker.references(agentId, agent.getAgentVersion(), secret)) {
-                    affected.add(new AffectedAgent(agentId, agent.getAgentVersion(), environment.name()));
+                switch (checker.checkReferences(agentId, agent.getAgentVersion(), secret)) {
+                    case REFERENCES -> affected.add(new AffectedAgent(agentId, agent.getAgentVersion(), environment.name()));
+                    // Not listed — naming it would be a guess — but the answer is no longer
+                    // complete: an agent whose config could not be read may well be one
+                    // that loses access.
+                    case UNKNOWN -> complete = false;
+                    case DOES_NOT_REFERENCE -> {
+                        // nothing to report
+                    }
                 }
             }
         }

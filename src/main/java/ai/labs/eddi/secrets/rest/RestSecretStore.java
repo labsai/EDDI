@@ -22,6 +22,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.regex.Pattern;
 
@@ -153,6 +154,7 @@ public class RestSecretStore implements IRestSecretStore {
         List<String> requested;
         try {
             requested = validatedGrant(body);
+            validateExpectedGrant(body.expectedAllowedAgents());
         } catch (IllegalArgumentException e) {
             return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
         }
@@ -170,8 +172,14 @@ public class RestSecretStore implements IRestSecretStore {
 
             var impact = grantImpactAnalyzer.agentsLosingAccess(ref, grant);
 
+            List<String> expected = body.expectedAllowedAgents();
             SecretMetadata after;
             if (dryRun) {
+                // A dry run answers the precondition too, so a preview never promises a
+                // write that would then be refused.
+                if (expected != null && !SecretMetadata.sameGrant(before.allowedAgents(), expected)) {
+                    return grantConflictResponse(ref, before.allowedAgents());
+                }
                 // The projection the write would produce, built here rather than by
                 // calling the provider with a flag: a dry run that goes near the write
                 // path is a dry run that can one day stop being dry.
@@ -179,7 +187,9 @@ public class RestSecretStore implements IRestSecretStore {
                         before.lastRotatedAt(), before.checksum(), body.description() != null ? body.description() : before.description(),
                         grant);
             } else {
-                after = secretProvider.updateGrant(ref, grant, body.description());
+                after = expected == null
+                        ? secretProvider.updateGrant(ref, grant, body.description())
+                        : secretProvider.updateGrant(ref, grant, body.description(), expected);
                 // Deliberately NOT invalidating the SecretResolver cache.
                 //
                 // storeSecret has to, because the plaintext behind the cached entry may
@@ -198,6 +208,8 @@ public class RestSecretStore implements IRestSecretStore {
                     .entity(Map.of("error", "Secret not found", "reference", ref.toReferenceString(), "action",
                             "Grants can only be changed on a secret that exists. Check the key name, or store the secret first."))
                     .build();
+        } catch (ISecretProvider.GrantConflictException e) {
+            return grantConflictResponse(ref, e.getCurrentAllowedAgents());
         } catch (ISecretProvider.SecretProviderException e) {
             LOGGER.error("Failed to update the grant of secret: " + sanitize(tenantId) + "/" + sanitize(keyName), e);
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", "Failed to update secret grant")).build();
@@ -249,6 +261,37 @@ public class RestSecretStore implements IRestSecretStore {
             distinct.add(trimmed);
         }
         return new ArrayList<>(distinct);
+    }
+
+    /**
+     * The optional precondition list only has to be comparable, not valid as a new
+     * grant: it may legitimately hold an entry an older release stored that would
+     * no longer pass {@link #validatedGrant}. Bounded and null-free all the same,
+     * since it arrives in a request body.
+     */
+    private static void validateExpectedGrant(List<String> expected) {
+        if (expected == null) {
+            return;
+        }
+        if (expected.size() > MAX_ALLOWED_AGENTS) {
+            throw new IllegalArgumentException("expectedAllowedAgents must not contain more than " + MAX_ALLOWED_AGENTS + " entries.");
+        }
+        if (expected.stream().anyMatch(Objects::isNull)) {
+            throw new IllegalArgumentException("expectedAllowedAgents must not contain null entries.");
+        }
+    }
+
+    /**
+     * 409 for a grant edit whose precondition no longer holds, with the grant as it
+     * now stands so the editor can show it without another round trip.
+     */
+    private static Response grantConflictResponse(SecretReference ref, List<String> currentAllowedAgents) {
+        var body = new LinkedHashMap<String, Object>();
+        body.put("error", "The grant was changed since it was loaded");
+        body.put("reference", ref.toReferenceString());
+        body.put("allowedAgents", SecretMetadata.canonicalGrant(currentAllowedAgents));
+        body.put("action", "Nothing was written. Review the current grant and apply the edit again.");
+        return Response.status(Response.Status.CONFLICT).entity(body).build();
     }
 
     /**
