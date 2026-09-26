@@ -16,6 +16,7 @@ import ai.labs.eddi.engine.internal.GroupApprovalRequest;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -363,8 +364,11 @@ public class SlackInteractivityHandler {
                 return;
             }
             // Checked again, authoritatively, inside resumeConversation; here only so a
-            // stale card gets a clear "superseded" instead of "already resolved".
-            if (!decision.appliesToPause(snapshot.getHitlPausedAt())) {
+            // stale card gets a clear "superseded" instead of "already resolved". Only
+            // while paused: a conversation that is no longer awaiting a human has no
+            // current pause, and the resume's state conflict marks the card resolved.
+            if (snapshot.getConversationState() == ConversationState.AWAITING_HUMAN
+                    && !decision.appliesToPause(snapshot.getHitlPausedAt())) {
                 finalizeSuperseded(auth, approvalChannelId, messageTs);
                 return;
             }
@@ -407,7 +411,10 @@ public class SlackInteractivityHandler {
                 postAuthzDenied(integration.getPlatformConfig().get("botToken"), approvalChannelId, slackUserId);
                 return;
             }
-            if (!decision.appliesToPause(gc.getPausedAt())) {
+            // Same rule for a group: only a discussion still awaiting approval has a
+            // current pause to compare with.
+            if (gc.getState() == GroupConversation.GroupConversationState.AWAITING_APPROVAL
+                    && !decision.appliesToPause(gc.getPausedAt())) {
                 finalizeSuperseded(auth, approvalChannelId, messageTs);
                 return;
             }

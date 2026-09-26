@@ -270,7 +270,13 @@ class ConversationHitlService {
                 // Checked before the CAS so the common stale-card case never even
                 // flickers the state; re-checked after it against the snapshot the
                 // resume actually runs on, which closes the window in between.
-                requireDecisionMatchesPause(conversationId, decision, preCasSnapshot.getHitlPausedAt());
+                // Only while paused: a conversation that is no longer AWAITING_HUMAN
+                // has no current pause to compare with (its bookmark is stale or
+                // cleared), and the CAS below reports that state conflict (409 naming
+                // the state) — "pause changed" would misdescribe it.
+                if (preCasSnapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
+                    requireDecisionMatchesPause(conversationId, decision, preCasSnapshot.getHitlPausedAt());
+                }
                 if (hasToolDecisions) {
                     validateToolDecisions(decision, preCasSnapshot);
                 }

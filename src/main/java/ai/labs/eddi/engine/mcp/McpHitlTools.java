@@ -421,18 +421,33 @@ public class McpHitlTools {
         }
     }
 
+    /** {@code approve_group_phase} without a {@code pauseId}. */
+    public String approveGroupPhase(String groupId, String conversationId, String verdict, String note,
+                                    String taskApprovalsJson) {
+        return approveGroupPhase(groupId, conversationId, verdict, note, taskApprovalsJson, null);
+    }
+
+    /**
+     * {@code pauseId} is optional. Passed, the decision applies only to that pause:
+     * a discussion that has since been resumed and paused again answers
+     * {@code PAUSE_CHANGED} instead of approving something the caller never saw.
+     */
     @Tool(name = "approve_group_phase",
           description = "Approve or reject a paused group discussion phase (or specific tasks for TASK-granularity). "
                   + "verdict=APPROVED or REJECTED (case-insensitive). taskApprovals is an optional JSON object mapping "
                   + "task-id to APPROVED/REJECTED. Returns the resumed group conversation. The decision is attributed "
-                  + "to the authenticated caller.")
+                  + "to the authenticated caller. Pass pauseId (from get_group_approval_status) to bind the decision "
+                  + "to the pause you reviewed: if the discussion has since paused again, the decision is refused "
+                  + "with errorCode PAUSE_CHANGED.")
     @SuppressWarnings("unchecked")
     public String approveGroupPhase(
                                     @ToolArg(description = "Group ID") String groupId,
                                     @ToolArg(description = "Group conversation ID") String conversationId,
                                     @ToolArg(description = "APPROVED or REJECTED (case-insensitive)") String verdict,
                                     @ToolArg(description = "Optional reviewer note (max 4096 chars)") String note,
-                                    @ToolArg(description = "Optional JSON object mapping task-id to APPROVED/REJECTED, e.g. {\"t1\":\"APPROVED\"}") String taskApprovalsJson) {
+                                    @ToolArg(description = "Optional JSON object mapping task-id to APPROVED/REJECTED, e.g. {\"t1\":\"APPROVED\"}") String taskApprovalsJson,
+                                    @ToolArg(description = "pauseId from get_group_approval_status — the pause this decision is for",
+                                             required = false) String pauseId) {
         String disabled = disabledIfMutationsOff();
         if (disabled != null) {
             return disabled;
@@ -477,6 +492,7 @@ public class McpHitlTools {
             decision.setVerdict(parsed);
             decision.setNote(note);
             decision.setDecidedBy(principalWithMcpPrefix());
+            decision.setPauseId(pauseId != null && !pauseId.isBlank() ? pauseId.trim() : null);
             GroupApprovalRequest request = new GroupApprovalRequest();
             request.setDecision(decision);
             request.setTaskApprovals(taskApprovals);
@@ -492,6 +508,9 @@ public class McpHitlTools {
         } catch (ResourceNotFoundException
                 | IGroupConversationStore.GroupConversationGoneException e) {
             return errorJson("Group conversation not found", "NOT_FOUND", null);
+        } catch (IGroupConversationService.GroupPauseMismatchException e) {
+            return errorJson("The pending approval changed since this decision was made — re-read "
+                    + "get_group_approval_status and decide again", "PAUSE_CHANGED", null);
         } catch (IGroupConversationService.GroupDiscussionException e) {
             return errorJson("Group conversation is not awaiting approval — it may have been resolved, cancelled, "
                     + "or already approved", "WRONG_STATE", null);

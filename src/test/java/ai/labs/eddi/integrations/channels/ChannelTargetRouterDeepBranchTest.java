@@ -494,6 +494,20 @@ class ChannelTargetRouterDeepBranchTest {
         }
 
         @Test
+        @DisplayName("a routed legacy Slack connector pins no workspace → no common team is derived")
+        void commonPinnedTeamWithLegacyConnector() throws Exception {
+            var t1 = createIntegration("default", List.of(), Map.of("channelId", "C1", ChannelTargetRouter.CFG_TEAM_ID, "T1"));
+            var t1b = createIntegration("default", List.of(), Map.of("channelId", "C2", ChannelTargetRouter.CFG_TEAM_ID, "T1"));
+            setField(router, "integrationMap", Map.of("slack:C1", t1, "slack:C2", t1b));
+            setField(router, "legacyMap", Map.of("C9", new LegacyTarget("agent-l", "xoxb-l", "sig-l", null)));
+
+            // Every new-style integration pins T1, but the legacy connector may serve T2:
+            // its users' bare ids must not be read as T1's.
+            assertNull(router.commonPinnedTeamId("slack"));
+            assertNull(router.commonPinnedTeamId("SLACK"));
+        }
+
+        @Test
         @DisplayName("two integrations with one name → getIntegrationByName binds to neither")
         void duplicateNameIsAmbiguous() throws Exception {
             var a = createIntegration("default", List.of(), Map.of("channelId", "C1", "signingSecret", "sig-a"));

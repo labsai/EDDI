@@ -335,10 +335,23 @@ public class ChannelTargetRouter {
      * {@code null} when any of them pins none or they pin different ones. A
      * deployment where this is non-null serves exactly one workspace, so a bare
      * Slack user id there can only ever have meant a user of that workspace.
+     * <p>
+     * Also {@code null} for Slack while any legacy agent-level Slack connector is
+     * routed: a legacy connector pins no workspace, so the bare ids its users wrote
+     * can belong to any team, and deriving one here would hand one workspace's
+     * memories to a same-id user of another.
+     * <p>
+     * This reflects the <em>current</em> configuration only. An integration removed
+     * earlier may also have written bare ids; an operator who needs certainty sets
+     * {@code eddi.slack.legacy-team-id} explicitly instead of relying on this.
      */
     public String commonPinnedTeamId(String channelType) {
         refreshIfNeeded();
-        String prefix = (channelType != null ? channelType.toLowerCase(Locale.ROOT) : "") + ":";
+        String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
+        if (CHANNEL_TYPE_SLACK.equals(normalizedType) && !legacyMap.isEmpty()) {
+            return null;
+        }
+        String prefix = normalizedType + ":";
         String common = null;
         for (var entry : integrationMap.entrySet()) {
             if (!entry.getKey().startsWith(prefix)) {

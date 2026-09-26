@@ -31,6 +31,7 @@ import java.util.Map;
 import java.io.IOException;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -226,6 +227,40 @@ class McpHitlToolsTest {
         verify(groupConversationService).resumeDiscussion(eq("gc1"), cap.capture(), isNull());
         assertEquals("mcp:alice", cap.getValue().getDecision().getDecidedBy());
         assertEquals(HitlDecision.HitlVerdict.APPROVED, cap.getValue().getDecision().getVerdict());
+    }
+
+    @Test
+    void approveGroup_withPauseId_bindsTheDecisionToThatPause() throws Exception {
+        when(json.serialize(any())).thenReturn("{\"ok\":true}");
+        tools.approveGroupPhase("g1", "gc1", "APPROVED", null, null, " 1700000000123 ");
+        ArgumentCaptor<GroupApprovalRequest> cap = ArgumentCaptor.forClass(GroupApprovalRequest.class);
+        verify(groupConversationService).resumeDiscussion(eq("gc1"), cap.capture(), isNull());
+        assertEquals("1700000000123", cap.getValue().getDecision().getPauseId());
+    }
+
+    @Test
+    void approveGroup_blankPauseId_leavesTheDecisionUnbound() throws Exception {
+        when(json.serialize(any())).thenReturn("{\"ok\":true}");
+        tools.approveGroupPhase("g1", "gc1", "APPROVED", null, null, "  ");
+        ArgumentCaptor<GroupApprovalRequest> cap = ArgumentCaptor.forClass(GroupApprovalRequest.class);
+        verify(groupConversationService).resumeDiscussion(eq("gc1"), cap.capture(), isNull());
+        assertNull(cap.getValue().getDecision().getPauseId());
+    }
+
+    @Test
+    void approveGroup_pauseChanged_returnsPauseChanged() throws Exception {
+        doThrow(new IGroupConversationService.GroupPauseMismatchException("changed"))
+                .when(groupConversationService).resumeDiscussion(eq("gc1"), any(), isNull());
+        String out = tools.approveGroupPhase("g1", "gc1", "APPROVED", null, null, "1000");
+        assertTrue(out.contains("\"errorCode\":\"PAUSE_CHANGED\""), out);
+    }
+
+    @Test
+    void approveGroup_notAwaiting_stillReturnsWrongState() throws Exception {
+        doThrow(new IGroupConversationService.GroupDiscussionException("not awaiting"))
+                .when(groupConversationService).resumeDiscussion(eq("gc1"), any(), isNull());
+        String out = tools.approveGroupPhase("g1", "gc1", "APPROVED", null, null, "1000");
+        assertTrue(out.contains("\"errorCode\":\"WRONG_STATE\""), out);
     }
 
     @Test

@@ -285,7 +285,6 @@ public class SlackEventHandler {
             LOGGER.warn("[SLACK] Event without a verified signing secret — ignoring");
             return;
         }
-        String botUserId = envelope.botUserId();
         String eventType = (String) event.get("type");
         String eventSubtype = (String) event.get("subtype");
         String eventChannel = (String) event.get("channel");
@@ -459,8 +458,10 @@ public class SlackEventHandler {
      * <p>
      * The bare id is aliased (legacyUserId) only when the user's team is the
      * deployment's legacy team — {@code eddi.slack.legacy-team-id}, or the one team
-     * every routed integration pins. In any other deployment a bare id may already
-     * hold two people's data, and copying it to either would leak it.
+     * every routed integration pins while no legacy connector is routed
+     * ({@link ChannelTargetRouter#commonPinnedTeamId}). In any other deployment a
+     * bare id may already hold two people's data, and copying it to either would
+     * leak it.
      */
     SlackUser slackUser(Map<String, Object> event, SlackEventEnvelope envelope) {
         String rawUserId = (String) event.get("user");

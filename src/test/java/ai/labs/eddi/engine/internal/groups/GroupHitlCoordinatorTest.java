@@ -431,7 +431,7 @@ class GroupHitlCoordinatorTest {
         var request = new GroupApprovalRequest();
         request.setDecision(decision);
 
-        assertThrows(IGroupConversationService.GroupDiscussionException.class,
+        assertThrows(IGroupConversationService.GroupPauseMismatchException.class,
                 () -> coordinator.resumeDiscussion(GC_ID, request, null));
 
         assertEquals(GroupConversationState.AWAITING_APPROVAL, gc.getState());

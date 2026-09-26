@@ -345,6 +345,32 @@ class ConversationServiceResumeTest {
         }
 
         @Test
+        @DisplayName("H4b: a decision on an already-resolved conversation gets the state conflict, not 'pause changed'")
+        void pauseIdOnResolvedConversation_reportsStateConflict() throws Exception {
+            // Approved already: state READY, the bookmark cleared. A second approver's
+            // card still names the old pause — that is "already resolved", which the
+            // CAS reports; comparing it with a pause that no longer exists would call
+            // it "superseded" instead.
+            var snapshot = createResumeSnapshot();
+            snapshot.setConversationState(ConversationState.READY);
+            snapshot.setHitlPausedAt(null);
+            doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+            doReturn(false).when(conversationMemoryStore).compareAndSetState(
+                    CONVERSATION_ID, ConversationState.AWAITING_HUMAN, ConversationState.IN_PROGRESS);
+            doReturn(ConversationState.READY).when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
+            HitlDecision decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.APPROVED);
+            decision.setPauseId(HitlDecision.pauseIdOf(Instant.ofEpochMilli(1_000L)));
+
+            var e = assertThrows(IllegalStateException.class,
+                    () -> conversationService.resumeConversation(CONVERSATION_ID, decision, null));
+            assertFalse(e instanceof IConversationService.PauseMismatchException,
+                    "an already-resolved conversation must not be reported as a changed pause");
+            assertTrue(e.getMessage().contains("READY"), "the conflict names the current state: " + e.getMessage());
+            verify(conversationCoordinator, never()).submitInOrder(any(), any());
+        }
+
+        @Test
         @DisplayName("H4b: a pause that changes between the pre-check and the CAS is restored, not resumed")
         void pauseChangedAfterPreCheck_restoredNotResumed() throws Exception {
             doReturn(true).when(conversationMemoryStore).compareAndSetState(
