@@ -12,7 +12,10 @@ selection and rollback, and the delete version predicate.
   each file whole into the heap. `ZipArchive.unzip` now enforces three limits, counted
   from the bytes actually inflated rather than from the entry header:
   `eddi.backup.import.max-entries` (10000), `eddi.backup.import.max-entry-bytes`
-  (64 MiB) and `eddi.backup.import.max-uncompressed-bytes` (256 MiB). A breach throws
+  (32 MiB — the importer reads each entry whole into memory, and agent documents are
+  kilobytes, so 32 rather than 64 still leaves ample room for a large dictionary) and
+  `eddi.backup.import.max-uncompressed-bytes` (256 MiB). An entry whose header
+  understates its size is caught on the inflated bytes (tested). A breach throws
   `ZipLimitExceededException`, which every import path (create, merge, legacy preview,
   upgrade, upgrade preview, and live sync, which unpacks through the same method)
   answers with **413** and the limit's name. The scratch directory is removed in
@@ -27,8 +30,10 @@ selection and rollback, and the delete version predicate.
   callers relied on the no-op being harmless: `PATCH /descriptorstore/descriptors/{id}`
   now answers **409** for a version that is not current — the live *resource* version
   is still accepted, because descriptor and resource versions drift and that is the
-  number every client holds — and `ResourceSharingService.writeBack` reports a target
-  whose descriptor moved on mid-write as **skipped** instead of applied.
+  number every client holds. The PATCH also re-checks the current version after its
+  write, so a `PUT` landing in between is a 409 rather than a 204 into history; and
+  `ResourceSharingService.writeBack` does the same and reports such a target as
+  **skipped** instead of applied.
 - **M-P2 — regexes built from caller input.** The descriptor listing pasted the `type`
   query parameter into an unanchored regex (ReDoS, 500s, or one pattern that selected
   every descriptor of every type); `findByOriginId` did the same with archive file
@@ -42,7 +47,8 @@ selection and rollback, and the delete version predicate.
   `readHistoryLatest` and `getCurrentVersion`, as the PostgreSQL backend already did.
 - **M-P4 — merge selection and rollback.**
   - Snippets ignored `selectedResources`, so a merge overwrote live snippets the
-    operator had unticked. They now honour it. The preview's snippet row carries the
+    operator had unticked. They now honour it — on a create import and a first-time
+    sync too, where a snippet left out of the selection is not created. The preview's snippet row carries the
     snippet's **archive id** (its file name) as `sourceId`, like every other row — it
     used to carry the local id, and a new snippet had none, so it could not be
     selected at all. The import also accepts the local id, which is what earlier
@@ -55,6 +61,11 @@ selection and rollback, and the delete version predicate.
     registration, RAG schedule sync and the snippet cache run as on the way in. The
     restore is version-checked; a resource someone else changed meanwhile is not
     overwritten, and the conflict is logged.
+  - A resource the merge updates **more than once** — an extension two workflows
+    share — keeps a single compensation per store and id: the first update's snapshot,
+    restored over the latest imported version. With one compensation per update, the
+    second one's "previous" was the archive's own content, the first one's restore hit
+    a version conflict, and the rollback silently left the import in place.
 - **M-P5 — delete racing an update.** Deleting by id alone erased a version an update
   had just committed (never archived, so gone for good), and the delete's tombstone
   lost the insert race to the update's non-deleted history row, so the resource looked
@@ -63,20 +74,34 @@ selection and rollback, and the delete version predicate.
   version predicate and, if the resource moved on, takes the flag back off and throws
   `ResourceModifiedException`; PostgreSQL does the same inside its transaction, so the
   rollback drops the tombstone with it. A resource that a concurrent delete already
-  removed counts as deleted.
+  removed counts as deleted. On MongoDB, a delete that fails between the tombstone and
+  the conditional delete (write-concern timeout, step-down, network) re-checks whether
+  the version is still live and takes the flag back if so, and every successful update
+  clears a stale `deleted` flag on the version it just archived — without that, a stray
+  tombstone made that version unreadable (404) for good, and a deployment pinned to it
+  stopped loading.
 - **M-P6 — legacy migration.** One document that could not be persisted aborted the
   rest of its collection, and the confirmation was written anyway, so nothing ever
   retried. Each document is now migrated in its own try, failures are counted, and
-  the confirmation is written only when there were none; otherwise the run is logged
-  at ERROR and repeats on the next start (the sweep is idempotent).
+  completion is recorded **per collection** as well as overall. A collection that
+  completed is not swept again, so a document that keeps failing re-sweeps only its
+  own collection on the next start (not every collection, conversation memories
+  included, before agents deploy). Within one sweep only the first failure logs a
+  stack trace.
 - **M-P7 — GridFS indexes.** `attachments.files` had no index on the metadata the store
   filters on, so every `storageRef` lookup, upload quota check, listing and GDPR
-  per-conversation delete was a full scan. The store now creates ascending indexes on
-  `metadata.storageRef`, `metadata.conversationId` and `metadata.grants` at startup;
-  none is unique (legacy blobs have no `storageRef`) and a refusal is logged, not
-  fatal.
+  per-conversation delete was a full scan. `GridFsIndexInitializer` (a `StartupEvent`
+  observer, MongoDB only) creates ascending indexes on `metadata.storageRef`,
+  `metadata.conversationId` and `metadata.grants` at boot, each bounded by a 10 s
+  operation timeout; none is unique (legacy blobs have no `storageRef`) and a refusal
+  is logged, not fatal.
 
 ### Decisions
+
+- Migration retries are bounded by recording completion per collection, not by an
+  attempt counter: a counter would eventually mark a collection done that still holds
+  unmigrated documents, while per-collection confirmation keeps retrying exactly what
+  is broken and stops re-sweeping what is not.
 
 - Merge compensation writes the old content **forward** as a new version rather than
   deleting the imported version: history is append-only everywhere else, and the
@@ -93,6 +118,8 @@ selection and rollback, and the delete version predicate.
 
 - Stored configs and archives are unchanged. The merge preview's snippet `sourceId`
   changed from the local id to the archive id; the import accepts both.
+- `selectedResources` now also filters snippets on a create import and a first-time
+  sync.
 - `IResourceStorage.storeHistoryAndRemove(history, id)` became
   `storeHistoryAndRemove(history, id, expectedVersion)`; internal SPI, both backends
   implement it.

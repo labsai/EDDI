@@ -216,6 +216,8 @@ curl -X POST -H "Content-Type: application/zip" \
 > archive. Prompt snippets honour the selection too: a snippet row's `sourceId` is the
 > snippet's id in the archive (its file name), and a merge updates a live snippet of the
 > same name only when that id — or the id of the local snippet it matched — is selected.
+> The same filter applies to a create import and to a first-time live sync: a snippet
+> left out of `selectedResources` is not created.
 
 **Scenario 4: Disaster Recovery**
 
@@ -499,7 +501,7 @@ changed while the import ran is not overwritten by the rollback; the conflict is
 An uploaded or synced archive is unpacked under three limits — entry count, bytes per entry,
 and total bytes, all counted from what is actually decompressed — so a small upload that
 inflates to gigabytes is refused with `413` and the limit it crossed, instead of filling the
-disk. The defaults (`10000` entries, 64 MiB per entry, 256 MiB in total) sit far above any real
+disk. The defaults (`10000` entries, 32 MiB per entry, 256 MiB in total) sit far above any real
 agent export; see `eddi.backup.import.*` in the
 [configuration reference](configuration-reference.md).
 
