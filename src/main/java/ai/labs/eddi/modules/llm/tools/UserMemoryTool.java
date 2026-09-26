@@ -17,7 +17,9 @@ import org.jboss.logging.Logger;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -99,14 +101,38 @@ public class UserMemoryTool {
             return "⚠️ Category '%s' not allowed. Allowed: %s".formatted(category, guardrails.getAllowedCategories());
         }
 
+        // Resolve visibility: the model's choice if it named a valid one, otherwise
+        // the configured defaultVisibility (itself falling back to self).
         Visibility vis;
-        try {
-            vis = (visibility != null && !visibility.isBlank()) ? Visibility.valueOf(visibility.trim().toLowerCase()) : Visibility.self;
-        } catch (IllegalArgumentException e) {
-            vis = Visibility.self;
+        if (visibility != null && !visibility.isBlank()) {
+            vis = parseVisibility(visibility, defaultVisibility());
+        } else {
+            vis = defaultVisibility();
+        }
+
+        // Guardrail: the resolved visibility must be permitted for this agent. By
+        // default only 'self' is allowed, so a prompt-injected model cannot broadcast
+        // a memory to every other agent (global) or to the group unless an operator
+        // opted in via guardrails.allowedVisibilities. The configured
+        // defaultVisibility is always permitted so setting it is never self-blocking.
+        if (!allowedVisibilities().contains(vis)) {
+            return "⚠️ Visibility '%s' is not permitted for this agent. Allowed: %s".formatted(vis,
+                    allowedVisibilities().stream().map(Enum::name).collect(Collectors.joining(", ")));
         }
 
         try {
+            // Guardrail: a 'global' write must not silently overwrite the value of a
+            // global memory another agent owns. The store preserves the original owner
+            // but still applies the new value, so refuse here unless configured to
+            // allow it.
+            if (vis == Visibility.global && !guardrails.isAllowGlobalKeyOverwrite()) {
+                String otherOwner = globalKeyOwnedByAnotherAgent(key.trim());
+                if (otherOwner != null) {
+                    return ("⚠️ A global memory with key '%s' is owned by another agent and cannot be overwritten. "
+                            + "Use a different key, or store it with 'self' visibility.").formatted(key.trim());
+                }
+            }
+
             // Check capacity — returns a user-facing message when the write must not
             // proceed, null when there is room (possibly after evicting).
             String capacityRefusal = enforceCapacity(key.trim());
@@ -198,6 +224,69 @@ public class UserMemoryTool {
             LOGGER.errorf("[MEMORY] Failed to forget fact: %s", e.getMessage());
             return "❌ Failed to forget memory: " + e.getMessage();
         }
+    }
+
+    /**
+     * The agent's configured default visibility, parsed, falling back to
+     * {@link Visibility#self} for a null/blank/unrecognised value.
+     */
+    private Visibility defaultVisibility() {
+        return parseVisibility(config.getDefaultVisibility(), Visibility.self);
+    }
+
+    /**
+     * Parses a visibility name case-insensitively, returning {@code fallback} for a
+     * null, blank or unrecognised value.
+     */
+    private static Visibility parseVisibility(String value, Visibility fallback) {
+        if (value == null || value.isBlank()) {
+            return fallback;
+        }
+        try {
+            return Visibility.valueOf(value.trim().toLowerCase());
+        } catch (IllegalArgumentException e) {
+            return fallback;
+        }
+    }
+
+    /**
+     * The set of visibilities the {@code rememberFact} tool may write: the
+     * configured {@code guardrails.allowedVisibilities} (default {@code [self]}),
+     * always unioned with the configured {@code defaultVisibility} so that setting
+     * a default can never make every write fail. Unrecognised names are ignored.
+     */
+    private Set<Visibility> allowedVisibilities() {
+        var allowed = EnumSet.noneOf(Visibility.class);
+        List<String> configured = guardrails.getAllowedVisibilities();
+        if (configured != null) {
+            for (String name : configured) {
+                Visibility parsed = parseVisibility(name, null);
+                if (parsed != null) {
+                    allowed.add(parsed);
+                }
+            }
+        }
+        if (allowed.isEmpty()) {
+            allowed.add(Visibility.self);
+        }
+        // A configured default must always be writable.
+        allowed.add(defaultVisibility());
+        return allowed;
+    }
+
+    /**
+     * If a {@code global} memory with this key already exists and is owned by an
+     * agent other than this one, returns that owning agent's id; otherwise
+     * {@code null}. Used to refuse a cross-agent global value overwrite.
+     */
+    private String globalKeyOwnedByAnotherAgent(String key) throws IResourceStore.ResourceStoreException {
+        for (UserMemoryEntry entry : store.getAllEntries(userId)) {
+            if (entry != null && entry.visibility() == Visibility.global && key.equals(entry.key())
+                    && entry.sourceAgentId() != null && !entry.sourceAgentId().equals(agentId)) {
+                return entry.sourceAgentId();
+            }
+        }
+        return null;
     }
 
     /**

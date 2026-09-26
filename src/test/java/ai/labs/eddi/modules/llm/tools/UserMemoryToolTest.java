@@ -12,6 +12,8 @@ import ai.labs.eddi.datastore.IResourceStore;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import org.mockito.ArgumentCaptor;
+
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -197,5 +199,59 @@ class UserMemoryToolTest {
 
         String result = tool.rememberFact("key", "value", "fact", "self");
         assertTrue(result.contains("❌ Failed to store memory"));
+    }
+
+    // --- Finding 5: visibility guardrail ---
+
+    @Test
+    void rememberFact_defaultConfig_refusesGlobalVisibility() throws Exception {
+        // Default allowedVisibilities = [self]: the model cannot broadcast a memory
+        // globally unless the agent is explicitly configured to allow it.
+        String result = tool.rememberFact("shared_key", "value", "fact", "global");
+
+        assertTrue(result.contains("not permitted"), "expected a visibility refusal, got: " + result);
+        verify(store, never()).upsert(any());
+    }
+
+    @Test
+    void rememberFact_globalAllowed_butKeyOwnedByAnotherAgent_refused() throws Exception {
+        config.getGuardrails().setAllowedVisibilities(List.of("self", "global"));
+        var otherAgentsGlobal = new UserMemoryEntry("id-x", "user-1", "shared_key", "old", "fact",
+                Visibility.global, "agent-OTHER", List.of(), "conv-x", false, 0, Instant.now(), Instant.now());
+        when(store.getAllEntries("user-1")).thenReturn(List.of(otherAgentsGlobal));
+
+        String result = tool.rememberFact("shared_key", "new value", "fact", "global");
+
+        assertTrue(result.contains("owned by another agent"), "expected a cross-agent refusal, got: " + result);
+        verify(store, never()).upsert(any());
+    }
+
+    @Test
+    void rememberFact_globalAllowed_ownKey_succeeds() throws Exception {
+        config.getGuardrails().setAllowedVisibilities(List.of("self", "global"));
+        when(store.getAllEntries("user-1")).thenReturn(List.of());
+        when(store.countEntries("user-1")).thenReturn(0L);
+        when(store.upsert(any())).thenReturn("entry-id");
+
+        String result = tool.rememberFact("my_key", "value", "fact", "global");
+
+        assertTrue(result.contains("✅ Remembered"), "expected success, got: " + result);
+        verify(store).upsert(any());
+    }
+
+    @Test
+    void rememberFact_appliesConfiguredDefaultVisibility_whenModelOmitsIt() throws Exception {
+        // A configured defaultVisibility is honoured for a null choice AND is always
+        // permitted (unioned into the allowed set) so it is never self-blocking.
+        config.setDefaultVisibility("group");
+        when(store.countEntries("user-1")).thenReturn(0L);
+        when(store.upsert(any())).thenReturn("entry-id");
+
+        String result = tool.rememberFact("team_key", "value", "fact", null);
+
+        assertTrue(result.contains("✅ Remembered"), "expected success, got: " + result);
+        ArgumentCaptor<UserMemoryEntry> captor = ArgumentCaptor.forClass(UserMemoryEntry.class);
+        verify(store).upsert(captor.capture());
+        assertEquals(Visibility.group, captor.getValue().visibility());
     }
 }
