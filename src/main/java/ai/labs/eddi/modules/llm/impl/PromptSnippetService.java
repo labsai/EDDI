@@ -7,14 +7,13 @@ package ai.labs.eddi.modules.llm.impl;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
-import ai.labs.eddi.configs.descriptors.model.ResourceGrant;
-import ai.labs.eddi.configs.descriptors.model.ResourceVisibility;
 import ai.labs.eddi.configs.snippets.IPromptSnippetStore;
 import ai.labs.eddi.configs.snippets.model.PromptSnippet;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import ai.labs.eddi.engine.security.spaces.CallerSpaces;
 import ai.labs.eddi.engine.security.spaces.DescriptorAccess;
+import ai.labs.eddi.engine.security.spaces.SharingChangedEvent;
 import ai.labs.eddi.engine.security.spaces.Subjects;
 import ai.labs.eddi.engine.security.spaces.WorkspaceSettings;
 import com.github.benmanes.caffeine.cache.Cache;
@@ -23,6 +22,7 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.event.Observes;
 
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -34,7 +34,6 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -71,20 +70,34 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * admin-authored, but a second evaluation pass over data is precisely the shape
  * EDDI avoids elsewhere. Left as-is deliberately rather than by oversight.
  *
- * <h3>Which snippets a conversation sees</h3> Snippets are guarded
- * configuration resources like any other, so under enforced workspaces
- * ({@code eddi.workspaces.enabled=true}) a render must not see every
- * workspace's snippets. {@link #getForAgent} returns only the snippets the
- * <em>agent</em> could use — judged by {@link DescriptorAccess} against the
- * agent's owner and space, exactly as for a user holding that identity — and
- * resolves a name that several visible snippets share by closeness: the agent's
- * own space first, then its owner's snippets, then grants, then published, then
- * legacy; the oldest first within a tier. Without that, one team could file a
- * snippet named like another team's in its own space and have it rendered into
- * the other team's system prompts. With enforcement off there is one shared
- * workspace and every snippet is visible, as before; a duplicated name then
- * resolves to the oldest snippet instead of to whichever happened to be listed
- * last.
+ * <h3>Which snippets a conversation sees</h3> Snippets are injected <em>by
+ * name</em>, automatically, into every render — nobody opts in to a particular
+ * one. That makes a share different from a share of any other resource: a grant
+ * or a publish on a snippet is not an offer the recipient may take up, it is a
+ * <em>push</em> into the recipient's prompts, and
+ * {@code ResourceSharingService} only asks the snippet's owner. So under
+ * enforced workspaces ({@code eddi.workspaces.enabled=true}),
+ * {@link #getForAgent} injects only snippets from sources the agent's own side
+ * controls:
+ * <ol>
+ * <li>snippets filed in the agent's own space, which that space's members may
+ * use;</li>
+ * <li>for an agent in a <em>personal</em> space, its owner's own snippets — but
+ * not for an agent in a team space, whose prompt every team editor can change
+ * and read back, so the creator's private snippets must not ride along;</li>
+ * <li>legacy (unowned) snippets — the pre-workspace shared namespace. No tenant
+ * can create one once enforcement is on, because ownership is stamped whenever
+ * authentication is, and they load regardless of
+ * {@code eddi.workspaces.legacy-visibility} for the same reason every other
+ * configuration an agent references does: that policy governs the authoring
+ * surface, not the engine.</li>
+ * </ol>
+ * A snippet from another space reaches an agent through none of these, however
+ * it is granted or published; to use it, copy it into the agent's space. A name
+ * several eligible snippets share goes to the earliest tier above, the oldest
+ * first within a tier. With enforcement off there is one shared workspace and
+ * every snippet is visible, as before; a duplicated name then resolves to the
+ * oldest snippet instead of to whichever happened to be listed last.
  *
  * @author ginccc
  * @since 6.0.0
@@ -96,6 +109,11 @@ public class PromptSnippetService {
     private static final String CACHE_KEY = "all_snippets";
     private static final Duration CACHE_TTL = Duration.ofMinutes(5);
     private static final int MAX_COLLISION_WARNINGS = 1000;
+
+    /** Closeness tiers, lower wins. See the class javadoc. */
+    private static final int TIER_AGENT_SPACE = 0;
+    private static final int TIER_OWNER = 1;
+    private static final int TIER_LEGACY = 2;
 
     /**
      * Tie-break for snippets sharing a name within the same closeness tier: the
@@ -115,16 +133,16 @@ public class PromptSnippetService {
 
     /**
      * Single-entry cache holding every snippet together with the descriptor that
-     * decides who may use it. Invalidated on any configuration update event. TTL
-     * fallback ensures eventual consistency even if events are missed.
+     * decides who may use it, and the unscoped {@link #getAll()} view resolved from
+     * them. Invalidated on any snippet write and on any sharing change; TTL
+     * fallback ensures eventual consistency across nodes.
      */
-    private final Cache<String, List<SnippetEntry>> snippetCache;
+    private final Cache<String, Loaded> snippetCache;
 
     /**
      * Per-agent view under enforced workspaces, keyed by agent id. Bounded and
      * expiring like the sibling caches, and cleared together with
-     * {@link #snippetCache}. A change to the agent's own owner or space (a
-     * transfer, a move between spaces) is picked up within {@link #CACHE_TTL}.
+     * {@link #snippetCache}.
      */
     private final Cache<String, Map<String, Object>> agentSnippetCache;
 
@@ -181,19 +199,21 @@ public class PromptSnippetService {
      * @return unmodifiable map of snippet name → content
      */
     public Map<String, Object> getAll() {
-        return resolve(loadEntries(), null, null);
+        return load().all();
     }
 
     /**
      * The snippets a conversation with {@code agentId} may render, as
-     * {@code name → content}. See the class javadoc for the visibility rule and for
+     * {@code name → content}. See the class javadoc for which snippets qualify and
      * how a shared name is resolved.
      * <p>
      * With workspaces not enforced this is {@link #getAll()}. With them enforced,
-     * an agent that has no descriptor is treated as belonging to nobody — it sees
-     * published snippets, and legacy ones when legacy data is admitted — and an
-     * agent whose descriptor cannot be read sees none: an unverifiable owner is not
-     * an absent owner.
+     * an agent that has no descriptor, or an unowned one, is a legacy agent and
+     * gets the legacy snippets. An agent whose descriptor cannot be read also gets
+     * only the legacy snippets for that turn — never another space's, and never
+     * nothing, since dropping every snippet would silently strip safety and
+     * compliance text from the prompt — and that view is not cached, so the next
+     * turn retries.
      *
      * @param agentId
      *            the agent the render is for; {@code null} is treated like an agent
@@ -215,16 +235,15 @@ public class PromptSnippetService {
             try {
                 agentDescriptor = descriptorStore.readCurrentDescriptor(agentId);
             } catch (IResourceStore.ResourceNotFoundException e) {
-                LOGGER.debugf("No descriptor for agent %s; scoping its prompt snippets as unowned", sanitize(agentId));
+                LOGGER.debugf("No descriptor for agent %s; giving it the legacy prompt snippets", sanitize(agentId));
             } catch (IResourceStore.ResourceStoreException e) {
-                // Not cached: the next render retries instead of pinning the empty view.
-                LOGGER.warnf("Could not load the descriptor of agent %s to scope its prompt snippets; rendering none this turn: %s",
-                        sanitize(agentId), e.getMessage());
-                return Collections.emptyMap();
+                LOGGER.warnf("Could not load the descriptor of agent %s to scope its prompt snippets; rendering only the legacy "
+                        + "snippets this turn: %s", sanitize(agentId), e.getMessage());
+                return resolveScoped(load().entries(), null);
             }
         }
 
-        Map<String, Object> scoped = resolve(loadEntries(), agentDescriptor, agentCaller(agentDescriptor));
+        Map<String, Object> scoped = resolveScoped(load().entries(), agentDescriptor);
         agentSnippetCache.put(cacheKey, scoped);
         return scoped;
     }
@@ -240,31 +259,38 @@ public class PromptSnippetService {
     }
 
     /**
-     * The agent as an access subject: its owner, the owner's personal space and the
-     * agent's own space. The chatting user does not own the agent they talk to, so
-     * their identity is the wrong one to ask with; the question is whether whoever
-     * the agent belongs to could use the snippet.
+     * A grant, revoke, publish or ownership transfer changes which snippets an
+     * agent may use — on the snippet, or on the agent itself — so the derived views
+     * are dropped immediately on this node rather than when the TTL runs out.
      */
-    static CallerSpaces agentCaller(DocumentDescriptor agentDescriptor) {
-        if (agentDescriptor == null) {
-            return CallerSpaces.ANONYMOUS;
-        }
-        Set<String> self = new LinkedHashSet<>();
-        Set<String> spaces = new LinkedHashSet<>();
-        String owner = agentDescriptor.getOwnerId();
-        if (isSet(owner)) {
-            self.add(owner.trim());
-            spaces.add(Subjects.personalSpace(owner.trim()));
-        }
-        String space = agentDescriptor.getSpaceId();
-        if (isSet(space) && !Subjects.LEGACY.equals(space)) {
-            spaces.add(space);
-        }
-        return new CallerSpaces(self, spaces, spaces);
+    void onSharingChanged(@Observes SharingChangedEvent event) {
+        invalidateCache();
     }
 
-    private List<SnippetEntry> loadEntries() {
-        List<SnippetEntry> cached = snippetCache.getIfPresent(CACHE_KEY);
+    /**
+     * The agent as an access subject. A team-space agent is the team: no personal
+     * identity, so its creator's private snippets and user grants are out of reach.
+     * A personal-space agent is its owner. A legacy agent is nobody.
+     */
+    static CallerSpaces agentCaller(DocumentDescriptor agentDescriptor) {
+        if (agentDescriptor == null || DescriptorAccess.isUnowned(agentDescriptor)) {
+            return CallerSpaces.ANONYMOUS;
+        }
+        String space = agentSpace(agentDescriptor);
+        if (space != null && space.startsWith(Subjects.TEAM_PREFIX)) {
+            return new CallerSpaces(Set.of(), Set.of(space), Set.of(space));
+        }
+        String owner = agentDescriptor.getOwnerId();
+        if (!isSet(owner)) {
+            // A space but no owner, and not a team: nothing personal to act as.
+            return space == null ? CallerSpaces.ANONYMOUS : new CallerSpaces(Set.of(), Set.of(space), Set.of(space));
+        }
+        String personal = Subjects.personalSpace(owner.trim());
+        return new CallerSpaces(Set.of(owner.trim()), Set.of(personal), Set.of(personal));
+    }
+
+    private Loaded load() {
+        Loaded cached = snippetCache.getIfPresent(CACHE_KEY);
         if (cached != null) {
             cacheHitCounter.increment();
             return cached;
@@ -272,8 +298,9 @@ public class PromptSnippetService {
 
         cacheMissCounter.increment();
         List<SnippetEntry> entries = loadAllSnippets();
-        snippetCache.put(CACHE_KEY, entries);
-        return entries;
+        Loaded loaded = new Loaded(entries, resolveUnscoped(entries));
+        snippetCache.put(CACHE_KEY, loaded);
+        return loaded;
     }
 
     private List<SnippetEntry> loadAllSnippets() {
@@ -318,45 +345,74 @@ public class PromptSnippetService {
         }
     }
 
+    /** Every entry is eligible; a shared name goes to the oldest. */
+    private Map<String, Object> resolveUnscoped(List<SnippetEntry> entries) {
+        return pick(entries, entry -> TIER_AGENT_SPACE);
+    }
+
     /**
-     * Builds the {@code name → content} map, one snippet per name.
+     * Only the entries the agent's own side controls are eligible — see the class
+     * javadoc.
      *
      * @param agentDescriptor
-     *            the agent's descriptor, for ranking by closeness
-     * @param caller
-     *            the agent as an access subject, or {@code null} for unscoped:
-     *            every entry is visible and a shared name goes to the oldest
+     *            the agent's descriptor, or {@code null} for a legacy agent (or one
+     *            whose descriptor could not be read)
      */
-    private Map<String, Object> resolve(List<SnippetEntry> entries, DocumentDescriptor agentDescriptor, CallerSpaces caller) {
+    private Map<String, Object> resolveScoped(List<SnippetEntry> entries, DocumentDescriptor agentDescriptor) {
+        CallerSpaces caller = agentCaller(agentDescriptor);
+        String agentSpace = agentDescriptor == null ? null : agentSpace(agentDescriptor);
+        return pick(entries, entry -> tier(entry.descriptor(), agentSpace, caller));
+    }
+
+    /**
+     * The closeness tier of a snippet for the agent, or {@code -1} when the agent
+     * must not see it.
+     */
+    private static int tier(DocumentDescriptor snippet, String agentSpace, CallerSpaces caller) {
+        if (DescriptorAccess.isUnowned(snippet)) {
+            return TIER_LEGACY;
+        }
+        // Access is still required: a snippet filed in the agent's space but kept
+        // private by a teammate is not the team's to use. admitLegacy=false because
+        // legacy snippets were handled above.
+        AccessLevel level = DescriptorAccess.effectiveLevel(snippet, caller, false);
+        if (level == null || !level.includes(AccessLevel.USE)) {
+            return -1;
+        }
+        if (agentSpace != null && agentSpace.equals(snippet.getSpaceId())) {
+            return TIER_AGENT_SPACE;
+        }
+        if (caller.isSelf(snippet.getOwnerId())) {
+            return TIER_OWNER;
+        }
+        // Reachable only through a grant or a publish from elsewhere: a push, not
+        // something this agent's side chose. Never injected.
+        return -1;
+    }
+
+    private Map<String, Object> pick(List<SnippetEntry> entries, TierFunction tierOf) {
         if (entries.isEmpty()) {
             return Collections.emptyMap();
         }
-        boolean admitLegacy = workspaceSettings == null || workspaceSettings.admitsLegacy();
-
         Map<String, SnippetEntry> chosen = new LinkedHashMap<>();
-        Map<String, Integer> chosenRank = new LinkedHashMap<>();
+        Map<String, Integer> chosenTier = new LinkedHashMap<>();
         for (SnippetEntry entry : entries) {
-            int rank = 0;
-            if (caller != null) {
-                AccessLevel level = DescriptorAccess.effectiveLevel(entry.descriptor(), caller, admitLegacy);
-                if (level == null || !level.includes(AccessLevel.USE)) {
-                    continue;
-                }
-                rank = closeness(entry.descriptor(), agentDescriptor, caller);
+            int tier = tierOf.tier(entry);
+            if (tier < 0) {
+                continue;
             }
-
             SnippetEntry incumbent = chosen.get(entry.name());
             if (incumbent == null) {
                 chosen.put(entry.name(), entry);
-                chosenRank.put(entry.name(), rank);
+                chosenTier.put(entry.name(), tier);
                 continue;
             }
-            int incumbentRank = chosenRank.get(entry.name());
-            boolean replaces = rank < incumbentRank || (rank == incumbentRank && OLDEST_FIRST.compare(entry, incumbent) < 0);
+            int incumbentTier = chosenTier.get(entry.name());
+            boolean replaces = tier < incumbentTier || (tier == incumbentTier && OLDEST_FIRST.compare(entry, incumbent) < 0);
             reportCollision(entry.name(), replaces ? entry : incumbent, replaces ? incumbent : entry);
             if (replaces) {
                 chosen.put(entry.name(), entry);
-                chosenRank.put(entry.name(), rank);
+                chosenTier.put(entry.name(), tier);
             }
         }
 
@@ -365,29 +421,9 @@ public class PromptSnippetService {
         return Collections.unmodifiableMap(result);
     }
 
-    /**
-     * How close a snippet the agent may use is to that agent — lower is closer.
-     */
-    private static int closeness(DocumentDescriptor snippet, DocumentDescriptor agent, CallerSpaces caller) {
-        String agentSpace = agent == null ? null : agent.getSpaceId();
-        if (isSet(agentSpace) && !Subjects.LEGACY.equals(agentSpace) && agentSpace.equals(snippet.getSpaceId())) {
-            return 0;
-        }
-        if (caller.isSelf(snippet.getOwnerId())) {
-            return 1;
-        }
-        List<ResourceGrant> grants = snippet.getGrants();
-        if (grants != null) {
-            for (ResourceGrant grant : grants) {
-                if (grant != null && grant.getSubject() != null && caller.subjects().contains(grant.getSubject())) {
-                    return 2;
-                }
-            }
-        }
-        if (snippet.resourceVisibility() == ResourceVisibility.published) {
-            return 3;
-        }
-        return 4;
+    private static String agentSpace(DocumentDescriptor agentDescriptor) {
+        String space = agentDescriptor.getSpaceId();
+        return isSet(space) && !Subjects.LEGACY.equals(space) ? space : null;
     }
 
     private void reportCollision(String name, SnippetEntry winner, SnippetEntry loser) {
@@ -440,7 +476,16 @@ public class PromptSnippetService {
         return 1;
     }
 
+    @FunctionalInterface
+    private interface TierFunction {
+        int tier(SnippetEntry entry);
+    }
+
     /** One loaded snippet with the descriptor that decides who may use it. */
     private record SnippetEntry(String id, String name, String content, Date createdOn, DocumentDescriptor descriptor) {
+    }
+
+    /** The loaded entries and the unscoped view resolved from them. */
+    private record Loaded(List<SnippetEntry> entries, Map<String, Object> all) {
     }
 }
