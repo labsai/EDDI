@@ -318,7 +318,10 @@ function ConditionEditor({
         configs = { mimeType: "", minCount: "1" };
         break;
       case "sizematcher":
-        configs = { valuePath: "", min: "", max: "" };
+        // SizeMatcher parses every min/max/equal key it finds with
+        // Integer.parseInt, so an empty "min" or "max" failed the save with a
+        // 400. Preset only a bound that means something: "at least one".
+        configs = { valuePath: "", min: "1" };
         break;
       case "dependency":
         configs = { reference: "" };

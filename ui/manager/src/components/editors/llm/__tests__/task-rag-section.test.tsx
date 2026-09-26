@@ -150,3 +150,18 @@ describe("TaskRagSection", () => {
     ).toBeInTheDocument();
   });
 });
+
+describe("TaskRagSection removed fields", () => {
+  it("does not offer the Injection strategy the backend no longer declares", async () => {
+    // KnowledgeBaseReference / ragDefaults `injectionStrategy` was removed from
+    // LlmConfiguration; the select saved a value that was dropped on write.
+    const user = userEvent.setup();
+    renderWithProviders(
+      <TaskRagSection task={{ ...taskWithKB, enableWorkflowRag: true }} onChange={vi.fn()} />,
+    );
+    await user.click(screen.getByText("RAG (Knowledge Retrieval)"));
+    expect(screen.getByDisplayValue("product-docs")).toBeInTheDocument();
+    expect(screen.queryByText("Injection")).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "User Message" })).not.toBeInTheDocument();
+  });
+});

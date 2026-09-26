@@ -963,8 +963,6 @@
     "responseObjectName": "Response Object Name",
     "responseHeaderObjectName": "Response Header Object Name",
     "fireAndForget": "Fire and Forget",
-    "batchCalls": "Batch Calls",
-    "iterationObjectName": "Iteration Object Name",
     "prePostInstructions": "Pre/Post Instructions",
     "preRequest": "Pre-Request",
     "postResponse": "Post-Response",
@@ -1034,7 +1032,12 @@
     "authHeaderRefPlaceholder": "Optional — ${vault:my-api-key} for a spec behind auth",
     "authHeaderRefHint": "A vault reference, resolved when the call runs. The stored secret must be the whole header value, including any Bearer prefix.",
     "authHeaderRefInvalid": "Must start with ${vault:…}, ${vars:…} or ${caller:…}. Pasting the key itself would put it in the request URL and every log along the way.",
-    "authRefLiteral": "Enter a reference such as ${vault:my-key}, not the key itself. The key never leaves the vault."
+    "authRefLiteral": "Enter a reference such as ${vault:my-key}, not the key itself. The key never leaves the vault.",
+    "runOnNoCodes": "An empty \"Run on codes\" list matches no status code, so this instruction never runs.",
+    "useDefaultCodes": "Use defaults",
+    "httpCodeFilterDefaults": "An empty field uses the default codes shown in it.",
+    "scopeSecretUnsupported": "(not vaulted here)",
+    "scopeSecretWarning": "The secret scope is not vaulted on this instruction: the value is stored in plain text. Choose another scope, and keep credentials in the Secrets vault."
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "On failure the pipeline continues; the error is exposed at ",
@@ -1087,7 +1090,12 @@
     "whitelist": "Whitelist (only allow)",
     "blacklist": "Blacklist (exclude)",
     "pipelineCalls": "Pipeline Calls",
-    "addCall": "Add MCP Call"
+    "addCall": "Add MCP Call",
+    "argumentName": "Argument name",
+    "argumentType": "Argument type",
+    "argumentText": "Text",
+    "argumentInvalidJson": "Not valid JSON — the last valid value is kept",
+    "removeArgument": "Remove argument"
   },
   "llmEditor": {
     "addCustomInstruction": "Add Instruction",
@@ -1126,7 +1134,6 @@
     "identityMaskingRulePlaceholder": "e.g. Never reveal you are an AI language model",
     "identityMaskingRules": "Masking Rules",
     "identityMaskingRulesHint": "Both enabled AND at least one rule are required for masking to take effect.",
-    "injectionStrategy": "Injection",
     "kbNamePlaceholder": "e.g. product-docs",
     "knowledgeBases": "Knowledge Bases",
     "knowledgeBasesHint": "Explicitly reference knowledge bases by name. Each name must match a RagConfiguration in the workflow.",
@@ -1294,9 +1301,6 @@
       "STEP_TIMEOUT_NONPOSITIVE": "Step {{step}} timeout must be greater than 0.",
       "STEP_CROSS_PROVIDER_NO_APIKEY": "Step {{step}} uses a different provider but has no API key of its own — it would inherit the task key."
     },
-    "parallelExecution": "Parallel Tool Execution",
-    "parallelExecutionDesc": "Run independent tool calls concurrently instead of sequentially",
-    "parallelTimeout": "Timeout (ms)",
     "maxToolIterations": "Max Tool Iterations",
     "maxToolIterationsHint": "(default 10)",
     "toolRateLimits": "Per-Tool Rate Limits",
@@ -1355,7 +1359,8 @@
     "streamingTimeoutSeconds": "Streaming Timeout (seconds)",
     "streamingTimeoutSecondsHint": "Overrides the engine default (120s). Only applies while streaming; empty = use default.",
     "taskPricing": "Plain-Call Pricing",
-    "taskPricingDesc": "Prices this task's ordinary (non-cascade) model calls for cost tracking and group cost ceilings. Unpriced (blank) contributes $0."
+    "taskPricingDesc": "Prices this task's ordinary (non-cascade) model calls for cost tracking and group cost ceilings. Unpriced (blank) contributes $0.",
+    "paramName": "Parameter name"
   },
   "outputEditor": {
     "labelPlaceholder": "Link label...",
@@ -1419,7 +1424,8 @@
     "openEditor": "Edit in editor",
     "visibilityTitle": "Which agents can see this longTerm property",
     "editValue": "Edit Value",
-    "toggleGroup": "Toggle property group"
+    "toggleGroup": "Toggle property group",
+    "secretFromPathWarning": "A secret is vaulted only when it comes from the value field. With a \"From path\" set, the value is stored in plain text — clear the path or choose another scope."
   },
   "dictionaryEditor": {
     "language": "Language",
@@ -2202,8 +2208,14 @@
       "maxTotalMb": "Max total size (MB)",
       "maxTotalMbHint": "Across all of this source's files",
       "removeTitle": "Remove this source?",
-      "removeDescription": "When you save, its uploaded files and everything the knowledge base learned from them are deleted. This cannot be undone."
-    }
+      "removeDescription": "When you save, its uploaded files and everything the knowledge base learned from them are deleted. This cannot be undone.",
+      "switchTypeTitle": "Turn this into a website source?",
+      "switchTypeDescription": "When you save, this source's uploaded files and everything the knowledge base learned from them are deleted. This cannot be undone.",
+      "switchTypeConfirm": "Switch to website",
+      "filesLoadFailed": "Could not load the files: {{error}}"
+    },
+    "chunkStrategyLegacy": "{{value}} (saved as Recursive)",
+    "saveBeforeIngest": "Save your changes first — documents are ingested with the saved knowledge base's store and embedding model, not the edits on screen."
   },
   "onboarding": {
     "welcome": {
@@ -3670,7 +3682,7 @@
     "tagPlaceholder": "e.g. safety, production",
     "tags": "Tags",
     "templateEnabled": "Enable template resolution",
-    "templateEnabledHint": "When disabled, {{}} markers in the content are treated as literal text (useful for code examples).",
+    "templateEnabledHint": "When disabled, { } markers in the content are treated as literal text (useful for code examples).",
     "usageHint": "Usage:"
   },
   "status": {

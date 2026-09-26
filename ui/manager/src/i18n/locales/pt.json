@@ -937,8 +937,6 @@
     "responseObjectName": "Nome do objeto resposta",
     "responseHeaderObjectName": "Nome do objeto header resposta",
     "fireAndForget": "Fire-and-Forget",
-    "batchCalls": "Chamadas em lote",
-    "iterationObjectName": "Nome do objeto iteração",
     "prePostInstructions": "Instruções pré/pós",
     "preRequest": "Pré-requisição",
     "postResponse": "Pós-resposta",
@@ -1008,7 +1006,12 @@
     "authHeaderRefPlaceholder": "Opcional — ${vault:minha-chave-api} para uma especificação protegida",
     "authHeaderRefHint": "Uma referência ao vault, resolvida quando a chamada é executada. O segredo armazenado deve ser o valor completo do cabeçalho, incluindo qualquer prefixo Bearer.",
     "authHeaderRefInvalid": "Deve começar por ${vault:…}, ${vars:…} ou ${caller:…}. Colar a chave a colocaria no URL do pedido e em todos os registos do percurso.",
-    "authRefLiteral": "Introduza uma referência como ${vault:minha-chave}, e não a chave em si. A chave nunca sai do vault."
+    "authRefLiteral": "Introduza uma referência como ${vault:minha-chave}, e não a chave em si. A chave nunca sai do vault.",
+    "runOnNoCodes": "Uma lista \"Executar nos códigos\" vazia não corresponde a nenhum código de status, então esta instrução nunca é executada.",
+    "useDefaultCodes": "Usar padrões",
+    "httpCodeFilterDefaults": "Um campo vazio usa os códigos padrão exibidos nele.",
+    "scopeSecretUnsupported": "(não guardado no cofre aqui)",
+    "scopeSecretWarning": "O escopo \"secret\" não é guardado no cofre nesta instrução: o valor é armazenado em texto simples. Escolha outro escopo e mantenha as credenciais no cofre de segredos."
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "Em caso de falha, o pipeline continua; o erro é exposto em ",
@@ -1061,7 +1064,12 @@
     "whitelist": "Lista de permissões (permitir apenas)",
     "blacklist": "Lista de bloqueio (excluir)",
     "pipelineCalls": "Chamadas de pipeline",
-    "addCall": "Adicionar chamada MCP"
+    "addCall": "Adicionar chamada MCP",
+    "argumentName": "Nome do argumento",
+    "argumentType": "Tipo do argumento",
+    "argumentText": "Texto",
+    "argumentInvalidJson": "JSON inválido — o último valor válido é mantido",
+    "removeArgument": "Remover argumento"
   },
   "llmEditor": {
     "addCustomInstruction": "Adicionar instrução",
@@ -1100,7 +1108,6 @@
     "identityMaskingRulePlaceholder": "ex. Nunca revele que você é um modelo de linguagem de IA",
     "identityMaskingRules": "Regras de mascaramento",
     "identityMaskingRulesHint": "Tanto a ativação QUANTO pelo menos uma regra são necessárias para que o mascaramento tenha efeito.",
-    "injectionStrategy": "Injeção",
     "kbNamePlaceholder": "ex. product-docs",
     "knowledgeBases": "Bases de conhecimento",
     "knowledgeBasesHint": "Referencie bases de conhecimento explicitamente pelo nome. Cada nome deve corresponder a uma RagConfiguration no fluxo de trabalho.",
@@ -1258,9 +1265,6 @@
       "STEP_TIMEOUT_NONPOSITIVE": "O tempo limite do passo {{step}} tem de ser superior a 0.",
       "STEP_CROSS_PROVIDER_NO_APIKEY": "O passo {{step}} usa um fornecedor diferente mas não tem chave de API própria — herdaria a chave da tarefa."
     },
-    "parallelExecution": "Execução paralela de ferramentas",
-    "parallelExecutionDesc": "Run independent tool calls concurrently",
-    "parallelTimeout": "Tempo limite (ms)",
     "maxToolIterations": "Máx. iterações de ferramentas",
     "maxToolIterationsHint": "(predefinição 10)",
     "toolRateLimits": "Limites de taxa por ferramenta",
@@ -1329,7 +1333,8 @@
     "streamingTimeoutSeconds": "Tempo limite de streaming (segundos)",
     "streamingTimeoutSecondsHint": "Substitui o padrão do mecanismo (120s). Aplica-se apenas durante o streaming; vazio = usar o padrão.",
     "taskPricing": "Preços de chamadas simples",
-    "taskPricingDesc": "Define o preço das chamadas de modelo comuns (sem cascata) desta tarefa para o rastreio de custos e os limites de custo do grupo. Sem preço (em branco) contribui com $0."
+    "taskPricingDesc": "Define o preço das chamadas de modelo comuns (sem cascata) desta tarefa para o rastreio de custos e os limites de custo do grupo. Sem preço (em branco) contribui com $0.",
+    "paramName": "Nome do parâmetro"
   },
   "outputEditor": {
     "labelPlaceholder": "Rótulo do link...",
@@ -1393,7 +1398,8 @@
     "openEditor": "Editar no editor",
     "visibilityTitle": "Quais agents podem ver esta propriedade longTerm",
     "editValue": "Editar valor",
-    "toggleGroup": "Alternar grupo de propriedades"
+    "toggleGroup": "Alternar grupo de propriedades",
+    "secretFromPathWarning": "Um segredo só é guardado no cofre quando vem do campo de valor. Com um \"Caminho de origem\" definido, o valor é armazenado em texto simples — limpe o caminho ou escolha outro escopo."
   },
   "dictionaryEditor": {
     "language": "Idioma",
@@ -2144,8 +2150,14 @@
       "maxTotalMb": "Tamanho total máx. (MB)",
       "maxTotalMbHint": "Para todos os arquivos desta fonte",
       "removeTitle": "Remover esta fonte?",
-      "removeDescription": "Ao salvar, seus arquivos enviados e tudo o que a base de conhecimento aprendeu com eles são excluídos. Isso não pode ser desfeito."
-    }
+      "removeDescription": "Ao salvar, seus arquivos enviados e tudo o que a base de conhecimento aprendeu com eles são excluídos. Isso não pode ser desfeito.",
+      "switchTypeTitle": "Transformar em uma fonte de site?",
+      "switchTypeDescription": "Ao salvar, os arquivos enviados desta fonte e tudo o que a base de conhecimento aprendeu com eles são excluídos. Isso não pode ser desfeito.",
+      "switchTypeConfirm": "Mudar para site",
+      "filesLoadFailed": "Não foi possível carregar os arquivos: {{error}}"
+    },
+    "chunkStrategyLegacy": "{{value}} (salvo como Recursivo)",
+    "saveBeforeIngest": "Salve suas alterações primeiro — os documentos são ingeridos com o armazenamento e o modelo de embeddings da base de conhecimento salva, não com as edições na tela."
   },
   "onboarding": {
     "welcome": {
@@ -3668,7 +3680,7 @@
     "tagPlaceholder": "ex. segurança, produção",
     "tags": "Tags",
     "templateEnabled": "Ativar resolução de template",
-    "templateEnabledHint": "Quando desativado, os marcadores {{}} no conteúdo são tratados como texto literal (útil para exemplos de código).",
+    "templateEnabledHint": "Quando desativado, os marcadores { } no conteúdo são tratados como texto literal (útil para exemplos de código).",
     "usageHint": "Uso:"
   },
   "status": {

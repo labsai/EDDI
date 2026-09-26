@@ -1,5 +1,6 @@
-import { useState, useCallback, useEffect, useId } from "react";
+import { useState, useCallback, useEffect, useId, useRef } from "react";
 import { useTranslation } from "react-i18next";
+import { NumberInput } from "./number-input";
 import {
   ChevronDown,
   ChevronRight,
@@ -31,6 +32,16 @@ import {
   type McpToolInfo,
 } from "@/lib/api/mcp-discover";
 import { EditorSection } from "./editor-section";
+import { RenamableKeyInput } from "./renamable-key-input";
+import {
+  formatJsonArgument,
+  nextFreeKey,
+  parseJsonArgument,
+  renameKey,
+  toolArgumentKind,
+  type ToolArgumentKind,
+} from "./editor-value-utils";
+import { cn } from "@/lib/utils";
 import {
   PropertyInstructionsEditor,
   OutputBuildInstructionsEditor,
@@ -88,6 +99,138 @@ export interface McpCallsConfig {
 }
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
+
+/**
+ * One MCP tool argument.
+ *
+ * A string is a Qute template the engine renders; any other JSON value is sent
+ * to the tool as-is (`McpCallsTask`). The value input used to be
+ * `String(value)` written back as a string, so a stored `5` was saved as `"5"`
+ * and an object as `"[object Object]"` the first time the row was touched.
+ * The row now edits a non-string as JSON and keeps its type.
+ */
+function ToolArgumentRow({
+  name,
+  value,
+  readOnly,
+  isNameAvailable,
+  onRename,
+  onValueChange,
+  onRemove,
+  testId,
+}: {
+  name: string;
+  value: unknown;
+  readOnly?: boolean;
+  isNameAvailable: (next: string) => boolean;
+  onRename: (next: string) => void;
+  onValueChange: (next: unknown) => void;
+  onRemove: () => void;
+  testId: string;
+}) {
+  const { t } = useTranslation();
+  const [kind, setKind] = useState<ToolArgumentKind>(() => toolArgumentKind(value));
+  const [jsonDraft, setJsonDraft] = useState(() => formatJsonArgument(value));
+  const [jsonInvalid, setJsonInvalid] = useState(false);
+
+  // A value replaced from outside (version switch, JSON tab) resets the row.
+  const lastValue = useRef(value);
+  useEffect(() => {
+    if (Object.is(value, lastValue.current)) return;
+    lastValue.current = value;
+    setKind(toolArgumentKind(value));
+    setJsonDraft(formatJsonArgument(value));
+    setJsonInvalid(false);
+  }, [value]);
+
+  const emit = (next: unknown) => {
+    lastValue.current = next;
+    onValueChange(next);
+  };
+
+  const switchKind = (next: ToolArgumentKind) => {
+    setKind(next);
+    setJsonInvalid(false);
+    if (next === "json") {
+      // "5" becomes 5, "true" becomes true; text that is not JSON stays a
+      // JSON string until it is edited into something else.
+      const text = typeof value === "string" ? value : formatJsonArgument(value);
+      const parsed = parseJsonArgument(text);
+      const nextValue = parsed.ok ? parsed.value : text;
+      setJsonDraft(formatJsonArgument(nextValue));
+      emit(nextValue);
+    } else {
+      emit(typeof value === "string" ? value : formatJsonArgument(value));
+    }
+  };
+
+  const inputClass =
+    "h-7 flex-1 rounded border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring";
+
+  return (
+    <div className="flex items-center gap-1.5" data-testid={testId}>
+      <RenamableKeyInput
+        value={name}
+        onRename={onRename}
+        isAvailable={isNameAvailable}
+        readOnly={readOnly}
+        aria-label={t("mcpcallsEditor.argumentName", "Argument name")}
+        className="h-7 w-28 rounded border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+        data-testid={`${testId}-name`}
+      />
+      <select
+        value={kind}
+        onChange={(e) => switchKind(e.target.value as ToolArgumentKind)}
+        disabled={readOnly}
+        aria-label={t("mcpcallsEditor.argumentType", "Argument type")}
+        className="h-7 rounded border border-input bg-background px-1 text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+        data-testid={`${testId}-kind`}
+      >
+        <option value="text">{t("mcpcallsEditor.argumentText", "Text")}</option>
+        <option value="json">JSON</option>
+      </select>
+      {kind === "text" ? (
+        <input
+          type="text"
+          value={typeof value === "string" ? value : formatJsonArgument(value)}
+          onChange={(e) => emit(e.target.value)}
+          readOnly={readOnly}
+          placeholder="{memory.current.input}"
+          className={inputClass}
+          data-testid={`${testId}-value`}
+        />
+      ) : (
+        <input
+          type="text"
+          value={jsonDraft}
+          onChange={(e) => {
+            setJsonDraft(e.target.value);
+            const parsed = parseJsonArgument(e.target.value);
+            setJsonInvalid(!parsed.ok);
+            // Only valid JSON is stored; the last valid value stays until then.
+            if (parsed.ok) emit(parsed.value);
+          }}
+          readOnly={readOnly}
+          placeholder='5, true, {"limit": 10}'
+          aria-invalid={jsonInvalid || undefined}
+          title={jsonInvalid ? t("mcpcallsEditor.argumentInvalidJson", "Not valid JSON — the last valid value is kept") : undefined}
+          className={cn(inputClass, jsonInvalid && "border-destructive focus:ring-destructive")}
+          data-testid={`${testId}-value`}
+        />
+      )}
+      {!readOnly && (
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label={t("mcpcallsEditor.removeArgument", "Remove argument")}
+          className="rounded p-1 text-muted-foreground hover:text-destructive transition-colors"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      )}
+    </div>
+  );
+}
 
 function TagListInput({
   label,
@@ -328,12 +471,11 @@ function McpRetryEditor({
           <label className="mb-0.5 block text-[10px] text-muted-foreground">
             {t("mcpcallsEditor.maxAttempts", "Max Attempts")}
           </label>
-          <input
-            type="number"
+          <NumberInput placeholder="3" integer
             min={1}
-            value={retry.maxAttempts ?? 3}
-            onChange={(e) =>
-              onChange({ ...retry, maxAttempts: parseInt(e.target.value, 10) || 0 })
+            value={retry.maxAttempts}
+            onChange={(v) =>
+              onChange({ ...retry, maxAttempts: v })
             }
             readOnly={readOnly}
             data-testid="mcp-retry-max-attempts"
@@ -344,12 +486,11 @@ function McpRetryEditor({
           <label className="mb-0.5 block text-[10px] text-muted-foreground">
             {t("mcpcallsEditor.backoffDelayMs", "Backoff Delay (ms)")}
           </label>
-          <input
-            type="number"
+          <NumberInput placeholder="1000" integer
             min={0}
-            value={retry.backoffDelayMs ?? 1000}
-            onChange={(e) =>
-              onChange({ ...retry, backoffDelayMs: parseInt(e.target.value, 10) || 0 })
+            value={retry.backoffDelayMs}
+            onChange={(v) =>
+              onChange({ ...retry, backoffDelayMs: v })
             }
             readOnly={readOnly}
             data-testid="mcp-retry-backoff-delay"
@@ -360,13 +501,12 @@ function McpRetryEditor({
           <label className="mb-0.5 block text-[10px] text-muted-foreground">
             {t("mcpcallsEditor.backoffMultiplier", "Backoff Multiplier")}
           </label>
-          <input
-            type="number"
+          <NumberInput placeholder="2.0"
             min={1}
             step={0.1}
-            value={retry.backoffMultiplier ?? 2.0}
-            onChange={(e) =>
-              onChange({ ...retry, backoffMultiplier: parseFloat(e.target.value) || 0 })
+            value={retry.backoffMultiplier}
+            onChange={(v) =>
+              onChange({ ...retry, backoffMultiplier: v })
             }
             readOnly={readOnly}
             data-testid="mcp-retry-multiplier"
@@ -377,12 +517,11 @@ function McpRetryEditor({
           <label className="mb-0.5 block text-[10px] text-muted-foreground">
             {t("mcpcallsEditor.maxBackoffDelayMs", "Max Backoff (ms)")}
           </label>
-          <input
-            type="number"
+          <NumberInput placeholder="10000" integer
             min={0}
-            value={retry.maxBackoffDelayMs ?? 10000}
-            onChange={(e) =>
-              onChange({ ...retry, maxBackoffDelayMs: parseInt(e.target.value, 10) || 0 })
+            value={retry.maxBackoffDelayMs}
+            onChange={(v) =>
+              onChange({ ...retry, maxBackoffDelayMs: v })
             }
             readOnly={readOnly}
             data-testid="mcp-retry-max-backoff"
@@ -561,60 +700,50 @@ function McpCallEditor({
               {t("mcpcallsEditor.toolArguments", "Tool Arguments")}
             </label>
             <div className="space-y-1.5">
-              {Object.entries(call.toolArguments ?? {}).map(([k, v]) => (
-                <div key={k} className="flex items-center gap-1.5">
-                  <input
-                    type="text"
-                    value={k}
-                    readOnly
-                    className="h-7 w-28 rounded border border-input bg-muted px-2 text-xs text-foreground"
-                  />
-                  <input
-                    type="text"
-                    value={String(v ?? "")}
-                    onChange={(e) =>
-                      onChange({
-                        ...call,
-                        toolArguments: {
-                          ...call.toolArguments,
-                          [k]: e.target.value,
-                        },
-                      })
-                    }
-                    readOnly={readOnly}
-                    placeholder="{{memory.input}}"
-                    className="h-7 flex-1 rounded border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                  />
-                  {!readOnly && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const next = { ...call.toolArguments };
-                        delete next[k];
-                        onChange({ ...call, toolArguments: next });
-                      }}
-                      className="rounded p-1 text-muted-foreground hover:text-destructive transition-colors"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  )}
-                </div>
+              {Object.entries(call.toolArguments ?? {}).map(([k, v], i) => (
+                // Keyed by position: a rename must not remount the row the
+                // user is typing in.
+                <ToolArgumentRow
+                  key={i}
+                  name={k}
+                  value={v}
+                  readOnly={readOnly}
+                  isNameAvailable={(next) => !(next in (call.toolArguments ?? {}))}
+                  onRename={(next) =>
+                    onChange({
+                      ...call,
+                      toolArguments: renameKey(call.toolArguments ?? {}, k, next),
+                    })
+                  }
+                  onValueChange={(next) =>
+                    onChange({
+                      ...call,
+                      toolArguments: { ...call.toolArguments, [k]: next },
+                    })
+                  }
+                  onRemove={() => {
+                    const next = { ...call.toolArguments };
+                    delete next[k];
+                    onChange({ ...call, toolArguments: next });
+                  }}
+                  testId={`tool-argument-${i}`}
+                />
               ))}
             </div>
             {!readOnly && (
               <button
                 type="button"
                 onClick={() => {
-                  const idx = Object.keys(call.toolArguments ?? {}).length;
                   onChange({
                     ...call,
                     toolArguments: {
                       ...call.toolArguments,
-                      [`arg${idx}`]: "",
+                      [nextFreeKey(Object.keys(call.toolArguments ?? {}), "arg")]: "",
                     },
                   });
                 }}
                 className="mt-1 inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                data-testid="add-tool-argument"
               >
                 <Plus className="h-3 w-3" />
                 {t("mcpcallsEditor.addArgument", "Add Argument")}
@@ -627,7 +756,7 @@ function McpCallEditor({
             <label className="inline-flex items-center gap-2 text-xs text-foreground">
               <input
                 type="checkbox"
-                checked={call.saveResponse ?? false}
+                checked={call.saveResponse ?? true}
                 onChange={(e) =>
                   onChange({ ...call, saveResponse: e.target.checked })
                 }
@@ -636,7 +765,7 @@ function McpCallEditor({
               />
               {t("mcpcallsEditor.saveResponse", "Save Response")}
             </label>
-            {call.saveResponse && (
+            {(call.saveResponse ?? true) && (
               <input
                 type="text"
                 value={call.responseObjectName ?? ""}
@@ -939,11 +1068,10 @@ export function McpCallsEditor({
             <label className="mb-1 block text-xs font-medium text-muted-foreground">
               {t("mcpcallsEditor.timeoutMs", "Timeout (ms)")}
             </label>
-            <input
-              type="number"
-              value={data.timeoutMs ?? 30000}
-              onChange={(e) =>
-                update({ timeoutMs: parseInt(e.target.value, 10) || 30000 })
+            <NumberInput placeholder="30000" integer
+              value={data.timeoutMs}
+              onChange={(v) =>
+                update({ timeoutMs: v })
               }
               readOnly={readOnly}
               className="h-8 w-full rounded-md border border-input bg-background px-3 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"

@@ -121,3 +121,65 @@ describe("VersionDiffDialog", () => {
     });
   });
 });
+
+describe("VersionDiffDialog fetch ordering", () => {
+  it("shows the pair that was asked for last, even when an earlier fetch answers later", async () => {
+    // The fetch used to start during render and every response was applied:
+    // choosing v1 then v2 showed whichever request finished last — under the
+    // labels of the other one.
+    const { DiffEditor } = await import("@monaco-editor/react");
+    const diffMock = vi.mocked(DiffEditor);
+    diffMock.mockClear();
+
+    const pending = new Map<number, (json: string) => void>();
+    const fetchVersion = vi.fn(
+      (v: number) =>
+        new Promise<string>((resolve) => {
+          // Versions 1 and 3 resolve immediately; 2 waits to be released.
+          if (v === 2) pending.set(v, resolve);
+          else resolve(JSON.stringify({ version: v }));
+        }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(
+      <VersionDiffDialog
+        open
+        onClose={vi.fn()}
+        typeName="Rules"
+        versions={[{ version: 1 }, { version: 2 }, { version: 3 }]}
+        fetchVersion={fetchVersion}
+        currentVersion={3}
+      />,
+    );
+    // Default pair is 2 ↔ 3; v2 is still pending. Switch the left side to 1.
+    await user.selectOptions(screen.getByTestId("diff-version-left"), "1");
+    await waitFor(() => expect(screen.getByTestId("monaco-diff-editor")).toBeInTheDocument());
+
+    // Now the stale v2 response arrives.
+    pending.get(2)!(JSON.stringify({ version: 2 }));
+    await new Promise((r) => setTimeout(r, 0));
+
+    const lastProps = diffMock.mock.lastCall![0] as { original: string; modified: string };
+    expect(JSON.parse(lastProps.original)).toEqual({ version: 1 });
+    expect(JSON.parse(lastProps.modified)).toEqual({ version: 3 });
+  });
+
+  it("fetches once per pair, not on every parent render", async () => {
+    const fetchVersion = vi.fn((v: number) => Promise.resolve(JSON.stringify({ v })));
+    const props = {
+      open: true,
+      onClose: vi.fn(),
+      typeName: "Rules",
+      versions: [{ version: 1 }, { version: 2 }],
+      currentVersion: 2,
+    };
+    const { rerender } = renderWithProviders(
+      <VersionDiffDialog {...props} fetchVersion={(v) => fetchVersion(v)} />,
+    );
+    await waitFor(() => expect(fetchVersion).toHaveBeenCalledTimes(2));
+    // A parent passing a fresh inline arrow must not refetch.
+    rerender(<VersionDiffDialog {...props} fetchVersion={(v) => fetchVersion(v)} />);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(fetchVersion).toHaveBeenCalledTimes(2);
+  });
+});
