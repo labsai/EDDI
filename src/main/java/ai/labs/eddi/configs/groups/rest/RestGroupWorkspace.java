@@ -283,27 +283,34 @@ public class RestGroupWorkspace implements IRestGroupWorkspace {
                 return Response.status(Response.Status.NOT_FOUND)
                         .entity(Map.of("error", "No such cadence")).build();
             }
-            // Schedule first: a cadence whose schedule outlives it would keep
-            // firing into "cadence no longer exists" errors forever.
-            try {
-                scheduleStore.deleteSchedule(cadence.scheduleRef());
-            } catch (Exception e) {
-                LOG.warnf("Could not delete schedule %s for cadence %s: %s", cadence.scheduleRef(),
-                        sanitize(cadenceId), sanitize(e.getMessage()));
-            }
             // H14c: revision-checked, with a re-read on a lost write — see addCadence.
-            for (int attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt++) {
+            // The workspace write goes FIRST and the schedule is deleted only once it
+            // has landed: a lost write (409) must leave the cadence and its schedule
+            // intact together. The reverse order left a cadence whose scheduleRef
+            // pointed at an already-deleted schedule whenever the write lost.
+            boolean removed = false;
+            for (int attempt = 0; attempt < MAX_CAS_ATTEMPTS && !removed; attempt++) {
                 if (attempt > 0) {
                     workspace = workspaceStore.find(groupId);
                     if (workspace == null || workspace.getCadences().stream().noneMatch(c -> cadenceId.equals(c.cadenceId()))) {
-                        // deleted concurrently — the outcome the caller asked for
-                        return Response.noContent().build();
+                        // removed concurrently — the outcome the caller asked for
+                        removed = true;
+                        break;
                     }
                 }
                 workspace.removeCadence(cadenceId);
-                if (workspaceStore.casRevision(workspace)) {
-                    return Response.noContent().build();
+                removed = workspaceStore.casRevision(workspace);
+            }
+            if (removed) {
+                // A fire landing between the two writes finds no cadence and fails that
+                // one fire; the schedule is gone right after.
+                try {
+                    scheduleStore.deleteSchedule(cadence.scheduleRef());
+                } catch (Exception e) {
+                    LOG.warnf("Could not delete schedule %s for cadence %s: %s", cadence.scheduleRef(),
+                            sanitize(cadenceId), sanitize(e.getMessage()));
                 }
+                return Response.noContent().build();
             }
             return Response.status(Response.Status.CONFLICT)
                     .entity(Map.of("error", "The workspace is being modified concurrently — retry the request"))
