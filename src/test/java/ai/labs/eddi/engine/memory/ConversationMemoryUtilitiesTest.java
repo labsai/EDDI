@@ -182,6 +182,22 @@ class ConversationMemoryUtilitiesTest {
         }
 
         @Test
+        @DisplayName("returnDetailed=false keeps the display input, which masks a secret turn")
+        void nonDetailedKeepsDisplayInput() {
+            // Conversation writes the placeholder under "input" for a secretInput turn
+            // while input:initial stays raw; a client rebuilding the transcript needs
+            // the masked copy or it can only print the plaintext.
+            var snapshot = buildSnapshotWithOutputs("input:initial", "input", "inputDebug", "output");
+            snapshot.getConversationOutputs().getFirst().put("input", MemoryKeys.SECRET_INPUT_PLACEHOLDER);
+
+            var simple = ConversationMemoryUtilities.convertSimpleConversationMemory(snapshot, false, false);
+
+            var output = simple.getConversationOutputs().getFirst();
+            assertEquals(MemoryKeys.SECRET_INPUT_PLACEHOLDER, output.get("input"));
+            assertFalse(output.containsKey("inputDebug"), "only the exact display key passes, not every input* key");
+        }
+
+        @Test
         @DisplayName("should set undoAvailable=true when >1 steps")
         void undoAvailable() {
             var snapshot = buildMultiStepSnapshot(3);
