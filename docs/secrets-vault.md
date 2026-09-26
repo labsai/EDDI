@@ -60,7 +60,7 @@ ${vault:tenantId/keyName}
 
 In an HTTP call, a vault reference is resolved **only where the configuration wrote it**: in the
 template of that URL, header, body or query parameter, or as the value of a property the template
-names that EDDI itself auto-vaulted (`Bearer {properties.apiKey}` holding `${vault:<agentId>.apiKey}`).
+names that EDDI itself auto-vaulted (`Bearer {properties.apiKey}` holding `${vault:<agentId>.<conversationId>.apiKey}`).
 The same
 applies to `${eddivault:…}`, `${connection:…}` and `${caller:…}`. A reference that arrives through
 conversation data — user input, a model reply, an API response, client context — refuses the call
@@ -74,12 +74,19 @@ expansion, against the configured template expanded the same way.
 
 The auto-vaulted-property case rests on **provenance, not on what the value looks like**. A
 `scope: secret` instruction stores its vault reference as an ordinary conversation property, so the
-string `${vault:<agentId>.apiKey}` is one anything that can write a property could produce — a
+string `${vault:<agentId>.<conversationId>.apiKey}` is one anything that can write a property could produce — a
 `valueString` of `{memory.current.input}` and a user who types it, a model reply, an API response
 copied into a property. The property therefore carries an `autoVaulted` marker, written by the
 auto-vaulting code and by nothing else, and the reference is resolved only when that marker is
-present. On top of it the reference must still name this agent and the property the template reads,
-**under this conversation's own tenant**.
+present. On top of it the reference must still name this agent, **this conversation** and the
+property the template reads, under the default tenant. A reference to the old, per-agent key
+(`<agentId>.apiKey`, shared by every conversation of the agent) is refused; so is a tenant-prefixed
+one, because the tenant used to come from a `tenantId` property a client can set.
+
+The same rule covers the builder parameters of an LLM task (`modelName`, `baseUrl`, …): they are
+resolved against the vault after templating, so a reference conversation data put into one fails the
+turn instead of being resolved. The prompts (`systemMessage`, `prompt`) are never resolved and may
+carry reference-shaped text.
 
 A property with no marker is refused, which includes one stored in a conversation that began before
 this marker existed: an unmarked property and one written from conversation data are the same thing
@@ -297,10 +304,10 @@ Agents can request secret input from users (e.g., API keys during setup). The fl
 
 When a property has `scope: secret`:
 
-1. **PropertySetterTask** detects `scope == secret` on the property instruction
-2. The raw value is immediately stored in the vault via `ISecretProvider.store()`
+1. **`SecretPropertyVault`** (used by `PropertySetterTask` and by the httpcall / MCP / LLM property instructions) detects `scope == secret`
+2. The raw value is immediately stored in the vault via `ISecretProvider.store()` under `<agentId>.<conversationId>.<name>`, and the resolver cache entry is invalidated
 3. A vault reference (`${vault:...}`) replaces the plaintext in memory
-4. The raw `input:initial` entry is scrubbed from the conversation step
+4. The raw `input:initial` entry, and any other copy in the conversation step, is scrubbed
 
 When the **client flags input as secret** (via the `secretInput` context key):
 

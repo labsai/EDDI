@@ -87,8 +87,10 @@ Use it in an HTTP call **header**:
 
 Keep it out of anything that leaves EDDI while the turn runs: a prompt sends it to the model
 provider, a streamed reply reaches the user before the turn ends (the returned and stored reply
-is scrubbed), and a query parameter or body is written to the server log by the HTTP call task. Values shorter than 8 characters are only removed from
-their own entry, not searched for elsewhere.
+is scrubbed), and a query parameter or body is written to the server log by the HTTP call task. Values shorter than 8 characters are
+not searched for inside other text; from 4 characters up they are still replaced wherever a property, datum, list element, map value
+or audit field **is** the value (a PIN copied into a property). Values under 4 characters, and `true`/`false`, are only removed from
+their own entry.
 
 `"secret": true` is different from the `secretInput` flag: `secretInput` hides the
 **message the user typed** (see [Secrets Vault → Secret Input](secrets-vault.md#secret-input-agent-conversations)),
