@@ -88,18 +88,20 @@
 {{- /*
   Two datastores of ONE kind is refused rather than resolved. The in-chart URL
   is a ConfigMap env var (ordinal 300) and the external URI is a line in the
-  mounted properties file (QUARKUS_CONFIG_LOCATIONS, ordinal 400), so leaving
-  mongodb.enabled at its default `true` while ALSO setting
-  externalConnectionString does not "override" anything visibly: the chart
-  deploys an in-chart StatefulSet, NOTES.txt reports "MongoDB (in-chart)", and
-  the pod quietly talks to the external database because the higher ordinal
-  wins. An upgrade carrying a stale externalConnectionString would switch which
+  mounted properties file. A file listed in QUARKUS_CONFIG_LOCATIONS takes the
+  ordinal of the source that lists it — that env var, so also 300 — and the two
+  TIE: which connection string EDDI uses is decided by source-name ordering, not
+  by anything the operator chose. (An earlier version of this comment said the
+  file was ordinal 400 and "won"; SmallRye's AbstractLocationConfigSourceFactory
+  says otherwise.) So leaving mongodb.enabled at its default `true` while ALSO
+  setting externalConnectionString deploys an in-chart StatefulSet, NOTES.txt
+  reports "MongoDB (in-chart)", and the pod may talk to either database. An upgrade carrying a stale externalConnectionString would switch which
   database EDDI uses with no render error and a NOTES line saying the opposite.
   Picking one by config ordinal is not a decision this chart gets to make
   silently.
 */}}
 {{- if and .Values.mongodb.enabled $externalMongo }}
-{{- fail "Two MongoDB datastores are configured: mongodb.enabled=true deploys an in-chart MongoDB, and eddi.datastore.externalConnectionString points at another one. The external URI is mounted as a properties file (config ordinal 400) and would silently win over the in-chart connection string in the ConfigMap (ordinal 300), while NOTES.txt still reported \"MongoDB (in-chart)\". Set mongodb.enabled=false to use the external database, or clear eddi.datastore.externalConnectionString to use the in-chart one." }}
+{{- fail "Two MongoDB datastores are configured: mongodb.enabled=true deploys an in-chart MongoDB, and eddi.datastore.externalConnectionString points at another one. The external URI is mounted as a properties file and the in-chart connection string is a ConfigMap env var; both sit at config ordinal 300, so which database EDDI uses would be an accident of source ordering while NOTES.txt reports \"MongoDB (in-chart)\". Set mongodb.enabled=false to use the external database, or clear eddi.datastore.externalConnectionString to use the in-chart one." }}
 {{- end }}
 {{- if and .Values.postgres.enabled $externalJdbc }}
 {{- fail "Two PostgreSQL datastores are configured: postgres.enabled=true deploys an in-chart PostgreSQL, and eddi.datastore.externalJdbcUrl points at another one. The in-chart URL wins and the external one is silently inert — including its credentials, which are then never rendered. Set postgres.enabled=false to use the external database, or clear eddi.datastore.externalJdbcUrl to use the in-chart one." }}
@@ -160,14 +162,15 @@ data:
   EDDI_DATASTORE_TYPE: {{ $declaredType | quote }}
   {{- /*
     Only for an in-chart MongoDB that runs WITHOUT authentication (the explicit
-    mongodb.auth.enabled=false escape hatch). With auth on — the default — the
+    mongodb.auth.enabled=false escape hatch — a MISSING mongodb.auth counts as
+    enabled, see eddi.enabledUnlessFalse). With auth on — the default — the
     connection string carries the password, so it is rendered into the
     <release>-mongodb Secret and mounted as a file instead, and it must not ALSO
     be here: the mounted file and this env var would both sit at config ordinal
     300 (a file listed in QUARKUS_CONFIG_LOCATIONS inherits the ordinal of the
     env var that lists it), and which one wins would be an accident.
   */}}
-  {{- if and .Values.mongodb.enabled (not (.Values.mongodb.auth | default dict).enabled) }}
+  {{- if and .Values.mongodb.enabled (ne (include "eddi.mongoAuthEnabled" .) "true") }}
   MONGODB_CONNECTIONSTRING: "mongodb://{{ include "eddi.fullname" . }}-mongodb:27017/eddi?retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000"
   {{- end }}
   {{- /*

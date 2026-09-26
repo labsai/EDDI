@@ -628,9 +628,20 @@ kubectl apply -k k8s/overlays/postgres/    # PostgreSQL backend
 kubectl apply -f https://raw.githubusercontent.com/labsai/EDDI/main/k8s/quickstart.yaml
 
 # Helm (renders the Secrets itself, so the key and the MongoDB password are required values)
-helm install eddi ./helm/eddi \
-  --set eddi.vaultMasterKey="$(openssl rand -base64 24)" \
-  --set mongodb.auth.password="$(openssl rand -hex 24)" \
+# Generate the chart's secrets ONCE, into a file you keep (0600), and pass that
+# same file to every later `helm upgrade`. Never generate them inline in the
+# upgrade command: a new MongoDB password rotates EDDI's half while mongod keeps
+# the user it created at first start, and a new vault key makes every stored
+# secret unreadable. The `[ -e ]` guard stops a re-run from replacing the file.
+umask 077
+[ -e eddi-secrets.yaml ] || cat > eddi-secrets.yaml <<EOF
+eddi:
+  vaultMasterKey: "$(openssl rand -base64 24)"
+mongodb:
+  auth:
+    password: "$(openssl rand -hex 24)"
+EOF
+helm install eddi ./helm/eddi -f eddi-secrets.yaml \
   --namespace eddi --create-namespace
 ```
 

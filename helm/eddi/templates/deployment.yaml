@@ -1,7 +1,7 @@
 {{- if .Values.autoscaling.enabled }}
 {{- fail "autoscaling.enabled=true is not supported: EDDI serialises the turns of a conversation with a JVM-local lock (InMemoryConversationCoordinator), and the NATS coordinator still executes each Callable in the JVM that published it. With more than one replica two turns of the same conversation race and one is silently lost, and in-memory replay nonces stop detecting replayed signed envelopes. Scale vertically via eddi.resources. This gate lifts when a distributed conversation coordinator ships." }}
 {{- end }}
-{{- $mongoSecret := and .Values.mongodb.enabled (.Values.mongodb.auth | default dict).enabled }}
+{{- $mongoSecret := eq (include "eddi.mongoAuthEnabled" .) "true" }}
 {{- if gt (int .Values.eddi.replicas) 1 }}
 {{- fail "eddi.replicas must be 1: EDDI is single-writer per conversation and the coordinator lock is JVM-local, so extra replicas silently drop conversation turns. Scale vertically via eddi.resources." }}
 {{- end }}

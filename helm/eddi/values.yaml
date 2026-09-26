@@ -203,13 +203,27 @@ mongodb:
     #
     # ⚠️  Like postgres.password, the mongo image reads this only when it
     # initialises an EMPTY data directory (MONGO_INITDB_ROOT_*), but it switches
-    # --auth on every time. UPGRADING an install that ran without auth: create
-    # the user in the running database FIRST, then upgrade with the same values:
-    #   kubectl exec -n <ns> statefulset/<release>-eddi-mongodb -- mongosh admin     #     --eval 'db.createUser({user: "eddi", pwd: "<password>", roles: ["root"]})'
+    # --auth on every time. UPGRADING an install that ran without auth: generate
+    # the password ONCE and keep it (upgrades reuse it — a fresh one on every
+    # upgrade rotates EDDI's half while mongod keeps the first), create the user
+    # in the running database FIRST, then upgrade with that password. <fullname>
+    # is the chart's fullname — `eddi` for a release named eddi, otherwise
+    # `<release>-eddi`; `kubectl get statefulsets -n <ns>` shows it:
+    #
+    #   # printf, not echo: --set-file keeps a trailing newline as part of the value
+    #   umask 077; printf '%s' "$(openssl rand -hex 24)" > mongodb-password.txt
+    #   kubectl exec -n <ns> statefulset/<fullname>-mongodb -- mongosh admin \
+    #     --eval "db.createUser({user: 'eddi', pwd: '$(cat mongodb-password.txt)', roles: ['root']})"
+    #   helm upgrade <release> ./helm/eddi --reuse-values \
+    #     --set-file mongodb.auth.password=mongodb-password.txt
+    #
     # Upgrading first starts mongod with --auth and no user, and EDDI cannot log
     # in until you create one (the localhost exception still allows that, the
-    # same way). Setting enabled=false keeps the old unauthenticated behaviour —
-    # only do that with networkPolicy.datastores.enabled left on.
+    # same way). `--reuse-values` from chart 2.x carries no mongodb.auth at all;
+    # a missing setting counts as ENABLED, so that upgrade stops at the
+    # password check rather than silently keeping the database open. Setting
+    # enabled=false explicitly keeps the old unauthenticated behaviour — only do
+    # that with networkPolicy.datastores.enabled left on.
     password: ""
   storage:
     size: 10Gi
@@ -387,7 +401,8 @@ networkPolicy:
   # PostgreSQL, NATS): only the EDDI pod may connect to them. Independent of
   # `enabled` above and ON by default — without it every pod in the cluster
   # can reach them on their Service. Needs a CNI that enforces NetworkPolicy
-  # (Calico, Cilium, most managed offerings); without one it is inert.
+  # (Calico, Cilium, most managed offerings); without one it is inert. A
+  # missing key (helm upgrade --reuse-values from chart 2.x) counts as enabled.
   datastores:
     enabled: true
   # Namespaces allowed to reach EDDI on 7070, by metadata.name. The release

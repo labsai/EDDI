@@ -2524,10 +2524,11 @@ class DeploymentManifestsTest {
          * it alone while setting {@code externalConnectionString} — one stale line in
          * an upgraded values file is enough — deployed an in-chart MongoDB StatefulSet,
          * printed "MongoDB (in-chart)" in NOTES.txt, and connected the pod to the
-         * EXTERNAL database: the external URI rides in the mounted properties file
-         * (QUARKUS_CONFIG_LOCATIONS, ordinal 400) and outranks the ConfigMap env var
-         * (ordinal 300). Which database EDDI talks to changed, with no render error and
-         * an install note saying the opposite; from the operator's side every
+         * EXTERNAL database — or not: the external URI rides in the mounted properties
+         * file, which inherits the ordinal of the QUARKUS_CONFIG_LOCATIONS env var that
+         * lists it (300), and so ties with the ConfigMap env var (300); source-name
+         * ordering decides. Which database EDDI talks to changed, with no render error
+         * and an install note saying the opposite; from the operator's side every
          * conversation and agent had vanished.
          * <p>
          * Refused rather than resolved. Silently preferring either one is a decision
@@ -2541,9 +2542,9 @@ class DeploymentManifestsTest {
             assertTrue(configmap.contains("{{- if and .Values.mongodb.enabled $externalMongo }}"),
                     "configmap.yaml must refuse mongodb.enabled=true together with "
                             + "eddi.datastore.externalConnectionString. secret.yaml renders the external URI "
-                            + "into the mounted properties file, whose config ordinal (400) beats the "
-                            + "ConfigMap env var (300), so the external database wins while the chart deploys "
-                            + "and reports an in-chart one");
+                            + "into the mounted properties file, which ties with the ConfigMap env var at "
+                            + "config ordinal 300, so either database may win while the chart deploys and "
+                            + "reports an in-chart one");
             assertTrue(configmap.contains("{{- if and .Values.postgres.enabled $externalJdbc }}"),
                     "the same must hold for PostgreSQL: postgres.enabled=true with "
                             + "eddi.datastore.externalJdbcUrl renders the in-chart URL and silently drops the "
@@ -3048,7 +3049,7 @@ class DeploymentManifestsTest {
             int line = configmap.indexOf("MONGODB_CONNECTIONSTRING: \"mongodb://");
             assertTrue(line > 0, "configmap.yaml no longer renders the unauthenticated connection string at all");
             String guard = configmap.substring(configmap.lastIndexOf("{{-", line), line);
-            assertTrue(guard.contains("not (.Values.mongodb.auth | default dict).enabled"),
+            assertTrue(guard.contains("ne (include \"eddi.mongoAuthEnabled\" .) \"true\""),
                     "the credential-less MONGODB_CONNECTIONSTRING may only render when auth is OFF. With auth on it "
                             + "would sit at the same config ordinal as the mounted file and one of the two would win "
                             + "by accident. Guard: " + guard);
@@ -3056,6 +3057,86 @@ class DeploymentManifestsTest {
             String deployment = read(HELM_TEMPLATES.resolve("deployment.yaml"));
             assertTrue(deployment.contains("{{ if $mongoSecret }},/etc/eddi/secrets/mongodb-secrets.properties{{ end }}"),
                     "QUARKUS_CONFIG_LOCATIONS must list the mounted MongoDB connection string when auth is on");
+        }
+
+        /**
+         * {@code helm upgrade --reuse-values} reuses the previous release's values and
+         * ignores the new chart's defaults, so {@code mongodb.auth} and
+         * {@code networkPolicy.datastores} are simply ABSENT on an upgrade from 2.x.
+         * Read as {@code (… | default dict).enabled}, absence meant off: the upgrade
+         * exited 0 with MongoDB still unauthenticated and no datastore policy, while
+         * looking hardened. Both switches go through one helper that turns only an
+         * explicit false off. manifest-lint renders the null cases; this pins the
+         * wiring so it cannot quietly go back.
+         */
+        @Test
+        @DisplayName("helm: a missing security switch counts as enabled")
+        void helmSecuritySwitchesDefaultOnWhenAbsent() throws IOException {
+            String helpers = read(HELM_TEMPLATES.resolve("_helpers.tpl"));
+            int helper = helpers.indexOf("define \"eddi.enabledUnlessFalse\"");
+            assertTrue(helper >= 0, "_helpers.tpl must define eddi.enabledUnlessFalse");
+            String body = helpers.substring(helper, helpers.indexOf("{{- end }}", helper));
+            assertTrue(body.contains("hasKey $section \"enabled\"") && body.contains("else -}}\ntrue"),
+                    "eddi.enabledUnlessFalse must answer true when the section or its `enabled` key is missing: " + body);
+
+            for (Path template : templates()) {
+                String text = stripGoComments(read(template));
+                for (String offOnAbsence : List.of("(.Values.mongodb.auth | default dict).enabled",
+                        "(.Values.networkPolicy.datastores | default dict).enabled", "$mongoAuth.enabled")) {
+                    assertFalse(text.contains(offOnAbsence), template + " reads `" + offOnAbsence + "`, which treats a "
+                            + "MISSING switch as off — exactly what `helm upgrade --reuse-values` from 2.x produces");
+                }
+            }
+            assertTrue(read(HELM_TEMPLATES.resolve("datastore-networkpolicy.yaml"))
+                    .contains("include \"eddi.enabledUnlessFalse\" (dict \"section\" .Values.networkPolicy.datastores)"),
+                    "the datastore policies must be gated by eddi.enabledUnlessFalse");
+            for (String template : List.of("mongodb.yaml", "deployment.yaml", "configmap.yaml")) {
+                assertTrue(read(HELM_TEMPLATES.resolve(template)).contains("include \"eddi.mongoAuthEnabled\" ."),
+                        template + " must read MongoDB authentication through eddi.mongoAuthEnabled");
+            }
+        }
+
+        /**
+         * The upgrade command the chart's own render error sends every 2.x upgrader to.
+         * It once sat on one comment line with its continuation lost, so the copied
+         * command ran a bare {@code mongosh admin} (exit 0, no user created), and it
+         * named the StatefulSet {@code <release>-eddi-mongodb}, which exists for no
+         * release. Checked as a script: the kubectl line continues onto the
+         * {@code --eval} line, nothing in it starts a comment, and the object is
+         * {@code <fullname>-mongodb}.
+         */
+        @Test
+        @DisplayName("helm: the documented MongoDB upgrade command is a working multi-line command")
+        void helmMongoUpgradeCommandIsWellFormed() throws IOException {
+            List<String> block = new ArrayList<>();
+            boolean inBlock = false;
+            for (String line : read(HELM.resolve("values.yaml")).lines().toList()) {
+                String content = line.strip();
+                if (content.startsWith("#   kubectl exec") && content.contains("mongosh admin")) {
+                    inBlock = true;
+                }
+                if (inBlock) {
+                    if (!content.startsWith("#  ")) {
+                        break;
+                    }
+                    block.add(content.substring(1).strip());
+                    if (!content.endsWith("\\")) {
+                        break;
+                    }
+                }
+            }
+            assertTrue(block.size() >= 2, "values.yaml must spell the createUser command over continued lines: " + block);
+            assertTrue(block.getFirst().endsWith("\\"), "the kubectl exec line must continue onto the --eval line: " + block);
+            assertTrue(block.get(1).startsWith("--eval") && block.get(1).contains("db.createUser("),
+                    "the continued line must carry the createUser --eval: " + block);
+            assertFalse(String.join(" ", block).contains("#"),
+                    "a `#` inside the command makes the shell drop everything after it: " + block);
+            assertTrue(block.getFirst().contains("statefulset/<fullname>-mongodb"),
+                    "the StatefulSet is <fullname>-mongodb (eddi-mongodb for a release named eddi): " + block);
+            for (Path doc : List.of(HELM.resolve("values.yaml"), K8S_DOC)) {
+                assertFalse(read(doc).contains("<release>-eddi-mongodb --"),
+                        doc + " names statefulset/<release>-eddi-mongodb as a command target, which no release creates");
+            }
         }
 
         @Test
@@ -3385,6 +3466,8 @@ class DeploymentManifestsTest {
 
         for (String guarded : List.of(
                 "an in-chart MongoDB with authentication but no password",
+                "a --reuse-values upgrade with no mongodb.auth (mongodb.auth=null)",
+                "a --reuse-values upgrade with neither mongodb.auth nor networkPolicy.datastores",
                 "no datastore configured at all",
                 "messagingType=nats on a stock image",
                 "OIDC enabled without a browser-facing publicUrl",
@@ -3411,6 +3494,10 @@ class DeploymentManifestsTest {
         // install — and both were invisible here, because every case above sets a
         // STRING. Only rendering a null can tell the difference; grepping for the
         // guard's source text, which is what the unit assertions do, cannot.
+        assertTrue(run.contains("--set networkPolicy.datastores=null") && run.contains("grep -c '^kind: NetworkPolicy$'"),
+                "manifest-lint must render with networkPolicy.datastores=null and require the datastore policies to "
+                        + "still be there. `helm upgrade --reuse-values` from chart 2.x carries no such key, and a "
+                        + "switch read as `(… | default dict).enabled` turned that absence into OFF with exit 0");
         assertTrue(run.contains("--set eddi.datastore.externalJdbcUrl=null"),
                 "manifest-lint must render a null-valued optional datastore value and require it to SUCCEED. "
                         + "A bare `externalJdbcUrl:` in a values file is what an operator gets by clearing "

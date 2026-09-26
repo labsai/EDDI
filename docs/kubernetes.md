@@ -81,12 +81,19 @@ git clone https://github.com/labsai/EDDI.git && cd EDDI
 bash k8s/create-secrets.sh
 
 # MongoDB runs with authentication — create its Secret too (one password, the
-# root user for mongod and the connection string EDDI mounts as a file)
+# root user for mongod and the connection string EDDI mounts as a file). The
+# Secret IS the stored copy of the password: run this once, never on an upgrade.
+# A fresh password over an initialised database locks EDDI out — mongod keeps
+# the user it created at first start. The guard refuses when one exists.
+if kubectl get secret mongodb-secrets -n eddi >/dev/null 2>&1; then
+  echo "mongodb-secrets already exists — keeping it" >&2
+else
 pw=$(openssl rand -hex 24)
 kubectl create secret generic mongodb-secrets -n eddi \
   --from-literal=MONGO_INITDB_ROOT_USERNAME=eddi \
   --from-literal=MONGO_INITDB_ROOT_PASSWORD="$pw" \
   --from-literal=mongodb-secrets.properties="mongodb.connectionString=mongodb://eddi:${pw}@mongodb:27017/eddi?authSource=admin&retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000"
+fi
 
 # Deploy with MongoDB
 kubectl apply -k k8s/overlays/mongodb/
@@ -101,6 +108,8 @@ or use `winget install Microsoft.PowerShell`.
 
 ```powershell
 pwsh -File .\k8s\create-secrets.ps1
+# Once, never on an upgrade — see the bash note above. kubectl create refuses
+# with AlreadyExists when the Secret is there.
 $pw = [Security.Cryptography.RandomNumberGenerator]::GetHexString(48, $true)
 kubectl create secret generic mongodb-secrets -n eddi `
   --from-literal=MONGO_INITDB_ROOT_USERNAME=eddi `
@@ -117,15 +126,29 @@ PowerShell) only when you mean to rotate.
 ### Option C: Helm
 
 ```bash
-helm install eddi ./helm/eddi \
-  --set eddi.vaultMasterKey="$(openssl rand -base64 24)" \
-  --set mongodb.auth.password="$(openssl rand -hex 24)" \
+# Generate the chart's secrets ONCE, into a file you keep (0600), and pass that
+# same file to every later `helm upgrade`. Never generate them inline in the
+# upgrade command: a new MongoDB password rotates EDDI's half while mongod keeps
+# the user it created at first start, and a new vault key makes every stored
+# secret unreadable. The `[ -e ]` guard stops a re-run from replacing the file.
+umask 077
+[ -e eddi-secrets.yaml ] || cat > eddi-secrets.yaml <<EOF
+eddi:
+  vaultMasterKey: "$(openssl rand -base64 24)"
+mongodb:
+  auth:
+    password: "$(openssl rand -hex 24)"
+EOF
+helm install eddi ./helm/eddi -f eddi-secrets.yaml \
   --namespace eddi --create-namespace
+
+# every later upgrade passes the same file
+helm upgrade eddi ./helm/eddi -f eddi-secrets.yaml --namespace eddi
 ```
 
-Keep both values: the chart renders them into Secrets, and a later `helm upgrade`
-without them fails to render rather than inventing new ones (`--reuse-values`, or
-your own values file, carries them).
+Keep `eddi-secrets.yaml` somewhere safe and private — it is the only copy of both
+values outside the cluster. A `helm upgrade` without them fails to render rather
+than inventing new ones.
 
 ## Deployment Options
 
@@ -199,12 +222,19 @@ kubectl create secret generic grafana-admin -n eddi \
   --from-literal=password="$(openssl rand -base64 24)"
 
 # MongoDB runs with authentication — create its Secret too (one password, the
-# root user for mongod and the connection string EDDI mounts as a file)
+# root user for mongod and the connection string EDDI mounts as a file). The
+# Secret IS the stored copy of the password: run this once, never on an upgrade.
+# A fresh password over an initialised database locks EDDI out — mongod keeps
+# the user it created at first start. The guard refuses when one exists.
+if kubectl get secret mongodb-secrets -n eddi >/dev/null 2>&1; then
+  echo "mongodb-secrets already exists — keeping it" >&2
+else
 pw=$(openssl rand -hex 24)
 kubectl create secret generic mongodb-secrets -n eddi \
   --from-literal=MONGO_INITDB_ROOT_USERNAME=eddi \
   --from-literal=MONGO_INITDB_ROOT_PASSWORD="$pw" \
   --from-literal=mongodb-secrets.properties="mongodb.connectionString=mongodb://eddi:${pw}@mongodb:27017/eddi?authSource=admin&retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000"
+fi
 
 # MongoDB + Keycloak auth + Monitoring
 kubectl apply -k k8s/examples/mongodb-full/
@@ -485,13 +515,18 @@ offerings do); authentication is what holds without one.
 > database **first**, with the password you are about to configure, then upgrade:
 >
 > ```bash
-> # Helm: kubectl exec -n <ns> statefulset/<release>-eddi-mongodb -- …
+> # Kustomize. For Helm the StatefulSet is <fullname>-mongodb — `eddi-mongodb`
+> # for a release named eddi, otherwise <release>-eddi-mongodb; the exact Helm
+> # sequence is under mongodb.auth in helm/eddi/values.yaml.
 > kubectl exec -n eddi statefulset/mongodb -- mongosh admin \
 >   --eval 'db.createUser({user: "eddi", pwd: "<password>", roles: ["root"]})'
 > ```
 >
-> then `helm upgrade … --set mongodb.auth.password=<password>`, or create
-> `mongodb-secrets` with that password and `kubectl apply -k`. Done the other way
+> then `helm upgrade` with that password in your stored values file (or
+> `--set-file mongodb.auth.password=<file>`), or create `mongodb-secrets` with that
+> password and `kubectl apply -k`. `helm upgrade --reuse-values` from chart 2.x
+> carries no `mongodb.auth` at all; a missing setting counts as **enabled**, so it
+> stops at the password check instead of silently keeping the database open. Done the other way
 > round, mongod restarts with `--auth` and no user and EDDI cannot log in until you
 > run the same `createUser` (the localhost exception still allows it). Helm users
 > who cannot migrate yet can set `mongodb.auth.enabled=false` explicitly.
@@ -538,11 +573,10 @@ kubectl apply -k k8s/examples/postgres-ha/
 Add NATS on top only with a `-Dquarkus.profile=nats` image, by listing
 `- ../../overlays/nats` under that example's `components:`.
 
-**Helm** — with an image you built with `-Dquarkus.profile=nats`:
+**Helm** — with an image you built with `-Dquarkus.profile=nats` (`eddi-secrets.yaml`
+as generated in [Option C](#option-c-helm)):
 ```bash
-helm install eddi ./helm/eddi \
-  --set eddi.vaultMasterKey="$(openssl rand -base64 24)" \
-  --set mongodb.auth.password="$(openssl rand -hex 24)" \
+helm install eddi ./helm/eddi -f eddi-secrets.yaml \
   --set eddi.image.repository=your-registry/eddi-nats \
   --set nats.enabled=true \
   --set nats.buildProfileImage=true \
