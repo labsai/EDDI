@@ -55,6 +55,34 @@ Findings from the 2026-09-25 code review, each with a regression test.
   `UNKNOWN`; an unreadable agent, workflow, extension config or connection makes the impact report
   `complete=false`.
 
+### Pre-push review follow-ups
+
+- **Lost master key (review B1).** The KEK check value that stops stale replicas cannot tell a lost key from a
+  stale replica, so after a lost key every DEK creation was refused, and the documented "reset and start fresh"
+  recovery could not work. New `POST /secretstore/secrets/admin/adopt-master-key?confirm=true`
+  (`VaultSecretProvider.adoptCurrentMasterKey`) is the explicit operator decision. It re-announces the check with
+  the configured key; resets the `__eddi-system` tenant and every `system-value:*` if they no longer open; and
+  lists the tenants that need `/reset`. A vault holding no DEKs at all adopts the configured key at startup (the
+  dev "restarted with another key" case). The decrypt-failure message names the endpoint. Documented under
+  *Lost master key* in secrets-vault.md.
+- **UNKNOWN_KEY can no longer be forged (review M1).** Every key the audit keyring pins or signs with is recorded
+  as a sealed system value, `audit-key-id:<id>`. System values are now sealed bound to their name, with AAD. A v5
+  row naming a key the deployment does not hold reports `UNKNOWN_KEY` only for a recorded id, and `INVALID`
+  otherwise. The docs and Javadoc no longer call it "distinguishable from tampering".
+- **Later rotation after an interrupted legacy migration (review m1).** `rotateKek` also tries the old key with the
+  pending salt, and refuses with guidance when a DEK is still under the key before that. The wrong comment in
+  `reconcileKekCheck` is corrected. Tests cover this path and the "salt promoted, pending marker not deleted" re-run.
+- **Stale-replica TOCTOU (review m2).** After inserting a DEK (first DEK or DEK rotation), a node re-reads the check.
+  If a rotation announced in between, it deletes the DEK it just inserted (`deleteDekIfWrappedWith`, guarded on the
+  IV) before sealing anything.
+- **Decrypt-failure message (review m3).** When this node's key is the vault's key, or a salt migration is pending,
+  the message says to re-run `rotate-kek`. During a pending migration it no longer offers a reset.
+- **Reset race (review m4).** Participants discard again after `deleteDek`.
+- **Mongo grant precondition (review m5).** `$expr`/`$setEquals` replaces `$all`+`$size`, so a stored duplicate no
+  longer makes every conditional edit 409.
+- **Audit pin retry (review m6).** A failed pin is retried from `signingKey()` with backoff from 30 s to 10 min.
+- **Hot path (review nit).** `AuditKeyring` uses a volatile fast path instead of a synchronized call per entry.
+
 ### Compatibility
 
 - Stored data: nothing to migrate. Old ciphertext, DEK wrappings and v1–v4 audit rows keep working.
@@ -62,6 +90,9 @@ Findings from the 2026-09-25 code review, each with a regression test.
   Audit verification can report `UNKNOWN_KEY`.
 - New properties `eddi.audit.hmac-key` / `eddi.audit.hmac-previous-keys` (empty by default).
 - Startup: an unreadable vault salt now fails the start (it used to derive a possibly wrong KEK).
+- **After any master-key change, DEK creation is refused** until a KEK rotation runs, or, if the old key is lost,
+  until an admin calls `adopt-master-key`. Previously a node silently wrapped new DEKs under whatever key it had.
+- New REST operation `POST /secretstore/secrets/admin/adopt-master-key`; the Manager's OpenAPI snapshot is updated.
 
 **Files:** [`VaultSaltManager.java`](../../src/main/java/ai/labs/eddi/secrets/crypto/VaultSaltManager.java),
 [`VaultSecretProvider.java`](../../src/main/java/ai/labs/eddi/secrets/impl/VaultSecretProvider.java),
@@ -73,5 +104,7 @@ Findings from the 2026-09-25 code review, each with a regression test.
 
 ```decision-log
 | 2026-09-26 | Audit HMAC key pinned in the vault (sealed under a reserved system tenant's DEK) and keyed by id in v5 signatures | KEK rotation silently changed the audit key and invalidated the whole ledger | Requiring operators to configure a separate key (kept as an option, eddi.audit.hmac-key); a KEK-wrapped meta value (would need its own re-wrap step in rotateKek) |
+| 2026-09-26 | Lost master key is resolved by an explicit admin call (adopt-master-key), not automatically | A stale replica and a lost key look identical from a node; guessing either way loses data | Auto-adopting on mismatch (lets a stale replica strand tenants); manual DB edit (undocumented) |
+| 2026-09-26 | UNKNOWN_KEY only for key ids recorded as sealed system values | The key id in a row is attacker-writable text | Rewording docs only |
 | 2026-09-26 | Unreadable vault salt fails startup | Legacy-salt fallback derives the wrong KEK on random-salt deployments | Falling back and warning; marking the vault unavailable |
 ```

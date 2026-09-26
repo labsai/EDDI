@@ -415,10 +415,11 @@ public final class AuditHmac {
         MISMATCH,
 
         /**
-         * A v5 entry signed with a key none of the supplied keys is. Nothing about its
-         * integrity is known either way: it is not evidence of tampering, and it is not
-         * evidence of its absence. The usual cause is a retired key that is no longer
-         * configured for verification — see {@link AuditKeyring}.
+         * A v5 entry naming a key none of the supplied keys is. Nothing about its
+         * integrity is known. The id is text in the row and can be written by anyone
+         * who can edit it, so callers must not read this as benign on its own —
+         * {@link AuditKeyring#isRecordedKeyId} says whether the deployment ever signed
+         * with that key.
          */
         UNKNOWN_KEY
     }

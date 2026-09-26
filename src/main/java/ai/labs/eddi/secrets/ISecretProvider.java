@@ -8,6 +8,7 @@ import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Service Provider Interface for secrets management. Implementations handle the
@@ -268,6 +269,18 @@ public interface ISecretProvider {
      */
     default String pinSystemValue(String name, String candidate) throws SecretProviderException {
         throw new SecretProviderException("This secret provider cannot hold system values");
+    }
+
+    /**
+     * The system value pinned under {@code name}, or empty when none is. The value
+     * is authenticated by its sealing, so a row written straight into the database
+     * without the vault's keys is not returned.
+     *
+     * @throws SecretProviderException
+     *             if the vault is unavailable or the value cannot be read or opened
+     */
+    default Optional<String> readSystemValue(String name) throws SecretProviderException {
+        return Optional.empty();
     }
 
     /**

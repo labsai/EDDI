@@ -487,6 +487,31 @@ class RestSecretStoreTest {
         assertEquals("d", without.description());
     }
 
+    // ─── B1: adopt-master-key ───
+
+    @Test
+    void adoptMasterKey_requiresConfirmation() throws Exception {
+        Response resp = rest.adoptMasterKey(false);
+
+        assertEquals(400, resp.getStatus());
+        assertTrue(String.valueOf(entityOf(resp).get("action")).contains("rotate-kek"));
+    }
+
+    @Test
+    void adoptMasterKey_reportsTheTenantsNeedingReset() throws Exception {
+        VaultSecretProvider vault = mock(VaultSecretProvider.class);
+        when(vault.isAvailable()).thenReturn(true);
+        when(vault.adoptCurrentMasterKey()).thenReturn(new VaultSecretProvider.MasterKeyAdoption(List.of("acme"), true));
+        var vaultRest = new RestSecretStore(vault, secretResolver, grantImpactAnalyzer);
+
+        Response resp = vaultRest.adoptMasterKey(true);
+
+        assertEquals(200, resp.getStatus());
+        assertEquals(List.of("acme"), entityOf(resp).get("tenantsNeedingReset"));
+        assertEquals(Boolean.TRUE, entityOf(resp).get("systemValuesReset"));
+        verify(secretResolver).invalidateAll();
+    }
+
     @SuppressWarnings("unchecked")
     private static Map<String, Object> entityOf(Response response) {
         return (Map<String, Object>) response.getEntity();

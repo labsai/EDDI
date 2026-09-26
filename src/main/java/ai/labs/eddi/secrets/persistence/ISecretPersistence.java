@@ -191,6 +191,19 @@ public interface ISecretPersistence {
     boolean updateDekWrapping(EncryptedDek dek, String expectedIv);
 
     /**
+     * Deletes one DEK generation, but only while it still carries
+     * {@code expectedIv} — i.e. only the exact wrapping the caller inserted.
+     * <p>
+     * Used to take back a DEK a node wrapped under a KEK that turned out, a moment
+     * later, to be retired: before anything is sealed with it, so nothing is lost.
+     *
+     * @return false if the row is gone or was re-wrapped meanwhile
+     * @throws PersistenceException
+     *             if the delete fails
+     */
+    boolean deleteDekIfWrappedWith(String tenantId, int generation, String expectedIv);
+
+    /**
      * Find the tenant's <b>active</b> DEK — the highest generation it holds.
      *
      * @throws PersistenceException
@@ -304,4 +317,18 @@ public interface ISecretPersistence {
     default void deleteMetaValue(String key) {
         // Default = no-op
     }
+
+    /**
+     * Removes every metadata value whose key starts with {@code prefix}.
+     * <p>
+     * Used when an operator adopts a new master key after losing the old one: the
+     * sealed system values ({@code system-value:*}) name DEKs that are about to be
+     * deleted, and left in place they would fail authentication forever instead of
+     * being re-created.
+     *
+     * @return how many values were removed
+     * @throws PersistenceException
+     *             if the delete fails
+     */
+    int deleteMetaValuesWithPrefix(String prefix);
 }

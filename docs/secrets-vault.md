@@ -304,7 +304,7 @@ eddi.vault.grant-enforcement=enforce
 eddi.setup.vault-key-reuse=checksum
 ```
 
-> **⚠️ Important:** The vault master key encrypts all stored API keys. If the master key is lost, all encrypted secrets become **permanently unrecoverable**. Back up your `~/.eddi/.env` file. If the key has already changed and the old one is unavailable, `POST /secretstore/secrets/{tenantId}/reset` (see [REST API](#rest-api)) clears the unrecoverable entries so the tenant can start fresh.
+> **⚠️ Important:** The vault master key encrypts all stored API keys. If the master key is lost, all encrypted secrets become **permanently unrecoverable**. Back up your `~/.eddi/.env` file. If the key has already changed and the old one is unavailable, follow [Lost master key](#lost-master-key): adopt the new key with `POST /secretstore/secrets/admin/adopt-master-key?confirm=true`, then `POST /secretstore/secrets/{tenantId}/reset` clears each tenant's unrecoverable entries so it can start fresh.
 
 ## Secret Input (Agent Conversations)
 
@@ -476,6 +476,7 @@ All endpoints are under the base path `/secretstore/secrets`. All endpoints requ
 | `POST`   | `/{tenantId}/rotate-dek`     | Install the tenant's next DEK generation and sweep rows onto it |
 | `POST`   | `/admin/rotate-kek`          | Rotate the Master Key (KEK) — **TLS required**         |
 | `POST`   | `/{tenantId}/reset`          | Delete **ALL** secrets and the DEK for a tenant — destructive; use when the master key changed and the old key is unavailable |
+| `POST`   | `/admin/adopt-master-key?confirm=true` | Make the configured master key the vault's after the previous one was **lost** — never during an unfinished rotation. Lists the tenants that still need a reset |
 
 > **⚠️ Important:** The `GET` endpoints return **metadata only** (`keyName`, `createdAt`, `lastAccessedAt`, `checksum`). Secret values are **write-only** — they can be stored and used by the engine but never retrieved via API.
 
@@ -654,7 +655,54 @@ wherever it stops:
 A failure after step 2 answers with how many DEKs are already on the new key and a
 statement that re-running completes the rotation. A replica restarted part-way
 through with the new master key opens DEKs under either KEK and wraps new ones under
-the new one.
+the new one. A DEK it cannot open — one the rotation did not reach, still under the
+previous key — fails with a message saying to re-run the rotation, and does **not**
+offer a tenant reset while a salt migration is pending: one re-run recovers it.
+
+If a legacy-salt migration was interrupted after step 3 and the nodes were restarted
+with the new key, everything keeps working and the unfinished rotation is easy to
+forget. A later rotation from that key to another still succeeds when every DEK was
+reached (DEKs under the pending salt are recognised). If some DEK was not reached, it
+is still under the key before that, and the rotation refuses with a message saying
+to finish the earlier rotation first — from the previous key to the current one.
+
+A node that is about to wrap a new DEK checks the KEK check value both before and
+after inserting it. A node that stalled across a rotation's announcement takes the
+DEK it just inserted back out, before anything is sealed with it, and fails the
+request. Otherwise a stale replica could leave a DEK — and, during a DEK rotation,
+every secret swept onto it — under a KEK nobody runs any more.
+
+#### Lost master key
+
+The KEK check value records which KEK the vault uses, and every node refuses to wrap
+a new DEK under any other. That is what protects a rotation from replicas still on
+the retired key. From a node's point of view, though, a replica that simply has not
+been restarted with a rotated key looks exactly like an operator who lost the old
+key and configured a new one. After a lost key, every new secret for every tenant is
+refused until the operator decides which case applies. That decision cannot be made
+automatically.
+
+When the previous master key is **gone for good**:
+
+1. Start EDDI with the new `EDDI_VAULT_MASTER_KEY`.
+2. `POST /secretstore/secrets/admin/adopt-master-key?confirm=true`. This does three
+   things:
+   - re-announces the check value with the configured key;
+   - if the reserved `__eddi-system` tenant's DEKs no longer open, discards them and
+     every sealed system value (the audit ledger pins a new key — see
+     [audit-ledger.md](audit-ledger.md#signing-keys-and-rotation));
+   - answers with `tenantsNeedingReset`, the tenants whose DEKs the key cannot open.
+3. `POST /secretstore/secrets/{tenantId}/reset` for each of them, then store the
+   secrets again.
+
+Never call it while a KEK rotation is merely unfinished, or because one replica was
+not restarted: in both cases the previous key still exists and `rotate-kek`
+recovers everything. Adopting the wrong key makes every other replica refuse new
+DEKs instead.
+
+One case needs no call. A vault that holds no DEKs at all — started once with one
+key, restarted with another before anything was stored — adopts the configured key
+at startup, because nothing can be stranded.
 
 #### Resetting a tenant
 

@@ -183,6 +183,35 @@ public interface IRestSecretStore {
     Response rotateKek(KekRotationRequest body);
 
     /**
+     * Make this node's master key the vault's master key after the previous one was
+     * <b>lost</b>.
+     * <p>
+     * Every node refuses to wrap a new DEK under any KEK other than the one the
+     * vault recorded, which is what keeps a replica on a retired key from stranding
+     * a tenant after a rotation — and which, after a lost key, refused every new
+     * secret everywhere. This is the explicit decision that ends that: the check is
+     * re-announced with this node's key, the system tenant is reset if its DEKs no
+     * longer open, and the tenants that still hold unreadable DEKs are listed for
+     * {@link #resetTenant}. Refused without {@code confirm=true}.
+     *
+     * @param confirm
+     *            must be {@code true}; the call is destructive to anything sealed
+     *            under the lost key
+     * @return 200 with {@code tenantsNeedingReset} and {@code systemValuesReset},
+     *         400 without confirmation
+     */
+    @POST
+    @Path("/admin/adopt-master-key")
+    @Produces(MediaType.APPLICATION_JSON)
+    @RolesAllowed("eddi-admin")
+    @Operation(summary = "Adopt the configured master key after the previous one was lost",
+               description = "Only for a LOST master key — never during an unfinished KEK rotation, where rotate-kek recovers "
+                       + "everything. Re-announces this node's KEK as the vault's, resets the system tenant if its DEKs no "
+                       + "longer open, and lists the tenants that still need POST /{tenantId}/reset. Requires confirm=true.")
+    Response adoptMasterKey(@QueryParam("confirm")
+    @DefaultValue("false") boolean confirm);
+
+    /**
      * Reset the vault for a specific tenant. Deletes ALL secrets and the DEK for
      * the tenant, allowing the vault to start fresh with the current master key.
      * <p>

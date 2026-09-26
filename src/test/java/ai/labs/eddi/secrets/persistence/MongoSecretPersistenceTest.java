@@ -655,7 +655,8 @@ class MongoSecretPersistenceTest {
         var filter = ArgumentCaptor.forClass(Bson.class);
         verify(secretsCollection).updateOne(filter.capture(), any(Bson.class));
         String rendered = filter.getValue().toBsonDocument(BsonDocument.class, MongoClientSettings.getDefaultCodecRegistry()).toJson();
-        assertTrue(rendered.contains("$all") && rendered.contains("$size"), rendered);
+        // m5: set equality, which tolerates a stored duplicate; $all+$size did not.
+        assertTrue(rendered.contains("$setEquals") && rendered.contains("$ifNull"), rendered);
     }
 
     @Test
@@ -671,6 +672,35 @@ class MongoSecretPersistenceTest {
         verify(secretsCollection).updateOne(filter.capture(), any(Bson.class));
         String rendered = filter.getValue().toBsonDocument(BsonDocument.class, MongoClientSettings.getDefaultCodecRegistry()).toJson();
         assertTrue(rendered.contains("$or") && rendered.contains("$size"), rendered);
+    }
+
+    @Test
+    @DisplayName("deleteDekIfWrappedWith — guarded on the IV")
+    void deleteDekIfWrappedWithIsGuarded() {
+        DeleteResult result = mock(DeleteResult.class);
+        when(result.getDeletedCount()).thenReturn(1L);
+        when(deksCollection.deleteOne(any(Bson.class))).thenReturn(result);
+
+        assertTrue(persistence.deleteDekIfWrappedWith(TENANT, 2, "theIv"));
+
+        var filter = ArgumentCaptor.forClass(Bson.class);
+        verify(deksCollection).deleteOne(filter.capture());
+        assertTrue(filter.getValue().toBsonDocument(BsonDocument.class, MongoClientSettings.getDefaultCodecRegistry()).toJson().contains("theIv"));
+    }
+
+    @Test
+    @DisplayName("deleteMetaValuesWithPrefix — an anchored, quoted prefix regex")
+    void deleteMetaValuesWithPrefix() {
+        DeleteResult result = mock(DeleteResult.class);
+        when(result.getDeletedCount()).thenReturn(2L);
+        when(metaCollection.deleteMany(any(Bson.class))).thenReturn(result);
+
+        assertEquals(2, persistence.deleteMetaValuesWithPrefix("system-value:"));
+
+        var filter = ArgumentCaptor.forClass(Bson.class);
+        verify(metaCollection).deleteMany(filter.capture());
+        String rendered = filter.getValue().toBsonDocument(BsonDocument.class, MongoClientSettings.getDefaultCodecRegistry()).toJson();
+        assertTrue(rendered.contains("^\\\\Qsystem-value:\\\\E"), rendered);
     }
 
     // ==================== Helpers ====================
