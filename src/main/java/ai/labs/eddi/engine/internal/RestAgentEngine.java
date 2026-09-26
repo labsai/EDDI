@@ -745,6 +745,10 @@ public class RestAgentEngine implements IRestAgentEngine {
         }
         try {
             var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            if (snapshot == null) {
+                // The store answers null for an unknown id; dereferencing it was a 500.
+                throw new NotFoundException("Conversation not found");
+            }
             var currentState = snapshot.getConversationState();
             if (currentState == ConversationState.IN_PROGRESS) {
                 return Response.status(Response.Status.CONFLICT)
