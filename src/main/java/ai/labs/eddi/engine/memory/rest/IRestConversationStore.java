@@ -33,8 +33,13 @@ import static ai.labs.eddi.datastore.IResourceStore.*;
  * {@code eddi-admin} instead.
  * <p>
  * {@link #getActiveConversations} and {@link #endActiveConversations} are
- * agent-scoped operational endpoints, not per-conversation ones — they are
- * deliberately outside that gate.
+ * agent-scoped operational endpoints, not per-conversation ones, so they have
+ * no single owner to scope to. They are therefore role-gated to
+ * {@code eddi-admin}/{@code eddi-editor} (the management tier the Manager's
+ * conversation-monitoring page runs as): without a role, any authenticated
+ * token — including one with no EDDI role at all — could enumerate every user's
+ * open conversations for an agent and end them, and ending an
+ * {@code AWAITING_HUMAN} conversation cancels its pending HITL approval.
  *
  * @author ginccc
  */
@@ -94,6 +99,7 @@ public interface IRestConversationStore {
     @GET
     @Path("/active/{agentId}")
     @Produces(MediaType.APPLICATION_JSON)
+    @RolesAllowed({"eddi-admin", "eddi-editor"})
     List<ConversationStatus> getActiveConversations(@PathParam("agentId") String agentId,
                                                     @Parameter(name = "agentVersion", required = false, example = "1",
                                                                description = "Restrict to one agent version; omit for every version")
@@ -102,5 +108,6 @@ public interface IRestConversationStore {
 
     @POST
     @Path("end")
+    @RolesAllowed({"eddi-admin", "eddi-editor"})
     Response endActiveConversations(List<ConversationStatus> conversationStatuses);
 }

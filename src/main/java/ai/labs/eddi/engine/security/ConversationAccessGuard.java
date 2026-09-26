@@ -123,6 +123,41 @@ public class ConversationAccessGuard {
     }
 
     /**
+     * Strict variant of {@link #requireConversationOwner} for irreversible,
+     * state-changing operations (e.g. permanent deletion): a conversation whose
+     * descriptor records <em>no</em> owner (legacy data) is refused rather than
+     * admitted. {@link #requireConversationOwner} deliberately admits an unowned
+     * conversation to any named caller, which for a delete means any authenticated
+     * token could remove a legacy no-owner conversation. Fail-closed here instead —
+     * only an admin may act on an unowned conversation.
+     *
+     * @return the conversation owner's userId, or {@code null} when the descriptor
+     *         was not found (the caller's actual operation then produces the 404)
+     * @throws ForbiddenException
+     *             if the caller is neither the owner nor an admin, or the
+     *             conversation is unowned and the caller is not an admin
+     */
+    public String requireConversationOwnerStrict(String conversationId) {
+        try {
+            var descriptor = conversationDescriptorStore.readDescriptor(conversationId, 0);
+            if (descriptor == null) {
+                LOGGER.debugf("Conversation descriptor not found for %s", sanitize(conversationId));
+                return null;
+            }
+            ownershipValidator.requireOwnerOrAdminStrict(identity, descriptor.getUserId(), RESOURCE_TYPE);
+            return descriptor.getUserId();
+        } catch (ForbiddenException e) {
+            throw e;
+        } catch (ResourceNotFoundException e) {
+            LOGGER.debugf("Conversation descriptor not found for %s", sanitize(conversationId));
+            return null;
+        } catch (ResourceStoreException e) {
+            LOGGER.warnf("Could not load conversation descriptor for ownership check: %s", sanitize(conversationId));
+            throw new ForbiddenException("Access denied: unable to verify conversation ownership");
+        }
+    }
+
+    /**
      * Non-throwing counterpart of {@link #requireConversationOwner} for filtering
      * listings, where a denied entry must be omitted rather than raise. It admits
      * exactly what {@code requireConversationOwner} admits — admin, owner, or an

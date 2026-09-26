@@ -385,8 +385,9 @@ public class RestConversationStore implements IRestConversationStore {
         checkNotNull(conversationId, "conversationId");
         // Deletion is irreversible, so the gate runs before anything is touched —
         // the soft-delete path included, which still removes the conversation from
-        // every listing.
-        conversationAccessGuard.requireConversationOwner(conversationId);
+        // every listing. Strict variant: a legacy conversation with no recorded
+        // owner is refused to a non-admin here, rather than deletable by any token.
+        conversationAccessGuard.requireConversationOwnerStrict(conversationId);
 
         if (deletePermanently) {
             // If the conversation is a live pending approval, resolve the HITL state

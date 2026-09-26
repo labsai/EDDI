@@ -249,4 +249,45 @@ class ConversationAccessGuardTest {
             assertNull(guard.resolveOwnerUserId(null));
         }
     }
+
+    @Nested
+    @DisplayName("requireConversationOwnerStrict")
+    class RequireConversationOwnerStrict {
+
+        @Test
+        @DisplayName("refuses a non-admin on an UNOWNED conversation (fail-closed, unlike the non-strict variant)")
+        void refusesNonAdminOnUnowned() throws Exception {
+            descriptorOwnedBy(null); // legacy conversation with no recorded owner
+            var guard = guardFor(identityOf(OTHER, "eddi-viewer"), true);
+
+            assertThrows(ForbiddenException.class, () -> guard.requireConversationOwnerStrict(CONVERSATION_ID));
+        }
+
+        @Test
+        @DisplayName("admits an admin on an unowned conversation")
+        void admitsAdminOnUnowned() throws Exception {
+            descriptorOwnedBy(null);
+            var guard = guardFor(identityOf("root", "eddi-admin"), true);
+
+            assertNull(guard.requireConversationOwnerStrict(CONVERSATION_ID));
+        }
+
+        @Test
+        @DisplayName("admits the owner")
+        void admitsOwner() throws Exception {
+            descriptorOwnedBy(OWNER);
+            var guard = guardFor(identityOf(OWNER, "eddi-viewer"), true);
+
+            assertEquals(OWNER, guard.requireConversationOwnerStrict(CONVERSATION_ID));
+        }
+
+        @Test
+        @DisplayName("denies a non-owner")
+        void deniesNonOwner() throws Exception {
+            descriptorOwnedBy(OWNER);
+            var guard = guardFor(identityOf(OTHER, "eddi-viewer"), true);
+
+            assertThrows(ForbiddenException.class, () -> guard.requireConversationOwnerStrict(CONVERSATION_ID));
+        }
+    }
 }

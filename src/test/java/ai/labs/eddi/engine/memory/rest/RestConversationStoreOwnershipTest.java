@@ -29,7 +29,9 @@ import java.util.Date;
 import java.util.List;
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.quarkus.security.ForbiddenException;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -266,6 +268,30 @@ class RestConversationStoreOwnershipTest {
                 "a legacy conversation whose snapshot resolves to another user must not leak");
         // ...but the owner does.
         assertEquals(1, asOwner().readConversationDescriptors(0, 20, null, null, null, null, null, null).size());
+    }
+
+    @Test
+    @DisplayName("Finding 10: a legacy unowned conversation is NOT deletable by a non-admin (strict owner check)")
+    void deleteUnownedConversationForbiddenForNonAdmin() throws Exception {
+        var guardDescriptorStore = mock(IConversationDescriptorStore.class);
+        var unowned = new ConversationDescriptor();
+        unowned.setUserId(null); // legacy conversation with no recorded owner
+        when(guardDescriptorStore.readDescriptor(anyString(), anyInt())).thenReturn(unowned);
+
+        var identity = mock(SecurityIdentity.class);
+        var principal = mock(Principal.class);
+        lenient().when(principal.getName()).thenReturn(INTRUDER);
+        lenient().when(identity.getPrincipal()).thenReturn(principal);
+        lenient().when(identity.isAnonymous()).thenReturn(false);
+        lenient().when(identity.hasRole("eddi-viewer")).thenReturn(true);
+        var guard = new ConversationAccessGuard(identity, new OwnershipValidator(true), guardDescriptorStore);
+        var store = new RestConversationStore(documentDescriptorStore, conversationDescriptorStore,
+                conversationMemoryStore, conversationService, userMemoryStore, runtime, guard,
+                30, 90, attachmentStorageInstance);
+
+        assertThrows(ForbiddenException.class, () -> store.deleteConversationLog("conv-legacy", false));
+        verify(conversationDescriptorStore, never()).deleteDescriptor(anyString(), anyInt());
+        verify(conversationMemoryStore, never()).deleteConversationMemorySnapshot(anyString());
     }
 
     @Test
