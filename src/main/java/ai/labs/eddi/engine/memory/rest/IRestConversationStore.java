@@ -33,8 +33,12 @@ import static ai.labs.eddi.datastore.IResourceStore.*;
  * {@code eddi-admin} instead.
  * <p>
  * {@link #getActiveConversations} and {@link #endActiveConversations} are
- * agent-scoped operational endpoints, not per-conversation ones — they are
- * deliberately outside that gate.
+ * agent-scoped operational endpoints, not per-conversation ones, so they are
+ * gated like undeploy (which ends every active conversation of an agent) rather
+ * than by conversation owner: {@code eddi-admin} or {@code eddi-editor}, plus
+ * EDIT access on the agent. They used to carry no role at all, which let any
+ * authenticated principal list every user's open conversation ids and end any
+ * of them.
  *
  * @author ginccc
  */
@@ -91,16 +95,28 @@ public interface IRestConversationStore {
     Integer permanentlyDeleteEndedConversationLogs(@QueryParam("deleteOlderThanDays") Integer deleteOlderThanDays)
             throws ResourceStoreException, ResourceNotFoundException, ResourceModifiedException;
 
+    /**
+     * The open (not ENDED) conversations of an agent, across all owners. Requires
+     * EDIT access on the agent.
+     */
     @GET
     @Path("/active/{agentId}")
     @Produces(MediaType.APPLICATION_JSON)
+    @RolesAllowed({"eddi-admin", "eddi-editor"})
     List<ConversationStatus> getActiveConversations(@PathParam("agentId") String agentId,
                                                     @Parameter(name = "agentVersion", required = false, example = "1",
                                                                description = "Restrict to one agent version; omit for every version")
                                                     @QueryParam("agentVersion") Integer agentVersion)
             throws ResourceStoreException, ResourceNotFoundException;
 
+    /**
+     * Ends the listed conversations. Only each entry's {@code conversationId} is
+     * used — the agent and the current state are read from the stored conversation
+     * — and each conversation requires EDIT access on its agent. Unknown and
+     * already ended conversations are skipped.
+     */
     @POST
     @Path("end")
+    @RolesAllowed({"eddi-admin", "eddi-editor"})
     Response endActiveConversations(List<ConversationStatus> conversationStatuses);
 }

@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.memory.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.IResourceStore.ResourceModifiedException;
@@ -23,6 +24,7 @@ import ai.labs.eddi.engine.memory.model.ConversationStatus;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.ThreadContext;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.quarkus.scheduler.Scheduled;
@@ -39,8 +41,10 @@ import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Set;
 
 import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.convertSimpleConversationMemory;
 import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.redactRawPendingToolCallsForRead;
@@ -83,6 +87,17 @@ public class RestConversationStore implements IRestConversationStore {
      */
     static final int MIN_RETENTION_DAYS = 1;
 
+    /**
+     * Actor recorded when deleting a conversation ends it — the HITL cancellation
+     * audit carries it if the conversation was paused (G4).
+     */
+    static final String DELETE_ACTOR = "system:delete";
+
+    /**
+     * Actor recorded by the agent-scoped bulk end ({@code POST …/end}, undeploy).
+     */
+    static final String BULK_END_ACTOR = "system:admin-end";
+
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IConversationDescriptorStore conversationDescriptorStore;
     private final IConversationMemoryStore conversationMemoryStore;
@@ -90,6 +105,7 @@ public class RestConversationStore implements IRestConversationStore {
     private final IUserMemoryStore userMemoryStore;
     private final IRuntime runtime;
     private final ConversationAccessGuard conversationAccessGuard;
+    private final ResourceAccessGuard resourceAccessGuard;
     private final Integer deleteEndedConversationsOnceOlderThanDays;
     private final Integer deleteMemoriesOlderThanDays;
     private final Instance<IAttachmentStore> attachmentStorageInstance;
@@ -112,6 +128,7 @@ public class RestConversationStore implements IRestConversationStore {
             IUserMemoryStore userMemoryStore,
             IRuntime runtime,
             ConversationAccessGuard conversationAccessGuard,
+            ResourceAccessGuard resourceAccessGuard,
             @ConfigProperty(name = "eddi.conversations.deleteEndedConversationsOnceOlderThanDays")
             Integer deleteEndedConversationsOnceOlderThanDays,
             @ConfigProperty(name = "eddi.usermemories.deleteOlderThanDays")
@@ -126,6 +143,7 @@ public class RestConversationStore implements IRestConversationStore {
         this.userMemoryStore = userMemoryStore;
         this.runtime = runtime;
         this.conversationAccessGuard = conversationAccessGuard;
+        this.resourceAccessGuard = resourceAccessGuard;
         this.deleteEndedConversationsOnceOlderThanDays = deleteEndedConversationsOnceOlderThanDays;
         this.deleteMemoriesOlderThanDays = deleteMemoriesOlderThanDays;
         this.attachmentStorageInstance = attachmentStorageInstance;
@@ -418,8 +436,9 @@ public class RestConversationStore implements IRestConversationStore {
     }
 
     /**
-     * Retires the conversation's descriptor so the conversation disappears from
-     * every listing, while its memory snapshot and attachments stay on the server.
+     * Ends the conversation and retires its descriptor, so the conversation
+     * disappears from every listing while its memory snapshot and attachments stay
+     * on the server.
      *
      * <p>
      * This branch used to do <em>nothing at all</em>. A comment claimed a
@@ -438,12 +457,26 @@ public class RestConversationStore implements IRestConversationStore {
      * {@code deleteDescriptor} archives the descriptor into its history collection
      * with {@code deleted=true} and drops the live row, which is what the
      * {@code includeDeleted=false} listings filter on. The snapshot itself is
-     * deliberately untouched — that is the whole distinction from the permanent
-     * path, and it is what lets the retention sweep and GDPR erasure still find the
-     * data.
+     * deliberately kept — that is the whole distinction from the permanent path,
+     * and it is what lets the retention sweep and GDPR erasure still find the data.
+     * </p>
+     *
+     * <p>
+     * The conversation is <strong>ended first</strong>. A deleted conversation left
+     * READY stayed drivable — {@code POST /agents/{id}} still ran turns on it — and
+     * stayed in {@code getActiveConversations}, whose descriptor read then failed
+     * and broke undeploy-with-end for the whole agent. Ending goes through
+     * {@link IConversationService#endConversation(String, String)}, so a paused
+     * conversation's approval is resolved (timer disarmed, bookmark cleared,
+     * cancellation audited) and an in-flight turn is told not to write back.
      * </p>
      */
     private void softDelete(String conversationId) throws ResourceStoreException, ResourceNotFoundException {
+        var state = conversationMemoryStore.getConversationState(conversationId);
+        if (state != null && state != ConversationState.ENDED) {
+            conversationService.endConversation(conversationId, DELETE_ACTOR);
+            markDescriptorEnded(conversationId);
+        }
         try {
             conversationDescriptorStore.deleteDescriptor(conversationId, CONVERSATION_DESCRIPTOR_VERSION);
             log.info(format("Conversation has been deleted (conversationId=%s)", sanitize(conversationId)));
@@ -452,6 +485,25 @@ public class RestConversationStore implements IRestConversationStore {
             // deletion that did not happen.
             throw new ResourceStoreException(
                     format("Could not delete conversation %s: its descriptor was modified concurrently", sanitize(conversationId)), e);
+        }
+    }
+
+    /**
+     * Records ENDED on the live descriptor, if there is one. A conversation whose
+     * descriptor was already retired (soft-deleted) or never written is ended on
+     * its snapshot alone — that is not an error for a bulk end.
+     */
+    private void markDescriptorEnded(String conversationId) throws ResourceStoreException {
+        try {
+            ConversationDescriptor conversationDescriptor = conversationDescriptorStore.readDescriptor(conversationId,
+                    CONVERSATION_DESCRIPTOR_VERSION);
+            if (conversationDescriptor == null) {
+                return;
+            }
+            conversationDescriptor.setConversationState(ConversationState.ENDED);
+            conversationDescriptorStore.setDescriptor(conversationId, CONVERSATION_DESCRIPTOR_VERSION, conversationDescriptor);
+        } catch (ResourceNotFoundException e) {
+            log.debug(format("No live descriptor to mark ENDED for conversation %s", sanitize(conversationId)));
         }
     }
 
@@ -522,6 +574,15 @@ public class RestConversationStore implements IRestConversationStore {
                     amountOfEndedConversations++;
                 }
             } catch (ResourceNotFoundException e) {
+                // No live descriptor. A soft-deleted conversation still has its
+                // archived one and ages out on the same schedule as everything else —
+                // soft delete now ends the conversation, so without this every
+                // soft-deleted conversation would be purged on the very next sweep,
+                // however recently it was active. Only a snapshot with no descriptor
+                // at all (live or archived) is an orphan to remove straight away.
+                if (archivedWithinRetention(endedConversationId, deleteOlderThanThisDate)) {
+                    continue;
+                }
                 conversationDescriptorStore.deleteAllDescriptor(endedConversationId);
                 deleteAttachmentsForConversation(endedConversationId);
                 conversationMemoryStore.deleteConversationMemorySnapshot(endedConversationId);
@@ -532,6 +593,20 @@ public class RestConversationStore implements IRestConversationStore {
         return amountOfEndedConversations;
     }
 
+    /**
+     * Whether a conversation without a live descriptor has an archived one that was
+     * modified on or after the retention cut-off, i.e. is not due for deletion yet.
+     */
+    private boolean archivedWithinRetention(String conversationId, Date deleteOlderThanThisDate) throws ResourceStoreException {
+        try {
+            var archived = conversationDescriptorStore.readDescriptorWithHistory(conversationId, CONVERSATION_DESCRIPTOR_VERSION);
+            return archived != null && archived.getLastModifiedOn() != null
+                    && !archived.getLastModifiedOn().before(deleteOlderThanThisDate);
+        } catch (ResourceNotFoundException e) {
+            return false;
+        }
+    }
+
     @Override
     public List<ConversationStatus> getActiveConversations(String agentId, Integer agentVersion)
             throws ResourceStoreException, ResourceNotFoundException {
@@ -540,6 +615,12 @@ public class RestConversationStore implements IRestConversationStore {
         // mandatory and a bare GET answered 400 "Argument must not be null", although
         // "which conversations of this agent are still open" is the question an
         // operator asks before undeploying — across versions, not for one.
+
+        // Agent-scoped: the ids of every user's open conversations with this agent are
+        // an operator's view of that agent, so they take the same EDIT access undeploy
+        // (which ends them all) takes. Before this, any authenticated caller could
+        // list them, and an id is all the per-conversation endpoints are keyed on.
+        resourceAccessGuard.requireAccess(agentId, AccessLevel.EDIT, "agent");
 
         List<ConversationMemorySnapshot> conversationMemorySnapshots;
         List<ConversationStatus> conversationStatuses = new LinkedList<>();
@@ -552,43 +633,99 @@ public class RestConversationStore implements IRestConversationStore {
             conversationStatus.setAgentId(agentId);
             conversationStatus.setAgentVersion(agentVersion != null ? agentVersion : snapshot.getAgentVersion());
             conversationStatus.setConversationState(snapshot.getConversationState());
-            var conversationDescriptor = conversationDescriptorStore.readDescriptor(conversationId, CONVERSATION_DESCRIPTOR_VERSION);
-            conversationStatus.setLastInteraction(conversationDescriptor.getLastModifiedOn());
+            conversationStatus.setLastInteraction(lastInteractionOf(conversationId));
             conversationStatuses.add(conversationStatus);
         }
 
         return conversationStatuses;
     }
 
+    /**
+     * The descriptor's last-modified date, falling back to the archived descriptor
+     * of a soft-deleted conversation, else {@code null}. A conversation that was
+     * soft-deleted while still open (before soft delete ended it) has no live
+     * descriptor, and reading one threw — which failed the whole listing, and with
+     * it undeploy-with-end for the agent.
+     */
+    private Date lastInteractionOf(String conversationId) throws ResourceStoreException {
+        try {
+            return conversationDescriptorStore.readDescriptor(conversationId, CONVERSATION_DESCRIPTOR_VERSION).getLastModifiedOn();
+        } catch (ResourceNotFoundException e) {
+            try {
+                return conversationDescriptorStore.readDescriptorWithHistory(conversationId, CONVERSATION_DESCRIPTOR_VERSION)
+                        .getLastModifiedOn();
+            } catch (ResourceNotFoundException notArchivedEither) {
+                return null;
+            }
+        }
+    }
+
+    /**
+     * Ends the listed conversations. Only the conversation ids are read from the
+     * request: which agent a conversation belongs to and which state it is in come
+     * from the stored snapshot.
+     *
+     * <p>
+     * The request's {@code conversationState} used to decide whether the HITL-aware
+     * end ran. A paused conversation sent as {@code READY} skipped it — leaving the
+     * timeout armed, the bookmark set and no cancellation audited — and any
+     * conversation sent as {@code AWAITING_HUMAN} wrote a forged
+     * {@code hitl.approval} cancellation to the audit trail. Every conversation now
+     * goes through {@link IConversationService#endConversation(String, String)},
+     * which reads the previous state itself.
+     * </p>
+     *
+     * <p>
+     * Each conversation takes EDIT access on its (stored) agent, the access
+     * undeploy-with-end takes for all of them at once. An unknown or already ended
+     * conversation is skipped, so a stale list from {@code GET …/active} still ends
+     * whatever is still open.
+     * </p>
+     */
     @Override
     public Response endActiveConversations(List<ConversationStatus> conversationStatuses) {
+        if (conversationStatuses == null) {
+            throw new BadRequestException("A list of conversations to end is required");
+        }
         try {
+            Set<String> checkedAgents = new HashSet<>();
             for (ConversationStatus conversationStatus : conversationStatuses) {
-                String conversationId = conversationStatus.getConversationId();
-
-                // A paused (AWAITING_HUMAN) conversation must be ended through the
-                // HITL-aware service path: a raw setConversationState(ENDED) would
-                // leave the armed timeout schedule (a later stale fire logs errors),
-                // keep the bookmark, skip the hitl.approval cancellation audit, and
-                // miss the in-flight-resume signal that stops a concurrent resume
-                // from persisting its snapshot back over the ENDED state.
-                if (conversationStatus.getConversationState() == ConversationState.AWAITING_HUMAN) {
-                    // G4: attribute the pause-terminating end (admin bulk-end path).
-                    conversationService.endConversation(conversationId, "system:admin-end");
-                } else {
-                    conversationMemoryStore.setConversationState(conversationId, ConversationState.ENDED);
+                String conversationId = conversationStatus == null ? null : conversationStatus.getConversationId();
+                if (isNullOrEmpty(conversationId)) {
+                    continue;
                 }
 
-                ConversationDescriptor conversationDescriptor = conversationDescriptorStore.readDescriptor(conversationId,
-                        CONVERSATION_DESCRIPTOR_VERSION);
-                conversationDescriptor.setConversationState(ConversationState.ENDED);
-                conversationDescriptorStore.setDescriptor(conversationId, CONVERSATION_DESCRIPTOR_VERSION, conversationDescriptor);
+                ConversationMemorySnapshot snapshot;
+                try {
+                    snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+                } catch (ResourceNotFoundException e) {
+                    snapshot = null;
+                }
+                if (snapshot == null) {
+                    log.debug(format("Skipping unknown conversation %s in bulk end", sanitize(conversationId)));
+                    continue;
+                }
+                if (checkedAgents.add(snapshot.getAgentId())) {
+                    resourceAccessGuard.requireAccess(snapshot.getAgentId(), AccessLevel.EDIT, "agent");
+                }
+                if (snapshot.getConversationState() == ConversationState.ENDED) {
+                    continue;
+                }
 
-                log.info(format("conversation (%s) has been set to ENDED", conversationId));
+                // The HITL-aware end for every state: it reads the previous state
+                // server-side, and only a conversation that really was AWAITING_HUMAN
+                // gets its timer disarmed, bookmark cleared and cancellation audited.
+                // It also signals an in-flight resume so it does not persist its
+                // snapshot back over ENDED, and keeps the state cache in step — the raw
+                // setConversationState used for non-paused conversations did neither.
+                conversationService.endConversation(conversationId, BULK_END_ACTOR);
+                markDescriptorEnded(conversationId);
+
+                log.info(format("conversation (%s) has been set to ENDED", sanitize(conversationId)));
             }
 
             return Response.ok().build();
-        } catch (ResourceStoreException | ResourceNotFoundException e) {
+        } catch (ResourceStoreException e) {
             throw sneakyThrow(e);
         }
     }
