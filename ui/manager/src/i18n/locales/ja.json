@@ -2692,7 +2692,6 @@
     "contextWindowEntries": "全文のまま残す直近エントリ数",
     "contextWindowSummarize": "ウィンドウから外れた分を要約する",
     "contextWindowTruncateNote": "古いエントリは「N 件の以前のエントリを省略」という簡易な表示に置き換えられます。",
-    "retroConfigHint": "振り返りフェーズが学びをチームメモリに記録し、以降の議論に引き継ぎます。",
     "retroPerRun": "1 回の実行あたり",
     "retroStored": "保存上限",
     "artifactConfigHint": "メンバーが共同で文書を作成し、書かれたターンを越えて残せるようにします。",
@@ -2887,7 +2886,24 @@
     },
     "stateRejected": "却下",
     "inputDisabledRejected": "この提案は却下されました",
-    "debateVerdictNote": "散文ではなく採点による裁定（勝者とスコア）で回答します: {{phases}}。メンバーが2つ以上の役割を持ち、議論が先行するため、モデレーター自身の統合プロンプトは使用されません。散文が必要な場合はフェーズに入力テンプレートを設定してください。"
+    "debateVerdictNote": "散文ではなく採点による裁定（勝者とスコア）で回答します: {{phases}}。メンバーが2つ以上の役割を持ち、議論が先行するため、モデレーター自身の統合プロンプトは使用されません。散文が必要な場合はフェーズに入力テンプレートを設定してください。",
+    "retroCustomLimits": "レトロの教訓の上限をカスタマイズ",
+    "retroCustomHint": "レトロフェーズは教訓をチームの記憶に書き込み、以降のディスカッションに引き継ぎます。この上限で件数を制限します。",
+    "retroDefaultHint": "レトロフェーズは既定の上限（1回あたり {{perRun}} 件、保存 {{stored}} 件）で引き続き教訓を書き込みます。止めるには RETRO フェーズを削除してください。",
+    "voteOptionsTooFew": "明示的な投票用紙には少なくとも 2 つの選択肢が必要です。",
+    "saveProblem": {
+      "title": "このグループはまだ作成できません:",
+      "debateRoles": "ディベートには、役割 PRO のメンバーと役割 CON のメンバーがそれぞれ少なくとも 1 人必要です。",
+      "devilAdvocateRole": "悪魔の代弁者グループには、役割 DEVIL_ADVOCATE のメンバーが必要です。",
+      "humanInTaskForce": "人間のメンバーはタスクフォースグループ（計画・実行・検証フェーズ）に参加できません。",
+      "humanWithPeerPhases": "ピアレビューのように、フェーズが各メンバーに順番に向けられるグループには人間のメンバーは参加できません。",
+      "memberUnassigned_one": "{{count}} 名のメンバーにエージェントが割り当てられていません。",
+      "memberUnassigned_other": "{{count}} 名のメンバーにエージェントが割り当てられていません。",
+      "humanNeedsName_one": "{{count}} 名の人間メンバーに表示名が必要です。",
+      "humanNeedsName_other": "{{count}} 名の人間メンバーに表示名が必要です。",
+      "humanNeedsId_one": "{{count}} 名の人間メンバーに本人のユーザー ID が必要です。",
+      "humanNeedsId_other": "{{count}} 名の人間メンバーに本人のユーザー ID が必要です。"
+    }
   },
   "taskBoard": {
     "title": "タスクボード",
@@ -3744,7 +3760,17 @@
       "toggleConfig": "詳細パネルの表示切替",
       "unpin": "回答のピン留めを解除",
       "untitled": "無題",
-      "viewSessions": "過去のセッションを表示"
+      "viewSessions": "過去のセッションを表示",
+      "alreadyEnded": "ディスカッションはすでに終了していました。",
+      "stopFailed": "ディスカッションを停止できませんでした: {{error}}",
+      "stopping": "停止しています…",
+      "startOver": "最初からやり直す",
+      "streamInterrupted": "ライブ接続が切断されました。保存済みのディスカッションを表示しています。実行中は引き続き更新されます。",
+      "confirmNewTitle": "実行中のディスカッションを停止しますか？",
+      "confirmNewDescription": "ディスカッションがまだ実行中です。新しく開始すると先に停止され、進行中の作業は破棄されます。",
+      "confirmNewButton": "停止して新規開始",
+      "keepRunning": "実行を続ける",
+      "questionRequired": "タスクフォースへの質問を入力してください。ファイルはディスカッション開始時に共有されます。"
     },
     "thread": {
       "fileTooLarge": "ファイルは20MB以下にしてください",
@@ -3773,7 +3799,8 @@
       "stop": "生成を停止",
       "streamEnded": "返信が完了する前に接続が終了しました。届いた分は上に表示されています。もう一度送信してやり直してください。",
       "newConversation": "新しい会話",
-      "newConversationFailed": "新しい会話を開始できませんでした"
+      "newConversationFailed": "新しい会話を開始できませんでした",
+      "initFailed": "この会話を開けませんでした。"
     },
     "chat": {
       "agentDetails": "エージェントの詳細",

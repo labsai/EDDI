@@ -4,6 +4,7 @@ import { Save, X, RefreshCw, Info } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useUpdateGroup } from "@/hooks/use-groups";
+import { getErrorMessage } from "@/lib/api-client";
 import type {
   AgentGroupConfiguration,
   ConvergenceConfig,
@@ -111,6 +112,33 @@ export function GroupPhaseEditor({
       ),
     );
 
+  /**
+   * The explicit-options textarea's raw text, per phase index.
+   *
+   * The options list is derived from it (trimmed, blank lines dropped) but the
+   * textarea must NOT be bound to the derived list: re-rendering it from the
+   * cleaned list deleted the newline the moment Enter was pressed and the
+   * trailing space the moment one was typed — so a second option, or any option
+   * of more than one word, could not be entered at all.
+   */
+  const [optionDrafts, setOptionDrafts] = useState<Record<number, string>>({});
+
+  /**
+   * VOTE phases the backend would refuse to save: `optionsSource: EXPLICIT`
+   * with fewer than two options is a 400 at save time
+   * (`AgentGroupStore.validateVotePhases`), which the generic error toast
+   * reported as "Something went wrong".
+   */
+  const tooFewOptions = phases
+    .map((p, idx) => ({ p, idx }))
+    .filter(
+      ({ p }) =>
+        p.type === "VOTE" &&
+        p.voteConfig?.optionsSource === "EXPLICIT" &&
+        (p.voteConfig.options?.length ?? 0) < 2,
+    )
+    .map(({ idx }) => idx);
+
   const patchVoteConfig = (index: number, patch: Partial<VoteConfig>) =>
     setPhases((prev) =>
       prev.map((p, i) =>
@@ -119,6 +147,7 @@ export function GroupPhaseEditor({
     );
 
   const save = () => {
+    if (tooFewOptions.length > 0) return;
     // Drop a convergence block that is off rather than persisting a disabled
     // object: `null` is what the backend means by "no convergence detection", and
     // storing an explicit off-block makes every phase in the document look
@@ -139,7 +168,9 @@ export function GroupPhaseEditor({
           toast.success(t("groups.phasesSaved", "Phase settings saved"));
           onDone();
         },
-        onError: () => toast.error(t("common.error", "Something went wrong")),
+        // The backend's save-time validation names the phase and the rule it
+        // broke; a generic "Something went wrong" threw that away.
+        onError: (err) => toast.error(getErrorMessage(err)),
       },
     );
   };
@@ -445,16 +476,30 @@ export function GroupPhaseEditor({
                     </label>
                     <textarea
                       id={`phase-vote-options-${idx}`}
-                      value={(phase.voteConfig?.options ?? []).join("\n")}
-                      onChange={(e) =>
+                      value={optionDrafts[idx] ?? (phase.voteConfig?.options ?? []).join("\n")}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        setOptionDrafts((prev) => ({ ...prev, [idx]: raw }));
                         patchVoteConfig(idx, {
-                          options: e.target.value.split("\n").map((s) => s.trim()).filter(Boolean),
-                        })
-                      }
+                          options: raw.split("\n").map((s) => s.trim()).filter(Boolean),
+                        });
+                      }}
                       rows={3}
+                      aria-invalid={tooFewOptions.includes(idx) || undefined}
+                      aria-describedby={tooFewOptions.includes(idx) ? `phase-vote-options-error-${idx}` : undefined}
                       className="w-full resize-none rounded-md border border-input bg-background px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                       data-testid={`phase-vote-options-${idx}`}
                     />
+                    {tooFewOptions.includes(idx) && (
+                      <p
+                        id={`phase-vote-options-error-${idx}`}
+                        className="mt-0.5 text-[10px] text-destructive"
+                        role="alert"
+                        data-testid={`phase-vote-options-error-${idx}`}
+                      >
+                        {t("groups.voteOptionsTooFew", "An explicit ballot needs at least two options.")}
+                      </p>
+                    )}
                   </div>
                 )}
 
@@ -504,7 +549,7 @@ export function GroupPhaseEditor({
           size="sm"
           className="h-7 flex-1 text-xs"
           onClick={save}
-          disabled={update.isPending}
+          disabled={update.isPending || tooFewOptions.length > 0}
           data-testid="group-phase-save"
         >
           {update.isPending ? <RefreshCw className="h-3 w-3 animate-spin me-1" /> : <Save className="h-3 w-3 me-1" />}

@@ -227,7 +227,31 @@ describe("useGroupDiscussionStream", () => {
     expect(result.current.streamState.conversationId).toBeNull();
   });
 
-  it("handles exception thrown in generator", async () => {
+  it("fails the discussion when the request is refused before anything streams", async () => {
+    // eslint-disable-next-line require-yield
+    async function* mockEvents() {
+      throw new Error("question is required (HTTP 400)");
+    }
+
+    mockStreamGroupDiscussion.mockReturnValue(mockEvents());
+
+    const { result } = renderHook(() => useGroupDiscussionStream());
+
+    await act(async () => {
+      await result.current.startStream("group-1", "");
+    });
+
+    expect(result.current.streamState.state).toBe("FAILED");
+    expect(result.current.streamState.error).toBe("question is required (HTTP 400)");
+    expect(result.current.streamState.interrupted).toBe(false);
+  });
+
+  /**
+   * A connection that breaks AFTER the run started says nothing about the run —
+   * it may well still be going on the server. Declaring it FAILED showed an
+   * error for a discussion that went on to complete.
+   */
+  it("treats a connection that breaks mid-run as interrupted, not failed", async () => {
     async function* mockEvents() {
       yield { type: "group_start", data: JSON.stringify({ groupConversationId: "conv-123", question: "Is 2+2=4?" }) };
       throw new Error("Network interrupted");
@@ -241,8 +265,10 @@ describe("useGroupDiscussionStream", () => {
       await result.current.startStream("group-1", "Is 2+2=4?");
     });
 
-    expect(result.current.streamState.state).toBe("FAILED");
-    expect(result.current.streamState.error).toBe("Network interrupted");
+    expect(result.current.streamState.state).toBe("IN_PROGRESS");
+    expect(result.current.streamState.error).toBeNull();
+    expect(result.current.streamState.interrupted).toBe(true);
+    expect(result.current.streamState.isStreaming).toBe(false);
   });
 
   it("swallows AbortError exception in generator", async () => {

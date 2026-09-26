@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Paperclip, X } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { isImeComposing } from "@/lib/ime";
 import { Button } from "@/components/ui/button";
 import {
   formatAttachmentBytes,
@@ -100,8 +101,12 @@ function BoardInput({ onSend, disabled = false, placeholder, className, mode = "
   // Measured on the trimmed body, which is what is actually sent — trailing
   // whitespace should not block a question that fits.
   const tooLong = trimmed.length > MAX_GROUP_QUESTION_CHARS;
-  const canSend =
-    (trimmed.length > 0 || attachments.length > 0) && !disabled && !tooLong && !isStaging;
+  // A question is required even with files attached: the discussion is about
+  // the question, and the backend rejects a start without one ("question is
+  // required"). Accepting an attachment-only send turned that 400 into a
+  // full-board error screen with no way back to the composer.
+  const needsQuestion = attachments.length > 0 && trimmed.length === 0;
+  const canSend = trimmed.length > 0 && !disabled && !tooLong && !isStaging;
 
   const handleSend = useCallback(() => {
     if (!canSend) return;
@@ -121,6 +126,10 @@ function BoardInput({ onSend, disabled = false, placeholder, className, mode = "
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
+      // Enter that CONFIRMS an IME composition (Chinese, Japanese, Korean) is
+      // not a send — it commits the converted text. Treating it as one posted
+      // the question half-typed.
+      if (isImeComposing(e)) return;
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         handleSend();
@@ -205,6 +214,19 @@ function BoardInput({ onSend, disabled = false, placeholder, className, mode = "
         </ul>
       )}
 
+      {needsQuestion && (
+        <p
+          className="mb-2 text-xs text-muted-foreground"
+          id="board-question-required"
+          data-testid="board-question-required"
+        >
+          {t(
+            "Workforce.board.questionRequired",
+            "Add a question for your task force — the files are shared with it when the discussion starts.",
+          )}
+        </p>
+      )}
+
       {tooLong && (
         <p
           className="mb-2 text-xs text-destructive"
@@ -255,7 +277,9 @@ function BoardInput({ onSend, disabled = false, placeholder, className, mode = "
           }}
           onKeyDown={handleKeyDown}
           aria-invalid={tooLong || undefined}
-          aria-describedby={tooLong ? "board-question-too-long" : undefined}
+          aria-describedby={
+            tooLong ? "board-question-too-long" : needsQuestion ? "board-question-required" : undefined
+          }
           placeholder={
             disabled && disabledMessage
               ? disabledMessage

@@ -2745,7 +2745,6 @@
     "contextWindowEntries": "Recent entries kept in full",
     "contextWindowSummarize": "Summarize what falls out of the window",
     "contextWindowTruncateNote": "Older entries are replaced with a plain \"N earlier entries omitted\" marker instead.",
-    "retroConfigHint": "Lets a retro phase write lessons into the team's memory, carried into later discussions.",
     "retroPerRun": "Per run",
     "retroStored": "Stored max",
     "artifactConfigHint": "Lets members co-author documents that survive the turn they were written in.",
@@ -2940,7 +2939,24 @@
     },
     "stateRejected": "Rejected",
     "inputDisabledRejected": "This recommendation was rejected",
-    "debateVerdictNote": "Answers with a scoring verdict (winner and scores), not prose: {{phases}}. The members hold two or more roles and arguments come first, so the moderator's own synthesis prompt is not used. Set an input template on the phase for prose."
+    "debateVerdictNote": "Answers with a scoring verdict (winner and scores), not prose: {{phases}}. The members hold two or more roles and arguments come first, so the moderator's own synthesis prompt is not used. Set an input template on the phase for prose.",
+    "retroCustomLimits": "Custom retro lesson limits",
+    "retroCustomHint": "A retro phase writes lessons into the team's memory, carried into later discussions. These caps bound how many.",
+    "retroDefaultHint": "A retro phase still writes lessons, with the default caps ({{perRun}} per run, {{stored}} stored). To stop it, remove the RETRO phase.",
+    "voteOptionsTooFew": "An explicit ballot needs at least two options.",
+    "saveProblem": {
+      "title": "This group cannot be created yet:",
+      "debateRoles": "A debate needs at least one member with the role PRO and one with the role CON.",
+      "devilAdvocateRole": "A Devil's Advocate group needs a member with the role DEVIL_ADVOCATE.",
+      "humanInTaskForce": "Human members cannot join a task-force group (planning, execution and verification phases).",
+      "humanWithPeerPhases": "Human members cannot join a group whose phases address each peer in turn, such as peer review.",
+      "memberUnassigned_one": "{{count}} member has no agent assigned.",
+      "memberUnassigned_other": "{{count}} members have no agent assigned.",
+      "humanNeedsName_one": "{{count}} human member needs a display name.",
+      "humanNeedsName_other": "{{count}} human members need a display name.",
+      "humanNeedsId_one": "{{count}} human member needs the person's user id.",
+      "humanNeedsId_other": "{{count}} human members need the person's user id."
+    }
   },
   "taskBoard": {
     "title": "Task Board",
@@ -3744,7 +3760,17 @@
       "toggleConfig": "Toggle details panel",
       "unpin": "Unpin response",
       "untitled": "Untitled",
-      "viewSessions": "View past sessions"
+      "viewSessions": "View past sessions",
+      "alreadyEnded": "The discussion had already ended.",
+      "stopFailed": "Could not stop the discussion: {{error}}",
+      "stopping": "Stopping…",
+      "startOver": "Start over",
+      "streamInterrupted": "The live connection was lost. Showing the saved discussion, which keeps updating while it runs.",
+      "confirmNewTitle": "Stop the running discussion?",
+      "confirmNewDescription": "A discussion is still running. Starting a new one stops it first — any work in progress is abandoned.",
+      "confirmNewButton": "Stop and start new",
+      "keepRunning": "Keep running",
+      "questionRequired": "Add a question for your task force — the files are shared with it when the discussion starts."
     },
     "thread": {
       "fileTooLarge": "File must be under 20MB",
@@ -3773,7 +3799,8 @@
       "stop": "Stop generating",
       "streamEnded": "The connection ended before the reply finished. What arrived is above — send again to retry.",
       "newConversation": "New conversation",
-      "newConversationFailed": "Could not start a new conversation"
+      "newConversationFailed": "Could not start a new conversation",
+      "initFailed": "This conversation could not be opened."
     },
     "chat": {
       "agentDetails": "Agent Details",
