@@ -223,6 +223,20 @@ class RestAgentAdministrationTest {
             assertEquals(202, response.getStatus());
             verify(restConversationStore).endActiveConversations(any());
         }
+
+        @Test
+        @DisplayName("does not undeploy when some active conversation could not be ended")
+        void doesNotUndeployWhenEndFailed() throws Exception {
+            // The bulk end continues past a failed conversation and reports a 500;
+            // undeploying on top of a conversation still open is what it must not do.
+            when(conversationMemoryStore.getActiveConversationCount("agent-1", 1)).thenReturn(1L);
+            when(restConversationStore.getActiveConversations("agent-1", 1)).thenReturn(List.of());
+            when(restConversationStore.endActiveConversations(any())).thenReturn(Response.serverError().build());
+
+            assertThrows(InternalServerErrorException.class,
+                    () -> restAgentAdmin.undeployAgent(Deployment.Environment.test, "agent-1", 1, true, false));
+            verify(runtime, never()).submitCallable(any(Callable.class), any());
+        }
     }
 
     @Nested

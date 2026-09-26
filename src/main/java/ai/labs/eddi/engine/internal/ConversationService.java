@@ -94,6 +94,11 @@ import static jakarta.ws.rs.core.MediaType.TEXT_PLAIN;
 public class ConversationService implements IConversationService {
 
     private static final String RESOURCE_URI = "eddi://ai.labs.conversation/conversationstore/conversations/";
+
+    /**
+     * Actor for ending a legacy soft-deleted conversation on its next turn attempt.
+     */
+    static final String SOFT_DELETED_ACTOR = "system:delete";
     private static final String CACHE_NAME_CONVERSATION_STATE = "conversationState";
     private static final String USER_ID = "userId";
 
@@ -1136,6 +1141,7 @@ public class ConversationService implements IConversationService {
         requireConversationAccess(conversationId);
         requireInputWithinLimit(inputData);
         var snapshot = requireSnapshot(conversationId);
+        refuseIfSoftDeleted(conversationId, snapshot);
         say(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData,
                 rerunOnly, responseHandler);
     }
@@ -1159,8 +1165,51 @@ public class ConversationService implements IConversationService {
         requireConversationAccess(conversationId);
         requireInputWithinLimit(inputData);
         var snapshot = requireSnapshot(conversationId);
+        refuseIfSoftDeleted(conversationId, snapshot);
         sayStreaming(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId, returnDetailed, returnCurrentStepOnly, returningFields,
                 inputData, streamingHandler);
+    }
+
+    /**
+     * Refuses a turn on a conversation that was soft-deleted but is not ENDED, and
+     * ends it on the way.
+     * <p>
+     * Soft delete ends the conversation since this was fixed, but conversations
+     * soft-deleted by earlier releases were left READY: their owner (the
+     * conversation guard resolves the owner from the archived descriptor) could
+     * still drive them, and the retention sweep — which only looks at ENDED
+     * conversations — never removed them. This is the lazy migration for those: the
+     * first attempt to continue one ends it (HITL-aware, like the delete itself)
+     * and answers as for any ended conversation. It costs one descriptor read on
+     * the conversation-id entry points (REST, SSE, MCP, Slack, {@code /v1}); the
+     * internal agent-driven overloads are not affected.
+     */
+    private void refuseIfSoftDeleted(String conversationId, ConversationMemorySnapshot snapshot)
+            throws ConversationEndedException, ResourceStoreException {
+        if (snapshot.getConversationState() == ConversationState.ENDED || !isSoftDeleted(conversationId)) {
+            return;
+        }
+        LOGGER.infof("Conversation %s was deleted before soft delete ended conversations — ending it now", sanitize(conversationId));
+        endConversation(conversationId, SOFT_DELETED_ACTOR);
+        throw new ConversationEndedException("Conversation has ended!");
+    }
+
+    /**
+     * No live descriptor, but an archived one: the conversation was soft-deleted.
+     */
+    private boolean isSoftDeleted(String conversationId) throws ResourceStoreException {
+        try {
+            if (conversationDescriptorStore.readDescriptor(conversationId, 0) != null) {
+                return false;
+            }
+        } catch (ResourceNotFoundException e) {
+            // no live descriptor — check the archive
+        }
+        try {
+            return conversationDescriptorStore.readDescriptorWithHistory(conversationId, 0) != null;
+        } catch (ResourceNotFoundException e) {
+            return false;
+        }
     }
 
     /**

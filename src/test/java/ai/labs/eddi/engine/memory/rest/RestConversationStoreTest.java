@@ -37,6 +37,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -69,6 +70,8 @@ class RestConversationStoreTest {
         runtime = mock(IRuntime.class);
         conversationAccessGuard = mock(ConversationAccessGuard.class);
         resourceAccessGuard = mock(ResourceAccessGuard.class);
+        // No named caller by default: actions are attributed to the fallback actor.
+        when(conversationAccessGuard.callerActor(anyString())).thenAnswer(inv -> inv.getArgument(0));
         // These tests do not exercise ownership scoping — the caller sees everything,
         // so listing behaves exactly as before this endpoint became owner-filtered.
         when(conversationAccessGuard.seesAllConversations()).thenReturn(true);
@@ -280,6 +283,30 @@ class RestConversationStoreTest {
 
             verify(conversationService).endConversation("conv-paused", "system:delete");
             verify(conversationMemoryStore, never()).setConversationState(anyString(), any());
+        }
+
+        @Test
+        @DisplayName("#3: soft delete attributes a terminated approval to the deleting caller")
+        void softDelete_callerRecordedAsActor() throws Exception {
+            when(conversationMemoryStore.getConversationState("conv-paused")).thenReturn(ConversationState.AWAITING_HUMAN);
+            when(conversationAccessGuard.callerActor(anyString())).thenReturn("owner-1");
+
+            restConversationStore.deleteConversationLog("conv-paused", false);
+
+            verify(conversationService).endConversation("conv-paused", "owner-1");
+        }
+
+        @Test
+        @DisplayName("soft delete still ends the conversation when there is no live descriptor to mark")
+        void softDelete_noLiveDescriptor_stillEnds() throws Exception {
+            when(conversationMemoryStore.getConversationState("conv-1")).thenReturn(ConversationState.READY);
+            when(conversationDescriptorStore.readDescriptor("conv-1", 0)).thenThrow(new ResourceNotFoundException("gone"));
+
+            restConversationStore.deleteConversationLog("conv-1", false);
+
+            verify(conversationService).endConversation("conv-1", "system:delete");
+            verify(conversationDescriptorStore, never()).setDescriptor(anyString(), anyInt(), any());
+            verify(conversationDescriptorStore).deleteDescriptor("conv-1", 0);
         }
 
         @Test
@@ -573,10 +600,25 @@ class RestConversationStoreTest {
             archived.setLastModifiedOn(new Date(System.currentTimeMillis() - 100L * 86400_000L));
             when(conversationDescriptorStore.readDescriptorWithHistory("conv-soft-old", 0)).thenReturn(archived);
 
-            restConversationStore.permanentlyDeleteEndedConversationLogs(30);
+            Integer result = restConversationStore.permanentlyDeleteEndedConversationLogs(30);
 
+            // #6: an aged-out soft delete is an ordinary retention deletion and counts.
+            assertEquals(1, result);
             verify(conversationMemoryStore).deleteConversationMemorySnapshot("conv-soft-old");
             verify(conversationDescriptorStore).deleteAllDescriptor("conv-soft-old");
+        }
+
+        @Test
+        @DisplayName("a soft-deleted conversation whose archive has no date is treated as past retention")
+        void softDeletedWithoutDateIsRemoved() throws Exception {
+            when(conversationMemoryStore.getEndedConversationIds()).thenReturn(List.of("conv-undated"));
+            when(documentDescriptorStore.readDescriptor("conv-undated", 0)).thenThrow(new ResourceNotFoundException("archived"));
+            when(conversationDescriptorStore.readDescriptorWithHistory("conv-undated", 0)).thenReturn(new ConversationDescriptor());
+
+            Integer result = restConversationStore.permanentlyDeleteEndedConversationLogs(30);
+
+            assertEquals(1, result);
+            verify(conversationMemoryStore).deleteConversationMemorySnapshot("conv-undated");
         }
 
         @Test
@@ -706,6 +748,11 @@ class RestConversationStoreTest {
     @DisplayName("endActiveConversations")
     class EndActiveConversations {
 
+        // Agent ids must be real ids: they are parsed out of the descriptor's agent
+        // URI.
+        private static final String AGENT_A = "a1a1a1a1a1a1a1a1a1a1a1a1";
+        private static final String AGENT_B = "b2b2b2b2b2b2b2b2b2b2b2b2";
+
         private ConversationStatus statusOf(String conversationId, ConversationState claimedState) {
             var status = new ConversationStatus();
             status.setConversationId(conversationId);
@@ -713,20 +760,77 @@ class RestConversationStoreTest {
             return status;
         }
 
+        private ConversationDescriptor descriptorOfAgent(String agentId) {
+            var descriptor = new ConversationDescriptor();
+            descriptor.setAgentResource(URI.create("eddi://ai.labs.agent/agentstore/agents/" + agentId + "?version=1"));
+            return descriptor;
+        }
+
         private void storedConversation(String conversationId, String agentId, ConversationState state) throws Exception {
-            var snapshot = new ConversationMemorySnapshot();
-            snapshot.setId(conversationId);
-            snapshot.setAgentId(agentId);
-            snapshot.setConversationState(state);
-            when(conversationMemoryStore.loadConversationMemorySnapshot(conversationId)).thenReturn(snapshot);
-            when(conversationDescriptorStore.readDescriptor(conversationId, 0)).thenReturn(new ConversationDescriptor());
+            when(conversationMemoryStore.getConversationState(conversationId)).thenReturn(state);
+            when(conversationDescriptorStore.readDescriptor(conversationId, 0)).thenReturn(descriptorOfAgent(agentId));
+        }
+
+        @Test
+        @DisplayName("#9: state and agent are read without loading the memory snapshot")
+        void doesNotLoadSnapshots() throws Exception {
+            storedConversation("conv-1", AGENT_A, ConversationState.READY);
+
+            restConversationStore.endActiveConversations(List.of(statusOf("conv-1", null)));
+
+            verify(conversationMemoryStore, never()).loadConversationMemorySnapshot(anyString());
+            verify(resourceAccessGuard).requireAccess(AGENT_A, AccessLevel.EDIT, "agent");
+        }
+
+        @Test
+        @DisplayName("#3: a terminated approval is attributed to the calling principal, not a synthetic admin")
+        void callerRecordedAsActor() throws Exception {
+            storedConversation("conv-paused", AGENT_A, ConversationState.AWAITING_HUMAN);
+            when(conversationAccessGuard.callerActor(anyString())).thenReturn("editor-1");
+
+            restConversationStore.endActiveConversations(List.of(statusOf("conv-paused", null)));
+
+            verify(conversationService).endConversation("conv-paused", "editor-1");
+        }
+
+        @Test
+        @DisplayName("#5: one failing conversation does not stop the rest; the response lists every outcome as a 500")
+        void continuesPastAFailureAndReportsIt() throws Exception {
+            storedConversation("conv-bad", AGENT_A, ConversationState.READY);
+            storedConversation("conv-good", AGENT_A, ConversationState.READY);
+            storedConversation("conv-ended", AGENT_A, ConversationState.ENDED);
+            doThrow(new IllegalStateException("boom")).when(conversationService).endConversation(eq("conv-bad"), anyString());
+
+            Response response = restConversationStore.endActiveConversations(List.of(
+                    statusOf("conv-bad", null), statusOf("conv-good", null), statusOf("conv-ended", null)));
+
+            assertEquals(500, response.getStatus());
+            verify(conversationService).endConversation("conv-good", "system:admin-end");
+            @SuppressWarnings("unchecked")
+            var body = (Map<String, List<String>>) response.getEntity();
+            assertEquals(List.of("conv-good"), body.get("ended"));
+            assertEquals(List.of("conv-ended"), body.get("skipped"));
+            assertEquals(List.of("conv-bad"), body.get("failed"));
+        }
+
+        @Test
+        @DisplayName("#5: a descriptor that cannot be marked ENDED does not fail an end that happened")
+        void descriptorMarkingFailureIsNotAFailure() throws Exception {
+            storedConversation("conv-1", AGENT_A, ConversationState.READY);
+            doThrow(new ResourceStoreException("db"))
+                    .when(conversationDescriptorStore).setDescriptor(eq("conv-1"), eq(0), any());
+
+            Response response = restConversationStore.endActiveConversations(List.of(statusOf("conv-1", null)));
+
+            assertEquals(200, response.getStatus());
+            verify(conversationService).endConversation("conv-1", "system:admin-end");
         }
 
         @Test
         @DisplayName("ends every listed conversation through the HITL-aware service path and marks its descriptor")
         void endsThroughService() throws Exception {
-            storedConversation("conv-1", "agent-1", ConversationState.READY);
-            storedConversation("conv-2", "agent-1", ConversationState.IN_PROGRESS);
+            storedConversation("conv-1", AGENT_A, ConversationState.READY);
+            storedConversation("conv-2", AGENT_A, ConversationState.IN_PROGRESS);
 
             Response response = restConversationStore.endActiveConversations(
                     List.of(statusOf("conv-1", null), statusOf("conv-2", null)));
@@ -743,7 +847,7 @@ class RestConversationStoreTest {
         @Test
         @DisplayName("C1b: the stored state decides — a paused conversation sent as READY still gets the HITL end")
         void pausedClaimedReady_stillEndedThroughService() throws Exception {
-            storedConversation("conv-paused", "agent-1", ConversationState.AWAITING_HUMAN);
+            storedConversation("conv-paused", AGENT_A, ConversationState.AWAITING_HUMAN);
 
             restConversationStore.endActiveConversations(List.of(statusOf("conv-paused", ConversationState.READY)));
 
@@ -755,7 +859,7 @@ class RestConversationStoreTest {
         @Test
         @DisplayName("C1b: an ENDED conversation claimed as AWAITING_HUMAN is skipped — no forged cancellation")
         void endedClaimedPaused_isSkipped() throws Exception {
-            storedConversation("conv-ended", "agent-1", ConversationState.ENDED);
+            storedConversation("conv-ended", AGENT_A, ConversationState.ENDED);
 
             restConversationStore.endActiveConversations(List.of(statusOf("conv-ended", ConversationState.AWAITING_HUMAN)));
 
@@ -766,20 +870,20 @@ class RestConversationStoreTest {
         @Test
         @DisplayName("C1b: each conversation takes EDIT access on its stored agent, checked once per agent")
         void requiresEditOnStoredAgent() throws Exception {
-            storedConversation("conv-1", "agent-1", ConversationState.READY);
-            storedConversation("conv-2", "agent-1", ConversationState.READY);
+            storedConversation("conv-1", AGENT_A, ConversationState.READY);
+            storedConversation("conv-2", AGENT_A, ConversationState.READY);
 
             restConversationStore.endActiveConversations(List.of(statusOf("conv-1", null), statusOf("conv-2", null)));
 
-            verify(resourceAccessGuard, times(1)).requireAccess("agent-1", AccessLevel.EDIT, "agent");
+            verify(resourceAccessGuard, times(1)).requireAccess(AGENT_A, AccessLevel.EDIT, "agent");
         }
 
         @Test
         @DisplayName("C1b: a caller without EDIT on the conversation's agent ends nothing")
         void deniedAgentAccess_endsNothing() throws Exception {
-            storedConversation("conv-foreign", "agent-foreign", ConversationState.READY);
+            storedConversation("conv-foreign", AGENT_B, ConversationState.READY);
             doThrow(new ForbiddenException("no edit"))
-                    .when(resourceAccessGuard).requireAccess("agent-foreign", AccessLevel.EDIT, "agent");
+                    .when(resourceAccessGuard).requireAccess(AGENT_B, AccessLevel.EDIT, "agent");
 
             assertThrows(ForbiddenException.class,
                     () -> restConversationStore.endActiveConversations(List.of(statusOf("conv-foreign", null))));
@@ -791,10 +895,10 @@ class RestConversationStoreTest {
         @Test
         @DisplayName("a batch mixing an allowed and a forbidden agent is refused as a whole — nothing is ended")
         void mixedBatch_refusedAsWhole() throws Exception {
-            storedConversation("conv-mine", "agent-mine", ConversationState.READY);
-            storedConversation("conv-foreign", "agent-foreign", ConversationState.READY);
+            storedConversation("conv-mine", AGENT_A, ConversationState.READY);
+            storedConversation("conv-foreign", AGENT_B, ConversationState.READY);
             doThrow(new ForbiddenException("no edit"))
-                    .when(resourceAccessGuard).requireAccess("agent-foreign", AccessLevel.EDIT, "agent");
+                    .when(resourceAccessGuard).requireAccess(AGENT_B, AccessLevel.EDIT, "agent");
 
             assertThrows(ForbiddenException.class, () -> restConversationStore.endActiveConversations(
                     List.of(statusOf("conv-mine", null), statusOf("conv-foreign", null))));
@@ -805,7 +909,7 @@ class RestConversationStoreTest {
         @Test
         @DisplayName("unknown conversations are skipped rather than failing the batch")
         void unknownConversationSkipped() throws Exception {
-            storedConversation("conv-1", "agent-1", ConversationState.READY);
+            storedConversation("conv-1", AGENT_A, ConversationState.READY);
 
             Response response = restConversationStore.endActiveConversations(
                     List.of(statusOf("conv-missing", null), statusOf("conv-1", null)));
@@ -818,9 +922,10 @@ class RestConversationStoreTest {
         @Test
         @DisplayName("a soft-deleted (descriptor-less) conversation is still ended on its snapshot")
         void noLiveDescriptor_stillEnded() throws Exception {
-            storedConversation("conv-soft", "agent-1", ConversationState.READY);
+            storedConversation("conv-soft", AGENT_A, ConversationState.READY);
             when(conversationDescriptorStore.readDescriptor("conv-soft", 0))
                     .thenThrow(new ResourceNotFoundException("archived"));
+            when(conversationDescriptorStore.readDescriptorWithHistory("conv-soft", 0)).thenReturn(descriptorOfAgent(AGENT_A));
 
             Response response = restConversationStore.endActiveConversations(List.of(statusOf("conv-soft", null)));
 
@@ -1520,20 +1625,18 @@ class RestConversationStoreTest {
     class EndActiveConversationsException {
 
         @Test
-        @DisplayName("should sneakyThrow when conversationDescriptorStore.readDescriptor throws ResourceStoreException")
+        @DisplayName("a store error while resolving a conversation's agent fails the call before anything is ended")
         void throwsOnResourceStoreException() throws Exception {
             var status = new ConversationStatus();
             status.setConversationId("conv-err");
-            var snapshot = new ConversationMemorySnapshot();
-            snapshot.setAgentId("agent-1");
-            snapshot.setConversationState(ConversationState.READY);
-            when(conversationMemoryStore.loadConversationMemorySnapshot("conv-err")).thenReturn(snapshot);
+            when(conversationMemoryStore.getConversationState("conv-err")).thenReturn(ConversationState.READY);
 
             when(conversationDescriptorStore.readDescriptor("conv-err", 0))
                     .thenThrow(new ResourceStoreException("DB error"));
 
             assertThrows(ResourceStoreException.class,
                     () -> restConversationStore.endActiveConversations(List.of(status)));
+            verify(conversationService, never()).endConversation(anyString(), anyString());
         }
     }
 

@@ -17,12 +17,30 @@ history, the MCP conversation tools and the audit trail, and permanently delete 
   an orphaned snapshot or the audit trail of a deleted conversation). Everyone else gets a 404. With
   authorization disabled `isAdmin` is true, so nothing changes there.
 - `requireExistingConversationOwner` resolves through the same method, so the two variants cannot drift.
-- Soft delete now **ends** the conversation first, through `IConversationService.endConversation` (actor
-  `system:delete`), so a paused conversation's approval is resolved and an in-flight turn does not write back,
-  and records ENDED on the descriptor before archiving it. A deleted conversation can no longer be driven.
+- Soft delete now **ends** the conversation first, through `IConversationService.endConversation`, so a
+  paused conversation's approval is resolved (attributed to the deleting caller, `system:delete` if there is
+  no named one) and an in-flight turn does not write back. It also records ENDED on the descriptor before
+  archiving it.
+- **Conversations soft-deleted by earlier releases** are still READY. The conversation-id `say` and
+  `sayStreaming` entry points (REST, SSE, MCP, Slack, `/v1`) now check for them: a conversation with no live
+  descriptor but an archived one is ended on the first turn attempt and refused like any ended conversation.
+  This is a lazy migration, at the cost of one descriptor read per turn on those entry points. The internal,
+  agent-driven overloads (group members, schedules, A2A) are not checked.
 - The retention sweep read "no live descriptor" as "orphan, delete now". Soft-deleted conversations now reach
-  it as ENDED, so it checks the archived descriptor's age as well: they age out on the normal schedule.
-  Snapshots with no descriptor anywhere are still removed straight away.
+  it as ENDED, so it checks the archived descriptor's age as well: they age out on the normal schedule, and an
+  archive with no date is treated as expired. Aged-out soft deletes are counted in the sweep's total.
+  Snapshots with no descriptor anywhere are still removed straight away (and not counted).
+  **Retention effect:** a conversation ended and then soft-deleted used to be purged by the next daily sweep.
+  It now stays until `deleteEndedConversationsOnceOlderThanDays` (default 365) has passed since its last
+  interaction. Documented in `configuration-reference.md` and `gdpr-compliance.md`.
+- **Stale managed-conversation mappings.** A permanently deleted or swept conversation leaves its
+  intent→conversation mapping behind (only GDPR erasure removes it). The guard's new 404 escaped MCP
+  `chat_managed` before the mapping was dropped, which failed every later call for that user. It now counts as a
+  stale mapping: the mapping is deleted and a new conversation started. The REST twin
+  (`RestAgentManagement.isConversationEnded`) failed on a missing conversation before this branch; it now
+  recreates as well.
+- The MCP conversation tools answer a guard 404 with `"Conversation not found"` and log it at debug. Before,
+  it fell into the generic handler, which logged an ERROR with a stack trace for every probed id.
 
 **NEW (audit trail readable after delete).** Audit entries are not deleted with a conversation, and the MCP
 `read_audit_trail` and `read_agent_logs` (conversation-scoped) tools passed the missing descriptor.
@@ -37,18 +55,29 @@ conversation sent as `READY` skipped the HITL cleanup. Any conversation sent as 
 forged `hitl.approval` cancellation to the audit trail.
 
 - Both now take `@RolesAllowed({"eddi-admin", "eddi-editor"})` plus EDIT access on the agent. That is the
-  same gate as undeploy, which already ends every active conversation of an agent.
-- `/end` reads only the conversation ids from the request. It takes each conversation's agent and state from
-  the stored snapshot and checks EDIT once per agent, for the whole batch before it ends anything, so a mixed list is refused rather than half-applied. Unknown and already ENDED conversations are skipped.
+  same gate as undeploy, which already ends every active conversation of an agent. **The EDIT check is enforced
+  only with workspaces on (`eddi.workspaces.enabled=true`, off by default).** Without it, the role is the
+  whole gate and any editor can list and end any agent's open conversations. That is the reach
+  undeploy-with-end already gives an editor, and a listed id grants nothing else, because every per-conversation
+  endpoint is owner-or-admin.
+- `/end` reads only the conversation ids from the request. It reads each conversation's state through the
+  state projection and its agent from the conversation descriptor (live or archived), without loading the
+  memory snapshot. Only a conversation with no descriptor at all falls back to the snapshot.
+- **Authorization is all-or-nothing:** EDIT is checked for every conversation's agent before anything is
+  ended. **Ending is per conversation and continues on error:** unknown and already ENDED ids are skipped.
   Every other conversation goes through `endConversation`, which decides server-side whether a pause is being
-  terminated. The old raw `setConversationState(ENDED)` for non-paused conversations also skipped the in-flight
-  signal and the state cache. A null body is a 400.
+  terminated and attributes it to the calling principal (`system:admin-end` only if there is no named caller).
+  The response body lists `ended`, `skipped` and `failed`, with status 200, or 500 if anything failed.
+  Marking the descriptor ENDED is best-effort, since the listing re-derives the state from the snapshot.
+  Undeploy-with-end now refuses to undeploy when the end reports a failure. The old raw
+  `setConversationState(ENDED)` for non-paused conversations also skipped the in-flight signal and the state
+  cache. A null body is a 400.
 
 **NEW (soft-deleted active conversation broke undeploy).** `getActiveConversations` read the live descriptor
 of every open conversation and threw NotFound for one that had been soft-deleted while open. That failed the
 listing, and undeploy-with-end with it (500), and any user could trigger it with their own conversation. It
 now falls back to the archived descriptor (`lastInteraction` null if neither exists). `endActiveConversations`
-likewise ends a descriptor-less conversation on its snapshot.
+likewise ends a soft-deleted conversation.
 
 **C1c: ownerless snapshot after a failed start.** `startConversation` stored the memory, then wrote the
 descriptor (which records the owner). If that write failed, the snapshot stayed with no owner on record. The
@@ -75,9 +104,14 @@ dereferenced the null snapshot the store returns for an unknown id. They now ans
 [`IRestConversationStore.java`](../../src/main/java/ai/labs/eddi/engine/memory/rest/IRestConversationStore.java),
 [`ConversationService.java`](../../src/main/java/ai/labs/eddi/engine/internal/ConversationService.java),
 [`RestAgentEngine.java`](../../src/main/java/ai/labs/eddi/engine/internal/RestAgentEngine.java),
-[`RestToolHistory.java`](../../src/main/java/ai/labs/eddi/modules/llm/rest/RestToolHistory.java), with
-regression tests in `ConversationAccessGuardTest`, `RestConversationStoreTest`, `RestAgentEngineTest`,
-`McpConversationToolsOwnershipTest`, `ConversationServiceTest` and `RestToolHistoryTest`.
+[`RestToolHistory.java`](../../src/main/java/ai/labs/eddi/modules/llm/rest/RestToolHistory.java),
+[`McpConversationTools.java`](../../src/main/java/ai/labs/eddi/engine/mcp/McpConversationTools.java),
+[`RestAgentManagement.java`](../../src/main/java/ai/labs/eddi/engine/internal/RestAgentManagement.java),
+[`RestAgentAdministration.java`](../../src/main/java/ai/labs/eddi/engine/internal/RestAgentAdministration.java),
+[`gdpr-compliance.md`](../gdpr-compliance.md), [`configuration-reference.md`](../configuration-reference.md).
+Regression tests are in `ConversationAccessGuardTest`, `RestConversationStoreTest`, `RestAgentEngineTest`,
+`McpConversationToolsOwnershipTest`, `McpConversationToolsTest`, `ConversationServiceTest`,
+`RestToolHistoryTest`, `RestAgentManagementExtendedTest` and `RestAgentAdministrationTest`.
 
 ```decision-log
 | 2026-09-26 | Conversation guard resolves the owner from the archived descriptor; no descriptor at all = 404 for non-admins | A soft delete left the snapshot readable and drivable by every authenticated caller | Admin-only `/active` + `/end` (editors undeploy and already end them all); deleting audit entries with the conversation (append-only ledger) |
