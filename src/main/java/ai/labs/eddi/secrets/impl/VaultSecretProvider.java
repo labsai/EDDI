@@ -8,6 +8,7 @@ import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.SealedDataRotationParticipant;
 import ai.labs.eddi.secrets.VaultStartupBanner;
 import ai.labs.eddi.secrets.crypto.EnvelopeCrypto;
+import ai.labs.eddi.secrets.crypto.VaultChecksum;
 import ai.labs.eddi.secrets.crypto.VaultMasterKeyStrength;
 import ai.labs.eddi.secrets.crypto.VaultSaltManager;
 import io.quarkus.runtime.LaunchMode;
@@ -90,6 +91,7 @@ public class VaultSecretProvider implements ISecretProvider {
     private final Instance<SealedDataRotationParticipant> rotationParticipants;
 
     private byte[] kek; // Key Encryption Key derived from master key
+    private byte[] checksumKey; // KEK-derived HMAC key for keyed secret checksums
     private boolean available = false;
 
     // ─── Metrics ───
@@ -176,6 +178,9 @@ public class VaultSecretProvider implements ISecretProvider {
         saltManager.initialize();
 
         this.kek = EnvelopeCrypto.deriveKeyFromString(masterKeyConfig.get(), saltManager.getSalt());
+        // Keyed-checksum key, domain-separated from the KEK's DEK-wrapping use. Derived
+        // once here so store()/matchesChecksum() never touch the KEK directly.
+        this.checksumKey = VaultChecksum.deriveKey(this.kek);
         this.available = true;
 
         if (saltManager.isUsingLegacySalt()) {
@@ -251,7 +256,11 @@ public class VaultSecretProvider implements ISecretProvider {
 
             // Encrypt the plaintext with the tenant's DEK
             EnvelopeCrypto.EncryptionResult result = EnvelopeCrypto.encrypt(plaintext, dek.key());
-            String checksum = EnvelopeCrypto.sha256Hex(plaintext);
+            // Keyed, tenant-bound checksum — never a plain SHA-256 an attacker with DB
+            // read access could brute-force offline or use to link equal values across
+            // rows/tenants. Legacy bare-SHA-256 rows keep verifying via matchesChecksum
+            // and migrate to this form the next time they are written.
+            String checksum = VaultChecksum.compute(checksumKey, reference.tenantId(), plaintext);
 
             // Check if this is an update (rotation) or new secret
             var existingOpt = persistence.findSecret(reference.tenantId(), reference.keyName());
@@ -370,6 +379,13 @@ public class VaultSecretProvider implements ISecretProvider {
             errorCounter.increment();
             throw new SecretProviderException("Persistence failure while listing secrets for tenant " + sanitize(tenantId), e);
         }
+    }
+
+    @Override
+    public boolean matchesChecksum(String tenantId, String storedChecksum, String plaintext) {
+        // Holds the keyed-checksum key, so it can verify both the current keyed form
+        // and legacy bare SHA-256 rows written before the upgrade.
+        return VaultChecksum.matches(checksumKey, tenantId, storedChecksum, plaintext);
     }
 
     @Override
@@ -644,8 +660,10 @@ public class VaultSecretProvider implements ISecretProvider {
                 saltManager.migrateSalt(newSalt);
             }
 
-            // Update our in-memory KEK to the new one
+            // Update our in-memory KEK to the new one, and re-derive the checksum key
+            // from it so newly written checksums use a key consistent with the new KEK.
             this.kek = newKek;
+            this.checksumKey = VaultChecksum.deriveKey(newKek);
 
             LOGGER.infof("KEK rotated: %d DEKs re-encrypted%s", allDeks.size(),
                     migratingFromLegacy ? " + salt migrated to per-deployment random" : "");

@@ -46,7 +46,6 @@ import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.TemplateEscaping;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.SecretResolver;
-import ai.labs.eddi.secrets.crypto.EnvelopeCrypto;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 import ai.labs.eddi.utils.LogSanitizer;
@@ -1316,7 +1315,7 @@ public class AgentSetupService {
         boolean haveNewPlaintext = key != null && !key.isEmpty() && !isVaultReference(key);
 
         if (existing != null) {
-            if (haveNewPlaintext && !EnvelopeCrypto.sha256Hex(key).equals(existing.checksum())) {
+            if (haveNewPlaintext && !secretProvider.matchesChecksum(ref.tenantId(), existing.checksum(), key)) {
                 throw new AgentSetupException("vaultKeyName '" + ref.keyName() + "' already holds a value that does not match the "
                         + "apiKey supplied. Setup will not overwrite it, because other agents may reference it. Use a different "
                         + "vaultKeyName, omit apiKey to reuse the stored value, or rotate the key through the secrets API first.");
@@ -1368,7 +1367,7 @@ public class AgentSetupService {
     private void verifyStoredValue(SecretReference ref, String expectedPlaintext) throws AgentSetupException {
         try {
             SecretMetadata written = secretProvider.getMetadata(ref);
-            if (written.checksum() != null && !EnvelopeCrypto.sha256Hex(expectedPlaintext).equals(written.checksum())) {
+            if (written.checksum() != null && !secretProvider.matchesChecksum(ref.tenantId(), written.checksum(), expectedPlaintext)) {
                 throw new AgentSetupException("Vault key '" + ref.keyName() + "' was written concurrently by another setup and now holds "
                         + "a different value. Nothing was created; retry, or choose a vaultKeyName that is not in contention.");
             }
@@ -1435,9 +1434,12 @@ public class AgentSetupService {
             return null;
         }
         try {
-            String checksum = EnvelopeCrypto.sha256Hex(plaintext);
+            // The stored checksum may be keyed (only the provider can verify it) or a
+            // legacy bare SHA-256, so match through the provider rather than computing a
+            // digest here — a caller no longer holds the checksum key.
             return secretProvider.listKeys(SecretReference.DEFAULT_TENANT).stream()
-                    .filter(metadata -> checksum.equals(metadata.checksum()))
+                    .filter(metadata -> secretProvider.matchesChecksum(
+                            metadata.tenantId() == null ? SecretReference.DEFAULT_TENANT : metadata.tenantId(), metadata.checksum(), plaintext))
                     .filter(AgentSetupService::isUnrestricted)
                     // Oldest first, key name as tie-break: repeated setups with the same key
                     // must converge on ONE entry, so the choice cannot depend on listing order.
