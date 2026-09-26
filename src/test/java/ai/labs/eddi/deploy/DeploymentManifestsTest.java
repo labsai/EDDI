@@ -3852,6 +3852,24 @@ class DeploymentManifestsTest {
             assertTrue(generated >= 0 && confirm.indexOf("Write-Fail", generated) > generated,
                     INSTALL_PS1 + ": a generated GRAFANA_ADMIN_PASSWORD that Grafana refuses must stop the "
                             + "install (Write-Fail) before Write-Success advertises it");
+            assertFalse(confirm.contains("-or (Test-GrafanaLogin $gBase \"admin\")"),
+                    INSTALL_PS1 + ": Confirm-GrafanaLogin treats a still-valid admin/admin login as confirmation. "
+                            + "When the change to GRAFANA_ADMIN_PASSWORD failed, admin/admin works and the "
+                            + "value in .env does not");
+            int updated = confirm.indexOf("Update-LegacyGrafanaLogin");
+            int configured = confirm.indexOf("Test-GrafanaLogin $gBase $GrafanaAdminSecret");
+            assertTrue(updated >= 0 && configured > updated
+                    && confirm.substring(updated, configured).replaceAll("#[^\n]*", "").contains("if ($script:GrafanaRotated) { return }")
+                    && countOccurrences(confirm.substring(updated, configured).replaceAll("#[^\n]*", ""), "return") == 1,
+                    INSTALL_PS1 + ": between the admin/admin change and the GRAFANA_ADMIN_PASSWORD check, "
+                            + "Confirm-GrafanaLogin may return only when the change succeeded");
+            assertEquals(2, countOccurrences(confirm, "if ($GrafanaPasswordGenerated) {"),
+                    INSTALL_PS1 + ": both refusals — a failed admin/admin change and a foreign password — must "
+                            + "stop the install when this run generated GRAFANA_ADMIN_PASSWORD");
+            assertTrue(functionBody(ps1, "function Repair-RunningStack {").contains("Confirm-GrafanaLogin"),
+                    INSTALL_PS1 + ": the already-running path no longer checks a stored GRAFANA_ADMIN_PASSWORD, "
+                            + "so the re-run that a failed admin/admin change tells the operator to do "
+                            + "retries nothing");
             assertTrue(functionBody(ps1, "function Resolve-StackCredential {").contains("$script:GrafanaPasswordGenerated = $true"),
                     INSTALL_PS1 + ": Resolve-StackCredential no longer records that it generated the Grafana "
                             + "password, so Confirm-GrafanaLogin cannot tell a fresh value from the operator's");
@@ -3866,6 +3884,12 @@ class DeploymentManifestsTest {
         @DisplayName("install.sh fails on a generated Grafana password nothing accepts, and only then")
         void shellConfirmsTheGrafanaLogin() throws Exception {
             String generated = "Gen3ratedPassw0rdGen3ratedPassw0";
+
+            String main = functionBody(read(INSTALL_SH), "main() {");
+            int runningBranch = main.indexOf("if [[ \"$EDDI_ALREADY_RUNNING\" == \"true\" ]]; then");
+            assertTrue(runningBranch >= 0 && main.substring(runningBranch, main.indexOf("exit 0", runningBranch)).contains("confirm_grafana_login"),
+                    INSTALL_SH + ": the already-running path no longer checks a stored GRAFANA_ADMIN_PASSWORD, so the "
+                            + "re-run that a failed admin/admin change tells the operator to do retries nothing");
 
             GrafanaRun fresh = runGrafanaConfirm(generated, generated, true);
             assertEquals(0, fresh.exitCode(), INSTALL_SH + " refused a Grafana that accepts GRAFANA_ADMIN_PASSWORD. " + fresh);
@@ -3891,7 +3915,32 @@ class DeploymentManifestsTest {
             assertTrue(stored.output().contains("does not accept GRAFANA_ADMIN_PASSWORD"),
                     INSTALL_SH + " said nothing about a GRAFANA_ADMIN_PASSWORD Grafana refuses. " + stored);
 
-            for (GrafanaRun run : List.of(fresh, legacy, foreign, stored)) {
+            // The legacy login is still valid but the change to the generated value
+            // failed: Grafana now rejects what .env says, so the install stops — and
+            // says how to recover, since .env keeps the value a re-run retries with.
+            GrafanaRun refused = runGrafanaConfirm("admin", generated, true, true, true);
+            assertNotEquals(0, refused.exitCode(),
+                    INSTALL_SH + " reached the success banner after Grafana refused the admin/admin change: "
+                            + "admin/admin still works and the generated GRAFANA_ADMIN_PASSWORD in .env does "
+                            + "not. " + refused);
+            assertTrue(refused.output().contains("re-run the installer to retry"),
+                    INSTALL_SH + " stopped on a refused admin/admin change without saying how to recover. " + refused);
+
+            GrafanaRun refusedStored = runGrafanaConfirm("admin", "StoredInEnvPassword", false, true, true);
+            assertEquals(0, refusedStored.exitCode(),
+                    INSTALL_SH + " failed on a refused admin/admin change for a password the operator supplied; "
+                            + "that is theirs to set, so it warns. " + refusedStored);
+            assertTrue(refusedStored.output().contains("could not change it to GRAFANA_ADMIN_PASSWORD"),
+                    INSTALL_SH + " said nothing when the admin/admin change failed. " + refusedStored);
+
+            // A generated password is alphanumeric, so a host without jq or python3
+            // can still send the change — rather than being stopped by the rule above.
+            GrafanaRun noTool = runGrafanaConfirm("admin", generated, true, false, false);
+            assertEquals(0, noTool.exitCode(), INSTALL_SH + " could not rotate admin/admin without jq or python3. " + noTool);
+            assertEquals(generated, noTool.acceptedAfter(),
+                    INSTALL_SH + " left admin/admin in place on a host without jq or python3. " + noTool);
+
+            for (GrafanaRun run : List.of(fresh, legacy, foreign, stored, refused, refusedStored, noTool)) {
                 assertFalse(run.curlArguments().contains(generated) || run.curlArguments().contains("StoredInEnvPassword"),
                         INSTALL_SH + " put the Grafana admin password on curl's command line, where the process "
                                 + "table shows it. " + run);
@@ -3908,10 +3957,26 @@ class DeploymentManifestsTest {
 
         private GrafanaRun runGrafanaConfirm(String grafanaAccepts, String envPassword, boolean generated)
                 throws IOException, InterruptedException {
+            return runGrafanaConfirm(grafanaAccepts, envPassword, generated, false, true);
+        }
+
+        /**
+         * @param refuseChange
+         *            the stand-in Grafana answers the password change with a 500 and
+         *            keeps its password
+         * @param withJsonTool
+         *            pass jq/python3 to the function, or nothing — a host with neither
+         */
+        private GrafanaRun runGrafanaConfirm(String grafanaAccepts, String envPassword, boolean generated,
+                                             boolean refuseChange, boolean withJsonTool)
+                throws IOException, InterruptedException {
             Path bash = locateBash();
             assumeTrue(bash != null, "no non-WSL bash available to run " + INSTALL_SH + "; CI's ubuntu-latest runner has one");
-            String jsonTool = locateOnPath("jq") != null ? "jq" : locateOnPath("python3") != null ? "python3" : null;
-            assumeTrue(jsonTool != null, "neither jq nor python3 is available; CI's ubuntu-latest runner has both");
+            String jsonTool = "";
+            if (withJsonTool) {
+                jsonTool = locateOnPath("jq") != null ? "jq" : locateOnPath("python3") != null ? "python3" : null;
+                assumeTrue(jsonTool != null, "neither jq nor python3 is available; CI's ubuntu-latest runner has both");
+            }
 
             String installer = read(INSTALL_SH);
             Path directory = Files.createDirectories(Path.of("target", "grafana-stub"));
@@ -3938,7 +4003,9 @@ class DeploymentManifestsTest {
                       */api/user) if [[ "$auth" == "$accepted" ]]; then printf 200; else printf 401; fi ;;
                       */api/user/password)
                         body=$(cat)
-                        if [[ "$auth" == "$accepted" ]]; then
+                        if [[ "$GRAFANA_STUB_REFUSE_CHANGE" == "true" ]]; then
+                          printf 500
+                        elif [[ "$auth" == "$accepted" ]]; then
                           printf '%s' "$body" | sed -n 's/.*"newPassword": *"\\([^"]*\\)".*/\\1/p' > "$GRAFANA_STUB_STATE"
                           printf 200
                         else
@@ -3957,13 +4024,14 @@ class DeploymentManifestsTest {
                     + "EDDI_DIR=/eddi-stub GRAFANA_PORT=3000\n"
                     + "GRAFANA_ADMIN_PASSWORD='" + envPassword + "'\n"
                     + "GRAFANA_PASSWORD_GENERATED=" + generated + "\n"
-                    + "confirm_grafana_login " + jsonTool + "\n", StandardCharsets.UTF_8);
+                    + "confirm_grafana_login \"" + jsonTool + "\"\n", StandardCharsets.UTF_8);
 
             String command = "cd \"" + slashed(directory) + "\" && PATH=\"$PWD:$PATH\" bash harness.sh";
             ProcessBuilder builder = new ProcessBuilder(bash.toString(), "-c", command);
             builder.redirectErrorStream(true);
             builder.environment().put("GRAFANA_STUB_STATE", slashed(state));
             builder.environment().put("GRAFANA_STUB_ARGV", slashed(argv));
+            builder.environment().put("GRAFANA_STUB_REFUSE_CHANGE", String.valueOf(refuseChange));
             Process process = builder.start();
             String output;
             try (var stream = process.getInputStream()) {

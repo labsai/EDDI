@@ -1993,15 +1993,17 @@ grafana_login_status() {
 #   - admin/admin accepted (a volume from before the compose file stopped
 #     hard-coding it): move it to GRAFANA_ADMIN_PASSWORD so .env tells the truth.
 #   - GRAFANA_ADMIN_PASSWORD accepted: nothing to do.
-#   - neither, and this run GENERATED the password: .env holds a value nothing
-#     answers to, so stop before the success banner advertises it. The stack is
-#     left running; the fix is to put the real password in .env and re-run.
-#   - neither, but the password came from .env or the environment: the operator
-#     chose it, and may have changed it in Grafana since — warn, do not fail.
+#   - otherwise — the admin/admin change failed, or Grafana has a password of
+#     its own — and this run GENERATED the value: .env holds a password nothing
+#     answers to, so stop before the success banner advertises it. EDDI is left
+#     running and .env keeps the generated value, so a re-run (which takes the
+#     already-running path and calls this again) can retry the change.
+#   - otherwise, but the password came from .env or the environment: the
+#     operator chose it, and may have changed it in Grafana since — warn only.
 # EDDI's readiness says nothing about Grafana's, so wait for Grafana first; one
 # that never answers is reported as unverified, not as a wrong password.
 confirm_grafana_login() {
-  local json_tool="$1" g_base="http://localhost:${GRAFANA_PORT:-3000}" g_status body waited=0
+  local json_tool="$1" g_base="http://localhost:${GRAFANA_PORT:-3000}" g_status body="" waited=0 rotation_failure=""
   until curl -sf -o /dev/null "${g_base}/api/health" 2>/dev/null; do
     if (( waited >= 60 )); then
       warn "Grafana did not answer on ${g_base} within 60s, so the installer could not confirm that it accepts GRAFANA_ADMIN_PASSWORD in ${EDDI_DIR}/.env."
@@ -2013,33 +2015,45 @@ confirm_grafana_login() {
 
   g_status=$(grafana_login_status "$g_base" admin admin)
   if [[ "$g_status" == "200" ]]; then
-    if [[ -z "$json_tool" ]]; then
-      warn "Grafana still accepts admin/admin, and without jq or python3 the installer cannot change it — set GRAFANA_ADMIN_PASSWORD from ${EDDI_DIR}/.env in Grafana's profile page."
-      return 0
-    fi
     if [[ "$json_tool" == "jq" ]]; then
       body=$(printf '%s' "$GRAFANA_ADMIN_PASSWORD" | jq -Rsc '{oldPassword: "admin", newPassword: ., confirmNew: .}' 2>/dev/null) || body=""
-    else
+    elif [[ "$json_tool" == "python3" ]]; then
       body=$(printf '%s' "$GRAFANA_ADMIN_PASSWORD" | python3 -c 'import sys, json; p = sys.stdin.read(); print(json.dumps({"oldPassword": "admin", "newPassword": p, "confirmNew": p}))' 2>/dev/null) || body=""
+    elif [[ "$GRAFANA_ADMIN_PASSWORD" =~ ^[A-Za-z0-9]+$ ]]; then
+      # A generated password is always alphanumeric, which needs no JSON
+      # escaping — so a host without jq or python3 can still be rotated.
+      body=$(printf '{"oldPassword":"admin","newPassword":"%s","confirmNew":"%s"}' "$GRAFANA_ADMIN_PASSWORD" "$GRAFANA_ADMIN_PASSWORD")
     fi
-    # The legacy login is built into a variable rather than written out as a
-    # curl -u literal, which secret scanners report as a leaked credential.
-    local legacy_auth
-    legacy_auth=$(printf '%s:%s' admin admin | base64 | tr -d '\n')
-    g_status=$(printf '%s' "$body" | curl -s -o /dev/null -w "%{http_code}" -X PUT \
-      -H "Authorization: Basic ${legacy_auth}" \
-      -H "Content-Type: application/json" --data-binary @- "${g_base}/api/user/password" 2>/dev/null) || g_status="000"
-    if [[ "$g_status" == "200" ]]; then
-      warn "Grafana still had the old admin/admin login — changed it to GRAFANA_ADMIN_PASSWORD in ${EDDI_DIR}/.env"
+    if [[ -z "$body" ]]; then
+      rotation_failure="without jq or python3 the installer cannot send this password to Grafana"
     else
-      warn "Grafana still accepts admin/admin and it could not be changed (HTTP ${g_status}) — change it in Grafana's profile page."
+      # The legacy login is built into a variable rather than written out as a
+      # curl -u literal, which secret scanners report as a leaked credential.
+      local legacy_auth
+      legacy_auth=$(printf '%s:%s' admin admin | base64 | tr -d '\n')
+      g_status=$(printf '%s' "$body" | curl -s -o /dev/null -w "%{http_code}" -X PUT \
+        -H "Authorization: Basic ${legacy_auth}" \
+        -H "Content-Type: application/json" --data-binary @- "${g_base}/api/user/password" 2>/dev/null) || g_status="000"
+      if [[ "$g_status" == "200" ]]; then
+        warn "Grafana still had the old admin/admin login — changed it to GRAFANA_ADMIN_PASSWORD in ${EDDI_DIR}/.env"
+        return 0
+      fi
+      rotation_failure="Grafana refused the change (HTTP ${g_status})"
     fi
-    return 0
   fi
 
+  # Whatever happened above, the only thing that matters now is whether the
+  # value in .env works — a change reported as failed may still have applied.
   g_status=$(grafana_login_status "$g_base" admin "$GRAFANA_ADMIN_PASSWORD")
   [[ "$g_status" == "200" ]] && return 0
 
+  if [[ -n "$rotation_failure" ]]; then
+    if [[ "$GRAFANA_PASSWORD_GENERATED" == "true" ]]; then
+      fail "Grafana still has the old admin/admin login, and the installer could not change it to the GRAFANA_ADMIN_PASSWORD it generated in ${EDDI_DIR}/.env: ${rotation_failure}.\n     EDDI is running, and .env keeps the generated value. Either re-run the installer to retry the change,\n     or log in to Grafana as admin/admin and set its password (profile page) to GRAFANA_ADMIN_PASSWORD from ${EDDI_DIR}/.env."
+    fi
+    warn "Grafana still accepts admin/admin, and the installer could not change it to GRAFANA_ADMIN_PASSWORD from ${EDDI_DIR}/.env: ${rotation_failure} — set it in Grafana's profile page."
+    return 0
+  fi
   if [[ "$GRAFANA_PASSWORD_GENERATED" == "true" ]]; then
     fail "GRAFANA_ADMIN_PASSWORD in ${EDDI_DIR}/.env was just generated, but this Grafana accepts neither it nor admin/admin (HTTP ${g_status}) — its grafana-data volume predates it and has its own admin password.\n     EDDI is running. Replace the value in ${EDDI_DIR}/.env with your Grafana admin password:\n       GRAFANA_ADMIN_PASSWORD='<your Grafana admin password>'\n     then re-run the installer."
   fi
@@ -2467,6 +2481,24 @@ CFGEOF
         ensure_stack_passwords_for_running_install "$running_json_tool"
       fi
       grep -q "docker-compose.monitoring.yml" "$EDDI_DIR/.eddi-config" 2>/dev/null && WITH_MONITORING=true
+    fi
+    # A stored GRAFANA_ADMIN_PASSWORD is checked too: a fresh install that
+    # stopped because the admin/admin change failed kept its generated value
+    # in .env and said to re-run — this is the retry. A value from .env counts
+    # as the operator's, so a mismatch here only warns.
+    if grep -q "docker-compose.monitoring.yml" "$EDDI_DIR/.eddi-config" 2>/dev/null \
+       && [[ -n "$(env_file_value GRAFANA_ADMIN_PASSWORD)" ]]; then
+      local running_grafana_port running_grafana_tool=""
+      WITH_MONITORING=true
+      running_grafana_port=$(env_file_value GRAFANA_PORT)
+      GRAFANA_PORT="${running_grafana_port:-$GRAFANA_PORT}"
+      GRAFANA_ADMIN_PASSWORD=$(env_file_value GRAFANA_ADMIN_PASSWORD)
+      if command -v jq &>/dev/null; then
+        running_grafana_tool="jq"
+      elif command -v python3 &>/dev/null; then
+        running_grafana_tool="python3"
+      fi
+      [[ "$GRAFANA_ADMIN_PASSWORD" == "admin" ]] || confirm_grafana_login "$running_grafana_tool"
     fi
     repair_running_keycloak
     install_cli_wrapper

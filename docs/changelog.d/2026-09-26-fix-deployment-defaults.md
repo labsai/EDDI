@@ -126,6 +126,18 @@ and the installers warn when auth and monitoring are combined.
 - **Checked, not changed:** the review's other finding, that `.env` is written before `resolve_stack_passwords` generates the Grafana password, does not hold. `.env` is written in `resolve_compose_files`, which `main()` calls after `resolve_stack_passwords`. `install.ps1` has the same order (`Resolve-StackCredential`, then `Get-ComposeFiles`). There is no `write_env`; a comment that named one now names `resolve_compose_files`.
 - **Tests:** `DeploymentManifestsTest.InstallerGrafanaCredential` pins both installers' order: passwords resolved, then `.env` written, then Compose started. It also pins that `install.ps1` confirms the Grafana login between `Wait-ForReady` and `Write-Success`. It runs `install.sh`'s two Grafana functions against a stand-in `curl` that plays a Grafana: a matching password, a legacy `admin`/`admin` volume (rotated), a foreign password with a generated value (stops) and with a stored one (warns). It also asserts that no password reached curl's argv. All three tests failed with the fix reverted. The PowerShell side is checked structurally only: no `pwsh` was available locally, and `Invoke-RestMethod` cannot be stubbed from PATH.
 
+### Third review follow-up (same day)
+
+- **A failed `admin`/`admin` change no longer counts as confirmation.** In `install.sh`, a refused change only warned and returned. In `install.ps1`, a still-valid `admin`/`admin` login returned before `GRAFANA_ADMIN_PASSWORD` was tested. Either way the install reached the success banner with a password Grafana rejects. Both installers now return early only when the change succeeded. Otherwise they check the value in `.env`, since a change reported as failed may still have applied. When it is refused, they apply the same rule as before: a password generated this run stops the install, and an operator-supplied one only warns. The stop message says how to recover. EDDI stays running, and `.env` keeps the generated value, so the operator can re-run the installer or set the password in Grafana's profile page.
+- **The re-run retries.** The already-running path used to check Grafana only when `.env` had no password. It now also checks a stored one, with a mismatch warning only, so the re-run that message asks for attempts the change again. The Grafana port is read from `.env` for that check.
+- **No jq or python3:** `install.sh` builds the change request by hand when the password is alphanumeric, which every generated one is. So a host without either tool can still move `admin`/`admin` to the generated value instead of hitting the stop.
+- **Tests:** `shellConfirmsTheGrafanaLogin` gains three runs against the stand-in `curl`:
+  - a refused change with a generated password (stops, and names the re-run);
+  - a refused change with a stored password (warns);
+  - a rotation with no JSON tool.
+
+  Both installers are now checked for calling the Grafana check on the already-running path. `install.ps1` is checked for returning only on a successful change, and for stopping on both refusals when the password was generated. Five mutations, each reverting one of these, each failed a test.
+
 ### Deferred / partial
 
 - M-F3's second half: the Chat UI never strips `?token=` from the URL. That is a

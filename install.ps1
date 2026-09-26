@@ -1228,6 +1228,11 @@ function Repair-RunningStack {
         $stored = Get-EnvFileValue "GRAFANA_ADMIN_PASSWORD"
         if ($stored) {
             $script:GrafanaAdminSecret = $stored
+            # A fresh install that stopped because the admin/admin change failed
+            # kept its generated value in .env and said to re-run: this is the
+            # retry. A value from .env counts as the operator's, so a mismatch
+            # here only warns.
+            Confirm-GrafanaLogin
         }
         else {
             if (-not $script:GrafanaAdminSecret) { $script:GrafanaAdminSecret = Get-StackPassword }
@@ -1286,10 +1291,12 @@ function Test-GrafanaLogin([string]$GrafanaBase, [string]$Secret) {
 #   - admin/admin accepted: Update-LegacyGrafanaLogin moves it to
 #     GRAFANA_ADMIN_PASSWORD.
 #   - GRAFANA_ADMIN_PASSWORD accepted: nothing to do.
-#   - neither, and this run GENERATED the password: .env holds a value nothing
-#     answers to, so stop before Write-Success advertises it. The stack stays
-#     up; the fix is to put the real password in .env and re-run.
-#   - neither, but the password came from .env or the environment: the
+#   - otherwise -- the admin/admin change failed, or Grafana has a password of
+#     its own -- and this run GENERATED the value: .env holds a password
+#     nothing answers to, so stop before Write-Success advertises it. The stack
+#     stays up and .env keeps the generated value, so a re-run (the
+#     already-running path, which calls this again) can retry the change.
+#   - otherwise, but the password came from .env or the environment: the
 #     operator chose it and may have changed it in Grafana since -- warn only.
 # EDDI's readiness says nothing about Grafana's, so wait for Grafana first; one
 # that never answers is reported as unverified, not as a wrong password.
@@ -1314,12 +1321,22 @@ function Confirm-GrafanaLogin {
         return
     }
     $script:GrafanaRotated = $false
-    Update-LegacyGrafanaLogin
-    if ($script:GrafanaRotated -or (Test-GrafanaLogin $gBase "admin")) {
-        # Rotated, or still on admin/admin with the change refused (already warned).
+    $legacyLogin = Test-GrafanaLogin $gBase "admin"
+    if ($legacyLogin) {
+        Update-LegacyGrafanaLogin
+        if ($script:GrafanaRotated) { return }
+    }
+    # Whatever happened above, what matters is whether the value in .env works:
+    # a change reported as failed may still have applied, and a still-valid
+    # admin/admin login says nothing about GRAFANA_ADMIN_PASSWORD.
+    if (Test-GrafanaLogin $gBase $GrafanaAdminSecret) { return }
+    if ($legacyLogin) {
+        if ($GrafanaPasswordGenerated) {
+            Write-Fail "Grafana still has the old admin/admin login, and the installer could not change it to the GRAFANA_ADMIN_PASSWORD it generated in $EddiDir\.env. EDDI is running, and .env keeps the generated value. Either re-run the installer to retry the change, or log in to Grafana as admin/admin and set its password (profile page) to GRAFANA_ADMIN_PASSWORD from $EddiDir\.env."
+        }
+        Write-Warn "Grafana still accepts admin/admin, and the installer could not change it to GRAFANA_ADMIN_PASSWORD from $EddiDir\.env -- set it in Grafana's profile page."
         return
     }
-    if (Test-GrafanaLogin $gBase $GrafanaAdminSecret) { return }
     if ($GrafanaPasswordGenerated) {
         Write-Fail "GRAFANA_ADMIN_PASSWORD in $EddiDir\.env was just generated, but this Grafana accepts neither it nor admin/admin -- its grafana-data volume predates it and has its own admin password. EDDI is running. Replace the value in $EddiDir\.env with your Grafana admin password (GRAFANA_ADMIN_PASSWORD='<your Grafana admin password>') and re-run the installer."
     }
