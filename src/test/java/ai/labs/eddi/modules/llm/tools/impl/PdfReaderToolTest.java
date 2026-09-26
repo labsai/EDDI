@@ -297,6 +297,15 @@ class PdfReaderToolTest {
         }
 
         @Test
+        @org.junit.jupiter.api.DisplayName("an unusable configured limit fails at startup, naming the property")
+        void unusableLimitFailsAtStartup() {
+            PdfReaderTool tool = new PdfReaderTool(org.mockito.Mockito.mock(SafeHttpClient.class), new AttachmentTextExtractor(10000));
+            tool.maxDownloadBytes = -1;
+            IllegalArgumentException e = assertThrows(IllegalArgumentException.class, tool::validateLimits);
+            assertTrue(e.getMessage().contains("eddi.tools.pdf-reader.max-download-bytes"), e.getMessage());
+        }
+
+        @Test
         @org.junit.jupiter.api.DisplayName("an oversized PDF is reported as an error, not an OutOfMemoryError")
         void oversizedIsAnError() throws Exception {
             SafeHttpClient client = org.mockito.Mockito.mock(SafeHttpClient.class);

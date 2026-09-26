@@ -21,6 +21,7 @@ import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
@@ -142,6 +143,13 @@ class SafeHttpClientBodyBoundsTest {
         ResponseTooLargeException e = assertThrows(ResponseTooLargeException.class,
                 () -> client.send(request, BoundedBodyHandlers.ofString(256 * 1024)));
         assertEquals(256 * 1024, e.getLimit());
+        // Created on the client's executor: the caller's own frames ride along as a
+        // suppressed exception, so a log shows who made the call.
+        boolean callerFramesAttached = Arrays.stream(e.getSuppressed())
+                .filter(SafeHttpClient.CallerFrames.class::isInstance)
+                .flatMap(s -> Arrays.stream(s.getStackTrace()))
+                .anyMatch(frame -> frame.getClassName().startsWith(SafeHttpClientBodyBoundsTest.class.getName()));
+        assertTrue(callerFramesAttached, "the caller's stack frames must be attached to the rethrown exception");
     }
 
     @Test

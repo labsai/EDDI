@@ -231,11 +231,19 @@ public class SafeHttpClient {
      * {@link BoundedBodyHandlers.ResponseTooLargeException} or
      * {@link HttpTimeoutException} by type), an unchecked exception or error as is,
      * anything else wrapped.
+     * <p>
+     * The failure was created on the client's executor thread, so its own stack
+     * trace holds only selector and executor frames. Rather than re-create it as
+     * the JDK's synchronous {@code send} does, which would lose the specific type,
+     * the caller's frames are attached as a suppressed {@link CallerFrames}.
      */
     private static IOException unwrap(ExecutionException e) {
         Throwable cause = e.getCause();
         while ((cause instanceof CompletionException || cause instanceof ExecutionException) && cause.getCause() != null) {
             cause = cause.getCause();
+        }
+        if (cause instanceof IOException || cause instanceof RuntimeException) {
+            cause.addSuppressed(new CallerFrames());
         }
         if (cause instanceof IOException io) {
             return io;
@@ -247,6 +255,16 @@ public class SafeHttpClient {
             throw error;
         }
         return new IOException(cause != null ? cause.getMessage() : e.getMessage(), cause);
+    }
+
+    /**
+     * Carries the calling thread's stack trace into an exception thrown on the HTTP
+     * client's executor — see {@link #unwrap}.
+     */
+    static final class CallerFrames extends Exception {
+        CallerFrames() {
+            super("rethrown to the caller of SafeHttpClient");
+        }
     }
 
     /**

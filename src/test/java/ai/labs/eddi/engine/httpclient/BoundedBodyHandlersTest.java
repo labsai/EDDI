@@ -83,6 +83,15 @@ class BoundedBodyHandlersTest {
     }
 
     @Test
+    @DisplayName("a configured limit is validated with the property's name in the message")
+    void configuredLimitValidation() {
+        assertEquals(1024, BoundedBodyHandlers.requireValidLimit("eddi.x", 1024));
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                () -> BoundedBodyHandlers.requireValidLimit("eddi.tools.pdf-reader.max-download-bytes", -5));
+        assertTrue(e.getMessage().contains("eddi.tools.pdf-reader.max-download-bytes"), e.getMessage());
+    }
+
+    @Test
     @DisplayName("the charset comes from Content-Type, defaulting to UTF-8 when absent or unknown")
     void charset() {
         assertEquals(StandardCharsets.ISO_8859_1, BoundedBodyHandlers.charsetFrom(headers("text/html; charset=ISO-8859-1")));

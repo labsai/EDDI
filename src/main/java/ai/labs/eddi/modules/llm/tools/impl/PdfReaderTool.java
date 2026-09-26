@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.httpclient.SafeHttpClient;
 import ai.labs.eddi.modules.llm.tools.impl.AttachmentTextExtractor.PdfInfo;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
+import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -33,6 +34,14 @@ import static ai.labs.eddi.modules.llm.tools.UrlValidationUtils.validateUrl;
 @ApplicationScoped
 public class PdfReaderTool {
     private static final Logger LOGGER = Logger.getLogger(PdfReaderTool.class);
+    /**
+     * Wall-clock budget for one download, body included. {@code SafeHttpClient}
+     * honours a request timeout above its 30 s default budget, and a 25 MiB scanned
+     * PDF from a slow server needs one: at 30 s it would need about 7 Mbit/s
+     * sustained.
+     */
+    static final Duration DOWNLOAD_TIMEOUT = Duration.ofSeconds(120);
+
     /** Default for {@link #maxDownloadBytes}: 25 MiB. */
     static final long DEFAULT_MAX_DOWNLOAD_BYTES = 25L * 1024 * 1024;
 
@@ -48,6 +57,16 @@ public class PdfReaderTool {
      */
     @ConfigProperty(name = "eddi.tools.pdf-reader.max-download-bytes", defaultValue = "26214400")
     long maxDownloadBytes = DEFAULT_MAX_DOWNLOAD_BYTES;
+
+    /**
+     * Fails the deployment at startup on an unusable
+     * {@code eddi.tools.pdf-reader.max-download-bytes}, instead of every call at
+     * call time.
+     */
+    @PostConstruct
+    void validateLimits() {
+        BoundedBodyHandlers.requireValidLimit("eddi.tools.pdf-reader.max-download-bytes", maxDownloadBytes);
+    }
 
     @Inject
     public PdfReaderTool(SafeHttpClient httpClient, AttachmentTextExtractor textExtractor) {
@@ -135,7 +154,7 @@ public class PdfReaderTool {
     private byte[] downloadPdfBytes(String url) throws IOException, InterruptedException {
         LOGGER.debug("Downloading PDF from URL: " + url);
 
-        HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(30))
+        HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).timeout(DOWNLOAD_TIMEOUT)
                 .header("User-Agent", "Mozilla/5.0 (EDDI-Agent/1.0)").GET().build();
 
         HttpResponse<byte[]> response = httpClient.send(request, BoundedBodyHandlers.ofByteArray(maxDownloadBytes));
