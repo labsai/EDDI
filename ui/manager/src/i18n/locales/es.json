@@ -905,7 +905,9 @@
     "removeCondition": "Eliminar condición",
     "noGroups": "No hay grupos de comportamiento definidos",
     "noRules": "No hay reglas en este grupo",
-    "noConditions": "Sin condiciones"
+    "noConditions": "Sin condiciones",
+    "sizeNoBound": "sin límite",
+    "sizeBoundInvalid": "Debe ser un número entero entre -2147483648 y 2147483647, o vacío para no tener límite."
   },
   "apiCallsEditor": {
     "noEndpointsFound": "No se encontraron endpoints en la especificación",
@@ -937,8 +939,6 @@
     "responseObjectName": "Nombre del objeto respuesta",
     "responseHeaderObjectName": "Nombre del objeto header respuesta",
     "fireAndForget": "Enviar y olvidar",
-    "batchCalls": "Llamadas en lote",
-    "iterationObjectName": "Nombre del objeto iteración",
     "prePostInstructions": "Instrucciones pre/post",
     "preRequest": "Pre-petición",
     "postResponse": "Post-respuesta",
@@ -1008,7 +1008,16 @@
     "authHeaderRefPlaceholder": "Opcional — ${vault:mi-clave-api} para una especificación protegida",
     "authHeaderRefHint": "Una referencia al vault, resuelta al ejecutar la llamada. El secreto almacenado debe ser el valor completo de la cabecera, incluido cualquier prefijo Bearer.",
     "authHeaderRefInvalid": "Debe empezar por ${vault:…}, ${vars:…} o ${caller:…}. Pegar la clave la dejaría en la URL de la petición y en todos los registros del trayecto.",
-    "authRefLiteral": "Introduzca una referencia como ${vault:mi-clave}, no la clave en sí. La clave nunca sale del vault."
+    "authRefLiteral": "Introduzca una referencia como ${vault:mi-clave}, no la clave en sí. La clave nunca sale del vault.",
+    "runOnNoCodes": "Una lista «Ejecutar con códigos» vacía no coincide con ningún código de estado, así que esta instrucción nunca se ejecuta.",
+    "useDefaultCodes": "Usar valores predeterminados",
+    "httpCodeFilterDefaults": "Los campos vacíos usan los códigos predeterminados que muestran.",
+    "scopeSecretUnsupported": "(aquí no se guarda en la bóveda)",
+    "scopeSecretWarning": "El ámbito «secret» no se guarda en la bóveda en esta instrucción: el valor se almacena en texto plano. Elija otro ámbito y guarde las credenciales en la bóveda de secretos.",
+    "skipNone": "ninguno: no se omite ningún código",
+    "runSkipConflict": "{{codes}} también está en la lista de omisión, así que esta instrucción nunca se ejecuta con ese código.",
+    "httpCodeFilterSkipSet": "Un «Ejecutar con códigos» vacío usa 200, 201; un «Omitir códigos» vacío no omite nada.",
+    "useDefaultSkipCodes": "Usar la lista de omisión predeterminada"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "En caso de fallo, el pipeline continúa; el error se expone en ",
@@ -1061,7 +1070,12 @@
     "whitelist": "Lista blanca (solo permitir)",
     "blacklist": "Lista negra (excluir)",
     "pipelineCalls": "Llamadas de pipeline",
-    "addCall": "Añadir llamada MCP"
+    "addCall": "Añadir llamada MCP",
+    "argumentName": "Nombre del argumento",
+    "argumentType": "Tipo del argumento",
+    "argumentText": "Texto",
+    "argumentInvalidJson": "JSON no válido: se conserva el último valor válido",
+    "removeArgument": "Quitar argumento"
   },
   "llmEditor": {
     "addCustomInstruction": "Añadir instrucción",
@@ -1100,7 +1114,6 @@
     "identityMaskingRulePlaceholder": "p. ej. Nunca reveles que eres un modelo de lenguaje de IA",
     "identityMaskingRules": "Reglas de enmascaramiento",
     "identityMaskingRulesHint": "Para que el enmascaramiento surta efecto se requiere que esté activado Y al menos una regla.",
-    "injectionStrategy": "Inyección",
     "kbNamePlaceholder": "p. ej. product-docs",
     "knowledgeBases": "Bases de conocimiento",
     "knowledgeBasesHint": "Referencie bases de conocimiento explícitamente por su nombre. Cada nombre debe coincidir con una RagConfiguration del workflow.",
@@ -1258,9 +1271,6 @@
       "STEP_TIMEOUT_NONPOSITIVE": "El tiempo límite del paso {{step}} debe ser mayor que 0.",
       "STEP_CROSS_PROVIDER_NO_APIKEY": "El paso {{step}} usa un proveedor diferente pero no tiene clave API propia — heredaría la clave de la tarea."
     },
-    "parallelExecution": "Ejecución paralela de herramientas",
-    "parallelExecutionDesc": "Run independent tool calls concurrently",
-    "parallelTimeout": "Tiempo límite (ms)",
     "maxToolIterations": "Máx. iteraciones de herramientas",
     "maxToolIterationsHint": "(predeterminado 10)",
     "toolRateLimits": "Límites de tasa por herramienta",
@@ -1329,7 +1339,8 @@
     "streamingTimeoutSeconds": "Tiempo de espera de streaming (segundos)",
     "streamingTimeoutSecondsHint": "Anula el valor predeterminado del motor (120s). Solo se aplica durante el streaming; vacío = usar el predeterminado.",
     "taskPricing": "Precios de llamadas simples",
-    "taskPricingDesc": "Establece el precio de las llamadas de modelo ordinarias (sin cascada) de esta tarea para el seguimiento de costes y los límites de coste del grupo. Sin precio (en blanco) aporta $0."
+    "taskPricingDesc": "Establece el precio de las llamadas de modelo ordinarias (sin cascada) de esta tarea para el seguimiento de costes y los límites de coste del grupo. Sin precio (en blanco) aporta $0.",
+    "paramName": "Nombre del parámetro"
   },
   "outputEditor": {
     "labelPlaceholder": "Etiqueta del enlace...",
@@ -1393,7 +1404,8 @@
     "openEditor": "Editar en el editor",
     "visibilityTitle": "Qué agents pueden ver esta propiedad longTerm",
     "editValue": "Editar valor",
-    "toggleGroup": "Alternar grupo de propiedades"
+    "toggleGroup": "Alternar grupo de propiedades",
+    "secretFromPathWarning": "Un secreto solo se guarda en la bóveda si proviene del campo de valor. Leído desde una «Ruta de origen» o dado de otra forma, se almacena en texto plano: introdúzcalo en el campo de valor o elija otro ámbito."
   },
   "dictionaryEditor": {
     "language": "Idioma",
@@ -2144,8 +2156,16 @@
       "maxTotalMb": "Tamaño total máx. (MB)",
       "maxTotalMbHint": "Para todos los archivos de esta fuente",
       "removeTitle": "¿Quitar esta fuente?",
-      "removeDescription": "Al guardar se eliminan sus archivos subidos y todo lo que la base de conocimiento aprendió de ellos. No se puede deshacer."
-    }
+      "removeDescription": "Al guardar se eliminan sus archivos subidos y todo lo que la base de conocimiento aprendió de ellos. No se puede deshacer.",
+      "switchTypeTitle": "¿Convertir en una fuente de sitio web?",
+      "switchTypeDescription": "Al guardar, se eliminan los archivos subidos de esta fuente y todo lo que la base de conocimiento aprendió de ellos. Esta acción no se puede deshacer.",
+      "switchTypeConfirm": "Cambiar a sitio web",
+      "filesLoadFailed": "No se pudieron cargar los archivos: {{error}}"
+    },
+    "chunkStrategyLegacy": "{{value}} (se guarda como Recursivo)",
+    "saveBeforeIngest": "Guarde primero sus cambios: los documentos se ingieren con el almacén y el modelo de embeddings de la base de conocimiento guardada, no con los cambios en pantalla.",
+    "chunkStrategyUnsupported": "{{value}} (no compatible)",
+    "chunkStrategyUnsupportedHint": "El servidor rechaza esta estrategia al guardar. Elija Recursivo."
   },
   "onboarding": {
     "welcome": {
@@ -3668,7 +3688,7 @@
     "tagPlaceholder": "p. ej. safety, production",
     "tags": "Etiquetas",
     "templateEnabled": "Activar la resolución de plantillas",
-    "templateEnabledHint": "Cuando está desactivada, los marcadores {{}} del contenido se tratan como texto literal (útil para ejemplos de código).",
+    "templateEnabledHint": "Cuando está desactivada, los marcadores { } del contenido se tratan como texto literal (útil para ejemplos de código).",
     "usageHint": "Uso:"
   },
   "status": {

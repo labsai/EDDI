@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { NumberInput } from "../number-input";
 import { ScrollText, RotateCcw } from "lucide-react";
 import { EditorSection } from "../editor-section";
 import { ContentEditor } from "../content-editor";
@@ -30,13 +31,12 @@ export function TaskMemorySection({ task, onChange, readOnly }: TaskSectionProps
               <label className="mb-0.5 block text-[10px] text-muted-foreground">
                 {t("llmEditor.maxContextTokens", "Max Context Tokens")}
               </label>
-              <input
-                type="number"
-                value={task.maxContextTokens ?? -1}
-                onChange={(e) =>
+              <NumberInput placeholder="-1" integer
+                value={task.maxContextTokens}
+                onChange={(v) =>
                   onChange({
                     ...task,
-                    maxContextTokens: parseInt(e.target.value, 10) || -1,
+                    maxContextTokens: v,
                   })
                 }
                 readOnly={readOnly}
@@ -51,13 +51,12 @@ export function TaskMemorySection({ task, onChange, readOnly }: TaskSectionProps
               <label className="mb-0.5 block text-[10px] text-muted-foreground">
                 {t("llmEditor.anchorFirstSteps", "Anchor First Steps")}
               </label>
-              <input
-                type="number"
-                value={task.anchorFirstSteps ?? 2}
-                onChange={(e) =>
+              <NumberInput placeholder="2" integer
+                value={task.anchorFirstSteps}
+                onChange={(v) =>
                   onChange({
                     ...task,
-                    anchorFirstSteps: parseInt(e.target.value, 10) || 0,
+                    anchorFirstSteps: v,
                   })
                 }
                 readOnly={readOnly}
@@ -163,15 +162,14 @@ export function TaskMemorySection({ task, onChange, readOnly }: TaskSectionProps
                   <label className="mb-0.5 block text-[10px] text-muted-foreground">
                     {t("llmEditor.recentWindow", "Recent Window (steps)")}
                   </label>
-                  <input
-                    type="number"
-                    value={task.conversationSummary.recentWindowSteps ?? 5}
-                    onChange={(e) =>
+                  <NumberInput placeholder="5" integer
+                    value={task.conversationSummary.recentWindowSteps}
+                    onChange={(v) =>
                       onChange({
                         ...task,
                         conversationSummary: {
                           ...task.conversationSummary!,
-                          recentWindowSteps: parseInt(e.target.value, 10) || 5,
+                          recentWindowSteps: v,
                         },
                       })
                     }
@@ -186,15 +184,14 @@ export function TaskMemorySection({ task, onChange, readOnly }: TaskSectionProps
                   <label className="mb-0.5 block text-[10px] text-muted-foreground">
                     {t("llmEditor.maxRecallTurns", "Max Recall Turns")}
                   </label>
-                  <input
-                    type="number"
-                    value={task.conversationSummary.maxRecallTurns ?? 20}
-                    onChange={(e) =>
+                  <NumberInput placeholder="20" integer
+                    value={task.conversationSummary.maxRecallTurns}
+                    onChange={(v) =>
                       onChange({
                         ...task,
                         conversationSummary: {
                           ...task.conversationSummary!,
-                          maxRecallTurns: parseInt(e.target.value, 10) || 20,
+                          maxRecallTurns: v,
                         },
                       })
                     }
@@ -209,15 +206,14 @@ export function TaskMemorySection({ task, onChange, readOnly }: TaskSectionProps
                   <label className="mb-0.5 block text-[10px] text-muted-foreground">
                     {t("llmEditor.maxSummaryTokens", "Max Summary Tokens")}
                   </label>
-                  <input
-                    type="number"
-                    value={task.conversationSummary.maxSummaryTokens ?? 800}
-                    onChange={(e) =>
+                  <NumberInput placeholder="800" integer
+                    value={task.conversationSummary.maxSummaryTokens}
+                    onChange={(v) =>
                       onChange({
                         ...task,
                         conversationSummary: {
                           ...task.conversationSummary!,
-                          maxSummaryTokens: parseInt(e.target.value, 10) || 800,
+                          maxSummaryTokens: v,
                         },
                       })
                     }
@@ -295,11 +291,10 @@ export function TaskMemorySection({ task, onChange, readOnly }: TaskSectionProps
                 <RotateCcw className="inline h-3 w-3 me-1" />
                 {t("llmEditor.retryMaxAttempts", "Max Attempts")}
               </label>
-              <input
-                type="number"
-                value={task.retry?.maxAttempts ?? 3}
-                onChange={(e) =>
-                  onChange({ ...task, retry: { ...task.retry, maxAttempts: parseInt(e.target.value, 10) || 1 } })
+              <NumberInput placeholder="3" integer
+                value={task.retry?.maxAttempts}
+                onChange={(v) =>
+                  onChange({ ...task, retry: { ...task.retry, maxAttempts: v } })
                 }
                 readOnly={readOnly}
                 className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
@@ -309,11 +304,10 @@ export function TaskMemorySection({ task, onChange, readOnly }: TaskSectionProps
               <label className="mb-0.5 block text-[10px] text-muted-foreground">
                 {t("llmEditor.retryDelay", "Initial Delay (ms)")}
               </label>
-              <input
-                type="number"
-                value={task.retry?.backoffDelayMs ?? 1000}
-                onChange={(e) =>
-                  onChange({ ...task, retry: { ...task.retry, backoffDelayMs: parseInt(e.target.value, 10) || 0 } })
+              <NumberInput placeholder="1000" integer
+                value={task.retry?.backoffDelayMs}
+                onChange={(v) =>
+                  onChange({ ...task, retry: { ...task.retry, backoffDelayMs: v } })
                 }
                 readOnly={readOnly}
                 className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
@@ -323,12 +317,11 @@ export function TaskMemorySection({ task, onChange, readOnly }: TaskSectionProps
               <label className="mb-0.5 block text-[10px] text-muted-foreground">
                 {t("llmEditor.retryMultiplier", "Backoff Multiplier")}
               </label>
-              <input
-                type="number"
+              <NumberInput placeholder="2.0"
                 step="0.1"
-                value={task.retry?.backoffMultiplier ?? 2.0}
-                onChange={(e) =>
-                  onChange({ ...task, retry: { ...task.retry, backoffMultiplier: parseFloat(e.target.value) || 1.0 } })
+                value={task.retry?.backoffMultiplier}
+                onChange={(v) =>
+                  onChange({ ...task, retry: { ...task.retry, backoffMultiplier: v } })
                 }
                 readOnly={readOnly}
                 className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
@@ -338,11 +331,10 @@ export function TaskMemorySection({ task, onChange, readOnly }: TaskSectionProps
               <label className="mb-0.5 block text-[10px] text-muted-foreground">
                 {t("llmEditor.retryMaxDelay", "Max Delay (ms)")}
               </label>
-              <input
-                type="number"
-                value={task.retry?.maxBackoffDelayMs ?? 10000}
-                onChange={(e) =>
-                  onChange({ ...task, retry: { ...task.retry, maxBackoffDelayMs: parseInt(e.target.value, 10) || 0 } })
+              <NumberInput placeholder="10000" integer
+                value={task.retry?.maxBackoffDelayMs}
+                onChange={(v) =>
+                  onChange({ ...task, retry: { ...task.retry, maxBackoffDelayMs: v } })
                 }
                 readOnly={readOnly}
                 className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"

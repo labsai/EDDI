@@ -22,12 +22,34 @@ export interface PropertyInstruction {
   valueInt?: number;
   valueFloat?: number;
   valueBoolean?: boolean;
+  /** Edited in the JSON tab only; carried through the form untouched. */
+  valueObject?: Record<string, unknown>;
+  valueList?: unknown[];
   scope?: "step" | "conversation" | "longTerm" | "secret";
   visibility?: "self" | "group" | "global";
   fromObjectPath?: string;
   toObjectPath?: string;
   override?: boolean;
   convertToObject?: boolean;
+}
+
+/**
+ * Whether PropertySetterTask would store this `secret` row without vaulting it.
+ * Only a non-empty `valueString` goes through `autoVaultSecret`; a
+ * `fromObjectPath` read, or a `valueObject` / `valueList` / number / boolean
+ * value, is stored under the scope as-is. A typed value is written after the
+ * vaulted string and replaces it, so a row carrying both still ends up in
+ * plain text — the typed fields are checked before `valueString`.
+ */
+function storesSecretInPlainText(prop: PropertyInstruction): boolean {
+  if (prop.fromObjectPath?.trim()) return true;
+  return (
+    prop.valueObject != null ||
+    prop.valueList != null ||
+    prop.valueInt != null ||
+    prop.valueFloat != null ||
+    prop.valueBoolean != null
+  );
 }
 
 export interface SetOnActions {
@@ -154,6 +176,17 @@ function PropertyRow({
           </button>
         )}
       </div>
+      {/* PropertySetterTask vaults a secret only on the valueString path; a
+          value read through fromObjectPath, or given as valueObject /
+          valueList / a number or boolean, is stored under the scope as-is. */}
+      {prop.scope === "secret" && storesSecretInPlainText(prop) && (
+        <p className="ps-2 text-[10px] text-amber-700 dark:text-amber-400" role="alert" data-testid="property-secret-from-path-warning">
+          {t(
+            "propertySetterEditor.secretFromPathWarning",
+            "A secret is vaulted only when it comes from the value field. Read from a \"From path\" or given any other way, it is stored in plain text — enter it in the value field or choose another scope.",
+          )}
+        </p>
+      )}
 
       {/* Monaco editor modal */}
       {showEditor && (
@@ -274,11 +307,11 @@ function SetterEditor({
           {expanded ? <ChevronDown className="h-4 w-4" aria-hidden="true" /> : <ChevronRight className="h-4 w-4" aria-hidden="true" />}
         </button>
         <span className="text-sm font-medium text-foreground">
-          {setter.actions.length > 0 ? setter.actions.join(", ") : t("propertySetterEditor.untitled", "(no actions)")}
+          {(setter.actions ?? []).length > 0 ? (setter.actions ?? []).join(", ") : t("propertySetterEditor.untitled", "(no actions)")}
         </span>
         <span className="flex-1" />
         <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-          {setter.setProperties.length} {t("propertySetterEditor.propsCount", "props")}
+          {(setter.setProperties ?? []).length} {t("propertySetterEditor.propsCount", "props")}
         </span>
         {!readOnly && (
           <button type="button" onClick={onRemove}
@@ -295,25 +328,25 @@ function SetterEditor({
             <h5 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               {t("propertySetterEditor.triggerActions", "Trigger Actions")}
             </h5>
-            <ActionTags actions={setter.actions} onChange={(a) => onChange({ ...setter, actions: a })} readOnly={readOnly} />
+            <ActionTags actions={setter.actions ?? []} onChange={(a) => onChange({ ...setter, actions: a })} readOnly={readOnly} />
           </div>
           <div>
             <h5 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               {t("propertySetterEditor.properties", "Properties")}
             </h5>
             <div className="space-y-1.5">
-              {setter.setProperties.length === 0 && (
+              {(setter.setProperties ?? []).length === 0 && (
                 <p className="text-xs italic text-muted-foreground">{t("propertySetterEditor.noProperties", "No properties")}</p>
               )}
-              {setter.setProperties.map((prop, pi) => (
+              {(setter.setProperties ?? []).map((prop, pi) => (
                 <PropertyRow key={pi} prop={prop}
-                  onChange={(updated) => { const props = [...setter.setProperties]; props[pi] = updated; onChange({ ...setter, setProperties: props }); }}
-                  onRemove={() => onChange({ ...setter, setProperties: setter.setProperties.filter((_, j) => j !== pi) })}
+                  onChange={(updated) => { const props = [...(setter.setProperties ?? [])]; props[pi] = updated; onChange({ ...setter, setProperties: props }); }}
+                  onRemove={() => onChange({ ...setter, setProperties: (setter.setProperties ?? []).filter((_, j) => j !== pi) })}
                   readOnly={readOnly} />
               ))}
               {!readOnly && (
                 <button type="button"
-                  onClick={() => onChange({ ...setter, setProperties: [...setter.setProperties, { name: "", valueString: "", scope: "conversation", override: true }] })}
+                  onClick={() => onChange({ ...setter, setProperties: [...(setter.setProperties ?? []), { name: "", valueString: "", scope: "conversation", override: true }] })}
                   className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
                   <Plus className="h-3 w-3" />{t("propertySetterEditor.addProperty", "Add Property")}
                 </button>

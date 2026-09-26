@@ -189,6 +189,7 @@ function SourceCard({
   const { t } = useTranslation();
   const [confirmPurge, setConfirmPurge] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const [confirmTypeSwitch, setConfirmTypeSwitch] = useState(false);
   const [preview, setPreview] = useState<IngestionReport | null>(null);
   // A preview describes the configuration it ran against. Once that changes, it is
   // a claim about something that no longer exists.
@@ -202,6 +203,21 @@ function SourceCard({
 
   // Runtime actions need a saved source: the id is what the endpoints address.
   const isSaved = Boolean(kbId && source.id);
+
+  /**
+   * A saved upload source that stops being one loses its files: on save the
+   * backend deletes them and every vector they produced
+   * (`RagSourceIngestionService.discardRemovedSources`). Removing the source
+   * already asked first; switching its type did the same damage silently.
+   */
+  const requestType = (next: IngestionSource["type"]) => {
+    if (next === source.type) return;
+    if (isUpload && source.id) {
+      setConfirmTypeSwitch(true);
+      return;
+    }
+    onChange({ type: next });
+  };
 
   // Not `isSaved && isOpen`: a disabled query keeps its cached data, so collapsing
     // a card froze its "Running" badge for ever and a scheduled run never showed one.
@@ -287,7 +303,7 @@ function SourceCard({
                 if (readOnly) return;
                 if (["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp"].includes(event.key)) {
                   event.preventDefault();
-                  onChange({ type: isUpload ? "web" : "upload" });
+                  requestType(isUpload ? "web" : "upload");
                 }
               }}
             >
@@ -296,7 +312,7 @@ function SourceCard({
                 icon={Globe}
                 selected={!isUpload}
                 disabled={readOnly}
-                onSelect={() => onChange({ type: "web" })}
+                onSelect={() => requestType("web")}
                 testId={`${testId}-type-web`}
               />
               <TypeChoice
@@ -304,7 +320,7 @@ function SourceCard({
                 icon={FolderUp}
                 selected={isUpload}
                 disabled={readOnly}
-                onSelect={() => onChange({ type: "upload" })}
+                onSelect={() => requestType("upload")}
                 testId={`${testId}-type-upload`}
               />
             </div>
@@ -496,7 +512,13 @@ function SourceCard({
               version={version}
               readOnly={readOnly}
               hasUnsavedChanges={hasUnsavedChanges}
-              onRunSource={isSaved ? () => runMutation.mutate(source.id as string) : undefined}
+              onRunSource={
+                // A disabled source refuses to run; the banner's button must
+                // not offer what the source card's own button withholds.
+                isSaved && source.enabled !== false
+                  ? () => runMutation.mutate(source.id as string)
+                  : undefined
+              }
               isRunning={runMutation.isPending || Boolean(activeRun)}
               testId={testId}
             />
@@ -653,6 +675,23 @@ function SourceCard({
         onConfirm={() => {
           setConfirmRemove(false);
           onRemove();
+        }}
+      />
+
+      <AlertDialog
+        open={confirmTypeSwitch}
+        onOpenChange={setConfirmTypeSwitch}
+        title={t("ragEditor.sources.switchTypeTitle", "Turn this into a website source?")}
+        description={t(
+          "ragEditor.sources.switchTypeDescription",
+          "When you save, this source's uploaded files and everything the knowledge base learned from them are deleted. This cannot be undone.",
+        )}
+        confirmLabel={t("ragEditor.sources.switchTypeConfirm", "Switch to website")}
+        cancelLabel={t("common.cancel", "Cancel")}
+        variant="destructive"
+        onConfirm={() => {
+          setConfirmTypeSwitch(false);
+          onChange({ type: "web" });
         }}
       />
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import {
   RulesEditor,
@@ -354,3 +354,86 @@ function o_disabled(select: HTMLSelectElement, value: string): boolean {
   const opt = Array.from(select.options).find((o) => o.value === value);
   return !!opt?.disabled;
 }
+
+describe("RulesEditor sizematcher preset", () => {
+  it("presets only integer bounds SizeMatcher can parse", async () => {
+    // The preset wrote min:"" and max:"", and SizeMatcher.setConfigs calls
+    // Integer.parseInt on every one of those keys it finds — the save 400'd.
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    renderWithProviders(<RulesEditor data={populatedConfig} onChange={onChange} />);
+    await user.selectOptions(screen.getByTestId("condition-type-select"), "sizematcher");
+    const saved = onChange.mock.lastCall![0] as RulesConfig;
+    const configs = saved.behaviorGroups[0]!.behaviorRules![0]!.conditions![0]!.configs!;
+    for (const key of ["min", "max", "equal"]) {
+      if (key in configs) expect(configs[key]).toMatch(/^-?\d+$/);
+    }
+    expect(configs).toEqual({ valuePath: "", min: "1" });
+  });
+});
+
+describe("RulesEditor sizematcher bounds", () => {
+  const sizeConfig = (configs: Record<string, string>): RulesConfig => ({
+    appendActions: false,
+    expressionsAsActions: false,
+    behaviorGroups: [
+      {
+        name: "g",
+        behaviorRules: [{ name: "r", actions: ["a"], conditions: [{ type: "sizematcher", configs }] }],
+      },
+    ],
+  });
+  const lastConfigs = (onChange: ReturnType<typeof vi.fn>) =>
+    (onChange.mock.lastCall![0] as RulesConfig).behaviorGroups[0]!.behaviorRules![0]!.conditions![0]!.configs!;
+
+  it("never writes an empty bound: a cleared bound is stored as -1 (no bound)", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    renderWithProviders(<RulesEditor data={sizeConfig({ valuePath: "p", min: "1" })} onChange={onChange} />);
+    await user.clear(screen.getByDisplayValue("1"));
+    expect(lastConfigs(onChange).min).toBe("-1");
+  });
+
+  it("shows a -1 bound as an empty 'no limit' field", () => {
+    renderWithProviders(<RulesEditor data={sizeConfig({ valuePath: "p", max: "-1" })} onChange={vi.fn()} />);
+    expect(screen.queryByDisplayValue("-1")).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText("no limit")).toHaveValue("");
+  });
+
+  it("stores -1 when an empty added key is renamed to a bound", () => {
+    const onChange = vi.fn();
+    renderWithProviders(<RulesEditor data={sizeConfig({ valuePath: "p", key1: "" })} onChange={onChange} />);
+    fireEvent.change(screen.getByDisplayValue("key1"), { target: { value: "max" } });
+    expect(lastConfigs(onChange)).toEqual({ valuePath: "p", max: "-1" });
+  });
+
+  it("flags a bound that is not a whole number", () => {
+    renderWithProviders(<RulesEditor data={sizeConfig({ valuePath: "p", min: "abc" })} onChange={vi.fn()} />);
+    expect(screen.getByDisplayValue("abc")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByText(/whole number/)).toBeInTheDocument();
+  });
+
+  it("stores a typed bound without surrounding whitespace", () => {
+    // SizeMatcher calls Integer.parseInt without trimming: " 2 " fails the save.
+    const onChange = vi.fn();
+    renderWithProviders(<RulesEditor data={sizeConfig({ valuePath: "p", min: "1" })} onChange={onChange} />);
+    fireEvent.change(screen.getByDisplayValue("1"), { target: { value: " 2 " } });
+    expect(lastConfigs(onChange)).toEqual({ valuePath: "p", min: "2" });
+  });
+
+  it("flags a stored bound Integer.parseInt would refuse", () => {
+    renderWithProviders(
+      <RulesEditor data={sizeConfig({ valuePath: "p", min: " 2 ", max: "2147483648" })} onChange={vi.fn()} />,
+    );
+    expect(screen.getByDisplayValue("2147483648")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByDisplayValue(" 2 ", { normalizer: (v) => v })).toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("accepts the int range limits", () => {
+    renderWithProviders(
+      <RulesEditor data={sizeConfig({ valuePath: "p", min: "-2147483648", max: "2147483647" })} onChange={vi.fn()} />,
+    );
+    expect(screen.getByDisplayValue("2147483647")).not.toHaveAttribute("aria-invalid");
+    expect(screen.getByDisplayValue("-2147483648")).not.toHaveAttribute("aria-invalid");
+  });
+});

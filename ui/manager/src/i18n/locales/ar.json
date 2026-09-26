@@ -947,7 +947,9 @@
     "removeCondition": "إزالة الشرط",
     "noGroups": "لم يتم تحديد مجموعات سلوك",
     "noRules": "لا توجد قواعد في هذه المجموعة",
-    "noConditions": "لا توجد شروط"
+    "noConditions": "لا توجد شروط",
+    "sizeNoBound": "بلا حد",
+    "sizeBoundInvalid": "يجب أن يكون عددًا صحيحًا بين -2147483648 و2147483647، أو فارغًا لعدم وجود حد."
   },
   "apiCallsEditor": {
     "noEndpointsFound": "لم يتم العثور على نقاط نهاية في المواصفة",
@@ -979,8 +981,6 @@
     "responseObjectName": "اسم كائن الاستجابة",
     "responseHeaderObjectName": "اسم كائن header الاستجابة",
     "fireAndForget": "أرسل وانسَ",
-    "batchCalls": "استدعاءات دفعية",
-    "iterationObjectName": "اسم كائن التكرار",
     "prePostInstructions": "تعليمات قبل/بعد",
     "preRequest": "قبل الطلب",
     "postResponse": "بعد الاستجابة",
@@ -1050,7 +1050,16 @@
     "authHeaderRefPlaceholder": "اختياري — ${vault:my-api-key} لمواصفة تتطلب مصادقة",
     "authHeaderRefHint": "مرجع إلى الخزنة، يُحلّ عند تنفيذ الاستدعاء. يجب أن يحتوي السر المخزّن على قيمة الترويسة كاملة، بما في ذلك بادئة Bearer.",
     "authHeaderRefInvalid": "يجب أن يبدأ بـ ${vault:…} أو ${vars:…} أو ${caller:…}. لصق المفتاح نفسه سيضعه في عنوان الطلب وفي كل سجل يمر به.",
-    "authRefLiteral": "أدخل مرجعًا مثل ${vault:my-key}، وليس المفتاح نفسه. المفتاح لا يغادر الخزنة أبدًا."
+    "authRefLiteral": "أدخل مرجعًا مثل ${vault:my-key}، وليس المفتاح نفسه. المفتاح لا يغادر الخزنة أبدًا.",
+    "runOnNoCodes": "قائمة «التشغيل عند الرموز» الفارغة لا تطابق أي رمز حالة، لذا لا تُنفَّذ هذه التعليمة أبدًا.",
+    "useDefaultCodes": "استخدام الافتراضيات",
+    "httpCodeFilterDefaults": "تستخدم الحقول الفارغة الرموز الافتراضية المعروضة فيها.",
+    "scopeSecretUnsupported": "(لا يُحفَظ في الخزنة هنا)",
+    "scopeSecretWarning": "لا يُحفَظ النطاق «secret» في الخزنة في هذه التعليمة: تُخزَّن القيمة كنص صريح. اختر نطاقًا آخر واحفظ بيانات الاعتماد في خزنة الأسرار.",
+    "skipNone": "لا شيء — لا يُتخطّى أي رمز",
+    "runSkipConflict": "{{codes}} موجود أيضًا في قائمة التخطي، لذا لا تُنفَّذ هذه التعليمة عليه أبدًا.",
+    "httpCodeFilterSkipSet": "«التشغيل عند الرموز» الفارغ يستخدم 200 و201؛ و«التخطي عند الرموز» الفارغ لا يتخطى شيئًا.",
+    "useDefaultSkipCodes": "استخدام قائمة التخطي الافتراضية"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "عند الفشل يستمر المسار؛ ويُكشف الخطأ عند ",
@@ -1103,7 +1112,12 @@
     "whitelist": "قائمة بيضاء (السماح فقط)",
     "blacklist": "قائمة سوداء (استبعاد)",
     "pipelineCalls": "استدعاءات Pipeline",
-    "addCall": "إضافة استدعاء MCP"
+    "addCall": "إضافة استدعاء MCP",
+    "argumentName": "اسم الوسيطة",
+    "argumentType": "نوع الوسيطة",
+    "argumentText": "نص",
+    "argumentInvalidJson": "ليس JSON صالحًا — يُحتفَظ بآخر قيمة صالحة",
+    "removeArgument": "إزالة الوسيطة"
   },
   "llmEditor": {
     "addCustomInstruction": "إضافة تعليمة",
@@ -1142,7 +1156,6 @@
     "identityMaskingRulePlaceholder": "مثل: لا تكشف أبداً أنك نموذج لغوي للذكاء الاصطناعي",
     "identityMaskingRules": "قواعد الإخفاء",
     "identityMaskingRulesHint": "يلزم التفعيل ووجود قاعدة واحدة على الأقل معاً ليصبح الإخفاء ساري المفعول.",
-    "injectionStrategy": "الإدراج",
     "kbNamePlaceholder": "مثل: product-docs",
     "knowledgeBases": "قواعد المعرفة",
     "knowledgeBasesHint": "أشِر صراحةً إلى قواعد المعرفة بالاسم. يجب أن يطابق كل اسم RagConfiguration في مسار العمل.",
@@ -1300,9 +1313,6 @@
       "STEP_TIMEOUT_NONPOSITIVE": "يجب أن تكون مهلة المرحلة {{step}} أكبر من 0.",
       "STEP_CROSS_PROVIDER_NO_APIKEY": "تستخدم المرحلة {{step}} مزوّداً مختلفاً لكن بلا مفتاح API خاص بها — سترث مفتاح المهمة."
     },
-    "parallelExecution": "تنفيذ متوازي للأدوات",
-    "parallelExecutionDesc": "Run independent tool calls concurrently",
-    "parallelTimeout": "المهلة (مللي ثانية)",
     "maxToolIterations": "أقصى تكرارات الأدوات",
     "maxToolIterationsHint": "(افتراضي 10)",
     "toolRateLimits": "حدود المعدل لكل أداة",
@@ -1371,7 +1381,8 @@
     "streamingTimeoutSeconds": "مهلة البث (بالثواني)",
     "streamingTimeoutSecondsHint": "يتجاوز الإعداد الافتراضي للمحرك (120 ثانية). ينطبق فقط أثناء البث؛ فارغ = استخدام الافتراضي.",
     "taskPricing": "تسعير الاستدعاءات العادية",
-    "taskPricingDesc": "يحدد سعر استدعاءات النموذج العادية (غير المتسلسلة) لهذه المهمة لأغراض تتبع التكلفة وسقوف تكلفة المجموعة. بدون سعر (فارغ) يُحتسب كـ 0$."
+    "taskPricingDesc": "يحدد سعر استدعاءات النموذج العادية (غير المتسلسلة) لهذه المهمة لأغراض تتبع التكلفة وسقوف تكلفة المجموعة. بدون سعر (فارغ) يُحتسب كـ 0$.",
+    "paramName": "اسم المعامل"
   },
   "outputEditor": {
     "labelPlaceholder": "تسمية الرابط...",
@@ -1435,7 +1446,8 @@
     "openEditor": "تحرير في المحرر",
     "visibilityTitle": "الوكلاء الذين يمكنهم رؤية خاصية longTerm هذه",
     "editValue": "تعديل القيمة",
-    "toggleGroup": "تبديل مجموعة الخصائص"
+    "toggleGroup": "تبديل مجموعة الخصائص",
+    "secretFromPathWarning": "لا يُحفَظ السر في الخزنة إلا إذا جاء من حقل القيمة. إذا قُرئ من «من المسار» أو أُعطي بأي طريقة أخرى فإنه يُخزَّن كنص صريح — أدخله في حقل القيمة أو اختر نطاقًا آخر."
   },
   "dictionaryEditor": {
     "language": "اللغة",
@@ -2210,8 +2222,16 @@
       "maxTotalMb": "الحد الأقصى للحجم الإجمالي (ميجابايت)",
       "maxTotalMbHint": "لجميع ملفات هذا المصدر",
       "removeTitle": "هل تريد إزالة هذا المصدر؟",
-      "removeDescription": "عند الحفظ، ستُحذف ملفاته المرفوعة وكل ما تعلّمته قاعدة المعرفة منها. لا يمكن التراجع عن ذلك."
-    }
+      "removeDescription": "عند الحفظ، ستُحذف ملفاته المرفوعة وكل ما تعلّمته قاعدة المعرفة منها. لا يمكن التراجع عن ذلك.",
+      "switchTypeTitle": "تحويل هذا إلى مصدر موقع ويب؟",
+      "switchTypeDescription": "عند الحفظ، تُحذف الملفات المرفوعة لهذا المصدر وكل ما تعلّمته قاعدة المعرفة منها. لا يمكن التراجع عن ذلك.",
+      "switchTypeConfirm": "التبديل إلى موقع ويب",
+      "filesLoadFailed": "تعذّر تحميل الملفات: {{error}}"
+    },
+    "chunkStrategyLegacy": "{{value}} (يُحفَظ كتعاودي)",
+    "saveBeforeIngest": "احفظ تغييراتك أولًا — تُستوعَب المستندات باستخدام مخزن قاعدة المعرفة المحفوظة ونموذج التضمين الخاص بها، لا بالتعديلات الظاهرة على الشاشة.",
+    "chunkStrategyUnsupported": "{{value}} (غير مدعوم)",
+    "chunkStrategyUnsupportedHint": "يرفض الخادم هذه الاستراتيجية عند الحفظ. اختر التعاودي."
   },
   "onboarding": {
     "welcome": {
@@ -3782,7 +3802,7 @@
     "tagPlaceholder": "مثل: safety، production",
     "tags": "الوسوم",
     "templateEnabled": "تفعيل حل القوالب",
-    "templateEnabledHint": "عند التعطيل، تُعامَل علامات {{}} في المحتوى كنص حرفي (مفيد لأمثلة الشيفرة).",
+    "templateEnabledHint": "عند التعطيل، تُعامَل علامات { } في المحتوى كنص حرفي (مفيد لأمثلة الشيفرة).",
     "usageHint": "الاستخدام:"
   },
   "status": {

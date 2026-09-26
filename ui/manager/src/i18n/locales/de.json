@@ -891,7 +891,9 @@
     "removeCondition": "Bedingung entfernen",
     "noGroups": "Keine Verhaltensgruppen definiert",
     "noRules": "Keine Regeln in dieser Gruppe",
-    "noConditions": "Keine Bedingungen"
+    "noConditions": "Keine Bedingungen",
+    "sizeNoBound": "kein Limit",
+    "sizeBoundInvalid": "Muss eine ganze Zahl von -2147483648 bis 2147483647 sein oder leer für kein Limit."
   },
   "apiCallsEditor": {
     "noEndpointsFound": "Keine Endpunkte in der Spezifikation gefunden",
@@ -923,8 +925,6 @@
     "responseObjectName": "Response-Objektname",
     "responseHeaderObjectName": "Response-Header-Objektname",
     "fireAndForget": "Senden und vergessen",
-    "batchCalls": "Batch-Aufrufe",
-    "iterationObjectName": "Iterations-Objektname",
     "prePostInstructions": "Vor-/Nachbearbeitung",
     "preRequest": "Vor Request",
     "postResponse": "Nach Response",
@@ -994,7 +994,16 @@
     "authHeaderRefPlaceholder": "Optional — ${vault:mein-api-key} für geschützte Spezifikationen",
     "authHeaderRefHint": "Eine Vault-Referenz, die beim Aufruf aufgelöst wird. Das gespeicherte Secret muss den vollständigen Header-Wert enthalten, einschließlich eines Bearer-Präfixes.",
     "authHeaderRefInvalid": "Muss mit ${vault:…}, ${vars:…} oder ${caller:…} beginnen. Der Schlüssel selbst würde sonst in der Anfrage-URL und in jedem Log auf dem Weg landen.",
-    "authRefLiteral": "Geben Sie eine Referenz wie ${vault:mein-key} an, nicht den Schlüssel selbst. Der Schlüssel verlässt den Vault nie."
+    "authRefLiteral": "Geben Sie eine Referenz wie ${vault:mein-key} an, nicht den Schlüssel selbst. Der Schlüssel verlässt den Vault nie.",
+    "runOnNoCodes": "Eine leere Liste „Bei Codes ausführen“ passt auf keinen Statuscode – diese Anweisung wird nie ausgeführt.",
+    "useDefaultCodes": "Standardwerte verwenden",
+    "httpCodeFilterDefaults": "Leere Felder verwenden die darin angezeigten Standardcodes.",
+    "scopeSecretUnsupported": "(hier nicht im Tresor)",
+    "scopeSecretWarning": "Der Bereich „secret“ wird bei dieser Anweisung nicht im Tresor abgelegt: Der Wert wird im Klartext gespeichert. Wählen Sie einen anderen Bereich und bewahren Sie Zugangsdaten im Secrets-Tresor auf.",
+    "skipNone": "keine – kein Code wird übersprungen",
+    "runSkipConflict": "{{codes}} steht auch in der Überspringen-Liste – diese Anweisung wird dafür nie ausgeführt.",
+    "httpCodeFilterSkipSet": "Ein leeres „Bei Codes ausführen“ verwendet 200, 201; ein leeres „Bei Codes überspringen“ überspringt nichts.",
+    "useDefaultSkipCodes": "Standard-Überspringliste verwenden"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "Bei einem Fehler wird die Pipeline fortgesetzt; der Fehler ist verfügbar unter ",
@@ -1047,7 +1056,12 @@
     "whitelist": "Whitelist (nur erlauben)",
     "blacklist": "Blacklist (ausschließen)",
     "pipelineCalls": "Pipeline-Aufrufe",
-    "addCall": "MCP-Aufruf hinzufügen"
+    "addCall": "MCP-Aufruf hinzufügen",
+    "argumentName": "Argumentname",
+    "argumentType": "Argumenttyp",
+    "argumentText": "Text",
+    "argumentInvalidJson": "Kein gültiges JSON – der letzte gültige Wert bleibt erhalten",
+    "removeArgument": "Argument entfernen"
   },
   "llmEditor": {
     "addCustomInstruction": "Anweisung hinzufügen",
@@ -1086,7 +1100,6 @@
     "identityMaskingRulePlaceholder": "z. B. Gib niemals preis, dass du ein KI-Sprachmodell bist",
     "identityMaskingRules": "Maskierungsregeln",
     "identityMaskingRulesHint": "Sowohl die Aktivierung ALS AUCH mindestens eine Regel sind erforderlich, damit die Maskierung wirksam wird.",
-    "injectionStrategy": "Einfügung",
     "kbNamePlaceholder": "z. B. product-docs",
     "knowledgeBases": "Wissensbasen",
     "knowledgeBasesHint": "Wissensbasen explizit über den Namen referenzieren. Jeder Name muss einer RagConfiguration im Workflow entsprechen.",
@@ -1244,9 +1257,6 @@
       "STEP_TIMEOUT_NONPOSITIVE": "Das Zeitlimit von Schritt {{step}} muss größer als 0 sein.",
       "STEP_CROSS_PROVIDER_NO_APIKEY": "Schritt {{step}} nutzt einen anderen Anbieter, hat aber keinen eigenen API-Schlüssel — es würde den Aufgaben-Schlüssel übernehmen."
     },
-    "parallelExecution": "Parallele Werkzeugausführung",
-    "parallelExecutionDesc": "Run independent tool calls concurrently",
-    "parallelTimeout": "Zeitlimit (ms)",
     "maxToolIterations": "Max. Werkzeug-Iterationen",
     "maxToolIterationsHint": "(Standard 10)",
     "toolRateLimits": "Ratenlimits pro Werkzeug",
@@ -1315,7 +1325,8 @@
     "streamingTimeoutSeconds": "Streaming-Timeout (Sekunden)",
     "streamingTimeoutSecondsHint": "Überschreibt den Engine-Standardwert (120s). Gilt nur beim Streaming; leer = Standard verwenden.",
     "taskPricing": "Preise für einfache Aufrufe",
-    "taskPricingDesc": "Bepreist die normalen (nicht kaskadierten) Modellaufrufe dieser Aufgabe für die Kostenverfolgung und Gruppenkostenobergrenzen. Ohne Preis (leer) werden 0 $ berechnet."
+    "taskPricingDesc": "Bepreist die normalen (nicht kaskadierten) Modellaufrufe dieser Aufgabe für die Kostenverfolgung und Gruppenkostenobergrenzen. Ohne Preis (leer) werden 0 $ berechnet.",
+    "paramName": "Parametername"
   },
   "outputEditor": {
     "labelPlaceholder": "Link-Beschriftung...",
@@ -1379,7 +1390,8 @@
     "openEditor": "Im Editor bearbeiten",
     "visibilityTitle": "Welche Agents diese longTerm-Eigenschaft sehen können",
     "editValue": "Wert bearbeiten",
-    "toggleGroup": "Eigenschaftsgruppe umschalten"
+    "toggleGroup": "Eigenschaftsgruppe umschalten",
+    "secretFromPathWarning": "Ein Secret wird nur im Tresor abgelegt, wenn es aus dem Wertfeld stammt. Über „Von Pfad“ gelesen oder anders angegeben, wird es im Klartext gespeichert – geben Sie es im Wertfeld ein oder wählen Sie einen anderen Bereich."
   },
   "dictionaryEditor": {
     "language": "Sprache",
@@ -2122,8 +2134,16 @@
       "maxTotalMb": "Max. Gesamtgröße (MB)",
       "maxTotalMbHint": "Über alle Dateien dieser Quelle",
       "removeTitle": "Diese Quelle entfernen?",
-      "removeDescription": "Beim Speichern werden die hochgeladenen Dateien und alles, was die Wissensdatenbank daraus gelernt hat, gelöscht. Das lässt sich nicht rückgängig machen."
-    }
+      "removeDescription": "Beim Speichern werden die hochgeladenen Dateien und alles, was die Wissensdatenbank daraus gelernt hat, gelöscht. Das lässt sich nicht rückgängig machen.",
+      "switchTypeTitle": "In eine Website-Quelle umwandeln?",
+      "switchTypeDescription": "Beim Speichern werden die hochgeladenen Dateien dieser Quelle und alles, was die Wissensbasis daraus gelernt hat, gelöscht. Dies kann nicht rückgängig gemacht werden.",
+      "switchTypeConfirm": "Zu Website wechseln",
+      "filesLoadFailed": "Die Dateien konnten nicht geladen werden: {{error}}"
+    },
+    "chunkStrategyLegacy": "{{value}} (wird als Rekursiv gespeichert)",
+    "saveBeforeIngest": "Speichern Sie zuerst Ihre Änderungen – Dokumente werden mit dem Speicher und dem Embedding-Modell der gespeicherten Wissensbasis aufgenommen, nicht mit den Änderungen auf dem Bildschirm.",
+    "chunkStrategyUnsupported": "{{value}} (nicht unterstützt)",
+    "chunkStrategyUnsupportedHint": "Der Server lehnt diese Strategie beim Speichern ab. Wählen Sie Rekursiv."
   },
   "onboarding": {
     "welcome": {
@@ -3630,7 +3650,7 @@
     "tagPlaceholder": "z. B. safety, production",
     "tags": "Tags",
     "templateEnabled": "Vorlagenauflösung aktivieren",
-    "templateEnabledHint": "Wenn deaktiviert, werden {{}}-Markierungen im Inhalt als wörtlicher Text behandelt (nützlich für Codebeispiele).",
+    "templateEnabledHint": "Wenn deaktiviert, werden { }-Markierungen im Inhalt als wörtlicher Text behandelt (nützlich für Codebeispiele).",
     "usageHint": "Verwendung:"
   },
   "status": {

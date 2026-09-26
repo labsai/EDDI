@@ -891,7 +891,9 @@
     "removeCondition": "移除条件",
     "noGroups": "未定义行为组",
     "noRules": "此组中没有规则",
-    "noConditions": "无条件"
+    "noConditions": "无条件",
+    "sizeNoBound": "无限制",
+    "sizeBoundInvalid": "必须是 -2147483648 到 2147483647 之间的整数，留空表示无限制。"
   },
   "apiCallsEditor": {
     "noEndpointsFound": "在规范中未找到端点",
@@ -923,8 +925,6 @@
     "responseObjectName": "响应对象名称",
     "responseHeaderObjectName": "响应 Header 对象名称",
     "fireAndForget": "发送后不等待",
-    "batchCalls": "批量调用",
-    "iterationObjectName": "迭代对象名称",
     "prePostInstructions": "前置/后置指令",
     "preRequest": "请求前",
     "postResponse": "响应后",
@@ -994,7 +994,16 @@
     "authHeaderRefPlaceholder": "可选 — 对需要认证的规范使用 ${vault:my-api-key}",
     "authHeaderRefHint": "密钥库引用，在调用时解析。存储的密钥必须是完整的请求头值，包含 Bearer 前缀。",
     "authHeaderRefInvalid": "必须以 ${vault:…}、${vars:…} 或 ${caller:…} 开头。直接粘贴密钥会将其写入请求 URL 以及沿途的每一条日志。",
-    "authRefLiteral": "请输入如 ${vault:my-key} 的引用，而不是密钥本身。密钥不会离开密钥库。"
+    "authRefLiteral": "请输入如 ${vault:my-key} 的引用，而不是密钥本身。密钥不会离开密钥库。",
+    "runOnNoCodes": "空的“运行状态码”列表不匹配任何状态码，因此此指令永远不会运行。",
+    "useDefaultCodes": "使用默认值",
+    "httpCodeFilterDefaults": "留空的字段使用其中显示的默认状态码。",
+    "scopeSecretUnsupported": "（此处不会存入保险库）",
+    "scopeSecretWarning": "此指令中的 secret 作用域不会存入保险库：该值以明文存储。请选择其他作用域，并将凭据保存在密钥保险库中。",
+    "skipNone": "无——不跳过任何状态码",
+    "runSkipConflict": "{{codes}} 也在跳过列表中，因此此指令永远不会针对它运行。",
+    "httpCodeFilterSkipSet": "“运行状态码”留空时使用 200、201；“跳过状态码”留空时不跳过任何状态码。",
+    "useDefaultSkipCodes": "使用默认跳过列表"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "失败时流水线继续；错误将暴露于 ",
@@ -1047,7 +1056,12 @@
     "whitelist": "白名单（仅允许）",
     "blacklist": "黑名单（排除）",
     "pipelineCalls": "流水线调用",
-    "addCall": "添加 MCP 调用"
+    "addCall": "添加 MCP 调用",
+    "argumentName": "参数名称",
+    "argumentType": "参数类型",
+    "argumentText": "文本",
+    "argumentInvalidJson": "不是有效的 JSON——保留最后一个有效值",
+    "removeArgument": "移除参数"
   },
   "llmEditor": {
     "addCustomInstruction": "添加指令",
@@ -1086,7 +1100,6 @@
     "identityMaskingRulePlaceholder": "例如 切勿透露你是 AI 语言模型",
     "identityMaskingRules": "掩码规则",
     "identityMaskingRulesHint": "掩码生效需同时满足：已启用且至少有一条规则。",
-    "injectionStrategy": "注入",
     "kbNamePlaceholder": "例如 product-docs",
     "knowledgeBases": "知识库",
     "knowledgeBasesHint": "按名称显式引用知识库。每个名称都必须与工作流中的 RagConfiguration 匹配。",
@@ -1244,9 +1257,6 @@
       "STEP_TIMEOUT_NONPOSITIVE": "步骤 {{step}} 超时必须大于 0。",
       "STEP_CROSS_PROVIDER_NO_APIKEY": "步骤 {{step}} 使用了不同的提供商，但没有自己的 API Key — 它将继承任务密钥。"
     },
-    "parallelExecution": "并行工具执行",
-    "parallelExecutionDesc": "Run independent tool calls concurrently",
-    "parallelTimeout": "超时 (毫秒)",
     "maxToolIterations": "最大工具迭代次数",
     "maxToolIterationsHint": "（默认 10）",
     "toolRateLimits": "单工具速率限制",
@@ -1315,7 +1325,8 @@
     "streamingTimeoutSeconds": "流式传输超时（秒）",
     "streamingTimeoutSecondsHint": "覆盖引擎默认值（120 秒）。仅在流式传输时适用；留空 = 使用默认值。",
     "taskPricing": "普通调用定价",
-    "taskPricingDesc": "为该任务的普通（非级联）模型调用定价，用于成本跟踪和群组成本上限。未定价（留空）则贡献 $0。"
+    "taskPricingDesc": "为该任务的普通（非级联）模型调用定价，用于成本跟踪和群组成本上限。未定价（留空）则贡献 $0。",
+    "paramName": "参数名称"
   },
   "outputEditor": {
     "labelPlaceholder": "链接标签...",
@@ -1379,7 +1390,8 @@
     "openEditor": "在编辑器中编辑",
     "visibilityTitle": "哪些 Agent 可以看到此 longTerm 属性",
     "editValue": "编辑值",
-    "toggleGroup": "切换属性组"
+    "toggleGroup": "切换属性组",
+    "secretFromPathWarning": "只有来自值字段的 secret 才会存入保险库。通过“来源路径”读取或以其他方式提供时，它会以明文存储——请在值字段中输入，或选择其他作用域。"
   },
   "dictionaryEditor": {
     "language": "语言",
@@ -2122,8 +2134,16 @@
       "maxTotalMb": "总大小上限（MB）",
       "maxTotalMbHint": "此来源所有文件合计",
       "removeTitle": "移除此来源？",
-      "removeDescription": "保存后，其上传的文件以及知识库从中学到的内容将被删除，且无法撤销。"
-    }
+      "removeDescription": "保存后，其上传的文件以及知识库从中学到的内容将被删除，且无法撤销。",
+      "switchTypeTitle": "要改为网站来源吗？",
+      "switchTypeDescription": "保存时，此来源已上传的文件以及知识库从中学到的所有内容都会被删除。此操作无法撤消。",
+      "switchTypeConfirm": "切换为网站",
+      "filesLoadFailed": "无法加载文件：{{error}}"
+    },
+    "chunkStrategyLegacy": "{{value}}（保存为递归）",
+    "saveBeforeIngest": "请先保存更改——文档会使用已保存知识库的存储和嵌入模型导入，而不是屏幕上的编辑内容。",
+    "chunkStrategyUnsupported": "{{value}}（不支持）",
+    "chunkStrategyUnsupportedHint": "保存时服务器会拒绝此策略。请选择递归。"
   },
   "onboarding": {
     "welcome": {
@@ -3630,7 +3650,7 @@
     "tagPlaceholder": "例如 safety、production",
     "tags": "标签",
     "templateEnabled": "启用模板解析",
-    "templateEnabledHint": "禁用后，内容中的 {{}} 标记将被视为纯文本（对代码示例很有用）。",
+    "templateEnabledHint": "禁用后，内容中的 { } 标记将被视为纯文本（对代码示例很有用）。",
     "usageHint": "用法："
   },
   "status": {

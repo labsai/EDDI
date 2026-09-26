@@ -120,6 +120,8 @@ export function IngestionFilesPanel({
   // the highlight off and on again.
   const dragDepth = useRef(0);
   const cancelled = useRef(false);
+  // Whether a run was in flight at the last render; see the effect below.
+  const wasRunning = useRef(Boolean(isRunning));
   // Monotonic, because two drops inside one millisecond would otherwise produce
   // the same React keys and the rows would swap contents.
   const nextKey = useRef(0);
@@ -130,6 +132,16 @@ export function IngestionFilesPanel({
     },
     [],
   );
+
+  // A run is what moves a file from "stored" to "indexed", and it finishes
+  // long after the request that started it returned. Without this the list
+  // kept saying "not yet in the knowledge base" after a successful run.
+  const { refetch: refetchFiles } = files;
+  useEffect(() => {
+    if (wasRunning.current && !isRunning) void refetchFiles();
+    wasRunning.current = Boolean(isRunning);
+  }, [isRunning, refetchFiles]);
+
 
   const patchUpload = useCallback((key: string, patch: Partial<UploadItem>) => {
     setUploads((current) =>
@@ -222,6 +234,15 @@ export function IngestionFilesPanel({
       }
     },
     [kbId, sourceId, uploadOne, files],
+  );
+
+  /** A retry is a new upload, so the list must show the file it stored. */
+  const retryUpload = useCallback(
+    async (item: UploadItem) => {
+      await uploadOne(item);
+      if (!cancelled.current) void refetchFiles();
+    },
+    [uploadOne, refetchFiles],
   );
 
   /** Everything the operator dropped, minus what a browser cannot give us. */
@@ -376,7 +397,7 @@ export function IngestionFilesPanel({
                 <UploadRow
                   key={item.key}
                   item={item}
-                  onRetry={canUpload ? () => void uploadOne(item) : undefined}
+                  onRetry={canUpload ? () => void retryUpload(item) : undefined}
                   testId={testId}
                 />
               ))}
@@ -426,6 +447,8 @@ export function IngestionFilesPanel({
           <FileList
             files={stored}
             isLoading={files.isLoading}
+            error={files.isError ? getErrorMessage(files.error) : null}
+            onRetryLoad={() => void refetchFiles()}
             readOnly={readOnly}
             onDelete={(file) => {
               setDeleteWarning(null);
@@ -569,17 +592,41 @@ function UploadRow({
 function FileList({
   files,
   isLoading,
+  error,
+  onRetryLoad,
   readOnly,
   onDelete,
   testId,
 }: {
   files: IngestedFile[];
   isLoading: boolean;
+  /** Why the list could not be loaded, or null. */
+  error: string | null;
+  onRetryLoad: () => void;
   readOnly?: boolean;
   onDelete: (file: IngestedFile) => void;
   testId: string;
 }) {
   const { t } = useTranslation();
+
+  // Checked before "empty": a failed load has no data, and used to be shown
+  // as "No files yet" — telling the operator to upload what is already there.
+  if (error !== null && files.length === 0 && !isLoading) {
+    return (
+      <div
+        className="flex flex-wrap items-center gap-2 text-xs text-destructive"
+        role="alert"
+        data-testid={`${testId}-files-error`}
+      >
+        <span className="flex-1">
+          {t('ragEditor.sources.filesLoadFailed', 'Could not load the files: {{error}}', { error })}
+        </span>
+        <Button variant="outline" size="sm" onClick={onRetryLoad} data-testid={`${testId}-files-reload`}>
+          {t('common.retry', 'Retry')}
+        </Button>
+      </div>
+    );
+  }
 
   if (isLoading) {
     return (

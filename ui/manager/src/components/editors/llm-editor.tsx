@@ -1,6 +1,9 @@
 import { useState, useCallback } from "react";
 import { PromptPreview } from "./prompt-preview";
 import { useTranslation } from "react-i18next";
+import { NumberInput } from "./number-input";
+import { RenamableKeyInput } from "./renamable-key-input";
+import { hasOwnKey, nextFreeKey, renameKey } from "./editor-value-utils";
 import {
   ChevronDown,
   ChevronRight,
@@ -417,16 +420,33 @@ function TaskEditor({
             <div className="grid grid-cols-2 gap-2">
               {Object.entries(task.parameters ?? {})
                 .filter(([k]) => !HIDDEN_PARAM_KEYS.has(k))
-                .map(([k, v]) => {
+                .map(([k, v], i) => {
                   const isSensitive = SENSITIVE_LLM_PARAM_KEYS.has(k.toLowerCase());
                   return (
-                    <div key={k}>
+                    // Keyed by position: a rename must not remount the row
+                    // the user is typing in.
+                    <div key={i}>
                       <div className="flex items-center gap-1.5">
-                        <input
-                          type="text"
+                        {/* The name used to be read-only, so "Add Parameter"
+                            could only ever produce a key called param<n>. A
+                            hidden key (systemMessage, …) is refused as a name:
+                            the row would vanish into another section. */}
+                        <RenamableKeyInput
                           value={k}
-                          readOnly
-                          className="h-7 w-28 rounded border border-input bg-muted px-2 text-xs text-foreground"
+                          readOnly={readOnly}
+                          isAvailable={(next) =>
+                            !HIDDEN_PARAM_KEYS.has(next) &&
+                            !hasOwnKey(task.parameters ?? {}, next)
+                          }
+                          onRename={(next) =>
+                            onChange({
+                              ...task,
+                              parameters: renameKey(task.parameters ?? {}, k, next),
+                            })
+                          }
+                          aria-label={t("llmEditor.paramName", "Parameter name")}
+                          className="h-7 w-28 rounded border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                          data-testid={`llm-param-name-${i}`}
                         />
                         {isSensitive ? (
                           <div className="flex-1">
@@ -477,9 +497,9 @@ function TaskEditor({
               <button
                 type="button"
                 onClick={() => {
-                  const nextKey = `param${
-                    Object.keys(task.parameters ?? {}).length
-                  }`;
+                  // The first free param<n>: counting keys could hand out a
+                  // name that is already taken and overwrite its value.
+                  const nextKey = nextFreeKey(Object.keys(task.parameters ?? {}), "param");
                   onChange({
                     ...task,
                     parameters: { ...task.parameters, [nextKey]: "" },
@@ -897,19 +917,19 @@ function TaskEditor({
                             testId={`a2a-apikey-connection-warning-${ai}`}
                           />
                         </div>
-                        <input
-                          type="number"
-                          value={agent.timeoutMs ?? 30000}
-                          onChange={(e) => {
+                        <NumberInput integer
+                          value={agent.timeoutMs}
+                          title={t("llmEditor.a2aTimeout", "Timeout (ms)")}
+                          onChange={(v) => {
                             const agents = [...(task.a2aAgents ?? [])];
                             agents[ai] = {
                               ...agent,
-                              timeoutMs: parseInt(e.target.value, 10) || 30000,
+                              timeoutMs: v,
                             };
                             onChange({ ...task, a2aAgents: agents });
                           }}
                           readOnly={readOnly}
-                          placeholder={t("llmEditor.a2aTimeout", "Timeout (ms)")}
+                          placeholder="30000"
                           className="h-7 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                         />
                       </div>
@@ -957,13 +977,12 @@ function TaskEditor({
                 <label className="text-xs text-foreground whitespace-nowrap">
                   {t("llmEditor.historyLimit", "History Limit")}
                 </label>
-                <input
-                  type="number"
-                  value={task.conversationHistoryLimit ?? 10}
-                  onChange={(e) =>
+                <NumberInput placeholder="10" integer
+                  value={task.conversationHistoryLimit}
+                  onChange={(v) =>
                     onChange({
                       ...task,
-                      conversationHistoryLimit: parseInt(e.target.value, 10) || 0,
+                      conversationHistoryLimit: v,
                     })
                   }
                   readOnly={readOnly}
@@ -1395,40 +1414,6 @@ function TaskEditor({
             defaultOpen={false}
           >
             <div className="space-y-3">
-              {/* Parallel execution */}
-              <label className="inline-flex items-center gap-2 text-xs text-foreground">
-                <input
-                  type="checkbox"
-                  checked={task.enableParallelExecution ?? false}
-                  onChange={(e) =>
-                    onChange({ ...task, enableParallelExecution: e.target.checked })
-                  }
-                  disabled={readOnly}
-                  className="h-3.5 w-3.5 rounded border-input accent-primary"
-                  data-testid="enable-parallel-execution"
-                />
-                {t("llmEditor.parallelExecution", "Parallel Tool Execution")}
-              </label>
-              <p className="text-[10px] text-muted-foreground ps-5 -mt-2">
-                {t("llmEditor.parallelExecutionDesc", "Run independent tool calls concurrently instead of sequentially")}
-              </p>
-              {task.enableParallelExecution && (
-                <div className="flex items-center gap-2 ps-5">
-                  <label className="text-xs text-foreground whitespace-nowrap">
-                    {t("llmEditor.parallelTimeout", "Timeout (ms)")}
-                  </label>
-                  <input
-                    type="number"
-                    value={task.parallelExecutionTimeoutMs ?? 30000}
-                    onChange={(e) =>
-                      onChange({ ...task, parallelExecutionTimeoutMs: parseInt(e.target.value, 10) || 30000 })
-                    }
-                    readOnly={readOnly}
-                    className="h-7 w-24 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                  />
-                </div>
-              )}
-
               <div className="flex items-center gap-2">
                 <label className="text-xs text-foreground whitespace-nowrap">
                   {t("llmEditor.maxToolIterations", "Max Tool Iterations")}
@@ -1474,13 +1459,12 @@ function TaskEditor({
                       <label className="text-xs text-foreground whitespace-nowrap">
                         {t("llmEditor.defaultRate", "Default Rate (req/min)")}
                       </label>
-                      <input
-                        type="number"
-                        value={task.defaultRateLimit ?? 100}
-                        onChange={(e) =>
+                      <NumberInput placeholder="100" integer
+                        value={task.defaultRateLimit}
+                        onChange={(v) =>
                           onChange({
                             ...task,
-                            defaultRateLimit: parseInt(e.target.value, 10) || 100,
+                            defaultRateLimit: v,
                           })
                         }
                         readOnly={readOnly}
@@ -1515,12 +1499,11 @@ function TaskEditor({
                               placeholder={t("llmEditor.toolName", "Tool name")}
                               className="h-7 w-40 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                             />
-                            <input
-                              type="number"
+                            <NumberInput emptyValue={0} integer
                               value={rate}
-                              onChange={(e) => {
+                              onChange={(v) => {
                                 const entries = Object.entries(task.toolRateLimits ?? {});
-                                entries[i] = [tool, parseInt(e.target.value, 10) || 0];
+                                entries[i] = [tool, v ?? 0];
                                 onChange({ ...task, toolRateLimits: Object.fromEntries(entries) });
                               }}
                               readOnly={readOnly}
@@ -1706,12 +1689,11 @@ function TaskEditor({
                           placeholder={t("llmEditor.toolName", "Tool name")}
                           className="h-7 w-40 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                         />
-                        <input
-                          type="number"
+                        <NumberInput emptyValue={0} integer
                           value={limit}
-                          onChange={(e) => {
+                          onChange={(v) => {
                             const entries = Object.entries(task.toolResponseLimits?.perToolLimits ?? {});
-                            entries[i] = [tool, parseInt(e.target.value, 10) || 0];
+                            entries[i] = [tool, v ?? 0];
                             onChange({
                               ...task,
                               toolResponseLimits: {

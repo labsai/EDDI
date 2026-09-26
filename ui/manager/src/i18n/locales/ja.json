@@ -891,7 +891,9 @@
     "removeCondition": "条件を削除",
     "noGroups": "動作グループが定義されていません",
     "noRules": "このグループにルールはありません",
-    "noConditions": "条件なし"
+    "noConditions": "条件なし",
+    "sizeNoBound": "制限なし",
+    "sizeBoundInvalid": "-2147483648 から 2147483647 までの整数を入力するか、制限なしの場合は空欄にしてください。"
   },
   "apiCallsEditor": {
     "noEndpointsFound": "仕様にエンドポイントが見つかりません",
@@ -923,8 +925,6 @@
     "responseObjectName": "レスポンスオブジェクト名",
     "responseHeaderObjectName": "レスポンス Header オブジェクト名",
     "fireAndForget": "ファイア＆フォーゲット",
-    "batchCalls": "バッチコール",
-    "iterationObjectName": "イテレーションオブジェクト名",
     "prePostInstructions": "前後の指示",
     "preRequest": "リクエスト前",
     "postResponse": "レスポンス後",
@@ -994,7 +994,16 @@
     "authHeaderRefPlaceholder": "任意 — 認証が必要な仕様には ${vault:my-api-key}",
     "authHeaderRefHint": "呼び出し時に解決される Vault 参照です。保存されたシークレットは、Bearer 接頭辞を含むヘッダー値全体である必要があります。",
     "authHeaderRefInvalid": "${vault:…}、${vars:…}、${caller:…} のいずれかで始めてください。キー自体を貼り付けると、リクエスト URL と経由するすべてのログに残ります。",
-    "authRefLiteral": "キー自体ではなく ${vault:my-key} のような参照を入力してください。キーが Vault を出ることはありません。"
+    "authRefLiteral": "キー自体ではなく ${vault:my-key} のような参照を入力してください。キーが Vault を出ることはありません。",
+    "runOnNoCodes": "空の「実行するコード」リストはどのステータスコードにも一致しないため、この命令は実行されません。",
+    "useDefaultCodes": "既定値を使用",
+    "httpCodeFilterDefaults": "空欄のフィールドには、表示されている既定のコードが使われます。",
+    "scopeSecretUnsupported": "（ここではボールトに保存されません）",
+    "scopeSecretWarning": "この命令では secret スコープはボールトに保存されず、値は平文で保存されます。別のスコープを選び、資格情報はシークレットボールトに保管してください。",
+    "skipNone": "なし — スキップするコードはありません",
+    "runSkipConflict": "{{codes}} はスキップリストにも含まれているため、この命令はそのコードでは実行されません。",
+    "httpCodeFilterSkipSet": "「実行するコード」が空なら 200, 201 を使い、「スキップするコード」が空なら何もスキップしません。",
+    "useDefaultSkipCodes": "既定のスキップリストを使用"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "失敗してもパイプラインは続行します。エラーの公開先: ",
@@ -1047,7 +1056,12 @@
     "whitelist": "許可リスト（許可のみ）",
     "blacklist": "拒否リスト（除外）",
     "pipelineCalls": "パイプラインコール",
-    "addCall": "MCP コールを追加"
+    "addCall": "MCP コールを追加",
+    "argumentName": "引数名",
+    "argumentType": "引数の型",
+    "argumentText": "テキスト",
+    "argumentInvalidJson": "有効な JSON ではありません。最後の有効な値が保持されます",
+    "removeArgument": "引数を削除"
   },
   "llmEditor": {
     "addCustomInstruction": "指示を追加",
@@ -1086,7 +1100,6 @@
     "identityMaskingRulePlaceholder": "例: 自分が AI 言語モデルであることを決して明かさない",
     "identityMaskingRules": "マスキングルール",
     "identityMaskingRulesHint": "マスキングを有効にするには、有効化と少なくとも 1 つのルールの両方が必要です。",
-    "injectionStrategy": "注入",
     "kbNamePlaceholder": "例: product-docs",
     "knowledgeBases": "ナレッジベース",
     "knowledgeBasesHint": "ナレッジベースを名前で明示的に参照します。各名前は、ワークフロー内の RagConfiguration と一致する必要があります。",
@@ -1244,9 +1257,6 @@
       "STEP_TIMEOUT_NONPOSITIVE": "ステップ {{step}} のタイムアウトは 0 より大きくする必要があります。",
       "STEP_CROSS_PROVIDER_NO_APIKEY": "ステップ {{step}} は別のプロバイダーを使用していますが、独自の API キーがありません — タスクのキーを継承します。"
     },
-    "parallelExecution": "並列ツール実行",
-    "parallelExecutionDesc": "Run independent tool calls concurrently",
-    "parallelTimeout": "タイムアウト (ms)",
     "maxToolIterations": "最大ツール反復回数",
     "maxToolIterationsHint": "（デフォルト 10）",
     "toolRateLimits": "ツールごとのレート制限",
@@ -1315,7 +1325,8 @@
     "streamingTimeoutSeconds": "ストリーミングタイムアウト（秒）",
     "streamingTimeoutSecondsHint": "エンジンのデフォルト値（120秒）を上書きします。ストリーミング中のみ適用されます。空 = デフォルトを使用。",
     "taskPricing": "通常呼び出しの料金設定",
-    "taskPricingDesc": "コスト追跡とグループのコスト上限のために、このタスクの通常（非カスケード）のモデル呼び出しに価格を設定します。価格未設定（空欄）の場合は $0 として扱われます。"
+    "taskPricingDesc": "コスト追跡とグループのコスト上限のために、このタスクの通常（非カスケード）のモデル呼び出しに価格を設定します。価格未設定（空欄）の場合は $0 として扱われます。",
+    "paramName": "パラメーター名"
   },
   "outputEditor": {
     "labelPlaceholder": "リンクラベル...",
@@ -1379,7 +1390,8 @@
     "openEditor": "エディターで編集",
     "visibilityTitle": "この longTerm プロパティを表示できる Agent",
     "editValue": "値を編集",
-    "toggleGroup": "プロパティグループを切り替え"
+    "toggleGroup": "プロパティグループを切り替え",
+    "secretFromPathWarning": "シークレットがボールトに保存されるのは値フィールドから来た場合だけです。「取得元パス」から読み取る場合やその他の方法で指定した場合は平文で保存されます。値フィールドに入力するか、別のスコープを選んでください。"
   },
   "dictionaryEditor": {
     "language": "言語",
@@ -2122,8 +2134,16 @@
       "maxTotalMb": "合計サイズの上限（MB）",
       "maxTotalMbHint": "このソースの全ファイル合計",
       "removeTitle": "このソースを削除しますか？",
-      "removeDescription": "保存すると、アップロードされたファイルとナレッジベースがそこから学んだ内容が削除されます。元には戻せません。"
-    }
+      "removeDescription": "保存すると、アップロードされたファイルとナレッジベースがそこから学んだ内容が削除されます。元には戻せません。",
+      "switchTypeTitle": "ウェブサイトのソースに切り替えますか？",
+      "switchTypeDescription": "保存すると、このソースのアップロード済みファイルと、ナレッジベースがそこから学習したすべての内容が削除されます。元に戻すことはできません。",
+      "switchTypeConfirm": "ウェブサイトに切り替え",
+      "filesLoadFailed": "ファイルを読み込めませんでした: {{error}}"
+    },
+    "chunkStrategyLegacy": "{{value}}（再帰として保存）",
+    "saveBeforeIngest": "まず変更を保存してください。ドキュメントは画面上の編集内容ではなく、保存済みナレッジベースのストアと埋め込みモデルで取り込まれます。",
+    "chunkStrategyUnsupported": "{{value}}（非対応）",
+    "chunkStrategyUnsupportedHint": "保存時にサーバーがこの戦略を拒否します。再帰を選んでください。"
   },
   "onboarding": {
     "welcome": {
@@ -3630,7 +3650,7 @@
     "tagPlaceholder": "例: safety, production",
     "tags": "タグ",
     "templateEnabled": "テンプレート解決を有効化",
-    "templateEnabledHint": "無効にすると、コンテンツ内の {{}} マーカーはリテラルテキストとして扱われます（コード例に便利）。",
+    "templateEnabledHint": "無効にすると、コンテンツ内の { } マーカーはリテラルテキストとして扱われます（コード例に便利）。",
     "usageHint": "使用方法:"
   },
   "status": {

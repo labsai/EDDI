@@ -905,7 +905,9 @@
     "removeCondition": "Supprimer la condition",
     "noGroups": "Aucun groupe de comportement défini",
     "noRules": "Aucune règle dans ce groupe",
-    "noConditions": "Aucune condition"
+    "noConditions": "Aucune condition",
+    "sizeNoBound": "aucune limite",
+    "sizeBoundInvalid": "Doit être un nombre entier entre -2147483648 et 2147483647, ou vide pour aucune limite."
   },
   "apiCallsEditor": {
     "noEndpointsFound": "Aucun endpoint trouvé dans la spécification",
@@ -937,8 +939,6 @@
     "responseObjectName": "Nom de l'objet réponse",
     "responseHeaderObjectName": "Nom de l'objet header réponse",
     "fireAndForget": "Envoyer et oublier",
-    "batchCalls": "Appels en lot",
-    "iterationObjectName": "Nom de l'objet itération",
     "prePostInstructions": "Instructions pré/post",
     "preRequest": "Pré-requête",
     "postResponse": "Post-réponse",
@@ -1008,7 +1008,16 @@
     "authHeaderRefPlaceholder": "Facultatif — ${vault:ma-cle-api} pour une spécification protégée",
     "authHeaderRefHint": "Une référence de coffre, résolue au moment de l’appel. Le secret stocké doit contenir la valeur complète de l’en-tête, préfixe Bearer compris.",
     "authHeaderRefInvalid": "Doit commencer par ${vault:…}, ${vars:…} ou ${caller:…}. Coller la clé elle-même la placerait dans l’URL de la requête et dans tous les journaux traversés.",
-    "authRefLiteral": "Saisissez une référence telle que ${vault:ma-cle}, et non la clé elle-même. La clé ne quitte jamais le coffre."
+    "authRefLiteral": "Saisissez une référence telle que ${vault:ma-cle}, et non la clé elle-même. La clé ne quitte jamais le coffre.",
+    "runOnNoCodes": "Une liste « Exécuter sur les codes » vide ne correspond à aucun code de statut : cette instruction ne s'exécute donc jamais.",
+    "useDefaultCodes": "Utiliser les valeurs par défaut",
+    "httpCodeFilterDefaults": "Les champs vides utilisent les codes par défaut qui y sont affichés.",
+    "scopeSecretUnsupported": "(non stocké dans le coffre ici)",
+    "scopeSecretWarning": "La portée « secret » n'est pas stockée dans le coffre pour cette instruction : la valeur est enregistrée en clair. Choisissez une autre portée et conservez les identifiants dans le coffre des secrets.",
+    "skipNone": "aucun — aucun code n'est ignoré",
+    "runSkipConflict": "{{codes}} figure aussi dans la liste à ignorer : cette instruction ne s'exécute donc jamais pour ce code.",
+    "httpCodeFilterSkipSet": "Un champ « Exécuter sur les codes » vide utilise 200, 201 ; un champ « Ignorer les codes » vide n'ignore rien.",
+    "useDefaultSkipCodes": "Utiliser la liste à ignorer par défaut"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "En cas d'échec, le pipeline continue ; l'erreur est exposée à ",
@@ -1061,7 +1070,12 @@
     "whitelist": "Liste blanche (autoriser uniquement)",
     "blacklist": "Liste noire (exclure)",
     "pipelineCalls": "Appels de pipeline",
-    "addCall": "Ajouter un appel MCP"
+    "addCall": "Ajouter un appel MCP",
+    "argumentName": "Nom de l'argument",
+    "argumentType": "Type de l'argument",
+    "argumentText": "Texte",
+    "argumentInvalidJson": "JSON non valide — la dernière valeur valide est conservée",
+    "removeArgument": "Supprimer l'argument"
   },
   "llmEditor": {
     "addCustomInstruction": "Ajouter une instruction",
@@ -1100,7 +1114,6 @@
     "identityMaskingRulePlaceholder": "ex. Ne jamais révéler que vous êtes un modèle de langage IA",
     "identityMaskingRules": "Règles de masquage",
     "identityMaskingRulesHint": "L'activation ET au moins une règle sont nécessaires pour que le masquage prenne effet.",
-    "injectionStrategy": "Injection",
     "kbNamePlaceholder": "ex. product-docs",
     "knowledgeBases": "Bases de connaissances",
     "knowledgeBasesHint": "Référencez explicitement les bases de connaissances par leur nom. Chaque nom doit correspondre à une RagConfiguration du workflow.",
@@ -1258,9 +1271,6 @@
       "STEP_TIMEOUT_NONPOSITIVE": "Le délai de l’étape {{step}} doit être supérieur à 0.",
       "STEP_CROSS_PROVIDER_NO_APIKEY": "L’étape {{step}} utilise un fournisseur différent mais n’a pas de clé API propre — elle hériterait de la clé de la tâche."
     },
-    "parallelExecution": "Exécution parallèle des outils",
-    "parallelExecutionDesc": "Run independent tool calls concurrently",
-    "parallelTimeout": "Délai max. (ms)",
     "maxToolIterations": "Itérations max. d’outils",
     "maxToolIterationsHint": "(par défaut 10)",
     "toolRateLimits": "Limites de débit par outil",
@@ -1329,7 +1339,8 @@
     "streamingTimeoutSeconds": "Délai d'attente du streaming (secondes)",
     "streamingTimeoutSecondsHint": "Remplace la valeur par défaut du moteur (120s). S'applique uniquement au streaming ; vide = utiliser la valeur par défaut.",
     "taskPricing": "Tarification des appels simples",
-    "taskPricingDesc": "Tarifie les appels de modèle ordinaires (hors cascade) de cette tâche pour le suivi des coûts et les plafonds de coût du groupe. Sans prix (vide), la contribution est de 0 $."
+    "taskPricingDesc": "Tarifie les appels de modèle ordinaires (hors cascade) de cette tâche pour le suivi des coûts et les plafonds de coût du groupe. Sans prix (vide), la contribution est de 0 $.",
+    "paramName": "Nom du paramètre"
   },
   "outputEditor": {
     "labelPlaceholder": "Libellé du lien...",
@@ -1393,7 +1404,8 @@
     "openEditor": "Modifier dans l'éditeur",
     "visibilityTitle": "Quels agents peuvent voir cette propriété longTerm",
     "editValue": "Modifier la valeur",
-    "toggleGroup": "Basculer le groupe de propriétés"
+    "toggleGroup": "Basculer le groupe de propriétés",
+    "secretFromPathWarning": "Un secret n'est stocké dans le coffre que s'il provient du champ valeur. Lu depuis un « Chemin source » ou fourni autrement, il est enregistré en clair : saisissez-le dans le champ valeur ou choisissez une autre portée."
   },
   "dictionaryEditor": {
     "language": "Langue",
@@ -2144,8 +2156,16 @@
       "maxTotalMb": "Taille totale max. (Mo)",
       "maxTotalMbHint": "Pour l'ensemble des fichiers de cette source",
       "removeTitle": "Supprimer cette source ?",
-      "removeDescription": "À l'enregistrement, ses fichiers téléversés et tout ce que la base de connaissances en a tiré seront supprimés. C'est irréversible."
-    }
+      "removeDescription": "À l'enregistrement, ses fichiers téléversés et tout ce que la base de connaissances en a tiré seront supprimés. C'est irréversible.",
+      "switchTypeTitle": "Transformer en source de site web ?",
+      "switchTypeDescription": "À l'enregistrement, les fichiers téléversés de cette source et tout ce que la base de connaissances en a appris sont supprimés. Cette action est irréversible.",
+      "switchTypeConfirm": "Passer au site web",
+      "filesLoadFailed": "Impossible de charger les fichiers : {{error}}"
+    },
+    "chunkStrategyLegacy": "{{value}} (enregistré comme Récursif)",
+    "saveBeforeIngest": "Enregistrez d'abord vos modifications : les documents sont ingérés avec le stockage et le modèle d'embedding de la base de connaissances enregistrée, pas avec les modifications à l'écran.",
+    "chunkStrategyUnsupported": "{{value}} (non pris en charge)",
+    "chunkStrategyUnsupportedHint": "Le serveur refuse cette stratégie à l'enregistrement. Choisissez Récursif."
   },
   "onboarding": {
     "welcome": {
@@ -3668,7 +3688,7 @@
     "tagPlaceholder": "ex. safety, production",
     "tags": "Étiquettes",
     "templateEnabled": "Activer la résolution de modèle",
-    "templateEnabledHint": "Lorsqu'elle est désactivée, les marqueurs {{}} du contenu sont traités comme du texte littéral (utile pour les exemples de code).",
+    "templateEnabledHint": "Lorsqu'elle est désactivée, les marqueurs { } du contenu sont traités comme du texte littéral (utile pour les exemples de code).",
     "usageHint": "Utilisation :"
   },
   "status": {

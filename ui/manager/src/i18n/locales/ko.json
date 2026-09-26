@@ -891,7 +891,9 @@
     "removeCondition": "조건 제거",
     "noGroups": "동작 그룹이 정의되지 않았습니다",
     "noRules": "이 그룹에 규칙이 없습니다",
-    "noConditions": "조건 없음"
+    "noConditions": "조건 없음",
+    "sizeNoBound": "제한 없음",
+    "sizeBoundInvalid": "-2147483648에서 2147483647 사이의 정수여야 하며, 제한이 없으면 비워 두세요."
   },
   "apiCallsEditor": {
     "noEndpointsFound": "사양에서 엔드포인트를 찾을 수 없습니다",
@@ -923,8 +925,6 @@
     "responseObjectName": "응답 객체 이름",
     "responseHeaderObjectName": "응답 Header 객체 이름",
     "fireAndForget": "비동기 전송",
-    "batchCalls": "배치 호출",
-    "iterationObjectName": "반복 객체 이름",
     "prePostInstructions": "전/후 지시",
     "preRequest": "요청 전",
     "postResponse": "응답 후",
@@ -994,7 +994,16 @@
     "authHeaderRefPlaceholder": "선택 사항 — 인증이 필요한 명세에는 ${vault:my-api-key}",
     "authHeaderRefHint": "호출 시점에 해석되는 볼트 참조입니다. 저장된 시크릿은 Bearer 접두사를 포함한 전체 헤더 값이어야 합니다.",
     "authHeaderRefInvalid": "${vault:…}, ${vars:…} 또는 ${caller:…} 로 시작해야 합니다. 키를 그대로 붙여넣으면 요청 URL과 경유하는 모든 로그에 남게 됩니다.",
-    "authRefLiteral": "키 자체가 아니라 ${vault:my-key} 같은 참조를 입력하세요. 키는 볼트를 벗어나지 않습니다."
+    "authRefLiteral": "키 자체가 아니라 ${vault:my-key} 같은 참조를 입력하세요. 키는 볼트를 벗어나지 않습니다.",
+    "runOnNoCodes": "비어 있는 \"실행할 코드\" 목록은 어떤 상태 코드와도 일치하지 않으므로 이 명령은 실행되지 않습니다.",
+    "useDefaultCodes": "기본값 사용",
+    "httpCodeFilterDefaults": "비어 있는 필드는 표시된 기본 코드를 사용합니다.",
+    "scopeSecretUnsupported": "(여기서는 볼트에 저장되지 않음)",
+    "scopeSecretWarning": "이 명령에서는 secret 범위가 볼트에 저장되지 않으며 값이 평문으로 저장됩니다. 다른 범위를 선택하고 자격 증명은 시크릿 볼트에 보관하세요.",
+    "skipNone": "없음 — 건너뛰는 코드 없음",
+    "runSkipConflict": "{{codes}}이(가) 건너뛰기 목록에도 있으므로 이 명령은 해당 코드에서 실행되지 않습니다.",
+    "httpCodeFilterSkipSet": "\"실행할 코드\"가 비어 있으면 200, 201을 사용하고, \"건너뛸 코드\"가 비어 있으면 아무것도 건너뛰지 않습니다.",
+    "useDefaultSkipCodes": "기본 건너뛰기 목록 사용"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "실패 시 파이프라인이 계속됩니다. 오류는 다음 위치에 노출됩니다: ",
@@ -1047,7 +1056,12 @@
     "whitelist": "허용 목록 (허용만)",
     "blacklist": "차단 목록 (제외)",
     "pipelineCalls": "파이프라인 호출",
-    "addCall": "MCP 호출 추가"
+    "addCall": "MCP 호출 추가",
+    "argumentName": "인수 이름",
+    "argumentType": "인수 유형",
+    "argumentText": "텍스트",
+    "argumentInvalidJson": "유효한 JSON이 아닙니다. 마지막 유효한 값이 유지됩니다",
+    "removeArgument": "인수 제거"
   },
   "llmEditor": {
     "addCustomInstruction": "지시 추가",
@@ -1086,7 +1100,6 @@
     "identityMaskingRulePlaceholder": "예: AI 언어 모델임을 절대 밝히지 마세요",
     "identityMaskingRules": "마스킹 규칙",
     "identityMaskingRulesHint": "마스킹이 적용되려면 활성화와 하나 이상의 규칙이 모두 필요합니다.",
-    "injectionStrategy": "주입",
     "kbNamePlaceholder": "예: product-docs",
     "knowledgeBases": "지식 베이스",
     "knowledgeBasesHint": "지식 베이스를 이름으로 명시적으로 참조합니다. 각 이름은 워크플로의 RagConfiguration과 일치해야 합니다.",
@@ -1244,9 +1257,6 @@
       "STEP_TIMEOUT_NONPOSITIVE": "{{step}} 단계의 타임아웃은 0보다 커야 합니다.",
       "STEP_CROSS_PROVIDER_NO_APIKEY": "{{step}} 단계가 다른 제공자를 사용하지만 자체 API 키가 없습니다 — 작업 키를 상속하게 됩니다."
     },
-    "parallelExecution": "병렬 도구 실행",
-    "parallelExecutionDesc": "Run independent tool calls concurrently",
-    "parallelTimeout": "타임아웃 (ms)",
     "maxToolIterations": "최대 도구 반복 횟수",
     "maxToolIterationsHint": "(기본값 10)",
     "toolRateLimits": "도구별 속도 제한",
@@ -1315,7 +1325,8 @@
     "streamingTimeoutSeconds": "스트리밍 시간 초과(초)",
     "streamingTimeoutSecondsHint": "엔진 기본값(120초)을 재정의합니다. 스트리밍 중에만 적용됩니다. 비어 있음 = 기본값 사용.",
     "taskPricing": "일반 호출 요금",
-    "taskPricingDesc": "비용 추적 및 그룹 비용 상한을 위해 이 작업의 일반(비캐스케이드) 모델 호출 가격을 설정합니다. 가격이 없으면(비어 있으면) $0으로 계산됩니다."
+    "taskPricingDesc": "비용 추적 및 그룹 비용 상한을 위해 이 작업의 일반(비캐스케이드) 모델 호출 가격을 설정합니다. 가격이 없으면(비어 있으면) $0으로 계산됩니다.",
+    "paramName": "매개변수 이름"
   },
   "outputEditor": {
     "labelPlaceholder": "링크 라벨...",
@@ -1379,7 +1390,8 @@
     "openEditor": "편집기에서 편집",
     "visibilityTitle": "이 longTerm 속성을 볼 수 있는 Agent",
     "editValue": "값 편집",
-    "toggleGroup": "속성 그룹 토글"
+    "toggleGroup": "속성 그룹 토글",
+    "secretFromPathWarning": "시크릿은 값 필드에서 온 경우에만 볼트에 저장됩니다. \"원본 경로\"에서 읽거나 다른 방식으로 지정하면 평문으로 저장되므로 값 필드에 입력하거나 다른 범위를 선택하세요."
   },
   "dictionaryEditor": {
     "language": "언어",
@@ -2122,8 +2134,16 @@
       "maxTotalMb": "전체 최대 크기(MB)",
       "maxTotalMbHint": "이 소스의 모든 파일 합계",
       "removeTitle": "이 소스를 제거할까요?",
-      "removeDescription": "저장하면 업로드된 파일과 지식 베이스가 거기서 배운 내용이 모두 삭제되며 되돌릴 수 없습니다."
-    }
+      "removeDescription": "저장하면 업로드된 파일과 지식 베이스가 거기서 배운 내용이 모두 삭제되며 되돌릴 수 없습니다.",
+      "switchTypeTitle": "웹사이트 소스로 전환할까요?",
+      "switchTypeDescription": "저장하면 이 소스에 업로드된 파일과 지식 베이스가 그 파일에서 학습한 모든 내용이 삭제됩니다. 되돌릴 수 없습니다.",
+      "switchTypeConfirm": "웹사이트로 전환",
+      "filesLoadFailed": "파일을 불러올 수 없습니다: {{error}}"
+    },
+    "chunkStrategyLegacy": "{{value}} (재귀로 저장됨)",
+    "saveBeforeIngest": "먼저 변경 사항을 저장하세요. 문서는 화면의 편집 내용이 아니라 저장된 지식 베이스의 저장소와 임베딩 모델로 수집됩니다.",
+    "chunkStrategyUnsupported": "{{value}} (지원되지 않음)",
+    "chunkStrategyUnsupportedHint": "저장할 때 서버가 이 전략을 거부합니다. 재귀를 선택하세요."
   },
   "onboarding": {
     "welcome": {
@@ -3630,7 +3650,7 @@
     "tagPlaceholder": "예: safety, production",
     "tags": "태그",
     "templateEnabled": "템플릿 해석 활성화",
-    "templateEnabledHint": "비활성화하면 콘텐츠의 {{}} 마커가 리터럴 텍스트로 처리됩니다(코드 예제에 유용함).",
+    "templateEnabledHint": "비활성화하면 콘텐츠의 { } 마커가 리터럴 텍스트로 처리됩니다(코드 예제에 유용함).",
     "usageHint": "사용법:"
   },
   "status": {

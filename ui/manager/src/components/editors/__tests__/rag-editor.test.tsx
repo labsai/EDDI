@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { act, fireEvent, screen } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import {
   RagEditor,
@@ -250,16 +250,14 @@ describe("RagEditor", () => {
     expect(screen.getByTestId("chunking-section")).toBeInTheDocument();
   });
 
-  it("changes chunk strategy to paragraph", async () => {
+  it("offers only the recursive chunking strategy, the one that is implemented", async () => {
     const user = userEvent.setup();
     renderWithProviders(
       <RagEditor data={populatedConfig} onChange={onChange} />
     );
     await openSection(user, "Document Chunking");
-    await user.selectOptions(screen.getByTestId("chunk-strategy"), "paragraph");
-    expect(onChange).toHaveBeenCalledWith(
-      expect.objectContaining({ chunkStrategy: "paragraph" })
-    );
+    const select = screen.getByTestId("chunk-strategy") as HTMLSelectElement;
+    expect([...select.options].map((o) => o.value)).toEqual(["recursive"]);
   });
 
   // ── KB name editing ────────────────────────────────────────────────────────
@@ -584,16 +582,104 @@ describe("RagEditor", () => {
 
   // ── Chunk strategy: sentence ──────────────────────────────────────────────
 
-  it("changes chunk strategy to sentence", async () => {
+  it("shows a stored legacy strategy as what it is saved as, without offering it", async () => {
     const user = userEvent.setup();
     renderWithProviders(
-      <RagEditor data={populatedConfig} onChange={onChange} />
+      <RagEditor data={{ ...populatedConfig, chunkStrategy: "sentence" }} onChange={onChange} />
     );
     await openSection(user, "Document Chunking");
-    await user.selectOptions(screen.getByTestId("chunk-strategy"), "sentence");
+    const select = screen.getByTestId("chunk-strategy") as HTMLSelectElement;
+    const legacy = [...select.options].find((o) => o.value === "sentence");
+    expect(legacy).toBeDefined();
+    expect(legacy!.disabled).toBe(true);
+    expect(legacy!.textContent).toMatch(/saved as Recursive/);
+    // Picking the real option replaces it.
+    await user.selectOptions(select, "recursive");
     expect(onChange).toHaveBeenCalledWith(
-      expect.objectContaining({ chunkStrategy: "sentence" })
+      expect.objectContaining({ chunkStrategy: "recursive" })
     );
+  });
+
+  // ── Manual ingestion with unsaved edits ─────────────────────────────────────
+
+  it("refuses manual ingestion while the knowledge base has unsaved edits", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const user = userEvent.setup();
+    renderWithProviders(
+      <RagEditor data={populatedConfig} onChange={onChange} resourceId="kb1" isDirty />
+    );
+    await openSection(user, "Document Ingestion");
+
+    // The ingest endpoint reads the SAVED config: the documents would go into
+    // the old store with the old embedding model.
+    expect(screen.getByTestId("ingestion-save-first")).toBeInTheDocument();
+    expect(screen.getByTestId("ingestion-file-input")).toBeDisabled();
+
+    await user.type(screen.getByPlaceholderText("Paste document text here..."), "hello");
+    const ingest = screen.getByTestId("ingest-text-btn");
+    expect(ingest).toBeDisabled();
+    await user.click(ingest);
+
+    // The file is never read: the fetch sits in FileReader.onload, so an
+    // assertion on fetch alone would pass before an unguarded read finished.
+    const readSpy = vi.spyOn(FileReader.prototype, "readAsText");
+    fireEvent.drop(screen.getByTestId("ingestion-dropzone"), {
+      dataTransfer: { files: [new File(["x"], "a.txt", { type: "text/plain" })] },
+    });
+    expect(readSpy).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining("/ingest"),
+      expect.anything(),
+    );
+    readSpy.mockRestore();
+    fetchSpy.mockRestore();
+  });
+
+  it("does not ingest a file whose read finished after the knowledge base was edited", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    // Hold the read: onload is fired by hand once the editor is dirty.
+    const readers: FileReader[] = [];
+    const readSpy = vi
+      .spyOn(FileReader.prototype, "readAsText")
+      .mockImplementation(function (this: FileReader) {
+        readers.push(this);
+      });
+    const user = userEvent.setup();
+    const { rerender } = renderWithProviders(
+      <RagEditor data={populatedConfig} onChange={onChange} resourceId="kb1" isDirty={false} />
+    );
+    await openSection(user, "Document Ingestion");
+
+    fireEvent.drop(screen.getByTestId("ingestion-dropzone"), {
+      dataTransfer: { files: [new File(["x"], "a.txt", { type: "text/plain" })] },
+    });
+    expect(readers).toHaveLength(1);
+    const pending = readers[0]!;
+
+    rerender(<RagEditor data={populatedConfig} onChange={onChange} resourceId="kb1" isDirty />);
+    await act(async () => {
+      pending.onload?.call(pending, new ProgressEvent("load") as ProgressEvent<FileReader>);
+    });
+
+    expect(fetchSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining("/ingest"),
+      expect.anything(),
+    );
+    expect(screen.getByText(/a\.txt was not ingested/)).toBeInTheDocument();
+    readSpy.mockRestore();
+    fetchSpy.mockRestore();
+  });
+
+  it("allows manual ingestion once the edits are saved", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <RagEditor data={populatedConfig} onChange={onChange} resourceId="kb1" isDirty={false} />
+    );
+    await openSection(user, "Document Ingestion");
+    expect(screen.queryByTestId("ingestion-save-first")).not.toBeInTheDocument();
+    expect(screen.getByTestId("ingestion-file-input")).not.toBeDisabled();
+    await user.type(screen.getByPlaceholderText("Paste document text here..."), "hello");
+    expect(screen.getByTestId("ingest-text-btn")).not.toBeDisabled();
   });
 
   // ── Empty name clears to undefined ──────────────────────────────────────────
@@ -682,3 +768,30 @@ describe("RagEditor", () => {
   });
 });
 
+
+describe("RagEditor unknown chunk strategies", () => {
+  it("tells an unsupported strategy apart from the two the server rewrites", async () => {
+    // Only paragraph/sentence are rewritten to recursive; anything else is a
+    // 400 on save, so "saved as Recursive" would be a false promise.
+    const user = userEvent.setup();
+    renderWithProviders(
+      <RagEditor data={{ ...populatedConfig, chunkStrategy: "semantic" }} onChange={vi.fn()} />,
+    );
+    await user.click(screen.getByRole("button", { name: /Document Chunking/i }));
+    const select = screen.getByTestId("chunk-strategy") as HTMLSelectElement;
+    const option = [...select.options].find((o) => o.value === "semantic")!;
+    expect(option.disabled).toBe(true);
+    expect(option.textContent).toMatch(/not supported/);
+    expect(option.textContent).not.toMatch(/saved as Recursive/);
+    expect(screen.getByTestId("chunk-strategy-unsupported")).toBeInTheDocument();
+  });
+
+  it("does not warn for a legacy strategy", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <RagEditor data={{ ...populatedConfig, chunkStrategy: "paragraph" }} onChange={vi.fn()} />,
+    );
+    await user.click(screen.getByRole("button", { name: /Document Chunking/i }));
+    expect(screen.queryByTestId("chunk-strategy-unsupported")).not.toBeInTheDocument();
+  });
+});

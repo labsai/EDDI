@@ -118,7 +118,6 @@ export interface LlmTask {
   ragDefaults?: {
     maxResults?: number;
     minScore?: number;
-    injectionStrategy?: string;
   };
   httpCallRag?: string;
   retry?: {
@@ -133,8 +132,6 @@ export interface LlmTask {
   enableRateLimiting?: boolean;
   defaultRateLimit?: number;
   toolRateLimits?: Record<string, number>;
-  enableParallelExecution?: boolean;
-  parallelExecutionTimeoutMs?: number;
   maxToolIterations?: number;
   modelCascade?: ModelCascadeConfig;
 
@@ -268,7 +265,6 @@ export interface KnowledgeBaseReference {
   name?: string;
   maxResults?: number;
   minScore?: number;
-  injectionStrategy?: string;
   contextTemplate?: string;
 }
 
