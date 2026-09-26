@@ -39,7 +39,7 @@ forged `hitl.approval` cancellation to the audit trail.
 - Both now take `@RolesAllowed({"eddi-admin", "eddi-editor"})` plus EDIT access on the agent. That is the
   same gate as undeploy, which already ends every active conversation of an agent.
 - `/end` reads only the conversation ids from the request. It takes each conversation's agent and state from
-  the stored snapshot and checks EDIT once per agent. Unknown and already ENDED conversations are skipped.
+  the stored snapshot and checks EDIT once per agent, for the whole batch before it ends anything, so a mixed list is refused rather than half-applied. Unknown and already ENDED conversations are skipped.
   Every other conversation goes through `endConversation`, which decides server-side whether a pause is being
   terminated. The old raw `setConversationState(ENDED)` for non-paused conversations also skipped the in-flight
   signal and the state cache. A null body is a 400.
