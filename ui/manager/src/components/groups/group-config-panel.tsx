@@ -28,6 +28,12 @@ interface GroupConfigPanelProps {
   config: AgentGroupConfiguration;
   groupId?: string;
   groupVersion?: number;
+  /**
+   * Called with the version an inline editor's save created. The host page owns
+   * the version (it is in the URL) and must move onto it: every save makes a new
+   * version, and the next save or delete addressed to the old one is a 409.
+   */
+  onVersionChange?: (version: number) => void;
   className?: string;
 }
 
@@ -54,7 +60,13 @@ const CONTEXT_SCOPE_FALLBACKS: Record<string, string> = {
   TASK_WITH_DEPS: "task + deps",
 };
 
-export function GroupConfigPanel({ config, groupId, groupVersion, className }: GroupConfigPanelProps) {
+export function GroupConfigPanel({
+  config,
+  groupId,
+  groupVersion,
+  onVersionChange,
+  className,
+}: GroupConfigPanelProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const styleInfo = styleDisplay(config.style, t);
@@ -297,6 +309,7 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
               config={config}
               groupId={groupId!}
               groupVersion={groupVersion!}
+              onSaved={onVersionChange}
               onDone={() => setEditingPhases(false)}
             />
           ) : (
@@ -434,6 +447,7 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
               config={config}
               groupId={groupId}
               groupVersion={groupVersion}
+              onSaved={onVersionChange}
               onDone={() => setEditingHitl(false)}
             />
           ) : hasHitl ? (
@@ -619,6 +633,7 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
               config={config}
               groupId={groupId}
               groupVersion={groupVersion}
+              onSaved={onVersionChange}
               onDone={() => setEditingAdvanced(false)}
             />
           ) : !hasAdvanced ? (

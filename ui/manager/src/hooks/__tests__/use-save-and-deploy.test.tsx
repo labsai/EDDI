@@ -94,4 +94,45 @@ describe("useSaveAndDeploy", () => {
     expect(useChatDrawerStore.getState().step).toBe("error");
     expect(useChatDrawerStore.getState().errorMessage).toBe("Save failed");
   });
+
+  it("reports a deployment ERROR at once instead of timing out 30 s later", async () => {
+    // The ERROR throw used to sit inside the poll's try/catch, which swallowed
+    // it on every attempt but the last — so the flow polled for the full 30 s
+    // and then said "Deploy timed out" about a deployment that had failed.
+    let statusReads = 0;
+    server.use(
+      http.post("*/administration/:env/deploy/:agentId", () => new HttpResponse(null, { status: 202 })),
+      http.get("*/administration/:env/deploymentstatus/:agentId", () => {
+        statusReads++;
+        return HttpResponse.json({ status: "ERROR" });
+      }),
+    );
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    try {
+      const { result } = renderHook(() => useSaveAndDeploy(), {
+        wrapper: createWrapper(),
+      });
+
+      let done = false;
+      await act(async () => {
+        void result.current
+          .saveAndDeploy({ agentId: "agent-1", save: async () => ({ newAgentVersion: 2 }) })
+          .then(() => {
+            done = true;
+          });
+        // One poll interval — the first status read answers ERROR. A few more
+        // seconds let the request settle, far short of the 30 s timeout.
+        for (let i = 0; i < 40 && !done; i++) {
+          await vi.advanceTimersByTimeAsync(100);
+        }
+      });
+
+      expect(done).toBe(true);
+      expect(statusReads).toBe(1);
+      expect(useChatDrawerStore.getState().step).toBe("error");
+      expect(useChatDrawerStore.getState().errorMessage).toBe("Deployment failed");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

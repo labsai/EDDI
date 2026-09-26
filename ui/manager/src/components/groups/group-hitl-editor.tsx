@@ -29,11 +29,14 @@ export function GroupHitlEditor({
   groupId,
   groupVersion,
   onDone,
+  onSaved,
 }: {
   config: AgentGroupConfiguration;
   groupId: string;
   groupVersion: number;
   onDone: () => void;
+  /** The version the save created — the page must move onto it (see `useUpdateGroup`). */
+  onSaved?: (version: number) => void;
 }) {
   const { t } = useTranslation();
   const update = useUpdateGroup();
@@ -98,7 +101,8 @@ export function GroupHitlEditor({
     update.mutate(
       { id: groupId, version: groupVersion, config: next },
       {
-        onSuccess: () => {
+        onSuccess: ({ version }) => {
+          if (version !== null) onSaved?.(version);
           toast.success(t("groups.hitlSaved", "Approval settings saved"));
           onDone();
         },

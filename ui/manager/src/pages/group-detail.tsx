@@ -129,11 +129,30 @@ export function GroupDetailPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   // Backend requires version — default to 1 if missing from URL (e.g. wizard link).
-  // To update after a save: call
-  // setSearchParams(p => { p.set("version", String(newVersion)); return p }, { replace: true })
   const version = useMemo(
     () => (searchParams.get("version") ? Number(searchParams.get("version")) : 1),
     [searchParams],
+  );
+  /**
+   * Move the page onto the version a config save created.
+   *
+   * Every save makes a new version. Staying on the old one — as this page did —
+   * refetched the pre-save document (the edit appeared to revert), and the next
+   * save or delete 409'd; "Delete group + members" got as far as soft-deleting
+   * every member agent before the group delete failed.
+   */
+  const setVersion = useCallback(
+    (next: number) => {
+      setSearchParams(
+        (prev) => {
+          const params = new URLSearchParams(prev);
+          params.set("version", String(next));
+          return params;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
   );
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -969,7 +988,14 @@ export function GroupDetailPage() {
                 <PanelRightClose className="h-3.5 w-3.5" />
               </button>
             </div>
-            <GroupConfigPanel key={groupId} config={safeConfig} groupId={groupId} groupVersion={version} className="flex-1 min-h-0" />
+            <GroupConfigPanel
+              key={groupId}
+              config={safeConfig}
+              groupId={groupId}
+              groupVersion={version}
+              onVersionChange={setVersion}
+              className="flex-1 min-h-0"
+            />
           </div>
         )}
       </div>
@@ -988,6 +1014,7 @@ export function GroupDetailPage() {
             config={safeConfig}
             groupId={groupId}
             groupVersion={version}
+            onVersionChange={setVersion}
           />
         </div>
       </AccessibleDialog>

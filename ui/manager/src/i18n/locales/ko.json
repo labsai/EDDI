@@ -4945,5 +4945,12 @@
     "headerMismatch": "이 연결은 자격 증명을 “{{expected}}”로 보내므로 헤더 이름도 그래야 합니다. 그렇지 않으면 설정에는 한 이름이, 요청에는 다른 이름이 실립니다.",
     "refusedInRequest": "${connection:…}은 경로, 쿼리 매개변수, 본문에서는 거부됩니다. URL의 자격 증명은 모든 프록시 로그에 남고 본문의 것은 읽히지 않습니다. 대신 헤더에서 연결을 참조하세요.",
     "refusedInModel": "언어 모델, 임베딩, 벡터 저장소는 ${connection:…}을 받지 않습니다. 연결은 전체 헤더로 확인되지만 이들은 순수 자격 증명이 필요합니다. 여기서는 ${vault:…}을 사용하세요."
+  },
+  "cascadeSave": {
+    "workflowChanged": "워크플로 {{workflowId}}이(가) 다른 곳에서 변경되었습니다(현재 버전 {{current}}, 이 페이지는 버전 {{version}}). 페이지를 새로 고치세요. 아무것도 저장되지 않았습니다.",
+    "agentChanged": "에이전트 {{agentId}}이(가) 다른 곳에서 변경되었습니다(현재 버전 {{current}}, 이 페이지는 버전 {{version}}). 페이지를 새로 고치세요. 아무것도 저장되지 않았습니다.",
+    "workflowMissingResource": "워크플로 {{workflowId}}(버전 {{version}})이(가) {{resource}}을(를) 참조하지 않으므로 여기서 저장해도 에이전트가 바뀌지 않습니다. 아무것도 저장되지 않았습니다.",
+    "agentWorkflowMismatch": "에이전트 {{agentId}}(버전 {{version}})은(는) 워크플로 {{workflowId}}의 버전 {{expected}}이(가) 아닌 버전 {{found}}을(를) 참조합니다. 이 페이지를 연 후 에이전트가 변경되었습니다. 새로 고치세요. 아무것도 저장되지 않았습니다.",
+    "agentMissingWorkflow": "에이전트 {{agentId}}(버전 {{version}})이(가) 워크플로 {{workflowId}}을(를) 참조하지 않습니다. 아무것도 저장되지 않았습니다."
   }
 }

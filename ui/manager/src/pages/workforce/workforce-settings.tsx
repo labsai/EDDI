@@ -43,6 +43,7 @@ import {
   type CostPolicy,
   type MemberFailurePolicy,
   type MemberUnavailablePolicy,
+  type AgentGroupConfiguration,
 } from "@/lib/api/groups";
 import type { GroupHitlConfig, HitlTimeoutPolicy, HitlGranularity, HitlRejectionPolicy } from "@/lib/api/hitl";
 import {
@@ -262,7 +263,7 @@ function WorkforceSettings() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { boardId } = useParams<{ boardId: string }>();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const version = Number(searchParams.get("version")) || 1;
 
   // ─── Data hooks ──────────────────────────────────────────────────
@@ -298,74 +299,112 @@ function WorkforceSettings() {
   const toggleSection = useCallback((key: string) => setExpandedSections((p) => ({ ...p, [key]: !p[key] })), []);
 
   // ─── Initialize form from config ────────────────────────────────
-  const [initialized, setInitialized] = useState(false);
-  useEffect(() => {
-    if (!config || initialized) return;
-    setName(config.name ?? "");
-    setDescription(config.description ?? "");
-    setStyle(config.style ?? "ROUND_TABLE");
-    setMaxRounds(config.maxRounds ?? 3);
-    setModeratorAgentId(config.moderatorAgentId ?? null);
-    setMembers(config.members ?? []);
-    if (config.protocol) setProtocol({ ...DEFAULT_PROTOCOL, ...config.protocol });
-    if (config.hitlConfig) setHitlConfig({ ...DEFAULT_HITL, ...config.hitlConfig });
-    if (config.dynamicAgents) {
-      setDelegationTargetsDraft((config.dynamicAgents.allowedDelegationTargets ?? []).join(", "));
-      setDynamicAgents({
-        ...DEFAULT_DYNAMIC,
-        ...config.dynamicAgents,
-        // `getGroup` already canonicalises this, but the settings page is also
-        // reachable with a config from a cache written before that existed.
-        lifecyclePolicy: normalizeLifecyclePolicy(config.dynamicAgents.lifecyclePolicy),
-      });
-    }
-    if (config.tasks) setTasks(config.tasks);
-    setRecordDissents(!!config.recordDissents);
-    if (config.taskListConfig) setTaskListConfig(normalizeGroupTaskConfig(config.taskListConfig));
-    setInitialized(true);
-  }, [config, initialized]);
+  // Every field is set, defaults included, so re-initialising from a later
+  // version cannot leave a value behind from the earlier one.
+  const initFrom = useCallback((cfg: AgentGroupConfiguration) => {
+    setName(cfg.name ?? "");
+    setDescription(cfg.description ?? "");
+    setStyle(cfg.style ?? "ROUND_TABLE");
+    setMaxRounds(cfg.maxRounds ?? 3);
+    setModeratorAgentId(cfg.moderatorAgentId ?? null);
+    setMembers(cfg.members ?? []);
+    setProtocol(cfg.protocol ? { ...DEFAULT_PROTOCOL, ...cfg.protocol } : DEFAULT_PROTOCOL);
+    setHitlConfig(cfg.hitlConfig ? { ...DEFAULT_HITL, ...cfg.hitlConfig } : DEFAULT_HITL);
+    setDelegationTargetsDraft((cfg.dynamicAgents?.allowedDelegationTargets ?? []).join(", "));
+    setDynamicAgents(
+      cfg.dynamicAgents
+        ? {
+            ...DEFAULT_DYNAMIC,
+            ...cfg.dynamicAgents,
+            // `getGroup` already canonicalises this, but the settings page is also
+            // reachable with a config from a cache written before that existed.
+            lifecyclePolicy: normalizeLifecyclePolicy(cfg.dynamicAgents.lifecyclePolicy),
+          }
+        : DEFAULT_DYNAMIC,
+    );
+    setTasks(cfg.tasks ?? []);
+    setRecordDissents(!!cfg.recordDissents);
+    setTaskListConfig(
+      cfg.taskListConfig ? normalizeGroupTaskConfig(cfg.taskListConfig) : DEFAULT_GROUP_TASK_CONFIG,
+    );
+  }, []);
 
   // ─── Dirty tracking ─────────────────────────────────────────────
-  const isDirty = useMemo(() => {
-    if (!config) return false;
-    if (name !== (config.name ?? "")) return true;
-    if (description !== (config.description ?? "")) return true;
-    if (style !== (config.style ?? "ROUND_TABLE")) return true;
-    if (maxRounds !== (config.maxRounds ?? 3)) return true;
-    if (moderatorAgentId !== (config.moderatorAgentId ?? null)) return true;
-    if (JSON.stringify(members) !== JSON.stringify(config.members ?? [])) return true;
+  /** Whether the form holds anything `cfg` does not. */
+  const formDiffersFrom = useCallback((cfg: AgentGroupConfiguration) => {
+    if (name !== (cfg.name ?? "")) return true;
+    if (description !== (cfg.description ?? "")) return true;
+    if (style !== (cfg.style ?? "ROUND_TABLE")) return true;
+    if (maxRounds !== (cfg.maxRounds ?? 3)) return true;
+    if (moderatorAgentId !== (cfg.moderatorAgentId ?? null)) return true;
+    if (JSON.stringify(members) !== JSON.stringify(cfg.members ?? [])) return true;
     // Compare against the SAME defaults-merged shape the form was initialised
-    // with. Comparing raw `config.protocol` marks the page dirty forever the
+    // with. Comparing raw `cfg.protocol` marks the page dirty forever the
     // moment a default key (a cost ceiling the stored config never carried) is
     // merged in on load.
-    if (JSON.stringify(protocol) !== JSON.stringify({ ...DEFAULT_PROTOCOL, ...(config.protocol ?? {}) })) return true;
+    if (JSON.stringify(protocol) !== JSON.stringify({ ...DEFAULT_PROTOCOL, ...(cfg.protocol ?? {}) })) return true;
     // Only counts when there is a hitlConfig to persist to. This page cannot
     // create one (approval points, which are what actually gate a pause, are set
     // in the Manager), so tracking edits that can never be saved left the page
     // permanently dirty after a successful save.
-    if (config.hitlConfig && JSON.stringify(hitlConfig) !== JSON.stringify({ ...DEFAULT_HITL, ...config.hitlConfig })) return true;
+    if (cfg.hitlConfig && JSON.stringify(hitlConfig) !== JSON.stringify({ ...DEFAULT_HITL, ...cfg.hitlConfig })) return true;
     if (
       JSON.stringify(dynamicAgents) !==
       JSON.stringify({
         ...DEFAULT_DYNAMIC,
-        ...(config.dynamicAgents ?? {}),
-        ...(config.dynamicAgents
-          ? { lifecyclePolicy: normalizeLifecyclePolicy(config.dynamicAgents.lifecyclePolicy) }
+        ...(cfg.dynamicAgents ?? {}),
+        ...(cfg.dynamicAgents
+          ? { lifecyclePolicy: normalizeLifecyclePolicy(cfg.dynamicAgents.lifecyclePolicy) }
           : {}),
       })
     ) return true;
-    if (JSON.stringify(tasks) !== JSON.stringify(config.tasks ?? [])) return true;
-    if (recordDissents !== !!config.recordDissents) return true;
+    if (JSON.stringify(tasks) !== JSON.stringify(cfg.tasks ?? [])) return true;
+    if (recordDissents !== !!cfg.recordDissents) return true;
     if (
       JSON.stringify(taskListConfig) !==
       JSON.stringify(
-        config.taskListConfig
-          ? normalizeGroupTaskConfig(config.taskListConfig)
+        cfg.taskListConfig
+          ? normalizeGroupTaskConfig(cfg.taskListConfig)
           : DEFAULT_GROUP_TASK_CONFIG,
       )
     ) return true;
     return false;
-  }, [config, name, description, style, maxRounds, moderatorAgentId, members, protocol, hitlConfig, dynamicAgents, tasks, recordDissents, taskListConfig]);
+  }, [name, description, style, maxRounds, moderatorAgentId, members, protocol, hitlConfig, dynamicAgents, tasks, recordDissents, taskListConfig]);
+
+  const isDirty = useMemo(() => (config ? formDiffersFrom(config) : false), [config, formDiffersFrom]);
+
+  /**
+   * The config the form was last loaded from or saved as.
+   *
+   * After a save the page moves onto the version the save created. It used to
+   * stay on the version it was opened with: that document never changed, so the
+   * form stayed dirty forever, and a second save or a delete 409'd. When the
+   * config under the page changes — the refetched copy of the version just
+   * saved, or another version — the form adopts it, but only while it still
+   * holds exactly the baseline: an edit in progress is never overwritten.
+   */
+  const [baseline, setBaseline] = useState<{
+    version: number;
+    config: AgentGroupConfiguration;
+    /** Set by a save until the URL names the version it created. */
+    awaitingUrl?: boolean;
+  } | null>(null);
+  useEffect(() => {
+    if (!config) return;
+    // Right after a save the router has not applied the new version yet (it
+    // does so in a render of its own), so the config here is still the
+    // superseded one — adopting it would flash the pre-save form. Wait for the
+    // URL, once; afterwards any version change is followed as usual, including
+    // a move back to an older version.
+    if (baseline?.awaitingUrl) {
+      if (version === baseline.version) setBaseline({ ...baseline, awaitingUrl: false });
+      return;
+    }
+    if (baseline === null || (config !== baseline.config && !formDiffersFrom(baseline.config))) {
+      initFrom(config);
+      setBaseline({ version, config });
+    }
+  }, [config, version, baseline, formDiffersFrom, initFrom]);
 
   // ─── Beforeunload guard ─────────────────────────────────────────
   useEffect(() => {
@@ -422,9 +461,23 @@ function WorkforceSettings() {
         taskListConfig.allowAgentTaskCreation || config.taskListConfig ? taskListConfig : undefined,
     };
     try {
-      await updateGroupAsync(
+      const saved = await updateGroupAsync(
         { id: boardId, version, config: updatedConfig },
       );
+      if (saved.version !== null) {
+        // The new version is seeded with this very document by `useUpdateGroup`,
+        // so once the URL names it the form matches its baseline exactly.
+        const newVersion = saved.version;
+        setBaseline({ version: newVersion, config: updatedConfig, awaitingUrl: true });
+        setSearchParams(
+          (prev) => {
+            const params = new URLSearchParams(prev);
+            params.set("version", String(newVersion));
+            return params;
+          },
+          { replace: true },
+        );
+      }
       toast.success(
         t("Workforce.settings.saveSuccess", "Task force settings saved")
       );
@@ -450,6 +503,7 @@ function WorkforceSettings() {
     taskListConfig,
     version,
     updateGroupAsync,
+    setSearchParams,
     t,
   ]);
 

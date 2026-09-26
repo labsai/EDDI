@@ -19,7 +19,7 @@ import {
   Search,
   HandMetal,
 } from "lucide-react";
-import { useUpdateAgent } from "@/hooks/use-agents";
+import { useAgentSectionSave } from "@/hooks/use-agent-section-save";
 import { useSkills } from "@/hooks/use-capabilities";
 import type { Agent, ChannelConnector } from "@/lib/api/agents";
 import { MAX_PAUSE_REASON_LENGTH, type AgentHitlConfig, type ToolApprovalsConfig } from "@/lib/api/hitl";
@@ -132,7 +132,7 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
   version: number;
 }) {
   const { t } = useTranslation();
-  const updateAgent = useUpdateAgent();
+  const updateAgent = useAgentSectionSave(agentId, version, agent);
   const [pendingFlag, setPendingFlag] = useState<typeof INERT_SECURITY_FLAGS[number] | null>(null);
   const [securityError, setSecurityError] = useState<string | null>(null);
 
@@ -614,7 +614,7 @@ export const CapabilitiesSection = memo(function CapabilitiesSection({
   version: number;
 }) {
   const { t } = useTranslation();
-  const updateAgent = useUpdateAgent();
+  const updateAgent = useAgentSectionSave(agentId, version, agent);
   const [newSkill, setNewSkill] = useState("");
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
 
@@ -764,7 +764,7 @@ export const UserMemorySection = memo(function UserMemorySection({
   version: number;
 }) {
   const { t } = useTranslation();
-  const updateAgent = useUpdateAgent();
+  const updateAgent = useAgentSectionSave(agentId, version, agent);
 
   const enabled = agent.enableMemoryTools ?? false;
   const cfg = agent.userMemoryConfig ?? {};
@@ -982,7 +982,7 @@ export const MemoryPolicySection = memo(function MemoryPolicySection({
   version: number;
 }) {
   const { t } = useTranslation();
-  const updateAgent = useUpdateAgent();
+  const updateAgent = useAgentSectionSave(agentId, version, agent);
 
   const policy = agent.memoryPolicy ?? {};
   const swd = policy.strictWriteDiscipline ?? {};
@@ -1067,7 +1067,7 @@ export const HitlConfigSection = memo(function HitlConfigSection({
   version: number;
 }) {
   const { t } = useTranslation();
-  const updateAgent = useUpdateAgent();
+  const updateAgent = useAgentSectionSave(agentId, version, agent);
 
   const hitl: AgentHitlConfig = agent.hitlConfig ?? {};
   const enabled = !!agent.hitlConfig;
@@ -1259,7 +1259,7 @@ export const SessionManagementSection = memo(function SessionManagementSection({
   version: number;
 }) {
   const { t } = useTranslation();
-  const updateAgent = useUpdateAgent();
+  const updateAgent = useAgentSectionSave(agentId, version, agent);
 
   const sm = agent.sessionManagement ?? {};
   const snap = sm.autoSnapshot ?? {};
@@ -1725,7 +1725,7 @@ export const ChannelsSection = memo(function ChannelsSection({
   version: number;
 }) {
   const { t } = useTranslation();
-  const updateAgent = useUpdateAgent();
+  const updateAgent = useAgentSectionSave(agentId, version, agent);
 
   const channels: ChannelConnector[] = agent.channels ?? [];
   const slackChannels = channels.filter((c) => c.type === "slack");
