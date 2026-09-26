@@ -75,7 +75,13 @@ describe("structured output items", () => {
         { type: "applicationLink", label: "Open docs", path: "https://eddi.labs.ai" },
         { type: "button", label: "Confirm", onPress: { action: "x" } },
       ]),
-    ).toEqual(["[Open docs](https://eddi.labs.ai)", "**Confirm**"]);
+    ).toEqual(["[Open docs](<https://eddi.labs.ai>)", "**Confirm**"]);
+  });
+
+  it("escapes the label and wraps the destination of an applicationLink", () => {
+    expect(
+      extractOutputTexts([{ type: "applicationLink", label: "See [docs]", path: "/help page(1)" }]),
+    ).toEqual(["[See \\[docs\\]](</help%20page(1)>)"]);
   });
 
   it("does not turn an unsafe link path into a link", () => {

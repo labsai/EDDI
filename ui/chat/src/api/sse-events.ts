@@ -46,7 +46,7 @@ export function parseErrorMessage(data: string): string {
  * optimistic user bubble must be withdrawn and the draft handed back, exactly
  * as for a non-streaming 409. A mid-turn failure carries no code.
  *
- * Pinned against the Java source by sse-events.test.ts.
+ * Pinned against the Java source by sse-events.review.test.ts.
  */
 export const UNCONSUMED_STREAM_ERROR_CODES: ReadonlySet<string> = new Set([
   "awaiting_approval",
@@ -103,6 +103,21 @@ export function findInputField(output: unknown): InputField | null {
     }
   }
   return null;
+}
+
+/**
+ * A markdown link built from data. Brackets and backslashes in the text are
+ * escaped, and the destination is wrapped in `<…>` (with `<`, `>` and spaces
+ * percent-encoded), so a label with `]` or a path with a space or `)` still
+ * renders as the link it is.
+ */
+export function markdownLink(text: string, destination: string): string {
+  const escapedText = text.replace(/[\\[\]]/g, (c) => `\\${c}`);
+  const escapedDestination = destination
+    .replace(/</g, "%3C")
+    .replace(/>/g, "%3E")
+    .replace(/ /g, "%20");
+  return `[${escapedText}](<${escapedDestination}>)`;
 }
 
 /** An `image` output item whose URI is safe to render. */
@@ -263,7 +278,7 @@ export function extractOutputTexts(output: unknown): string[] {
       if (record.type === "applicationLink") {
         const label = typeof record.label === "string" ? record.label.trim() : "";
         const path = typeof record.path === "string" ? record.path.trim() : "";
-        if (path && isSafeUri(path)) texts.push(`[${label || path}](${path})`);
+        if (path && isSafeUri(path)) texts.push(markdownLink(label || path, path));
         else if (label) texts.push(label);
         continue;
       }

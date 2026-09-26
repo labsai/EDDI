@@ -525,13 +525,18 @@ export function ChatWidget() {
 
       // Handle the "conversationOutputs" format (from POST /agents responses)
       if (snapshot.conversationOutputs?.length) {
-        snapshot.conversationOutputs.forEach((output) => {
+        snapshot.conversationOutputs.forEach((output, index, outputs) => {
           // Extract agent replies and detect input field requests
           const agentReplies: unknown[] = output.output ?? [];
 
-          // inputField items configure the composer rather than the transcript.
-          const field = findInputField(agentReplies);
-          if (field) dispatch({ type: "SET_INPUT_FIELD", field });
+          // inputField items configure the composer rather than the transcript,
+          // and only the LATEST turn's request is still open: a full-snapshot
+          // refresh (HITL resume) would otherwise re-raise a password prompt
+          // from an earlier turn that was already answered.
+          if (index === outputs.length - 1) {
+            const field = findInputField(agentReplies);
+            if (field) dispatch({ type: "SET_INPUT_FIELD", field });
+          }
 
           // Handles bare-string entries too — HITL's pending-approval
           // placeholder and reviewer-rejection message arrive as raw strings.

@@ -155,6 +155,25 @@ describe("a password field requested on the streaming path (UI review High 6)", 
     ],
   });
 
+  it("does not re-raise a prompt from an earlier, already-answered turn", async () => {
+    mockBackend({
+      snapshot: {
+        agentId: "agent-1",
+        agentVersion: 1,
+        conversationState: "READY",
+        conversationOutputs: [
+          { output: [{ type: "inputField", subType: "password", label: "API Key" }] },
+          { input: "<secret input>", output: [{ type: "text", text: "Key saved." }] },
+        ],
+      },
+    });
+    renderAt("/chat/production/agent-1");
+
+    expect(await screen.findByText("Key saved.")).toBeInTheDocument();
+    expect(screen.queryByTestId("secret-input-field")).not.toBeInTheDocument();
+    expect(screen.getByTestId("chat-input")).toBeInTheDocument();
+  });
+
   it("shows the masked field and sends the key as secret", async () => {
     const calls = mockBackend({ frames: [`event: done\ndata: ${done}\n\n`] });
     renderAt("/chat/production/agent-1");
