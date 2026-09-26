@@ -107,6 +107,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
   const endConversation = useEndConversation();
   const undoConversation = useUndoConversation();
   const redoConversation = useRedoConversation();
+  const stepMovePending = undoConversation.isPending || redoConversation.isPending;
 
   // Open the chat for the ?agentId= query param
   /**
@@ -672,8 +673,15 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
             pendingAttachments={pendingAttachments}
             onRemoveAttachment={removeAttachment}
             hasReadyAttachment={hasReadyAttachment}
-            onUndo={conversationId && undoAvailable && !isProcessing ? () => undoConversation.mutate() : undefined}
-            onRedo={conversationId && redoAvailable && !isProcessing ? () => redoConversation.mutate() : undefined}
+            // Disabled while either move is pending: the flags only change
+            // after the re-read, so a double click would otherwise undo a
+            // second turn.
+            onUndo={conversationId && undoAvailable && !isProcessing && !stepMovePending
+              ? () => undoConversation.mutate(undefined, { onError: (err) => toast.error(getErrorMessage(err)) })
+              : undefined}
+            onRedo={conversationId && redoAvailable && !isProcessing && !stepMovePending
+              ? () => redoConversation.mutate(undefined, { onError: (err) => toast.error(getErrorMessage(err)) })
+              : undefined}
             embedded={embedded}
           />
         )}

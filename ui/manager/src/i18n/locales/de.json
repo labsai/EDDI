@@ -3219,6 +3219,8 @@
     "title": "Agenten-Synchronisierung",
     "subtitle": "Agenten zwischen EDDI-Instanzen synchronisieren",
     "connection": "Quell-Instanz",
+    "loadingLocalAgents": "Alle lokalen Agenten werden vor dem Zuordnen geladen…",
+    "localAgentsError": "Die lokale Agentenliste konnte nicht vollständig geladen werden, daher können Agenten nicht nach Namen zugeordnet werden. Eine Synchronisierung würde jetzt Duplikate erzeugen.",
     "sourceUrl": "URL der Quell-EDDI-Instanz",
     "authToken": "Autorisierungstoken",
     "authHint": "Optional. Wird als X-Source-Authorization-Header gesendet.",

@@ -75,10 +75,47 @@ tests would now fail on a regression.
   environment deployment listing, and 201 for `POST /backup/import`. 48 shadowed
   duplicate handlers were deleted (a second schedule store, coordinator, audit,
   quota, currentversion, descriptor and tool-metrics copies, the `agents/:id`
-  memory-inspector copy, the factory `/descriptors` copy) — the one stale set that
-  *ran* (the backup import preview with a pre-6.x shape) was removed in favour of
-  the correct copy below it. `openapi-contract.test.ts`'s `KNOWN_DUPLICATE_ROUTES`
+  memory-inspector copy, the factory `/descriptors` copy). Four of the removed
+  copies were the ones that actually *answered*, so their routes now answer from
+  the `backupSyncHandlers` copy instead: `POST /backup/export/:agentId`
+  (Location `agent-export.zip`, was `test-agent-1.zip`),
+  `GET /backup/export/:filename`, `POST /backup/import/preview` (the current
+  `ImportPreview` shape, was a pre-6.x one) and `POST /backup/import` (201 with
+  `imported-<timestamp>`, was 200 with a fixed `imported-agent`; a merge still
+  lands on `agent1` v2). `openapi-contract.test.ts`'s `KNOWN_DUPLICATE_ROUTES`
   ratchet shrinks from 58 entries to the 10 deliberate `:id` fall-through layers.
+
+### Review follow-up
+
+- **Agent detail Environments panel** now uses `isLiveAtRequestedVersion`: an
+  environment live at an older version shows `vN` and offers **Deploy** for the
+  page's version, never **Undeploy**. Undeploying a version that is not running
+  is accepted by the backend, which then disables all of the agent's schedules
+  while the old version keeps serving. Test: `agent-detail.test.tsx`
+  ("shows an older live version per environment…").
+- **Sync auto-match waits for the whole local list** (`isComplete`); remote
+  agents received earlier are matched when it completes, and a failed page shows
+  an error with Retry instead of matching a partial list (2 new keys, 11 locales).
+  Tests: `sync-page.test.tsx`.
+- **`getDescriptorVersions` skips only 404s**; any other error fails the list.
+  Test: `descriptors.test.ts`.
+- **Undo/redo**: one move at a time (a call while one is in flight is dropped),
+  the chat panel disables both buttons while either is pending and toasts
+  failures, and a failed re-read after a move disables both buttons (the
+  transcript can no longer be trusted). Undo, redo and rerun all ignore their
+  result when the user switched conversation meanwhile; binding them to the chat
+  store's conversation epoch (fix/manager-chat) is a follow-up. Tests:
+  `use-chat.test.tsx`.
+- **Deployment fallback adopts only READY** listing rows — an adopted,
+  unpolled IN_PROGRESS kept the card's toggle disabled. Documented gap: the
+  listing holds the highest deployed version whatever its status, so when that
+  one is ERROR an older READY version is not visible (no backend "latest READY"
+  listing). Test: `deployment-environments.test.ts`.
+- **`auditToolCalls`** attaches `tool_error` reasons (budget, quota, HITL cap)
+  to the refused call, or lists an orphan refusal. Test: `audit.test.ts`.
+- **`useAllAgentDescriptors` has its own cache key**, so the Agents list does
+  not inherit (and re-fetch on every invalidation) every page Sync loaded. Test:
+  `use-agents.test.tsx`.
 
 ### Compatibility
 

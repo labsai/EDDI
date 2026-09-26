@@ -46,11 +46,13 @@ export function useAgentDescriptors(
  * at 50 — and the sync page, which matches against these pages, created
  * duplicates of every local agent past the first 50.
  */
-export function useInfiniteAgentDescriptors(filter = "", space = "") {
+export function useInfiniteAgentDescriptors(filter = "", space = "", keySuffix?: string) {
   return useInfiniteQuery({
     // The space is part of the key: switching workspace must refetch rather
     // than re-render a cached page belonging to the previous one.
-    queryKey: [...agentKeys.descriptorsInfinite(filter), space],
+    queryKey: keySuffix
+      ? [...agentKeys.descriptorsInfinite(filter), space, keySuffix]
+      : [...agentKeys.descriptorsInfinite(filter), space],
     queryFn: ({ pageParam = 0 }) => getAgentDescriptors(PAGE_SIZE, pageParam, filter, space),
     initialPageParam: 0,
     getNextPageParam: (lastPage, allPages) => {
@@ -74,7 +76,10 @@ export function useInfiniteAgentDescriptors(filter = "", space = "") {
  * whole yet.
  */
 export function useAllAgentDescriptors() {
-  const query = useInfiniteAgentDescriptors();
+  // Its own cache entry: sharing the Agents list's key would leave that list
+  // holding every page after a visit to Sync, and each later invalidation
+  // (deploy, save) would re-fetch all of them one page after another.
+  const query = useInfiniteAgentDescriptors("", "", "all-pages");
   const { hasNextPage, isFetchingNextPage, isError, fetchNextPage } = query;
   // The page count is a dependency on purpose: the in-flight render can be
   // batched away, so after a page lands every other dependency may read exactly

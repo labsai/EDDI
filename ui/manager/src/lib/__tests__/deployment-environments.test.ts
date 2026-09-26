@@ -138,6 +138,16 @@ describe("withAnyDeployedVersion", () => {
     expect(isLiveAtRequestedVersion(merged![0])).toBe(true);
   });
 
+  it("never adopts a listing IN_PROGRESS — it is unpolled and would pin the toggle busy", () => {
+    const merged = withAnyDeployedVersion(
+      notLive,
+      { production: [{ environment: "production", agentId: "a1", agentVersion: 3, status: "IN_PROGRESS" }] },
+      "a1",
+    );
+    expect(merged).toEqual(notLive);
+    expect(isAnyEnvironmentBusy(merged)).toBe(false);
+  });
+
   it("passes undefined through while statuses load", () => {
     expect(withAnyDeployedVersion(undefined, {}, "a1")).toBeUndefined();
   });

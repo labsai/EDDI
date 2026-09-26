@@ -339,6 +339,9 @@ function TaskBar({ task, maxDuration }: { task: TaskBarData; maxDuration: number
                           {args.substring(0, 80)}
                           {args.length > 80 ? "..." : ""}
                         </span>
+                        {tc.error !== undefined && (
+                          <span className="ms-1 text-destructive">{String(tc.error)}</span>
+                        )}
                       </div>
                     );
                   })}

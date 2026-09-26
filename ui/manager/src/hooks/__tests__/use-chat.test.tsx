@@ -528,6 +528,51 @@ describe("useUndoConversation", () => {
     expect(useChatStore.getState().messages.map((m) => m.content)).toEqual(["Keep me"]);
   });
 
+  it("sends one undo when fired twice before the first settles", async () => {
+    // The flags change only after the re-read; a double click must not undo
+    // a second turn.
+    let posts = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    server.use(
+      http.post("*/agents/:convId/undo", async () => {
+        posts++;
+        await gate;
+        return new HttpResponse(null, { status: 200 });
+      }),
+      http.get("*/agents/:convId", () =>
+        HttpResponse.json(snapshotAfterMove([], { undoAvailable: false, redoAvailable: true })),
+      ),
+    );
+
+    const first = renderHook(() => useUndoConversation(), { wrapper: createWrapper() });
+    const second = renderHook(() => useUndoConversation(), { wrapper: createWrapper() });
+    first.result.current.mutate();
+    await waitFor(() => expect(posts).toBe(1));
+    second.result.current.mutate();
+    await waitFor(() => expect(second.result.current.isSuccess).toBe(true));
+    expect(second.result.current.data).toBe(false);
+    release();
+    await waitFor(() => expect(first.result.current.isSuccess).toBe(true));
+    expect(posts).toBe(1);
+  });
+
+  it("disables both buttons and fails when the re-read after a move fails", async () => {
+    server.use(
+      http.post("*/agents/:convId/undo", () => new HttpResponse(null, { status: 200 })),
+      http.get("*/agents/:convId", () => HttpResponse.json({ message: "down" }, { status: 503 })),
+    );
+    useChatStore.getState().setUndoRedo(true, true);
+
+    const { result } = renderHook(() => useUndoConversation(), {
+      wrapper: createWrapper(),
+    });
+    result.current.mutate();
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(useChatStore.getState().undoAvailable).toBe(false);
+    expect(useChatStore.getState().redoAvailable).toBe(false);
+  });
+
   it("throws when no active conversation", async () => {
     useChatStore.getState().reset(); // clear conversationId
     const { result } = renderHook(() => useUndoConversation(), {
@@ -618,6 +663,26 @@ describe("useRerunConversation", () => {
     result.current.mutate();
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(rerunCalled).toBe(true);
+  });
+
+  it("does not overwrite a conversation the user switched to meanwhile", async () => {
+    server.use(
+      http.post("*/agents/:convId/rerun", () => {
+        useChatStore.getState().setConversationId("conv-other");
+        return new HttpResponse(null, { status: 200 });
+      }),
+      http.get("*/agents/:convId", () =>
+        HttpResponse.json(snapshotAfterMove([{ input: "old", output: "old reply" }], { undoAvailable: true, redoAvailable: false })),
+      ),
+    );
+    useChatStore.getState().addMessage({ id: "u1", role: "user", content: "Keep me", timestamp: 1 });
+
+    const { result } = renderHook(() => useRerunConversation(), {
+      wrapper: createWrapper(),
+    });
+    result.current.mutate();
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(useChatStore.getState().messages.map((m) => m.content)).toEqual(["Keep me"]);
   });
 
   it("throws when no active conversation", async () => {

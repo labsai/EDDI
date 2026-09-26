@@ -1,4 +1,4 @@
-import { useState, useMemo, Fragment } from "react";
+import { useState, useMemo, useEffect, Fragment } from "react";
 import { useTranslation } from "react-i18next";
 import {
   RefreshCw,
@@ -51,16 +51,47 @@ export function SyncPage() {
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
 
   // Local agents for target dropdown
-  const { data: agentPages } = useAllAgentDescriptors();
+  const {
+    data: agentPages,
+    isComplete: localAgentsComplete,
+    isError: localAgentsFailed,
+    refetch: refetchLocalAgents,
+  } = useAllAgentDescriptors();
   const localAgents = useMemo(
     () => groupAgentsByName(agentPages?.pages.flat() ?? []),
     [agentPages]
   );
+  // Remote agents received before the local list finished loading. Matching
+  // them against a partial list would leave every agent past the loaded pages
+  // unmatched — and a sync of an unmatched agent CREATES it, a duplicate.
+  const [pendingRemote, setPendingRemote] = useState<DocumentDescriptor[] | null>(null);
 
   const previewBatchMutation = usePreviewSyncBatch();
   const executeBatchMutation = useExecuteSyncBatch();
 
   function handleConnected(agents: DocumentDescriptor[]) {
+    if (!localAgentsComplete) {
+      // Match once every local page has arrived — see pendingRemote.
+      setPendingRemote(agents);
+      setMappings([]);
+      setExpandedAgent(null);
+      return;
+    }
+    setPendingRemote(null);
+    matchRemoteAgents(agents);
+  }
+
+  // Deferred auto-match: runs when the local list completes after connecting.
+  useEffect(() => {
+    if (pendingRemote && localAgentsComplete) {
+      setPendingRemote(null);
+      matchRemoteAgents(pendingRemote);
+    }
+    // matchRemoteAgents reads localAgents, which is complete exactly when this fires.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingRemote, localAgentsComplete]);
+
+  function matchRemoteAgents(agents: DocumentDescriptor[]) {
     // Auto-match by name
     const newMappings: AgentMapping[] = agents.map((remote) => {
       const { id, version } = parseResourceUri(remote.resource);
@@ -189,6 +220,28 @@ export function SyncPage() {
           onAuthChange={setSyncAuth}
           onConnected={handleConnected}
         />
+        {localAgentsFailed && (
+          <div
+            className="mt-4 flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive"
+            role="alert"
+            data-testid="sync-local-agents-error"
+          >
+            <span>
+              {t(
+                "syncPage.localAgentsError",
+                "The local agent list could not be loaded completely, so agents cannot be matched by name. Syncing now would create duplicates."
+              )}
+            </span>
+            <Button variant="outline" size="sm" onClick={() => void refetchLocalAgents()}>
+              {t("common.retry")}
+            </Button>
+          </div>
+        )}
+        {pendingRemote && !localAgentsFailed && (
+          <p className="mt-4 text-sm text-muted-foreground" role="status" data-testid="sync-local-agents-loading">
+            {t("syncPage.loadingLocalAgents", "Loading all local agents before matching…")}
+          </p>
+        )}
       </section>
 
       {/* Agent mapping */}

@@ -39,6 +39,8 @@ export interface AuditToolCall {
   /** The model's arguments — a JSON string as recorded, already secret-redacted. */
   arguments: unknown;
   result?: unknown;
+  /** Why the call was refused (a `tool_error` trace event: budget, quota, HITL cap). */
+  error?: unknown;
   /** Which LLM sub-task issued the call, when the entry merges several. */
   llmTaskId?: string;
 }
@@ -48,7 +50,8 @@ export interface AuditToolCall {
  *
  * Accepts the backend's `{ calls: [...] }` map and, defensively, a bare array.
  * Events without a type are treated as calls (a hand-written or older entry);
- * budget, cap and HITL markers are skipped — they are not invocations. A
+ * other markers are skipped — they are not invocations. A `tool_error` attaches
+ * its reason as `error` to the call it refused. A
  * `tool_result` attaches to the most recent unanswered call of the same tool,
  * the same pairing `RestToolHistory` uses.
  */
@@ -72,6 +75,21 @@ export function auditToolCalls(entry: Pick<AuditEntry, "toolCalls"> | null | und
           call.result = e.result;
           break;
         }
+      }
+      continue;
+    }
+    if (type === "tool_error") {
+      // Budget, cost-quota and HITL-cap refusals (ToolLoopRunner). Attach the
+      // reason to the call it refused; a refusal with no recorded call (the
+      // pause cap fires before one is logged) is shown as its own entry, so
+      // the reason is never lost.
+      const pending = [...calls].reverse().find(
+        (c) => c.tool === tool && c.result === undefined && c.error === undefined,
+      );
+      if (pending) {
+        pending.error = e.error;
+      } else if (tool !== null) {
+        calls.push({ tool, arguments: undefined, error: e.error });
       }
       continue;
     }
