@@ -971,7 +971,10 @@ Dynamic agents are tracked in `GroupConversation.dynamicMembers`, `createdAgentI
   in the conversation's created list **and** carries a `dynamicOrigin` in its own
   configuration naming the calling conversation or its discussion.
   `create_sub_agent` stamps that marker on the agent's first version; an agent a
-  person built has none, so it can never be torn down by a tool.
+  person built has none, so it can never be torn down by a tool. Only the engine
+  writes the marker: an agent update (`PUT`, a merge import, an upgrade) keeps the
+  stored value whatever the body says, and a duplicate or a ZIP import that
+  creates a new agent drops it.
 - End-of-discussion cleanup applies the same marker: it deletes only agents whose
   `dynamicOrigin` names this discussion, leaves agents marked for another one
   alone, and only **undeploys** — never deletes — an agent with no marker (one
@@ -982,7 +985,8 @@ Dynamic agents are tracked in `GroupConversation.dynamicMembers`, `createdAgentI
   message. Any other `conversationId` is refused; omit it to start a new
   conversation. Starting one requires the user to be allowed to use the target
   agent, the same rule as recruitment above; agents this conversation or its
-  discussion created are exempt.
+  discussion created are exempt — "created" meaning tracked **and** carrying a
+  `dynamicOrigin` that names this conversation or its discussion.
 
 #### Model and credential inheritance
 

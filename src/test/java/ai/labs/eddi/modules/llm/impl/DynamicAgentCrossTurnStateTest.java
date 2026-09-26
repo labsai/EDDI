@@ -6,8 +6,10 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
 import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
@@ -44,6 +46,7 @@ import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -59,6 +62,7 @@ class DynamicAgentCrossTurnStateTest {
     private IConversationService conversationService;
     private IAgentFactory agentFactory;
     private AgentSetupService agentSetupService;
+    private IAgentStore agentStore;
     private DynamicAgentToolsProvider provider;
 
     @BeforeEach
@@ -66,6 +70,7 @@ class DynamicAgentCrossTurnStateTest {
         conversationService = mock(IConversationService.class);
         agentFactory = mock(IAgentFactory.class);
         agentSetupService = mock(AgentSetupService.class);
+        agentStore = mock(IAgentStore.class);
         provider = providerWithUseCheck(null);
         doAnswer(invocation -> {
             IConversationService.ConversationResponseHandler handler = invocation.getArgument(8);
@@ -76,7 +81,7 @@ class DynamicAgentCrossTurnStateTest {
 
     private DynamicAgentToolsProvider providerWithUseCheck(BiPredicate<String, String> useCheck) {
         return new DynamicAgentToolsProvider(agentSetupService, mock(CapabilityRegistryService.class), conversationService, agentFactory,
-                mock(IAgentStore.class), mock(IDeploymentStore.class), new LiveDiscussionRegistry(), mock(IAgentGroupStore.class), useCheck);
+                agentStore, mock(IDeploymentStore.class), new LiveDiscussionRegistry(), mock(IAgentGroupStore.class), useCheck);
     }
 
     private static ConversationMemory memory() {
@@ -190,10 +195,28 @@ class DynamicAgentCrossTurnStateTest {
                 argThat((InputData input) -> input != null && "follow-up".equals(input.getInput())), anyBoolean(), any());
     }
 
+    private void storedWithOrigin(String agentId, AgentConfiguration.DynamicOrigin origin) throws Exception {
+        var configuration = new AgentConfiguration();
+        configuration.setDynamicOrigin(origin);
+        when(agentStore.getCurrentResourceId(agentId)).thenReturn(new IResourceStore.IResourceId() {
+            @Override
+            public String getId() {
+                return agentId;
+            }
+
+            @Override
+            public Integer getVersion() {
+                return 1;
+            }
+        });
+        when(agentStore.read(agentId, 1)).thenReturn(configuration);
+    }
+
     @Test
     @DisplayName("review #2: delegation to an agent this conversation created skips the USE check; any other agent needs it")
     void createdAgentsAreExemptFromTheDelegationUseCheck() throws Exception {
         when(conversationService.startConversation(any(), anyString(), any(), any())).thenReturn(new ConversationResult("conv-new", null));
+        storedWithOrigin("sub-1", new AgentConfiguration.DynamicOrigin("agent-1", "conv-1", null, "user-1"));
         var memory = memory();
         memory.getCurrentStep().storeData(new Data<Object>(MemoryKeys.DYNAMIC_CREATED_AGENT_IDS, List.of("sub-1")));
         memory.startNextStep();
@@ -201,6 +224,23 @@ class DynamicAgentCrossTurnStateTest {
 
         assertFalse(converse.converseWithAgent("sub-1", "hi", null).contains("not available"));
         assertTrue(converse.converseWithAgent("someone-elses-agent", "hi", null).contains("not available"));
+    }
+
+    @Test
+    @DisplayName("a tracked id alone does not exempt: without a marker naming this conversation the USE check still applies")
+    void trackedIdWithoutMatchingOriginIsNotExempt() throws Exception {
+        when(conversationService.startConversation(any(), anyString(), any(), any())).thenReturn(new ConversationResult("conv-new", null));
+        // A pre-fix step may hold ids seeded from forged client context.
+        storedWithOrigin("legacy-forged", null);
+        storedWithOrigin("other-conversations", new AgentConfiguration.DynamicOrigin("agent-9", "conv-9", "gc-9", "user-9"));
+        var memory = memory();
+        memory.getCurrentStep().storeData(new Data<Object>(MemoryKeys.DYNAMIC_CREATED_AGENT_IDS, List.of("legacy-forged", "other-conversations")));
+        memory.startNextStep();
+        var converse = (ConverseWithAgentTool) buildWith(providerWithUseCheck((agentId, principal) -> false), memory, "converse_with_agent");
+
+        assertTrue(converse.converseWithAgent("legacy-forged", "hi", null).contains("not available"));
+        assertTrue(converse.converseWithAgent("other-conversations", "hi", null).contains("not available"));
+        verify(conversationService, never()).startConversation(any(), anyString(), any(), any());
     }
 
     private static Object buildWith(DynamicAgentToolsProvider provider, ConversationMemory memory, String toolName) {

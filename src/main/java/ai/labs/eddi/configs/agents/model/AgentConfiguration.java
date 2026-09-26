@@ -262,8 +262,12 @@ public class AgentConfiguration {
      * marker to name the calling conversation (or the discussion it belongs to), so
      * an agent a person built can never qualify, whatever a list says.
      * <p>
-     * Written by {@code AgentSetupService} on the agent's first version, never on a
-     * later update, and carried through export/import like any other field.
+     * Written by {@code AgentSetupService} on the agent's first version and by
+     * nothing else. {@code RestAgentStore.updateAgent} keeps the stored value
+     * whatever the request body says, so an edit (a PUT, a merge import, an
+     * upgrade) can neither erase nor forge it; {@code duplicateAgent} and a ZIP
+     * import that creates a new agent drop it, since the copy is a new agent a
+     * person made, not one {@code create_sub_agent} provisioned here.
      */
     private DynamicOrigin dynamicOrigin;
 
@@ -330,6 +334,16 @@ public class AgentConfiguration {
 
         public void setCreatedForUserId(String createdForUserId) {
             this.createdForUserId = createdForUserId;
+        }
+
+        /**
+         * Whether this origin names {@code conversationId} as the creating
+         * conversation, or {@code groupConversationId} as the discussion it ran in. A
+         * {@code null} argument never matches.
+         */
+        public boolean namesConversationOrDiscussion(String conversationId, String groupConversationId) {
+            return (conversationId != null && conversationId.equals(createdInConversationId))
+                    || (groupConversationId != null && groupConversationId.equals(createdInGroupConversationId));
         }
     }
 

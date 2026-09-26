@@ -194,9 +194,7 @@ public class TeardownAgentTool {
             LOGGER.warnf("[TEARDOWN] Refused teardown of agent '%s': it carries no dynamic-agent origin", sanitize(agentId));
             return "⚠️ Cannot tear down agent '%s' — it was not created by create_sub_agent.".formatted(agentId);
         }
-        boolean sameConversation = conversationId != null && conversationId.equals(origin.getCreatedInConversationId());
-        boolean sameDiscussion = groupConversationId != null && groupConversationId.equals(origin.getCreatedInGroupConversationId());
-        if (!sameConversation && !sameDiscussion) {
+        if (!origin.namesConversationOrDiscussion(conversationId, groupConversationId)) {
             LOGGER.warnf("[TEARDOWN] Refused teardown of agent '%s': created by a different conversation", sanitize(agentId));
             return "⚠️ Cannot tear down agent '%s' — it was not created during this discussion.".formatted(agentId);
         }
