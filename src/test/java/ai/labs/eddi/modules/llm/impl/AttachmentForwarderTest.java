@@ -5,6 +5,8 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.httpclient.BodyHandlerProbe;
+import ai.labs.eddi.engine.httpclient.BoundedBodyHandlers.ResponseTooLargeException;
 import ai.labs.eddi.engine.httpclient.SafeHttpClient;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -375,6 +377,39 @@ class AttachmentForwarderTest {
             UserMessage enhanced = (UserMessage) messages.get(0);
             assertInstanceOf(ImageContent.class, enhanced.contents().get(1));
             verify(httpClient).sendValidated(any(), any());
+        }
+
+        @Test
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        void urlDownload_readsAtMostThePerFileCap() throws Exception {
+            // The cap used to be checked on a body already buffered whole: a URL
+            // answering with gigabytes ended in an OutOfMemoryError first. Now the
+            // handler handed to the client is itself bounded by the cap.
+            AttachmentForwarder small = newForwarder(1000, 20_000);
+            mockAttachments(urlImage());
+            mockDownload("imgbytes".getBytes());
+
+            small.forward(messages(UserMessage.from("Describe")), memory, "gemini", "gemini-2.0-flash");
+
+            ArgumentCaptor<HttpResponse.BodyHandler> handler = ArgumentCaptor.forClass(HttpResponse.BodyHandler.class);
+            verify(httpClient).sendValidated(any(), handler.capture());
+            assertTrue(BodyHandlerProbe.declared(handler.getValue(), 1001).refused(), "a body over the cap must be refused while reading");
+            assertTrue(BodyHandlerProbe.streamed(handler.getValue(), 1001).refused());
+            assertFalse(BodyHandlerProbe.streamed(handler.getValue(), 1000).refused());
+        }
+
+        @Test
+        void urlDownload_tooLarge_isTheUsualPerFileNote() throws Exception {
+            AttachmentForwarder small = newForwarder(1000, 20_000);
+            mockAttachments(urlImage());
+            doThrow(new ResponseTooLargeException(1000)).when(httpClient).sendValidated(any(), any());
+            List<ChatMessage> messages = messages(UserMessage.from("Describe"));
+
+            small.forward(messages, memory, "gemini", "gemini-2.0-flash");
+
+            Content c = ((UserMessage) messages.get(0)).contents().get(1);
+            assertInstanceOf(TextContent.class, c);
+            assertTrue(((TextContent) c).text().contains("per-file forward limit of 1000 bytes"), ((TextContent) c).text());
         }
 
         @Test

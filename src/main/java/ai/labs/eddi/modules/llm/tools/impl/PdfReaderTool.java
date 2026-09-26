@@ -4,20 +4,20 @@
  */
 package ai.labs.eddi.modules.llm.tools.impl;
 
+import ai.labs.eddi.engine.httpclient.BoundedBodyHandlers;
 import ai.labs.eddi.engine.httpclient.SafeHttpClient;
 import ai.labs.eddi.modules.llm.tools.impl.AttachmentTextExtractor.PdfInfo;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Duration;
 
 import static ai.labs.eddi.modules.llm.tools.UrlValidationUtils.validateUrl;
@@ -33,8 +33,21 @@ import static ai.labs.eddi.modules.llm.tools.UrlValidationUtils.validateUrl;
 @ApplicationScoped
 public class PdfReaderTool {
     private static final Logger LOGGER = Logger.getLogger(PdfReaderTool.class);
+    /** Default for {@link #maxDownloadBytes}: 25 MiB. */
+    static final long DEFAULT_MAX_DOWNLOAD_BYTES = 25L * 1024 * 1024;
+
     private final SafeHttpClient httpClient;
     private final AttachmentTextExtractor textExtractor;
+
+    /**
+     * Largest PDF this tool will download. The download used to stream to an
+     * unbounded temp file and then read that file whole into memory, so a URL
+     * serving an endless body filled the disk first and the heap second.
+     * Field-injected so the direct constructor keeps working for tests, with the
+     * default in place.
+     */
+    @ConfigProperty(name = "eddi.tools.pdf-reader.max-download-bytes", defaultValue = "26214400")
+    long maxDownloadBytes = DEFAULT_MAX_DOWNLOAD_BYTES;
 
     @Inject
     public PdfReaderTool(SafeHttpClient httpClient, AttachmentTextExtractor textExtractor) {
@@ -112,38 +125,24 @@ public class PdfReaderTool {
         }
     }
 
+    /**
+     * Downloads the PDF into memory, refusing anything over
+     * {@link #maxDownloadBytes} — by its declared length before a byte is read, or
+     * mid-stream the moment it passes the limit. No temp file: the bytes went
+     * straight back into memory anyway, so the file only added a second unbounded
+     * resource (disk) to the first.
+     */
     private byte[] downloadPdfBytes(String url) throws IOException, InterruptedException {
-        Path tempFile = null;
-        try {
-            tempFile = downloadPdf(url);
-            return Files.readAllBytes(tempFile);
-        } finally {
-            if (tempFile != null) {
-                try {
-                    Files.deleteIfExists(tempFile);
-                } catch (IOException e) {
-                    LOGGER.warn("Could not delete temp file: " + tempFile);
-                }
-            }
-        }
-    }
-
-    private Path downloadPdf(String url) throws IOException, InterruptedException {
         LOGGER.debug("Downloading PDF from URL: " + url);
 
         HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(30))
                 .header("User-Agent", "Mozilla/5.0 (EDDI-Agent/1.0)").GET().build();
 
-        Path tempFile = Files.createTempFile("eddi-pdf-", ".pdf");
-
-        HttpResponse<Path> response = httpClient.send(request, HttpResponse.BodyHandlers.ofFile(tempFile));
+        HttpResponse<byte[]> response = httpClient.send(request, BoundedBodyHandlers.ofByteArray(maxDownloadBytes));
 
         if (response.statusCode() != 200) {
-            Files.deleteIfExists(tempFile);
             throw new IOException("HTTP " + response.statusCode() + " when downloading PDF");
         }
-
-        LOGGER.debug("PDF downloaded to temp file: " + tempFile);
-        return tempFile;
+        return response.body();
     }
 }

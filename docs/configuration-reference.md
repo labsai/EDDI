@@ -239,6 +239,8 @@ Full guide: [hitl.md](hitl.md).
 | `eddi.tools.websearch.google.api-key` | *(empty)* | Required for the `google` provider |
 | `eddi.tools.websearch.google.cx` | *(empty)* | Google Programmable Search engine ID |
 | `eddi.tools.weather.openweathermap.api-key` | *(empty)* | Required by the weather tool |
+| `eddi.tools.web-scraper.max-response-bytes` | `5242880` (5 MB) | Largest page the web-scraper tool downloads. Enforced while reading — a declared `Content-Length` above it is refused before the body is read, and a body that grows past it is cut off — so a URL the model is handed cannot exhaust the heap |
+| `eddi.tools.pdf-reader.max-download-bytes` | `26214400` (25 MB) | Largest PDF the PDF-reader tool downloads, enforced the same way. The download is held in memory; no temp file is written |
 | `eddi.httpcalls.default-timeout-millis` | `30000` | Per-call timeout when the httpCall does not set one. Without it a call can occupy the conversation thread indefinitely |
 | `eddi.httpcalls.default-max-response-size-bytes` | `2000000` | Response-body ceiling. Deliberately above the memory cap, so an over-long body is truncated into memory rather than failing the turn |
 | `eddi.mcpcalls.default-rate-limit` | `100` | Default per-minute limit for MCP tool calls |

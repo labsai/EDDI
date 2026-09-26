@@ -8,6 +8,9 @@ import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.connections.model.ConnectionReference;
+import ai.labs.eddi.engine.httpclient.BoundedBodyHandlers;
+import ai.labs.eddi.engine.httpclient.BoundedBodyHandlers.ResponseTooLargeException;
+import ai.labs.eddi.engine.httpclient.SafeHttpClient;
 import ai.labs.eddi.modules.llm.governance.RemoteTextGovernor;
 import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
@@ -25,7 +28,6 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
-import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
@@ -58,8 +60,14 @@ public class A2AToolProviderManager {
      * A2A peer was configured — and made the class impossible to construct at all
      * where a selector cannot be opened, which is every unit test in a sandboxed
      * environment. Deferring it costs one volatile read per call and buys both.
+     * <p>
+     * A {@link SafeHttpClient}, used through {@code sendNoRedirect}: this manager
+     * validates each target itself (by its own SSRF setting) and follows no
+     * redirect, and the wrapper adds what a bare JDK client lacked — one wall-clock
+     * deadline over the whole exchange, body included, so a peer that sends headers
+     * and then trickles its answer cannot hold the tool call open indefinitely.
      */
-    private volatile HttpClient httpClient;
+    private volatile SafeHttpClient httpClient;
     private final boolean ssrfProtectionEnabled;
     private final int maxDescriptionChars;
 
@@ -82,6 +90,7 @@ public class A2AToolProviderManager {
     private static final int CIRCUIT_BREAKER_THRESHOLD = 3;
     private static final long CIRCUIT_BREAKER_COOLDOWN_MS = 60_000;
     private static final int MAX_RESPONSE_SIZE_BYTES = 1_048_576; // 1MB
+    private static final int CONNECT_TIMEOUT_MS = 10_000;
 
     /**
      * Default cap for a remote-authored description before it reaches the model.
@@ -127,16 +136,16 @@ public class A2AToolProviderManager {
      * not each build a client, because the loser's would be dropped with its
      * selector thread still running.
      */
-    private HttpClient httpClient() {
-        HttpClient client = httpClient;
+    private SafeHttpClient httpClient() {
+        SafeHttpClient client = httpClient;
         if (client == null) {
             synchronized (this) {
                 client = httpClient;
                 if (client == null) {
-                    // JDK HttpClient defaults to Redirect.NEVER, so validating the
+                    // Every call goes through sendNoRedirect, so validating the
                     // target URL is sufficient — there is no redirect hop to
                     // re-validate.
-                    client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+                    client = new SafeHttpClient(CONNECT_TIMEOUT_MS);
                     httpClient = client;
                 }
             }
@@ -341,16 +350,19 @@ public class A2AToolProviderManager {
 
         applyCredential(requestBuilder, config, agentUrl, true);
 
-        HttpResponse<String> response = httpClient().send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
-
-        if (response.statusCode() != 200) {
-            LOGGER.warnf("Agent Card fetch returned %d from %s", response.statusCode(), cardUrl);
+        // Response size limit — enforced while reading, not after: the check used to
+        // run on a body already buffered whole, which is no limit at all against a
+        // peer answering with gigabytes.
+        HttpResponse<String> response;
+        try {
+            response = httpClient().sendNoRedirect(requestBuilder.build(), BoundedBodyHandlers.ofString(MAX_RESPONSE_SIZE_BYTES));
+        } catch (ResponseTooLargeException e) {
+            LOGGER.warnf("Agent Card response from %s exceeds %d bytes — rejecting", cardUrl, MAX_RESPONSE_SIZE_BYTES);
             return null;
         }
 
-        // Response size limit
-        if (response.body() != null && response.body().length() > MAX_RESPONSE_SIZE_BYTES) {
-            LOGGER.warnf("Agent Card response from %s exceeds %d bytes — rejecting", cardUrl, MAX_RESPONSE_SIZE_BYTES);
+        if (response.statusCode() != 200) {
+            LOGGER.warnf("Agent Card fetch returned %d from %s", response.statusCode(), cardUrl);
             return null;
         }
 
@@ -412,15 +424,16 @@ public class A2AToolProviderManager {
 
         applyCredential(requestBuilder, config, agentUrl);
 
-        HttpResponse<String> response = httpClient().send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
+        // Response size limit, enforced while reading (see fetchAgentCard).
+        HttpResponse<String> response;
+        try {
+            response = httpClient().sendNoRedirect(requestBuilder.build(), BoundedBodyHandlers.ofString(MAX_RESPONSE_SIZE_BYTES));
+        } catch (ResponseTooLargeException e) {
+            return "A2A agent response exceeds size limit (" + MAX_RESPONSE_SIZE_BYTES + " bytes)";
+        }
 
         if (response.statusCode() != 200) {
             return "A2A agent returned HTTP " + response.statusCode();
-        }
-
-        // Response size limit
-        if (response.body() != null && response.body().length() > MAX_RESPONSE_SIZE_BYTES) {
-            return "A2A agent response exceeds size limit (" + MAX_RESPONSE_SIZE_BYTES + " bytes)";
         }
 
         // Validate JSON-RPC response schema

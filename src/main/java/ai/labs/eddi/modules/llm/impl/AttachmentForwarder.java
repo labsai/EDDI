@@ -5,6 +5,8 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.httpclient.BoundedBodyHandlers;
+import ai.labs.eddi.engine.httpclient.BoundedBodyHandlers.ResponseTooLargeException;
 import ai.labs.eddi.engine.httpclient.SafeHttpClient;
 import ai.labs.eddi.engine.memory.AttachmentContextExtractor;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -413,17 +415,27 @@ public class AttachmentForwarder {
         return bytes;
     }
 
+    /**
+     * Downloads a URL attachment, reading at most {@code maxForwardBytes} of it.
+     * The per-file cap in {@link #resolveBytes} used to run only after the whole
+     * body was in memory, so a URL answering with gigabytes ended in an
+     * OutOfMemoryError — which no {@code catch (Exception)} sees — before the cap
+     * was ever consulted. Now the download itself stops at the cap.
+     */
     private byte[] download(String url, String name) throws ForwardSkipException {
         try {
             validateUrl(url);
             HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).GET().build();
-            HttpResponse<byte[]> response = httpClient.sendValidated(request, HttpResponse.BodyHandlers.ofByteArray());
+            HttpResponse<byte[]> response = httpClient.sendValidated(request, BoundedBodyHandlers.ofByteArray(maxForwardBytes));
             if (response.statusCode() != 200) {
                 throw new ForwardSkipException("Attachment '" + name + "' download failed: HTTP " + response.statusCode());
             }
             return response.body();
         } catch (ForwardSkipException e) {
             throw e;
+        } catch (ResponseTooLargeException e) {
+            throw new ForwardSkipException(("Attachment '%s' exceeds the per-file forward limit of %d bytes "
+                    + "and was not sent. Use the readAttachment tool to access it.").formatted(name, maxForwardBytes));
         } catch (Exception e) {
             throw new ForwardSkipException("Attachment '" + name + "' could not be fetched: " + e.getMessage());
         }
