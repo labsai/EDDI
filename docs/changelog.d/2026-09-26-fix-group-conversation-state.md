@@ -101,11 +101,14 @@ conversations. The REST shape is unchanged; the UI needs no change to benefit.
   the coordinator (the conversation queue serializes them), so the member can execute twice. Fixing it needs the
   member turn cancelled through the coordinator, which is its own change.
 - Merges with `fix/gdpr-erasure` (#834): this branch carries that PR's rename and its lost-ownership helpers
-  verbatim, so a merge leaves five small conflict hunks, all in `GroupConversationService`: (1) the cadence
+  verbatim, so a merge leaves six small conflict hunks, five in `GroupConversationService`: (1) the cadence
   `launch()` block — keep this branch; (2, 3) the two catch blocks — keep this branch (it adds the
   `stopIfEndedElsewhere` re-read after the lines both branches share); (4) `persistCancelled` — keep this branch's
   conditional `persistWhileRunning`; (5) the `discussionControls` field — take #834's `erasureStepName` /
-  `stopInFlightWork`. `GroupLifecycleOps`, `GroupHitlCoordinator` and `GroupConversationStore` merge cleanly.
+  `stopInFlightWork`. The sixth is one line in `GroupConversationServiceBranchCoverageTest`, where this branch
+  carries #834's deleted-while-running tests with the Gone stub moved to `updateIfState` — keep this branch.
+  `GroupLifecycleOps`, `GroupHitlCoordinator` and `GroupConversationStore` merge cleanly, and the resolved merge
+  compiles (main and tests) with #834's erasure and in-flight tests passing.
 - Review refutation: `speaker_complete` for a timed-out or failed parallel turn never carried raw exception text —
   the text sat in the transcript entry's `errorReason`, and the event carried the (null) `content`. The new `outcome`
   flag makes the distinction explicit.
