@@ -4,15 +4,20 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import com.sun.net.httpserver.HttpServer;
+import io.swagger.v3.core.util.Yaml;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -43,6 +48,63 @@ class McpApiToolBuilderExternalRefTest {
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
                 () -> McpApiToolBuilder.parseSpec(specReferencing(secret.toAbsolutePath().toString())));
         assertTrue(e.getMessage().contains("local references"), e.getMessage());
+    }
+
+    @Test
+    @DisplayName("a JSON spec too large for the YAML loader is still scanned, and its file reference refused")
+    void oversizedJsonSpecIsStillScanned(@TempDir Path dir) throws Exception {
+        // snakeyaml refuses documents over 3,145,728 code points. The scan used to
+        // read everything as YAML and wave a spec through when that failed, while
+        // swagger-parser reads {-prefixed input with its unlimited JSON mapper and
+        // then resolved the reference: the file's content landed in the model.
+        Path secret = dir.resolve("secret.yaml");
+        Files.writeString(secret, "type: object\ndescription: SERVER-FILE-CONTENT\n");
+        String small = specReferencing(secret.toAbsolutePath().toString()).trim();
+        String big = small.substring(0, small.length() - 1) + ", \"x-pad\": \"" + "a".repeat(3_300_000) + "\"}";
+
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> McpApiToolBuilder.parseSpec(big));
+        assertTrue(e.getMessage().contains("local references"), e.getMessage());
+    }
+
+    @Test
+    @DisplayName("a spec the scan cannot read is refused, not waved through")
+    void unreadableSpecFailsClosed() {
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                () -> McpApiToolBuilder.rejectExternalRefs("{\"openapi\": \"3.0.0\", \"paths\": {"));
+        assertTrue(e.getMessage().contains("could not be read"), e.getMessage());
+    }
+
+    @Test
+    @DisplayName("a REMOTE spec's file: references are not resolved by swagger-parser (pins the library's behaviour)")
+    void remoteSpecDoesNotResolveFileRefs(@TempDir Path dir) throws Exception {
+        // Remote specs keep ref resolution (multi-file specs are legitimate there),
+        // so this guards the assumption that makes that safe: swagger-parser
+        // resolves a remote spec's refs against its http base and never opens a
+        // file: URL. A library upgrade that changed this must fail here.
+        Path secret = dir.resolve("secret.yaml");
+        Files.writeString(secret, "type: object\ndescription: SERVER-FILE-CONTENT\n");
+        String spec = specReferencing(secret.toUri().toString());
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/openapi.json", exchange -> {
+            byte[] body = spec.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+        try {
+            String url = "http://127.0.0.1:" + server.getAddress().getPort() + "/openapi.json";
+            String rendered;
+            try {
+                rendered = Yaml.pretty(McpApiToolBuilder.parseSpec(url));
+            } catch (IllegalArgumentException refused) {
+                rendered = refused.getMessage();
+            }
+            assertFalse(rendered.contains("SERVER-FILE-CONTENT"), rendered);
+        } finally {
+            server.stop(0);
+        }
     }
 
     @Test

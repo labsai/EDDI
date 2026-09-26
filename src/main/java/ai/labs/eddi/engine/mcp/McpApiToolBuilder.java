@@ -8,9 +8,7 @@ import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.apicalls.model.Request;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
-import io.swagger.v3.core.util.Yaml;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.Operation;
 import io.swagger.v3.oas.models.PathItem;
@@ -21,6 +19,7 @@ import io.swagger.v3.oas.models.servers.Server;
 import io.swagger.v3.parser.OpenAPIV3Parser;
 import io.swagger.v3.parser.core.models.ParseOptions;
 import io.swagger.v3.parser.core.models.SwaggerParseResult;
+import io.swagger.v3.parser.util.DeserializationUtils;
 import org.jboss.logging.Logger;
 
 import java.util.*;
@@ -291,24 +290,37 @@ public final class McpApiToolBuilder {
      * Local references need no I/O; only external ones do, and an inline spec has
      * no location they could legitimately be relative to.
      * <p>
-     * A document that does not parse as YAML/JSON is left for swagger-parser to
-     * reject with its own message. Package-private for the test.
+     * The scan reads the document with swagger-parser's own
+     * {@link DeserializationUtils#deserializeIntoTree(String, String)} — the JSON
+     * mapper for {@code {}-prefixed input, the YAML loader otherwise — so it sees
+     * exactly the tree the resolver will walk. It fails <em>closed</em>: a document
+     * the scan cannot read is refused, never waved through. An earlier version read
+     * everything with the YAML mapper and returned quietly on a parse error, and
+     * snakeyaml's 3,145,728-code-point document limit made any larger JSON spec
+     * skip the check entirely while swagger-parser, on its unlimited JSON path,
+     * went on to resolve the file and loopback references it carried.
+     * <p>
+     * {@code $ref} keys under {@code example}/{@code examples}/{@code x-*} are
+     * refused too, although swagger-parser does not dereference those: telling such
+     * a subtree apart from a schema property that happens to be called {@code
+     * example} (which it does dereference) needs the OpenAPI grammar, and guessing
+     * wrong would reopen the hole. Package-private for the test.
      *
-     * @throws IllegalArgumentException
-     *             naming the first external reference found
+     * @throws IllegalArgumentException naming the first external reference found,
+     * or when the document cannot be read
      */
     static void rejectExternalRefs(String specInput) {
         JsonNode root;
         try {
-            // YAML is a superset of JSON, so one mapper reads both forms.
-            root = Yaml.mapper().readTree(specInput);
-        } catch (JsonProcessingException e) {
-            return;
+            root = DeserializationUtils.deserializeIntoTree(specInput, null);
+        } catch (RuntimeException e) {
+            throw unreadable(e);
+        }
+        if (root == null) {
+            throw unreadable(null);
         }
         Deque<JsonNode> pending = new ArrayDeque<>();
-        if (root != null) {
-            pending.push(root);
-        }
+        pending.push(root);
         while (!pending.isEmpty()) {
             JsonNode node = pending.pop();
             if (node.isObject()) {
@@ -322,6 +334,12 @@ public final class McpApiToolBuilder {
                 node.elements().forEachRemaining(pending::push);
             }
         }
+    }
+
+    private static IllegalArgumentException unreadable(RuntimeException cause) {
+        String reason = cause != null && cause.getMessage() != null ? ": " + abbreviate(cause.getMessage().split("\n", 2)[0]) : "";
+        return new IllegalArgumentException("Inline OpenAPI spec could not be read, so it could not be checked for external "
+                + "references" + reason, cause);
     }
 
     private static String abbreviate(String value) {
