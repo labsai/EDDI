@@ -209,7 +209,7 @@ public class VaultSecretProvider implements ISecretProvider {
             // newest generation: a row the last rotation's sweep has not reached yet is
             // still sealed with an older one, and that one still exists.
             byte[] dek = dekFor(reference.tenantId(), secret.getDekId());
-            String plaintext = EnvelopeCrypto.decrypt(secret.getEncryptedValue(), secret.getIv(), dek);
+            String plaintext = decryptSecretWithFallback(secret, dek);
 
             // Update last accessed timestamp (best-effort, fire-and-forget)
             updateLastAccessed(secret);
@@ -254,8 +254,11 @@ public class VaultSecretProvider implements ISecretProvider {
         try {
             ActiveDek dek = activeDek(reference.tenantId());
 
-            // Encrypt the plaintext with the tenant's DEK
-            EnvelopeCrypto.EncryptionResult result = EnvelopeCrypto.encrypt(plaintext, dek.key());
+            // Encrypt the plaintext with the tenant's DEK, binding the row identity
+            // (tenant|key|dekId) as GCM AAD so the ciphertext cannot be swapped onto a
+            // different key by someone with DB write access.
+            EnvelopeCrypto.EncryptionResult result = EnvelopeCrypto.encrypt(plaintext, dek.key(),
+                    secretAad(reference.tenantId(), reference.keyName(), dek.dekId()));
             // Keyed, tenant-bound checksum — never a plain SHA-256 an attacker with DB
             // read access could brute-force offline or use to link equal values across
             // rows/tenants. Legacy bare-SHA-256 rows keep verifying via matchesChecksum
@@ -523,8 +526,9 @@ public class VaultSecretProvider implements ISecretProvider {
             if (activeDekId.equals(rowDekId)) {
                 return true;
             }
-            String plaintext = EnvelopeCrypto.decrypt(current.getEncryptedValue(), current.getIv(), dekFor(tenantId, rowDekId));
-            EnvelopeCrypto.EncryptionResult enc = EnvelopeCrypto.encrypt(plaintext, activeDek);
+            String plaintext = decryptSecretWithFallback(current, dekFor(tenantId, rowDekId));
+            EnvelopeCrypto.EncryptionResult enc = EnvelopeCrypto.encrypt(plaintext, activeDek,
+                    secretAad(tenantId, current.getKeyName(), activeDekId));
             current.setEncryptedValue(enc.ciphertext());
             current.setIv(enc.iv());
             current.setDekId(activeDekId);
@@ -862,6 +866,44 @@ public class VaultSecretProvider implements ISecretProvider {
      */
     LaunchMode getLaunchMode() {
         return LaunchMode.current();
+    }
+
+    /**
+     * The GCM AAD that binds a secret's ciphertext to the row it belongs to:
+     * {@code tenantId|keyName|dekId}. All three are stored on the row and so are
+     * reconstructable at decrypt time, and none of them can change without a
+     * re-seal (a grant edit touches neither), so binding them cannot break a later
+     * legitimate read. The grant list is deliberately NOT bound —
+     * {@code updateGrant} rewrites it without re-encrypting, so binding it would
+     * make every post-grant-edit read fail.
+     */
+    private static byte[] secretAad(String tenantId, String keyName, String dekId) {
+        return (tenantId + "|" + keyName + "|" + dekId).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    /**
+     * Decrypt a stored secret, verifying the row-identity AAD, and falling back to
+     * a no-AAD decrypt for rows written before AAD binding existed.
+     * <p>
+     * GCM authenticates or fails, so a legacy (no-AAD) row cannot be read with the
+     * AAD and vice versa; trying the AAD first and the legacy form only on failure
+     * lets both coexist without a schema flag. A tampered row — ciphertext swapped
+     * from another key — fails both and surfaces as a decryption failure, which is
+     * the intended outcome.
+     */
+    private String decryptSecretWithFallback(EncryptedSecret secret, byte[] dek) {
+        byte[] aad = secretAad(secret.getTenantId(), secret.getKeyName(), secret.getDekId());
+        try {
+            return EnvelopeCrypto.decrypt(secret.getEncryptedValue(), secret.getIv(), dek, aad);
+        } catch (EnvelopeCrypto.CryptoException withAadFailed) {
+            // Legacy row written before AAD binding — retry without AAD. If this also
+            // fails, the original (AAD) failure is the more informative one to surface.
+            try {
+                return EnvelopeCrypto.decrypt(secret.getEncryptedValue(), secret.getIv(), dek);
+            } catch (EnvelopeCrypto.CryptoException legacyFailed) {
+                throw withAadFailed;
+            }
+        }
     }
 
     private void ensureAvailable() throws SecretProviderException {

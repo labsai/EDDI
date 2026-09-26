@@ -458,7 +458,12 @@ class VaultSecretProviderGrantTest {
         assertDoesNotThrow(() -> {
             storeSecret(List.of("agent-one"));
             assertEquals(PLAINTEXT, provider.resolve(REF));
-            assertEquals(EnvelopeCrypto.sha256Hex(PLAINTEXT), provider.getMetadata(REF).checksum());
+            // Checksum is now a keyed HMAC (finding #2), not a plain SHA-256 — verify it
+            // through the provider, which holds the checksum key, and confirm it is the
+            // keyed form rather than the brute-forceable digest.
+            String checksum = provider.getMetadata(REF).checksum();
+            assertTrue(checksum.startsWith("h1:"), checksum);
+            assertTrue(provider.matchesChecksum(REF.tenantId(), checksum, PLAINTEXT));
         });
     }
 }
