@@ -402,6 +402,17 @@ class AgentModelResolverTest {
     }
 
     @Test
+    void resolve_refusedExactIdMatch_doesNotFallThroughToANamesake() throws Exception {
+        givenAgent(AGENT_ID_SUPPORT, "Private Support");
+        // A usable agent whose display name is the private agent's id.
+        givenAgent(AGENT_ID_SALES, AGENT_ID_SUPPORT);
+
+        assertThrows(AgentModelResolver.UnknownModelException.class,
+                () -> resolverDenying(AGENT_ID_SUPPORT).resolve(AGENT_ID_SUPPORT),
+                "a request naming a refused agent's id must not quietly land on another agent");
+    }
+
+    @Test
     void resolve_nameShared_withAnUnusableAgent_neitherLeaksNorIsAmbiguous() throws Exception {
         givenAgent(AGENT_ID_SUPPORT, "Support");
         givenAgent(AGENT_ID_SALES, "Support");

@@ -630,6 +630,11 @@ class ResourceAccessGuardTest {
             when(store.readCurrentDescriptor(RESOURCE_ID)).thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
 
             assertEquals(AccessLevel.VIEW, guard(identity("bob"), enforced, store).currentLevel(RESOURCE_ID));
+            // Agrees with requireLegacyFallback, which admits USE and VIEW: an agent the
+            // caller can start a conversation with must not drop out of id-only listings.
+            assertTrue(guard(identity("bob"), enforced, store).hasAccess(RESOURCE_ID, AccessLevel.USE));
+            assertTrue(guard(identity("bob"), enforced, store).hasAccess(RESOURCE_ID, AccessLevel.VIEW));
+            assertDoesNotThrow(() -> guard(identity("bob"), enforced, store).requireAgentUseAccess(RESOURCE_ID));
             assertFalse(guard(identity("bob"), enforced, store).hasAccess(RESOURCE_ID, AccessLevel.EDIT));
 
             var adminOnly = settings(true, true, WorkspaceSettings.LEGACY_ADMIN_ONLY);

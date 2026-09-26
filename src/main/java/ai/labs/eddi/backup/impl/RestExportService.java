@@ -32,6 +32,7 @@ import ai.labs.eddi.configs.propertysetter.IPropertySetterStore;
 import ai.labs.eddi.configs.dictionary.IDictionaryStore;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.engine.schedule.IScheduleStore.ListingScope;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
@@ -1112,6 +1113,23 @@ public class RestExportService extends AbstractBackupService implements IRestExp
         }
     }
 
+    /**
+     * Whether the caller may carry this schedule out in an archive or see it in the
+     * preview: the schedule listing's owner rule. A schedule that runs as a real
+     * user is that user's — another user's dream schedule would otherwise leave
+     * with its {@code userId}, message and cron in the ZIP, although the listing
+     * hides it. Unowned (system) schedules go with the agent, as before, and an
+     * administrator exports everything. The importer re-stamps {@code userId}
+     * anyway, so nothing an import needs is lost.
+     */
+    private boolean mayExportSchedule(ScheduleConfiguration schedule) {
+        String userId = schedule.getUserId();
+        if (ListingScope.isUnownedUserId(userId) || resourceAccessGuard.isAdmin()) {
+            return true;
+        }
+        return userId.equals(resourceAccessGuard.currentPrincipal());
+    }
+
     /** A HITL approval-timeout schedule, which never belongs in an archive. */
     private static boolean isHitlTimeout(ScheduleConfiguration schedule) {
         return schedule != null && HitlSchedules.isHitlTimeout(schedule.getMetadata());
@@ -1124,7 +1142,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     private void addScheduleResources(List<ExportableResource> resources, String agentId) {
         try {
             for (ScheduleConfiguration schedule : scheduleStore.readSchedulesByAgentId(agentId)) {
-                if (schedule == null || schedule.getId() == null || isHitlTimeout(schedule)) {
+                if (schedule == null || schedule.getId() == null || isHitlTimeout(schedule) || !mayExportSchedule(schedule)) {
                     continue;
                 }
                 resources.add(new ExportableResource(schedule.getId(), null, SCHEDULE_EXT,
@@ -1158,6 +1176,9 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                 // so writing it into the archive only produced a backup that could
                 // not be restored.
                 if (isHitlTimeout(schedule)) {
+                    continue;
+                }
+                if (!mayExportSchedule(schedule)) {
                     continue;
                 }
                 // When the caller expressed a schedule selection, only the ones it

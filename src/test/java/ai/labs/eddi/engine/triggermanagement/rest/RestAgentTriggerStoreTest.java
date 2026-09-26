@@ -12,6 +12,7 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.triggermanagement.IAgentTriggerStore;
+import ai.labs.eddi.engine.triggermanagement.IRestAgentTriggerStore;
 import ai.labs.eddi.engine.model.AgentDeployment;
 import ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration;
 import io.quarkus.security.ForbiddenException;
@@ -179,7 +180,9 @@ class RestAgentTriggerStoreTest {
         when(agentTriggerStore.readAgentTrigger("theirs")).thenReturn(trigger("theirs", "theiragent000000000000"));
         when(resourceAccessGuard.hasAccess("theiragent000000000000", AccessLevel.USE)).thenReturn(false);
 
-        assertThrows(ResourceNotFoundException.class, () -> restAgentTriggerStore.readAgentTrigger("theirs"));
+        var refused = assertThrows(ResourceNotFoundException.class, () -> restAgentTriggerStore.readAgentTrigger("theirs"));
+        assertInstanceOf(IRestAgentTriggerStore.TriggerNotVisibleException.class, refused,
+                "a refusal must be distinguishable in-process, so callers do not clean up as if it were deleted");
     }
 
     @Test

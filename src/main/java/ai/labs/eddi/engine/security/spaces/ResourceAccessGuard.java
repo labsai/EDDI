@@ -125,10 +125,13 @@ public class ResourceAccessGuard {
      * directly.
      * <p>
      * A resource with no descriptor answers exactly what {@link #requireAccess}'s
-     * legacy fallback would admit — at most {@link AccessLevel#VIEW}, and only
-     * under the legacy-visibility policy. A descriptor that cannot be read answers
-     * {@code null}: a listing omits what it cannot verify rather than failing
-     * wholesale.
+     * legacy fallback would admit: under the legacy-visibility policy it admits
+     * every level below EDIT, so the answer is {@link AccessLevel#VIEW}, which
+     * {@link AccessLevel#includes includes} USE as well. {@code hasAccess(id, USE)}
+     * and {@code hasAccess(id, VIEW)} are therefore true exactly when
+     * {@code requireUseAccess} / {@code requireAccess(VIEW)} would pass, and EDIT
+     * or OWN stays refused. A descriptor that cannot be read answers {@code null}:
+     * a listing omits what it cannot verify rather than failing wholesale.
      *
      * @return the caller's level, or {@code null} for none
      */

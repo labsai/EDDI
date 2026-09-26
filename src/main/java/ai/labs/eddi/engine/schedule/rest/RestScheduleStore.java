@@ -38,6 +38,8 @@ import java.net.URI;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -544,7 +546,23 @@ public class RestScheduleStore implements IRestScheduleStore {
     @Override
     public List<ScheduleFireLog> readFailedFires(int limit) {
         try {
-            return scheduleStore.readFailedFireLogs(boundedLimit(limit, MAX_FIRE_LOG_LIMIT));
+            List<ScheduleFireLog> failed = scheduleStore.readFailedFireLogs(boundedLimit(limit, MAX_FIRE_LOG_LIMIT));
+            if (ownershipValidator.isAdmin(identity)) {
+                return failed;
+            }
+            // The dead-letter view carries the conversation ids and error text of every
+            // failed run — the same data /{id}/fires shows only when its schedule is
+            // visible. Non-admins get the entries of schedules mayRead admits, which can
+            // leave the page shorter than the limit: this is an operator view, not a
+            // paged listing, so a short page is honest rather than a truncation signal.
+            Map<String, Boolean> visible = new HashMap<>();
+            List<ScheduleFireLog> scoped = new ArrayList<>();
+            for (ScheduleFireLog log : failed) {
+                if (log != null && visible.computeIfAbsent(log.scheduleId(), this::mayReadById)) {
+                    scoped.add(log);
+                }
+            }
+            return scoped;
         } catch (IllegalArgumentException e) {
             LOGGER.warn("Invalid fire log limit: " + e.getMessage());
             throw new BadRequestException(e.getMessage());
@@ -797,8 +815,12 @@ public class RestScheduleStore implements IRestScheduleStore {
      *         when the operation may proceed
      */
     private Response requireOwnUserId(String userId, String operation) {
-        if (userId == null || userId.isBlank() || SCHEDULER_USER_ID.equals(userId)) {
-            return null; // no end-user identity to act as
+        if (ListingScope.isUnownedUserId(userId)) {
+            // No end-user identity to act as: blank, system:scheduler, or any other
+            // system: identity such as system:team-cadence. The same test mayAccess and
+            // the listing use, so a row is never listed as unowned and then refused as
+            // somebody else's.
+            return null;
         }
         if (ownershipValidator.isAdmin(identity) || ownershipValidator.isOwner(identity, userId)) {
             return null;
@@ -856,31 +878,64 @@ public class RestScheduleStore implements IRestScheduleStore {
         if (principal == null) {
             return null;
         }
-        boolean includeUnowned = resourceAccessGuard.seesEverything()
+        boolean seesEverything = resourceAccessGuard.seesEverything();
+        boolean includeUnowned = seesEverything
                 || (agentId != null && resourceAccessGuard.hasAccess(agentId, AccessLevel.EDIT));
-        return new ListingScope(principal, includeUnowned);
+        // With workspaces off every caller may view every group, so every cadence is
+        // listable; under enforcement a co-editor reaches another member's cadence by
+        // id (mayRead) and through the group workspace, not through this listing.
+        return new ListingScope(principal, includeUnowned, seesEverything);
     }
 
     /**
-     * Whether the caller may see and manage an existing schedule.
-     * <ul>
-     * <li>An administrator may manage everything.</li>
-     * <li>A schedule that runs as a real user belongs to that user — regardless of
-     * workspaces, because it acts as them (a dream schedule prunes their
-     * memories).</li>
-     * <li>An unowned (system) schedule is manageable by everyone while workspaces
-     * are off, as before. With them enforced, by its creator and by whoever may
-     * EDIT the resource it drives: the RAG configuration of an ingestion schedule,
-     * the group of a team cadence, otherwise the agent.</li>
-     * </ul>
+     * Whether the caller may manage an existing schedule — {@link #mayAccess} at
+     * {@link AccessLevel#EDIT}.
      */
     private boolean mayManage(ScheduleConfiguration schedule) {
+        return mayAccess(schedule, AccessLevel.EDIT);
+    }
+
+    /**
+     * Whether the caller may see an existing schedule: {@link #mayAccess} at
+     * {@link AccessLevel#VIEW}, and never a HITL timeout unless an admin — the
+     * listing's rule.
+     */
+    private boolean mayRead(ScheduleConfiguration schedule) {
+        if (isHitlSchedule(schedule) && !ownershipValidator.isAdmin(identity)) {
+            return false;
+        }
+        return mayAccess(schedule, AccessLevel.VIEW);
+    }
+
+    /**
+     * The schedule access rule.
+     * <ul>
+     * <li>An administrator may do everything.</li>
+     * <li>A schedule that runs as a real user belongs to that user, regardless of
+     * workspaces, because it acts as them (a dream schedule prunes their memories).
+     * The one exception is a team cadence: it runs as its creator but belongs to
+     * its group, so whoever holds {@code level} on the group reaches it too — VIEW
+     * to see it, EDIT to toggle or delete it. (Firing and re-pointing still go
+     * through {@link #requireOwnUserId}, because those act as the creator.)</li>
+     * <li>An unowned (system) schedule is open to everyone while workspaces are
+     * off, as before. With them enforced, to its creator and to whoever holds
+     * {@code level} on the resource it drives: the RAG configuration of an
+     * ingestion schedule, the group of a team cadence, otherwise the agent. A
+     * schedule created before {@code createdBy} was stamped is therefore reached
+     * through its agent.</li>
+     * </ul>
+     */
+    private boolean mayAccess(ScheduleConfiguration schedule, AccessLevel level) {
         if (schedule == null || ownershipValidator.isAdmin(identity)) {
             return true;
         }
         String userId = schedule.getUserId();
         if (!ListingScope.isUnownedUserId(userId)) {
-            return ownershipValidator.isOwner(identity, userId);
+            if (ownershipValidator.isOwner(identity, userId)) {
+                return true;
+            }
+            return TeamCadenceService.isTeamCadenceSchedule(schedule.getMetadata())
+                    && resourceAccessGuard.hasAccess(governingResourceId(schedule), level);
         }
         if (resourceAccessGuard.seesEverything()) {
             return true;
@@ -889,17 +944,7 @@ public class RestScheduleStore implements IRestScheduleStore {
         if (!ListingScope.isUnownedUserId(createdBy) && ownershipValidator.isOwner(identity, createdBy)) {
             return true;
         }
-        return resourceAccessGuard.hasAccess(governingResourceId(schedule), AccessLevel.EDIT);
-    }
-
-    /**
-     * {@link #mayManage}, minus HITL timeouts for non-admins — the listing's rule.
-     */
-    private boolean mayRead(ScheduleConfiguration schedule) {
-        if (isHitlSchedule(schedule) && !ownershipValidator.isAdmin(identity)) {
-            return false;
-        }
-        return mayManage(schedule);
+        return resourceAccessGuard.hasAccess(governingResourceId(schedule), level);
     }
 
     /**
@@ -915,6 +960,21 @@ public class RestScheduleStore implements IRestScheduleStore {
             return groupId != null ? groupId.toString() : null;
         }
         return schedule.getAgentId();
+    }
+
+    /**
+     * {@link #mayRead} for a schedule addressed by id; a missing or unreadable
+     * schedule is not visible to a non-admin.
+     */
+    private boolean mayReadById(String scheduleId) {
+        if (scheduleId == null) {
+            return false;
+        }
+        try {
+            return mayRead(scheduleStore.readSchedule(scheduleId));
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     /**

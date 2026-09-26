@@ -833,6 +833,12 @@ public class McpConversationTools {
             try {
                 agentTriggerStore.readAgentTrigger(intent);
             } catch (Exception triggerEx) {
+                if (triggerEx instanceof IRestAgentTriggerStore.TriggerNotVisibleException) {
+                    // The trigger still exists but now routes to an agent this caller may
+                    // not use. Refuse, but keep the mapping: it is not stale, and deleting
+                    // it would destroy the user's standing conversation over a sharing change.
+                    throw new RuntimeException("Agent trigger for intent '" + intent + "' is not available to you");
+                }
                 if (triggerEx instanceof IResourceStore.ResourceNotFoundException) {
                     userConversationStore.deleteUserConversation(intent, userId);
                     throw new RuntimeException("Agent trigger for intent '" + intent + "' no longer exists");

@@ -4,26 +4,25 @@
  */
 package ai.labs.eddi.engine.mcp;
 
-import java.util.Arrays;
-import io.quarkus.security.ForbiddenException;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.security.OwnershipValidator;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
+import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-
-import ai.labs.eddi.engine.security.OwnershipValidator;
-import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 
 import static ai.labs.eddi.engine.mcp.McpToolUtils.errorJson;
 import static ai.labs.eddi.engine.mcp.McpToolUtils.requireRole;

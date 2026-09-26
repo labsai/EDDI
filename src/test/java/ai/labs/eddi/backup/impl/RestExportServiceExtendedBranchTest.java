@@ -375,6 +375,58 @@ class RestExportServiceExtendedBranchTest {
             assertTrue(Files.exists(schedulesDir.resolve(kept.getId() + ".schedule.json")));
             assertFalse(Files.exists(schedulesDir.resolve(dropped.getId() + ".schedule.json")));
         }
+
+        @Test
+        @DisplayName("another user's personal schedule is not written into the caller's archive")
+        void anotherUsersScheduleIsNotExported() throws Exception {
+            Method method = RestExportService.class.getDeclaredMethod(
+                    "exportSchedules", String.class, Path.class, Set.class);
+            method.setAccessible(true);
+
+            var system = new ScheduleConfiguration();
+            system.setId("aabbccddeeff112233445566");
+            system.setUserId("system:scheduler");
+            var mine = new ScheduleConfiguration();
+            mine.setId("ccddeeff1122334455667788");
+            mine.setUserId("editor-1");
+            var theirs = new ScheduleConfiguration();
+            theirs.setId("bbccddeeff11223344556677");
+            theirs.setUserId("victim-42");
+            when(scheduleStore.readSchedulesByAgentId("agent1")).thenReturn(List.of(system, mine, theirs));
+            when(resourceAccessGuard.currentPrincipal()).thenReturn("editor-1");
+            when(jsonSerialization.serialize(any())).thenReturn("{}");
+            when(secretScrubber.scrubJson(anyString())).thenReturn("{}");
+
+            Path agentPath = Files.createTempDirectory("test-sched");
+            method.invoke(exportService, "agent1", agentPath, null);
+
+            Path schedulesDir = agentPath.resolve("schedules");
+            assertTrue(Files.exists(schedulesDir.resolve(system.getId() + ".schedule.json")));
+            assertTrue(Files.exists(schedulesDir.resolve(mine.getId() + ".schedule.json")));
+            assertFalse(Files.exists(schedulesDir.resolve(theirs.getId() + ".schedule.json")),
+                    "the listing hides another user's dream schedule; the archive must too");
+        }
+
+        @Test
+        @DisplayName("an administrator's archive still carries every schedule")
+        void adminExportsEverySchedule() throws Exception {
+            Method method = RestExportService.class.getDeclaredMethod(
+                    "exportSchedules", String.class, Path.class, Set.class);
+            method.setAccessible(true);
+
+            var theirs = new ScheduleConfiguration();
+            theirs.setId("bbccddeeff11223344556677");
+            theirs.setUserId("victim-42");
+            when(scheduleStore.readSchedulesByAgentId("agent1")).thenReturn(List.of(theirs));
+            when(resourceAccessGuard.isAdmin()).thenReturn(true);
+            when(jsonSerialization.serialize(any())).thenReturn("{}");
+            when(secretScrubber.scrubJson(anyString())).thenReturn("{}");
+
+            Path agentPath = Files.createTempDirectory("test-sched");
+            method.invoke(exportService, "agent1", agentPath, null);
+
+            assertTrue(Files.exists(agentPath.resolve("schedules").resolve(theirs.getId() + ".schedule.json")));
+        }
     }
 
     // =========================================================
@@ -597,6 +649,23 @@ class RestExportServiceExtendedBranchTest {
             assertEquals(SCHEDULE_ID, row.resourceId());
             assertEquals("nightly consolidation", row.name());
             assertFalse(row.required(), "a schedule must be deselectable");
+        }
+
+        @Test
+        @DisplayName("another user's personal schedule is not listed in the preview")
+        void anotherUsersScheduleIsNotPreviewed() throws Exception {
+            stubSnippetDescriptorSweep(List.of());
+
+            ScheduleConfiguration schedule = new ScheduleConfiguration();
+            schedule.setId(SCHEDULE_ID);
+            schedule.setName("their dream");
+            schedule.setUserId("victim-42");
+            when(scheduleStore.readSchedulesByAgentId(PREVIEW_AGENT_ID)).thenReturn(List.of(schedule));
+            when(resourceAccessGuard.currentPrincipal()).thenReturn("editor-1");
+
+            ExportPreview preview = exportService.previewExport(PREVIEW_AGENT_ID, 1);
+
+            assertTrue(preview.resources().stream().noneMatch(r -> "schedule".equals(r.resourceType())), preview.resources().toString());
         }
     }
 

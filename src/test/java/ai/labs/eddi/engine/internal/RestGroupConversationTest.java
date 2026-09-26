@@ -830,18 +830,18 @@ class RestGroupConversationTest {
         }
 
         @Test
-        @DisplayName("streaming discuss answers a refusal with a terminal SSE error and starts nothing")
+        @DisplayName("streaming discuss refuses with a 403 before the stream starts, and starts nothing")
         void streamingRequiresUse() throws Exception {
             doThrow(new ForbiddenException("no")).when(resourceAccessGuard).requireUseAccess("group-1", "group");
             var sink = mock(SseEventSink.class);
             var sse = mock(Sse.class, RETURNS_DEEP_STUBS);
 
-            restGroupConversation.discussStreaming("group-1", new DiscussRequest("Q", "user-1"), sink, sse);
+            assertThrows(ForbiddenException.class,
+                    () -> restGroupConversation.discussStreaming("group-1", new DiscussRequest("Q", "user-1"), sink, sse));
 
             verify(groupService, never()).startAndDiscussAsync(any(), any(), any(), any());
             verify(groupService, never()).startAndDiscussAsync(any(), any(), any(), any(), any());
-            verify(sink).send(any());
-            verify(sink).close();
+            verify(sink, never()).send(any());
         }
 
         @Test

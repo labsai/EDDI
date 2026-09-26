@@ -244,17 +244,30 @@ public interface IScheduleStore {
      * absent or a {@code system:} identity such as {@code system:scheduler}. With a
      * {@link #principal} set, a row is admitted when it is owned by that principal,
      * or when it is unowned and either {@link #includeUnowned} is true or the
-     * principal created it ({@code createdBy}).
+     * principal created it ({@code createdBy}), or — with
+     * {@link #includeTeamCadences} — when it is a team cadence schedule, whoever
+     * created it.
      *
      * @param principal
      *            the caller; {@code null} admits every row
      * @param includeUnowned
      *            whether unowned schedules someone else created are admitted too
+     * @param includeTeamCadences
+     *            whether every team cadence schedule is admitted. A cadence runs as
+     *            its creator but belongs to its group, so the group's co-editors
+     *            must see it; the caller sets this only when it may see every group
+     *            (workspaces not enforced), because group access cannot be decided
+     *            inside a schedule query
      */
-    record ListingScope(String principal, boolean includeUnowned) {
+    record ListingScope(String principal, boolean includeUnowned, boolean includeTeamCadences) {
 
         /** Every row — an administrator, or authorization disabled. */
-        public static final ListingScope UNRESTRICTED = new ListingScope(null, true);
+        public static final ListingScope UNRESTRICTED = new ListingScope(null, true, true);
+
+        /** A scope that admits no team cadence beyond the caller's own. */
+        public ListingScope(String principal, boolean includeUnowned) {
+            this(principal, includeUnowned, false);
+        }
 
         /** Prefix of the non-human identities schedules run as. */
         public static final String SYSTEM_IDENTITY_PREFIX = "system:";

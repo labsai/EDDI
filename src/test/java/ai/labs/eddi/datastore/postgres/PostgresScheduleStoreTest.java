@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.datastore.postgres;
 
+import java.util.stream.Collectors;
+import java.util.Set;
+import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
 import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
@@ -177,6 +180,47 @@ class PostgresScheduleStoreTest extends PostgresTestBase {
             assertEquals(2, store.readSchedulesByAgentId("agentA").size());
             assertEquals(1, store.readSchedulesByAgentId("agentB").size());
             assertEquals(0, store.readSchedulesByAgentId("agentC").size());
+        }
+
+        /**
+         * The owner scope runs in the query against a real database: rows owned by the
+         * caller, unowned rows the caller created, team cadences only when asked, and
+         * nothing owned by or created by somebody else.
+         */
+        @Test
+        @DisplayName("scoped listing — owner, creator and cadence rules run in the query")
+        void scopedListing() throws Exception {
+            var mine = createCronSchedule("mine", "agentA", "t");
+            mine.setUserId("alice");
+            var theirs = createCronSchedule("theirs", "agentA", "t");
+            theirs.setUserId("bob");
+            var systemByAlice = createCronSchedule("system-by-alice", "agentA", "t");
+            systemByAlice.setUserId("system:scheduler");
+            systemByAlice.setCreatedBy("alice");
+            var systemByBob = createCronSchedule("system-by-bob", "agentA", "t");
+            systemByBob.setUserId("system:scheduler");
+            systemByBob.setCreatedBy("bob");
+            var legacy = createCronSchedule("legacy-no-user", "agentA", "t");
+            var bobsCadence = createCronSchedule("bobs-cadence", "agentA", "t");
+            bobsCadence.setUserId("bob");
+            bobsCadence.setMetadata(Map.of("teamCadenceType", "team_cadence", "groupId", "g1", "cadenceId", "c1"));
+            for (var s : List.of(mine, theirs, systemByAlice, systemByBob, legacy, bobsCadence)) {
+                store.createSchedule(s);
+            }
+
+            assertEquals(Set.of("mine", "system-by-alice"), names(store.readAllSchedules(100, 0, false,
+                    new IScheduleStore.ListingScope("alice", false))));
+            assertEquals(Set.of("mine", "system-by-alice", "system-by-bob", "legacy-no-user"),
+                    names(store.readAllSchedules(100, 0, false, new IScheduleStore.ListingScope("alice", true))));
+            assertEquals(Set.of("mine", "system-by-alice", "system-by-bob", "legacy-no-user", "bobs-cadence"),
+                    names(store.readAllSchedules(100, 0, false, new IScheduleStore.ListingScope("alice", true, true))));
+            assertEquals(6, store.readAllSchedules(100, 0, false, IScheduleStore.ListingScope.UNRESTRICTED).size());
+            assertEquals(Set.of("mine", "system-by-alice"), names(store.readSchedulesByAgentId("agentA", 100, 0, true,
+                    new IScheduleStore.ListingScope("alice", false))));
+        }
+
+        private Set<String> names(List<ScheduleConfiguration> schedules) {
+            return schedules.stream().map(ScheduleConfiguration::getName).collect(Collectors.toSet());
         }
     }
 

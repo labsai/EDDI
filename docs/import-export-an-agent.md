@@ -97,11 +97,11 @@ DEVELOPMENT EDDI
     ↓
 1. Export Agent
    POST /backup/export/agent123?agentVersion=1
-   ← Returns: agent123-1.zip
+   ← Returns: Location /backup/export/My-Agent--agent123-1-<token>.zip
     ↓
 2. Download ZIP file
-   GET /backup/export/agent123-1.zip
-   ← Receives: agent123-1.zip file
+   GET /backup/export/My-Agent--agent123-1-<token>.zip
+   ← Receives: My-Agent-agent123-1.zip (needs VIEW on the agent)
     ↓
 3. Store in version control / backup / transfer
     ↓
@@ -289,7 +289,10 @@ agent), so read it from the `Location` header rather than constructing it.
 LOCATION=$(curl -s -D - -o /dev/null -X POST \
   "http://localhost:7070/backup/export/agent123?agentVersion=1" \
   | grep -i '^location:' | tr -d '\r' | awk '{print $2}')
-# e.g. /backup/export/My+Agent-agent123-1.zip
+# e.g. /backup/export/My-Agent--agent123-1-3f9c0e1a7b2d4c5e8f60718293a4b5c6.zip
+# The last segment carries a random token, so the URL cannot be guessed, and the
+# download checks VIEW on the exported agent. The file is saved as
+# My-Agent-agent123-1.zip (Content-Disposition).
 
 curl -O "http://localhost:7070${LOCATION}"
 ```
