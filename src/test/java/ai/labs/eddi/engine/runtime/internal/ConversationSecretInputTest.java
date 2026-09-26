@@ -7,7 +7,9 @@ package ai.labs.eddi.engine.runtime.internal;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.ILifecycleManager;
 import ai.labs.eddi.engine.memory.ConversationMemory;
+import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IPropertiesHandler;
+import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,6 +23,8 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.mockito.MockitoAnnotations.openMocks;
@@ -217,6 +221,63 @@ class ConversationSecretInputTest {
             boolean anyElementHasPlaintext = currentStep.getAllElements().stream()
                     .anyMatch(d -> "sk-live-super-secret-value".equals(String.valueOf(d.getResult())));
             assertFalse(anyElementHasPlaintext, "No persisted step datum may contain the secret plaintext");
+        }
+
+        /**
+         * Non-vacuous guard for the parser-derived leak: the parser runs on the raw
+         * plaintext and emits {@code unknown(<token>)} expressions embedding the secret
+         * into expressions:parsed / expressions:matches / the "expressions" output.
+         * Those are persisted and rendered to an admin, so scrubbing only input:initial
+         * is not enough. Here the mocked lifecycle writes exactly what InputParserTask
+         * would, and we assert the turn's finally scrub removes it.
+         */
+        @Test
+        @DisplayName("Secret input: parser-derived expressions embedding the secret are scrubbed")
+        void secretInput_parserDerivedFormsScrubbed() throws Exception {
+            var lifecycleManager = mock(ILifecycleManager.class);
+            var workflow = mock(IExecutableWorkflow.class);
+            when(workflow.getWorkflowId()).thenReturn("wf-parser");
+            when(workflow.getLifecycleManager()).thenReturn(lifecycleManager);
+            // Simulate InputParserTask writing the raw (normalized) secret into the
+            // derived forms while the pipeline runs.
+            doAnswer(inv -> {
+                IConversationMemory mem = inv.getArgument(0);
+                var step = mem.getCurrentStep();
+                step.storeData(new Data<>("expressions:parsed", "unknown(hunter2secret)"));
+                step.addConversationOutputString("expressions", "unknown(hunter2secret)");
+                step.storeData(new Data<>("expressions:matches", List.of("hunter2secret -> unknown(hunter2secret)")));
+                return null;
+            }).when(lifecycleManager).executeLifecycle(any(), any());
+
+            Conversation conversation = new Conversation(List.of(workflow), memory, propertiesHandler, outputRenderer);
+            try {
+                conversation.say("Hunter2Secret", secretFlag());
+            } catch (Exception ignored) {
+                // Expected — no real lifecycle tasks configured beyond the stub
+            }
+
+            var currentStep = memory.getCurrentStep();
+
+            // input:initial itself is the placeholder (baseline behaviour).
+            var initial = currentStep.getLatestData("input:initial");
+            assertNotNull(initial);
+            assertEquals("<secret input>", initial.getResult());
+
+            // The parsed expressions are wiped, not left holding the token.
+            var parsed = currentStep.getLatestData("expressions:parsed");
+            assertNotNull(parsed, "expressions:parsed should still exist (scrubbed to empty), not the raw token");
+            assertEquals("", parsed.getResult());
+
+            // No persisted step datum may carry the normalized secret token.
+            boolean anyElementHasToken = currentStep.getAllElements().stream()
+                    .anyMatch(d -> String.valueOf(d.getResult()).toLowerCase().contains("hunter2secret"));
+            assertFalse(anyElementHasToken, "No persisted step datum may contain the parsed secret token");
+
+            // Nor may any conversation-output value.
+            var output = currentStep.getConversationOutput();
+            boolean outputHasToken = output != null && output.values().stream()
+                    .anyMatch(v -> String.valueOf(v).toLowerCase().contains("hunter2secret"));
+            assertFalse(outputHasToken, "No conversation-output value may contain the parsed secret token");
         }
 
         @Test

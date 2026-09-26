@@ -35,8 +35,12 @@ import java.util.ArrayList;
 import static ai.labs.eddi.engine.memory.ContextUtilities.storeContextLanguageInLongTermMemory;
 import static ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
+import static ai.labs.eddi.engine.memory.MemoryKeys.EXPRESSIONS_MATCHES;
+import static ai.labs.eddi.engine.memory.MemoryKeys.EXPRESSIONS_PARSED;
 import static ai.labs.eddi.engine.memory.MemoryKeys.INPUT;
 import static ai.labs.eddi.engine.memory.MemoryKeys.INPUT_INITIAL;
+import static ai.labs.eddi.engine.memory.MemoryKeys.INTENTS;
+import static ai.labs.eddi.engine.memory.MemoryKeys.PROPERTIES_EXTRACTED;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
@@ -546,6 +550,17 @@ public class Conversation implements IConversation {
      * it doubles as the audit ledger's signal that the input was a secret
      * ({@link ai.labs.eddi.engine.audit.TurnAuditBuffer}). Idempotent: a
      * {@code scope: "secret"} property that already scrubbed leaves nothing to do.
+     * <p>
+     * It is not enough to scrub {@code input:initial}/{@code input:normalized}: the
+     * parser runs on the raw plaintext and, with {@code includeUnknown}/{@code
+     * includeUnused} on (the defaults), emits {@code unknown(<token>)} expressions
+     * that embed the (normalized, lower-cased) secret into
+     * {@code expressions:parsed} and {@code expressions:matches} step data and the
+     * {@code expressions} conversation output — none of which a free-text secret
+     * ever matches out of. So the derived parsed forms are dropped too, mirroring
+     * {@code PropertySetterTask.dropParsedForms} (which only runs when a
+     * {@code scope: "secret"} property vaulted the value; the client-flag path has
+     * no such property and must do this itself).
      */
     private void scrubSecretUserInput() {
         IWritableConversationStep currentStep = conversationMemory.getCurrentStep();
@@ -568,8 +583,38 @@ public class Conversation implements IConversation {
         if (hadInput) {
             currentStep.resetConversationOutput(INPUT.key());
             currentStep.addConversationOutputString(INPUT.key(), SECRET_INPUT_PLACEHOLDER);
+            dropParsedSecretForms(currentStep);
         }
     }
+
+    /**
+     * Drops everything the parser derived from the raw secret input — the parsed
+     * expressions, the per-token match details, the intents and any extracted
+     * properties — and removes their conversation-output echoes. These embed the
+     * raw token verbatim ({@code unknown(<token>)}) and a verbatim scrub cannot
+     * patch them, so they are replaced wholesale. Mirrors
+     * {@code PropertySetterTask.dropParsedForms}. The behavior rules that consume
+     * these have already run by the time this executes (turn {@code finally}).
+     */
+    private static void dropParsedSecretForms(IWritableConversationStep currentStep) {
+        if (currentStep.getLatestData(EXPRESSIONS_PARSED.key()) != null) {
+            currentStep.storeData(new Data<>(EXPRESSIONS_PARSED.key(), ""));
+        }
+        for (String derivedListKey : List.of(EXPRESSIONS_MATCHES.key(), INTENTS.key(), PROPERTIES_EXTRACTED.key())) {
+            if (currentStep.getLatestData(derivedListKey) != null) {
+                currentStep.storeData(new Data<>(derivedListKey, List.of()));
+            }
+        }
+        // InputParserTask echoes the parsed expressions under the bare "expressions"
+        // conversation-output key (KEY_EXPRESSIONS), not "expressions:parsed".
+        currentStep.removeConversationOutput(KEY_EXPRESSIONS_OUTPUT);
+        currentStep.removeConversationOutput(INTENTS.key());
+    }
+
+    /**
+     * Conversation-output key InputParserTask writes the parsed expressions under.
+     */
+    private static final String KEY_EXPRESSIONS_OUTPUT = "expressions";
 
     private void executeConversationStep(List<IData<?>> lifecycleData, List<String> lifecycleTaskTypes,
                                          boolean secretInput)
