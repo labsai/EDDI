@@ -240,6 +240,8 @@ Full guide: [hitl.md](hitl.md).
 | `eddi.tools.websearch.google.cx` | *(empty)* | Google Programmable Search engine ID |
 | `eddi.tools.weather.openweathermap.api-key` | *(empty)* | Required by the weather tool |
 | `eddi.httpcalls.default-timeout-millis` | `30000` | Per-call timeout when the httpCall does not set one. Without it a call can occupy the conversation thread indefinitely |
+| `eddi.httpcalls.batch.default-max-size` | `100` | Most requests a fire-and-forget `batchRequests` may expand into when the call sets no `maxBatchSize`. A larger target array refuses the whole call. See [httpcalls.md](httpcalls.md) |
+| `eddi.httpcalls.batch.max-size-ceiling` | `1000` | Highest `maxBatchSize` an http call may set. Saving a config above it is refused (`400`); one stored before the ceiling was lowered runs at the ceiling, with a WARN |
 | `eddi.httpcalls.default-max-response-size-bytes` | `2000000` | Response-body ceiling. Deliberately above the memory cap, so an over-long body is truncated into memory rather than failing the turn |
 | `eddi.mcpcalls.default-rate-limit` | `100` | Default per-minute limit for MCP tool calls |
 | `eddi.ollama.default-base-url` | `http://localhost:11434` | Used when an Ollama LLM config omits `baseUrl` |

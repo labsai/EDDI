@@ -8,13 +8,17 @@ import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.apicalls.IApiCallsStore;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
+import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
+import ai.labs.eddi.configs.apicalls.model.BatchRequestBuildingInstruction;
+import ai.labs.eddi.configs.apicalls.model.HttpPreRequest;
 import ai.labs.eddi.configs.apicalls.model.ApiEndpointDiscoveryRequest;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.engine.mcp.McpApiToolBuilder;
+import ai.labs.eddi.modules.apicalls.impl.ApiCallExecutor;
 import ai.labs.eddi.modules.apicalls.impl.RequestRedactor;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import ai.labs.eddi.secrets.sanitize.UriRedactor;
@@ -22,6 +26,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.UriInfo;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.util.LinkedHashMap;
@@ -43,6 +48,11 @@ public class RestApiCallsStore implements IRestApiCallsStore {
     private final IApiCallsStore httpCallsStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
     private final RestVersionInfo<ApiCallsConfiguration> restVersionInfo;
+
+    // Field-injected so the direct constructions in tests keep compiling; the
+    // initializer is the property's own default.
+    @ConfigProperty(name = ApiCallExecutor.BATCH_MAX_SIZE_CEILING_PROPERTY, defaultValue = "1000")
+    int maxBatchSizeCeiling = ApiCallExecutor.MAX_BATCH_SIZE_CEILING;
 
     @Inject
     public RestApiCallsStore(IApiCallsStore httpCallsStore, IDocumentDescriptorStore documentDescriptorStore, IJsonSchemaCreator jsonSchemaCreator,
@@ -73,12 +83,48 @@ public class RestApiCallsStore implements IRestApiCallsStore {
 
     @Override
     public Response updateApiCalls(String id, Integer version, ApiCallsConfiguration httpCallsConfiguration) {
+        Response invalid = validateBatchLimits(httpCallsConfiguration);
+        if (invalid != null) {
+            return invalid;
+        }
         return restVersionInfo.update(id, version, httpCallsConfiguration);
     }
 
     @Override
     public Response createApiCalls(ApiCallsConfiguration httpCallsConfiguration) {
+        Response invalid = validateBatchLimits(httpCallsConfiguration);
+        if (invalid != null) {
+            return invalid;
+        }
         return restVersionInfo.create(httpCallsConfiguration);
+    }
+
+    /**
+     * Refuses a {@code batchRequests.maxBatchSize} above the deployment ceiling.
+     * <p>
+     * The executor would clamp it at run time, so the value the designer saved is
+     * not the value that applies — and a batch between the two fails a turn with a
+     * limit the designer never wrote down. Saying so at save time is the honest
+     * place for that surprise.
+     *
+     * @return a 400 naming the call and the ceiling, or null when every call is
+     *         within it
+     */
+    private Response validateBatchLimits(ApiCallsConfiguration configuration) {
+        if (configuration == null || configuration.getHttpCalls() == null) {
+            return null;
+        }
+        for (ApiCall call : configuration.getHttpCalls()) {
+            HttpPreRequest preRequest = call != null ? call.getPreRequest() : null;
+            BatchRequestBuildingInstruction batch = preRequest != null ? preRequest.getBatchRequests() : null;
+            Integer requested = batch != null ? batch.getMaxBatchSize() : null;
+            if (requested != null && requested > maxBatchSizeCeiling) {
+                return badRequest("http call '" + call.getName() + "': preRequest.batchRequests.maxBatchSize " + requested
+                        + " exceeds this deployment's ceiling of " + maxBatchSizeCeiling + " (" + ApiCallExecutor.BATCH_MAX_SIZE_CEILING_PROPERTY
+                        + "). Lower it, or ask an operator to raise the ceiling.");
+            }
+        }
+        return null;
     }
 
     @Override
