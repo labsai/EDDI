@@ -988,6 +988,20 @@ public class Conversation implements IConversation {
                 .sorted(Comparator.comparingInt(String::length).reversed())
                 .toList();
 
+        // A tool-call pause persists its batch: the transcript the model saw
+        // (built from the display input, which the parser had overwritten with
+        // the normalized text), the gated call's arguments, and the redacted
+        // arguments an approver is shown. A resume replays and executes from it,
+        // so it is scrubbed like the step — the resumed turn sees the placeholder.
+        PendingToolCallBatch pendingToolCalls = conversationMemory.getHitlPendingToolCalls();
+        if (pendingToolCalls != null && !needles.isEmpty()) {
+            PendingToolCallBatch cleaned = SecretValueScrubber.scrubTyped(pendingToolCalls, PendingToolCallBatch.class, needles,
+                    SECRET_INPUT_PLACEHOLDER);
+            if (cleaned != null) {
+                conversationMemory.setHitlPendingToolCalls(cleaned);
+            }
+        }
+
         for (IData<?> datum : step.getAllElements()) {
             @SuppressWarnings("unchecked")
             var writable = (IData<Object>) datum;

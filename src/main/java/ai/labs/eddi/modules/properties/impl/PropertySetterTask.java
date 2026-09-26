@@ -187,7 +187,9 @@ public class PropertySetterTask implements ILifecycleTask {
                                         PathNavigator.setValue(toObjectPath, templateDataObjects, templatedObj);
                                     } else if (templatedObj instanceof String) {
                                         templateString = templatingEngine.processTemplate(templatedObj.toString(), templateDataObjects);
-                                        conversationProperties.put(name, new Property(name, templateString, scope));
+                                        if (!isScrubbedInputPlaceholder(name, templateString)) {
+                                            conversationProperties.put(name, new Property(name, templateString, scope));
+                                        }
                                     } else if (templatedObj instanceof Map<?, ?>) {
                                         @SuppressWarnings("unchecked")
                                         var valueMap = (Map<String, Object>) templatedObj;
@@ -207,7 +209,9 @@ public class PropertySetterTask implements ILifecycleTask {
                                     var valueString = property.getValueString();
                                     if (!isNullOrEmpty(valueString)) {
                                         templateString = templatingEngine.processTemplate(valueString, templateDataObjects);
-                                        if (scope == Scope.secret) {
+                                        if (isScrubbedInputPlaceholder(name, templateString)) {
+                                            // Neither vaulted nor stored — see isScrubbedInputPlaceholder.
+                                        } else if (scope == Scope.secret) {
                                             // Auto-vault: store the plaintext in the vault and
                                             // replace it with a vault reference in conversation properties.
                                             templateString = autoVaultSecret(memory, name, templateString);
@@ -447,6 +451,27 @@ public class PropertySetterTask implements ILifecycleTask {
      *             plaintext secret persisted twice (property +
      *             {@code input:initial} ) in the conversation document.
      */
+    /**
+     * True when a property value resolved to the {@code <secret input>}
+     * placeholder, which means the input it was meant to capture had already been
+     * scrubbed. This happens when a turn the client flagged {@code secretInput}
+     * paused on a RULE pause and this setter runs after the resume:
+     * {@code Conversation} scrubs a secret input when the turn stops, so
+     * {@code {memory.current.input}} then reads the placeholder. Storing it would
+     * silently configure the agent with the literal text "&lt;secret input&gt;" —
+     * for {@code scope:"secret"}, vault it as the secret. The value is skipped
+     * instead, and the reason logged.
+     */
+    private static boolean isScrubbedInputPlaceholder(String keyName, String value) {
+        if (value == null || !SECRET_INPUT_PLACEHOLDER.equals(value.trim())) {
+            return false;
+        }
+        LOGGER.warnf("Property '%s' resolved to the %s placeholder: the secret input it captures was already scrubbed "
+                + "(typically a capture that runs after a HITL resume of a secretInput turn). The property is not set. "
+                + "Capture the input before the pause.", keyName, SECRET_INPUT_PLACEHOLDER);
+        return true;
+    }
+
     private String autoVaultSecret(IConversationMemory memory, String keyName, String plaintext) throws LifecycleException {
         // Determine tenantId — use conversation property if set, else "default"
         var conversationProperties = memory.getConversationProperties();
