@@ -818,7 +818,6 @@ class McpGroupToolsTest {
         assertEquals(1, workspace.getBacklog().size());
         assertEquals(7, workspace.getBacklog().getTasks().get(0).priority());
         verify(workspaceStore).casRevision(workspace);
-        verify(workspaceStore, never()).update(any());
     }
 
     @Test
@@ -832,7 +831,6 @@ class McpGroupToolsTest {
         String result = tools.add_team_task("g1", "One more", null, null);
 
         assertTrue(result.contains("complete or delete"), "the cap error says what to do about it: " + result);
-        verify(workspaceStore, never()).update(any());
         verify(workspaceStore, never()).casRevision(any());
     }
 
@@ -869,7 +867,6 @@ class McpGroupToolsTest {
         assertTrue(tools.add_team_task("g1", longSubject, null, null).contains("error"));
         String longDescription = "d".repeat(SharedTaskList.MAX_AGENT_TASK_DESCRIPTION_LENGTH + 1);
         assertTrue(tools.add_team_task("g1", "Ok", longDescription, null).contains("error"));
-        verify(workspaceStore, never()).update(any());
         verify(workspaceStore, never()).casRevision(any());
     }
 
@@ -883,7 +880,6 @@ class McpGroupToolsTest {
         assertTrue(result.contains("error"), result);
         assertTrue(result.contains("subject"), "the error names the conflict: " + result);
         assertEquals(1, workspace.getBacklog().size());
-        verify(workspaceStore, never()).update(any());
         verify(workspaceStore, never()).casRevision(any());
     }
 

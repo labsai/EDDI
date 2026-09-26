@@ -225,20 +225,33 @@ public class RestGroupWorkspace implements IRestGroupWorkspace {
 
             var cadence = new Cadence(cadenceId, scheduleId, request.inputTemplate(),
                     request.maxBacklogTasksPerRun(), request.maxCostPerRun(), principal);
-            workspace.addCadence(cadence);
+            // H14c: revision-checked like every other workspace write. The plain
+            // whole-document update this used to be dropped a backlog task added
+            // concurrently, and wrote away a cadence run claim taken in between —
+            // orphaning that run and letting its tasks be pulled twice. A lost write
+            // re-reads and re-validates the cap against the fresh document.
+            boolean written = false;
             try {
-                workspaceStore.update(workspace);
-            } catch (Exception e) {
-                // Compensate (review finding): the schedule exists but no cadence
-                // names its scheduleRef — it would fire into "cadence no longer
-                // exists" forever and deleteCadence could never reach it.
-                try {
-                    scheduleStore.deleteSchedule(scheduleId);
-                } catch (Exception cleanupFailure) {
-                    LOG.errorf(cleanupFailure, "Orphaned schedule %s for group %s after a failed workspace write",
-                            scheduleId, sanitize(groupId));
+                for (int attempt = 0; attempt < MAX_CAS_ATTEMPTS && !written; attempt++) {
+                    if (attempt > 0) {
+                        workspace = workspaceStore.readOrCreate(groupId);
+                        if (workspace.getCadences().size() >= MAX_CADENCES_PER_WORKSPACE) {
+                            break;
+                        }
+                    }
+                    workspace.addCadence(cadence);
+                    written = workspaceStore.casRevision(workspace);
                 }
+            } catch (Exception e) {
+                deleteOrphanedSchedule(scheduleId, groupId);
                 throw e;
+            }
+            if (!written) {
+                deleteOrphanedSchedule(scheduleId, groupId);
+                return Response.status(Response.Status.CONFLICT)
+                        .entity(Map.of("error", "The workspace is being modified concurrently, or its cadence limit of "
+                                + MAX_CADENCES_PER_WORKSPACE + " was reached meanwhile — retry the request"))
+                        .build();
             }
             LOG.infof("Cadence %s created for group %s (schedule %s, cron '%s')", cadenceId, sanitize(groupId),
                     scheduleId, sanitize(request.cronExpression()));
@@ -278,14 +291,43 @@ public class RestGroupWorkspace implements IRestGroupWorkspace {
                 LOG.warnf("Could not delete schedule %s for cadence %s: %s", cadence.scheduleRef(),
                         sanitize(cadenceId), sanitize(e.getMessage()));
             }
-            workspace.removeCadence(cadenceId);
-            workspaceStore.update(workspace);
-            return Response.noContent().build();
+            // H14c: revision-checked, with a re-read on a lost write — see addCadence.
+            for (int attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt++) {
+                if (attempt > 0) {
+                    workspace = workspaceStore.find(groupId);
+                    if (workspace == null || workspace.getCadences().stream().noneMatch(c -> cadenceId.equals(c.cadenceId()))) {
+                        // deleted concurrently — the outcome the caller asked for
+                        return Response.noContent().build();
+                    }
+                }
+                workspace.removeCadence(cadenceId);
+                if (workspaceStore.casRevision(workspace)) {
+                    return Response.noContent().build();
+                }
+            }
+            return Response.status(Response.Status.CONFLICT)
+                    .entity(Map.of("error", "The workspace is being modified concurrently — retry the request"))
+                    .build();
         } catch (IResourceStore.ResourceNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).entity(Map.of("error", e.getMessage())).build();
         } catch (Exception e) {
             LOG.errorf(e, "Failed to delete cadence %s for group %s", sanitize(cadenceId), sanitize(groupId));
             return Response.serverError().build();
+        }
+    }
+
+    /**
+     * Compensation for a cadence whose workspace write did not land (review
+     * finding): the schedule exists but no cadence names its scheduleRef — it would
+     * fire into "cadence no longer exists" forever and deleteCadence could never
+     * reach it.
+     */
+    private void deleteOrphanedSchedule(String scheduleId, String groupId) {
+        try {
+            scheduleStore.deleteSchedule(scheduleId);
+        } catch (Exception cleanupFailure) {
+            LOG.errorf(cleanupFailure, "Orphaned schedule %s for group %s after a failed workspace write",
+                    scheduleId, sanitize(groupId));
         }
     }
 

@@ -104,20 +104,82 @@ class GroupWorkspaceStoreTest {
     }
 
     @Test
-    @DisplayName("a pre-revision document is stamped with one plain write, then CAS'd forever after")
-    void casRevision_legacyNullRevision_stampsWithPlainWrite() throws Exception {
+    @DisplayName("a pre-revision document is stamped by a write guarded on the run claim — never a blind write")
+    void casRevision_legacyNullRevision_stampsWithGuardedWrite() throws Exception {
         var workspace = new GroupWorkspace();
         workspace.setId("ws-1");
         workspace.setGroupId(GROUP_ID);
         workspace.setRevision(null);
+        workspace.setRunningDiscussionId("gc-running");
         var res = resource(workspace, "ws-1");
         when(storage.newResource(eq("ws-1"), anyInt(), eq(workspace))).thenReturn(res);
 
         assertTrue(store.casRevision(workspace));
 
         assertEquals("1", workspace.getRevision());
-        verify(storage).store(any(IResourceStorage.IResource.class));
-        verify(storage, never()).storeIfFieldEquals(any(), anyString(), anyString());
+        // H14c: the stamp used to be a plain store — it could write away a run claim
+        // taken between this caller's read and its write.
+        verify(storage).storeIfFieldEquals(res, "runningDiscussionId", "gc-running");
+        verify(storage, never()).store(any(IResourceStorage.IResource.class));
+    }
+
+    // =================================================================
+    // casRunningDiscussion — the same revision guard (H14c)
+    // =================================================================
+
+    @Test
+    @DisplayName("a run claim is guarded by the REVISION, so it cannot drop a concurrent backlog edit")
+    void casRunningDiscussion_guardsOnRevision_andBumpsIt() throws Exception {
+        var workspace = new GroupWorkspace();
+        workspace.setId("ws-1");
+        workspace.setGroupId(GROUP_ID);
+        workspace.setRevision("7");
+        workspace.setRunningDiscussionId("gc-new");
+        var res = resource(workspace, "ws-1");
+        when(storage.newResource(eq("ws-1"), anyInt(), eq(workspace))).thenReturn(res);
+
+        assertTrue(store.casRunningDiscussion(workspace, GroupWorkspace.NO_RUNNING_DISCUSSION));
+
+        assertEquals("8", workspace.getRevision(),
+                "the claim bumps the revision, so a backlog add read before it now loses its CAS instead of "
+                        + "writing the claim away");
+        verify(storage).storeIfFieldEquals(res, "revision", "7");
+        verify(storage, never()).storeIfFieldEquals(any(), eq("runningDiscussionId"), anyString());
+        verify(storage, never()).store(any(IResourceStorage.IResource.class));
+    }
+
+    @Test
+    @DisplayName("a run claim that lost to ANY concurrent write reports false and restores the stamp")
+    void casRunningDiscussion_lostToConcurrentWrite_returnsFalse() throws Exception {
+        var workspace = new GroupWorkspace();
+        workspace.setId("ws-1");
+        workspace.setGroupId(GROUP_ID);
+        workspace.setRevision("7");
+        var res = resource(workspace, "ws-1");
+        when(storage.newResource(eq("ws-1"), anyInt(), eq(workspace))).thenReturn(res);
+        doThrow(new IResourceStore.ResourceModifiedException("a backlog add landed first"))
+                .when(storage).storeIfFieldEquals(any(), eq("revision"), eq("7"));
+
+        assertFalse(store.casRunningDiscussion(workspace, GroupWorkspace.NO_RUNNING_DISCUSSION));
+
+        assertEquals("7", workspace.getRevision());
+    }
+
+    @Test
+    @DisplayName("a run claim on a pre-revision document falls back to the claim guard and stamps a revision")
+    void casRunningDiscussion_legacyNullRevision_guardsOnExpectedRunning() throws Exception {
+        var workspace = new GroupWorkspace();
+        workspace.setId("ws-1");
+        workspace.setGroupId(GROUP_ID);
+        workspace.setRevision(null);
+        workspace.setRunningDiscussionId("gc-new");
+        var res = resource(workspace, "ws-1");
+        when(storage.newResource(eq("ws-1"), anyInt(), eq(workspace))).thenReturn(res);
+
+        assertTrue(store.casRunningDiscussion(workspace, null));
+
+        assertEquals("1", workspace.getRevision());
+        verify(storage).storeIfFieldEquals(res, "runningDiscussionId", GroupWorkspace.NO_RUNNING_DISCUSSION);
     }
 
     @Test

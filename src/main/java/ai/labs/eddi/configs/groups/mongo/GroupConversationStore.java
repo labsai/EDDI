@@ -85,7 +85,14 @@ public class GroupConversationStore implements IGroupConversationStore {
     public void update(GroupConversation conversation) throws IResourceStore.ResourceStoreException {
         try {
             IResourceStorage.IResource<GroupConversation> resource = storage.newResource(conversation.getId(), SINGLE_VERSION, conversation);
-            storage.store(resource);
+            // A replace that matches an existing row only. Every document is written at
+            // SINGLE_VERSION, so the version predicate is always true while the row
+            // exists and false once it is gone — which is the whole point: a plain store
+            // is an upsert, and a discussion running while its document was deleted
+            // (GDPR erasure, the delete endpoint) recreated it on its next write.
+            storage.storeIfCurrentVersion(resource, SINGLE_VERSION);
+        } catch (IResourceStore.ResourceModifiedException e) {
+            throw new GroupConversationGoneException("Group conversation no longer exists.", e);
         } catch (IOException e) {
             throw new IResourceStore.ResourceStoreException("Failed to update group conversation: " + e.getMessage(), e);
         }

@@ -597,7 +597,7 @@ class GroupConversationServiceExtendedTest {
             doAnswer(inv -> {
                 basesAtPersistTime.add(((GroupConversation) inv.getArgument(0)).getPausedRepeatSliceBase());
                 return null;
-            }).when(conversationStore).update(any());
+            }).when(conversationStore).updateIfState(any(), any());
 
             GroupConversation gc = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
 
