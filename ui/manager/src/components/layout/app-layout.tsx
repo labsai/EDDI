@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
+import { useLocation } from "react-router-dom";
 import { Sidebar } from "./sidebar";
 import { SuspendedOutlet } from "./suspended-outlet";
 import { TopBar } from "./top-bar";
@@ -31,6 +32,16 @@ export function AppLayout() {
   useEffect(() => {
     if (!isMobile) setMobileSidebarOpen(false);
   }, [isMobile]);
+
+  // Close the mobile sidebar once a navigation lands. It is an overlay: left
+  // open, it covered the page the user had just asked for. Keyed on the path,
+  // so a query-string change (a tab, a filter) does not close it.
+  const { pathname } = useLocation();
+  const [sidebarPath, setSidebarPath] = useState(pathname);
+  if (sidebarPath !== pathname) {
+    setSidebarPath(pathname);
+    if (mobileSidebarOpen) setMobileSidebarOpen(false);
+  }
 
   // M5: Close mobile sidebar on Escape key
   useEffect(() => {

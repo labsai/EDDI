@@ -1,11 +1,21 @@
 import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
+import i18next from "i18next";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-/** Format a timestamp into a human-friendly relative time string */
+/**
+ * Format a timestamp into a human-friendly relative time string ("5m ago"), in
+ * the language on screen.
+ *
+ * It used to build English by hand ("5m ago", "just now") for every locale.
+ * `Intl.RelativeTimeFormat` in `narrow` style produces exactly those strings in
+ * English and the right ones everywhere else; "just now" is a translation key.
+ * Reads the shared i18next instance rather than taking `t`, so the ~15 callers
+ * (cards, lists, pickers) stay unchanged.
+ */
 export function formatRelativeTime(timestamp: number): string {
   if (!timestamp || !Number.isFinite(timestamp)) return "—";
   const now = Date.now();
@@ -16,10 +26,22 @@ export function formatRelativeTime(timestamp: number): string {
   const hours = Math.floor(minutes / 60);
   const days = Math.floor(hours / 24);
 
-  if (days > 0) return `${days}d ago`;
-  if (hours > 0) return `${hours}h ago`;
-  if (minutes > 0) return `${minutes}m ago`;
-  return "just now";
+  if (days <= 0 && hours <= 0 && minutes <= 0) {
+    return i18next.isInitialized ? i18next.t("time.justNow", "just now") : "just now";
+  }
+  const format = relativeTimeFormat();
+  if (days > 0) return format.format(-days, "day");
+  if (hours > 0) return format.format(-hours, "hour");
+  return format.format(-minutes, "minute");
+}
+
+function relativeTimeFormat(): Intl.RelativeTimeFormat {
+  const language = i18next.resolvedLanguage || i18next.language || "en";
+  try {
+    return new Intl.RelativeTimeFormat(language, { style: "narrow", numeric: "always" });
+  } catch {
+    return new Intl.RelativeTimeFormat("en", { style: "narrow", numeric: "always" });
+  }
 }
 
 /** Agent deployment status color configuration */

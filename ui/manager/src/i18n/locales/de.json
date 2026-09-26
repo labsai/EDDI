@@ -25,7 +25,13 @@
     "profile": "Profil",
     "guest": "Gast",
     "userMenu": "Benutzermenü",
-    "signedIn": "Angemeldet"
+    "signedIn": "Angemeldet",
+    "initFailedTitle": "Anmeldung nicht verfügbar",
+    "initFailedMessage": "Der Manager konnte den Anmeldedienst nicht erreichen. Prüfen Sie Ihre Verbindung und versuchen Sie es erneut.",
+    "signedOutTitle": "Sie sind abgemeldet",
+    "signedOutMessage": "Melden Sie sich an, um fortzufahren.",
+    "retry": "Erneut versuchen",
+    "signIn": "Anmelden"
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -75,7 +81,8 @@
     "workforce": "Belegschaft",
     "monitoring": "Gesprächsüberwachung",
     "analytics": "Auswertungen",
-    "connections": "Verbindungen"
+    "connections": "Verbindungen",
+    "breadcrumb": "Brotkrümelnavigation"
   },
   "theme": {
     "light": "Hell",
@@ -95,7 +102,8 @@
     "ko": "한국어",
     "pt": "Português",
     "hi": "हिन्दी",
-    "switchFailed": "Diese Sprache konnte nicht geladen werden. Bitte versuchen Sie es erneut."
+    "switchFailed": "Diese Sprache konnte nicht geladen werden. Bitte versuchen Sie es erneut.",
+    "select": "Sprache"
   },
   "pages": {
     "dashboard": {
@@ -264,7 +272,10 @@
     "openExternalChatIn": "{{environment}}-Chat in neuem Tab öffnen",
     "deployToProduction": "In Produktion bereitstellen",
     "undeployFromProduction": "Aus Produktion entfernen",
-    "deployFailedIn": "Bereitstellung in {{environment}} fehlgeschlagen"
+    "deployFailedIn": "Bereitstellung in {{environment}} fehlgeschlagen",
+    "pickerUseAsId": "Drücken Sie die Eingabetaste, um „{{id}}“ als ID zu verwenden.",
+    "pickerOpen": "Agenten anzeigen",
+    "pickerClose": "Agentenliste schließen"
   },
   "agentDetail": {
     "a2aDescHint": "Wird in der Agent Card angezeigt — hilft anderen Agenten zu verstehen, was dieser Agent tut",
@@ -814,7 +825,9 @@
       }
     },
     "emptyDescription": "Erstellen Sie Ihre erste {{type}}, um sie in Workflows zu verwenden.",
-    "descriptionPlaceholder": "Beschreiben Sie diese {{type}}-Konfiguration …"
+    "descriptionPlaceholder": "Beschreiben Sie diese {{type}}-Konfiguration …",
+    "snippetNamePlaceholder": "z. B. cautious_mode",
+    "namePlaceholder": "Mein {{type}}"
   },
   "editor": {
     "compare": "Vergleichen",
@@ -4945,5 +4958,14 @@
     "headerMismatch": "Diese Verbindung sendet ihre Zugangsdaten als „{{expected}}“, also muss der Header so heißen – sonst zeigt die Konfiguration einen Namen und die Anfrage trägt einen anderen.",
     "refusedInRequest": "${connection:…} wird in Pfad, Query-Parameter oder Body abgelehnt – Zugangsdaten in einer URL landen in jedem Proxy-Log, und im Body werden sie nicht gelesen. Verweisen Sie stattdessen aus einem Header auf die Verbindung.",
     "refusedInModel": "Sprachmodelle, Embeddings und Vektorspeicher akzeptieren kein ${connection:…}: Eine Verbindung wird in einen ganzen Header aufgelöst, diese brauchen aber ein nacktes Geheimnis. Verwenden Sie hier ${vault:…}."
+  },
+  "time": {
+    "justNow": "gerade eben"
+  },
+  "sidebar": {
+    "checkingVersion": "Version wird geprüft…",
+    "demoModeFallback": "Eigenständiger Demo-Modus",
+    "expand": "Seitenleiste ausklappen",
+    "collapse": "Seitenleiste einklappen"
   }
 }

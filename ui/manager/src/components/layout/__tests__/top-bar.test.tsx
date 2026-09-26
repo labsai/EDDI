@@ -171,6 +171,32 @@ describe("TopBar", () => {
     await waitFor(() => expect(select.value).toBe("de"));
   });
 
+  it("shows the RESOLVED language for a region-tagged browser locale (de-DE)", async () => {
+    // A de-DE browser detects as "de-DE", which matches no <option>: the select
+    // fell back to its first entry and read "English" over German text, and
+    // choosing English then fired no change event at all.
+    const { default: i18n } = await import("@/i18n/config");
+    await i18n.changeLanguage("de-DE");
+    try {
+      renderWithProviders(<TopBar onMenuClick={() => {}} sidebarVisible={false} />);
+      const select = screen.getByTestId("language-selector") as HTMLSelectElement;
+      expect(select.value).toBe("de");
+
+      fireEvent.change(select, { target: { value: "en" } });
+      await waitFor(() => expect(i18n.resolvedLanguage).toBe("en"));
+      await waitFor(() => expect(select.value).toBe("en"));
+    } finally {
+      await i18n.changeLanguage("en");
+    }
+  });
+
+  it("gives the language selector an accessible name", () => {
+    renderWithProviders(<TopBar onMenuClick={() => {}} sidebarVisible={false} />);
+    expect(screen.getByRole("combobox", { name: "Language" })).toBe(
+      screen.getByTestId("language-selector"),
+    );
+  });
+
   it("lets the LAST pick win when two language changes overlap", async () => {
     // Locale chunks differ in size, so picking Thai then Spanish can complete
     // Spanish-then-Thai and leave the user reading a language they already moved

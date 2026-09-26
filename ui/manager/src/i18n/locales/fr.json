@@ -25,7 +25,13 @@
     "profile": "Profil",
     "guest": "Invité",
     "userMenu": "Menu utilisateur",
-    "signedIn": "Session ouverte"
+    "signedIn": "Session ouverte",
+    "initFailedTitle": "Connexion indisponible",
+    "initFailedMessage": "Le Manager n’a pas pu joindre le service de connexion. Vérifiez votre connexion, puis réessayez.",
+    "signedOutTitle": "Vous êtes déconnecté",
+    "signedOutMessage": "Connectez-vous pour continuer.",
+    "retry": "Réessayer",
+    "signIn": "Se connecter"
   },
   "nav": {
     "dashboard": "Tableau de bord",
@@ -75,7 +81,8 @@
     "workforce": "Effectif",
     "monitoring": "Suivi des conversations",
     "analytics": "Analyses",
-    "connections": "Connexions"
+    "connections": "Connexions",
+    "breadcrumb": "Fil d’Ariane"
   },
   "theme": {
     "light": "Clair",
@@ -95,7 +102,8 @@
     "ko": "한국어",
     "pt": "Português",
     "hi": "हिन्दी",
-    "switchFailed": "Impossible de charger cette langue. Veuillez réessayer."
+    "switchFailed": "Impossible de charger cette langue. Veuillez réessayer.",
+    "select": "Langue"
   },
   "pages": {
     "dashboard": {
@@ -265,7 +273,10 @@
     "openExternalChatIn": "Ouvrir le chat {{environment}} dans un nouvel onglet",
     "deployToProduction": "Déployer en production",
     "undeployFromProduction": "Retirer de la production",
-    "deployFailedIn": "Le déploiement a échoué en {{environment}}"
+    "deployFailedIn": "Le déploiement a échoué en {{environment}}",
+    "pickerUseAsId": "Appuyez sur Entrée pour utiliser « {{id}} » comme ID.",
+    "pickerOpen": "Afficher les agents",
+    "pickerClose": "Fermer la liste des agents"
   },
   "agentDetail": {
     "a2aDescHint": "Affiché dans l'Agent Card — aide les autres agents à comprendre ce que fait cet agent",
@@ -826,7 +837,9 @@
     "emptyDescription": "Créez votre premier(ère) {{type}} pour l'utiliser dans les workflows.",
     "itemCount_many": "{{count}} éléments",
     "count_many": "{{count}} ressources",
-    "descriptionPlaceholder": "Décrivez cette configuration {{type}}…"
+    "descriptionPlaceholder": "Décrivez cette configuration {{type}}…",
+    "snippetNamePlaceholder": "p. ex. cautious_mode",
+    "namePlaceholder": "Mon {{type}}"
   },
   "editor": {
     "compare": "Comparer",
@@ -4994,5 +5007,14 @@
     "headerMismatch": "Cette connexion envoie son identifiant sous « {{expected}} », l'en-tête doit donc porter ce nom — sinon la configuration affiche un nom et la requête en porte un autre.",
     "refusedInRequest": "${connection:…} est refusé dans un chemin, un paramètre de requête ou un corps — un identifiant dans une URL finit dans chaque journal de proxy, et dans un corps il n'est pas lu. Référencez plutôt la connexion depuis un en-tête.",
     "refusedInModel": "Les modèles de langage, les embeddings et les bases vectorielles n'acceptent pas ${connection:…} : une connexion se résout en un en-tête complet, alors qu'ils ont besoin d'un identifiant brut. Utilisez ${vault:…} ici."
+  },
+  "time": {
+    "justNow": "à l’instant"
+  },
+  "sidebar": {
+    "checkingVersion": "Vérification de la version…",
+    "demoModeFallback": "Mode démo autonome",
+    "expand": "Développer la barre latérale",
+    "collapse": "Réduire la barre latérale"
   }
 }

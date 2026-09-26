@@ -63,6 +63,28 @@ describe("AppLayout", () => {
     expect(screen.queryByTestId("sidebar")).not.toBeInTheDocument();
   });
 
+  it("closes the mobile sidebar once a sidebar link navigates", async () => {
+    // It is an overlay: left open after navigation, it covered the page the
+    // user had just asked for.
+    const user = userEvent.setup();
+    window.innerWidth = 500;
+    act(() => {
+      window.dispatchEvent(new Event("resize"));
+    });
+
+    renderWithProviders(<AppLayout />, { initialRoute: "/manage" });
+    await user.click(screen.getByTestId("mobile-menu-toggle"));
+    const sidebar = screen.getByTestId("sidebar");
+
+    const agentsLink = Array.from(sidebar.querySelectorAll("a")).find(
+      (a) => a.getAttribute("href") === "/manage/agents",
+    );
+    expect(agentsLink).toBeDefined();
+    await user.click(agentsLink!);
+
+    expect(screen.queryByTestId("sidebar")).not.toBeInTheDocument();
+  });
+
   it("closes mobile sidebar when Escape key is pressed", async () => {
     window.innerWidth = 500;
     act(() => {

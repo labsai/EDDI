@@ -25,7 +25,13 @@
     "profile": "โปรไฟล์",
     "guest": "ผู้เยี่ยมชม",
     "userMenu": "เมนูผู้ใช้",
-    "signedIn": "เข้าสู่ระบบแล้ว"
+    "signedIn": "เข้าสู่ระบบแล้ว",
+    "initFailedTitle": "ไม่สามารถลงชื่อเข้าใช้ได้",
+    "initFailedMessage": "Manager ไม่สามารถเชื่อมต่อบริการลงชื่อเข้าใช้ได้ ตรวจสอบการเชื่อมต่อแล้วลองอีกครั้ง",
+    "signedOutTitle": "คุณออกจากระบบแล้ว",
+    "signedOutMessage": "ลงชื่อเข้าใช้เพื่อดำเนินการต่อ",
+    "retry": "ลองอีกครั้ง",
+    "signIn": "ลงชื่อเข้าใช้"
   },
   "nav": {
     "dashboard": "แดชบอร์ด",
@@ -75,7 +81,8 @@
     "workforce": "ทีมงาน",
     "monitoring": "การติดตามการสนทนา",
     "analytics": "การวิเคราะห์",
-    "connections": "การเชื่อมต่อ"
+    "connections": "การเชื่อมต่อ",
+    "breadcrumb": "เส้นทางนำทาง"
   },
   "theme": {
     "light": "สว่าง",
@@ -95,7 +102,8 @@
     "ko": "한국어",
     "pt": "Português",
     "hi": "हिन्दी",
-    "switchFailed": "ไม่สามารถโหลดภาษานั้นได้ กรุณาลองอีกครั้ง"
+    "switchFailed": "ไม่สามารถโหลดภาษานั้นได้ กรุณาลองอีกครั้ง",
+    "select": "ภาษา"
   },
   "pages": {
     "dashboard": {
@@ -264,7 +272,10 @@
     "openExternalChatIn": "เปิดแชท {{environment}} ในแท็บใหม่",
     "deployToProduction": "ดีพลอยไปยังโปรดักชัน",
     "undeployFromProduction": "นำออกจากโปรดักชัน",
-    "deployFailedIn": "การดีพลอยใน {{environment}} ล้มเหลว"
+    "deployFailedIn": "การดีพลอยใน {{environment}} ล้มเหลว",
+    "pickerUseAsId": "กด Enter เพื่อใช้ \"{{id}}\" เป็น ID",
+    "pickerOpen": "แสดงเอเจนต์",
+    "pickerClose": "ปิดรายการเอเจนต์"
   },
   "agentDetail": {
     "a2aDescHint": "แสดงใน Agent Card — ช่วยให้เอเจนต์อื่นเข้าใจว่าเอเจนต์นี้ทำอะไร",
@@ -814,7 +825,9 @@
       }
     },
     "emptyDescription": "สร้าง {{type}} แรกของคุณเพื่อใช้ใน Workflow",
-    "descriptionPlaceholder": "อธิบายการตั้งค่า {{type}} นี้…"
+    "descriptionPlaceholder": "อธิบายการตั้งค่า {{type}} นี้…",
+    "snippetNamePlaceholder": "เช่น cautious_mode",
+    "namePlaceholder": "{{type}} ของฉัน"
   },
   "editor": {
     "compare": "เปรียบเทียบ",
@@ -4945,5 +4958,14 @@
     "headerMismatch": "การเชื่อมต่อนี้ส่งข้อมูลรับรองในชื่อ “{{expected}}” เฮดเดอร์จึงต้องใช้ชื่อนั้น มิฉะนั้นการตั้งค่าจะแสดงชื่อหนึ่งแต่คำขอส่งอีกชื่อหนึ่ง",
     "refusedInRequest": "${connection:…} ถูกปฏิเสธในพาธ พารามิเตอร์คิวรี หรือบอดี ข้อมูลรับรองใน URL จะไปอยู่ในล็อกของพร็อกซีทุกตัว ส่วนในบอดีจะไม่ถูกอ่าน ให้อ้างอิงการเชื่อมต่อจากเฮดเดอร์แทน",
     "refusedInModel": "โมเดลภาษา เอ็มเบดดิง และเวกเตอร์สโตร์ไม่รับ ${connection:…} เพราะการเชื่อมต่อแปลงเป็นเฮดเดอร์ทั้งชุด แต่สิ่งเหล่านี้ต้องการข้อมูลรับรองล้วนๆ ใช้ ${vault:…} ตรงนี้แทน"
+  },
+  "time": {
+    "justNow": "เมื่อสักครู่"
+  },
+  "sidebar": {
+    "checkingVersion": "กำลังตรวจสอบเวอร์ชัน…",
+    "demoModeFallback": "โหมดสาธิตแบบสแตนด์อโลน",
+    "expand": "ขยายแถบด้านข้าง",
+    "collapse": "ยุบแถบด้านข้าง"
   }
 }

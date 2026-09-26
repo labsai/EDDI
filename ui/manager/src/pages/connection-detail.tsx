@@ -33,6 +33,7 @@ import {
   useDeleteConnection,
 } from "@/hooks/use-connections";
 import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
+import { allowNextNavigation } from "@/lib/unsaved-changes";
 import { getErrorMessage } from "@/lib/api-client";
 import { commitPending } from "@/lib/chip-values";
 import { authTypeLabel } from "@/lib/connection-labels";
@@ -230,12 +231,10 @@ export function ConnectionDetailPage() {
     pendingScope.trim() !== "" ||
     pendingOrigin.trim() !== "";
 
-  // Covers tab close and reload. In-app navigation is guarded explicitly below
-  // — on this page's own two exits, the back link and the linked-accounts link
-  // — because the app uses <BrowserRouter> and React Router's blocker needs the
-  // data router. Leaving by the sidebar or the command palette is not guarded,
-  // here or anywhere else in the app; that is a gap in the router setup rather
-  // than in this page.
+  // Covers tab close and reload, and — through the router-level guard — leaving
+  // by the sidebar, a breadcrumb, the command palette or Back. This page's own
+  // two exits (the back link and the linked-accounts link) ask through
+  // `leaveFor` below, and then tell the router guard not to ask again.
   useUnsavedChangesGuard(isDirty);
 
   /** Leave for `to`, asking first when there are unsaved edits. */
@@ -390,6 +389,7 @@ export function ConnectionDetailPage() {
       await deleteMutation.mutateAsync({ id, version });
       // Deliberately `navigate`, not `leaveFor`: the document is gone, so there
       // is nothing left for an "unsaved changes" prompt to protect.
+      allowNextNavigation();
       navigate("/manage/connections");
     } catch (err) {
       toast.error(getErrorMessage(err));
@@ -841,7 +841,10 @@ export function ConnectionDetailPage() {
         onConfirm={() => {
           const to = pendingExit;
           setPendingExit(null);
-          if (to) navigate(to);
+          if (to) {
+            allowNextNavigation();
+            navigate(to);
+          }
         }}
         onCancel={() => setPendingExit(null)}
       />

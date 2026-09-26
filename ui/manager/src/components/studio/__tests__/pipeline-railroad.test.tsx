@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, fireEvent } from "@testing-library/react";
 import { render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -6,6 +6,7 @@ import { MemoryRouter } from "react-router-dom";
 import { ThemeProvider } from "@/components/layout/theme-provider";
 import { PipelineRailroad } from "@/components/studio/pipeline-railroad";
 import { useDebugStore } from "@/hooks/use-debug-events";
+import { setUnsavedChanges } from "@/lib/unsaved-changes";
 
 const mockSteps = [
   { type: "eddi://ai.labs.parser", extensions: {}, config: { uri: "eddi://ai.labs.parser/parsers/p1?version=1" } },
@@ -124,5 +125,54 @@ describe("PipelineRailroad", () => {
     expect(stage1Icon.className).not.toContain("animate-pulse");
     // The error did NOT land on the payload's index (0) — stage 0 stays idle
     expect(stage0Icon.className).toContain("bg-muted/50");
+  });
+});
+
+/**
+ * UI High 14 (Studio half): switching stage remounts the editor panel and threw
+ * away an unsaved edit without a word. It is local state, not a navigation, so
+ * the router-level guard cannot see it — the railroad asks.
+ */
+describe("PipelineRailroad unsaved-changes guard", () => {
+  afterEach(() => {
+    setUnsavedChanges("studio-test", false);
+  });
+
+  it("switches immediately when nothing is dirty", () => {
+    const onSelectStage = vi.fn();
+    renderRailroad({ selectedIndex: 0, onSelectStage });
+    fireEvent.click(screen.getByTestId("stage-1"));
+    expect(onSelectStage).toHaveBeenCalledWith(1);
+    expect(screen.queryByTestId("unsaved-confirm")).not.toBeInTheDocument();
+  });
+
+  it("asks before switching away from a dirty editor, and honours Cancel", () => {
+    setUnsavedChanges("studio-test", true);
+    const onSelectStage = vi.fn();
+    renderRailroad({ selectedIndex: 0, onSelectStage });
+
+    fireEvent.click(screen.getByTestId("stage-1"));
+    expect(onSelectStage).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("unsaved-cancel"));
+    expect(onSelectStage).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("unsaved-confirm")).not.toBeInTheDocument();
+  });
+
+  it("switches after Discard & Leave", () => {
+    setUnsavedChanges("studio-test", true);
+    const onSelectStage = vi.fn();
+    renderRailroad({ selectedIndex: 0, onSelectStage });
+
+    fireEvent.click(screen.getByTestId("stage-2"));
+    fireEvent.click(screen.getByTestId("unsaved-confirm"));
+    expect(onSelectStage).toHaveBeenCalledWith(2);
+  });
+
+  it("does not ask when re-selecting the current stage", () => {
+    setUnsavedChanges("studio-test", true);
+    const onSelectStage = vi.fn();
+    renderRailroad({ selectedIndex: 1, onSelectStage });
+    fireEvent.click(screen.getByTestId("stage-1"));
+    expect(onSelectStage).toHaveBeenCalledWith(1);
   });
 });

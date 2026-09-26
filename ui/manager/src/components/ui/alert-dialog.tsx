@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { AlertTriangle, X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -26,14 +27,15 @@ export function AlertDialog({
   onOpenChange,
   title,
   description,
-  confirmLabel = "Delete",
-  cancelLabel = "Cancel",
+  confirmLabel,
+  cancelLabel,
   onConfirm,
   variant = "destructive",
   isPending = false,
   children,
   confirmDisabled = false,
 }: AlertDialogProps) {
+  const { t } = useTranslation();
   const iconColor =
     variant === "destructive" ? "text-destructive" : "text-warning";
   const iconBg =
@@ -54,7 +56,7 @@ export function AlertDialog({
         >
           <div className="flex flex-col items-center gap-4 text-center">
             <div className={cn("rounded-full p-3", iconBg)}>
-              <AlertTriangle className={cn("h-6 w-6", iconColor)} />
+              <AlertTriangle className={cn("h-6 w-6", iconColor)} aria-hidden="true" />
             </div>
             <div className="space-y-2">
               <DialogPrimitive.Title className="text-lg font-semibold text-foreground">
@@ -76,7 +78,7 @@ export function AlertDialog({
               disabled={isPending}
               data-testid="alert-dialog-cancel"
             >
-              {cancelLabel}
+              {cancelLabel ?? t("common.cancel", "Cancel")}
             </Button>
             <Button
               variant={variant === "destructive" ? "destructive" : "warning"}
@@ -87,13 +89,13 @@ export function AlertDialog({
               disabled={isPending || confirmDisabled}
               data-testid="alert-dialog-confirm"
             >
-              {isPending ? "…" : confirmLabel}
+              {isPending ? "…" : (confirmLabel ?? t("common.delete", "Delete"))}
             </Button>
           </div>
 
           <DialogPrimitive.Close className="absolute inset-e-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2">
             <X className="h-4 w-4" />
-            <span className="sr-only">Close</span>
+            <span className="sr-only">{t("common.close", "Close")}</span>
           </DialogPrimitive.Close>
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>

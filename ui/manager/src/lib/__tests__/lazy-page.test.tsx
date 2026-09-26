@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Suspense } from "react";
 import { render, screen, waitFor } from "@testing-library/react";
+import { userEvent } from "@/test/test-utils";
+import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { lazyPage } from "../lazy-page";
 
 function Ok() {
@@ -99,5 +101,32 @@ describe("lazyPage", () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(reload).not.toHaveBeenCalled();
     expect(sessionStorage.getItem(RELOAD_GUARD_KEY)).toBeNull();
+  });
+
+  it("imports again when the error boundary retries — a failed load is not cached", async () => {
+    // React.lazy caches a rejected promise forever, so "Try Again" used to
+    // re-throw the same error until the tab was reloaded.
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const loader = vi
+      .fn<() => Promise<{ Ok: typeof Ok }>>()
+      .mockRejectedValue(new TypeError("NetworkError when attempting to load"));
+    const Lazy = lazyPage(loader, "Ok");
+    const user = userEvent.setup();
+
+    render(
+      <ErrorBoundary>
+        <Suspense fallback={<span>loading</span>}>
+          <Lazy />
+        </Suspense>
+      </ErrorBoundary>,
+    );
+    expect(await screen.findByTestId("error-boundary-fallback")).toBeInTheDocument();
+    const failedAttempts = loader.mock.calls.length;
+
+    // The network is back.
+    loader.mockResolvedValue({ Ok });
+    await user.click(screen.getByRole("button", { name: /try again/i }));
+    expect(await screen.findByTestId("loaded")).toBeInTheDocument();
+    expect(loader.mock.calls.length).toBe(failedAttempts + 1);
   });
 });

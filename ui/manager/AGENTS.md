@@ -29,7 +29,7 @@ The Manager, the Chat UI and the backend are one repository, `labsai/EDDI`:
 | **Styling**        | Tailwind CSS v4 + CSS variables (black/gold)                           |
 | **State (server)** | TanStack Query v5                                                      |
 | **State (UI)**     | Zustand (chat/debug), `useState` / `useCallback` elsewhere             |
-| **Routing**        | React Router v7 (`react-router-dom` 7.x, declarative mode — no data router) |
+| **Routing**        | React Router v7 (`react-router-dom` 7.x) — a data router (`createBrowserRouter` in `main.tsx`) with one splat route; the route table itself stays declarative `<Routes>` in `app.tsx` |
 | **i18n**           | react-i18next (11 locales: en, de, fr, es, ar, zh, th, ja, ko, pt, hi) |
 | **Test (unit)**    | Vitest + React Testing Library + MSW                                   |
 | **Test (e2e)**     | Playwright                                                             |
@@ -325,7 +325,21 @@ Chunks are content-hashed, and the Maven build copies a fresh `dist/` into the j
 `./mvnw clean package`, so a stale hashed asset cannot ship; `lazyPage` reloads once if a chunk 404s
 (a tab held open across a deploy).
 
-#### 7. Tests
+#### 7. Unsaved changes and page errors
+
+- **An editor with unsaved edits calls `useUnsavedChangesGuard(isDirty)`** — that
+  covers tab close *and* every in-app exit (sidebar, breadcrumb, command palette,
+  Back) through the single `UnsavedChangesNavigationGuard` at the router root.
+  Do not mount a second `useBlocker`: React Router allows one. A page that
+  navigates away *on purpose* while dirty (after a delete, or after its own
+  prompt) calls `allowNextNavigation()` from `@/lib/unsaved-changes` first.
+  Local state that remounts an editor (the Studio stage switch) is not a
+  navigation — ask with `hasUnsavedChanges()` there.
+- **Page errors stay in the page.** `SuspendedOutlet` carries an `ErrorBoundary`
+  keyed on the path, so a throwing page keeps the shell, and navigating away
+  recovers. `lazyPage` re-imports after a failed load, so "Try Again" works.
+
+#### 8. Tests
 
 - Unit tests in `src/pages/__tests__/` — naming: `resource-detail-{type}.test.tsx`
 - Use `renderPage(type)` helper with `MemoryRouter` + `QueryClient` + `ThemeProvider`

@@ -228,7 +228,7 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
 
         {/* Breadcrumbs */}
         <nav
-          aria-label="Breadcrumb"
+          aria-label={t("nav.breadcrumb", "Breadcrumb")}
           className="hidden items-center gap-1 text-sm md:flex"
         >
           {/* Keyed by position, not by `to`: listRouteForSegment maps a *view
@@ -274,9 +274,14 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
           {/* Language selector — hidden on phones (reachable via settings);
               keeping it inflated the bar past the viewport at 375px. */}
           <div className="relative hidden items-center gap-1 sm:flex">
-            <Globe className="h-4 w-4 text-muted-foreground" />
+            <Globe className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
             <select
-              value={i18n.language}
+              // The RESOLVED language, never the detected one: a `de-DE` browser
+              // detects as "de-DE", which matches no option, so the select fell
+              // back to showing its first entry ("English") over German text —
+              // and choosing English then fired no change event at all.
+              value={i18n.resolvedLanguage ?? "en"}
+              aria-label={t("language.select", "Language")}
               onChange={(e) => void handleLanguageChange(e.target.value)}
               data-testid="language-selector"
               className="appearance-none rounded-md bg-transparent px-2 py-1.5 text-sm text-foreground outline-none transition-colors hover:bg-secondary focus:ring-2 focus:ring-ring"

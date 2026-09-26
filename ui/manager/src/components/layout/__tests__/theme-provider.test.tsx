@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { ThemeProvider, useTheme } from "@/components/layout/theme-provider";
 import { userEvent } from "@/test/test-utils";
 
@@ -118,5 +118,41 @@ describe("ThemeProvider", () => {
       </ThemeProvider>
     );
     expect(screen.getByTestId("child")).toBeInTheDocument();
+  });
+
+  it("renders (with the default) when storage access throws", () => {
+    // Blocked site data, some private modes and sandboxed iframes make
+    // localStorage THROW. This ran in a state initializer at the top of the
+    // tree, so the whole Manager rendered as a blank page.
+    const get = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new DOMException("denied", "SecurityError");
+    });
+    const set = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("denied", "SecurityError");
+    });
+    try {
+      render(
+        <ThemeProvider defaultTheme="light">
+          <ThemeConsumer />
+        </ThemeProvider>
+      );
+      expect(screen.getByTestId("theme").textContent).toBe("light");
+      // Switching still works for the session, just unpersisted.
+      fireEvent.click(screen.getByTestId("set-dark"));
+      expect(screen.getByTestId("theme").textContent).toBe("dark");
+    } finally {
+      get.mockRestore();
+      set.mockRestore();
+    }
+  });
+
+  it("ignores a stored value that is not a theme", () => {
+    localStorage.setItem("eddi-theme", "purple");
+    render(
+      <ThemeProvider defaultTheme="light">
+        <ThemeConsumer />
+      </ThemeProvider>
+    );
+    expect(screen.getByTestId("theme").textContent).toBe("light");
   });
 });

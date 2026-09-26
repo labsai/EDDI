@@ -1,4 +1,6 @@
 import { useTranslation } from "react-i18next";
+import i18next from "i18next";
+import { formatRelativeTime } from "@/lib/utils";
 
 export interface VersionInfo {
   version: number;
@@ -16,16 +18,11 @@ export interface VersionPickerProps {
   disabled?: boolean;
 }
 
-function formatRelativeTime(timestamp: number): string {
-  const diff = Date.now() - timestamp;
-  const minutes = Math.floor(diff / 60000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  return new Date(timestamp).toLocaleDateString();
+/** Relative for the last month, then the date — both in the current locale. */
+function formatVersionTime(timestamp: number): string {
+  const days = (Date.now() - timestamp) / 86_400_000;
+  if (days < 30) return formatRelativeTime(timestamp);
+  return new Date(timestamp).toLocaleDateString(i18next.resolvedLanguage);
 }
 
 /**
@@ -63,7 +60,7 @@ export function VersionPicker({
       {versions.map((v) => (
         <option key={v.version} value={v.version}>
           v{v.version}
-          {v.lastModifiedOn ? ` — ${formatRelativeTime(v.lastModifiedOn)}` : ""}
+          {v.lastModifiedOn ? ` — ${formatVersionTime(v.lastModifiedOn)}` : ""}
         </option>
       ))}
     </select>

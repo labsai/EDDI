@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo, useEffect } from "react";
+import { allowNextNavigation } from "@/lib/unsaved-changes";
 import { useParams, Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
@@ -428,6 +429,8 @@ export function ResourceDetailPage() {
         onSuccess: () => {
           toast.success(t("common.delete") + " ✓");
           setShowDeleteDialog(false);
+          // The resource is gone; there is no edit left to protect.
+          allowNextNavigation();
           navigate(`/manage/resources/${type}`);
         },
         onError: (err) => toast.error(getErrorMessage(err)),

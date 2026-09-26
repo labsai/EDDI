@@ -21,6 +21,25 @@ function getSystemTheme(): "dark" | "light" {
     : "light";
 }
 
+const THEMES: readonly Theme[] = ["dark", "light", "system"];
+
+/**
+ * The stored theme, or `fallback`.
+ *
+ * Storage access can THROW (blocked site data, some private modes, sandboxed
+ * iframes), and this runs in a state initializer at the very top of the tree —
+ * an uncaught throw here left the whole Manager as a blank page. A stored value
+ * that is not a theme (hand-edited, left by an older build) is ignored too.
+ */
+function readStoredTheme(storageKey: string, fallback: Theme): Theme {
+  try {
+    const stored = localStorage.getItem(storageKey);
+    return THEMES.includes(stored as Theme) ? (stored as Theme) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export function ThemeProvider({
   children,
   defaultTheme = "system",
@@ -31,7 +50,7 @@ export function ThemeProvider({
   storageKey?: string;
 }) {
   const [theme, setTheme] = useState<Theme>(
-    () => (localStorage.getItem(storageKey) as Theme) || defaultTheme
+    () => readStoredTheme(storageKey, defaultTheme)
   );
   const [systemTheme, setSystemTheme] = useState<"dark" | "light">(getSystemTheme);
 
@@ -53,7 +72,11 @@ export function ThemeProvider({
   }, [resolvedTheme]);
 
   const handleSetTheme = useCallback((newTheme: Theme) => {
-    localStorage.setItem(storageKey, newTheme);
+    try {
+      localStorage.setItem(storageKey, newTheme);
+    } catch {
+      // Not persisted, but the switch itself still applies for this session.
+    }
     setTheme(newTheme);
   }, [storageKey]);
 

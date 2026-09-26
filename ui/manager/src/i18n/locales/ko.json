@@ -25,7 +25,13 @@
     "profile": "프로필",
     "guest": "게스트",
     "userMenu": "사용자 메뉴",
-    "signedIn": "로그인됨"
+    "signedIn": "로그인됨",
+    "initFailedTitle": "로그인을 사용할 수 없습니다",
+    "initFailedMessage": "Manager가 로그인 서비스에 연결할 수 없습니다. 연결을 확인한 후 다시 시도하세요.",
+    "signedOutTitle": "로그아웃되었습니다",
+    "signedOutMessage": "계속하려면 로그인하세요.",
+    "retry": "다시 시도",
+    "signIn": "로그인"
   },
   "nav": {
     "dashboard": "대시보드",
@@ -75,7 +81,8 @@
     "workforce": "워크포스",
     "monitoring": "대화 모니터링",
     "analytics": "분석",
-    "connections": "연결"
+    "connections": "연결",
+    "breadcrumb": "탐색 경로"
   },
   "theme": {
     "light": "라이트",
@@ -95,7 +102,8 @@
     "ko": "한국어",
     "pt": "Português",
     "hi": "हिन्दी",
-    "switchFailed": "해당 언어를 불러오지 못했습니다. 다시 시도해 주세요."
+    "switchFailed": "해당 언어를 불러오지 못했습니다. 다시 시도해 주세요.",
+    "select": "언어"
   },
   "pages": {
     "dashboard": {
@@ -264,7 +272,10 @@
     "openExternalChatIn": "{{environment}} 채팅을 새 탭에서 열기",
     "deployToProduction": "프로덕션에 배포",
     "undeployFromProduction": "프로덕션에서 제거",
-    "deployFailedIn": "{{environment}}에 배포하지 못했습니다"
+    "deployFailedIn": "{{environment}}에 배포하지 못했습니다",
+    "pickerUseAsId": "Enter 키를 눌러 \"{{id}}\"을(를) ID로 사용합니다.",
+    "pickerOpen": "에이전트 표시",
+    "pickerClose": "에이전트 목록 닫기"
   },
   "agentDetail": {
     "a2aDescHint": "에이전트 카드에 표시됩니다 — 다른 에이전트가 이 에이전트의 기능을 이해하는 데 도움이 됩니다",
@@ -814,7 +825,9 @@
       }
     },
     "emptyDescription": "워크플로에서 사용할 첫 번째 {{type}}을(를) 만드세요.",
-    "descriptionPlaceholder": "이 {{type}} 구성을 설명하세요…"
+    "descriptionPlaceholder": "이 {{type}} 구성을 설명하세요…",
+    "snippetNamePlaceholder": "예: cautious_mode",
+    "namePlaceholder": "내 {{type}}"
   },
   "editor": {
     "compare": "비교",
@@ -4945,5 +4958,14 @@
     "headerMismatch": "이 연결은 자격 증명을 “{{expected}}”로 보내므로 헤더 이름도 그래야 합니다. 그렇지 않으면 설정에는 한 이름이, 요청에는 다른 이름이 실립니다.",
     "refusedInRequest": "${connection:…}은 경로, 쿼리 매개변수, 본문에서는 거부됩니다. URL의 자격 증명은 모든 프록시 로그에 남고 본문의 것은 읽히지 않습니다. 대신 헤더에서 연결을 참조하세요.",
     "refusedInModel": "언어 모델, 임베딩, 벡터 저장소는 ${connection:…}을 받지 않습니다. 연결은 전체 헤더로 확인되지만 이들은 순수 자격 증명이 필요합니다. 여기서는 ${vault:…}을 사용하세요."
+  },
+  "time": {
+    "justNow": "방금"
+  },
+  "sidebar": {
+    "checkingVersion": "버전 확인 중…",
+    "demoModeFallback": "독립 실행형 데모 모드",
+    "expand": "사이드바 펼치기",
+    "collapse": "사이드바 접기"
   }
 }

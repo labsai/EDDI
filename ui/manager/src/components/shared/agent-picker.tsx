@@ -95,7 +95,10 @@ export function AgentPicker({
       }
 
       if (e.key === "Escape") {
+        // Handled: close the popup only. preventDefault is the signal the
+        // surrounding AccessibleDialog checks, so the dialog stays open.
         e.preventDefault();
+        e.stopPropagation();
         closePopup();
       } else if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -220,8 +223,14 @@ export function AgentPicker({
               : "rounded-e-md bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground"
           }`}
           tabIndex={-1}
+          aria-label={
+            popupOpen
+              ? t("agents.pickerClose", "Close agent list")
+              : t("agents.pickerOpen", "Show agents")
+          }
+          aria-expanded={popupOpen}
         >
-          <Bot className="h-3.5 w-3.5 me-1" />
+          <Bot className="h-3.5 w-3.5 me-1" aria-hidden="true" />
           <ChevronDown className={`h-3 w-3 transition-transform ${popupOpen ? "rotate-180" : ""}`} />
         </button>
       </div>
@@ -241,7 +250,9 @@ export function AgentPicker({
                   <>
                     <span className="block">{t("common.noResults", "No results found.")}</span>
                     <span className="mt-1 block text-[10px]">
-                      Press Enter to use &quot;{filter}&quot; as ID.
+                      {t("agents.pickerUseAsId", "Press Enter to use \"{{id}}\" as ID.", {
+                        id: filter,
+                      })}
                     </span>
                   </>
                 ) : (
