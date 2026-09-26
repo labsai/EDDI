@@ -113,6 +113,9 @@ public class ScheduleConfiguration {
 
     // -- Metadata --
     private Map<String, Object> metadata;
+    // Same idea as allowSelfSchedulingProvided: tells an explicit "metadata": null
+    // (clear it) apart from a body that never named the field (keep it).
+    private transient boolean metadataProvided;
     private Instant createdAt;
     private Instant updatedAt;
 
@@ -361,6 +364,16 @@ public class ScheduleConfiguration {
 
     public void setMetadata(Map<String, Object> metadata) {
         this.metadata = metadata;
+        this.metadataProvided = true;
+    }
+
+    /**
+     * True once {@link #setMetadata} has been called, with any value including null
+     * — for a request body, when the JSON named the field. Deliberately not a bean
+     * getter.
+     */
+    public boolean hasMetadata() {
+        return metadataProvided;
     }
 
     public Instant getCreatedAt() {

@@ -123,12 +123,12 @@ Heartbeats are **drift-proof** — the next fire is the time this fire was *due*
 | `conversationStrategy` | string | varies | `new` or `persistent` |
 | `message` | string | — | Message text sent to the agent on each fire |
 | `userId` | string | `system:scheduler` | User identity for the fire |
-| `timeZone` | string | `UTC` | IANA timezone (e.g., `Europe/Vienna`). Across a DST change a fixed-time cron (no `*` in the minute or hour field, e.g. `30 2 * * *`) fires once per day: a local time the clocks skip fires at the moment of the transition, a local time they repeat fires only at its first occurrence. Wildcard crons (`*/15 * * * *`, `5 * * * *`) keep their real-time cadence |
+| `timeZone` | string | `UTC` | IANA timezone (e.g., `Europe/Vienna`). Across a DST change a fixed-time cron (no `*` in the minute or hour field, e.g. `30 2 * * *`) fires once per day: a local time the clocks skip fires at the moment of the transition, a local time they repeat fires only at its first occurrence. Wildcard crons (`*/15 * * * *`, `5 * * * *`) keep their real-time cadence. Two consequences of that (Vixie cron) rule: two fixed times that both land on the transition fire once — `0 2,3 * * *` fires a single time, at 03:00, on the spring-forward day — and a fixed hour *range* such as `0 0-23 * * *` or `0 1-5 * * *` counts as fixed-time, so on the 25-hour fall-back day it fires 24 times and does not repeat the doubled hour. Use `0 * * * *` for a truly hourly cadence |
 | `environment` | string | `production` | Deployment environment |
 | `enabled` | boolean | `true` | Whether the schedule is active |
 | `maxCostPerFire` | double | `-1` (unlimited) | Dollar ceiling per fire |
 | `oneTimeAt` | string | — | ISO-8601 instant for a single fire. Mutually exclusive with `cronExpression`; exactly one of the two is required for a `CRON` trigger |
-| `metadata` | object | — | Free-form markers read by the fire executor. `{"dreamType": "dream_consolidation"}` dispatches the fire to the Dream service — see [Scheduling a Dream Cycle](user-memory.md#scheduling-a-dream-cycle). A `PUT` that omits `metadata` keeps the stored value (so does one that omits `tenantId` or `allowSelfScheduling`); send `{}` to clear it |
+| `metadata` | object | — | Free-form markers read by the fire executor. `{"dreamType": "dream_consolidation"}` dispatches the fire to the Dream service — see [Scheduling a Dream Cycle](user-memory.md#scheduling-a-dream-cycle). A `PUT` that omits `metadata` keeps the stored value (so does one that omits `tenantId` or `allowSelfScheduling`); send `"metadata": null` or `{}` to clear it. A `PUT` to a RAG-ingestion schedule is refused (`409`) — change the source's cron on the knowledge base — and one to a team-cadence schedule needs EDIT on the group |
 
 ### Managing Schedules
 

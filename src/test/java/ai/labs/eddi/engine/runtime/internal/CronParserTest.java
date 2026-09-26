@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
+import java.time.zone.ZoneOffsetTransition;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -441,5 +442,83 @@ class CronParserTest {
         var fires = firesBetween("30 2 * * *", ZonedDateTime.of(2026, 10, 24, 12, 0, 0, 0, UTC),
                 ZonedDateTime.of(2026, 10, 26, 12, 0, 0, 0, UTC));
         assertEquals(List.of(Instant.parse("2026-10-25T02:30:00Z"), Instant.parse("2026-10-26T02:30:00Z")), fires);
+    }
+
+    // --- DST beyond whole hours and at midnight ---
+
+    /** The first transition of the requested kind after {@code from}. */
+    private static ZoneOffsetTransition nextTransition(ZoneId zone, Instant from, boolean gap) {
+        ZoneOffsetTransition transition = zone.getRules().nextTransition(from);
+        while (transition.isGap() != gap) {
+            transition = zone.getRules().nextTransition(transition.getInstant());
+        }
+        return transition;
+    }
+
+    @Test
+    void computeNextFire_lordHowe_halfHourGap_firesAtTheTransition() {
+        // Australia/Lord_Howe springs forward by 30 minutes (02:00 -> 02:30), so
+        // 02:15 does not exist that night.
+        ZoneId lordHowe = ZoneId.of("Australia/Lord_Howe");
+        ZoneOffsetTransition gap = nextTransition(lordHowe, Instant.parse("2026-06-01T00:00:00Z"), true);
+        assertEquals(30, gap.getDuration().toMinutes(), "precondition: a half-hour shift");
+        ZonedDateTime dayBefore = gap.getDateTimeBefore().minusDays(1).withHour(12).withMinute(0).atZone(lordHowe);
+
+        var fires = firesBetween("15 2 * * *", dayBefore, dayBefore.plusDays(2));
+
+        assertEquals(List.of(gap.getInstant(), gap.getDateTimeBefore().plusDays(1).withMinute(15).atZone(lordHowe).toInstant()), fires);
+    }
+
+    @Test
+    void computeNextFire_lordHowe_halfHourOverlap_firesOnce() {
+        // Falling back by 30 minutes (02:00 -> 01:30) repeats 01:30-01:59.
+        ZoneId lordHowe = ZoneId.of("Australia/Lord_Howe");
+        ZoneOffsetTransition overlap = nextTransition(lordHowe, Instant.parse("2026-01-01T00:00:00Z"), false);
+        ZonedDateTime dayBefore = overlap.getDateTimeAfter().minusDays(1).withHour(12).withMinute(0).atZone(lordHowe);
+
+        var fires = firesBetween("45 1 * * *", dayBefore, dayBefore.plusDays(2));
+
+        assertEquals(2, fires.size(), "once on the day of the repeat, once the day after: " + fires);
+        // The first 01:45, still at the pre-transition offset.
+        assertEquals(overlap.getDateTimeAfter().withMinute(45).toInstant(overlap.getOffsetBefore()), fires.get(0));
+    }
+
+    @Test
+    void computeNextFire_midnightGap_firesAtTheTransition() {
+        // America/Havana springs forward at midnight, so 00:00 does not exist that day.
+        ZoneId havana = ZoneId.of("America/Havana");
+        ZoneOffsetTransition gap = nextTransition(havana, Instant.parse("2026-01-01T00:00:00Z"), true);
+        assertEquals(0, gap.getDateTimeBefore().getHour(), "precondition: the gap starts at midnight");
+        ZonedDateTime dayBefore = gap.getDateTimeBefore().minusDays(1).withHour(12).atZone(havana);
+
+        var fires = firesBetween("0 0 * * *", dayBefore, dayBefore.plusDays(2));
+
+        assertEquals(List.of(gap.getInstant(), gap.getDateTimeBefore().plusDays(1).atZone(havana).toInstant()), fires);
+    }
+
+    @Test
+    void computeNextFire_midnightOverlap_firesOnce() {
+        // Havana falls back 01:00 -> 00:00, repeating the first hour of the day.
+        ZoneId havana = ZoneId.of("America/Havana");
+        ZoneOffsetTransition overlap = nextTransition(havana, Instant.parse("2026-06-01T00:00:00Z"), false);
+        assertEquals(0, overlap.getDateTimeAfter().getHour(), "precondition: the repeated hour is 00:00-00:59");
+        ZonedDateTime dayBefore = overlap.getDateTimeAfter().minusDays(1).withHour(12).atZone(havana);
+
+        var fires = firesBetween("30 0 * * *", dayBefore, dayBefore.plusDays(2));
+
+        assertEquals(2, fires.size(), fires.toString());
+        assertEquals(overlap.getDateTimeAfter().withMinute(30).toInstant(overlap.getOffsetBefore()), fires.get(0));
+    }
+
+    /**
+     * Documented Vixie behaviour, pinned so it is a decision and not an accident:
+     * two fixed times that both fall into a spring-forward gap resolve to the same
+     * transition instant and fire once.
+     */
+    @Test
+    void computeNextFire_fixedTime_twoTimesResolvingToTheTransition_fireOnce() {
+        var fires = firesBetween("0 2,3 * * *", ZonedDateTime.of(2026, 3, 29, 0, 0, 0, 0, BERLIN),
+                ZonedDateTime.of(2026, 3, 29, 12, 0, 0, 0, BERLIN));
+        assertEquals(List.of(Instant.parse("2026-03-29T01:00:00Z")), fires);
     }
 }

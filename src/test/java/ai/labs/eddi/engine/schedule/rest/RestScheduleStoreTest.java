@@ -12,6 +12,9 @@ import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
 import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
+import ai.labs.eddi.engine.runtime.internal.TeamCadenceService;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
+import ai.labs.eddi.modules.ingestion.RagIngestionSchedules;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -737,6 +740,102 @@ class RestScheduleStoreTest {
         assertEquals(Map.of(), written.getValue().getMetadata(), "an explicit (empty) metadata is an edit, not an omission");
         assertEquals("tenant-b", written.getValue().getTenantId());
         assertFalse(written.getValue().isAllowSelfScheduling());
+    }
+
+    @Test
+    void updateSchedule_explicitNullMetadata_clearsIt() throws Exception {
+        asEditor("editor-1");
+        when(scheduleStore.readSchedule("k3")).thenReturn(dreamSchedule("k3", "editor-1"));
+
+        var body = new ObjectMapper().readValue("""
+                {"name":"dream-k3","agentId":"agent-1","triggerType":"CRON","cronExpression":"0 4 * * *",
+                 "userId":"editor-1","message":"hello","enabled":true,"metadata":null}
+                """, ScheduleConfiguration.class);
+
+        Response response = rest.updateSchedule("k3", body);
+
+        assertEquals(200, response.getStatus());
+        ArgumentCaptor<ScheduleConfiguration> written = ArgumentCaptor.forClass(ScheduleConfiguration.class);
+        verify(scheduleStore).updateSchedule(eq("k3"), written.capture());
+        assertNull(written.getValue().getMetadata(), "an explicit null is a request to clear, not an omission");
+    }
+
+    // --- PUT on schedules another resource manages (review MAJOR 1) ---
+
+    private static ScheduleConfiguration storedIngestionSchedule(String id) {
+        var s = makeCronSchedule(id);
+        s.setName(RagIngestionSchedules.scheduleName("kb-1", "src-1"));
+        s.setUserId("system:scheduler");
+        s.setAgentId(null);
+        s.setMetadata(RagIngestionSchedules.metadata("kb-1", 1, "src-1"));
+        return s;
+    }
+
+    /**
+     * The bypass: a metadata-less PUT used to strip the ingestion marker (harmless
+     * chat schedule); once the carry-over kept it, anyone with USE on some agent
+     * and VIEW on the knowledge base could re-cron its crawl to every minute.
+     */
+    @Test
+    void updateSchedule_ofStoredIngestionSchedule_isRefusedEvenWithoutMetadataInTheBody() throws Exception {
+        asEditor("editor-1");
+        when(scheduleStore.readSchedule("ing1")).thenReturn(storedIngestionSchedule("ing1"));
+
+        var body = new ObjectMapper().readValue("""
+                {"name":"%s","agentId":"agent-1","triggerType":"CRON","cronExpression":"* * * * *","message":"x"}
+                """.formatted(RagIngestionSchedules.scheduleName("kb-1", "src-1")), ScheduleConfiguration.class);
+
+        Response response = rest.updateSchedule("ing1", body);
+
+        assertEquals(409, response.getStatus());
+        verify(scheduleStore, never()).updateSchedule(anyString(), any());
+    }
+
+    @Test
+    void updateSchedule_ofStoredIngestionSchedule_isRefusedForAdminsToo() throws Exception {
+        asAdmin("root");
+        when(scheduleStore.readSchedule("ing2")).thenReturn(storedIngestionSchedule("ing2"));
+
+        Response response = rest.updateSchedule("ing2", makeCronSchedule("ing2"));
+
+        assertEquals(409, response.getStatus());
+        verify(scheduleStore, never()).updateSchedule(anyString(), any());
+    }
+
+    private static ScheduleConfiguration storedCadenceSchedule(String id) {
+        var s = makeCronSchedule(id);
+        s.setUserId("system:scheduler");
+        s.setMetadata(Map.of(TeamCadenceService.METADATA_TYPE_KEY, TeamCadenceService.METADATA_TYPE_CADENCE,
+                TeamCadenceService.METADATA_GROUP_ID_KEY, "group-1", TeamCadenceService.METADATA_CADENCE_ID_KEY, "cad-1"));
+        return s;
+    }
+
+    @Test
+    void updateSchedule_ofStoredTeamCadence_withoutGroupEdit_isForbidden() throws Exception {
+        asEditor("editor-1");
+        when(scheduleStore.readSchedule("tc1")).thenReturn(storedCadenceSchedule("tc1"));
+        var guard = mock(ResourceAccessGuard.class);
+        doThrow(new ForbiddenException("no")).when(guard).requireAccess(eq("group-1"), eq(AccessLevel.EDIT), anyString());
+        setField(rest, "resourceAccessGuard", guard);
+
+        assertThrows(ForbiddenException.class, () -> rest.updateSchedule("tc1", makeCronSchedule("tc1")));
+        verify(scheduleStore, never()).updateSchedule(anyString(), any());
+    }
+
+    @Test
+    void updateSchedule_ofStoredTeamCadence_withGroupEdit_keepsTheCadenceMarker() throws Exception {
+        asEditor("editor-1");
+        when(scheduleStore.readSchedule("tc2")).thenReturn(storedCadenceSchedule("tc2"));
+        var guard = mock(ResourceAccessGuard.class);
+        setField(rest, "resourceAccessGuard", guard);
+
+        Response response = rest.updateSchedule("tc2", makeCronSchedule("tc2"));
+
+        assertEquals(200, response.getStatus());
+        verify(guard).requireAccess("group-1", AccessLevel.EDIT, "group");
+        ArgumentCaptor<ScheduleConfiguration> written = ArgumentCaptor.forClass(ScheduleConfiguration.class);
+        verify(scheduleStore).updateSchedule(eq("tc2"), written.capture());
+        assertTrue(TeamCadenceService.isTeamCadenceSchedule(written.getValue().getMetadata()));
     }
 
     @Test
