@@ -23,6 +23,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -103,6 +104,14 @@ class ChangelogFragmentTest {
      * A fenced block carrying register rows — mirrors the collator's REGISTER_INFO.
      */
     private static final Pattern REGISTER_FENCE = Pattern.compile("^(`{3,}|~{3,})(decision-log|regression-note)[ \t]*$");
+
+    /**
+     * The right intent with the wrong spelling — mirrors the collator's
+     * REGISTER_TYPO, which refuses the fragment rather than leave the rows in the
+     * entry as an ordinary code block.
+     */
+    private static final Pattern REGISTER_TYPO = Pattern.compile("^(?:decision[-_ ]?logs?|regression[-_ ]?notes?)$",
+            Pattern.CASE_INSENSITIVE);
 
     /** A markdown table's separator row, which is not data. */
     private static final Pattern SEPARATOR_ROW = Pattern.compile("^\\|[\\s\\-:|]+\\|\\s*$");
@@ -348,6 +357,89 @@ class ChangelogFragmentTest {
                         + "fenced ```decision-log or ```regression-note block, which is collated into the "
                         + "table at the bottom of docs/changelog.md:\n  "
                         + String.join("\n  ", problems));
+    }
+
+    /**
+     * Three things {@code collate-changelog.py} refuses that nothing above looked
+     * at, so a fragment could pass {@code mvnw test} and then stop the nightly job:
+     * text above the first heading (collation would drop it, so the script exits
+     * instead), a fence that never closes, and a register block spelt almost right
+     * ({@code ```decision_log}), whose rows would otherwise never reach the table.
+     * CI's Changelog Discipline job now also runs {@code collate-changelog.py
+     * --check} itself; this is the half that fails the author's own build.
+     */
+    @Test
+    @DisplayName("every fragment passes the checks the collator exits on")
+    void fragmentsPassTheCollatorsStructuralChecks() {
+        var problems = new TreeSet<String>();
+        for (Path fragment : fragments()) {
+            problems.addAll(collationProblems(fragment.getFileName().toString(), read(fragment)));
+        }
+        assertTrue(problems.isEmpty(), "collate-changelog.py would refuse these fragment(s):\n  "
+                + String.join("\n  ", problems));
+    }
+
+    @Test
+    @DisplayName("the collator's structural checks catch what the collator refuses")
+    void collationProblemsMirrorTheCollator() {
+        String entry = "## Title (2026-09-26)\n\nBody.\n";
+
+        assertEquals(List.of(), collationProblems("ok.md", entry));
+        assertEquals(List.of(), collationProblems("ok.md",
+                "```decision-log\n| 2026-09-26 | a | b | c |\n```\n\n" + entry),
+                "a register block may sit above the first entry — the collator lifts it out first");
+        assertEquals(List.of(), collationProblems("ok.md", entry + "\n````markdown\n```decision_log\n```\n````\n"),
+                "a near-miss inside an outer fence is an example, not a register block");
+
+        assertEquals(1, collationProblems("x.md", "Intro line.\n\n" + entry).size(), "text above the first heading");
+        assertEquals(1, collationProblems("x.md", entry + "\n```java\nint x;\n").size(), "an unterminated fence");
+        assertEquals(1, collationProblems("x.md", entry + "\n```decision_log\n| 2026-09-26 | a |\n```\n").size(),
+                "a misspelt register block");
+        assertEquals(1, collationProblems("x.md", entry + "\n~~~Regression-Notes\n| 2026-09-26 | a |\n~~~\n").size(),
+                "a misspelt register block, tilde-fenced and capitalised");
+    }
+
+    /**
+     * The fragment-level refusals of {@code collate-changelog.py} that the other
+     * tests here do not already cover: {@code entries_of}'s preamble check and
+     * {@code take_register_rows}' unterminated-fence and {@code REGISTER_TYPO}
+     * checks, walked with the same fence rules as {@link #proseLines}.
+     */
+    private static List<String> collationProblems(String name, String body) {
+        var problems = new ArrayList<String>();
+        char fenceChar = 0;
+        int openRun = 0;
+        String openedAt = null;
+        boolean seenHeading = false;
+        for (String line : body.split("\n", -1)) {
+            String stripped = line.strip();
+            Matcher mark = FENCE_MARK.matcher(stripped);
+            boolean isMark = mark.matches();
+            if (openRun == 0) {
+                if (isMark) {
+                    fenceChar = mark.group(1).charAt(0);
+                    openRun = mark.group(1).length();
+                    openedAt = stripped;
+                    String info = mark.group(2).strip();
+                    if (!REGISTER_FENCE.matcher(stripped).matches() && REGISTER_TYPO.matcher(info).matches()) {
+                        problems.add(name + " — opens a " + stripped + " block; only ```decision-log and "
+                                + "```regression-note are filed into the register tables");
+                    }
+                } else if (line.startsWith("## ")) {
+                    seenHeading = true;
+                } else if (!seenHeading && !stripped.isEmpty()) {
+                    problems.add(name + " — text above the first '## ' heading, which collation would discard: "
+                            + stripped);
+                }
+            } else if (isMark && mark.group(1).charAt(0) == fenceChar
+                    && mark.group(1).length() >= openRun && mark.group(2).isBlank()) {
+                openRun = 0;
+            }
+        }
+        if (openRun != 0) {
+            problems.add(name + " — the " + openedAt + " block is never closed");
+        }
+        return problems;
     }
 
     @Test

@@ -110,16 +110,32 @@ updates:
       default-days: 3
       semver-major-days: 14
     groups:
-      # One PR for every open advisory instead of one per package.
+      # vitest and every @vitest/* package peer-depend on each other at the EXACT
+      # same version, so bumping one alone fails `npm ci` with ERESOLVE. That is
+      # how the vitest 4.1.11 security fix (GHSA-82fw-gwwq-j7x9) arrived as a PR
+      # that could never go green.
+      #
+      # A group without `applies-to` covers VERSION updates only, so the `vitest`
+      # group below never saw that security PR at all. This one is its
+      # security-update twin, declared before the catch-all because a package
+      # lands in the first group that matches. What it does and does not buy:
+      # the vitest family's security bumps travel in one PR of their own, apart
+      # from unrelated advisories — but Dependabot's security updates touch only
+      # packages that carry an advisory, so a fix published for `vitest` alone
+      # can still leave @vitest/* behind. When that happens, close it: the
+      # weekly `vitest` version-update PR moves the whole family together.
+      vitest-security:
+        applies-to: security-updates
+        patterns:
+          - "vitest"
+          - "@vitest/*"
+      # One PR for every other open advisory instead of one per package.
       security-updates:
         applies-to: security-updates
         patterns:
           - "*"
-      # vitest and every @vitest/* package peer-depend on each other at the EXACT
-      # same version, so bumping one alone fails `npm ci` with ERESOLVE. That is
-      # how the vitest 4.1.11 security fix (GHSA-82fw-gwwq-j7x9) arrived as a PR
-      # that could never go green. No update-types filter: majors must move
-      # together too. Declared before minor-and-patch so these land here instead.
+      # No update-types filter: majors must move together too. Declared before
+      # minor-and-patch so these land here instead.
       vitest:
         patterns:
           - "vitest"
@@ -167,7 +183,13 @@ updates:
       default-days: 3
       semver-major-days: 14
     groups:
-      # One PR for every open advisory instead of one per package.
+      # Security-update twin of the vitest group; see the Manager entry above.
+      vitest-security:
+        applies-to: security-updates
+        patterns:
+          - "vitest"
+          - "@vitest/*"
+      # One PR for every other open advisory instead of one per package.
       security-updates:
         applies-to: security-updates
         patterns:

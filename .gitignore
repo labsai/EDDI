@@ -139,9 +139,14 @@ ui/manager/.claude/settings.local.json
 # re-included file — so the parent has to be un-ignored first, then re-excluded for
 # everything that is genuinely machine-local: settings.local.json, worktrees/ and
 # the local workflow scratch.
-!.claude/
-.claude/*
-!.claude/skills/
+#
+# All three are anchored with a leading `/`. An unanchored `!.claude/` matches a
+# .claude/ directory at ANY depth, while `.claude/*` (slash in the middle) is
+# already root-only — so a nested ui/chat/.claude/ or src/.claude/ was re-included
+# and nothing re-excluded its contents, settings.local.json included.
+!/.claude/
+/.claude/*
+!/.claude/skills/
 
 # === Generated frontend output (ui/manager and ui/chat, built by Maven) ===
 # frontend-maven-plugin installs Node into ui/node (installDirectory is ui/, so
