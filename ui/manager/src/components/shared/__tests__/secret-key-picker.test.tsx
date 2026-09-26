@@ -259,6 +259,34 @@ describe("SecretKeyPicker", () => {
     });
   });
 
+  it("refuses to create a secret under a name that already exists", async () => {
+    // The create dialog sends no grant, and the store endpoint is an upsert: an
+    // existing name used to be overwritten, and on an older backend opened to
+    // every agent, behind a "stored" toast.
+    const user = userEvent.setup();
+    let stored = false;
+    server.use(
+      http.put("*/secretstore/secrets/:tenantId/:keyName", () => {
+        stored = true;
+        return HttpResponse.json({});
+      }),
+    );
+    renderWithProviders(<SecretKeyPicker value="" onChange={mockOnChange} />);
+    await user.click(await screen.findByTestId("secret-key-picker-vault-btn"));
+    await user.click(screen.getByTestId("vault-popup-create"));
+
+    await user.type(screen.getByTestId("create-secret-modal-key"), "openai-key");
+    await user.type(screen.getByTestId("create-secret-modal-value"), "sk-replacement");
+    await user.click(screen.getByTestId("create-secret-modal-submit"));
+
+    expect(await screen.findByTestId("create-secret-modal-exists")).toHaveTextContent(
+      /openai-key.*already exists/,
+    );
+    expect(stored).toBe(false);
+    expect(mockOnChange).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
   it("handles vault health down gracefully", async () => {
     userEvent.setup();
     server.use(

@@ -8,6 +8,9 @@ import {
   deleteSecret,
   getVaultHealth,
   rotateSecret,
+  findSecret,
+  adoptMasterKey,
+  ADOPT_NOT_SUPPORTED,
 } from "../secrets";
 
 describe("secrets API — uses ApiClient (C2 fix)", () => {
@@ -212,69 +215,133 @@ describe("getVaultHealth", () => {
 });
 
 describe("rotateSecret", () => {
-  it("rotates a secret successfully", async () => {
-    const result = await rotateSecret("default", "test-key", "new-value");
-    expect(result).toBeDefined();
-    expect(result.keyName).toBeDefined();
-  });
-
-  it("includes description when provided", async () => {
-    let capturedBody: Record<string, unknown> = {};
+  /** Capture the one PUT a rotation makes, and fail on any POST to the old path. */
+  function captureStore() {
+    const hits: { url: string; body: Record<string, unknown> }[] = [];
+    const rotatePosts: string[] = [];
     server.use(
-      http.post("*/secretstore/secrets/:tenantId/:keyName/rotate", async ({ request }) => {
-        capturedBody = (await request.json()) as Record<string, unknown>;
+      http.put("*/secretstore/secrets/:tenantId/:keyName", async ({ request, params }) => {
+        hits.push({ url: request.url, body: (await request.json()) as Record<string, unknown> });
         return HttpResponse.json({
-          reference: "vault:default/test-key",
-          tenantId: "default",
-          keyName: "test-key",
+          reference: `\${vault:${params.keyName as string}}`,
+          tenantId: params.tenantId,
+          keyName: params.keyName,
         });
-      })
+      }),
+      http.post("*/secretstore/secrets/:tenantId/:keyName/rotate", ({ request }) => {
+        rotatePosts.push(request.url);
+        return HttpResponse.json({}, { status: 404 });
+      }),
     );
-    await rotateSecret("default", "test-key", "new-val", "rotated key");
-    expect(capturedBody.description).toBe("rotated key");
+    return { hits, rotatePosts };
+  }
+
+  it("sends the current narrowed grant and description with the new value (S1)", async () => {
+    // A PUT without allowedAgents is stored as ["*"] with a blank description by
+    // a backend before the vault-key-safety fix — which is what the old /rotate
+    // 404 fallback sent on every rotation.
+    const { hits, rotatePosts } = captureStore();
+    await rotateSecret("default", "gemini-key", "new-value", {
+      allowedAgents: ["agent5", "agent7"],
+      description: "Gemini key",
+    });
+    expect(rotatePosts).toEqual([]);
+    expect(hits).toHaveLength(1);
+    expect(hits[0]!.body).toEqual({
+      value: "new-value",
+      allowedAgents: ["agent5", "agent7"],
+      description: "Gemini key",
+    });
   });
 
-  it("throws on 503 with vault not configured message", async () => {
+  it("sends the explicit wildcard for a secret open to every agent", async () => {
+    const { hits } = captureStore();
+    await rotateSecret("default", "k", "v", { allowedAgents: [], description: null });
+    expect(hits[0]!.body).toEqual({ value: "v", allowedAgents: ["*"] });
+  });
+
+  it("surfaces a store failure instead of reporting a rotation", async () => {
     server.use(
-      http.post("*/secretstore/secrets/:tenantId/:keyName/rotate", () =>
-        new HttpResponse(null, { status: 503 })
-      )
+      http.put("*/secretstore/secrets/:tenantId/:keyName", () =>
+        HttpResponse.json({ error: "Rotation refused" }, { status: 500 }),
+      ),
     );
     await expect(
-      rotateSecret("default", "test-key", "new-value")
-    ).rejects.toThrow("Secrets vault is not configured");
+      rotateSecret("default", "k", "v", { allowedAgents: ["*"], description: null }),
+    ).rejects.toThrow("Rotation refused");
+  });
+});
+
+describe("findSecret", () => {
+  it("returns the key's metadata from a fresh listing, or null", async () => {
+    expect((await findSecret("default", "google-gemini-key"))?.allowedAgents).toEqual([
+      "agent5",
+      "agent7",
+    ]);
+    expect(await findSecret("default", "no-such-key")).toBeNull();
+  });
+});
+
+describe("path segments are encoded", () => {
+  it("does not let a key name address another resource", async () => {
+    const urls: string[] = [];
+    server.use(
+      http.put("*/secretstore/secrets/*", ({ request }) => {
+        urls.push(request.url);
+        return HttpResponse.json({ reference: "x", tenantId: "t", keyName: "k" });
+      }),
+      http.delete("*/secretstore/secrets/*", ({ request }) => {
+        urls.push(request.url);
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    await storeSecret("team a", "a/b?c", "v");
+    await deleteSecret("team a", "a/b?c");
+    for (const url of urls) {
+      expect(new URL(url).pathname).toBe("/secretstore/secrets/team%20a/a%2Fb%3Fc");
+      expect(new URL(url).search).toBe("");
+    }
+    expect(urls).toHaveLength(2);
+  });
+});
+
+describe("adoptMasterKey", () => {
+  it("POSTs with confirm=true and returns the tenants that need a reset", async () => {
+    let url = "";
+    server.use(
+      http.post("*/secretstore/secrets/admin/adopt-master-key", ({ request }) => {
+        url = request.url;
+        return HttpResponse.json({
+          tenantsNeedingReset: ["default", "team-b"],
+          systemValuesReset: true,
+          message: "adopted",
+        });
+      }),
+    );
+    const result = await adoptMasterKey();
+    expect(new URL(url).searchParams.get("confirm")).toBe("true");
+    expect(result).toEqual({
+      tenantsNeedingReset: ["default", "team-b"],
+      systemValuesReset: true,
+      message: "adopted",
+    });
   });
 
-  it("falls back to storeSecret on 404", async () => {
+  it("reports a backend without the operation as ADOPT_NOT_SUPPORTED, not as a failure", async () => {
     server.use(
-      http.post("*/secretstore/secrets/:tenantId/:keyName/rotate", () =>
-        new HttpResponse(null, { status: 404 })
-      )
+      http.post("*/secretstore/secrets/admin/adopt-master-key", () =>
+        new HttpResponse(null, { status: 404 }),
+      ),
     );
-    // Should fall back to PUT (storeSecret) which is handled by default MSW
-    const result = await rotateSecret("default", "test-key", "new-value");
-    expect(result).toBeDefined();
-    expect(result.keyName).toBeDefined();
+    await expect(adoptMasterKey()).rejects.toMatchObject({ code: ADOPT_NOT_SUPPORTED });
   });
 
-  it("falls back to storeSecret on 405", async () => {
+  it("keeps the backend's refusal message for any other error", async () => {
     server.use(
-      http.post("*/secretstore/secrets/:tenantId/:keyName/rotate", () =>
-        new HttpResponse(null, { status: 405 })
-      )
+      http.post("*/secretstore/secrets/admin/adopt-master-key", () =>
+        HttpResponse.json({ error: "Adopting the master key failed" }, { status: 500 }),
+      ),
     );
-    const result = await rotateSecret("default", "test-key", "new-value");
-    expect(result).toBeDefined();
-  });
-
-  it("throws on other non-ok status", async () => {
-    server.use(
-      http.post("*/secretstore/secrets/:tenantId/:keyName/rotate", () =>
-        HttpResponse.json({ error: "Rotation limit exceeded" }, { status: 429 })
-      )
-    );
-    await expect(
-      rotateSecret("default", "test-key", "new-value")
-    ).rejects.toThrow("Rotation limit exceeded");
+    await expect(adoptMasterKey()).rejects.toThrow("Adopting the master key failed");
   });
 });

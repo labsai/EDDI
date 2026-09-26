@@ -33,8 +33,17 @@ import {
   useRotateDek,
   useRotateKek,
   useResetTenant,
+  useAdoptMasterKey,
 } from "@/hooks/use-secrets";
-import { grantsAllAgents, type SecretMetadata } from "@/lib/api/secrets";
+import {
+  grantsAllAgents,
+  SecretsError,
+  ADOPT_NOT_SUPPORTED,
+  SECRET_EXISTS,
+  SECRET_NOT_FOUND,
+  type AdoptMasterKeyResponse,
+  type SecretMetadata,
+} from "@/lib/api/secrets";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { EditGrantDialog } from "@/components/secrets/edit-grant-dialog";
 import { getErrorMessage } from "@/lib/api-client";
@@ -48,7 +57,11 @@ export function SecretsPage() {
   useEffect(() => { const t = setTimeout(() => maybeAutoStart("secrets"), 500); return () => clearTimeout(t); }, [maybeAutoStart]);
 
   /* ─── Namespace state ─── */
-  const [tenantId, setTenantId] = useState(DEFAULT_TENANT);
+  /* What the operator typed, and the tenant it names. Trimmed once here: the
+   * raw text addressed a different tenant ("default " is not "default") and
+   * made it into every URL and every copied `${vault:…}` reference. */
+  const [tenantInput, setTenantInput] = useState(DEFAULT_TENANT);
+  const tenantId = tenantInput.trim();
 
   /* ─── Dialog state ─── */
   const [showCreate, setShowCreate] = useState(false);
@@ -66,6 +79,9 @@ export function SecretsPage() {
   const [rotateVisible, setRotateVisible] = useState(false);
   const [newAllowedAgents, setNewAllowedAgents] = useState<string[]>([]);
   const [newAgentInput, setNewAgentInput] = useState("");
+  /* The existing key an "Add Secret" was refused for, so the dialog can say so
+   * in place and offer the rotation that was probably meant. */
+  const [existingKeyConflict, setExistingKeyConflict] = useState<string | null>(null);
 
   /* ─── Key-lifecycle (danger zone) state ─── */
   const [showRotateDek, setShowRotateDek] = useState(false);
@@ -77,6 +93,9 @@ export function SecretsPage() {
   const [kekNewVisible, setKekNewVisible] = useState(false);
   const [resetConfirm, setResetConfirm] = useState("");
   const [kekResult, setKekResult] = useState<number | null>(null);
+  const [showAdoptKey, setShowAdoptKey] = useState(false);
+  const [adoptAcknowledged, setAdoptAcknowledged] = useState(false);
+  const [adoptResult, setAdoptResult] = useState<AdoptMasterKeyResponse | null>(null);
 
   /* ─── Queries ─── */
   const {
@@ -93,6 +112,7 @@ export function SecretsPage() {
   const rotateDekMut = useRotateDek();
   const rotateKekMut = useRotateKek();
   const resetTenantMut = useResetTenant();
+  const adoptKeyMut = useAdoptMasterKey();
 
   const vaultDown = vaultHealth?.available === false;
   const secretCount = secrets?.length ?? 0;
@@ -107,8 +127,33 @@ export function SecretsPage() {
   /* Drop any pending (un-committed) allowed-agent text once the create dialog
    * closes so it doesn't reappear the next time the dialog is opened. */
   useEffect(() => {
-    if (!showCreate) setNewAgentInput("");
+    if (!showCreate) {
+      setNewAgentInput("");
+      setExistingKeyConflict(null);
+    }
   }, [showCreate]);
+
+  /** A vault error in the operator's language where the API raised a code for it. */
+  const secretsErrorMessage = useCallback(
+    (err: unknown): string => {
+      if (err instanceof SecretsError) {
+        if (err.code === SECRET_NOT_FOUND) {
+          return t(
+            "secrets.rotateNotFound",
+            "This secret no longer exists, so there is nothing to rotate. Add it again instead.",
+          );
+        }
+        if (err.code === ADOPT_NOT_SUPPORTED) {
+          return t(
+            "secrets.adoptNotSupported",
+            "This EDDI version has no adopt step and does not need one: reset the affected tenant directly.",
+          );
+        }
+      }
+      return getErrorMessage(err);
+    },
+    [t],
+  );
 
   /* ─── Copy vault reference ─── */
   const copyRef = useCallback(
@@ -131,7 +176,12 @@ export function SecretsPage() {
 
   /* ─── Handlers ─── */
   const handleCreate = useCallback(() => {
+    // The value is checked for content but sent as typed: a secret is compared
+    // byte for byte by whatever consumes it, and silently trimming it stored a
+    // different credential from the one pasted.
     if (!newKeyName.trim() || !newValue.trim()) return;
+    const keyName = newKeyName.trim();
+    setExistingKeyConflict(null);
     // Flush any typed-but-not-Entered agent so it isn't silently dropped
     // (which would leave the secret unrestricted / available to ALL agents).
     const pendingAgent = newAgentInput.trim().replace(/,$/, "");
@@ -142,18 +192,21 @@ export function SecretsPage() {
     storeMut.mutate(
       {
         tenantId,
-        keyName: newKeyName.trim(),
-        value: newValue.trim(),
+        keyName,
+        value: newValue,
         description: newDescription.trim() || undefined,
         allowedAgents:
           finalAllowedAgents.length > 0 ? finalAllowedAgents : undefined,
+        // "Add" never overwrites. Replacing a value is Rotate, which keeps the
+        // grant; an upsert from here reset it.
+        createOnly: true,
       },
       {
         onSuccess: () => {
           toast.success(
             t("secrets.storeSuccess", {
-              key: newKeyName,
-              defaultValue: `Secret "${newKeyName}" stored`,
+              key: keyName,
+              defaultValue: `Secret "${keyName}" stored`,
             }),
           );
           setShowCreate(false);
@@ -164,11 +217,69 @@ export function SecretsPage() {
           setNewAllowedAgents([]);
           setNewAgentInput("");
         },
-        onError: (err) =>
-          toast.error(err instanceof Error ? err.message : String(err)),
+        onError: (err) => {
+          if (err instanceof SecretsError && err.code === SECRET_EXISTS) {
+            setExistingKeyConflict(keyName);
+            return;
+          }
+          toast.error(secretsErrorMessage(err));
+        },
       },
     );
-  }, [tenantId, newKeyName, newValue, newDescription, newAllowedAgents, newAgentInput, storeMut, t]);
+  }, [tenantId, newKeyName, newValue, newDescription, newAllowedAgents, newAgentInput, storeMut, t, secretsErrorMessage]);
+
+  /** Open the rotate dialog for one row, with no leftover state from the last. */
+  const openRotate = useCallback(
+    (target: SecretMetadata) => {
+      // A previous rotation's error or pending flag must not show against this
+      // key — the mutation object is shared by every row.
+      rotateMut.reset();
+      setRotateTarget(target);
+      setRotateValue("");
+      setRotateVisible(false);
+    },
+    [rotateMut],
+  );
+
+  const handleRotate = useCallback(() => {
+    const target = rotateTarget;
+    if (!target || !rotateValue.trim()) return;
+    rotateMut.mutate(
+      // The row's own tenant, not the tenant field: the operator may have
+      // edited that since the row was listed.
+      { tenantId: target.tenantId, keyName: target.keyName, newValue: rotateValue },
+      {
+        onSuccess: () => {
+          toast.success(t("secrets.rotateSuccess", { key: target.keyName, defaultValue: `Secret "${target.keyName}" rotated` }));
+          // Only close the dialog this rotation belongs to.
+          setRotateTarget((open) => (open === target ? null : open));
+          setRotateValue("");
+        },
+        onError: (err) => toast.error(secretsErrorMessage(err)),
+      },
+    );
+  }, [rotateTarget, rotateValue, rotateMut, t, secretsErrorMessage]);
+
+  const handleAdoptKey = useCallback(() => {
+    if (!adoptAcknowledged) return;
+    adoptKeyMut.mutate(undefined, {
+      onSuccess: (data) => {
+        setAdoptResult(data);
+        setShowAdoptKey(false);
+        setAdoptAcknowledged(false);
+        toast.success(t("secrets.adoptSuccess", "Master key adopted — new secrets can be stored again"));
+      },
+      onError: (err) => {
+        setShowAdoptKey(false);
+        setAdoptAcknowledged(false);
+        if (err instanceof SecretsError && err.code === ADOPT_NOT_SUPPORTED) {
+          toast.info(secretsErrorMessage(err));
+          return;
+        }
+        toast.error(secretsErrorMessage(err));
+      },
+    });
+  }, [adoptAcknowledged, adoptKeyMut, t, secretsErrorMessage]);
 
   const handleDelete = useCallback(() => {
     if (!deleteTarget) return;
@@ -295,7 +406,10 @@ export function SecretsPage() {
         </div>
         <div className="flex items-center gap-3">
           <button
-            onClick={() => setShowCreate(true)}
+            onClick={() => {
+              storeMut.reset();
+              setShowCreate(true);
+            }}
             disabled={vaultDown}
             title={
               vaultDown
@@ -380,8 +494,8 @@ export function SecretsPage() {
           <input
             id="secrets-tenant-input"
             type="text"
-            value={tenantId}
-            onChange={(e) => setTenantId(e.target.value)}
+            value={tenantInput}
+            onChange={(e) => setTenantInput(e.target.value)}
             placeholder="default"
             className="h-9 w-48 rounded-lg border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
             data-testid="tenant-input"
@@ -540,7 +654,7 @@ export function SecretsPage() {
                           {t("secrets.access", "Access")}
                         </button>
                         <button
-                          onClick={() => { setRotateTarget(s); setRotateValue(""); setRotateVisible(false); }}
+                          onClick={() => openRotate(s)}
                           className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-amber-600 dark:text-amber-400 transition-colors hover:bg-amber-500/10"
                           data-testid={`rotate-${s.keyName}`}
                           aria-label={t("secrets.rotateKey", { key: s.keyName, defaultValue: `Rotate ${s.keyName}` })}
@@ -667,7 +781,7 @@ export function SecretsPage() {
             </div>
           )}
 
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             {/* Rotate DEK */}
             <div className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
               <div className="flex items-center gap-2">
@@ -739,9 +853,125 @@ export function SecretsPage() {
                 {t("secrets.resetTenantAction", "Reset vault")}
               </button>
             </div>
+
+            {/* Adopt master key — the lost-key recovery step */}
+            <div className="flex flex-col gap-2 rounded-lg border border-destructive/40 bg-card p-3">
+              <div className="flex items-center gap-2">
+                <KeyRound className="h-4 w-4 text-destructive" />
+                <span className="text-sm font-medium text-foreground">
+                  {t("secrets.adoptTitle", "Adopt current master key")}
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {t(
+                  "secrets.adoptBlurb",
+                  "Only when the previous master key is lost for good. Lets the vault store secrets again under the key EDDI now runs with, and lists the tenants that must then be reset.",
+                )}
+              </p>
+              <button
+                onClick={() => {
+                  adoptKeyMut.reset();
+                  setAdoptAcknowledged(false);
+                  setShowAdoptKey(true);
+                }}
+                className="mt-auto inline-flex items-center justify-center gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs font-medium text-destructive transition-colors hover:bg-destructive/20"
+                data-testid="open-adopt-key"
+              >
+                <KeyRound className="h-3.5 w-3.5" />
+                {t("secrets.adoptAction", "Adopt master key")}
+              </button>
+            </div>
           </div>
+
+          {/* Adopt result — which tenants still hold unreadable secrets */}
+          {adoptResult && (
+            <div
+              className="relative space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 pe-10"
+              data-testid="adopt-key-result"
+              role="status"
+            >
+              <button
+                type="button"
+                onClick={() => setAdoptResult(null)}
+                className="absolute inset-e-2 top-2 rounded-md p-1 text-amber-700 hover:bg-amber-500/20 dark:text-amber-300"
+                aria-label={t("common.dismiss", "Dismiss")}
+              >
+                <X className="h-4 w-4" />
+              </button>
+              {adoptResult.tenantsNeedingReset.length === 0 ? (
+                <p className="text-sm text-foreground">
+                  {t("secrets.adoptResultNone", "No tenant holds secrets sealed under the lost key.")}
+                </p>
+              ) : (
+                <>
+                  <p className="text-sm font-semibold text-amber-700 dark:text-amber-300">
+                    {t("secrets.adoptResultReset", {
+                      count: adoptResult.tenantsNeedingReset.length,
+                      defaultValue: `${adoptResult.tenantsNeedingReset.length} tenant(s) still hold secrets sealed under the lost key. Reset each one, then store its secrets again.`,
+                    })}
+                  </p>
+                  <ul className="flex flex-wrap gap-2">
+                    {adoptResult.tenantsNeedingReset.map((tenant) => (
+                      <li key={tenant}>
+                        <button
+                          type="button"
+                          onClick={() => setTenantInput(tenant)}
+                          className="rounded-md border border-border bg-card px-2 py-1 font-mono text-xs text-foreground hover:bg-muted"
+                          data-testid={`adopt-reset-tenant-${tenant}`}
+                        >
+                          {tenant}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="text-xs text-muted-foreground">
+                    {t("secrets.adoptResultHint", "Select a tenant to switch to it, then use \"Reset vault\" above.")}
+                  </p>
+                </>
+              )}
+              {adoptResult.systemValuesReset && (
+                <p className="text-xs text-muted-foreground">
+                  {t(
+                    "secrets.adoptResultSystem",
+                    "EDDI's own sealed values were unreadable and have been discarded; the audit ledger now signs with a new key.",
+                  )}
+                </p>
+              )}
+            </div>
+          )}
         </div>
       )}
+
+      {/* ─── Adopt master key confirmation ─── */}
+      <AlertDialog
+        open={showAdoptKey}
+        onOpenChange={(open) => {
+          setShowAdoptKey(open);
+          if (!open) setAdoptAcknowledged(false);
+        }}
+        variant="destructive"
+        title={t("secrets.adoptConfirmTitle", "Adopt the current master key?")}
+        description={t(
+          "secrets.adoptConfirmDesc",
+          "Use this only if the previous master key is gone for good. Everything sealed under it becomes permanently unreadable. If a master-key rotation was merely interrupted, or one EDDI instance still runs with the old key, do not adopt — re-run the rotation with the same two keys instead, which recovers everything.",
+        )}
+        confirmLabel={t("secrets.adoptConfirm", "Adopt master key")}
+        cancelLabel={t("common.cancel", "Cancel")}
+        onConfirm={handleAdoptKey}
+        isPending={adoptKeyMut.isPending}
+        confirmDisabled={!adoptAcknowledged}
+      >
+        <label className="flex items-start gap-2 text-sm text-foreground">
+          <input
+            type="checkbox"
+            checked={adoptAcknowledged}
+            onChange={(e) => setAdoptAcknowledged(e.target.checked)}
+            className="mt-0.5"
+            data-testid="adopt-key-ack"
+          />
+          {t("secrets.adoptAck", "The previous master key is lost and cannot be recovered.")}
+        </label>
+      </AlertDialog>
 
       {/* ─── Rotate DEK confirmation ─── */}
       <AlertDialog
@@ -1002,7 +1232,10 @@ export function SecretsPage() {
                   id="new-key-name"
                   type="text"
                   value={newKeyName}
-                  onChange={(e) => setNewKeyName(e.target.value)}
+                  onChange={(e) => {
+                    setNewKeyName(e.target.value);
+                    setExistingKeyConflict(null);
+                  }}
                   placeholder={t(
                     "secrets.keyNamePlaceholder",
                     "e.g. openaiKey, dbPassword",
@@ -1010,6 +1243,8 @@ export function SecretsPage() {
                   className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
                   data-testid="new-key-input"
                   autoComplete="off"
+                  aria-invalid={existingKeyConflict !== null}
+                  aria-describedby={existingKeyConflict !== null ? "new-key-exists" : undefined}
                   autoFocus
                 />
                 {newKeyName.trim() && (
@@ -1019,6 +1254,42 @@ export function SecretsPage() {
                       {refString(newKeyName.trim())}
                     </code>
                   </p>
+                )}
+                {existingKeyConflict !== null && (
+                  <div
+                    id="new-key-exists"
+                    role="alert"
+                    className="mt-2 space-y-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2"
+                    data-testid="secret-exists-error"
+                  >
+                    <p className="text-xs text-destructive">
+                      {t("secrets.keyExists", {
+                        key: existingKeyConflict,
+                        defaultValue: `A secret named "${existingKeyConflict}" already exists. Adding it again would replace its value — use Rotate to change the value and keep who may use it.`,
+                      })}
+                    </p>
+                    {(() => {
+                      const existing = secrets?.find((s) => s.keyName === existingKeyConflict);
+                      return existing ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowCreate(false);
+                            setNewKeyName("");
+                            setNewValue("");
+                            setNewDescription("");
+                            setValueVisible(false);
+                            setNewAllowedAgents([]);
+                            openRotate(existing);
+                          }}
+                          className="text-xs font-medium text-primary hover:underline"
+                          data-testid="secret-exists-rotate"
+                        >
+                          {t("secrets.keyExistsRotate", "Rotate this secret instead")}
+                        </button>
+                      ) : null;
+                    })()}
+                  </div>
                 )}
               </div>
               <div>
@@ -1243,9 +1514,11 @@ export function SecretsPage() {
       {rotateTarget && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-          onClick={() => setRotateTarget(null)}
+          onClick={() => {
+            if (!rotateMut.isPending) setRotateTarget(null);
+          }}
           onKeyDown={(e) => {
-            if (e.key === "Escape") setRotateTarget(null);
+            if (e.key === "Escape" && !rotateMut.isPending) setRotateTarget(null);
           }}
         >
           <div
@@ -1285,28 +1558,24 @@ export function SecretsPage() {
                 {rotateVisible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
               </button>
             </div>
+            <p className="mt-3 text-xs text-muted-foreground" data-testid="rotate-keeps-grant">
+              {grantsAllAgents(rotateTarget.allowedAgents)
+                ? t("secrets.rotateKeepsGrantAll", "Every agent keeps access, as now.")
+                : t("secrets.rotateKeepsGrant", {
+                    agents: rotateTarget.allowedAgents.join(", "),
+                    defaultValue: `Access stays limited to: ${rotateTarget.allowedAgents.join(", ")}`,
+                  })}
+            </p>
             <div className="mt-6 flex justify-end gap-2">
               <button
                 onClick={() => setRotateTarget(null)}
-                className="rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted"
+                disabled={rotateMut.isPending}
+                className="rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50"
               >
                 {t("common.cancel", "Cancel")}
               </button>
               <button
-                onClick={() => {
-                  if (!rotateValue.trim()) return;
-                  rotateMut.mutate(
-                    { tenantId, keyName: rotateTarget.keyName, newValue: rotateValue.trim() },
-                    {
-                      onSuccess: () => {
-                        toast.success(t("secrets.rotateSuccess", { key: rotateTarget.keyName, defaultValue: `Secret "${rotateTarget.keyName}" rotated` }));
-                        setRotateTarget(null);
-                        setRotateValue("");
-                      },
-                      onError: (err) => toast.error(err.message),
-                    },
-                  );
-                }}
+                onClick={handleRotate}
                 disabled={!rotateValue.trim() || rotateMut.isPending}
                 className="inline-flex items-center gap-2 rounded-lg bg-amber-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-amber-600 disabled:opacity-50"
                 data-testid="confirm-rotate-button"
