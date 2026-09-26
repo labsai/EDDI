@@ -41,6 +41,8 @@ import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -290,5 +292,43 @@ class PropertySetterTaskSecretScrubTest {
 
         assertEquals("ok", step.<String>getData("input:initial").getResult(),
                 "a two-character input must not be wiped because it happens to appear inside the secret");
+    }
+
+    @Test
+    @DisplayName("a value that resolved to the <secret input> placeholder is neither vaulted nor stored")
+    void placeholderIsNotVaulted() throws Exception {
+        // A capture that runs after a HITL resume of a secretInput turn reads the
+        // already-scrubbed input. Vaulting "<secret input>" as the key would
+        // silently misconfigure the agent.
+        IWritableConversationStep step = memory.getCurrentStep();
+        step.storeData(new Data<>("input:initial", PLACEHOLDER));
+        step.storeData(new Data<>("actions", List.of("store_secret")));
+
+        task.execute(memory, secretPropertySetter(PLACEHOLDER));
+
+        verify(secretProvider, never()).store(any(), any(), any(), any());
+        assertNull(memory.getConversationProperties().get("apiKey"));
+    }
+
+    @Test
+    @DisplayName("the same holds for a non-secret scope: the literal placeholder is not stored as the value")
+    void placeholderIsNotStoredAsConversationValue() throws Exception {
+        IWritableConversationStep step = memory.getCurrentStep();
+        step.storeData(new Data<>("actions", List.of("store_secret")));
+        var instruction = new PropertyInstruction();
+        instruction.setName("apiKey");
+        instruction.setValueString(PLACEHOLDER);
+        instruction.setScope(Scope.conversation);
+        instruction.setOverride(true);
+        var setOnActions = new SetOnActions();
+        setOnActions.setActions(List.of("store_secret"));
+        setOnActions.setSetProperties(List.of(instruction));
+        var propertySetter = mock(IPropertySetter.class);
+        when(propertySetter.getSetOnActionsList()).thenReturn(List.of(setOnActions));
+        when(propertySetter.extractProperties(any())).thenReturn(new LinkedList<>());
+
+        task.execute(memory, propertySetter);
+
+        assertNull(memory.getConversationProperties().get("apiKey"));
     }
 }

@@ -9,12 +9,18 @@ import ai.labs.eddi.configs.properties.model.Property.Scope;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.ILifecycleManager;
+import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException;
+import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException.PauseOrigin;
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IPropertiesHandler;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
 import ai.labs.eddi.modules.nlp.IInputParser;
@@ -42,6 +48,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
@@ -199,6 +206,71 @@ class ConversationSecretClientInputTest {
         assertEquals(SECRET, step.getLatestData(MemoryKeys.INPUT_INITIAL.key()).getResult());
         assertEquals(NORMALIZED, step.getConversationOutput().get("input"));
         assertEquals(SECRET, ledger.getFirst().input().get("userInput"));
+    }
+
+    @Test
+    @DisplayName("a tool-call pause scrubs the persisted batch, and the resumed turn and its audit do not bring the secret back")
+    void toolCallPauseAndResume() throws Exception {
+        IInputParser parser = normalizingParser();
+        doAnswer(invocation -> {
+            parserTask.execute(memory, parser);
+            // The model saw the display input (the normalized plaintext) and passed
+            // it to a gated tool.
+            var call = new PendingToolCall();
+            call.setToolName("create_agent");
+            call.setArgumentsRaw("{\"apiKey\":\"" + NORMALIZED + "\"}");
+            call.setArgumentsRedacted("{\"apiKey\":\"" + NORMALIZED + "\"}");
+            var batch = new PendingToolCallBatch();
+            batch.setLlmTaskId("ai.labs.llm");
+            batch.setLlmTaskIndex(0);
+            batch.setCalls(List.of(call));
+            batch.setChatTranscriptJson("[{\"user\":\"" + NORMALIZED + "\"}]");
+            memory.setHitlPendingToolCalls(batch);
+            throw new ConversationPauseException("wf1", 2, "gated", PauseOrigin.TOOL_CALL);
+        }).when(lifecycleManager).executeLifecycle(any(), any());
+
+        conversation().say(SECRET, secretFlag());
+
+        assertEquals(ConversationState.AWAITING_HUMAN, memory.getConversationState());
+        PendingToolCallBatch paused = memory.getHitlPendingToolCalls();
+        String pausedJson = MAPPER.writeValueAsString(paused);
+        for (String form : List.of(SECRET, NORMALIZED)) {
+            assertFalse(pausedJson.contains(form), "the persisted batch leaks: " + pausedJson);
+        }
+        assertEquals("{\"apiKey\":\"" + PLACEHOLDER + "\"}", paused.getCalls().getFirst().getArgumentsRedacted(),
+                "the approver is shown the placeholder");
+        assertEquals("{\"apiKey\":\"" + PLACEHOLDER + "\"}", paused.getCalls().getFirst().getArgumentsRaw());
+        assertTrue(paused.getChatTranscriptJson().contains(PLACEHOLDER));
+
+        // Resume: a fresh Conversation (as the service builds one) re-enters the
+        // gated task, which replays the batch and records an audit entry from it.
+        List<String> seenOnResume = new ArrayList<>();
+        doAnswer(invocation -> {
+            var batch = memory.getHitlPendingToolCalls();
+            seenOnResume.add(batch.getChatTranscriptJson());
+            seenOnResume.add(batch.getCalls().getFirst().getArgumentsRaw());
+            memory.getAuditCollector()
+                    .collect(new AuditEntry("e2", "conv1", "agent1", 1, "user1", null, 1, "ai.labs.llm", "langchain", 0, 1L,
+                            Map.of("userInput", String.valueOf(memory.getCurrentStep().getConversationOutput().get("input"))), null,
+                            Map.of("compiledPrompt", batch.getChatTranscriptJson()), null, List.of(), 0.0, Instant.now(), null, null));
+            return null;
+        }).when(lifecycleManager).executeLifecycleFromIndex(any(), anyInt());
+        var decision = new HitlDecision();
+        decision.setVerdict(HitlVerdict.APPROVED);
+
+        conversation().resume(decision);
+
+        for (String seen : seenOnResume) {
+            assertFalse(seen.contains(NORMALIZED) || seen.contains(SECRET), "the resumed task was handed the secret: " + seen);
+        }
+        String stored = MAPPER.writeValueAsString(ConversationMemoryUtilities.convertConversationMemory(memory));
+        for (String form : List.of(SECRET, NORMALIZED)) {
+            assertFalse(stored.contains(form), "the resumed turn's document leaks");
+        }
+        String ledgerJson = MAPPER.writeValueAsString(ledger);
+        for (String form : List.of(SECRET, NORMALIZED)) {
+            assertFalse(ledgerJson.contains(form), "the audit ledger leaks: " + ledgerJson);
+        }
     }
 
     private Conversation conversation() {
