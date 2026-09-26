@@ -466,3 +466,48 @@ describe("PropertySetterEditor", () => {
     expect(screen.getByTestId("visibility-select")).toBeInTheDocument();
   });
 });
+
+describe("PropertySetterEditor edge cases", () => {
+  it("renders a setter with no setProperties or actions instead of crashing the page", () => {
+    const data = { setOnActions: [{}] } as unknown as PropertySetterConfig;
+    renderWithProviders(<PropertySetterEditor data={data} onChange={vi.fn()} />);
+    expect(screen.getByText("(no actions)")).toBeInTheDocument();
+  });
+
+  it("warns that a secret read through fromObjectPath is not vaulted", () => {
+    // PropertySetterTask.autoVaultSecret runs only on the valueString path.
+    renderWithProviders(
+      <PropertySetterEditor
+        data={{
+          setOnActions: [
+            {
+              actions: ["a"],
+              setProperties: [
+                { name: "token", valueString: "", scope: "secret", fromObjectPath: "response.token" },
+              ],
+            },
+          ],
+        }}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("property-secret-from-path-warning")).toBeInTheDocument();
+  });
+
+  it("does not warn for a secret taken from the value field", () => {
+    renderWithProviders(
+      <PropertySetterEditor
+        data={{
+          setOnActions: [
+            {
+              actions: ["a"],
+              setProperties: [{ name: "token", valueString: "{memory.current.input}", scope: "secret" }],
+            },
+          ],
+        }}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId("property-secret-from-path-warning")).not.toBeInTheDocument();
+  });
+});

@@ -146,10 +146,13 @@ const STORE_PARAM_HINTS: Record<string, { key: string; placeholder: string }[]> 
   ],
 };
 
+/**
+ * Only `recursive` is implemented. `paragraph` and `sentence` were offered here
+ * but always split recursively, and the backend now rewrites them to
+ * `recursive` on save (`RagConfiguration.LEGACY_CHUNK_STRATEGIES`).
+ */
 const CHUNK_STRATEGIES = [
   { value: "recursive", label: "Recursive (recommended)" },
-  { value: "paragraph", label: "Paragraph" },
-  { value: "sentence", label: "Sentence" },
 ] as const;
 
 // ─── Section Component ──────────────────────────────────────────────────────
@@ -367,10 +370,18 @@ function IngestionPanel({
   kbId,
   version,
   readOnly,
+  hasUnsavedChanges,
 }: {
   kbId: string;
   version: number;
   readOnly?: boolean;
+  /**
+   * The ingest endpoint resolves the *saved* knowledge base: its store, its
+   * embedding model, its chunking. Ingesting with unsaved edits on screen put
+   * the documents into the old store with the old model — and nothing told
+   * the user.
+   */
+  hasUnsavedChanges?: boolean;
 }) {
   const { t } = useTranslation();
   const [ingestions, setIngestions] = useState<IngestionStatus[]>([]);
@@ -475,6 +486,7 @@ function IngestionPanel({
 
   const handleFiles = useCallback(
     (files: FileList) => {
+      if (hasUnsavedChanges) return;
       Array.from(files).forEach((file) => {
         const reader = new FileReader();
         reader.onload = () => {
@@ -490,19 +502,31 @@ function IngestionPanel({
         reader.readAsText(file);
       });
     },
-    [startIngestion],
+    [startIngestion, hasUnsavedChanges],
   );
 
   const handleTextIngest = useCallback(() => {
-    if (!textContent.trim()) return;
+    if (!textContent.trim() || hasUnsavedChanges) return;
     startIngestion(textContent, `text-${Date.now()}.txt`);
     setTextContent("");
-  }, [textContent, startIngestion]);
+  }, [textContent, startIngestion, hasUnsavedChanges]);
 
   if (readOnly) return null;
 
   return (
     <div className="space-y-3" data-testid="ingestion-panel">
+      {hasUnsavedChanges && (
+        <p
+          className="text-xs text-amber-700 dark:text-amber-400"
+          role="alert"
+          data-testid="ingestion-save-first"
+        >
+          {t(
+            "ragEditor.saveBeforeIngest",
+            "Save your changes first — documents are ingested with the saved knowledge base's store and embedding model, not the edits on screen.",
+          )}
+        </p>
+      )}
       {/* Drop zone */}
       <div
         onDragOver={(e) => {
@@ -517,10 +541,12 @@ function IngestionPanel({
         }}
         className={cn(
           "rounded-lg border-2 border-dashed p-4 text-center transition-colors",
-          dragOver
+          dragOver && !hasUnsavedChanges
             ? "border-primary bg-primary/5"
             : "border-muted-foreground/20 hover:border-muted-foreground/40",
+          hasUnsavedChanges && "opacity-60",
         )}
+        data-testid="ingestion-dropzone"
       >
         <Upload className="mx-auto h-6 w-6 text-muted-foreground/50 mb-1.5" />
         <p className="text-xs text-muted-foreground">
@@ -529,7 +555,12 @@ function IngestionPanel({
         <p className="text-[10px] text-muted-foreground/60 mt-0.5">
           {t("ragEditor.dropHint", "Text, Markdown, or any text-based file")}
         </p>
-        <label className="mt-2 inline-flex cursor-pointer items-center gap-1 rounded-md border border-input px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted/50 transition-colors">
+        <label
+          className={cn(
+            "mt-2 inline-flex items-center gap-1 rounded-md border border-input px-3 py-1.5 text-xs font-medium text-foreground transition-colors",
+            hasUnsavedChanges ? "cursor-not-allowed" : "cursor-pointer hover:bg-muted/50",
+          )}
+        >
           <FileText className="h-3 w-3" />
           {t("ragEditor.browse", "Browse")}
           <input
@@ -537,7 +568,9 @@ function IngestionPanel({
             multiple
             accept=".txt,.md,.csv,.json,.xml,.html"
             className="hidden"
+            disabled={hasUnsavedChanges}
             onChange={(e) => e.target.files && handleFiles(e.target.files)}
+            data-testid="ingestion-file-input"
           />
         </label>
       </div>
@@ -558,7 +591,9 @@ function IngestionPanel({
           <button
             type="button"
             onClick={handleTextIngest}
-            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+            disabled={hasUnsavedChanges}
+            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+            data-testid="ingest-text-btn"
           >
             <Upload className="h-3 w-3" />
             {t("ragEditor.ingestText", "Ingest Text")}
@@ -843,6 +878,13 @@ export function RagEditor({
                   {s.label}
                 </option>
               ))}
+              {data.chunkStrategy && !CHUNK_STRATEGIES.some((s) => s.value === data.chunkStrategy) && (
+                <option value={data.chunkStrategy} disabled>
+                  {t("ragEditor.chunkStrategyLegacy", "{{value}} (saved as Recursive)", {
+                    value: data.chunkStrategy,
+                  })}
+                </option>
+              )}
             </select>
           </div>
 
@@ -1042,7 +1084,12 @@ export function RagEditor({
         defaultOpen={false}
       >
         {resourceId ? (
-          <IngestionPanel kbId={resourceId} version={version} readOnly={readOnly} />
+          <IngestionPanel
+            kbId={resourceId}
+            version={version}
+            readOnly={readOnly}
+            hasUnsavedChanges={isDirty}
+          />
         ) : (
           <p className="text-xs text-muted-foreground italic">
             {t("ragEditor.saveFirstIngestion", "Save this knowledge base first to enable document ingestion.")}

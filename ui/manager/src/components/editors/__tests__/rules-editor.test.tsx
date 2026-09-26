@@ -354,3 +354,20 @@ function o_disabled(select: HTMLSelectElement, value: string): boolean {
   const opt = Array.from(select.options).find((o) => o.value === value);
   return !!opt?.disabled;
 }
+
+describe("RulesEditor sizematcher preset", () => {
+  it("presets only integer bounds SizeMatcher can parse", async () => {
+    // The preset wrote min:"" and max:"", and SizeMatcher.setConfigs calls
+    // Integer.parseInt on every one of those keys it finds — the save 400'd.
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    renderWithProviders(<RulesEditor data={populatedConfig} onChange={onChange} />);
+    await user.selectOptions(screen.getByTestId("condition-type-select"), "sizematcher");
+    const saved = onChange.mock.lastCall![0] as RulesConfig;
+    const configs = saved.behaviorGroups[0]!.behaviorRules![0]!.conditions![0]!.configs!;
+    for (const key of ["min", "max", "equal"]) {
+      if (key in configs) expect(configs[key]).toMatch(/^-?\d+$/);
+    }
+    expect(configs).toEqual({ valuePath: "", min: "1" });
+  });
+});

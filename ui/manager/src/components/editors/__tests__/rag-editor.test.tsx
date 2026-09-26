@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import {
   RagEditor,
@@ -250,16 +250,14 @@ describe("RagEditor", () => {
     expect(screen.getByTestId("chunking-section")).toBeInTheDocument();
   });
 
-  it("changes chunk strategy to paragraph", async () => {
+  it("offers only the recursive chunking strategy, the one that is implemented", async () => {
     const user = userEvent.setup();
     renderWithProviders(
       <RagEditor data={populatedConfig} onChange={onChange} />
     );
     await openSection(user, "Document Chunking");
-    await user.selectOptions(screen.getByTestId("chunk-strategy"), "paragraph");
-    expect(onChange).toHaveBeenCalledWith(
-      expect.objectContaining({ chunkStrategy: "paragraph" })
-    );
+    const select = screen.getByTestId("chunk-strategy") as HTMLSelectElement;
+    expect([...select.options].map((o) => o.value)).toEqual(["recursive"]);
   });
 
   // ── KB name editing ────────────────────────────────────────────────────────
@@ -584,16 +582,64 @@ describe("RagEditor", () => {
 
   // ── Chunk strategy: sentence ──────────────────────────────────────────────
 
-  it("changes chunk strategy to sentence", async () => {
+  it("shows a stored legacy strategy as what it is saved as, without offering it", async () => {
     const user = userEvent.setup();
     renderWithProviders(
-      <RagEditor data={populatedConfig} onChange={onChange} />
+      <RagEditor data={{ ...populatedConfig, chunkStrategy: "sentence" }} onChange={onChange} />
     );
     await openSection(user, "Document Chunking");
-    await user.selectOptions(screen.getByTestId("chunk-strategy"), "sentence");
+    const select = screen.getByTestId("chunk-strategy") as HTMLSelectElement;
+    const legacy = [...select.options].find((o) => o.value === "sentence");
+    expect(legacy).toBeDefined();
+    expect(legacy!.disabled).toBe(true);
+    expect(legacy!.textContent).toMatch(/saved as Recursive/);
+    // Picking the real option replaces it.
+    await user.selectOptions(select, "recursive");
     expect(onChange).toHaveBeenCalledWith(
-      expect.objectContaining({ chunkStrategy: "sentence" })
+      expect.objectContaining({ chunkStrategy: "recursive" })
     );
+  });
+
+  // ── Manual ingestion with unsaved edits ─────────────────────────────────────
+
+  it("refuses manual ingestion while the knowledge base has unsaved edits", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const user = userEvent.setup();
+    renderWithProviders(
+      <RagEditor data={populatedConfig} onChange={onChange} resourceId="kb1" isDirty />
+    );
+    await openSection(user, "Document Ingestion");
+
+    // The ingest endpoint reads the SAVED config: the documents would go into
+    // the old store with the old embedding model.
+    expect(screen.getByTestId("ingestion-save-first")).toBeInTheDocument();
+    expect(screen.getByTestId("ingestion-file-input")).toBeDisabled();
+
+    await user.type(screen.getByPlaceholderText("Paste document text here..."), "hello");
+    const ingest = screen.getByTestId("ingest-text-btn");
+    expect(ingest).toBeDisabled();
+    await user.click(ingest);
+
+    fireEvent.drop(screen.getByTestId("ingestion-dropzone"), {
+      dataTransfer: { files: [new File(["x"], "a.txt", { type: "text/plain" })] },
+    });
+    expect(fetchSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining("/ingest"),
+      expect.anything(),
+    );
+    fetchSpy.mockRestore();
+  });
+
+  it("allows manual ingestion once the edits are saved", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <RagEditor data={populatedConfig} onChange={onChange} resourceId="kb1" isDirty={false} />
+    );
+    await openSection(user, "Document Ingestion");
+    expect(screen.queryByTestId("ingestion-save-first")).not.toBeInTheDocument();
+    expect(screen.getByTestId("ingestion-file-input")).not.toBeDisabled();
+    await user.type(screen.getByPlaceholderText("Paste document text here..."), "hello");
+    expect(screen.getByTestId("ingest-text-btn")).not.toBeDisabled();
   });
 
   // ── Empty name clears to undefined ──────────────────────────────────────────

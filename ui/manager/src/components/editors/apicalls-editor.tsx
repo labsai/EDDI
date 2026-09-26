@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { NumberInput } from "./number-input";
 import {
   ChevronDown,
   ChevronRight,
@@ -34,6 +35,7 @@ import { ConnectionReferenceButton } from "@/components/shared/connection-refere
 import { ConnectionReferenceWarning } from "@/components/shared/connection-reference-warning";
 import { isValidUrl } from "@/lib/utils";
 import { EditorSection } from "./editor-section";
+import { parseHttpCodeList } from "./editor-value-utils";
 
 // ─── Types matching HttpCallsConfiguration backend model ─────────────────────
 
@@ -122,9 +124,19 @@ export interface HttpCall {
   responseObjectName?: string;
   responseHeaderObjectName?: string;
   fireAndForget?: boolean;
+  /**
+   * Declared on the backend model but read by nothing in the engine, so the
+   * form no longer offers them (batching is `preRequest.batchRequests`). Kept
+   * in the type so a stored value survives a round trip untouched.
+   */
   isBatchCalls?: boolean;
   iterationObjectName?: string;
   preRequest?: HttpPreRequest;
+  /**
+   * Always written by this editor, but a hand-written or imported config can
+   * carry `null` here — the call editor guards for it rather than trusting the
+   * type.
+   */
   request: HttpRequest;
   postResponse?: HttpPostResponse;
 }
@@ -333,6 +345,14 @@ function KvEditor({
 
 // ─── HttpCodeValidator editor ────────────────────────────────────────────────
 
+/**
+ * What the engine applies to a list that is left out (`HttpCodeValidator.DEFAULT`
+ * in the backend). Shown as the placeholders, so an empty field reads as
+ * "the default" rather than "nothing".
+ */
+const DEFAULT_RUN_ON_HTTP_CODES = "200, 201";
+const DEFAULT_SKIP_ON_HTTP_CODES = "0, 400, 401, 402, 403, 404, 409, 410, 500, 501, 502";
+
 function HttpCodeValidatorEditor({
   validator,
   onChange,
@@ -343,13 +363,12 @@ function HttpCodeValidatorEditor({
   readOnly?: boolean;
 }) {
   const { t } = useTranslation();
-  const [showValidator, setShowValidator] = useState(!!validator && (!!validator.runOnHttpCode?.length || !!validator.skipOnHttpCode?.length));
+  const [showValidator, setShowValidator] = useState(!!validator);
 
   const runCodes = validator?.runOnHttpCode ?? [];
   const skipCodes = validator?.skipOnHttpCode ?? [];
-
-  const parseCodeList = (raw: string): number[] =>
-    raw.split(",").map((s) => parseInt(s.trim(), 10)).filter((n) => !isNaN(n));
+  // Stored by earlier versions of this editor. Matches no status code.
+  const runsOnNothing = Array.isArray(validator?.runOnHttpCode) && validator.runOnHttpCode.length === 0;
 
   if (!showValidator && !readOnly) {
     return (
@@ -357,9 +376,11 @@ function HttpCodeValidatorEditor({
         type="button"
         onClick={() => {
           setShowValidator(true);
-          onChange({ runOnHttpCode: [], skipOnHttpCode: [] });
+          // Both lists absent: the engine's defaults apply until codes are typed.
+          onChange({});
         }}
         className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+        data-testid="add-http-code-filter"
       >
         <Shield className="h-2.5 w-2.5" />
         {t("apiCallsEditor.addHttpCodeValidator", "Add HTTP Code Filter")}
@@ -369,7 +390,7 @@ function HttpCodeValidatorEditor({
   if (!showValidator && readOnly) return null;
 
   return (
-    <div className="rounded-md border border-border/50 bg-muted/30 p-2 space-y-1.5">
+    <div className="rounded-md border border-border/50 bg-muted/30 p-2 space-y-1.5" data-testid="http-code-filter">
       <div className="flex items-center justify-between">
         <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
           <Shield className="h-2.5 w-2.5" />
@@ -393,10 +414,11 @@ function HttpCodeValidatorEditor({
           <input
             type="text"
             value={runCodes.join(", ")}
-            onChange={(e) => onChange({ ...validator, runOnHttpCode: parseCodeList(e.target.value) })}
+            onChange={(e) => onChange({ ...validator, runOnHttpCode: parseHttpCodeList(e.target.value) })}
             readOnly={readOnly}
-            placeholder="200, 201"
+            placeholder={DEFAULT_RUN_ON_HTTP_CODES}
             className="h-6 w-full rounded border border-input bg-background px-1.5 font-mono text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            data-testid="http-code-filter-run"
           />
         </div>
         <div>
@@ -406,20 +428,53 @@ function HttpCodeValidatorEditor({
           <input
             type="text"
             value={skipCodes.join(", ")}
-            onChange={(e) => onChange({ ...validator, skipOnHttpCode: parseCodeList(e.target.value) })}
+            onChange={(e) => onChange({ ...validator, skipOnHttpCode: parseHttpCodeList(e.target.value) })}
             readOnly={readOnly}
-            placeholder="400, 500"
+            placeholder={DEFAULT_SKIP_ON_HTTP_CODES}
             className="h-6 w-full rounded border border-input bg-background px-1.5 font-mono text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            data-testid="http-code-filter-skip"
           />
         </div>
       </div>
+      {runsOnNothing ? (
+        <div className="flex flex-wrap items-center gap-2 text-[10px] text-amber-700 dark:text-amber-400" role="alert" data-testid="http-code-filter-runs-on-nothing">
+          <span className="flex-1">
+            {t(
+              "apiCallsEditor.runOnNoCodes",
+              "An empty \"Run on codes\" list matches no status code, so this instruction never runs.",
+            )}
+          </span>
+          {!readOnly && (
+            <button
+              type="button"
+              onClick={() => onChange({ ...validator, runOnHttpCode: undefined })}
+              className="rounded border border-current px-1.5 py-0.5 font-medium hover:bg-amber-100 dark:hover:bg-amber-900/30"
+              data-testid="http-code-filter-use-defaults"
+            >
+              {t("apiCallsEditor.useDefaultCodes", "Use defaults")}
+            </button>
+          )}
+        </div>
+      ) : (
+        <p className="text-[10px] text-muted-foreground">
+          {t("apiCallsEditor.httpCodeFilterDefaults", "An empty field uses the default codes shown in it.")}
+        </p>
+      )}
     </div>
   );
 }
 
 // ─── PropertyInstruction row editor ──────────────────────────────────────────
 
-const SCOPE_OPTIONS = ["step", "conversation", "longTerm", "secret"] as const;
+/**
+ * `secret` is deliberately absent. Only a property setter's own `valueString`
+ * rows are vaulted (`PropertySetterTask.autoVaultSecret`); a property
+ * instruction on an HTTP or MCP call is stored by `PrePostUtils` under whatever
+ * scope it names, so "secret" here kept the value in plain text while the
+ * editor promised the opposite. A stored `secret` is still shown, with a
+ * warning, so opening an old config does not silently rewrite it.
+ */
+const SCOPE_OPTIONS = ["step", "conversation", "longTerm"] as const;
 
 function PropertyInstructionRow({
   instruction,
@@ -467,6 +522,11 @@ function PropertyInstructionRow({
           {SCOPE_OPTIONS.map((s) => (
             <option key={s} value={s}>{s}</option>
           ))}
+          {instruction.scope === "secret" && (
+            <option value="secret" disabled>
+              secret {t("apiCallsEditor.scopeSecretUnsupported", "(not vaulted here)")}
+            </option>
+          )}
         </select>
         <label className="inline-flex items-center gap-1 text-[10px] text-foreground whitespace-nowrap" title={t("apiCallsEditor.overrideTitle", "Override existing value")}>
           <input
@@ -488,6 +548,15 @@ function PropertyInstructionRow({
           </button>
         )}
       </div>
+
+      {instruction.scope === "secret" && (
+        <p className="text-[10px] text-amber-700 dark:text-amber-400" role="alert" data-testid="property-instruction-secret-warning">
+          {t(
+            "apiCallsEditor.scopeSecretWarning",
+            "The secret scope is not vaulted on this instruction: the value is stored in plain text. Choose another scope, and keep credentials in the Secrets vault.",
+          )}
+        </p>
+      )}
 
       {/* Advanced toggle */}
       <div>
@@ -980,12 +1049,11 @@ export function RetryApiCallEditor({
           <label className="mb-0.5 block text-[10px] text-muted-foreground">
             {t("apiCallsEditor.maxRetries", "Max Retries")}
           </label>
-          <input
-            type="number"
+          <NumberInput placeholder="3" integer
             min={0}
-            value={retry.maxRetries ?? 3}
-            onChange={(e) =>
-              onChange({ ...retry, maxRetries: parseInt(e.target.value, 10) || 0 })
+            value={retry.maxRetries}
+            onChange={(v) =>
+              onChange({ ...retry, maxRetries: v })
             }
             readOnly={readOnly}
             data-testid="retry-max-retries"
@@ -996,14 +1064,13 @@ export function RetryApiCallEditor({
           <label className="mb-0.5 block text-[10px] text-muted-foreground">
             {t("apiCallsEditor.backoffDelayMs", "Backoff Delay (ms)")}
           </label>
-          <input
-            type="number"
+          <NumberInput placeholder="1000" integer
             min={0}
-            value={retry.exponentialBackoffDelayInMillis ?? 1000}
-            onChange={(e) =>
+            value={retry.exponentialBackoffDelayInMillis}
+            onChange={(v) =>
               onChange({
                 ...retry,
-                exponentialBackoffDelayInMillis: parseInt(e.target.value, 10) || 0,
+                exponentialBackoffDelayInMillis: v,
               })
             }
             readOnly={readOnly}
@@ -1177,10 +1244,9 @@ function PreRequestEditor({
         <label className="text-xs text-muted-foreground whitespace-nowrap">
           {t("apiCallsEditor.delayMs", "Delay (ms)")}
         </label>
-        <input
-          type="number"
-          value={data.delayBeforeExecutingInMillis ?? 0}
-          onChange={(e) => onChange({ ...data, delayBeforeExecutingInMillis: parseInt(e.target.value, 10) || 0 })}
+        <NumberInput placeholder="0" integer
+          value={data.delayBeforeExecutingInMillis}
+          onChange={(v) => onChange({ ...data, delayBeforeExecutingInMillis: v })}
           readOnly={readOnly}
           min={0}
           className="h-7 w-24 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
@@ -1289,12 +1355,16 @@ function HttpCallEditor({
 }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(true);
+  // A config written by hand, imported or produced by another tool can carry
+  // `"request": null`. Dereferencing it threw during render and took the whole
+  // page — and every unsaved edit on it — down through the root error boundary.
+  const request: Partial<HttpRequest> = call.request ?? {};
 
   const updateRequest = useCallback(
     (patch: Partial<HttpRequest>) => {
       onChange({
         ...call,
-        request: { ...call.request, ...patch },
+        request: { ...call.request, ...patch } as HttpRequest,
       });
     },
     [call, onChange]
@@ -1308,7 +1378,7 @@ function HttpCallEditor({
    * a wrong one — the lookup returns nothing and `expectedHeaderFor` stays
    * silent on an unknown name.
    */
-  const anyHeaderReferencesConnection = Object.values(call.request.headers ?? {}).some(
+  const anyHeaderReferencesConnection = Object.values(request.headers ?? {}).some(
     (value) => containsConnectionReference(value)
   );
   const { data: connectionRows } = useConnectionDescriptors(
@@ -1353,18 +1423,18 @@ function HttpCallEditor({
         {/* Method badge */}
         <span
           className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wider ${
-            call.request.method === "GET"
+            request.method === "GET"
               ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
-              : call.request.method === "POST"
+              : request.method === "POST"
                 ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
-                : call.request.method === "PUT"
+                : request.method === "PUT"
                   ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
-                  : call.request.method === "DELETE"
+                  : request.method === "DELETE"
                     ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
                     : "bg-muted text-muted-foreground"
           }`}
         >
-          {call.request.method}
+          {request.method}
         </span>
         <input
           type="text"
@@ -1422,7 +1492,7 @@ function HttpCallEditor({
           <EditorSection label={t("apiCallsEditor.request", "Request")}>
             <div className="flex gap-2">
               <select
-                value={call.request.method}
+                value={request.method ?? ""}
                 onChange={(e) => updateRequest({ method: e.target.value })}
                 disabled={readOnly}
                 className="h-8 rounded-md border border-input bg-background px-2 text-xs font-semibold text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
@@ -1436,7 +1506,7 @@ function HttpCallEditor({
               </select>
               <input
                 type="text"
-                value={call.request.path ?? ""}
+                value={request.path ?? ""}
                 onChange={(e) => updateRequest({ path: e.target.value })}
                 readOnly={readOnly}
                 placeholder={t(
@@ -1448,7 +1518,7 @@ function HttpCallEditor({
               />
             </div>
             <ConnectionReferenceWarning
-              value={call.request.path}
+              value={request.path}
               refused="request"
               testId="httpcall-path-connection-warning"
             />
@@ -1458,7 +1528,7 @@ function HttpCallEditor({
               </label>
               <input
                 type="text"
-                value={call.request.contentType ?? ""}
+                value={request.contentType ?? ""}
                 onChange={(e) => updateRequest({ contentType: e.target.value })}
                 readOnly={readOnly}
                 placeholder="application/json"
@@ -1471,13 +1541,13 @@ function HttpCallEditor({
           <EditorSection
             label={t("apiCallsEditor.headers", "Headers")}
             defaultOpen={
-              Object.keys(call.request.headers ?? {}).length > 0
+              Object.keys(request.headers ?? {}).length > 0
             }
           >
             {/* The one httpcall placement that resolves ${connection:…}: as
                 the whole value, under the header the connection names. */}
             <KvEditor
-              entries={call.request.headers ?? {}}
+              entries={request.headers ?? {}}
               onChange={(h) => updateRequest({ headers: h })}
               keyPlaceholder="Header name"
               valuePlaceholder="Header value"
@@ -1493,11 +1563,11 @@ function HttpCallEditor({
           <EditorSection
             label={t("apiCallsEditor.queryParams", "Query Parameters")}
             defaultOpen={
-              Object.keys(call.request.queryParams ?? {}).length > 0
+              Object.keys(request.queryParams ?? {}).length > 0
             }
           >
             <KvEditor
-              entries={call.request.queryParams ?? {}}
+              entries={request.queryParams ?? {}}
               onChange={(q) => updateRequest({ queryParams: q })}
               keyPlaceholder="Param name"
               valuePlaceholder="Param value"
@@ -1511,10 +1581,10 @@ function HttpCallEditor({
           {/* Body */}
           <EditorSection
             label={t("apiCallsEditor.body", "Request Body")}
-            defaultOpen={!!call.request.body}
+            defaultOpen={!!request.body}
           >
             <ContentEditor
-              value={call.request.body ?? ""}
+              value={request.body ?? ""}
               onChange={(v) => updateRequest({ body: v })}
               readOnly={readOnly}
               language="json"
@@ -1526,7 +1596,7 @@ function HttpCallEditor({
               testId="request-body-editor"
             />
             <ConnectionReferenceWarning
-              value={call.request.body}
+              value={request.body}
               refused="request"
               testId="request-body-connection-warning"
             />
@@ -1618,33 +1688,6 @@ function HttpCallEditor({
                 />
                 {t("apiCallsEditor.fireAndForget", "Fire and Forget")}
               </label>
-              <label className="inline-flex items-center gap-2 text-xs text-foreground">
-                <input
-                  type="checkbox"
-                  checked={call.isBatchCalls ?? false}
-                  onChange={(e) =>
-                    onChange({ ...call, isBatchCalls: e.target.checked })
-                  }
-                  disabled={readOnly}
-                  className="h-3.5 w-3.5 rounded border-input accent-primary"
-                />
-                {t("apiCallsEditor.batchCalls", "Batch Calls")}
-              </label>
-              {call.isBatchCalls && (
-                <input
-                  type="text"
-                  value={call.iterationObjectName ?? ""}
-                  onChange={(e) =>
-                    onChange({ ...call, iterationObjectName: e.target.value })
-                  }
-                  readOnly={readOnly}
-                  placeholder={t(
-                    "apiCallsEditor.iterationObjectName",
-                    "Iteration Object Name"
-                  )}
-                  className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                />
-              )}
             </div>
           </EditorSection>
 

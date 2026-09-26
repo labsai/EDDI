@@ -27,7 +27,7 @@ const populatedConfig: McpCallsConfig = {
       name: "search",
       toolName: "search_documents",
       actions: ["search"],
-      toolArguments: { query: "{{memory.input}}" },
+      toolArguments: { query: "{memory.current.input}" },
       saveResponse: true,
     },
   ],
@@ -343,5 +343,106 @@ describe("McpCallsEditor — connection references in the API key", () => {
     expect(screen.getByTestId("mcp-apikey-connection-warning")).toHaveTextContent(
       "whole header value"
     );
+  });
+});
+
+// ─── Tool arguments (editors review) ─────────────────────────────────────────
+
+describe("McpCallsEditor tool arguments", () => {
+  const onChange = vi.fn();
+  beforeEach(() => vi.clearAllMocks());
+
+  const withArgs = (toolArguments: Record<string, unknown>): McpCallsConfig => ({
+    mcpCalls: [{ name: "c", toolName: "t", toolArguments }],
+  });
+  const lastArgs = () =>
+    (onChange.mock.lastCall![0] as McpCallsConfig).mcpCalls![0]!.toolArguments!;
+
+  it("keeps a numeric argument a number when it is edited", () => {
+    // The value input was String(v) written back as a string: 5 became "5".
+    renderWithProviders(<McpCallsEditor data={withArgs({ limit: 5 })} onChange={onChange} />);
+    expect(screen.getByTestId("tool-argument-0-kind")).toHaveValue("json");
+    fireEvent.change(screen.getByTestId("tool-argument-0-value"), { target: { value: "10" } });
+    expect(lastArgs().limit).toBe(10);
+  });
+
+  it("keeps an object argument an object instead of writing [object Object]", () => {
+    renderWithProviders(
+      <McpCallsEditor data={withArgs({ filter: { lang: "en" } })} onChange={onChange} />,
+    );
+    const input = screen.getByTestId("tool-argument-0-value");
+    expect(input).toHaveValue('{"lang":"en"}');
+    fireEvent.change(input, { target: { value: '{"lang":"de","max":3}' } });
+    expect(lastArgs().filter).toEqual({ lang: "de", max: 3 });
+  });
+
+  it("does not store text that is not valid JSON in a JSON argument", () => {
+    renderWithProviders(<McpCallsEditor data={withArgs({ limit: 5 })} onChange={onChange} />);
+    const input = screen.getByTestId("tool-argument-0-value");
+    fireEvent.change(input, { target: { value: "{oops" } });
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("converts a text argument to a typed value on switching to JSON", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<McpCallsEditor data={withArgs({ limit: "5" })} onChange={onChange} />);
+    await user.selectOptions(screen.getByTestId("tool-argument-0-kind"), "json");
+    expect(lastArgs().limit).toBe(5);
+  });
+
+  it("keeps string arguments as templates", () => {
+    renderWithProviders(
+      <McpCallsEditor data={withArgs({ query: "{memory.current.input}" })} onChange={onChange} />,
+    );
+    const input = screen.getByTestId("tool-argument-0-value");
+    expect(input).toHaveAttribute("placeholder", "{memory.current.input}");
+    fireEvent.change(input, { target: { value: "{properties.topic}" } });
+    expect(lastArgs().query).toBe("{properties.topic}");
+  });
+
+  it("lets an argument be renamed, committing on blur and keeping its value and position", () => {
+    // The name input was read-only, so every added argument was stuck as arg<n>.
+    renderWithProviders(
+      <McpCallsEditor data={withArgs({ arg1: "x", other: 1 })} onChange={onChange} />,
+    );
+    const name = screen.getByTestId("tool-argument-0-name");
+    fireEvent.change(name, { target: { value: "query" } });
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.blur(name);
+    expect(Object.entries(lastArgs())).toEqual([
+      ["query", "x"],
+      ["other", 1],
+    ]);
+  });
+
+  it("refuses a rename onto an existing argument instead of overwriting it", () => {
+    renderWithProviders(
+      <McpCallsEditor data={withArgs({ arg1: "x", other: 1 })} onChange={onChange} />,
+    );
+    const name = screen.getByTestId("tool-argument-0-name");
+    fireEvent.change(name, { target: { value: "other" } });
+    expect(name).toHaveAttribute("aria-invalid", "true");
+    fireEvent.blur(name);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(name).toHaveValue("arg1");
+  });
+
+  it("adds an argument under a name that is not already taken", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<McpCallsEditor data={withArgs({ arg1: "keep" })} onChange={onChange} />);
+    await user.click(screen.getByTestId("add-tool-argument"));
+    expect(lastArgs()).toEqual({ arg1: "keep", arg2: "" });
+  });
+});
+
+describe("McpCallsEditor Save Response default", () => {
+  it("shows Save Response on when the call does not set it, as the backend defaults it", () => {
+    // McpCall.saveResponse defaults to true; the checkbox showed it off.
+    renderWithProviders(
+      <McpCallsEditor data={{ mcpCalls: [{ name: "c", toolName: "t" }] }} onChange={vi.fn()} />,
+    );
+    const box = screen.getByText("Save Response").closest("label")!.querySelector("input")!;
+    expect(box).toBeChecked();
   });
 });
