@@ -185,9 +185,14 @@ public class PropertySetterTask implements ILifecycleTask {
                                     templatedObj = PathNavigator.getValue(fromObjectPath, templateDataObjects);
                                     if (!isNullOrEmpty(toObjectPath)) {
                                         PathNavigator.setValue(toObjectPath, templateDataObjects, templatedObj);
-                                    } else if (templatedObj instanceof String) {
-                                        templateString = templatingEngine.processTemplate(templatedObj.toString(), templateDataObjects);
-                                        conversationProperties.put(name, new Property(name, templateString, scope));
+                                    } else if (templatedObj instanceof String valueString) {
+                                        // Stored as resolved, NOT rendered again. The path points into
+                                        // conversation data — memory.current.input, an HTTP response, a
+                                        // context value — so the string is whatever the user or an upstream
+                                        // API sent. Rendering it would evaluate their "{vars.x}" or
+                                        // "{#for ...}" with the server's template data. valueString is the
+                                        // authored alternative and is still templated below.
+                                        conversationProperties.put(name, new Property(name, valueString, scope));
                                     } else if (templatedObj instanceof Map<?, ?>) {
                                         @SuppressWarnings("unchecked")
                                         var valueMap = (Map<String, Object>) templatedObj;

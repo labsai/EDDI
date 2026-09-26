@@ -109,12 +109,12 @@ class LlmTaskCoverageTest {
     void setUp() throws Exception {
         openMocks(this);
 
-        lenient().when(promptSnippetService.getAll()).thenReturn(Collections.emptyMap());
+        lenient().when(promptSnippetService.getForAgent(any())).thenReturn(Collections.emptyMap());
         lenient().when(globalVariableResolver.getTemplateData()).thenReturn(Map.of());
         lenient().when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
 
         var counterweightService = mock(CounterweightService.class);
-        lenient().when(counterweightService.apply(anyString(), any(), any())).thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(counterweightService.apply(anyString(), any(), any(), any())).thenAnswer(inv -> inv.getArgument(0));
         var identityMaskingService = mock(IdentityMaskingService.class);
         lenient().when(identityMaskingService.apply(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
 
@@ -289,7 +289,7 @@ class LlmTaskCoverageTest {
         wireStandardMemory(List.of("action1"));
         var templateData = new HashMap<String, Object>();
         when(memoryItemConverter.convert(memory)).thenReturn(templateData);
-        when(promptSnippetService.getAll()).thenReturn(Collections.emptyMap());
+        when(promptSnippetService.getForAgent(any())).thenReturn(Collections.emptyMap());
         when(globalVariableResolver.getTemplateData()).thenReturn(Map.of());
         agentReturns("done");
 

@@ -95,7 +95,7 @@ class LlmTaskExtendedTest {
         var chatModelRegistry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver, null);
 
         promptSnippetService = mock(PromptSnippetService.class);
-        when(promptSnippetService.getAll()).thenReturn(Collections.emptyMap());
+        when(promptSnippetService.getForAgent(any())).thenReturn(Collections.emptyMap());
 
         var counterweightService = new CounterweightService(
                 promptSnippetService, new SimpleMeterRegistry());
@@ -412,7 +412,7 @@ class LlmTaskExtendedTest {
         @Test
         @DisplayName("Non-empty snippets should be injected into template data")
         void snippetsInjected() throws Exception {
-            when(promptSnippetService.getAll()).thenReturn(Map.of("greeting", "Hello!"));
+            when(promptSnippetService.getForAgent(any())).thenReturn(Map.of("greeting", "Hello!"));
 
             var memory = createMemoryWithAction("action1");
             when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());

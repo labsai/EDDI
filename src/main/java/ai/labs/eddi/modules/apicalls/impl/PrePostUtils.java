@@ -109,14 +109,19 @@ public class PrePostUtils {
                     Property.Scope scope = propertyInstruction.getScope();
                     Object propertyValue;
                     try {
-                        if (!isNullOrEmpty(path)) {
+                        // Only the authored valueString is a template. A value reached through
+                        // fromObjectPath is conversation data — typically the HTTP response this
+                        // instruction runs against — and is used as resolved: rendering it would
+                        // evaluate whatever "{vars.x}" or "{#for ...}" the upstream API returned.
+                        boolean fromPath = !isNullOrEmpty(path);
+                        if (fromPath) {
                             propertyValue = PathNavigator.getValue(path, templateDataObjects);
                         } else {
                             propertyValue = propertyInstruction.getValueString();
                         }
 
                         if (!isNullOrEmpty(propertyValue) && propertyValue instanceof String propertyValueString) {
-                            var value = templateValues(propertyValueString, templateDataObjects);
+                            var value = fromPath ? propertyValueString : templateValues(propertyValueString, templateDataObjects);
                             var valueTrimmed = value.trim();
                             if (propertyInstruction.getConvertToObject() && valueTrimmed.startsWith("{") && valueTrimmed.endsWith("}")) {
                                 try {

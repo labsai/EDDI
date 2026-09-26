@@ -159,7 +159,7 @@ class LlmTaskTest {
         // memoryItemConverter.convert will be called before the null-check on actions
         // result
         doReturn(new HashMap<>()).when(memoryItemConverter).convert(any());
-        doReturn(Map.of()).when(promptSnippetService).getAll();
+        doReturn(Map.of()).when(promptSnippetService).getForAgent(any());
         doReturn(Map.of()).when(globalVariableResolver).getTemplateData();
 
         LlmConfiguration config = new LlmConfiguration(List.of());
@@ -184,7 +184,7 @@ class LlmTaskTest {
         doReturn(List.of("someAction")).when(actionsData).getResult();
 
         doReturn(new HashMap<>()).when(memoryItemConverter).convert(any());
-        doReturn(Map.of()).when(promptSnippetService).getAll();
+        doReturn(Map.of()).when(promptSnippetService).getForAgent(any());
         doReturn(Map.of()).when(globalVariableResolver).getTemplateData();
 
         // Task that only matches "otherAction"
@@ -219,7 +219,7 @@ class LlmTaskTest {
 
         Map<String, Object> templateData = new HashMap<>();
         doReturn(templateData).when(memoryItemConverter).convert(any());
-        doReturn(Map.of()).when(promptSnippetService).getAll();
+        doReturn(Map.of()).when(promptSnippetService).getForAgent(any());
         doReturn(Map.of()).when(globalVariableResolver).getTemplateData();
 
         // Return input string unchanged for template processing
@@ -227,7 +227,7 @@ class LlmTaskTest {
 
         // Identity masking + counterweight pass-through
         doReturn("hello").when(identityMaskingService).apply(anyString(), any());
-        doReturn("hello").when(counterweightService).apply(anyString(), any(), any());
+        doReturn("hello").when(counterweightService).apply(anyString(), any(), any(), any());
 
         // Global variable resolver for task type
         doReturn("openai").when(globalVariableResolver).resolveValue(anyString());

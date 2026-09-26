@@ -143,10 +143,10 @@ class LlmTaskAuditLedgerTest {
         }).when(currentStep).storeData(any());
         lenient().doAnswer(inv -> stored.get(inv.<String>getArgument(0))).when(currentStep).getLatestData(anyString());
 
-        lenient().when(promptSnippetService.getAll()).thenReturn(Map.of());
+        lenient().when(promptSnippetService.getForAgent(any())).thenReturn(Map.of());
         lenient().when(globalVariableResolver.getTemplateData()).thenReturn(Map.of());
         lenient().when(globalVariableResolver.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
-        lenient().when(counterweightService.apply(anyString(), any(), any())).thenAnswer(i -> i.getArgument(0));
+        lenient().when(counterweightService.apply(anyString(), any(), any(), any())).thenAnswer(i -> i.getArgument(0));
         lenient().when(identityMaskingService.apply(anyString(), any())).thenAnswer(i -> i.getArgument(0));
         lenient().when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
         lenient().when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(chatModel);

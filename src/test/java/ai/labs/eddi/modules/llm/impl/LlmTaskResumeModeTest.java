@@ -89,12 +89,12 @@ class LlmTaskResumeModeTest {
     void setUp() throws Exception {
         openMocks(this);
 
-        when(promptSnippetService.getAll()).thenReturn(Collections.emptyMap());
+        when(promptSnippetService.getForAgent(any())).thenReturn(Collections.emptyMap());
         when(globalVariableResolver.getTemplateData()).thenReturn(Map.of());
         when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
 
         var counterweightService = mock(CounterweightService.class);
-        when(counterweightService.apply(anyString(), any(), any())).thenAnswer(inv -> inv.getArgument(0));
+        when(counterweightService.apply(anyString(), any(), any(), any())).thenAnswer(inv -> inv.getArgument(0));
         var identityMaskingService = mock(IdentityMaskingService.class);
         when(identityMaskingService.apply(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
 
