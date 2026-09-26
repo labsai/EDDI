@@ -46,6 +46,9 @@ spec:
         prometheus.io/port: "7070"
         prometheus.io/path: "/q/metrics"
     spec:
+      # EDDI never calls the Kubernetes API, so the pod does not mount the
+      # service account token — nothing to steal for a process that gets in.
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 185

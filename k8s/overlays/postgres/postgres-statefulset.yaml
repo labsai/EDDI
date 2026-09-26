@@ -21,6 +21,9 @@ spec:
         app.kubernetes.io/component: database
         app.kubernetes.io/part-of: eddi
     spec:
+      # PostgreSQL never calls the Kubernetes API, so the pod does not mount the
+      # service account token — nothing to steal for a process that gets in.
+      automountServiceAccountToken: false
       securityContext:
         fsGroup: 999
       containers:

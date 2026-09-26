@@ -44,6 +44,9 @@ spec:
         app.kubernetes.io/component: auth
         app.kubernetes.io/part-of: eddi
     spec:
+      # Keycloak never calls the Kubernetes API, so the pod does not mount the
+      # service account token — nothing to steal for a process that gets in.
+      automountServiceAccountToken: false
       # The keycloak image runs as USER 1000, and a freshly provisioned PVC is
       # root:root 0755 on EBS/PD/Azure Disk and most other CSI drivers until the
       # kubelet applies fsGroup. Without this Keycloak cannot create

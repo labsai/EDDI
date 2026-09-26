@@ -21,6 +21,9 @@ spec:
         app.kubernetes.io/component: messaging
         app.kubernetes.io/part-of: eddi
     spec:
+      # NATS never calls the Kubernetes API, so the pod does not mount the
+      # service account token — nothing to steal for a process that gets in.
+      automountServiceAccountToken: false
       containers:
         - name: nats
           image: nats:2.10-alpine

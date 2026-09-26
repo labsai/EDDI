@@ -80,6 +80,14 @@ git clone https://github.com/labsai/EDDI.git && cd EDDI
 # Generate vault key + create K8s secret
 bash k8s/create-secrets.sh
 
+# MongoDB runs with authentication — create its Secret too (one password, the
+# root user for mongod and the connection string EDDI mounts as a file)
+pw=$(openssl rand -hex 24)
+kubectl create secret generic mongodb-secrets -n eddi \
+  --from-literal=MONGO_INITDB_ROOT_USERNAME=eddi \
+  --from-literal=MONGO_INITDB_ROOT_PASSWORD="$pw" \
+  --from-literal=mongodb-secrets.properties="mongodb.connectionString=mongodb://eddi:${pw}@mongodb:27017/eddi?authSource=admin&retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000"
+
 # Deploy with MongoDB
 kubectl apply -k k8s/overlays/mongodb/
 ```
@@ -93,6 +101,11 @@ or use `winget install Microsoft.PowerShell`.
 
 ```powershell
 pwsh -File .\k8s\create-secrets.ps1
+$pw = [Security.Cryptography.RandomNumberGenerator]::GetHexString(48, $true)
+kubectl create secret generic mongodb-secrets -n eddi `
+  --from-literal=MONGO_INITDB_ROOT_USERNAME=eddi `
+  --from-literal=MONGO_INITDB_ROOT_PASSWORD="$pw" `
+  --from-literal=mongodb-secrets.properties="mongodb.connectionString=mongodb://eddi:${pw}@mongodb:27017/eddi?authSource=admin&retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000"
 kubectl apply -k k8s\overlays\mongodb\
 ```
 
@@ -106,8 +119,13 @@ PowerShell) only when you mean to rotate.
 ```bash
 helm install eddi ./helm/eddi \
   --set eddi.vaultMasterKey="$(openssl rand -base64 24)" \
+  --set mongodb.auth.password="$(openssl rand -hex 24)" \
   --namespace eddi --create-namespace
 ```
+
+Keep both values: the chart renders them into Secrets, and a later `helm upgrade`
+without them fails to render rather than inventing new ones (`--reuse-values`, or
+your own values file, carries them).
 
 ## Deployment Options
 
@@ -117,8 +135,8 @@ EDDI provides modular overlays (Kustomize) and Helm values for different deploym
 
 | Backend | Kustomize | Helm |
 |---|---|---|
-| **MongoDB** (default) | `kubectl apply -k k8s/overlays/mongodb/` | `--set mongodb.enabled=true` |
-| **PostgreSQL** | `kubectl apply -k k8s/overlays/postgres/` | `--set postgres.enabled=true --set mongodb.enabled=false --set eddi.datastoreType=postgres` |
+| **MongoDB** (default) | `kubectl apply -k k8s/overlays/mongodb/` (create `mongodb-secrets` first) | `--set mongodb.auth.password=…` (required) |
+| **PostgreSQL** | `kubectl apply -k k8s/overlays/postgres/` (create `postgres-secrets` first — see `postgres-secret.yaml.example`) | `--set postgres.enabled=true --set mongodb.enabled=false --set eddi.datastoreType=postgres` |
 
 ### Optional Components
 
@@ -176,10 +194,24 @@ bash k8s/create-secrets.sh
 kubectl create secret generic keycloak-admin -n eddi \
   --from-literal=password="$(openssl rand -base64 24)"
 
+# ...and the monitoring component, which has no default Grafana password
+kubectl create secret generic grafana-admin -n eddi \
+  --from-literal=password="$(openssl rand -base64 24)"
+
+# MongoDB runs with authentication — create its Secret too (one password, the
+# root user for mongod and the connection string EDDI mounts as a file)
+pw=$(openssl rand -hex 24)
+kubectl create secret generic mongodb-secrets -n eddi \
+  --from-literal=MONGO_INITDB_ROOT_USERNAME=eddi \
+  --from-literal=MONGO_INITDB_ROOT_PASSWORD="$pw" \
+  --from-literal=mongodb-secrets.properties="mongodb.connectionString=mongodb://eddi:${pw}@mongodb:27017/eddi?authSource=admin&retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000"
+
 # MongoDB + Keycloak auth + Monitoring
 kubectl apply -k k8s/examples/mongodb-full/
 
-# PostgreSQL + Production hardening (PDB, NetworkPolicy, resource limits)
+# PostgreSQL + Production hardening (PDB, NetworkPolicy, resource limits).
+# No database password is shipped: create postgres-secrets with the command in
+# k8s/overlays/postgres/postgres-secret.yaml.example first.
 kubectl apply -k k8s/examples/postgres-ha/
 ```
 
@@ -417,11 +449,61 @@ securityContext:
   runAsGroup: 185
 ```
 
+No pod mounts a service-account token it does not use
+(`automountServiceAccountToken: false` on EDDI, MongoDB, PostgreSQL, NATS,
+Keycloak and Grafana): none of them calls the Kubernetes API, so a process that
+gets into one finds no API credential to escalate with. Prometheus keeps its
+token, which pod discovery needs. Helm exposes `serviceAccount.automountToken`
+for the rare setup that adds something needing one.
+
+### Datastore authentication and isolation
+
+The in-cluster MongoDB used to run **without authentication**, behind a Service
+every pod in the cluster could reach — and the network policies selected only the
+EDDI pod, the Helm one being off by default. Any workload could read and rewrite
+every agent, conversation and the audit ledger. Now:
+
+- **Helm** runs MongoDB with authentication. `mongodb.auth.password` is required
+  (no default) and the connection string reaches EDDI through the
+  `<release>-mongodb` Secret as a mounted file. `networkPolicy.datastores.enabled`
+  (on by default, independent of `networkPolicy.enabled`) admits only the EDDI pod
+  to MongoDB, PostgreSQL and NATS.
+- **Kustomize** `overlays/mongodb` runs MongoDB with authentication from the
+  `mongodb-secrets` Secret you create (see Option B), and `overlays/mongodb` and
+  `overlays/postgres` each ship a NetworkPolicy admitting only EDDI.
+  `overlays/postgres` no longer ships `eddi`/`eddi`: `postgres-secrets` is created
+  by hand from `postgres-secret.yaml.example`.
+- **quickstart.yaml** stays one file for evaluation: its MongoDB is still
+  unauthenticated, but a NetworkPolicy admits only EDDI.
+
+NetworkPolicies need a CNI that enforces them (Calico, Cilium and most managed
+offerings do); authentication is what holds without one.
+
+> ⚠️ **Upgrading an install whose MongoDB ran without authentication.** The mongo
+> image creates the root user only when it initialises an **empty** data directory,
+> but it switches `--auth` on every time. So create the user in the running
+> database **first**, with the password you are about to configure, then upgrade:
+>
+> ```bash
+> # Helm: kubectl exec -n <ns> statefulset/<release>-eddi-mongodb -- …
+> kubectl exec -n eddi statefulset/mongodb -- mongosh admin \
+>   --eval 'db.createUser({user: "eddi", pwd: "<password>", roles: ["root"]})'
+> ```
+>
+> then `helm upgrade … --set mongodb.auth.password=<password>`, or create
+> `mongodb-secrets` with that password and `kubectl apply -k`. Done the other way
+> round, mongod restarts with `--auth` and no user and EDDI cannot log in until you
+> run the same `createUser` (the localhost exception still allows it). Helm users
+> who cannot migrate yet can set `mongodb.auth.enabled=false` explicitly.
+
 ### Network Policy
 
 The production overlay includes a `NetworkPolicy` that restricts EDDI to:
 - **Ingress**: HTTP port 7070 from within the namespace + Ingress controllers
 - **Egress**: Database (MongoDB/PG), NATS, Keycloak, DNS, and external HTTPS (port 443 for LLM APIs)
+
+The datastores carry their own ingress policies — see
+[Datastore authentication and isolation](#datastore-authentication-and-isolation).
 
 ## Scaling
 
@@ -459,6 +541,8 @@ Add NATS on top only with a `-Dquarkus.profile=nats` image, by listing
 **Helm** — with an image you built with `-Dquarkus.profile=nats`:
 ```bash
 helm install eddi ./helm/eddi \
+  --set eddi.vaultMasterKey="$(openssl rand -base64 24)" \
+  --set mongodb.auth.password="$(openssl rand -hex 24)" \
   --set eddi.image.repository=your-registry/eddi-nats \
   --set nats.enabled=true \
   --set nats.buildProfileImage=true \
@@ -490,8 +574,21 @@ kubectl apply -k k8s/examples/mongodb-full/
 
 # Access Grafana — the Prometheus datasource is provisioned for you
 kubectl port-forward svc/grafana 3000:3000 -n eddi
-# Open http://localhost:3000 (admin/admin)
+# Open http://localhost:3000 — user admin, the password in the grafana-admin
+# Secret, which you create before the first apply (Grafana does not start
+# without it; it used to run as admin/admin):
+#   kubectl create secret generic grafana-admin -n eddi \
+#     --from-literal=password="$(openssl rand -base64 24)"
 ```
+
+Prometheus discovers pods **in its own namespace** only, so it now gets a
+namespaced `Role`/`RoleBinding` instead of a cluster-wide `ClusterRole`. On an
+existing install delete the old objects by hand — `kubectl apply -k` does not
+prune: `kubectl delete clusterrolebinding eddi-prometheus` and
+`kubectl delete clusterrole eddi-prometheus`.
+
+With the auth component, `/q/metrics` requires a token and an anonymous scrape
+answers 401 — see [Scraping with authentication on](monitoring/monitoring-guide.md#scraping-with-authentication-on).
 
 ## Health Checks
 
@@ -509,8 +606,8 @@ EDDI provides three probe endpoints:
 k8s/
 ├── base/                    # Core EDDI manifests
 ├── overlays/
-│   ├── mongodb/             # MongoDB backend (standalone)
-│   ├── postgres/            # PostgreSQL backend (standalone)
+│   ├── mongodb/             # MongoDB backend, authenticated (standalone)
+│   ├── postgres/            # PostgreSQL backend (standalone; postgres-secret.yaml.example)
 │   ├── nats/                # NATS JetStream (component)
 │   ├── auth/                # Keycloak + realm import (component)
 │   ├── monitoring/          # Prometheus + Grafana (component)

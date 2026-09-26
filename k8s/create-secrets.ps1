@@ -21,9 +21,12 @@
 #  Creates the eddi-secrets Kubernetes Secret, which holds exactly one thing:
 #    - EDDI Vault Master Key (auto-generated or user-provided)
 #
-#  It does NOT create PostgreSQL credentials. Those are a separate manifest,
-#  k8s/overlays/postgres/postgres-secret.yaml, and have to be changed BEFORE the
-#  first apply — the postgres image reads the password only during initdb.
+#  It does NOT create database credentials. The PostgreSQL overlay's
+#  postgres-secrets is created by hand from the command in
+#  k8s/overlays/postgres/postgres-secret.yaml.example, and the MongoDB overlay's
+#  mongodb-secrets from the command in k8s/overlays/mongodb/kustomization.yaml —
+#  both BEFORE the first apply, because each image reads its password only when
+#  it initialises an empty data directory.
 #
 #  Usage — always through pwsh, never a bare .\…ps1: on a stock Windows box
 #  that starts Windows PowerShell 5.1, which the #Requires above refuses.
@@ -277,6 +280,7 @@ Write-Information -MessageData "" -InformationAction Continue
 Write-Information -MessageData "  Secret created in namespace: $Namespace" -InformationAction Continue
 Write-Information -MessageData "" -InformationAction Continue
 Write-Information -MessageData "  Next steps:" -InformationAction Continue
+Write-Information -MessageData "    # create mongodb-secrets or postgres-secrets first (see the overlay)" -InformationAction Continue
 Write-Information -MessageData "    kubectl apply -k k8s/overlays/mongodb/    # MongoDB backend" -InformationAction Continue
 Write-Information -MessageData "    kubectl apply -k k8s/overlays/postgres/   # PostgreSQL backend" -InformationAction Continue
 Write-Information -MessageData "" -InformationAction Continue

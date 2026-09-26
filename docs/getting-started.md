@@ -161,10 +161,17 @@ kubectl apply -k k8s/overlays/mongodb/    # MongoDB backend
 kubectl apply -k k8s/overlays/postgres/   # PostgreSQL backend
 ```
 
+Both need their Secrets first — the vault key (`bash k8s/create-secrets.sh`) and
+the database credentials, which are not shipped; the
+[Kubernetes Deployment Guide](kubernetes.md) has the commands.
+
 **Using Helm:**
 
 ```bash
-helm install eddi ./helm/eddi --namespace eddi --create-namespace
+helm install eddi ./helm/eddi \
+  --set eddi.vaultMasterKey="$(openssl rand -base64 24)" \
+  --set mongodb.auth.password="$(openssl rand -hex 24)" \
+  --namespace eddi --create-namespace
 ```
 
 See the [Kubernetes Deployment Guide](kubernetes.md) for full details including auth, monitoring, NATS, Ingress, and production hardening.

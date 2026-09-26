@@ -6,8 +6,9 @@
 #   helm install eddi ./helm/eddi -f my-values.yaml
 #
 # ⚠️  The chart intentionally has NO default credentials. eddi.vaultMasterKey is
-# mandatory, and postgres.password / keycloak.adminPassword are mandatory when
-# those components are enabled — rendering fails with a clear message otherwise.
+# mandatory, and mongodb.auth.password / postgres.password /
+# keycloak.adminPassword are mandatory when those components are enabled —
+# rendering fails with a clear message otherwise.
 
 # ── EDDI Server ────────────────────────────────────────────
 
@@ -143,6 +144,14 @@ eddi:
       # to authServerUrl, which is the in-cluster address a client cannot reach.
       authorizationServer: ""
 
+      # The ABSOLUTE public URL of the MCP endpoint, e.g.
+      # "https://eddi.example.com/mcp". Unset, EDDI advertises a relative
+      # identifier whose origin comes from each request's Host header — fine
+      # for port-forward, but behind a proxy that does not pin Host a crafted
+      # Host makes EDDI advertise a resource on another origin. Set it for any
+      # deployment reachable by name.
+      resource: ""
+
   resources:
     requests:
       cpu: 250m
@@ -154,6 +163,20 @@ eddi:
   service:
     type: ClusterIP
     port: 7070
+
+  # Who may read /q/metrics. Empty keeps EDDI's default, "authenticated":
+  # with OIDC on, a Prometheus without a token gets 401. "permit" opens this
+  # one path — only where /q/metrics cannot be reached from outside the
+  # cluster (the chart's ingress routes every path, /q/* included, unless you
+  # change ingress.hosts[].paths). See docs/monitoring/monitoring-guide.md.
+  metrics:
+    httpPolicy: ""
+
+  # Origins allowed to embed the Chat UI (/chat) in an <iframe>, space-separated,
+  # e.g. "https://www.example.com https://*.example.org". Empty keeps EDDI's
+  # default, 'none': no page may frame it.
+  chat:
+    frameAncestors: ""
 
   # Pod annotations (e.g., Prometheus scrape)
   podAnnotations:
@@ -168,6 +191,26 @@ mongodb:
   image:
     repository: mongo
     tag: "7.0"
+  # Authentication for the in-chart MongoDB. It used to run with none at all
+  # and a credential-less connection string, so any pod in the cluster could
+  # read and rewrite every agent, conversation, secret reference and the audit
+  # ledger.
+  auth:
+    enabled: true
+    username: eddi
+    # REQUIRED when mongodb.enabled and mongodb.auth.enabled — no default.
+    # Generate: openssl rand -hex 24
+    #
+    # ⚠️  Like postgres.password, the mongo image reads this only when it
+    # initialises an EMPTY data directory (MONGO_INITDB_ROOT_*), but it switches
+    # --auth on every time. UPGRADING an install that ran without auth: create
+    # the user in the running database FIRST, then upgrade with the same values:
+    #   kubectl exec -n <ns> statefulset/<release>-eddi-mongodb -- mongosh admin     #     --eval 'db.createUser({user: "eddi", pwd: "<password>", roles: ["root"]})'
+    # Upgrading first starts mongod with --auth and no user, and EDDI cannot log
+    # in until you create one (the localhost exception still allows that, the
+    # same way). Setting enabled=false keeps the old unauthenticated behaviour —
+    # only do that with networkPolicy.datastores.enabled left on.
+    password: ""
   storage:
     size: 10Gi
     # storageClassName: standard
@@ -340,6 +383,13 @@ podDisruptionBudget:
 
 networkPolicy:
   enabled: false
+  # Ingress isolation for the in-chart datastores and broker (MongoDB,
+  # PostgreSQL, NATS): only the EDDI pod may connect to them. Independent of
+  # `enabled` above and ON by default — without it every pod in the cluster
+  # can reach them on their Service. Needs a CNI that enforces NetworkPolicy
+  # (Calico, Cilium, most managed offerings); without one it is inert.
+  datastores:
+    enabled: true
   # Namespaces allowed to reach EDDI on 7070, by metadata.name. The release
   # namespace is always allowed. Add your ingress controller's namespace here.
   allowedIngressNamespaces: []
@@ -370,6 +420,12 @@ serviceAccount:
   create: true
   name: ""
   annotations: {}
+  # EDDI never calls the Kubernetes API, so its pod does not mount the service
+  # account token: a process that reaches the container (an RCE, a hostile
+  # dependency) gets no API credential to escalate with. Set true only if you
+  # add something that needs one — cloud workload identity (IRSA, GKE Workload
+  # Identity) injects its own projected token and does not need this.
+  automountToken: false
 
 # ── Namespace ──────────────────────────────────────────────
 #

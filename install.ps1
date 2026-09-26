@@ -1129,6 +1129,12 @@ function Write-Success {
         Write-Information -MessageData "  Grafana    ->  http://localhost:${GrafanaPort}  (admin / GRAFANA_ADMIN_PASSWORD in $EddiDir\.env)"
         Write-Information -MessageData "  Prometheus ->  http://localhost:${PrometheusPort}"
         Write-Information -MessageData "  Jaeger     ->  http://localhost:${JaegerPort}  (trace visualization)"
+        if ($WithAuth) {
+            # /q/metrics is authenticated once Keycloak is on, so the stock
+            # scrape config gets 401 -- say so rather than leave an empty dashboard.
+            Write-Information -MessageData "  With Keycloak on, Prometheus needs a token to scrape EDDI (the target shows DOWN until then):"
+            Write-Information -MessageData "     https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#scraping-with-authentication-on"
+        }
     }
 
     if ($WithAuth) {

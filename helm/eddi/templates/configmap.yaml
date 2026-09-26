@@ -158,7 +158,16 @@ data:
     MongoDB store. Guard and render now read the same binding.
   */}}
   EDDI_DATASTORE_TYPE: {{ $declaredType | quote }}
-  {{- if .Values.mongodb.enabled }}
+  {{- /*
+    Only for an in-chart MongoDB that runs WITHOUT authentication (the explicit
+    mongodb.auth.enabled=false escape hatch). With auth on — the default — the
+    connection string carries the password, so it is rendered into the
+    <release>-mongodb Secret and mounted as a file instead, and it must not ALSO
+    be here: the mounted file and this env var would both sit at config ordinal
+    300 (a file listed in QUARKUS_CONFIG_LOCATIONS inherits the ordinal of the
+    env var that lists it), and which one wins would be an accident.
+  */}}
+  {{- if and .Values.mongodb.enabled (not (.Values.mongodb.auth | default dict).enabled) }}
   MONGODB_CONNECTIONSTRING: "mongodb://{{ include "eddi.fullname" . }}-mongodb:27017/eddi?retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000"
   {{- end }}
   {{- /*
@@ -186,6 +195,12 @@ data:
   EDDI_NATS_URL: "nats://{{ include "eddi.fullname" . }}-nats:4222"
   {{- end }}
   QUARKUS_HTTP_CORS_ORIGINS: {{ .Values.eddi.corsOrigins | quote }}
+  {{- with (.Values.eddi.metrics | default dict).httpPolicy }}
+  EDDI_METRICS_HTTP_POLICY: {{ . | quote }}
+  {{- end }}
+  {{- with (.Values.eddi.chat | default dict).frameAncestors }}
+  EDDI_CHAT_FRAME_ANCESTORS: {{ . | quote }}
+  {{- end }}
   QUARKUS_OIDC_TENANT_ENABLED: {{ .Values.eddi.oidc.enabled | quote }}
   {{- /*
     With OIDC off, AuthStartupGuard refuses a production boot unless the escape
@@ -283,6 +298,9 @@ data:
   {{- $metadata := .Values.eddi.oidc.resourceMetadata | default dict }}
   {{- with $metadata.authorizationServer }}
   QUARKUS_OIDC_RESOURCE_METADATA_AUTHORIZATION_SERVER: {{ . | quote }}
+  {{- end }}
+  {{- with $metadata.resource }}
+  QUARKUS_OIDC_RESOURCE_METADATA_RESOURCE: {{ . | quote }}
   {{- end }}
   {{- $forceHttps := $metadata.forceHttpsScheme }}
   {{- if kindIs "invalid" $forceHttps }}
