@@ -7,9 +7,17 @@ import {
   cancelConversation,
   cancelGroupDiscussion,
   approveGroupPhase,
+  getGroupApprovalStatus,
   type HitlDecision,
   type GroupApprovalRequest,
 } from "@/lib/api/hitl";
+import {
+  bindDecisionToPause,
+  currentGroupPauseOf,
+  currentPauseOf,
+  isPauseChanged,
+  type ShownPause,
+} from "@/lib/hitl-pause-binding";
 import { submitHumanInput } from "@/lib/api/groups";
 import { useChatStore } from "@/hooks/use-chat";
 
@@ -88,17 +96,48 @@ export function useApprovalStatus(
 
 // ── Mutations ────────────────────────────────────────────────────
 
-/** Resume a paused 1:1 conversation with an APPROVED/REJECTED decision. */
+/**
+ * Resume a paused 1:1 conversation with an APPROVED/REJECTED decision.
+ *
+ * Pass `shown` — the pause the reviewer was looking at — and the decision is
+ * bound to it (see `lib/hitl-pause-binding.ts`): if the conversation has since
+ * been resumed and paused on something else, the mutation fails with a
+ * pause-changed error instead of approving what nobody reviewed. Every approval
+ * surface should pass it; it is optional only for callers that decide a pause
+ * they have just read themselves.
+ */
 export function useResumeConversation() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ conversationId, decision }: { conversationId: string; decision: HitlDecision }) =>
-      resumeConversation(conversationId, decision),
+    mutationFn: async ({
+      conversationId,
+      decision,
+      shown,
+    }: {
+      conversationId: string;
+      decision: HitlDecision;
+      shown?: ShownPause;
+    }) => {
+      const bound = shown
+        ? await bindDecisionToPause(decision, shown, async () =>
+            currentPauseOf(await getApprovalStatus(conversationId)),
+          )
+        : decision;
+      return resumeConversation(conversationId, bound);
+    },
     onSuccess: (_data, { conversationId }) => {
       qc.invalidateQueries({ queryKey: ["conversations"] });
       qc.invalidateQueries({ queryKey: ["pending-approvals"] });
       qc.invalidateQueries({ queryKey: ["approval-status", conversationId] });
       clearChatPauseIfCurrent(conversationId);
+    },
+    onError: (err, { conversationId }) => {
+      // The reviewer is looking at a pause that no longer exists: show them the
+      // current one rather than leaving the stale one up to be decided again.
+      if (isPauseChanged(err)) {
+        qc.invalidateQueries({ queryKey: ["pending-approvals"] });
+        qc.invalidateQueries({ queryKey: ["approval-status", conversationId] });
+      }
     },
   });
 }
@@ -130,18 +169,33 @@ export function useCancelConversation() {
 export function useApproveGroupPhase() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({
+    mutationFn: async ({
       groupId,
       gcId,
       request,
+      shown,
     }: {
       groupId: string;
       gcId: string;
       request: GroupApprovalRequest;
-    }) => approveGroupPhase(groupId, gcId, request),
+      /** The pause the reviewer saw — see `useResumeConversation`. */
+      shown?: ShownPause;
+    }) => {
+      const decision = shown
+        ? await bindDecisionToPause(request.decision, shown, async () =>
+            currentGroupPauseOf(await getGroupApprovalStatus(groupId, gcId)),
+          )
+        : request.decision;
+      return approveGroupPhase(groupId, gcId, { ...request, decision });
+    },
     onSuccess: (_data, { groupId }) => {
       qc.invalidateQueries({ queryKey: ["groupConversations", groupId] });
       qc.invalidateQueries({ queryKey: ["all-group-pending-approvals"] });
+    },
+    onError: (err) => {
+      if (isPauseChanged(err)) {
+        qc.invalidateQueries({ queryKey: ["all-group-pending-approvals"] });
+      }
     },
   });
 }

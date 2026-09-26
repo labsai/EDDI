@@ -37,7 +37,14 @@ import { useGroupDescriptors } from "@/hooks/use-groups";
 import { groupGroupsByName } from "@/lib/api/groups";
 import { timeoutPolicyLabel } from "@/lib/hitl-labels";
 import { useHasRole } from "@/hooks/use-auth";
-import type { PendingApprovalSummary, HitlVerdict, ToolCallDecision, PendingToolCallView } from "@/lib/api/hitl";
+import type {
+  ApprovalStatusSummary,
+  PendingApprovalSummary,
+  HitlVerdict,
+  ToolCallDecision,
+  PendingToolCallView,
+} from "@/lib/api/hitl";
+import { isPauseChanged, shownPauseOf, type ShownPause } from "@/lib/hitl-pause-binding";
 
 /**
  * The redacted-preview render prop shared by every `ApprovalBanner` consumer.
@@ -72,15 +79,21 @@ interface ApprovalQueueRowProps {
   onRequestConfirm: (item: PendingApprovalSummary, action: HitlVerdict | "CANCEL") => void;
   onToolDecide: (
     item: PendingApprovalSummary,
+    shown: ApprovalStatusSummary | undefined,
     verdict: HitlVerdict,
     note?: string,
     toolDecisions?: Record<string, ToolCallDecision>,
   ) => void;
   onToolCancel: (item: PendingApprovalSummary) => void;
-  resumeMutation: ReturnType<typeof useResumeConversation>;
-  cancelMutation: ReturnType<typeof useCancelConversation>;
-  groupApproveMutation: ReturnType<typeof useApproveGroupPhase>;
-  groupCancelMutation: ReturnType<typeof useCancelGroupDiscussion>;
+  /**
+   * Whether a decision or cancel for THIS row is in flight.
+   *
+   * Tracked by the page per conversation id, not read off the shared mutation
+   * objects: a TanStack mutation remembers only its latest call, so deciding a
+   * second row while the first was still running re-enabled the first row's
+   * buttons — a double submit one click away.
+   */
+  busy: boolean;
 }
 
 /**
@@ -100,10 +113,7 @@ function ApprovalQueueRow({
   onRequestConfirm,
   onToolDecide,
   onToolCancel,
-  resumeMutation,
-  cancelMutation,
-  groupApproveMutation,
-  groupCancelMutation,
+  busy,
 }: ApprovalQueueRowProps) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
@@ -117,16 +127,9 @@ function ApprovalQueueRow({
   // rather than trusting a stale cache, matching every other pause surface.
   const approvalStatus = useApprovalStatus(item.conversationId, expanded);
 
-  const isSubmitting =
-    (resumeMutation.isPending && resumeMutation.variables?.conversationId === item.conversationId) ||
-    (cancelMutation.isPending && cancelMutation.variables === item.conversationId);
-
+  const isSubmitting = busy;
   /** This row's own group decision, so one busy row does not disable the queue. */
-  const groupDecisionPending =
-    (groupApproveMutation.isPending &&
-      groupApproveMutation.variables?.gcId === item.conversationId) ||
-    (groupCancelMutation.isPending &&
-      groupCancelMutation.variables?.gcId === item.conversationId);
+  const groupDecisionPending = busy;
 
   // The same refusal the operator screen applies, enforced here too: this inbox
   // is precisely where an admin decides a pause WITHOUT the surrounding context
@@ -251,7 +254,7 @@ function ApprovalQueueRow({
                   variant="outline"
                   size="sm"
                   onClick={() => onRequestConfirm(item, "CANCEL")}
-                  disabled={cancelMutation.isPending && cancelMutation.variables === item.conversationId}
+                  disabled={busy}
                   data-testid={`cancel-${item.conversationId}`}
                 >
                   {t("hitl.cancel", "Cancel")}
@@ -264,7 +267,7 @@ function ApprovalQueueRow({
                   variant="primary"
                   size="sm"
                   onClick={() => onRequestConfirm(item, "APPROVED")}
-                  disabled={resumeMutation.isPending && resumeMutation.variables?.conversationId === item.conversationId}
+                  disabled={busy}
                   data-testid={`approve-${item.conversationId}`}
                 >
                   {t("hitl.approve", "Approve")}
@@ -273,7 +276,7 @@ function ApprovalQueueRow({
                   variant="destructive"
                   size="sm"
                   onClick={() => onRequestConfirm(item, "REJECTED")}
-                  disabled={resumeMutation.isPending && resumeMutation.variables?.conversationId === item.conversationId}
+                  disabled={busy}
                   data-testid={`reject-${item.conversationId}`}
                 >
                   {t("hitl.reject", "Reject")}
@@ -282,7 +285,7 @@ function ApprovalQueueRow({
                   variant="outline"
                   size="sm"
                   onClick={() => onRequestConfirm(item, "CANCEL")}
-                  disabled={cancelMutation.isPending && cancelMutation.variables === item.conversationId}
+                  disabled={busy}
                   data-testid={`cancel-${item.conversationId}`}
                 >
                   {t("hitl.cancel", "Cancel")}
@@ -383,7 +386,11 @@ function ApprovalQueueRow({
                 requireExplicitPerCall
                 blockedCalls={blockedCalls}
                 renderCallExtra={renderCallExtra}
-                onDecide={(verdict, note, _taskApprovals, toolDecisions) => onToolDecide(item, verdict, note, toolDecisions)}
+                // The status the banner rendered goes along, so the decision is
+                // bound to the calls the reviewer actually saw.
+                onDecide={(verdict, note, _taskApprovals, toolDecisions) =>
+                  onToolDecide(item, approvalStatus.data, verdict, note, toolDecisions)
+                }
                 onCancel={() => onToolCancel(item)}
               />
             </div>
@@ -415,6 +422,42 @@ export function ApprovalsPage() {
   const cancelMutation = useCancelConversation();
   const groupApproveMutation = useApproveGroupPhase();
   const groupCancelMutation = useCancelGroupDiscussion();
+
+  /** Conversation ids with a decision or cancel in flight — see `ApprovalQueueRowProps.busy`. */
+  const [inFlight, setInFlight] = useState<ReadonlySet<string>>(() => new Set());
+
+  /**
+   * Run one row's action, keeping its row busy until THIS call settles.
+   *
+   * `mutateAsync` rather than `mutate` with callbacks: TanStack runs per-call
+   * `mutate` callbacks only for the latest call, so deciding two rows in quick
+   * succession dropped the first one's toast — including its failure.
+   */
+  const runForRow = useCallback(
+    async (conversationId: string, action: () => Promise<unknown>, ok: () => void) => {
+      setInFlight((prev) => new Set(prev).add(conversationId));
+      try {
+        await action();
+        ok();
+      } catch (err) {
+        toast.error(
+          isPauseChanged(err)
+            ? t(
+                "hitl.pauseChanged",
+                "This request changed since you opened it — nothing was decided. Review it again.",
+              )
+            : getErrorMessage(err),
+        );
+      } finally {
+        setInFlight((prev) => {
+          const next = new Set(prev);
+          next.delete(conversationId);
+          return next;
+        });
+      }
+    },
+    [t],
+  );
 
   /**
    * groupId → current version, for the links out.
@@ -499,26 +542,44 @@ export function ApprovalsPage() {
       toast.success(
         verdict === "APPROVED" ? t("hitl.approved", "Approved") : t("hitl.rejected", "Rejected"),
       );
-    const fail = (err: unknown) => toast.error(getErrorMessage(err));
+    // What the reviewer decided on is the row: its kind and when it paused. A
+    // row is up to ten seconds old, and a verdict sent without a pause identity
+    // applies to whatever the conversation is paused on when it arrives —
+    // including a tool-call batch nobody reviewed.
+    const shown: ShownPause = { pausedAt: item.pausedAt, pauseType: item.pauseType ?? null };
 
     if (item.groupId) {
+      const groupId = item.groupId;
       // The non-streaming approve endpoint, which existed with no caller. The
       // group page uses the streaming variant because it has a transcript to
       // play the resume into; a queue row has nowhere to put one.
-      groupApproveMutation.mutate(
-        { groupId: item.groupId, gcId: item.conversationId, request: { decision: { verdict } } },
-        { onSuccess: ok, onError: fail },
+      void runForRow(
+        item.conversationId,
+        () =>
+          groupApproveMutation.mutateAsync({
+            groupId,
+            gcId: item.conversationId,
+            request: { decision: { verdict } },
+            shown,
+          }),
+        ok,
       );
       return;
     }
-    resumeMutation.mutate(
-      { conversationId: item.conversationId, decision: { verdict } },
-      { onSuccess: ok, onError: fail },
+    void runForRow(
+      item.conversationId,
+      () => resumeMutation.mutateAsync({ conversationId: item.conversationId, decision: { verdict }, shown }),
+      ok,
     );
   };
 
   /**
    * Decide a TOOL_CALL pause from the inline panel — per-call verdicts included.
+   *
+   * Bound to `shownStatus`, the approval-status the panel rendered: the per-call
+   * verdicts are keyed by call id, and a call not listed inherits the top-level
+   * verdict — so a decision landing on a later batch would approve every call
+   * in it unseen.
    *
    * `useResumeConversation.onSuccess` already invalidates `["approval-status",
    * conversationId]`, but a REMOVE (not just invalidate) is still needed here:
@@ -530,34 +591,44 @@ export function ApprovalsPage() {
    */
   const decideToolCall = (
     item: PendingApprovalSummary,
+    shownStatus: ApprovalStatusSummary | undefined,
     verdict: HitlVerdict,
     note?: string,
     toolDecisions?: Record<string, ToolCallDecision>,
   ) => {
-    resumeMutation.mutate(
-      { conversationId: item.conversationId, decision: { verdict, note, toolDecisions } },
-      {
-        onSuccess: () => {
-          toast.success(verdict === "APPROVED" ? t("hitl.approved", "Approved") : t("hitl.rejected", "Rejected"));
-          queryClient.removeQueries({ queryKey: ["approval-status", item.conversationId] });
-        },
-        onError: (err) => toast.error(getErrorMessage(err)),
+    // No status means nothing was shown; fall back to the row's own identity
+    // rather than sending an unbound verdict.
+    const shown: ShownPause = shownStatus
+      ? shownPauseOf(shownStatus)
+      : { pausedAt: item.pausedAt, pauseType: item.pauseType ?? null };
+    void runForRow(
+      item.conversationId,
+      () =>
+        resumeMutation.mutateAsync({
+          conversationId: item.conversationId,
+          decision: { verdict, note, toolDecisions },
+          shown,
+        }),
+      () => {
+        toast.success(verdict === "APPROVED" ? t("hitl.approved", "Approved") : t("hitl.rejected", "Rejected"));
+        queryClient.removeQueries({ queryKey: ["approval-status", item.conversationId] });
       },
     );
   };
 
   const doCancel = (item: PendingApprovalSummary) => {
     const ok = () => toast.success(t("hitl.cancelled", "Cancelled"));
-    const fail = (err: unknown) => toast.error(getErrorMessage(err));
 
     if (item.groupId) {
-      groupCancelMutation.mutate(
-        { groupId: item.groupId, gcId: item.conversationId },
-        { onSuccess: ok, onError: fail },
+      const groupId = item.groupId;
+      void runForRow(
+        item.conversationId,
+        () => groupCancelMutation.mutateAsync({ groupId, gcId: item.conversationId }),
+        ok,
       );
       return;
     }
-    cancelMutation.mutate(item.conversationId, { onSuccess: ok, onError: fail });
+    void runForRow(item.conversationId, () => cancelMutation.mutateAsync(item.conversationId), ok);
   };
 
   // Only fired after the reviewer confirms in the AlertDialog.
@@ -586,7 +657,7 @@ export function ApprovalsPage() {
             ),
             confirmLabel: t("hitl.approve", "Approve"),
             variant: "warning" as const,
-            isPending: groupApproveMutation.isPending,
+            isPending: inFlight.has(confirm.item.conversationId),
           };
         }
         return {
@@ -594,7 +665,7 @@ export function ApprovalsPage() {
           description: t("hitl.confirmApproveDescription", "Approve and resume this conversation?"),
           confirmLabel: t("hitl.approve", "Approve"),
           variant: "warning" as const,
-          isPending: resumeMutation.isPending || groupApproveMutation.isPending,
+          isPending: inFlight.has(confirm.item.conversationId),
         };
       case "REJECTED":
         // Same asymmetry as APPROVED above: a group verdict is decided for the
@@ -608,7 +679,7 @@ export function ApprovalsPage() {
             ),
             confirmLabel: t("hitl.reject", "Reject"),
             variant: "destructive" as const,
-            isPending: groupApproveMutation.isPending,
+            isPending: inFlight.has(confirm.item.conversationId),
           };
         }
         return {
@@ -616,7 +687,7 @@ export function ApprovalsPage() {
           description: t("hitl.confirmRejectDescription", "Reject this request? The conversation will not proceed."),
           confirmLabel: t("hitl.reject", "Reject"),
           variant: "destructive" as const,
-          isPending: resumeMutation.isPending || groupApproveMutation.isPending,
+          isPending: inFlight.has(confirm.item.conversationId),
         };
       case "CANCEL":
         // A group row cancels a discussion, not a conversation. Reusing the
@@ -631,14 +702,14 @@ export function ApprovalsPage() {
               ),
               confirmLabel: t("hitl.confirmCancelGroupButton", "Cancel discussion"),
               variant: "destructive" as const,
-              isPending: groupCancelMutation.isPending,
+              isPending: inFlight.has(confirm.item.conversationId),
             }
           : {
               title: t("hitl.confirmCancelTitle", "Cancel conversation?"),
               description: t("hitl.confirmCancelDescription", "Cancel this conversation? Any in-progress work is aborted."),
               confirmLabel: t("hitl.confirmCancelButton", "Cancel conversation"),
               variant: "destructive" as const,
-              isPending: cancelMutation.isPending,
+              isPending: inFlight.has(confirm.item.conversationId),
             };
     }
   })();
@@ -793,10 +864,7 @@ export function ApprovalsPage() {
                   onRequestConfirm={(row, action) => setConfirm({ item: row, action })}
                   onToolDecide={decideToolCall}
                   onToolCancel={doCancel}
-                  resumeMutation={resumeMutation}
-                  cancelMutation={cancelMutation}
-                  groupApproveMutation={groupApproveMutation}
-                  groupCancelMutation={groupCancelMutation}
+                  busy={inFlight.has(item.conversationId)}
                 />
               ))}
             </tbody>

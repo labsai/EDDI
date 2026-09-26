@@ -3449,7 +3449,8 @@
     "decidedProgress": "{{total}}건 중 {{decided}}건 결정됨",
     "groupLinkUnavailable": "이 그룹을 찾을 수 없어 안전한 링크를 제공할 수 없습니다.",
     "confirmApproveGroupDescription": "일시 중지된 단계 전체를 승인하고 토론을 재개합니다. 대기 중인 모든 작업도 함께 승인됩니다. 개별 결정은 그룹에서 하세요.",
-    "confirmRejectGroupDescription": "일시 중지된 단계 전체를 거부합니다. 이 일시 중지를 기다리는 모든 작업이 함께 거부되며 논의는 더 진행되지 않습니다. 개별적으로 결정하려면 그룹을 여세요."
+    "confirmRejectGroupDescription": "일시 중지된 단계 전체를 거부합니다. 이 일시 중지를 기다리는 모든 작업이 함께 거부되며 논의는 더 진행되지 않습니다. 개별적으로 결정하려면 그룹을 여세요.",
+    "pauseChanged": "이 요청은 연 이후 변경되었습니다. 아무것도 결정되지 않았습니다. 다시 검토하세요."
   },
   "chatDrawer": {
     "deploying": "에이전트 배포 중…",

@@ -48,6 +48,7 @@ import {
   useApprovalStatus,
 } from "@/hooks/use-hitl";
 import type { HitlVerdict, ToolCallDecision, PendingToolCallView } from "@/lib/api/hitl";
+import { isPauseChanged, shownPauseOf } from "@/lib/hitl-pause-binding";
 
 /** Same redacted-preview render prop the approvals inbox uses. */
 function renderCallExtra(call: PendingToolCallView) {
@@ -320,7 +321,15 @@ export function ConversationDetailPage() {
             toolDecisions?: Record<string, ToolCallDecision>,
           ) => {
             resumeMutation.mutate(
-              { conversationId: id!, decision: { verdict, note, toolDecisions } },
+              {
+                conversationId: id!,
+                decision: { verdict, note, toolDecisions },
+                // Bound to the pause this banner rendered, so a decision cannot
+                // land on a later pause of the same conversation unseen.
+                shown: approvalStatus
+                  ? shownPauseOf(approvalStatus)
+                  : { pausedAt: conversation.hitlPausedAt ?? null },
+              },
               {
                 onSuccess: () => {
                   toast.success(verdict === "APPROVED"
@@ -328,7 +337,17 @@ export function ConversationDetailPage() {
                     : t("hitl.rejected", "Rejected"));
                   refetch();
                 },
-                onError: (err) => toast.error(getErrorMessage(err)),
+                onError: (err) => {
+                  if (isPauseChanged(err)) {
+                    toast.error(t(
+                      "hitl.pauseChanged",
+                      "This request changed since you opened it — nothing was decided. Review it again.",
+                    ));
+                    refetch();
+                    return;
+                  }
+                  toast.error(getErrorMessage(err));
+                },
               }
             );
           }}
