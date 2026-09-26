@@ -36,7 +36,14 @@ import java.security.MessageDigest;
  * when the caller already proved possession of the API key, i.e. Open WebUI
  * acts as a trusted proxy that has authenticated its own users. This is a
  * deliberate delegation, not an oversight — but it means a leaked key permits
- * impersonating any user. Set {@code trust-user-headers=false} to disable it.
+ * impersonating any Open WebUI user. Set {@code trust-user-headers=false} to
+ * disable it.
+ * <p>
+ * The header value is namespaced to {@code openwebui:<id>}
+ * ({@link OpenAiUserIdentity}) before it becomes the EDDI {@code userId}, so a
+ * self-asserted header can never equal a bare OIDC principal — the leaked-key
+ * reach stays within Open WebUI's own users and does not cross into OIDC-owned
+ * identities. OIDC principals (in {@code authenticated} mode) are used as-is.
  *
  * @since 6.1.0
  */
@@ -138,7 +145,11 @@ public class OpenAiAuthFilter implements ContainerRequestFilter {
         } else if (config.isTrustUserHeaders()) {
             String header = requestContext.getHeaderString(HEADER_USER_ID);
             if (header != null && !header.isBlank()) {
-                return header.trim();
+                // Namespace the self-asserted header value so it can never equal a
+                // bare OIDC principal (or any other identity source). The /v1 trust
+                // model is unchanged — a leaked key still impersonates any Open WebUI
+                // user — but that reach no longer crosses into OIDC-owned users.
+                return OpenAiUserIdentity.namespace(header.trim());
             }
         }
 

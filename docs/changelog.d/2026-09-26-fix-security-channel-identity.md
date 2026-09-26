@@ -92,7 +92,39 @@ Compatibility, with no migration step to run:
 [`DataStoreProducers.java`](../../src/main/java/ai/labs/eddi/datastore/DataStoreProducers.java).
 Docs: [`hitl.md`](../hitl.md), [`slack-integration.md`](../slack-integration.md).
 
+### Item 4 — OpenAI-compat `X-OpenWebUI-User-Id` shared the OIDC principal namespace
+
+`OpenAiAuthFilter` used the `X-OpenWebUI-User-Id` header verbatim as the EDDI
+`userId`. Since a leaked shared `/v1` key lets a caller set that header to
+anything, a caller could set it to an OIDC user's principal and reach that user's
+conversations and long-term memories. The header value is now namespaced to
+`openwebui:<id>` (`OpenAiUserIdentity`), so a self-asserted header can never equal
+a bare OIDC principal. OIDC principals (in `authenticated` mode) and the
+configured anonymous default are left unprefixed — the first is already verified,
+the second is operator config. The documented trust model is unchanged: a leaked
+key still impersonates any *Open WebUI* user; only the cross-namespace reach into
+OIDC-owned identities is closed (`application.properties` `trust-user-headers`
+comment still holds).
+
+Same forward-safe + migration approach as Slack, in `OpenAiConversationBridge`
+and only for the `openwebui:`-namespaced path: a chat mapping stored under the raw
+header id is adopted and re-keyed to the namespaced id (the conversation keeps its
+raw-id owner and memories); before a new conversation starts (stateful *and*
+stateless), long-term memories under the raw id are moved to the namespaced id,
+with the namespaced identity winning any per-key/agent conflict. Best-effort — a
+migration failure never fails the turn.
+
+Test `OpenAiAuthFilterTest.headerUserId_isNamespaced_soItCannotEqualABareOidcPrincipal`
+proves an OpenAI-compat identity can never collide with a bare OIDC principal;
+mutation-checked (reverting the namespacing in the filter fails it). Migration
+paths covered in `OpenAiConversationBridgeTest`.
+
+**Files:** [`OpenAiUserIdentity.java`](../../src/main/java/ai/labs/eddi/integrations/openai/OpenAiUserIdentity.java),
+[`OpenAiAuthFilter.java`](../../src/main/java/ai/labs/eddi/integrations/openai/OpenAiAuthFilter.java),
+[`OpenAiConversationBridge.java`](../../src/main/java/ai/labs/eddi/integrations/openai/OpenAiConversationBridge.java).
+
 ```decision-log
 | 2026-09-26 | Slack HITL decisions require a persisted record of the card the owning integration posted, matched to the subject's current pause | Signature and approver list bound the integration, not the subject | In-memory marker (lost on restart); trusting the button value |
 | 2026-09-26 | Slack users are `slack:<team_id>:<user_id>` in EDDI; raw-id data is re-keyed/moved lazily | Raw Slack ids shared the OIDC principal namespace | Keeping raw ids for existing users (leaves the collision open); a one-shot bulk migration |
+| 2026-09-26 | OpenAI-compat header users are `openwebui:<id>` in EDDI; raw-id data is re-keyed/moved lazily | `X-OpenWebUI-User-Id` shared the OIDC principal namespace, so a shared-key holder reached OIDC users | Namespacing OIDC principals too (they are already canonical); a one-shot bulk migration |
 ```

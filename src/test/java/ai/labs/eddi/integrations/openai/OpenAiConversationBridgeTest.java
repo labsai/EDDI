@@ -13,6 +13,9 @@ import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment.Environment;
+import ai.labs.eddi.configs.properties.IUserMemoryStore;
+import ai.labs.eddi.configs.properties.model.Property.Visibility;
+import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import ai.labs.eddi.integrations.openai.model.ChatCompletionRequest;
@@ -25,6 +28,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
 import java.util.Date;
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -65,6 +69,7 @@ class OpenAiConversationBridgeTest {
 
     private IConversationService conversationService;
     private IUserConversationStore userConversationStore;
+    private IUserMemoryStore userMemoryStore;
     private OpenAiConversationBridge bridge;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -77,13 +82,14 @@ class OpenAiConversationBridgeTest {
     void setUp() throws Exception {
         conversationService = mock(IConversationService.class);
         userConversationStore = mock(IUserConversationStore.class);
+        userMemoryStore = mock(IUserMemoryStore.class);
 
         when(conversationService.startConversation(any(), any(), any(), any()))
                 .thenReturn(new IConversationService.ConversationResult(
                         CONVERSATION_ID, URI.create("eddi://conversation/" + CONVERSATION_ID)));
         when(conversationService.getConversationState(any(String.class))).thenReturn(ConversationState.READY);
 
-        bridge = new OpenAiConversationBridge(conversationService, userConversationStore,
+        bridge = new OpenAiConversationBridge(conversationService, userConversationStore, userMemoryStore,
                 new OpenAiMessageMapper(objectMapper, 5),
                 OpenAiTestFixtures.config(b -> b.requestTimeoutSeconds = 2),
                 new SimpleMeterRegistry(), permissiveUseGuard());
@@ -707,6 +713,95 @@ class OpenAiConversationBridgeTest {
         ArgumentCaptor<Map<String, Context>> captor = ArgumentCaptor.forClass(Map.class);
         verify(conversationService).startConversation(any(), any(), any(), captor.capture());
         assertTrue(captor.getValue().containsKey(OpenAiConversationBridge.CONTEXT_CHANNEL_INTENT));
+    }
+
+    // ─── Legacy Open WebUI identity migration (raw id -> openwebui:<id>) ───
+
+    private static final String RAW_OWUI = "u_812";
+    private static final String NS_OWUI = "openwebui:u_812";
+    private static final String INTENT_A = OpenAiConversationBridge.INTENT_PREFIX + AGENT_ID_SUPPORT + ":chat-a";
+
+    private static UserMemoryEntry memEntry(String id, String userId, String key, String agent, Object value) {
+        Instant t = Instant.parse("2026-01-01T00:00:00Z");
+        return new UserMemoryEntry(id, userId, key, value, "fact", Visibility.self, agent, List.of(), "conv-old",
+                false, 1, t, t);
+    }
+
+    @Test
+    void namespacedCaller_adoptsAndRekeysALegacyRawMapping() throws Exception {
+        // No mapping under the namespaced id; a usable one exists under the raw id.
+        when(userConversationStore.readUserConversation(INTENT_A, NS_OWUI)).thenReturn(null);
+        when(userConversationStore.readUserConversation(INTENT_A, RAW_OWUI)).thenReturn(new UserConversation(
+                INTENT_A, RAW_OWUI, Environment.production, AGENT_ID_SUPPORT, OTHER_CONVERSATION_ID));
+
+        var turn = bridge.prepare(statefulModel, simpleRequest(), headers("chat-a"), NS_OWUI);
+
+        assertEquals(OTHER_CONVERSATION_ID, turn.conversationId());
+        // The conversation is kept, not recreated.
+        verify(conversationService, never()).startConversation(any(), any(), any(), any());
+        // Re-keyed to the namespaced id, and the legacy mapping removed.
+        ArgumentCaptor<UserConversation> created = ArgumentCaptor.forClass(UserConversation.class);
+        verify(userConversationStore).createUserConversation(created.capture());
+        assertEquals(NS_OWUI, created.getValue().getUserId());
+        assertEquals(OTHER_CONVERSATION_ID, created.getValue().getConversationId());
+        verify(userConversationStore).deleteUserConversation(INTENT_A, RAW_OWUI);
+    }
+
+    @Test
+    void namespacedCaller_withNoLegacyMapping_movesRawIdMemoriesBeforeStarting() throws Exception {
+        when(userConversationStore.readUserConversation(any(), any())).thenReturn(null);
+        when(userMemoryStore.getAllEntries(RAW_OWUI)).thenReturn(List.of(
+                memEntry("m1", RAW_OWUI, "favourite_colour", AGENT_ID_SUPPORT, "blue"),
+                memEntry("m2", RAW_OWUI, "city", AGENT_ID_SUPPORT, "Vienna")));
+        // The namespaced id already holds "city" for this agent -> it wins.
+        when(userMemoryStore.getAllEntries(NS_OWUI)).thenReturn(List.of(
+                memEntry("n1", NS_OWUI, "city", AGENT_ID_SUPPORT, "Graz")));
+
+        bridge.prepare(statefulModel, simpleRequest(), headers("chat-a"), NS_OWUI);
+
+        ArgumentCaptor<UserMemoryEntry> moved = ArgumentCaptor.forClass(UserMemoryEntry.class);
+        verify(userMemoryStore, times(1)).upsert(moved.capture());
+        assertEquals(NS_OWUI, moved.getValue().userId());
+        assertEquals("favourite_colour", moved.getValue().key());
+        // Both legacy rows dropped; the conflicting one lost to the newer identity.
+        verify(userMemoryStore).deleteEntry("m1");
+        verify(userMemoryStore).deleteEntry("m2");
+        // Then a fresh conversation is started under the namespaced id.
+        verify(conversationService).startConversation(any(), eq(AGENT_ID_SUPPORT), eq(NS_OWUI), any());
+    }
+
+    @Test
+    void statelessNamespacedCaller_stillMovesRawIdMemories() throws Exception {
+        when(userMemoryStore.getAllEntries(RAW_OWUI)).thenReturn(List.of(
+                memEntry("m1", RAW_OWUI, "k", AGENT_ID_SUPPORT, "v")));
+        when(userMemoryStore.getAllEntries(NS_OWUI)).thenReturn(List.of());
+
+        bridge.prepare(statelessModel, simpleRequest(), headers("chat-a"), NS_OWUI);
+
+        verify(userMemoryStore).upsert(any());
+        verify(userMemoryStore).deleteEntry("m1");
+    }
+
+    @Test
+    void nonNamespacedCaller_isNeverLookedUpUnderARawIdNorMigrated() throws Exception {
+        // A plain (e.g. OIDC) userId must not trigger any legacy lookup or migration.
+        when(userConversationStore.readUserConversation(any(), any())).thenReturn(null);
+
+        bridge.prepare(statefulModel, simpleRequest(), headers("chat-a"), USER_ID);
+
+        verify(userMemoryStore, never()).getAllEntries(any());
+        // Only the namespaced-absent read happened; no raw-id fallback read.
+        verify(userConversationStore, times(1)).readUserConversation(any(), any());
+    }
+
+    @Test
+    void memoryMigrationFailure_doesNotFailTheTurn() throws Exception {
+        when(userConversationStore.readUserConversation(any(), any())).thenReturn(null);
+        when(userMemoryStore.getAllEntries(RAW_OWUI)).thenThrow(new RuntimeException("db down"));
+
+        var turn = bridge.prepare(statefulModel, simpleRequest(), headers("chat-a"), NS_OWUI);
+
+        assertEquals(CONVERSATION_ID, turn.conversationId());
     }
 
     /**

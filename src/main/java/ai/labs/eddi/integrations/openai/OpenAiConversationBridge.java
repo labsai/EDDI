@@ -5,6 +5,8 @@
 package ai.labs.eddi.integrations.openai;
 
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.configs.properties.IUserMemoryStore;
+import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.lifecycle.TaskId;
@@ -28,7 +30,10 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -86,6 +91,7 @@ public class OpenAiConversationBridge {
 
     private final IConversationService conversationService;
     private final IUserConversationStore userConversationStore;
+    private final IUserMemoryStore userMemoryStore;
     private final OpenAiMessageMapper messageMapper;
     private final OpenAiCompatConfig config;
     private final MeterRegistry meterRegistry;
@@ -98,6 +104,7 @@ public class OpenAiConversationBridge {
     @Inject
     public OpenAiConversationBridge(IConversationService conversationService,
             IUserConversationStore userConversationStore,
+            IUserMemoryStore userMemoryStore,
             OpenAiMessageMapper messageMapper,
             OpenAiCompatConfig config,
             MeterRegistry meterRegistry,
@@ -105,6 +112,7 @@ public class OpenAiConversationBridge {
         this.resourceAccessGuard = resourceAccessGuard;
         this.conversationService = conversationService;
         this.userConversationStore = userConversationStore;
+        this.userMemoryStore = userMemoryStore;
         this.messageMapper = messageMapper;
         this.config = config;
         this.meterRegistry = meterRegistry;
@@ -190,9 +198,15 @@ public class OpenAiConversationBridge {
         String chatKey = resolveChatKey(headers, request);
         String intent = buildIntent(model.agentId(), chatKey);
 
-        String conversationId = model.stateless()
-                ? startConversation(model, userId, intent)
-                : getOrCreateConversation(model, userId, intent);
+        String conversationId;
+        if (model.stateless()) {
+            // Stateless turns keep no mapping, but memory still loads by userId, so a
+            // namespaced Open WebUI caller must still inherit what the raw id learned.
+            migrateLegacyMemories(userId);
+            conversationId = startConversation(model, userId, intent);
+        } else {
+            conversationId = getOrCreateConversation(model, userId, intent);
+        }
 
         return new PreparedTurn(conversationId, inputData, model.stateless());
     }
@@ -210,6 +224,17 @@ public class OpenAiConversationBridge {
             // Ended or vanished — drop the stale mapping and start over rather
             // than failing every subsequent message in this chat.
             deleteMapping(intent, userId);
+        } else {
+            // No mapping under the namespaced id: an Open WebUI chat that predates
+            // namespacing may still have one under the raw header id. Adopt it (the
+            // conversation keeps its raw-id owner and memories), else move the raw
+            // id's long-term memories over before starting fresh. Mirrors
+            // SlackEventHandler.getOrCreateConversation.
+            String legacyConversationId = adoptLegacyMapping(model, userId, intent);
+            if (legacyConversationId != null) {
+                return legacyConversationId;
+            }
+            migrateLegacyMemories(userId);
         }
 
         String conversationId = startConversation(model, userId, intent);
@@ -264,6 +289,95 @@ public class OpenAiConversationBridge {
                     sanitize(model.agentId()), e.getMessage());
             throw OpenAiApiException.serverError(null, "Could not start a conversation: " + e.getMessage());
         }
+    }
+
+    // ─── legacy-identity migration (raw Open WebUI id → openwebui:<id>) ───
+
+    /**
+     * Adopt a chat mapping stored under the raw header id, re-keying it to the
+     * namespaced id so the chat keeps its conversation. The conversation is not
+     * touched — it keeps the raw id as its owner, and with it the memories it has
+     * always loaded. Only attempted for a namespaced Open WebUI caller.
+     *
+     * @return the adopted conversation id, or {@code null} when there is nothing to
+     *         adopt (not a namespaced caller, no legacy mapping, or a stale one)
+     */
+    private String adoptLegacyMapping(AgentModelResolver.ResolvedModel model, String userId, String intent) {
+        String rawId = OpenAiUserIdentity.rawId(userId);
+        if (rawId == null) {
+            return null;
+        }
+        UserConversation legacy = readMapping(intent, rawId);
+        if (legacy == null) {
+            return null;
+        }
+        if (!isUsable(legacy.getConversationId())) {
+            deleteMapping(intent, rawId);
+            return null;
+        }
+        try {
+            userConversationStore.createUserConversation(new UserConversation(
+                    intent, userId, legacy.getEnvironment() != null ? legacy.getEnvironment() : model.environment(),
+                    legacy.getAgentId() != null ? legacy.getAgentId() : model.agentId(), legacy.getConversationId()));
+        } catch (Exception e) {
+            // A concurrent request re-keyed it first; fall through and drop the legacy
+            // mapping anyway. Returning the conversation is still correct.
+            LOGGER.debugf("Namespaced mapping for %s already exists: %s", sanitize(intent), e.getMessage());
+        }
+        deleteMapping(intent, rawId);
+        LOGGER.infof("Re-keyed legacy Open WebUI conversation mapping %s to the namespaced user id", sanitize(intent));
+        return legacy.getConversationId();
+    }
+
+    /**
+     * Move long-term memory entries stored under the raw header id to the
+     * namespaced id, so a new conversation still remembers what earlier ones
+     * learned. No-op unless {@code userId} is a namespaced Open WebUI id. An entry
+     * the namespaced identity already holds for the same key and agent wins, and
+     * the legacy copy is dropped. Idempotent: once moved there is nothing left
+     * under the raw id. Best-effort — a failure leaves the entries where they were
+     * rather than failing the turn.
+     */
+    private void migrateLegacyMemories(String userId) {
+        String rawId = OpenAiUserIdentity.rawId(userId);
+        if (rawId == null) {
+            return;
+        }
+        try {
+            List<UserMemoryEntry> legacyEntries = userMemoryStore.getAllEntries(rawId);
+            if (legacyEntries == null || legacyEntries.isEmpty()) {
+                return;
+            }
+            Set<MemoryIdentity> held = new HashSet<>();
+            for (UserMemoryEntry entry : userMemoryStore.getAllEntries(userId)) {
+                held.add(memoryIdentity(entry));
+            }
+            int moved = 0;
+            for (UserMemoryEntry entry : legacyEntries) {
+                if (!held.contains(memoryIdentity(entry))) {
+                    userMemoryStore.upsert(new UserMemoryEntry(null, userId, entry.key(), entry.value(),
+                            entry.category(), entry.visibility(), entry.sourceAgentId(), entry.groupIds(),
+                            entry.sourceConversationId(), entry.conflicted(), entry.accessCount(),
+                            entry.createdAt(), entry.updatedAt()));
+                    moved++;
+                }
+                userMemoryStore.deleteEntry(entry.id());
+            }
+            LOGGER.infof("Moved %d legacy Open WebUI user memory entries to the namespaced user id", moved);
+        } catch (Exception e) {
+            LOGGER.warnf("Could not migrate legacy Open WebUI user memories: %s", e.getMessage());
+        }
+    }
+
+    /**
+     * An entry's upsert identity, less the owner: its key and the agent that wrote
+     * it.
+     */
+    private record MemoryIdentity(String key, String sourceAgentId) {
+    }
+
+    private static MemoryIdentity memoryIdentity(UserMemoryEntry entry) {
+        return new MemoryIdentity(entry.key(), entry.sourceAgentId());
     }
 
     // ─── turn execution ───
