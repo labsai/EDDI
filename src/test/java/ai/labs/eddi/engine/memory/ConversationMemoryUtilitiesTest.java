@@ -205,6 +205,40 @@ class ConversationMemoryUtilitiesTest {
         }
 
         @Test
+        @DisplayName("returnDetailed=true must redact secrets nested inside a structured (Map/List) value")
+        void detailedRedactsStructuredValues() {
+            // A secret embedded in a deserialized httpCall response body (a Map/List under
+            // an agent-chosen, non-denylisted key) must not reach the detailed view raw.
+            String secret = "sk-ant-abcdefghijklmnopqrstuvwxyz012345";
+            Object body = Map.of("token", secret, "nested", List.of(Map.of("apiKey", secret)));
+
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setConversationId("conv-struct");
+            snapshot.setAgentId("agent-1");
+            snapshot.setAgentVersion(1);
+            var output = new ConversationOutput();
+            output.put("httpCall:myApi", body);
+            snapshot.getConversationOutputs().add(output);
+            var step = new ConversationStepSnapshot();
+            var workflow = new WorkflowRunSnapshot();
+            workflow.getLifecycleTasks().add(new ResultSnapshot("httpCall:myApi", body, null, new Date(), null, true));
+            step.getWorkflows().add(workflow);
+            snapshot.getConversationSteps().add(step);
+
+            var simple = ConversationMemoryUtilities.convertSimpleConversationMemory(snapshot, true, false);
+
+            String outStr = String.valueOf(simple.getConversationOutputs().getFirst().get("httpCall:myApi"));
+            assertFalse(outStr.contains(secret), "the raw secret must not survive in a structured output value");
+            assertTrue(outStr.contains("<REDACTED>"), "the nested secret must be masked");
+
+            var stepData = simple.getConversationSteps().getFirst().getConversationStep().stream()
+                    .filter(d -> "httpCall:myApi".equals(d.getKey())).findFirst().orElseThrow();
+            String stepStr = String.valueOf(stepData.getValue());
+            assertFalse(stepStr.contains(secret), "the raw secret must not survive in a structured step value");
+            assertTrue(stepStr.contains("<REDACTED>"), "the nested secret must be masked in step data");
+        }
+
+        @Test
         @DisplayName("should set undoAvailable=true when >1 steps")
         void undoAvailable() {
             var snapshot = buildMultiStepSnapshot(3);

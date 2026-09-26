@@ -33,7 +33,9 @@ keep working, while the missing owner/role/redaction checks are added.
 - **`returnDetailed` step-data exposure.** The detailed conversion now drops sensitive
   internal keys (`audit:*`, `*:trace:*`, `*Error`) and runs values through
   `SecretRedactionFilter`, matching the SSE path; full-fidelity debugging remains on the
-  owner/admin-gated raw endpoint.
+  owner/admin-gated raw endpoint. Redaction recurses into `Map` values and `List`
+  elements, so a secret embedded in a structured value (e.g. a deserialized httpCall
+  response body under an agent-chosen key) is masked too, not just top-level strings.
 - **Semantic parser endpoint.** `POST /parser/{parserId}` was role-less; it now requires
   `eddi-admin`/`eddi-editor` and a `VIEW` check on the specific parser configuration.
 - **Postgres health readiness.** The anonymous readiness payload no longer returns the

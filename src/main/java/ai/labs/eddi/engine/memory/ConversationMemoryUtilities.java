@@ -231,14 +231,35 @@ public class ConversationMemoryUtilities {
     }
 
     /**
-     * Runs a step/output value through {@link SecretRedactionFilter} when it is a
-     * String; other shapes (lists, maps, POJOs) are returned unchanged. The
+     * Runs a step/output value through {@link SecretRedactionFilter}, recursing
+     * into {@link Map} values and {@link List}/array elements so a secret embedded
+     * in a <em>structured</em> value is masked too — e.g. a deserialized httpCall
+     * response body stored as a Map/List under the agent-chosen
+     * {@code responseObjectName}, which is not a denylisted key and would otherwise
+     * reach the caller-controlled {@code returnDetailed} view unredacted. Every
+     * String leaf is redacted; other scalar shapes are returned unchanged. The
      * sensitive internal keys are already dropped by
-     * {@link #isSensitiveDetailedKey} before this is reached, so this masks
-     * secret-looking substrings in the textual values that remain.
+     * {@link #isSensitiveDetailedKey} before this is reached.
      */
     private static Object redactDetailedValue(Object value) {
-        return value instanceof String s ? SecretRedactionFilter.redact(s) : value;
+        if (value instanceof String s) {
+            return SecretRedactionFilter.redact(s);
+        }
+        if (value instanceof Map<?, ?> map) {
+            var redacted = new LinkedHashMap<Object, Object>();
+            for (var entry : map.entrySet()) {
+                redacted.put(entry.getKey(), redactDetailedValue(entry.getValue()));
+            }
+            return redacted;
+        }
+        if (value instanceof List<?> list) {
+            var redacted = new ArrayList<Object>(list.size());
+            for (var element : list) {
+                redacted.add(redactDetailedValue(element));
+            }
+            return redacted;
+        }
+        return value;
     }
 
     public static SimpleConversationMemorySnapshot convertSimpleConversationMemory(ConversationMemorySnapshot conversationMemorySnapshot,
