@@ -29,6 +29,7 @@ import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -53,6 +54,7 @@ public class GridFsAttachmentStore implements IAttachmentStore {
     private static final String META_STORAGE_REF = "storageRef";
     private static final String META_MIME_TYPE = "mimeType";
     private static final String META_GRANTS = "grants";
+    static final long INDEX_TIMEOUT_SECONDS = 10;
 
     private final GridFSBucket gridFSBucket;
     private final MongoCollection<Document> filesCollection;
@@ -70,7 +72,18 @@ public class GridFsAttachmentStore implements IAttachmentStore {
     public GridFsAttachmentStore(MongoDatabase database) {
         this.gridFSBucket = GridFSBuckets.create(database, BUCKET_NAME);
         this.filesCollection = database.getCollection(BUCKET_NAME + ".files");
-        ensureIndexes(filesCollection);
+    }
+
+    /**
+     * Creates the metadata indexes, each bounded by {@link #INDEX_TIMEOUT_SECONDS}
+     * so an unreachable database delays startup by that much at most rather than by
+     * one server-selection timeout per index. Called once at startup by
+     * {@link GridFsIndexInitializer}, not from the constructor: the bean is created
+     * on first use, which put a blocking index build on the first attachment
+     * request.
+     */
+    public void ensureIndexes() {
+        ensureIndexes(filesCollection.withTimeout(INDEX_TIMEOUT_SECONDS, TimeUnit.SECONDS));
     }
 
     /**

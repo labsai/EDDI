@@ -8,6 +8,7 @@ import ai.labs.eddi.datastore.IResourceFilter;
 import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
+import com.mongodb.MongoException;
 import com.mongodb.MongoWriteException;
 import com.mongodb.WriteConcern;
 import com.mongodb.client.MongoCollection;
@@ -20,6 +21,7 @@ import com.mongodb.client.model.Updates;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.bson.types.ObjectId;
+import org.jboss.logging.Logger;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -36,6 +38,7 @@ import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
  * @author ginccc
  */
 public class MongoResourceStorage<T> implements IResourceStorage<T> {
+    private static final Logger LOGGER = Logger.getLogger(MongoResourceStorage.class);
     public static final String VERSION_FIELD = "_version";
     public static final String ID_FIELD = "_id";
     private static final String DELETED_FIELD = "_deleted";
@@ -284,6 +287,28 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
                     String.format("Resource was modified concurrently (id=%s, expected version=%d)",
                             resource.getId(), expectedCurrentVersion));
         }
+        clearStaleTombstone(historyResource.getMongoDocument().get(ID_FIELD));
+    }
+
+    /**
+     * Takes a {@code deleted} flag off a history row whose version was, a moment
+     * ago, the live one.
+     * <p>
+     * The archive above is insert-if-absent, so a tombstone a failed delete left on
+     * this version (see {@link #storeHistoryAndRemove}) would otherwise survive the
+     * update for good: every later read of that version answers 404, and a
+     * deployment pinned to it stops loading. Having just replaced the live row at
+     * exactly this version proves the resource was not deleted there. Best-effort —
+     * the update itself has already succeeded.
+     */
+    private void clearStaleTombstone(Object historyRowId) {
+        try {
+            historyCollection.updateOne(
+                    Filters.and(Filters.eq(ID_FIELD, historyRowId), Filters.eq(DELETED_FIELD, true)),
+                    Updates.unset(DELETED_FIELD));
+        } catch (MongoException e) {
+            LOGGER.warnf("Could not clear a stale deleted flag on history row %s: %s", historyRowId, e.getMessage());
+        }
     }
 
     /**
@@ -307,21 +332,43 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         var durableHistory = historyCollection.withWriteConcern(WriteConcern.MAJORITY);
         durableHistory.replaceOne(historyRow, historyResource.getMongoDocument(), new ReplaceOptions().upsert(true));
 
-        var result = currentCollection.withWriteConcern(WriteConcern.MAJORITY).deleteOne(
-                Filters.and(
-                        Filters.eq(ID_FIELD, new ObjectId(id)),
-                        Filters.eq(VERSION_FIELD, expectedCurrentVersion)));
-        if (result.getDeletedCount() > 0) {
-            return;
-        }
-        if (currentCollection.countDocuments(Filters.eq(ID_FIELD, new ObjectId(id))) == 0) {
-            // Already gone — a concurrent delete of the same version won. Deleted, as
-            // asked.
-            return;
+        try {
+            var result = currentCollection.withWriteConcern(WriteConcern.MAJORITY).deleteOne(
+                    Filters.and(
+                            Filters.eq(ID_FIELD, new ObjectId(id)),
+                            Filters.eq(VERSION_FIELD, expectedCurrentVersion)));
+            if (result.getDeletedCount() > 0) {
+                return;
+            }
+            if (currentCollection.countDocuments(Filters.eq(ID_FIELD, new ObjectId(id))) == 0) {
+                // Already gone — a concurrent delete of the same version won. Deleted, as
+                // asked.
+                return;
+            }
+        } catch (MongoException e) {
+            // A write-concern timeout, a step-down or a network error: whether the delete
+            // happened is unknown. If the resource is still live at this version, the
+            // tombstone is a lie that would make the version unreadable for good.
+            untombstoneIfStillLive(historyRow, id, expectedCurrentVersion);
+            throw e;
         }
         durableHistory.updateOne(historyRow, Updates.unset(DELETED_FIELD));
         throw new IResourceStore.ResourceModifiedException(
                 String.format("Resource was modified concurrently (id=%s, expected version=%d)", id, expectedCurrentVersion));
+    }
+
+    private void untombstoneIfStillLive(Bson historyRow, String id, int version) {
+        try {
+            long live = currentCollection.countDocuments(
+                    Filters.and(Filters.eq(ID_FIELD, new ObjectId(id)), Filters.eq(VERSION_FIELD, version)));
+            if (live > 0) {
+                historyCollection.withWriteConcern(WriteConcern.MAJORITY).updateOne(historyRow, Updates.unset(DELETED_FIELD));
+            }
+        } catch (MongoException e) {
+            // Still unreachable. The next successful update of this version clears the
+            // flag (see clearStaleTombstone).
+            LOGGER.warnf("Delete of %s v%d failed and its tombstone could not be checked: %s", id, version, e.getMessage());
+        }
     }
 
     @Override
