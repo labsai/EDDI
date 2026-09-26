@@ -24,6 +24,7 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.IPropertiesHandler;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
+import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ConversationStepSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.WorkflowRunSnapshot;
@@ -812,6 +813,60 @@ class ConversationServiceTest {
                     }));
 
             verify(conversationMemoryStore, atLeastOnce()).loadConversationMemorySnapshot(CONVERSATION_ID);
+        }
+
+        private void softDeletedBeforeTheFix() throws Exception {
+            var snapshot = createMinimalSnapshot(AGENT_ID, USER_ID);
+            snapshot.setEnvironment(ENV);
+            snapshot.setConversationState(ConversationState.READY);
+            doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+            doThrow(new ResourceNotFoundException("archived")).when(conversationDescriptorStore).readDescriptor(CONVERSATION_ID, 0);
+            doReturn(new ConversationDescriptor()).when(conversationDescriptorStore).readDescriptorWithHistory(CONVERSATION_ID, 0);
+        }
+
+        @Test
+        @DisplayName("#4: a conversation soft-deleted by an earlier release (still READY) is ended and refused, not continued")
+        void legacySoftDeleted_endedAndRefused() throws Exception {
+            softDeletedBeforeTheFix();
+            var inputData = new InputData("hello", new LinkedHashMap<>());
+
+            assertThrows(IConversationService.ConversationEndedException.class,
+                    () -> conversationService.say(CONVERSATION_ID, false, false, null, inputData, false, (s) -> {
+                    }));
+
+            verify(conversationMemoryStore).setConversationState(CONVERSATION_ID, ConversationState.ENDED);
+            verify(agentFactory, never()).getAgent(any(), anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("#4: the streaming entry point refuses a legacy soft-deleted conversation too")
+        void legacySoftDeleted_streamingRefused() throws Exception {
+            softDeletedBeforeTheFix();
+            var inputData = new InputData("hello", new LinkedHashMap<>());
+
+            assertThrows(IConversationService.ConversationEndedException.class,
+                    () -> conversationService.sayStreaming(CONVERSATION_ID, false, false, null, inputData,
+                            mock(IConversationService.StreamingResponseHandler.class)));
+
+            verify(conversationMemoryStore).setConversationState(CONVERSATION_ID, ConversationState.ENDED);
+        }
+
+        @Test
+        @DisplayName("#4: a conversation with a live descriptor is not treated as soft-deleted")
+        void liveDescriptor_notRefused() throws Exception {
+            var snapshot = createMinimalSnapshot(AGENT_ID, USER_ID);
+            snapshot.setEnvironment(ENV);
+            snapshot.setConversationState(ConversationState.READY);
+            doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+            doReturn(new ConversationDescriptor()).when(conversationDescriptorStore).readDescriptor(CONVERSATION_ID, 0);
+            var inputData = new InputData("hello", new LinkedHashMap<>());
+
+            // Proceeds to the env-based say (which then fails: no agent is deployed).
+            assertThrows(IConversationService.AgentNotReadyException.class,
+                    () -> conversationService.say(CONVERSATION_ID, false, false, null, inputData, false, (s) -> {
+                    }));
+            verify(conversationMemoryStore, never()).setConversationState(anyString(), any());
+            verify(conversationDescriptorStore, never()).readDescriptorWithHistory(anyString(), anyInt());
         }
     }
 

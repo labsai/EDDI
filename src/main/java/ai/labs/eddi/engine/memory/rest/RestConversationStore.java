@@ -33,6 +33,7 @@ import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -42,6 +43,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Date;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Set;
@@ -88,13 +90,15 @@ public class RestConversationStore implements IRestConversationStore {
     static final int MIN_RETENTION_DAYS = 1;
 
     /**
-     * Actor recorded when deleting a conversation ends it — the HITL cancellation
-     * audit carries it if the conversation was paused (G4).
+     * Fallback actor recorded when deleting a conversation ends it and there is no
+     * named caller — the HITL cancellation audit carries the actor if the
+     * conversation was paused (G4). A named caller is recorded as themselves.
      */
     static final String DELETE_ACTOR = "system:delete";
 
     /**
-     * Actor recorded by the agent-scoped bulk end ({@code POST …/end}, undeploy).
+     * Fallback actor for the agent-scoped bulk end ({@code POST …/end}, undeploy)
+     * when there is no named caller; a named caller is recorded as themselves.
      */
     static final String BULK_END_ACTOR = "system:admin-end";
 
@@ -474,7 +478,7 @@ public class RestConversationStore implements IRestConversationStore {
     private void softDelete(String conversationId) throws ResourceStoreException, ResourceNotFoundException {
         var state = conversationMemoryStore.getConversationState(conversationId);
         if (state != null && state != ConversationState.ENDED) {
-            conversationService.endConversation(conversationId, DELETE_ACTOR);
+            conversationService.endConversation(conversationId, conversationAccessGuard.callerActor(DELETE_ACTOR));
             markDescriptorEnded(conversationId);
         }
         try {
@@ -580,31 +584,53 @@ public class RestConversationStore implements IRestConversationStore {
                 // soft-deleted conversation would be purged on the very next sweep,
                 // however recently it was active. Only a snapshot with no descriptor
                 // at all (live or archived) is an orphan to remove straight away.
-                if (archivedWithinRetention(endedConversationId, deleteOlderThanThisDate)) {
+                var archive = archiveRetention(endedConversationId, deleteOlderThanThisDate);
+                if (archive == ArchiveRetention.WITHIN_RETENTION) {
                     continue;
                 }
                 conversationDescriptorStore.deleteAllDescriptor(endedConversationId);
                 deleteAttachmentsForConversation(endedConversationId);
                 conversationMemoryStore.deleteConversationMemorySnapshot(endedConversationId);
-                log.debug(format("Cleaned up orphaned conversation memory without descriptor (id=%s)", endedConversationId));
+                if (archive == ArchiveRetention.EXPIRED) {
+                    // A soft-deleted conversation that aged out: an ordinary retention
+                    // deletion, counted as one.
+                    amountOfEndedConversations++;
+                    log.debug(format("Deleted soft-deleted conversation past retention (id=%s)", sanitize(endedConversationId)));
+                } else {
+                    log.debug(format("Cleaned up orphaned conversation memory without descriptor (id=%s)", sanitize(endedConversationId)));
+                }
             }
         }
 
         return amountOfEndedConversations;
     }
 
-    /**
-     * Whether a conversation without a live descriptor has an archived one that was
-     * modified on or after the retention cut-off, i.e. is not due for deletion yet.
-     */
-    private boolean archivedWithinRetention(String conversationId, Date deleteOlderThanThisDate) throws ResourceStoreException {
+    /** Where a conversation without a live descriptor stands against retention. */
+    private enum ArchiveRetention {
+        /** No archived descriptor either: an orphaned snapshot. */
+        NO_ARCHIVE,
+        /** Soft-deleted, last modified on or after the cut-off: keep for now. */
+        WITHIN_RETENTION,
+        /** Soft-deleted and past retention (or of unknown age): delete. */
+        EXPIRED
+    }
+
+    private ArchiveRetention archiveRetention(String conversationId, Date deleteOlderThanThisDate) throws ResourceStoreException {
+        ConversationDescriptor archived;
         try {
-            var archived = conversationDescriptorStore.readDescriptorWithHistory(conversationId, CONVERSATION_DESCRIPTOR_VERSION);
-            return archived != null && archived.getLastModifiedOn() != null
-                    && !archived.getLastModifiedOn().before(deleteOlderThanThisDate);
+            archived = conversationDescriptorStore.readDescriptorWithHistory(conversationId, CONVERSATION_DESCRIPTOR_VERSION);
         } catch (ResourceNotFoundException e) {
-            return false;
+            archived = null;
         }
+        if (archived == null) {
+            return ArchiveRetention.NO_ARCHIVE;
+        }
+        // An archive with no date cannot be aged, and the conversation is both ended
+        // and deleted — it is not kept forever on that account.
+        if (archived.getLastModifiedOn() != null && !archived.getLastModifiedOn().before(deleteOlderThanThisDate)) {
+            return ArchiveRetention.WITHIN_RETENTION;
+        }
+        return ArchiveRetention.EXPIRED;
     }
 
     @Override
@@ -663,7 +689,7 @@ public class RestConversationStore implements IRestConversationStore {
     /**
      * Ends the listed conversations. Only the conversation ids are read from the
      * request: which agent a conversation belongs to and which state it is in come
-     * from the stored snapshot.
+     * from the server.
      *
      * <p>
      * The request's {@code conversationState} used to decide whether the HITL-aware
@@ -672,14 +698,33 @@ public class RestConversationStore implements IRestConversationStore {
      * conversation sent as {@code AWAITING_HUMAN} wrote a forged
      * {@code hitl.approval} cancellation to the audit trail. Every conversation now
      * goes through {@link IConversationService#endConversation(String, String)},
-     * which reads the previous state itself.
+     * which reads the previous state itself, and a terminated approval is
+     * attributed to the calling principal.
      * </p>
      *
      * <p>
-     * Each conversation takes EDIT access on its (stored) agent, the access
-     * undeploy-with-end takes for all of them at once. An unknown or already ended
-     * conversation is skipped, so a stale list from {@code GET …/active} still ends
-     * whatever is still open.
+     * <strong>Authorization is all-or-nothing:</strong> every conversation's agent
+     * is checked for EDIT access before any conversation is ended, so a list that
+     * mixes agents the caller may and may not edit is refused with 403 and nothing
+     * changes. (The EDIT check is only enforced with workspaces on —
+     * {@code eddi.workspaces.enabled=true}; otherwise the role on the interface is
+     * the whole gate, exactly as for undeploy.)
+     * </p>
+     *
+     * <p>
+     * <strong>Ending is per conversation and continues on error.</strong> An
+     * unknown or already ENDED id is skipped. If ending one conversation fails, the
+     * rest are still ended and the response is a 500 whose body lists what was
+     * {@code ended}, {@code skipped} and {@code failed}; otherwise it is a 200 with
+     * the same body. Recording ENDED on the descriptor is best-effort — the listing
+     * re-derives the state from the snapshot — so it is logged, not failed.
+     * </p>
+     *
+     * <p>
+     * State and agent are read without loading the memory snapshot: the state
+     * through the state projection, the agent from the conversation descriptor
+     * (live or archived). Only a conversation with no descriptor at all falls back
+     * to the snapshot.
      * </p>
      */
     @Override
@@ -687,52 +732,94 @@ public class RestConversationStore implements IRestConversationStore {
         if (conversationStatuses == null) {
             throw new BadRequestException("A list of conversations to end is required");
         }
+        String actor = conversationAccessGuard.callerActor(BULK_END_ACTOR);
         try {
-            // Authorize the whole batch before ending anything, so a list that mixes
-            // agents the caller may and may not edit is refused as a whole rather
-            // than half-applied.
             Set<String> checkedAgents = new HashSet<>();
             List<String> toEnd = new LinkedList<>();
+            List<String> skipped = new LinkedList<>();
             for (ConversationStatus conversationStatus : conversationStatuses) {
                 String conversationId = conversationStatus == null ? null : conversationStatus.getConversationId();
                 if (isNullOrEmpty(conversationId)) {
                     continue;
                 }
 
-                ConversationMemorySnapshot snapshot;
-                try {
-                    snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
-                } catch (ResourceNotFoundException e) {
-                    snapshot = null;
-                }
-                if (snapshot == null) {
+                ConversationState state = conversationMemoryStore.getConversationState(conversationId);
+                if (state == null) {
                     log.debug(format("Skipping unknown conversation %s in bulk end", sanitize(conversationId)));
+                    skipped.add(conversationId);
                     continue;
                 }
-                if (checkedAgents.add(snapshot.getAgentId())) {
-                    resourceAccessGuard.requireAccess(snapshot.getAgentId(), AccessLevel.EDIT, "agent");
+                String agentId = agentIdOf(conversationId);
+                if (checkedAgents.add(String.valueOf(agentId))) {
+                    resourceAccessGuard.requireAccess(agentId, AccessLevel.EDIT, "agent");
                 }
-                if (snapshot.getConversationState() != ConversationState.ENDED) {
+                if (state == ConversationState.ENDED) {
+                    skipped.add(conversationId);
+                } else {
                     toEnd.add(conversationId);
                 }
             }
 
+            List<String> ended = new LinkedList<>();
+            List<String> failed = new LinkedList<>();
             for (String conversationId : toEnd) {
-                // The HITL-aware end for every state: it reads the previous state
-                // server-side, and only a conversation that really was AWAITING_HUMAN
-                // gets its timer disarmed, bookmark cleared and cancellation audited.
-                // It also signals an in-flight resume so it does not persist its
-                // snapshot back over ENDED, and keeps the state cache in step — the raw
-                // setConversationState used for non-paused conversations did neither.
-                conversationService.endConversation(conversationId, BULK_END_ACTOR);
-                markDescriptorEnded(conversationId);
-
+                try {
+                    conversationService.endConversation(conversationId, actor);
+                } catch (RuntimeException e) {
+                    log.error(format("Could not end conversation %s in bulk end", sanitize(conversationId)), e);
+                    failed.add(conversationId);
+                    continue;
+                }
+                ended.add(conversationId);
+                try {
+                    markDescriptorEnded(conversationId);
+                } catch (ResourceStoreException | RuntimeException e) {
+                    log.warn(format("Conversation %s was ended but its descriptor could not be marked ENDED: %s",
+                            sanitize(conversationId), sanitize(e.getMessage())));
+                }
                 log.info(format("conversation (%s) has been set to ENDED", sanitize(conversationId)));
             }
 
-            return Response.ok().build();
+            var result = new LinkedHashMap<String, List<String>>();
+            result.put("ended", ended);
+            result.put("skipped", skipped);
+            result.put("failed", failed);
+            var status = failed.isEmpty() ? Response.Status.OK : Response.Status.INTERNAL_SERVER_ERROR;
+            return Response.status(status).entity(result).type(MediaType.APPLICATION_JSON).build();
         } catch (ResourceStoreException e) {
             throw sneakyThrow(e);
+        }
+    }
+
+    /**
+     * The agent a conversation belongs to, from its descriptor (live, else
+     * archived), falling back to the memory snapshot only when it has neither.
+     */
+    private String agentIdOf(String conversationId) throws ResourceStoreException {
+        ConversationDescriptor descriptor;
+        try {
+            descriptor = conversationDescriptorStore.readDescriptor(conversationId, CONVERSATION_DESCRIPTOR_VERSION);
+        } catch (ResourceNotFoundException e) {
+            descriptor = null;
+        }
+        if (descriptor == null) {
+            try {
+                descriptor = conversationDescriptorStore.readDescriptorWithHistory(conversationId, CONVERSATION_DESCRIPTOR_VERSION);
+            } catch (ResourceNotFoundException e) {
+                descriptor = null;
+            }
+        }
+        if (descriptor != null && descriptor.getAgentResource() != null) {
+            var agentResourceId = extractResourceId(descriptor.getAgentResource());
+            if (agentResourceId != null && !isNullOrEmpty(agentResourceId.getId())) {
+                return agentResourceId.getId();
+            }
+        }
+        try {
+            var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            return snapshot == null ? null : snapshot.getAgentId();
+        } catch (ResourceNotFoundException e) {
+            return null;
         }
     }
 

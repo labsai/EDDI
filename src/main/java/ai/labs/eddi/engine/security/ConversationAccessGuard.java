@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
+import jakarta.enterprise.context.ContextNotActiveException;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.NotFoundException;
@@ -195,6 +196,23 @@ public class ConversationAccessGuard {
      */
     public boolean seesAllConversations() {
         return ownershipValidator.isAdmin(identity);
+    }
+
+    /**
+     * The calling principal's name, to attribute an action on a conversation in the
+     * audit trail (G4) — e.g. the {@code hitl.approval} cancellation written when a
+     * delete or bulk end terminates a pending approval. Falls back to
+     * {@code fallbackActor} when there is no named caller: anonymous, a nameless
+     * token, or no request context at all.
+     */
+    public String callerActor(String fallbackActor) {
+        try {
+            var principal = identity == null || identity.isAnonymous() ? null : identity.getPrincipal();
+            String name = principal == null ? null : principal.getName();
+            return name == null || name.isBlank() ? fallbackActor : name;
+        } catch (ContextNotActiveException e) {
+            return fallbackActor;
+        }
     }
 
     /**

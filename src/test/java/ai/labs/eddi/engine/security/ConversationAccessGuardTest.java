@@ -221,6 +221,24 @@ class ConversationAccessGuardTest {
     }
 
     @Nested
+    @DisplayName("callerActor")
+    class CallerActor {
+
+        @Test
+        @DisplayName("a named caller is the actor")
+        void namedCaller() {
+            assertEquals(OWNER, guardFor(identityOf(OWNER, "eddi-editor"), true).callerActor("system:x"));
+        }
+
+        @Test
+        @DisplayName("anonymous or nameless callers fall back")
+        void fallsBack() {
+            assertEquals("system:x", guardFor(identityOf(null), true).callerActor("system:x"));
+            assertEquals("system:x", guardFor(namelessIdentity(), true).callerActor("system:x"));
+        }
+    }
+
+    @Nested
     @DisplayName("requireExistingConversationOwner")
     class RequireExistingConversationOwner {
 

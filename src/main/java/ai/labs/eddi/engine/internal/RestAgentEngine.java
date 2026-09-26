@@ -710,9 +710,10 @@ public class RestAgentEngine implements IRestAgentEngine {
     /**
      * Validates that the caller owns the conversation identified by
      * {@code conversationId}. Admin role bypasses the check. If the descriptor
-     * cannot be loaded due to a store error, access is denied (fail-closed). If the
-     * descriptor is not found, the check is skipped and the actual operation will
-     * handle the 404.
+     * cannot be loaded due to a store error, access is denied (fail-closed). A
+     * soft-deleted conversation is checked against its archived descriptor; one
+     * with no descriptor at all is a 404 for everyone but an admin (see
+     * {@link ConversationAccessGuard#requireConversationOwner}).
      */
     private void validateConversationOwnership(String conversationId) {
         validateConversationOwnership(conversationId, false);
@@ -721,8 +722,9 @@ public class RestAgentEngine implements IRestAgentEngine {
     /**
      * @param hitlOperation
      *            if true, uses strict ownership + approver role check
-     * @return the conversation owner's userId, or {@code null} if the descriptor
-     *         was not found (the actual operation handles the 404)
+     * @return the conversation owner's userId; {@code null} for a legacy unowned
+     *         conversation or for an admin addressing one without a descriptor (the
+     *         actual operation then handles the 404)
      */
     private String validateConversationOwnership(String conversationId, boolean hitlOperation) {
         if (hitlOperation) {
