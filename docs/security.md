@@ -54,7 +54,12 @@ This starts Keycloak alongside EDDI with a pre-configured realm, clients and acc
 
 The Keycloak admin console is at `http://localhost:8180/admin` — bound to `127.0.0.1` — with the user `admin` and the `KEYCLOAK_ADMIN_PASSWORD` from `~/.eddi/.env`. The public `eddi-frontend` client does not allow the password grant: the Manager signs in with the authorization-code flow.
 
-> **Upgrading an existing install.** These accounts used to ship as `viewer`/`viewer` and `user`/`user`, the console as `admin`/`admin`, and the password grant was on. Realm import is one-shot, so an existing Keycloak volume keeps all of that until it is changed. Re-running the installer changes the console password to the generated one, turns the password grant off and gives `eddi` a first password if it has none; it leaves `viewer` and `user` alone, so reset or delete their credentials in the console if you never changed them.
+> **Upgrading an existing install.** These accounts used to ship as `viewer`/`viewer` and `user`/`user`, the console as `admin`/`admin`, and the password grant was on. Realm import is one-shot, so an existing Keycloak volume keeps all of that until it is changed. Re-run the installer (`install.sh` or `install.ps1`, whether EDDI is running or stopped):
+>
+> - It moves a console that still accepts `admin`/`admin` to a generated `KEYCLOAK_ADMIN_PASSWORD` and records that in `.env`, which the compose overlay now requires. If `.env` has no password and the console no longer accepts `admin`/`admin`, the password is yours to supply: on a running stack the installer stops with the exact line to add; on a stopped one it starts the stack and then warns that the generated value in `.env` must be replaced with your real one. The same goes for Grafana and `GRAFANA_ADMIN_PASSWORD` on a running stack.
+> - It turns the password grant off on `eddi-frontend`, and gives `eddi` a one-time password if it has none.
+> - It does **not** touch `viewer` and `user` (without `--demo-users` / `-DemoUsers`), but it tells you when either still has a password — on a legacy realm that is `viewer`/`viewer` and `user`/`user`. Reset or delete their credentials in the console.
+> - On Linux and macOS, `eddi update` refuses to restart a legacy install that lacks the new password and says to re-run the installer first. On Windows, compose itself stops with a message naming the missing variable.
 
 ### Configuration Properties
 
