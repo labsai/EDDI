@@ -424,4 +424,52 @@ class ConversationLongTermPersistenceTest {
         assertEquals(List.of("group-7", "group-9"), entry.getValue().groupIds(),
                 "writing the property back must not wipe the groups it is shared with");
     }
+
+    @Test
+    @DisplayName("M-E2: re-setting a recalled group property to the same value is not a write")
+    void resettingARecalledGroupPropertyToTheSameValueWritesNothing() throws Exception {
+        Property recalled = new Property("team_goal", "ship it", Scope.longTerm);
+        recalled.setVisibility(Property.Visibility.group);
+        recalled.setGroupIds(List.of("group-7"));
+        memory.getConversationProperties().put("team_goal", recalled);
+        memory.setConversationState(ConversationState.READY);
+
+        IExecutableWorkflow workflow = workflowThat(() -> {
+            // Same value and visibility, but a NEW Property without the recalled groups.
+            Property same = new Property("team_goal", "ship it", Scope.longTerm);
+            same.setVisibility(Property.Visibility.group);
+            memory.getConversationProperties().put("team_goal", same);
+        });
+
+        turnWith(workflow).say("same goal", new LinkedHashMap<>());
+
+        verify(userMemoryStore, never()).upsert(any(UserMemoryEntry.class));
+    }
+
+    @Test
+    @DisplayName("M-E2: the groups outlive the rewrite — a later rewrite without group context keeps them")
+    void groupsSurviveASecondRewriteWithoutGroupContext() throws Exception {
+        Property recalled = new Property("team_goal", "ship it", Scope.longTerm);
+        recalled.setVisibility(Property.Visibility.group);
+        recalled.setGroupIds(List.of("group-7"));
+        memory.getConversationProperties().put("team_goal", recalled);
+        memory.setConversationState(ConversationState.READY);
+
+        turnWith(workflowThat(() -> {
+            Property updated = new Property("team_goal", "ship it twice", Scope.longTerm);
+            updated.setVisibility(Property.Visibility.group);
+            memory.getConversationProperties().put("team_goal", updated);
+        })).say("new goal", new LinkedHashMap<>());
+        turnWith(workflowThat(() -> {
+            Property updated = new Property("team_goal", "ship it thrice", Scope.longTerm);
+            updated.setVisibility(Property.Visibility.group);
+            memory.getConversationProperties().put("team_goal", updated);
+        })).say("newer goal", new LinkedHashMap<>());
+
+        ArgumentCaptor<UserMemoryEntry> entry = ArgumentCaptor.forClass(UserMemoryEntry.class);
+        verify(userMemoryStore, times(2)).upsert(entry.capture());
+        assertEquals("ship it thrice", entry.getAllValues().get(1).value());
+        assertEquals(List.of("group-7"), entry.getAllValues().get(1).groupIds(),
+                "the replaced property became the baseline — it must still carry the groups");
+    }
 }

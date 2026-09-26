@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.runtime.internal;
 
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
@@ -462,6 +463,7 @@ class ScheduleFireExecutorTest {
         var full = new ConversationMemorySnapshot();
         full.setConversationId("full-conv");
         full.setAgentId("agent-1");
+        full.setUserId("system:scheduler");
         full.setConversationState(ConversationState.READY);
         for (int i = 0; i < 3; i++) {
             full.getConversationSteps().add(new ConversationMemorySnapshot.ConversationStepSnapshot());
@@ -493,6 +495,77 @@ class ScheduleFireExecutorTest {
         assertEquals("41", properties.get("counter").getValueString(), "conversation-scoped state must survive the rollover");
         assertFalse(properties.containsKey("scratch"), "step-scoped properties are not carried");
         assertEquals("new", properties.get("started").getValueString(), "what the new start turn set wins");
+    }
+
+    @Test
+    void fire_persistentStrategy_doesNotCarryAnotherUsersPropertiesAcrossTheRollover() throws Exception {
+        var schedule = makeHeartbeatSchedule("hb-owner", "persistent");
+        schedule.setPersistentConversationId("old-owner-conv");
+        setField(executor, "persistentConversationMaxSteps", 3);
+        var full = new ConversationMemorySnapshot();
+        full.setConversationId("old-owner-conv");
+        full.setAgentId("agent-1");
+        full.setUserId("someone-else");
+        full.setConversationState(ConversationState.READY);
+        for (int i = 0; i < 3; i++) {
+            full.getConversationSteps().add(new ConversationMemorySnapshot.ConversationStepSnapshot());
+        }
+        full.getConversationProperties().put("counter", new Property("counter", "41", Property.Scope.conversation));
+        when(conversationMemoryStore.loadConversationMemorySnapshot("old-owner-conv")).thenReturn(full);
+        when(conversationService.startConversation(any(), any(), any(), any()))
+                .thenReturn(new IConversationService.ConversationResult("owner-fresh", null));
+        sayCompletes("owner-fresh");
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals("owner-fresh", result.conversationId());
+        verify(conversationMemoryStore, never()).storeConversationMemorySnapshot(any());
+    }
+
+    @Test
+    void fire_persistentStrategy_keepsTheConversationWhenEndingItForRolloverFails() throws Exception {
+        var schedule = makeHeartbeatSchedule("hb-endfail", "persistent");
+        schedule.setPersistentConversationId("endfail-conv");
+        setField(executor, "persistentConversationMaxSteps", 3);
+        storedConversation("endfail-conv", ConversationState.READY, 5);
+        doThrow(new RuntimeException("store down")).when(conversationService).endConversation("endfail-conv", "system:scheduler");
+        sayCompletes("endfail-conv");
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals("endfail-conv", result.conversationId());
+        verify(conversationService, never()).startConversation(any(), any(), any(), any());
+        verify(scheduleStore, never()).setPersistentConversationId(any(), any());
+    }
+
+    @Test
+    void fire_persistentStrategy_failsTheFireInsteadOfReplacingTheConversationOnAStoreError() throws Exception {
+        var schedule = makeHeartbeatSchedule("hb-outage", "persistent");
+        schedule.setPersistentConversationId("outage-conv");
+        when(conversationMemoryStore.loadConversationMemorySnapshot("outage-conv"))
+                .thenThrow(new RuntimeException("connection refused"));
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals(FireStatus.FAILED.name(), result.status());
+        verify(conversationService, never()).startConversation(any(), any(), any(), any());
+        verify(scheduleStore, never()).setPersistentConversationId(any(), any());
+    }
+
+    @Test
+    void fire_persistentStrategy_replacesAConversationTheStoreReportsMissing() throws Exception {
+        var schedule = makeHeartbeatSchedule("hb-gone", "persistent");
+        schedule.setPersistentConversationId("gone-conv");
+        when(conversationMemoryStore.loadConversationMemorySnapshot("gone-conv"))
+                .thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+        when(conversationService.startConversation(any(), any(), any(), any()))
+                .thenReturn(new IConversationService.ConversationResult("gone-fresh", null));
+        sayCompletes("gone-fresh");
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals("gone-fresh", result.conversationId());
+        verify(scheduleStore).setPersistentConversationId("hb-gone", "gone-fresh");
     }
 
     @Test

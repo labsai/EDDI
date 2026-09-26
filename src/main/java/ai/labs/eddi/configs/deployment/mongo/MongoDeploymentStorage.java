@@ -60,6 +60,7 @@ public class MongoDeploymentStorage implements IDeploymentStorage {
      */
     private static final String FIELD_DUPLICATE_IDS = "duplicateIds";
     private static final String FIELD_DUPLICATE_COUNT = "duplicateCount";
+    private static final String FIELD_DUPLICATE_ROWS = "duplicateRows";
 
     /**
      * MongoDB {@code IndexOptionsConflict} — an index on this key pattern exists
@@ -349,6 +350,12 @@ public class MongoDeploymentStorage implements IDeploymentStorage {
      * <li>among unstamped rows, the LOWEST {@code _id} — the row {@code replaceOne}
      * has been rewriting ({@code _id} sorts descending, so it comes last).</li>
      * </ol>
+     * <p>
+     * That order is only a tie-breaker. Where it would decide between rows that
+     * disagree on the status without evidence — no stamp, or a tie on the newest —
+     * {@link #survivorOf} keeps the row the store's point read returns instead, or
+     * nothing at all.
+     * </p>
      *
      * <p>
      * The {@code $sort} stays load-bearing. {@code $push} preserves the order the
@@ -372,6 +379,9 @@ public class MongoDeploymentStorage implements IDeploymentStorage {
                         new Document(FIELD_ENVIRONMENT, "$" + FIELD_ENVIRONMENT).append(FIELD_AGENT_ID, "$" + FIELD_AGENT_ID)
                                 .append(FIELD_AGENT_VERSION, "$" + FIELD_AGENT_VERSION))
                         .append(FIELD_DUPLICATE_IDS, new Document("$push", "$_id"))
+                        .append(FIELD_DUPLICATE_ROWS, new Document("$push", new Document("_id", "$_id")
+                                .append(FIELD_LAST_MODIFIED, "$" + FIELD_LAST_MODIFIED)
+                                .append(FIELD_DEPLOYMENT_STATUS, "$" + FIELD_DEPLOYMENT_STATUS)))
                         .append(FIELD_DUPLICATE_COUNT, new Document("$sum", 1))),
                 new Document("$match", new Document(FIELD_DUPLICATE_COUNT, new Document("$gt", 1))));
 
@@ -381,13 +391,68 @@ public class MongoDeploymentStorage implements IDeploymentStorage {
             if (ids == null || ids.size() < 2) {
                 continue;
             }
-            doomed.addAll(ids.subList(0, ids.size() - 1));
+            Object survivor = survivorOf(group, ids);
+            if (survivor == null) {
+                continue;
+            }
+            for (Object id : ids) {
+                if (!id.equals(survivor)) {
+                    doomed.add(id);
+                }
+            }
         }
 
         if (doomed.isEmpty()) {
             return 0;
         }
         return (int) deploymentsCollection.deleteMany(in("_id", doomed)).getDeletedCount();
+    }
+
+    /**
+     * The id of the row to keep for one duplicate group, or {@code null} to keep
+     * them all.
+     * <p>
+     * The last element of the sorted {@code $push} is trusted only when it is
+     * unambiguous: every row carries the same {@code deploymentStatus} (then which
+     * one survives changes nothing), or it holds a {@value #FIELD_LAST_MODIFIED}
+     * strictly newer than every other row's. With no stamp at all, or a tie on the
+     * newest one, the sort order says nothing about which write came last — MongoDB
+     * does not promise which matching row {@code replaceOne} rewrites. The survivor
+     * is then the row {@code find(filter).first()} returns: the one
+     * {@link #readDeploymentInfo} has been answering with, so the dedupe keeps
+     * exactly the status the store already reports. If that cannot be read, the
+     * group is left alone and the unique index stays unbuilt (reported at ERROR)
+     * rather than guessing.
+     */
+    private Object survivorOf(Document group, List<Object> ids) {
+        Object sortedLast = ids.get(ids.size() - 1);
+        List<Document> rows = group.getList(FIELD_DUPLICATE_ROWS, Document.class);
+        if (rows == null || rows.size() != ids.size()) {
+            return sortedLast;
+        }
+        long statuses = rows.stream().map(row -> row.get(FIELD_DEPLOYMENT_STATUS)).distinct().count();
+        if (statuses <= 1) {
+            return sortedLast;
+        }
+        Object newest = rows.get(rows.size() - 1).get(FIELD_LAST_MODIFIED);
+        Object runnerUp = rows.get(rows.size() - 2).get(FIELD_LAST_MODIFIED);
+        if (newest != null && !newest.equals(runnerUp)) {
+            return sortedLast;
+        }
+
+        Document key = group.get("_id", Document.class);
+        try {
+            // The group key holds the three key fields with their stored types.
+            Document live = key == null ? null : deploymentsCollection.find(new Document(key)).first();
+            if (live != null && ids.contains(live.get("_id"))) {
+                return live.get("_id");
+            }
+        } catch (RuntimeException e) {
+            LOGGER.warnf(e, "Could not read the live deployment row for %s", key);
+        }
+        LOGGER.warnf("Duplicate deployment rows for %s disagree on their status and carry no evidence of which was "
+                + "written last — keeping all of them", key);
+        return null;
     }
 
     /**

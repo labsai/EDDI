@@ -16,6 +16,7 @@ import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.internal.HitlTimeoutHandler;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.configs.properties.model.Property;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -615,11 +616,16 @@ public class ScheduleFireExecutor {
     }
 
     private String createNewConversation(ScheduleConfiguration schedule, Environment env) throws Exception {
-        var userId = schedule.getUserId() != null ? schedule.getUserId() : DreamService.SCHEDULER_PLACEHOLDER_USER_ID;
+        var userId = scheduleUserId(schedule);
 
         var result = conversationService.startConversation(env, schedule.getAgentId(), userId, Collections.emptyMap());
 
         return result.conversationId();
+    }
+
+    /** The user a conversation this schedule starts belongs to. */
+    private static String scheduleUserId(ScheduleConfiguration schedule) {
+        return schedule.getUserId() != null ? schedule.getUserId() : DreamService.SCHEDULER_PLACEHOLDER_USER_ID;
     }
 
     private String resolveOrCreatePersistent(ScheduleConfiguration schedule, Environment env) throws Exception {
@@ -636,8 +642,13 @@ public class ScheduleFireExecutor {
                             conversationId, schedule.getId());
                 } else if (!rollOverIfDue(schedule, conversationId, existing)) {
                     return conversationId;
-                } else {
+                } else if (Objects.equals(existing.getUserId(), scheduleUserId(schedule))) {
                     carriedProperties = conversationScopedProperties(existing);
+                } else {
+                    // The new conversation belongs to the schedule's CURRENT user. State
+                    // written for someone else must not be handed to them.
+                    LOGGER.infof("[SCHEDULE] Rolled-over conversation %s of schedule %s belongs to another user — "
+                            + "its conversation properties are not carried", conversationId, schedule.getId());
                 }
             }
         }
@@ -666,18 +677,28 @@ public class ScheduleFireExecutor {
 
     /**
      * The stored persistent conversation, or {@code null} when it no longer exists,
-     * belongs to another agent or cannot be read — a new one is started then, as
-     * before. One raw load: the step count, the state and the properties all come
-     * from it, without converting every step into a response snapshot.
+     * belongs to another agent or its id cannot name a conversation in this store —
+     * a new one is started then, as before. One raw load: the step count, the state
+     * and the properties all come from it, without converting every step into a
+     * response snapshot.
+     * <p>
+     * Any OTHER failure propagates. A store that is briefly unreachable is not a
+     * missing conversation: answering {@code null} there repointed the schedule at
+     * a brand-new conversation, which orphaned the old one with its history and
+     * properties for good. Propagated, it fails this fire, which the fire log
+     * records and the retry/backoff path runs again against the same conversation.
      */
-    private ConversationMemorySnapshot loadPersistentConversation(ScheduleConfiguration schedule, String conversationId) {
+    private ConversationMemorySnapshot loadPersistentConversation(ScheduleConfiguration schedule, String conversationId)
+            throws IResourceStore.ResourceStoreException {
         try {
             ConversationMemorySnapshot existing = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
             if (existing != null && Objects.equals(schedule.getAgentId(), existing.getAgentId())) {
                 return existing;
             }
-        } catch (Exception e) {
-            LOGGER.debugf("[SCHEDULE] Could not load persistent conversation %s: %s", conversationId, e.getMessage());
+        } catch (IResourceStore.ResourceNotFoundException | IllegalArgumentException e) {
+            // IllegalArgumentException: an id this store cannot parse (e.g. not an
+            // ObjectId) can never load — that is permanent, not transient.
+            LOGGER.debugf("[SCHEDULE] Persistent conversation %s cannot be loaded: %s", conversationId, e.getMessage());
         }
         LOGGER.infof("[SCHEDULE] Persistent conversation %s no longer valid for schedule %s, creating new", conversationId, schedule.getId());
         return null;
@@ -719,7 +740,11 @@ public class ScheduleFireExecutor {
         try {
             conversationService.endConversation(conversationId, "system:scheduler");
         } catch (Exception e) {
-            LOGGER.warnf(e, "[SCHEDULE] Could not end the rolled-over conversation %s of schedule %s", conversationId, schedule.getId());
+            // Rolling over anyway would leave the old conversation READY but orphaned
+            // beside the new one. Keep it; the next idle fire tries again.
+            LOGGER.warnf(e, "[SCHEDULE] Could not end persistent conversation %s of schedule %s for rollover — keeping it for now",
+                    conversationId, schedule.getId());
+            return false;
         }
         return true;
     }

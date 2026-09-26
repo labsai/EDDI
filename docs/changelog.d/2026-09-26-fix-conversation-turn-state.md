@@ -62,7 +62,11 @@ the fix.
   client-set value. So a resume, which has no context of its own, writes a
   brand-new group property without groups. Once PR 831 (reserved context keys)
   merges, this should switch to its verified group resolver. `MemoryCheckpoint`
-  copies the field too. `groupIds` cannot be configured: `PropertyInstruction`
+  copies the field too. A replacement property adopts the groups of the property it
+  replaced (and a written entry's groups are kept on the live property), so
+  re-setting a group memory to the same value is not a write, and a later turn
+  outside the group or resumed from a pause does not write it back with none.
+  `groupIds` cannot be configured: `PropertyInstruction`
   ignores it in `property.json`. Recalled group ids do show up in serialized
   conversation properties over REST and MCP — they are the user's own memory's
   groups.
@@ -103,18 +107,29 @@ the fix.
   old conversation stays readable. A persistent conversation that has ENDED is
   replaced now as well; every fire into it used to be refused, forever. The fire
   reads the stored conversation once, raw, rather than converting every step into
-  a response snapshot. See [scheduling.md](../scheduling.md#long-running-persistent-schedules).
+  a response snapshot. Only a conversation the store reports missing (or an id it
+  cannot parse) or one of another agent counts as gone: any other load failure now
+  fails the fire, which is retried against the same conversation, instead of
+  silently repointing the schedule at a fresh one. A rollover whose end call fails
+  keeps the old conversation until a later idle fire, and properties are carried
+  only when the old conversation belongs to the schedule's current user. See [scheduling.md](../scheduling.md#long-running-persistent-schedules).
 - **E3 — migrations marked complete on empty collections.** The V6 Qute, channel
   connector and workspace access-index migrations read the collections the V6 rename
   migration populates. If the rename migration was still pending, they found
   nothing, recorded themselves complete, and never ran again. They are now parked
-  until it completes, and they are not flagged, so the next startup runs them.
+  until it completes, and they are not flagged. The first deployment sweep that sees
+  the rename complete runs them, before it deploys anything or reports ready — so a
+  migration-log read that failed transiently at boot no longer defers them to the
+  next restart.
 - **E6 — the deployment dedupe deleted the live row.** `replaceOne` rewrites the first
   matching row, which is the oldest. The dedupe kept the newest, so it deleted the row
   every deploy/undeploy had written to. `setDeploymentInfo` now stamps
   `lastModified`. The dedupe keeps the most recently stamped row, and among rows
   written before the stamp existed, the lowest `_id`, i.e. the one `replaceOne`
-  was rewriting.
+  was rewriting. That order only breaks ties: when the rows disagree on their status
+  and there is no strictly newest stamp, the dedupe keeps the row the point read
+  (`find(filter).first()`) returns — the status the store already reports — and if
+  that cannot be read it keeps every row of the group rather than guess.
 
 ### Compatibility
 

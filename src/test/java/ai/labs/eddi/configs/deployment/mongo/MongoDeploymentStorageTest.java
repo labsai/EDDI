@@ -27,6 +27,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.stubbing.OngoingStubbing;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
 
@@ -478,6 +479,89 @@ class MongoDeploymentStorageTest {
         verify(odd, never()).deleteMany(any(Bson.class));
         // The index is still retried — the dedupe ran, it simply found nothing to do.
         verify(odd, times(2)).createIndex(any(Bson.class), any(IndexOptions.class));
+    }
+
+    /** A collection whose unique index fails once (duplicates), then builds. */
+    private static MongoCollection<Document> duplicatedCollection(MongoDatabase database) {
+        @SuppressWarnings("unchecked")
+        MongoCollection<Document> duplicated = mock(MongoCollection.class);
+        when(database.getCollection("deployments")).thenReturn(duplicated);
+        when(duplicated.createIndex(any(Bson.class), any(IndexOptions.class)))
+                .thenThrow(mock(MongoCommandException.class))
+                .thenReturn("environment_1_agentId_1_agentVersion_1");
+        DeleteResult deleteResult = mock(DeleteResult.class);
+        when(deleteResult.getDeletedCount()).thenReturn(1L);
+        when(duplicated.deleteMany(any(Bson.class))).thenReturn(deleteResult);
+        return duplicated;
+    }
+
+    private static Document duplicateGroup(Document... rows) {
+        List<Object> ids = Arrays.stream(rows).map(row -> row.get("_id")).toList();
+        return new Document("_id", new Document("environment", "production").append("agentId", "agent-1").append("agentVersion", 1))
+                .append("duplicateIds", ids).append("duplicateRows", List.of(rows)).append("duplicateCount", rows.length);
+    }
+
+    private static Document row(String id, Date lastModified, String status) {
+        return new Document("_id", id).append("lastModified", lastModified).append("deploymentStatus", status);
+    }
+
+    private static String deletedFilter(MongoCollection<Document> collection) {
+        ArgumentCaptor<Bson> deleteFilter = ArgumentCaptor.forClass(Bson.class);
+        verify(collection).deleteMany(deleteFilter.capture());
+        return deleteFilter.getValue().toBsonDocument(Document.class, MongoClientSettings.getDefaultCodecRegistry()).toString();
+    }
+
+    @Test
+    @DisplayName("unstamped duplicates that disagree keep the row the point read returns, not the lowest _id")
+    @SuppressWarnings("unchecked")
+    void unstampedDisagreeingDuplicatesKeepTheRowTheStoreReads() {
+        MongoDatabase database = mock(MongoDatabase.class);
+        MongoCollection<Document> duplicated = duplicatedCollection(database);
+        // Sort order puts the lowest _id ("id-a") last, but the store has been reading
+        // "id-b".
+        stubAggregate(duplicated, List.of(duplicateGroup(row("id-b", null, "undeployed"), row("id-a", null, "deployed"))));
+        FindIterable<Document> live = mock(FindIterable.class);
+        when(duplicated.find(any(Document.class))).thenReturn(live);
+        when(live.first()).thenReturn(new Document("_id", "id-b"));
+
+        assertDoesNotThrow(() -> new MongoDeploymentStorage(database, documentBuilder));
+
+        String filter = deletedFilter(duplicated);
+        assertTrue(filter.contains("id-a"), "the row the store does not read goes, got: " + filter);
+        assertFalse(filter.contains("id-b"), "the row every reader has been seeing survives, got: " + filter);
+    }
+
+    @Test
+    @DisplayName("duplicates tied on their newest stamp are left alone when the live row cannot be read")
+    @SuppressWarnings("unchecked")
+    void tiedStampsWithoutALiveRowDeleteNothing() {
+        MongoDatabase database = mock(MongoDatabase.class);
+        MongoCollection<Document> duplicated = duplicatedCollection(database);
+        Date same = new Date(1_000L);
+        stubAggregate(duplicated, List.of(duplicateGroup(row("id-a", same, "undeployed"), row("id-b", same, "deployed"))));
+        FindIterable<Document> live = mock(FindIterable.class);
+        when(duplicated.find(any(Document.class))).thenReturn(live);
+        when(live.first()).thenReturn(null);
+
+        assertDoesNotThrow(() -> new MongoDeploymentStorage(database, documentBuilder));
+
+        verify(duplicated, never()).deleteMany(any(Bson.class));
+    }
+
+    @Test
+    @DisplayName("a strictly newest stamp decides without consulting the point read")
+    void aStrictlyNewestStampWins() {
+        MongoDatabase database = mock(MongoDatabase.class);
+        MongoCollection<Document> duplicated = duplicatedCollection(database);
+        stubAggregate(duplicated,
+                List.of(duplicateGroup(row("id-a", new Date(1_000L), "undeployed"), row("id-b", new Date(2_000L), "deployed"))));
+
+        assertDoesNotThrow(() -> new MongoDeploymentStorage(database, documentBuilder));
+
+        String filter = deletedFilter(duplicated);
+        assertTrue(filter.contains("id-a"), "the older write goes, got: " + filter);
+        assertFalse(filter.contains("id-b"), "the newest write survives, got: " + filter);
+        verify(duplicated, never()).find(any(Document.class));
     }
 
     private static int indexOfStage(List<Document> stages, String stageName) {
