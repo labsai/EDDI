@@ -974,8 +974,17 @@ public class PhaseExecutionEngine {
                                               GroupDiscussionEventListener listener) {
         gc.getTranscript().add(entry);
         if (listener != null) {
+            String outcome = switch (entry.type()) {
+                case SKIPPED -> entry.errorReason() != null && entry.errorReason().startsWith("Timeout")
+                        ? GroupConversationEventSink.SpeakerCompleteEvent.OUTCOME_TIMEOUT
+                        : GroupConversationEventSink.SpeakerCompleteEvent.OUTCOME_SKIPPED;
+                case ERROR -> GroupConversationEventSink.SpeakerCompleteEvent.OUTCOME_ERROR;
+                default -> null;
+            };
+            // A skipped or failed turn carries no content (its reason is in the
+            // transcript's errorReason, never on the wire) and says so by flag.
             listener.onSpeakerComplete(new GroupConversationEventSink.SpeakerCompleteEvent(entry.speakerAgentId(), entry.speakerDisplayName(),
-                    entry.content(), phaseIdx, phase.name()));
+                    outcome == null ? entry.content() : null, phaseIdx, phase.name(), null, null, outcome));
         }
     }
 
