@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
+import { useNavigate } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { renderPage } from "@/test/test-utils";
@@ -85,10 +86,23 @@ beforeEach(() => {
   );
 });
 
+/** Stands in for any in-app link to an older version of the board. */
+function OpenVersionOne() {
+  const navigate = useNavigate();
+  return (
+    <button type="button" onClick={() => navigate("/workforce/wb1/settings?version=1")}>
+      open v1
+    </button>
+  );
+}
+
 function renderSettings() {
   return renderPage(
     "/workforce/wb1/settings?version=1",
-    <WorkforceSettings />,
+    <>
+      <WorkforceSettings />
+      <OpenVersionOne />
+    </>,
     "/workforce/:boardId/settings",
   );
 }
@@ -155,5 +169,18 @@ describe("WorkforceSettings — after a save", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: /Save Changes/i })).toBeEnabled());
     await new Promise((r) => setTimeout(r, 100));
     expect(screen.getByDisplayValue("Draft")).toBeInTheDocument();
+  });
+
+  it("follows the URL back to an older version after a save", async () => {
+    renderSettings();
+    const user = userEvent.setup();
+    await screen.findByDisplayValue("Board One");
+
+    await rename(user, "Board Two");
+    await waitFor(() => expect(current).toBe(2));
+    await waitFor(() => expect(screen.getByRole("button", { name: /Save Changes/i })).toBeDisabled());
+
+    await user.click(screen.getByRole("button", { name: "open v1" }));
+    await screen.findByDisplayValue("Board One");
   });
 });

@@ -383,13 +383,23 @@ function WorkforceSettings() {
    * saved, or another version — the form adopts it, but only while it still
    * holds exactly the baseline: an edit in progress is never overwritten.
    */
-  const [baseline, setBaseline] = useState<{ version: number; config: AgentGroupConfiguration } | null>(null);
+  const [baseline, setBaseline] = useState<{
+    version: number;
+    config: AgentGroupConfiguration;
+    /** Set by a save until the URL names the version it created. */
+    awaitingUrl?: boolean;
+  } | null>(null);
   useEffect(() => {
     if (!config) return;
-    // A save's baseline names the version it created. Until the URL has caught
-    // up with it (the router applies its update separately), the config here is
-    // still the superseded one — adopting it would flash the pre-save form.
-    if (baseline && baseline.version > version) return;
+    // Right after a save the router has not applied the new version yet (it
+    // does so in a render of its own), so the config here is still the
+    // superseded one — adopting it would flash the pre-save form. Wait for the
+    // URL, once; afterwards any version change is followed as usual, including
+    // a move back to an older version.
+    if (baseline?.awaitingUrl) {
+      if (version === baseline.version) setBaseline({ ...baseline, awaitingUrl: false });
+      return;
+    }
     if (baseline === null || (config !== baseline.config && !formDiffersFrom(baseline.config))) {
       initFrom(config);
       setBaseline({ version, config });
@@ -458,7 +468,7 @@ function WorkforceSettings() {
         // The new version is seeded with this very document by `useUpdateGroup`,
         // so once the URL names it the form matches its baseline exactly.
         const newVersion = saved.version;
-        setBaseline({ version: newVersion, config: updatedConfig });
+        setBaseline({ version: newVersion, config: updatedConfig, awaitingUrl: true });
         setSearchParams(
           (prev) => {
             const params = new URLSearchParams(prev);
