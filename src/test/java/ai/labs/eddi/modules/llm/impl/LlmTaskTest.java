@@ -254,6 +254,38 @@ class LlmTaskTest {
         assertTrue(ex.getMessage().contains("test-stop"));
     }
 
+    /**
+     * H8 through {@code execute}: the guard sits in runTemplateEngineOnParams,
+     * which both the normal path and the HITL-resume rebuild use, so dropping the
+     * call there fails this test (review nit #11).
+     */
+    @SuppressWarnings("unchecked")
+    @Test
+    void execute_vaultReferenceTypedIntoABuilderParameter_failsBeforeTheModelIsBuilt() throws Exception {
+        doReturn(currentStep).when(memory).getCurrentStep();
+        IData<List<String>> actionsData = mock(IData.class);
+        doReturn(actionsData).when(currentStep).getLatestData(MemoryKeys.ACTIONS);
+        doReturn(List.of("anyAction")).when(actionsData).getResult();
+        doReturn(new HashMap<String, Object>()).when(memoryItemConverter).convert(any());
+        doReturn(Map.of()).when(promptSnippetService).getAll();
+        doReturn(Map.of()).when(globalVariableResolver).getTemplateData();
+        doReturn("hello").when(templatingEngine).processTemplate(anyString(), any());
+        // What {context.model} renders to when the user sends a vault reference.
+        doReturn("${vault:another-agents-key}").when(templatingEngine).processTemplate(eq("{context.model}"), any());
+        doReturn("openai").when(globalVariableResolver).resolveValue(anyString());
+
+        Task task = new Task();
+        task.setActions(List.of("*"));
+        task.setId("test");
+        task.setType("openai");
+        task.setParameters(Map.of("systemMessage", "hello", "modelName", "{context.model}"));
+
+        LifecycleException ex = assertThrows(LifecycleException.class, () -> llmTask.execute(memory, new LlmConfiguration(List.of(task))));
+
+        assertTrue(ex.getMessage().contains("LLM parameter 'modelName' contains the reference ${vault:another-agents-key}"), ex.getMessage());
+        verify(chatModelRegistry, never()).getOrCreate(anyString(), any());
+    }
+
     // ====================================================================
     // 7. configure — null/empty URI throws WorkflowConfigurationException
     // ====================================================================

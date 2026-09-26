@@ -374,6 +374,14 @@ public class AgentFactory implements IAgentFactory {
             }
 
             @Override
+            public IConversation startConversation(String conversationId, String userId, Map<String, Context> context,
+                                                   IPropertiesHandler propertiesHandler, IConversationOutputRenderer outputProvider)
+                    throws IllegalAccessException {
+
+                throw createAgentInProgressException();
+            }
+
+            @Override
             public IConversation continueConversation(IConversationMemory conversationMemory, IPropertiesHandler propertiesHandler,
                                                       IConversationOutputRenderer outputProvider)
                     throws IllegalAccessException {

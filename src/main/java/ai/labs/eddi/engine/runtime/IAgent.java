@@ -31,6 +31,18 @@ public interface IAgent {
                                     IConversationOutputRenderer outputProvider)
             throws InstantiationException, IllegalAccessException, LifecycleException;
 
+    /**
+     * {@link #startConversation(String, Map, IPropertiesHandler, IConversationOutputRenderer)}
+     * for a conversation whose id was allocated before its first turn (see
+     * {@code IConversationMemoryStore#newConversationId}). The default ignores the
+     * id, for implementations that have no memory of their own to give it to.
+     */
+    default IConversation startConversation(String conversationId, String userId, Map<String, Context> context,
+                                            IPropertiesHandler propertiesHandler, IConversationOutputRenderer outputProvider)
+            throws InstantiationException, IllegalAccessException, LifecycleException {
+        return startConversation(userId, context, propertiesHandler, outputProvider);
+    }
+
     IConversation continueConversation(IConversationMemory conversationMemory, IPropertiesHandler propertiesHandler,
                                        IConversationOutputRenderer outputProvider)
             throws InstantiationException, IllegalAccessException;

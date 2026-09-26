@@ -358,7 +358,8 @@ class AgentSetupVaultKeyReuseTest {
             doThrow(new ISecretProvider.SecretProviderException("disk full")).when(secretProvider).store(any(), anyString(), anyString(),
                     any());
 
-            assertEquals(KEY, vaultApiKey(KEY, null), "falls back to plaintext");
+            // Fails closed (M-S1) — it used to fall back to the plaintext key.
+            assertThrows(AgentSetupService.AgentSetupException.class, () -> vaultApiKey(KEY, null));
             assertFalse(createdResources.containsKey(AgentSetupService.VAULTED_SECRET_KEY));
         }
     }
@@ -648,6 +649,80 @@ class AgentSetupVaultKeyReuseTest {
 
             assertTrue(e.getMessage().contains("OpenAPI"), e.getMessage());
             verifyNoInteractions(secretProvider);
+        }
+    }
+
+    private String vaultApiAuth(String apiAuth) throws Exception {
+        Method method = AgentSetupService.class.getDeclaredMethod("vaultApiAuth", String.class, String.class, Map.class);
+        method.setAccessible(true);
+        try {
+            return (String) method.invoke(service, apiAuth, "My Agent", createdResources);
+        } catch (InvocationTargetException e) {
+            if (e.getCause() instanceof Exception cause) {
+                throw cause;
+            }
+            throw e;
+        }
+    }
+
+    // ─── M-S1: no plaintext fallback, apiAuth vaulted ────────────────────
+
+    @Nested
+    @DisplayName("M-S1 — a vault write failure never degrades to plaintext")
+    class NoPlaintextFallback {
+
+        @Test
+        @DisplayName("apiKey: a failed vault write fails the setup instead of returning the plaintext")
+        void apiKeyStoreFailureFails() throws Exception {
+            doThrow(new ISecretProvider.SecretProviderException("mongo down")).when(secretProvider).store(any(), anyString(), anyString(), any());
+
+            var e = assertThrows(AgentSetupService.AgentSetupException.class, () -> vaultApiKey(KEY, null));
+
+            assertFalse(e.getMessage().contains(KEY), "the failure must not echo the key: " + e.getMessage());
+            assertTrue(e.getMessage().contains("Refusing to store it in plaintext"), e.getMessage());
+        }
+
+        @Test
+        @DisplayName("apiAuth: a plaintext value is vaulted and replaced by its reference, recorded for rollback")
+        void apiAuthIsVaulted() throws Exception {
+            service.vaultKeyReuse = AgentSetupService.VAULT_KEY_REUSE_NEVER;
+
+            String result = vaultApiAuth("Bearer " + KEY);
+
+            var ref = ArgumentCaptor.forClass(SecretReference.class);
+            verify(secretProvider).store(ref.capture(), eq("Bearer " + KEY), anyString(), any());
+            assertTrue(ref.getValue().keyName().startsWith("setup.my-agent."), ref.getValue().keyName());
+            assertTrue(ref.getValue().keyName().endsWith(".apiAuth"), ref.getValue().keyName());
+            assertEquals(ref.getValue().toReferenceString(), result);
+            assertEquals(ref.getValue().keyName(), createdResources.get(AgentSetupService.VAULTED_API_AUTH_KEY));
+            verify(secretResolver).invalidateCache(ref.getValue());
+        }
+
+        @Test
+        @DisplayName("apiAuth: a value already carrying a reference is used as-is")
+        void apiAuthReferencePassesThrough() throws Exception {
+            assertEquals("${connection:crm}", vaultApiAuth("${connection:crm}"));
+            assertEquals("Bearer ${vault:crm-token}", vaultApiAuth("Bearer ${vault:crm-token}"));
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("apiAuth: with the vault disabled the value passes through, like apiKey")
+        void apiAuthVaultDisabled() throws Exception {
+            when(secretProvider.isAvailable()).thenReturn(false);
+
+            assertEquals("Bearer " + KEY, vaultApiAuth("Bearer " + KEY));
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("apiAuth: a failed vault write fails the setup")
+        void apiAuthStoreFailureFails() throws Exception {
+            doThrow(new ISecretProvider.SecretProviderException("mongo down")).when(secretProvider).store(any(), anyString(), anyString(), any());
+
+            var e = assertThrows(AgentSetupService.AgentSetupException.class, () -> vaultApiAuth("Bearer " + KEY));
+
+            assertFalse(e.getMessage().contains(KEY), e.getMessage());
         }
     }
 }

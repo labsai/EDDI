@@ -6,6 +6,7 @@ package ai.labs.eddi.configs.llm.mongo;
 
 import ai.labs.eddi.configs.hitl.HitlConfigValidation;
 import ai.labs.eddi.configs.llm.ILlmStore;
+import ai.labs.eddi.configs.properties.SecretScopeValidation;
 import ai.labs.eddi.datastore.AbstractResourceStore;
 import ai.labs.eddi.datastore.IResourceStorageFactory;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -58,6 +59,8 @@ public class LlmStore extends AbstractResourceStore<LlmConfiguration> implements
             if (task != null) {
                 String fieldPath = "langchain.task[" + i + "].toolApprovals";
                 HitlConfigValidation.validateToolApprovals(task.getToolApprovals(), fieldPath);
+                SecretScopeValidation.validate(task.getPreRequest(), "langchain.task[" + i + "].preRequest");
+                SecretScopeValidation.validate(task.getPostResponse(), "langchain.task[" + i + "].postResponse");
                 warnStrictModeImplications(task.getToolApprovals(), fieldPath);
             }
         }

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.propertysetter.mongo;
 
+import ai.labs.eddi.configs.properties.SecretScopeValidation;
 import ai.labs.eddi.configs.propertysetter.IPropertySetterStore;
 import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
 import ai.labs.eddi.datastore.AbstractResourceStore;
@@ -21,5 +22,22 @@ public class PropertySetterStore extends AbstractResourceStore<PropertySetterCon
     @Inject
     public PropertySetterStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder) {
         super(storageFactory, "propertysetter", documentBuilder, PropertySetterConfiguration.class);
+    }
+
+    /**
+     * Rejects {@code scope: "secret"} instructions that can never be vaulted — see
+     * {@link SecretScopeValidation}.
+     */
+    @Override
+    protected void validate(PropertySetterConfiguration content) {
+        if (content == null || content.getSetOnActions() == null) {
+            return;
+        }
+        for (int i = 0; i < content.getSetOnActions().size(); i++) {
+            var setOnActions = content.getSetOnActions().get(i);
+            if (setOnActions != null) {
+                SecretScopeValidation.validate(setOnActions.getSetProperties(), "setOnActions[" + i + "].setProperties");
+            }
+        }
     }
 }

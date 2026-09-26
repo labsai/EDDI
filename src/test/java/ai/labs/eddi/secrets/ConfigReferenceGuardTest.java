@@ -2,7 +2,7 @@
  * Copyright EDDI contributors
  * SPDX-License-Identifier: Apache-2.0
  */
-package ai.labs.eddi.modules.apicalls.impl;
+package ai.labs.eddi.secrets;
 
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.Property.Scope;
@@ -11,19 +11,22 @@ import org.junit.jupiter.api.Test;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @DisplayName("ConfigReferenceGuard")
 class ConfigReferenceGuardTest {
 
-    private static final Map<String, Object> DATA = Map.of("conversationInfo", Map.of("agentId", "agent1"),
-            "properties", Map.of("apiKey", "${vault:agent1.apiKey}", "typed", "${vault:agent1.typed-by-user}", "foreign", "${vault:other.apiKey}"));
+    private static final Map<String, Object> DATA = Map.of("conversationInfo", Map.of("agentId", "agent1", "conversationId", "conv1"),
+            "properties",
+            Map.of("apiKey", "${vault:agent1.conv1.apiKey}", "typed", "${vault:agent1.conv1.typed-by-user}", "foreign", "${vault:other.apiKey}"));
 
     /**
-     * A property as {@code PropertySetterTask.autoVaultSecret} stores it: the vault
+     * A property as {@code SecretPropertyVault.vault} stores it: the vault
      * reference, conversation scope, and the provenance marker that says this
      * process vaulted it.
      */
@@ -50,8 +53,8 @@ class ConfigReferenceGuardTest {
         return map;
     }
 
-    private static final Map<String, Property> VAULTED = properties(autoVaulted("apiKey", "${vault:agent1.apiKey}"),
-            unmarked("typed", "${vault:agent1.typed-by-user}"), unmarked("foreign", "${vault:other.apiKey}"));
+    private static final Map<String, Property> VAULTED = properties(autoVaulted("apiKey", "${vault:agent1.conv1.apiKey}"),
+            unmarked("typed", "${vault:agent1.conv1.typed-by-user}"), unmarked("foreign", "${vault:other.apiKey}"));
 
     @Test
     @DisplayName("a reference the configuration wrote is allowed")
@@ -93,7 +96,7 @@ class ConfigReferenceGuardTest {
     @Test
     @DisplayName("the agent's own auto-vaulted property, read through the property the template names, is allowed")
     void autoVaultProperty() {
-        assertDoesNotThrow(() -> ConfigReferenceGuard.requireConfiguredReferences("Bearer {properties.apiKey}", "Bearer ${vault:agent1.apiKey}",
+        assertDoesNotThrow(() -> ConfigReferenceGuard.requireConfiguredReferences("Bearer {properties.apiKey}", "Bearer ${vault:agent1.conv1.apiKey}",
                 "header", DATA, VAULTED));
     }
 
@@ -103,14 +106,14 @@ class ConfigReferenceGuardTest {
         assertThrows(IllegalArgumentException.class,
                 () -> ConfigReferenceGuard.requireConfiguredReferences("{properties.foreign}", "${vault:other.apiKey}", "header", DATA, VAULTED));
         assertThrows(IllegalArgumentException.class, () -> ConfigReferenceGuard.requireConfiguredReferences("{properties.typed}",
-                "${vault:agent1.typed-by-user}", "header", DATA, VAULTED));
+                "${vault:agent1.conv1.typed-by-user}", "header", DATA, VAULTED));
     }
 
     @Test
     @DisplayName("an auto-vault reference is allowed only in a field whose template names that property")
     void autoVaultOnlyWhereNamed() {
         assertThrows(IllegalArgumentException.class, () -> ConfigReferenceGuard.requireConfiguredReferences("{\"q\":\"{memory.current.input}\"}",
-                "{\"q\":\"${vault:agent1.apiKey}\"}", "a request body", DATA, VAULTED));
+                "{\"q\":\"${vault:agent1.conv1.apiKey}\"}", "a request body", DATA, VAULTED));
     }
 
     @Test
@@ -120,17 +123,47 @@ class ConfigReferenceGuardTest {
         // agent, but under a tenant this conversation is not in. Accepting it reads a
         // foreign tenant's secret, which is what an unpinned <tenant>/ prefix allowed.
         // The marker does not license it: provenance is necessary, not sufficient.
-        Map<String, Property> foreignTenant = properties(autoVaulted("apiKey", "${vault:victim-tenant/agent1.apiKey}"));
+        Map<String, Property> foreignTenant = properties(autoVaulted("apiKey", "${vault:victim-tenant/agent1.conv1.apiKey}"));
         assertThrows(IllegalArgumentException.class, () -> ConfigReferenceGuard.requireConfiguredReferences("Bearer {properties.apiKey}",
-                "Bearer ${vault:victim-tenant/agent1.apiKey}", "header", DATA, foreignTenant));
+                "Bearer ${vault:victim-tenant/agent1.conv1.apiKey}", "header", DATA, foreignTenant));
     }
 
     @Test
-    @DisplayName("a tenant-qualified auto-vault reference is allowed when it is the conversation's own tenant")
-    void autoVaultOwnTenant() {
-        Map<String, Property> ownTenant = properties(unmarked("tenantId", "acme"), autoVaulted("apiKey", "${vault:acme/agent1.apiKey}"));
-        assertDoesNotThrow(() -> ConfigReferenceGuard.requireConfiguredReferences("Bearer {properties.apiKey}",
-                "Bearer ${vault:acme/agent1.apiKey}", "header", DATA, ownTenant));
+    @DisplayName("a client-settable tenantId property no longer qualifies a tenant-prefixed auto-vault reference")
+    void tenantPropertyIsIgnored() {
+        // The tenant used to come from the tenantId conversation property, which a
+        // client can set through a context expression. The vault key no longer reads
+        // it, so neither does the guard: only the default-tenant form is this
+        // conversation's own reference.
+        Map<String, Property> claimedTenant = properties(unmarked("tenantId", "acme"),
+                autoVaulted("apiKey", "${vault:acme/agent1.conv1.apiKey}"));
+        assertThrows(IllegalArgumentException.class, () -> ConfigReferenceGuard.requireConfiguredReferences("Bearer {properties.apiKey}",
+                "Bearer ${vault:acme/agent1.conv1.apiKey}", "header", DATA, claimedTenant));
+    }
+
+    @Test
+    @DisplayName("another conversation's auto-vault reference of the same agent and property is refused")
+    void otherConversationsReferenceIsRefused() {
+        // C2: the key used to be <agentId>.<property>, one entry for every user of the
+        // agent. A marked property carrying a different conversation's key must not be
+        // resolved in this one.
+        Map<String, Property> foreign = properties(autoVaulted("apiKey", "${vault:agent1.conv2.apiKey}"));
+        assertThrows(IllegalArgumentException.class, () -> ConfigReferenceGuard.requireConfiguredReferences("Bearer {properties.apiKey}",
+                "Bearer ${vault:agent1.conv2.apiKey}", "header", DATA, foreign));
+    }
+
+    @Test
+    @DisplayName("a reference under the old shared per-agent key is refused")
+    void legacySharedKeyIsRefused() {
+        // Stored before the per-conversation key: that entry holds whichever user's
+        // value was written last, so it is not resolved any more.
+        Map<String, Property> legacy = properties(autoVaulted("apiKey", "${vault:agent1.apiKey}"));
+        var e = assertThrows(IllegalArgumentException.class, () -> ConfigReferenceGuard.requireConfiguredReferences(
+                "Bearer {properties.apiKey}", "Bearer ${vault:agent1.apiKey}", "header", DATA, legacy));
+        // Review #9: not the injection wording — the operator must not chase a phantom
+        // attack.
+        assertTrue(e.getMessage().contains("earlier release") && e.getMessage().contains("enter the secret again"), e.getMessage());
+        assertFalse(e.getMessage().contains("came from conversation data"), e.getMessage());
     }
 
     @Test
@@ -143,10 +176,10 @@ class ConfigReferenceGuardTest {
         // a conversation property can produce it: a valueString of
         // {memory.current.input} and a user who types the reference, a model reply, an
         // API response copied into a property by a post-response instruction.
-        Map<String, Property> dataWritten = properties(unmarked("apiKey", "${vault:agent1.apiKey}"));
+        Map<String, Property> dataWritten = properties(unmarked("apiKey", "${vault:agent1.conv1.apiKey}"));
         var e = assertThrows(IllegalArgumentException.class, () -> ConfigReferenceGuard.requireConfiguredReferences("Bearer {properties.apiKey}",
-                "Bearer ${vault:agent1.apiKey}", "header", DATA, dataWritten));
-        assertTrue(e.getMessage().contains("${vault:agent1.apiKey}"), e.getMessage());
+                "Bearer ${vault:agent1.conv1.apiKey}", "header", DATA, dataWritten));
+        assertTrue(e.getMessage().contains("${vault:agent1.conv1.apiKey}"), e.getMessage());
     }
 
     @Test
@@ -154,18 +187,29 @@ class ConfigReferenceGuardTest {
     void falselyMarkedPropertyIsRefused() {
         // Only TRUE is trusted. FALSE is not "unknown, be lenient" — it is a statement
         // that this value was not vaulted, and it is treated as one.
-        var property = unmarked("apiKey", "${vault:agent1.apiKey}");
+        var property = unmarked("apiKey", "${vault:agent1.conv1.apiKey}");
         property.setAutoVaulted(Boolean.FALSE);
         assertThrows(IllegalArgumentException.class, () -> ConfigReferenceGuard.requireConfiguredReferences("Bearer {properties.apiKey}",
-                "Bearer ${vault:agent1.apiKey}", "header", DATA, properties(property)));
+                "Bearer ${vault:agent1.conv1.apiKey}", "header", DATA, properties(property)));
     }
 
     @Test
     @DisplayName("no conversation properties at all still guards rather than skips")
     void noConversationProperties() {
         assertThrows(IllegalArgumentException.class, () -> ConfigReferenceGuard.requireConfiguredReferences("Bearer {properties.apiKey}",
-                "Bearer ${vault:agent1.apiKey}", "header", DATA, Map.of()));
+                "Bearer ${vault:agent1.conv1.apiKey}", "header", DATA, Map.of()));
         assertThrows(IllegalArgumentException.class, () -> ConfigReferenceGuard.requireConfiguredReferences("Bearer {properties.apiKey}",
-                "Bearer ${vault:agent1.apiKey}", "header", DATA, null));
+                "Bearer ${vault:agent1.conv1.apiKey}", "header", DATA, null));
+    }
+
+    @Test
+    @DisplayName("a ${vars:} parameter reference must be one the template wrote whole, not text inside another reference")
+    void variableReferenceMatchedWhole() {
+        assertDoesNotThrow(() -> ConfigReferenceGuard.requireConfiguredParameters(Map.of("modelName", "${vars:model}-{context.suffix}"),
+                Map.of("modelName", "${vars:model}-large"), Set.of(), "LLM", DATA, VAULTED));
+        var e = assertThrows(IllegalArgumentException.class,
+                () -> ConfigReferenceGuard.requireConfiguredParameters(Map.of("modelName", "${vars:outer${vars:model}"),
+                        Map.of("modelName", "${vars:model}"), Set.of(), "LLM", DATA, VAULTED));
+        assertTrue(e.getMessage().contains("${vars:model}"), e.getMessage());
     }
 }

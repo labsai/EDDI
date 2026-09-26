@@ -91,12 +91,17 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     }
 
     @Override
+    public String newConversationId() {
+        return UUID.randomUUID().toString();
+    }
+
+    @Override
     public String storeConversationMemorySnapshot(ConversationMemorySnapshot snapshot) throws IResourceStore.ResourceStoreException {
         ensureSchema();
         try {
             String conversationId = snapshot.getConversationId();
 
-            if (conversationId != null) {
+            if (conversationId != null && !snapshot.isUnpersisted()) {
                 if (isPureAppend(snapshot)) {
                     appendConversationSteps(snapshot);
                     return conversationId;
@@ -146,9 +151,12 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
                 }
                 snapshot.setPersistedStepCount(snapshot.getConversationSteps().size());
             } else {
-                // Insert new
-                conversationId = UUID.randomUUID().toString();
+                // Insert new — under the id allocated before the first turn, if any.
+                if (conversationId == null) {
+                    conversationId = newConversationId();
+                }
                 snapshot.setId(conversationId);
+                snapshot.setUnpersisted(false);
                 // A fresh conversation starts at revision 1, so a legacy-shaped row (no
                 // _rev, read as UNVERSIONED_REVISION) can never be mistaken for one.
                 snapshot.setRevision(ConversationMemorySnapshot.UNVERSIONED_REVISION + 1);
@@ -490,6 +498,20 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
             ps.executeUpdate();
         } catch (SQLException e) {
             throw new RuntimeException("Failed to delete conversation memory", e);
+        }
+    }
+
+    @Override
+    public boolean conversationExists(String conversationId) {
+        ensureSchema();
+        String sql = "SELECT 1 FROM conversation_memories WHERE id = ?::uuid";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, conversationId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to check whether conversation exists", e);
         }
     }
 

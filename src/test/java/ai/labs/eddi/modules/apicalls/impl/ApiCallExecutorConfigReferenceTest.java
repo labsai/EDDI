@@ -10,7 +10,7 @@ import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.connections.ResolvedCredential;
-import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.datastore.serialization.JsonSerialization;
 import ai.labs.eddi.engine.httpclient.IHttpClient;
 import ai.labs.eddi.engine.httpclient.IRequest;
 import ai.labs.eddi.engine.httpclient.IResponse;
@@ -27,6 +27,7 @@ import ai.labs.eddi.modules.templating.impl.CallerNamespaceResolver;
 import ai.labs.eddi.modules.templating.impl.ConfigReferenceNamespaceResolvers;
 import ai.labs.eddi.modules.templating.impl.TemplatingEngine;
 import ai.labs.eddi.secrets.SecretResolver;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.quarkus.qute.Engine;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -40,6 +41,7 @@ import java.net.URI;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -48,6 +50,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
@@ -69,6 +73,8 @@ class ApiCallExecutorConfigReferenceTest {
     private static final String SERVER = "https://api.example.com";
     private static final String SECRET = "opaque-secret-value-1234";
     private static final String AUTO_VAULTED = "auto-vaulted-value-5678";
+    /** A short vaulted value — a Basic-auth username, an account id. */
+    private static final String SHORT_SECRET = "alice";
 
     private ApiCallExecutor executor;
     private PrePostUtils prePostUtils;
@@ -79,6 +85,7 @@ class ApiCallExecutorConfigReferenceTest {
     private IConversationMemory memory;
     private IConversationProperties conversationProperties;
     private IRequest request;
+    private CallerIdentityResolver callerIdentityResolver;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -96,20 +103,24 @@ class ApiCallExecutorConfigReferenceTest {
         secretResolver = mock(SecretResolver.class);
         when(secretResolver.resolveValue(any())).thenAnswer(inv -> {
             String value = inv.getArgument(0);
-            return value == null ? null : value.replace("${vault:api-key}", SECRET).replace("${vault:agent1.apiKey}", AUTO_VAULTED);
+            return value == null
+                    ? null
+                    : value.replace("${vault:api-key}", SECRET).replace("${vault:agent1.conv1.apiKey}", AUTO_VAULTED).replace("${vault:user}",
+                            SHORT_SECRET);
         });
         globalVariableResolver = mock(GlobalVariableResolver.class);
         when(globalVariableResolver.resolveValue(any())).thenAnswer(inv -> {
             String value = inv.getArgument(0);
             return value == null ? null : value.replace("${vars:host}", "vars.example.com");
         });
-        CallerIdentityResolver callerIdentityResolver = mock(CallerIdentityResolver.class);
+        callerIdentityResolver = mock(CallerIdentityResolver.class);
         when(callerIdentityResolver.resolveValue(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         when(callerIdentityResolver.redactCallerToken(anyString(), anyString())).thenAnswer(inv -> inv.getArgument(0));
         connectionResolver = mock(ConnectionResolver.class);
 
         httpClient = mock(IHttpClient.class);
-        executor = new ApiCallExecutor(httpClient, mock(IJsonSerialization.class), mock(IRuntime.class), prePostUtils, globalVariableResolver,
+        executor = new ApiCallExecutor(httpClient, new JsonSerialization(new ObjectMapper()), mock(IRuntime.class), prePostUtils,
+                globalVariableResolver,
                 secretResolver, callerIdentityResolver, mock(CallerIdentityContext.class), new RequestRedactor(callerIdentityResolver),
                 connectionResolver,
                 false, 30_000L, 2_000_000);
@@ -119,10 +130,10 @@ class ApiCallExecutorConfigReferenceTest {
         // The live properties, which is where the auto-vault provenance marker lives —
         // ConversationProperties.toMap() (what `data()` below stands in for) flattens
         // each Property to its raw value and loses it. Stored exactly as
-        // PropertySetterTask.autoVaultSecret stores one: the vault reference,
+        // SecretPropertyVault.vault stores one: the vault reference,
         // conversation scope, marked.
         conversationProperties = new ConversationProperties(memory);
-        conversationProperties.put("apiKey", autoVaulted("apiKey", "${vault:agent1.apiKey}"));
+        conversationProperties.put("apiKey", autoVaulted("apiKey", "${vault:agent1.conv1.apiKey}"));
         when(memory.getConversationProperties()).thenReturn(conversationProperties);
 
         request = mock(IRequest.class);
@@ -162,8 +173,8 @@ class ApiCallExecutorConfigReferenceTest {
     private static Map<String, Object> data(String userInput) {
         var data = new HashMap<String, Object>();
         data.put("memory", Map.of("current", Map.of("input", userInput)));
-        data.put("conversationInfo", Map.of("agentId", "agent1"));
-        data.put("properties", Map.of("apiKey", "${vault:agent1.apiKey}"));
+        data.put("conversationInfo", Map.of("agentId", "agent1", "conversationId", "conv1"));
+        data.put("properties", Map.of("apiKey", "${vault:agent1.conv1.apiKey}"));
         return data;
     }
 
@@ -242,14 +253,14 @@ class ApiCallExecutorConfigReferenceTest {
         // autoVaultSecret — a valueString of {memory.current.input} and a user who
         // typed the reference is enough — so it carries no marker, and the value alone
         // cannot tell the two apart.
-        conversationProperties.put("apiKey", new Property("apiKey", "${vault:agent1.apiKey}", Property.Scope.conversation));
+        conversationProperties.put("apiKey", new Property("apiKey", "${vault:agent1.conv1.apiKey}", Property.Scope.conversation));
 
         var failure = assertThrows(LifecycleException.class,
                 () -> executor.execute(call(Map.of("Authorization", "Bearer {properties.apiKey}"), "{}"), memory, data("hi"), SERVER));
 
         assertInstanceOf(IllegalArgumentException.class, failure.getCause());
-        assertTrue(failure.getMessage().contains("header 'Authorization' contains the reference ${vault:agent1.apiKey}"), failure.getMessage());
-        verify(secretResolver, never()).resolveValue(contains("${vault:agent1.apiKey}"));
+        assertTrue(failure.getMessage().contains("header 'Authorization' contains the reference ${vault:agent1.conv1.apiKey}"), failure.getMessage());
+        verify(secretResolver, never()).resolveValue(contains("${vault:agent1.conv1.apiKey}"));
         verify(request, never()).send();
     }
 
@@ -411,5 +422,170 @@ class ApiCallExecutorConfigReferenceTest {
         ArgumentCaptor<Object> record = ArgumentCaptor.forClass(Object.class);
         verify(prePostUtils).createMemoryEntry(any(), record.capture(), eq("downstreamRequest"), any());
         assertFalse(String.valueOf(record.getValue()).contains(SECRET), "stored: " + record.getValue());
+    }
+
+    /**
+     * S2 — a server that rejects (or simply reflects) a credential echoes it. The
+     * executor knows every plaintext it substituted, so none of them may reach
+     * conversation memory, template data or the tool result through the response.
+     */
+    @Nested
+    @DisplayName("S2 — a response echoing a substituted secret")
+    class EchoedSecret {
+
+        private IResponse respond(int code, String body) throws Exception {
+            IResponse echo = mock(IResponse.class);
+            when(echo.getHttpCode()).thenReturn(code);
+            when(echo.getHttpCodeMessage()).thenReturn(code == 200 ? "OK" : "Unauthorized: " + SECRET);
+            when(echo.getContentAsString()).thenReturn(body);
+            var headers = new HashMap<String, String>();
+            headers.put("Content-Type", "text/plain");
+            headers.put("X-Echo", "key=" + SECRET);
+            when(echo.getHttpHeader()).thenReturn(headers);
+            when(request.send()).thenReturn(echo);
+            when(request.toMap()).thenReturn(storedRequestRecord("{}", Map.of("X-Api-Key", SECRET)));
+            return echo;
+        }
+
+        private ApiCall savingCall() {
+            ApiCall call = call(Map.of("X-Api-Key", "${vault:api-key}"), "{}");
+            call.setSaveResponse(true);
+            call.setResponseHeaderObjectName("responseHeaders");
+            return call;
+        }
+
+        @Test
+        @DisplayName("an error body quoting the key is redacted in memory, template data and the tool result")
+        void errorBodyRedacted() throws Exception {
+            respond(401, "{\"error\":\"invalid api key " + SECRET + "\"}");
+            var templateData = data("hi");
+
+            var result = executor.execute(savingCall(), memory, templateData, SERVER);
+
+            assertFalse(String.valueOf(result).contains(SECRET), "tool result: " + result);
+            assertFalse(String.valueOf(templateData.get("responseError")).contains(SECRET), "template data: " + templateData.get("responseError"));
+            ArgumentCaptor<Object> stored = ArgumentCaptor.forClass(Object.class);
+            verify(prePostUtils, atLeastOnce()).createMemoryEntry(any(), stored.capture(), anyString(), any());
+            for (Object value : stored.getAllValues()) {
+                assertFalse(String.valueOf(value).contains(SECRET), "memory entry: " + value);
+            }
+            assertTrue(String.valueOf(templateData.get("responseError")).contains("invalid api key"), "the failure reason survives");
+        }
+
+        @Test
+        @DisplayName("review #7: a connection credential echoed in an error body is redacted like a vault plaintext")
+        void connectionCredentialEchoRedacted() throws Exception {
+            when(connectionResolver.resolve(eq("${connection:jira}"), any(), any()))
+                    .thenReturn(new ResolvedCredential("Authorization", "Bearer conn-credential-value-99"));
+            respond(401, "{\"error\":\"token conn-credential-value-99 expired\"}");
+            var templateData = data("hi");
+            ApiCall call = call(Map.of("Authorization", "${connection:jira}"), "{}");
+            call.setSaveResponse(true);
+
+            var result = executor.execute(call, memory, templateData, SERVER);
+
+            assertFalse(String.valueOf(result).contains("conn-credential-value-99"), "tool result: " + result);
+            assertFalse(String.valueOf(templateData.get("responseError")).contains("conn-credential-value-99"));
+        }
+
+        @Test
+        @DisplayName("review #7: the caller's token echoed in an error body is redacted too")
+        void callerTokenEchoRedacted() throws Exception {
+            when(callerIdentityResolver.resolveValue(anyString(), any()))
+                    .thenAnswer(inv -> ((String) inv.getArgument(0)).replace("${caller:token}", "caller-token-value-777"));
+            when(callerIdentityResolver.currentCallerToken()).thenReturn("caller-token-value-777");
+            respond(401, "rejected caller-token-value-777");
+            var templateData = data("hi");
+            ApiCall call = call(Map.of("Authorization", "Bearer ${caller:token}"), "{}");
+            call.setSaveResponse(true);
+
+            var result = executor.execute(call, memory, templateData, SERVER);
+
+            assertFalse(String.valueOf(result).contains("caller-token-value-777"), "tool result: " + result);
+            assertFalse(String.valueOf(templateData.get("responseError")).contains("caller-token-value-777"));
+        }
+
+        @Test
+        @DisplayName("review #8: a JSON success body keeps its data — short secrets only where a value IS the secret, numbers intact")
+        void jsonSuccessBodyIsNotMangled() throws Exception {
+            IResponse echo = respond(200, "{\"user\":\"alice\",\"note\":\"malice aforethought\",\"id\":123456789,"
+                    + "\"echo\":\"key " + SECRET + "\"}");
+            when(echo.getHttpHeader()).thenReturn(Map.of("Content-Type", "application/json"));
+            var templateData = data("hi");
+            ApiCall call = call(Map.of("X-Api-Key", "${vault:api-key}", "X-User", "${vault:user}"), "{}");
+            call.setSaveResponse(true);
+
+            executor.execute(call, memory, templateData, SERVER);
+
+            @SuppressWarnings("unchecked")
+            var body = (Map<String, Object>) templateData.get("response");
+            assertEquals("malice aforethought", body.get("note"), "a short secret is not replaced inside other text");
+            assertEquals(123456789, body.get("id"), "numbers are never rewritten digit by digit");
+            assertEquals(RequestRedactor.REDACTED, body.get("user"), "a value that IS the short secret is replaced");
+            assertFalse(String.valueOf(body.get("echo")).contains(SECRET), "a long secret is removed from string values");
+        }
+
+        @Test
+        @DisplayName("review #6: a token a post-response secret instruction vaulted is removed from the LLM tool result")
+        void vaultedTokenLeavesToolResult() throws Exception {
+            when(prePostUtils.runPostResponse(any(), any(), any(), anyInt(), anyBoolean())).thenReturn(Set.of("fresh-oauth-token-value"));
+            respond(200, "access_token=fresh-oauth-token-value");
+            var templateData = data("hi");
+
+            var result = executor.execute(savingCall(), memory, templateData, SERVER);
+
+            assertFalse(String.valueOf(result).contains("fresh-oauth-token-value"), "tool result: " + result);
+            assertTrue(String.valueOf(result).contains("access_token="), "the rest of the body survives: " + result);
+        }
+
+        @Test
+        @DisplayName("a success body and a response header reflecting the key are redacted too")
+        void successBodyRedacted() throws Exception {
+            respond(200, "you sent " + SECRET);
+            var templateData = data("hi");
+
+            var result = executor.execute(savingCall(), memory, templateData, SERVER);
+
+            assertFalse(String.valueOf(result).contains(SECRET), "tool result: " + result);
+            assertFalse(String.valueOf(templateData.get("response")).contains(SECRET));
+            assertFalse(String.valueOf(templateData.get("responseHeaders")).contains(SECRET));
+            ArgumentCaptor<Object> stored = ArgumentCaptor.forClass(Object.class);
+            verify(prePostUtils, atLeastOnce()).createMemoryEntry(any(), stored.capture(), anyString(), any());
+            for (Object value : stored.getAllValues()) {
+                assertFalse(String.valueOf(value).contains(SECRET), "memory entry: " + value);
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("S5 — a path that fails URI parsing does not quote the resolved secret in the error")
+    void invalidUriDoesNotLeakThePathSecret() throws Exception {
+        ApiCall call = call(Map.of(), null);
+        call.getRequest().setPath("/hooks/${vault:api-key}/bad path");
+
+        var failure = assertThrows(LifecycleException.class, () -> executor.execute(call, memory, data("hi"), SERVER));
+
+        for (Throwable t = failure; t != null; t = t.getCause()) {
+            assertFalse(String.valueOf(t.getMessage()).contains(SECRET), "leaked through " + t.getClass().getSimpleName() + ": " + t.getMessage());
+        }
+        assertTrue(failure.getMessage().contains("URISyntaxException") || failure.getMessage().contains("Illegal character"), failure.getMessage());
+        verify(request, never()).send();
+    }
+
+    @Test
+    @DisplayName("S5 — a checked template failure after the path resolved a secret does not quote it in the error")
+    void templateFailureDoesNotLeakThePathSecret() throws Exception {
+        ApiCall call = call(Map.of(), "{\"broken\": {body}}");
+        call.getRequest().setPath("/hooks/${vault:api-key}/items");
+        when(prePostUtils.templateValues(eq("{\"broken\": {body}}"), any()))
+                .thenThrow(new ITemplatingEngine.TemplateEngineException("could not render the request for /hooks/" + SECRET + "/items", null));
+
+        var failure = assertThrows(LifecycleException.class, () -> executor.execute(call, memory, data("hi"), SERVER));
+
+        for (Throwable t = failure; t != null; t = t.getCause()) {
+            assertFalse(String.valueOf(t.getMessage()).contains(SECRET), "leaked through " + t.getClass().getSimpleName() + ": " + t.getMessage());
+        }
+        assertTrue(failure.getMessage().contains("TemplateEngineException"), failure.getMessage());
+        verify(request, never()).send();
     }
 }

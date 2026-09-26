@@ -89,11 +89,33 @@ public class Conversation implements IConversation {
     private final Set<String> secretContextValues = new LinkedHashSet<>();
 
     /**
-     * Shorter secret values are only removed from their own context entry, not
-     * searched for elsewhere: replacing every "12" in a turn's output would destroy
-     * it, and a value that short is not a credential.
+     * The secret context entries whose whole value is a string — the only source of
+     * exact-match candidates. The leaves of a secret OBJECT are not: its
+     * {@code "tokenType": "Bearer"} or {@code "port": 8080} would otherwise blank
+     * every equal value of the turn, loaded {@code longTerm} properties included,
+     * and that loss would be persisted.
+     */
+    private final Set<String> secretContextStrings = new LinkedHashSet<>();
+
+    /**
+     * Shorter secret values are not searched for INSIDE other values: replacing
+     * every "4711" in a turn's output would destroy it. They are still replaced
+     * wherever a value IS the secret — see
+     * {@link #MIN_EXACT_SCRUBBED_SECRET_CONTEXT_LENGTH}.
      */
     static final int MIN_SCRUBBED_SECRET_CONTEXT_LENGTH = 8;
+
+    /**
+     * Secret string values from this length up to
+     * {@link #MIN_SCRUBBED_SECRET_CONTEXT_LENGTH} are replaced where a property,
+     * datum, list element, map value or audit field equals them exactly. Before, a
+     * short secret — a PIN, a four-digit code — copied into a property by a
+     * template was stored verbatim, in {@code longTerm} user memory and the audit
+     * trail included. Only a context entry whose whole value is a string qualifies
+     * (see {@link #secretContextStrings}); below this length a value is not a
+     * credential, and {@code true}/{@code false} are never treated as one.
+     */
+    static final int MIN_EXACT_SCRUBBED_SECRET_CONTEXT_LENGTH = 4;
 
     Conversation(List<IExecutableWorkflow> executableWorkflows, IConversationMemory conversationMemory, IPropertiesHandler propertiesHandler,
             IConversationOutputRenderer outputProvider) {
@@ -557,7 +579,7 @@ public class Conversation implements IConversation {
             // stored snapshot, the rendered output — sees a secret context value.
             scrubSecretContextValues();
             if (auditBuffer != null) {
-                auditBuffer.flush(conversationMemory, searchableSecretContextValues());
+                auditBuffer.flush(conversationMemory, searchableSecretContextValues(), exactSecretContextValues());
             }
             // BEFORE the persist decision below, and on every exit including the
             // exception path: note which longTerm properties this turn changed. If the
@@ -836,6 +858,17 @@ public class Conversation implements IConversation {
         return placeholder;
     }
 
+    /**
+     * The short secret values replaced only where a value equals them whole — see
+     * {@link #MIN_EXACT_SCRUBBED_SECRET_CONTEXT_LENGTH}.
+     */
+    private List<String> exactSecretContextValues() {
+        return secretContextStrings.stream()
+                .filter(value -> value.length() >= MIN_EXACT_SCRUBBED_SECRET_CONTEXT_LENGTH && value.length() < MIN_SCRUBBED_SECRET_CONTEXT_LENGTH)
+                .filter(value -> !"true".equalsIgnoreCase(value) && !"false".equalsIgnoreCase(value))
+                .toList();
+    }
+
     /** The secret values worth searching for, longest first. */
     private List<String> searchableSecretContextValues() {
         return secretContextValues.stream()
@@ -873,17 +906,19 @@ public class Conversation implements IConversation {
             return;
         }
         List<String> needles = searchableSecretContextValues();
+        List<String> exact = exactSecretContextValues();
+        boolean anythingToFind = !needles.isEmpty() || !exact.isEmpty();
 
         // Properties first: their step mirrors hold the same Property objects, which
         // must be clean before those mirrors are checked below.
         IConversationProperties properties = conversationMemory.getConversationProperties();
-        if (properties != null && !needles.isEmpty()) {
-            properties.values().stream().filter(Objects::nonNull).forEach(property -> scrubProperty(property, needles));
+        if (properties != null && anythingToFind) {
+            properties.values().stream().filter(Objects::nonNull).forEach(property -> scrubProperty(property, needles, exact));
         }
 
         PendingToolCallBatch pendingToolCalls = conversationMemory.getHitlPendingToolCalls();
-        if (pendingToolCalls != null && !needles.isEmpty()) {
-            PendingToolCallBatch cleaned = SecretValueScrubber.scrubTyped(pendingToolCalls, PendingToolCallBatch.class, needles,
+        if (pendingToolCalls != null && anythingToFind) {
+            PendingToolCallBatch cleaned = SecretValueScrubber.scrubTyped(pendingToolCalls, PendingToolCallBatch.class, needles, exact,
                     MemoryKeys.SECRET_CONTEXT_PLACEHOLDER);
             if (cleaned != null) {
                 conversationMemory.setHitlPendingToolCalls(cleaned);
@@ -898,11 +933,11 @@ public class Conversation implements IConversation {
                 writable.setPossibleResults(null);
                 continue;
             }
-            Object cleaned = scrubSecretsFrom(datum.getResult(), needles);
+            Object cleaned = scrubSecretsFrom(datum.getResult(), needles, exact);
             if (cleaned != null) {
                 writable.setResult(cleaned);
             }
-            if (scrubSecretsFrom(writable.getPossibleResults(), needles) instanceof List<?> cleanedPossible) {
+            if (scrubSecretsFrom(writable.getPossibleResults(), needles, exact) instanceof List<?> cleanedPossible) {
                 writable.setPossibleResults(castList(cleanedPossible));
             }
         }
@@ -910,7 +945,7 @@ public class Conversation implements IConversation {
         var conversationOutput = step.getConversationOutput();
         if (conversationOutput != null) {
             for (var entry : conversationOutput.entrySet()) {
-                Object cleaned = scrubSecretsFrom(entry.getValue(), needles);
+                Object cleaned = scrubSecretsFrom(entry.getValue(), needles, exact);
                 if (cleaned != null) {
                     entry.setValue(cleaned);
                 }
@@ -922,19 +957,24 @@ public class Conversation implements IConversation {
      * {@code value} with the secrets replaced, or {@code null} when it carries
      * none.
      */
-    private static Object scrubSecretsFrom(Object value, List<String> needles) {
-        return SecretValueScrubber.scrubDeep(value, needles, MemoryKeys.SECRET_CONTEXT_PLACEHOLDER);
+    private static Object scrubSecretsFrom(Object value, List<String> needles, List<String> exact) {
+        return SecretValueScrubber.scrubDeep(value, needles, exact, MemoryKeys.SECRET_CONTEXT_PLACEHOLDER);
     }
 
-    private static void scrubProperty(Property property, List<String> needles) {
-        if (scrubSecretsFrom(property.getValueString(), needles) instanceof String cleaned) {
+    private static void scrubProperty(Property property, List<String> needles, List<String> exact) {
+        if (scrubSecretsFrom(property.getValueString(), needles, exact) instanceof String cleaned) {
             property.setValueString(cleaned);
         }
-        if (scrubSecretsFrom(property.getValueObject(), needles) instanceof Map<?, ?> cleaned) {
+        if (scrubSecretsFrom(property.getValueObject(), needles, exact) instanceof Map<?, ?> cleaned) {
             property.setValueObject(castMap(cleaned));
         }
-        if (scrubSecretsFrom(property.getValueList(), needles) instanceof List<?> cleaned) {
+        if (scrubSecretsFrom(property.getValueList(), needles, exact) instanceof List<?> cleaned) {
             property.setValueList(castList(cleaned));
+        }
+        // A number property that IS the short secret (a PIN stored as valueInt).
+        if (property.getValueInt() != null && exact.contains(String.valueOf(property.getValueInt()))) {
+            property.setValueInt(null);
+            property.setValueString(MemoryKeys.SECRET_CONTEXT_PLACEHOLDER);
         }
     }
 
@@ -952,12 +992,16 @@ public class Conversation implements IConversation {
         List<IData<Context>> contextData = new LinkedList<>();
         secretContextKeys.clear();
         secretContextValues.clear();
+        secretContextStrings.clear();
         if (context != null) {
             for (String key : context.keySet()) {
                 Context entry = context.get(key);
                 if (entry != null && Boolean.TRUE.equals(entry.getSecret())) {
                     secretContextKeys.add(key);
                     SecretValueScrubber.collectPlaintexts(entry.getValue(), secretContextValues);
+                    if (entry.getValue() instanceof String text) {
+                        secretContextStrings.add(text);
+                    }
                 }
                 // Persisted copy is scrubbed of inline base64 payloads; the live payload
                 // has already been captured into ATTACHMENTS memory for this turn.

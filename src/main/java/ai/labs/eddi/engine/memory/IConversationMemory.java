@@ -353,6 +353,26 @@ public interface IConversationMemory extends Serializable {
         // no-op by default
     }
 
+    /**
+     * Whether this memory carries a conversation id that has not been written to
+     * the store yet.
+     * <p>
+     * A new conversation is given its id BEFORE its CONVERSATION_START turn runs
+     * (see {@code IConversationMemoryStore#newConversationId}), so everything that
+     * turn does can already name the conversation — a {@code scope: "secret"}
+     * property is vaulted under a key that contains it. The store inserts such a
+     * memory under the id it carries instead of treating the id as "update the
+     * existing document", and clears the flag once it has.
+     */
+    default boolean isUnpersisted() {
+        return false;
+    }
+
+    /** See {@link #isUnpersisted()}. */
+    default void setUnpersisted(boolean unpersisted) {
+        // no-op by default
+    }
+
     interface IConversationStepStack {
         <T> IData<T> getLatestData(String key);
 

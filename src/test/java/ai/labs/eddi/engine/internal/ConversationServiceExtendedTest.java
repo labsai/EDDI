@@ -265,7 +265,7 @@ class ConversationServiceExtendedTest {
 
             IAgent mockAgent = mock(IAgent.class);
             when(agentFactory.getLatestReadyAgent(ENV, AGENT_ID)).thenReturn(mockAgent);
-            when(mockAgent.startConversation(anyString(), anyMap(), any(), any()))
+            when(mockAgent.startConversation(any(), anyString(), anyMap(), any(), any()))
                     .thenThrow(new InstantiationException("Agent init failed"));
 
             assertThrows(IResourceStore.ResourceStoreException.class,

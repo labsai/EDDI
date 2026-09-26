@@ -235,7 +235,7 @@ class ConversationServiceTest {
             doReturn(false).when(gdprComplianceService).isProcessingRestricted(USER_ID);
             doReturn(agent).when(agentFactory).getLatestReadyAgent(ENV, AGENT_ID);
             doReturn(new QuotaCheckResult(true, null)).when(tenantQuotaService).acquireConversationSlot();
-            doReturn(conversation).when(agent).startConversation(eq(USER_ID), anyMap(), any(), isNull());
+            doReturn(conversation).when(agent).startConversation(any(), eq(USER_ID), anyMap(), any(), isNull());
             doReturn(memory).when(conversation).getConversationMemory();
             doReturn(ConversationState.READY).when(memory).getConversationState();
             doReturn(new Stack<>()).when(memory).getRedoCache();
@@ -249,6 +249,32 @@ class ConversationServiceTest {
             // Assert
             assertNotNull(result);
             assertEquals(CONVERSATION_ID, result.conversationId());
+        }
+
+        @Test
+        @DisplayName("review #1: the conversation id is allocated by the store and handed to the agent BEFORE the start turn runs")
+        void conversationIdIsAllocatedBeforeTheStartTurn() throws Exception {
+            IAgent agent = mock(IAgent.class);
+            IConversation conversation = mock(IConversation.class);
+            IConversationMemory memory = mock(IConversationMemory.class);
+
+            doReturn(USER_ID).when(conversationSetup).computeAnonymousUserIdIfEmpty(eq(USER_ID), isNull());
+            doReturn(false).when(gdprComplianceService).isProcessingRestricted(USER_ID);
+            doReturn(agent).when(agentFactory).getLatestReadyAgent(ENV, AGENT_ID);
+            doReturn(new QuotaCheckResult(true, null)).when(tenantQuotaService).acquireConversationSlot();
+            doReturn(CONVERSATION_ID).when(conversationMemoryStore).newConversationId();
+            doReturn(conversation).when(agent).startConversation(eq(CONVERSATION_ID), eq(USER_ID), anyMap(), any(), isNull());
+            doReturn(memory).when(conversation).getConversationMemory();
+            doReturn(ConversationState.READY).when(memory).getConversationState();
+            doReturn(new Stack<>()).when(memory).getRedoCache();
+            doReturn(mock(IConversationMemory.IConversationStepStack.class)).when(memory).getAllSteps();
+            doReturn(new ConversationProperties(memory)).when(memory).getConversationProperties();
+            doReturn(CONVERSATION_ID).when(conversationMemoryStore).storeConversationMemorySnapshot(any());
+
+            ConversationResult result = conversationService.startConversation(ENV, AGENT_ID, USER_ID, null);
+
+            assertEquals(CONVERSATION_ID, result.conversationId());
+            verify(agent).startConversation(eq(CONVERSATION_ID), eq(USER_ID), anyMap(), any(), isNull());
         }
 
         @Test
@@ -300,7 +326,7 @@ class ConversationServiceTest {
             doReturn(false).when(gdprComplianceService).isProcessingRestricted(USER_ID);
             doReturn(agent).when(agentFactory).getLatestReadyAgent(ENV, AGENT_ID);
             doReturn(new QuotaCheckResult(true, null)).when(tenantQuotaService).acquireConversationSlot();
-            doReturn(conversation).when(agent).startConversation(eq(USER_ID), eq(context), any(), isNull());
+            doReturn(conversation).when(agent).startConversation(any(), eq(USER_ID), eq(context), any(), isNull());
             doReturn(memory).when(conversation).getConversationMemory();
             doReturn(ConversationState.READY).when(memory).getConversationState();
             doReturn(new Stack<>()).when(memory).getRedoCache();

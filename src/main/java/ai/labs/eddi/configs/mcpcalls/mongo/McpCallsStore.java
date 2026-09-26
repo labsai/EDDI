@@ -7,6 +7,7 @@ package ai.labs.eddi.configs.mcpcalls.mongo;
 import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
 import ai.labs.eddi.configs.mcpcalls.model.McpCall;
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
+import ai.labs.eddi.configs.properties.SecretScopeValidation;
 import ai.labs.eddi.datastore.AbstractResourceStore;
 import ai.labs.eddi.datastore.IResourceStorageFactory;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
@@ -27,6 +28,24 @@ public class McpCallsStore extends AbstractResourceStore<McpCallsConfiguration> 
     @Inject
     public McpCallsStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder) {
         super(storageFactory, "mcpcalls", documentBuilder, McpCallsConfiguration.class);
+    }
+
+    /**
+     * Rejects {@code scope: "secret"} property instructions that can never be
+     * vaulted — see {@link SecretScopeValidation}.
+     */
+    @Override
+    protected void validate(McpCallsConfiguration content) {
+        if (content == null || content.getMcpCalls() == null) {
+            return;
+        }
+        for (int i = 0; i < content.getMcpCalls().size(); i++) {
+            McpCall call = content.getMcpCalls().get(i);
+            if (call != null) {
+                SecretScopeValidation.validate(call.getPreRequest(), "mcpCalls[" + i + "].preRequest");
+                SecretScopeValidation.validate(call.getPostResponse(), "mcpCalls[" + i + "].postResponse");
+            }
+        }
     }
 
     @Override

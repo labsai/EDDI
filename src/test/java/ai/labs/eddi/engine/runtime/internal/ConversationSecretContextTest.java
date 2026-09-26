@@ -235,6 +235,27 @@ class ConversationSecretContextTest {
     }
 
     @Test
+    @DisplayName("S4: a short secret inside a paused call's serialized arguments is replaced, not only a long one")
+    void shortValueInPendingToolCallArguments() throws Exception {
+        String pin = "4711";
+        doAnswer(invocation -> {
+            var call = new PendingToolCall();
+            call.setToolName("downstream");
+            call.setArgumentsRaw("{\"pin\":\"" + pin + "\",\"note\":\"order 14711\"}");
+            var batch = new PendingToolCallBatch();
+            batch.setCalls(List.of(call));
+            memory.setHitlPendingToolCalls(batch);
+            throw new ConversationPauseException("wf1", 1, "gated", PauseOrigin.TOOL_CALL);
+        }).when(lifecycleManager).executeLifecycle(any(), any());
+
+        conversation().say("hello", contexts(pin, true));
+
+        PendingToolCallBatch persisted = memory.getHitlPendingToolCalls();
+        assertNotNull(persisted);
+        assertEquals("{\"pin\":\"" + PLACEHOLDER + "\",\"note\":\"order 14711\"}", persisted.getCalls().getFirst().getArgumentsRaw());
+    }
+
+    @Test
     @DisplayName("a numeric leaf of a secret object is replaced where a task copied it")
     void numericSecretLeaf() throws Exception {
         doAnswer(invocation -> {
@@ -279,6 +300,78 @@ class ConversationSecretContextTest {
         assertNotNull(stored);
         assertEquals(PLACEHOLDER, stored.getResult().getValue());
         assertTrue(storedDocument().contains("code " + shortValue));
+    }
+
+    @Test
+    @DisplayName("S4: a short secret copied whole into a property, a datum, the longTerm store and the audit trail is replaced there")
+    void shortValueReplacedWhereAValueIsTheSecret() throws Exception {
+        String pin = "4711";
+        IUserMemoryStore store = mock(IUserMemoryStore.class);
+        lenient().when(propertiesHandler.getUserMemoryStore()).thenReturn(store);
+        List<AuditEntry> ledger = new ArrayList<>();
+        memory.setAuditCollector(ledger::add);
+        doAnswer(invocation -> {
+            memory.getConversationProperties().put("pin", new Property("pin", pin, Scope.conversation));
+            memory.getConversationProperties().put("rememberedPin", new Property("rememberedPin", pin, Scope.longTerm));
+            memory.getConversationProperties().put("pinNumber", new Property("pinNumber", 4711, Scope.conversation));
+            memory.getCurrentStep().storeData(new Data<>("httpCalls:request", Map.of("pin", pin, "note", "order 14711 shipped")));
+            memory.getAuditCollector().collect(new AuditEntry("e1", "conv1", "agent1", 1, "user1", null, 1, "ai.labs.httpcalls", "httpcalls", 0,
+                    1L, Map.of("userInput", "hello"), Map.of("pin", pin), null, null, List.of(), 0.0, Instant.now(), null, null));
+            return null;
+        }).when(lifecycleManager).executeLifecycle(any(), any());
+
+        conversation().say("hello", contexts(pin, true));
+
+        assertEquals(PLACEHOLDER, memory.getConversationProperties().get("pin").getValueString());
+        assertEquals(PLACEHOLDER, memory.getConversationProperties().get("pinNumber").getValueString());
+        IData<Object> request = memory.getCurrentStep().getLatestData("httpCalls:request");
+        assertNotNull(request);
+        @SuppressWarnings("unchecked")
+        var requestMap = (Map<String, Object>) request.getResult();
+        assertEquals(PLACEHOLDER, requestMap.get("pin"));
+        assertEquals("order 14711 shipped", requestMap.get("note"), "a short value is never replaced INSIDE other text");
+
+        var written = ArgumentCaptor.forClass(UserMemoryEntry.class);
+        verify(store, atLeastOnce()).upsert(written.capture());
+        written.getAllValues().forEach(entry -> assertFalse(pin.equals(String.valueOf(entry.value())), "written: " + entry.value()));
+
+        assertEquals(1, ledger.size());
+        assertEquals(PLACEHOLDER, ledger.getFirst().output().get("pin"));
+    }
+
+    @Test
+    @DisplayName("S4: true/false and values under four characters are never exact-matched")
+    void trivialValuesAreNotExactMatched() throws Exception {
+        doAnswer(invocation -> {
+            memory.getConversationProperties().put("flag", new Property("flag", "true", Scope.conversation));
+            memory.getConversationProperties().put("code", new Property("code", "abc", Scope.conversation));
+            return null;
+        }).when(lifecycleManager).executeLifecycle(any(), any());
+        var secretObject = new Context(Context.ContextType.object, Map.of("enabled", true, "tag", "abc"));
+        secretObject.setSecret(true);
+
+        conversation().say("hello", Map.of("settings", secretObject));
+
+        assertEquals("true", memory.getConversationProperties().get("flag").getValueString());
+        assertEquals("abc", memory.getConversationProperties().get("code").getValueString());
+    }
+
+    @Test
+    @DisplayName("review #4: leaves of a secret OBJECT are never exact-matched — unrelated equal values survive")
+    void objectLeavesAreNotExactMatched() throws Exception {
+        doAnswer(invocation -> {
+            memory.getConversationProperties().put("preferredPort", new Property("preferredPort", "8080", Scope.longTerm));
+            memory.getConversationProperties().put("scheme", new Property("scheme", "Bearer", Scope.conversation));
+            return null;
+        }).when(lifecycleManager).executeLifecycle(any(), any());
+        var secretObject = new Context(Context.ContextType.object,
+                Map.of("token", TOKEN, "tokenType", "Bearer", "port", 8080));
+        secretObject.setSecret(true);
+
+        conversation().say("hello", Map.of("oauth", secretObject));
+
+        assertEquals("8080", memory.getConversationProperties().get("preferredPort").getValueString());
+        assertEquals("Bearer", memory.getConversationProperties().get("scheme").getValueString());
     }
 
     @Test
