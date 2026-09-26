@@ -72,6 +72,14 @@ reference, so a `${vars:…}` the configuration wrote still resolves through to 
 that arrived through conversation data refuses the call — the check runs again after variable
 expansion, against the configured template expanded the same way.
 
+Because agent-secret grants are checked at **deploy** time, a global variable that resolves to a
+secret can be used to redirect a deployed agent's credentials past that check by editing the
+variable after deployment. To close that, **only an `eddi-admin` may store a global variable whose
+value contains a `${vault:…}`, `${eddivault:…}` or `${connection:…}` reference** — a non-admin
+editor writing such a value is refused with `403`. Plain-literal variables are unaffected, and
+callers on a deployment with authentication disabled are out of scope (there is no editor/admin
+distinction to enforce).
+
 The auto-vaulted-property case rests on **provenance, not on what the value looks like**. A
 `scope: secret` instruction stores its vault reference as an ordinary conversation property, so the
 string `${vault:<agentId>.apiKey}` is one anything that can write a property could produce — a
