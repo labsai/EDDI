@@ -108,6 +108,62 @@ describe("GroupDetailPage — a rejection is confirmed", () => {
   });
 });
 
+describe("GroupDetailPage — a dropped connection", () => {
+  beforeEach(() => useGroupStreamStore.setState({ streams: {} }));
+
+  /**
+   * The page hands an interrupted stream over to the stored conversation, and
+   * that copy can be behind what the stream already showed. Rows vanished until
+   * the next poll; the live rows now stay until the stored copy has caught up.
+   */
+  it("keeps the streamed rows while the stored copy is still behind them", async () => {
+    const encoder = new TextEncoder();
+    const frame = (type: string, data: unknown) => encoder.encode(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);
+    const readIds: string[] = [];
+    server.use(
+      http.post("*/groups/:groupId/conversations/stream", () => {
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(frame("group_start", { groupConversationId: "gc-int", question: "Ship it?" }));
+            controller.enqueue(frame("phase_start", { phaseIndex: 0, phaseName: "Opinions", phaseType: "OPINION" }));
+            controller.enqueue(frame("speaker_start", { agentId: "a1", displayName: "Alpha", phaseIndex: 0, phaseName: "Opinions" }));
+            controller.enqueue(
+              frame("speaker_complete", { agentId: "a1", displayName: "Alpha", phaseIndex: 0, phaseName: "Opinions", response: "Streamed answer from Alpha" }),
+            );
+            // The proxy drops the connection: no terminal event.
+            controller.close();
+          },
+        });
+        return new HttpResponse(body, { headers: { "Content-Type": "text/event-stream" } });
+      }),
+      http.get("*/groups/:groupId/conversations/:convId", ({ params }) => {
+        readIds.push(String(params.convId));
+        return HttpResponse.json({
+          ...paused("IN_PROGRESS"),
+          id: String(params.convId),
+          transcript: [
+            {
+              speakerAgentId: "user", speakerDisplayName: "User", content: "Ship it?", phaseIndex: 0,
+              phaseName: "Question", type: "QUESTION", timestamp: new Date().toISOString(),
+              errorReason: null, targetAgentId: null,
+            },
+          ],
+        });
+      }),
+    );
+    renderAt("/manage/groups/grp1?version=1");
+    await userEvent.click((await screen.findAllByRole("button", { name: /new discussion/i }))[0]!);
+    await userEvent.type(screen.getByTestId("discussion-input"), "Ship it?");
+    await userEvent.click(screen.getByTestId("start-discussion-btn"));
+
+    await waitFor(() => expect(useGroupStreamStore.getState().streams.grp1?.interrupted).toBe(true));
+    // Handed over to the stored conversation, which is one row behind.
+    await waitFor(() => expect(readIds).toContain("gc-int"));
+    await new Promise((r) => setTimeout(r, 300));
+    expect(screen.getByText("Streamed answer from Alpha")).toBeInTheDocument();
+  });
+});
+
 describe("GroupDetailPage — 'New Discussion' belongs to one group", () => {
   beforeEach(() => useGroupStreamStore.setState({ streams: {} }));
 

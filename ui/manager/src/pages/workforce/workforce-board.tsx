@@ -14,7 +14,7 @@ import {
   isActiveConversationState,
   GROUP_CONVERSATIONS_KEY,
 } from "@/hooks/use-groups";
-import { deliveredRowCount, useGroupDiscussionStream } from "@/hooks/use-group-discussion-stream";
+import { persistedHasCaughtUp, useGroupDiscussionStream } from "@/hooks/use-group-discussion-stream";
 import { BoardTranscript } from "@/components/workforce/board-transcript";
 import { BoardInput } from "@/components/workforce/board-input";
 import { SessionHistory } from "@/components/workforce/session-history";
@@ -273,10 +273,7 @@ function WorkforceBoard() {
    * good. It is only kept while the refetched document is still behind it, so
    * the switch does not flash an older transcript.
    */
-  const persistedCaughtUp =
-    !!selectedConversation &&
-    selectedConversation.id === streamState.conversationId &&
-    (selectedConversation.transcript?.length ?? 0) >= deliveredRowCount(streamState.transcript);
+  const persistedCaughtUp = persistedHasCaughtUp(selectedConversation, streamState);
 
   // Show the live transcript for the conversation the stream is driving while
   // it is running; when the user browses another session, or once the stream
@@ -427,6 +424,23 @@ function WorkforceBoard() {
    */
   const [confirmStop, setConfirmStop] = useState<"stop" | "new" | null>(null);
   const [isStopping, setIsStopping] = useState(false);
+  /**
+   * "Stop and start new" was confirmed before `group_start` had named the
+   * conversation, so the cancel is still pending. The board is cleared once it
+   * lands, not left on the run the user chose to leave.
+   */
+  const [newAfterCancel, setNewAfterCancel] = useState(false);
+
+  /**
+   * The discussion on screen is running, whether or not this tab holds its
+   * stream. A connection that dropped (`interrupted`) and a discussion adopted
+   * from the stored list after a reload both run on without one, and both need
+   * a Stop — and a "+ New" that asks first — as much as a live stream does.
+   */
+  const canStop = isStreaming || viewingRunningConversation;
+  /** What Stop addresses when this tab has no stream for it. */
+  const remoteRunningId =
+    !isStreaming && viewingRunningConversation ? (selectedConversation?.id ?? undefined) : undefined;
 
   /**
    * Cancel the running discussion on the server.
@@ -439,7 +453,7 @@ function WorkforceBoard() {
   const stopDiscussion = useCallback(async (): Promise<boolean> => {
     setIsStopping(true);
     try {
-      const outcome = await cancelStream();
+      const outcome = await cancelStream(remoteRunningId);
       if (outcome === "cancelled") {
         toast.success(t("hitl.discussionCancelled", "Discussion cancelled"));
       } else if (outcome === "alreadyEnded") {
@@ -457,24 +471,37 @@ function WorkforceBoard() {
     } finally {
       setIsStopping(false);
     }
-  }, [cancelStream, boardId, queryClient, t]);
+  }, [cancelStream, remoteRunningId, boardId, queryClient, t]);
 
   const handleNewDiscussion = useCallback(() => {
     // A running discussion is stopped first, and only after asking: "+ New"
     // alone must not leave it spending in the background.
-    if (isStreaming) {
+    if (canStop) {
       setConfirmStop("new");
       return;
     }
     startFresh();
-  }, [isStreaming, startFresh]);
+  }, [canStop, startFresh]);
 
   const handleConfirmStop = useCallback(async () => {
     const kind = confirmStop;
+    const pendingBefore = !streamState.conversationId && isStreaming;
     const stopped = await stopDiscussion();
     setConfirmStop(null);
-    if (stopped && kind === "new") startFresh();
-  }, [confirmStop, stopDiscussion, startFresh]);
+    if (kind !== "new") return;
+    if (stopped) startFresh();
+    else if (pendingBefore) setNewAfterCancel(true);
+  }, [confirmStop, stopDiscussion, startFresh, streamState.conversationId, isStreaming]);
+
+  // The pending cancel has landed (or the run ended some other way): the
+  // stream is no longer running, so the new discussion the user asked for can
+  // start. A cancel that failed leaves the stream running and drops the intent
+  // — the discussion was not stopped, so nothing should be cleared.
+  useEffect(() => {
+    if (!newAfterCancel || streamState.cancelRequested) return;
+    setNewAfterCancel(false);
+    if (!streamState.isStreaming) startFresh();
+  }, [newAfterCancel, streamState.cancelRequested, streamState.isStreaming, startFresh]);
 
   // ─── Lifecycle mutations ──────────────────────────────────────
   const invalidateConversations = useCallback(() => {
@@ -672,7 +699,7 @@ function WorkforceBoard() {
         </div>
 
         <div className="flex items-center gap-1">
-          {isStreaming && (
+          {canStop && (
             <Button
               variant="ghost"
               size="sm"

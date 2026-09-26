@@ -334,4 +334,38 @@ describe("group stream — Stop cancels the discussion", () => {
     expect(outcome).toBe("nothingToCancel");
     expect(mockCancel).not.toHaveBeenCalled();
   });
+
+  /**
+   * A dropped connection leaves the run going with no stream to cancel through.
+   * Stop must still reach it, and the "connection lost, keeps updating" notice
+   * must not outlive the cancel.
+   */
+  it("cancels an interrupted discussion by its id and clears the interruption", async () => {
+    const { result } = await run([start, phase0, speak("a")]);
+    expect(result.current.streamState.interrupted).toBe(true);
+    mockCancel.mockResolvedValue(undefined);
+
+    let outcome: string | undefined;
+    await act(async () => {
+      outcome = await result.current.cancelStream("gc-1");
+    });
+
+    expect(mockCancel).toHaveBeenCalledWith("g1", "gc-1");
+    expect(outcome).toBe("cancelled");
+    expect(result.current.streamState.state).toBe("CANCELLED");
+    expect(result.current.streamState.interrupted).toBe(false);
+    expect(result.current.streamState.transcript.some(isOpenPlaceholder)).toBe(false);
+  });
+
+  it("cancels a discussion this tab never streamed, without inventing a stream for it", async () => {
+    mockCancel.mockResolvedValue(undefined);
+    const { result } = renderHook(() => useGroupDiscussionStream("g1"));
+    let outcome: string | undefined;
+    await act(async () => {
+      outcome = await result.current.cancelStream("gc-adopted");
+    });
+    expect(mockCancel).toHaveBeenCalledWith("g1", "gc-adopted");
+    expect(outcome).toBe("cancelled");
+    expect(useGroupStreamStore.getState().streams.g1).toBeUndefined();
+  });
 });

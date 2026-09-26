@@ -16,7 +16,7 @@ import {
   useGroupConversation,
   useDeleteGroupConversation,
 } from "@/hooks/use-groups";
-import { useGroupDiscussionStream } from "@/hooks/use-group-discussion-stream";
+import { persistedHasCaughtUp, useGroupDiscussionStream } from "@/hooks/use-group-discussion-stream";
 import { useCancelGroupDiscussion, useSubmitHumanInput } from "@/hooks/use-hitl";
 import { DiscussionTranscript } from "@/components/groups/discussion-transcript";
 import { DiscussionPanel } from "@/components/groups/overview/discussion-panel";
@@ -586,11 +586,18 @@ export function GroupDetailPage() {
   // conversation, whose detail may not be cached yet. Keep showing the live
   // streamState (banner from hitlPause) instead of a loading skeleton until the
   // persisted conversation has loaded — avoids a flash at the decision moment.
+  //
+  // The same holds after a dropped connection: the page hands over to the
+  // stored conversation at once, but that copy can be behind what the stream
+  // already showed. Until it has caught up (it polls while the run goes on),
+  // keep the live rows rather than let them vanish — the rule the Workforce
+  // board applies too.
   const showStreamFallback =
     !isStreamActive &&
-    convLoading &&
     streamState.state !== "CREATED" &&
-    selectedConvId === streamState.conversationId;
+    selectedConvId === streamState.conversationId &&
+    (convLoading ||
+      (streamState.interrupted && !persistedHasCaughtUp(selectedConversation, streamState)));
 
   const conversationCount = conversations?.length ?? 0;
 

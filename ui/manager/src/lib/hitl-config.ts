@@ -66,6 +66,43 @@ The parties bargained but did NOT reach unanimous agreement. The full transcript
 
 As the arbitrator, decide the outcome. Weigh the stated interests, the open proposals and the concession ledger (appended below); state your decision and its reasoning plainly.`;
 
+/**
+ * Restores the arbitration prompt on a NEGOTIATION group saved before the
+ * Manager materialized it.
+ *
+ * Those groups store Arbitration with `inputTemplate: null`, and the backend
+ * then runs the generic synthesis prompt in its place. Only the exact phase the
+ * preset produces is touched — NEGOTIATION style, named "Arbitration", a
+ * MODERATOR SYNTHESIS skipped on AGREEMENT_REACHED, with no prompt of its own —
+ * so an author's own phase is never rewritten. Applied when a group is read, so
+ * the next save from any editor stores the repaired phase; until then the
+ * stored document is unchanged.
+ *
+ * Returns the SAME array when nothing needed changing.
+ */
+export function repairNegotiationArbitration(
+  style: DiscussionStyle | null | undefined,
+  phases: DiscussionPhase[] | null | undefined,
+): DiscussionPhase[] | null | undefined {
+  if (style !== "NEGOTIATION" || !phases) return phases;
+  let changed = false;
+  const repaired = phases.map((p) => {
+    if (
+      p &&
+      p.name === "Arbitration" &&
+      p.type === "SYNTHESIS" &&
+      p.participants?.toUpperCase() === "MODERATOR" &&
+      p.skipIf === "AGREEMENT_REACHED" &&
+      p.inputTemplate == null
+    ) {
+      changed = true;
+      return { ...p, inputTemplate: NEGOTIATION_ARBITRATION_TEMPLATE };
+    }
+    return p;
+  });
+  return changed ? repaired : phases;
+}
+
 export function getStylePhases(style: DiscussionStyle, maxRounds: number): DiscussionPhase[] {
   const rounds = Math.max(1, maxRounds || 1);
   switch (style) {

@@ -22,6 +22,16 @@ backend strings (P2).
   leaving it running and letting a second run start beside it.
 - New store action `cancelStream`; `abortStream` keeps its meaning (detach,
   used when switching discussions) and is no longer what the board's Stop does.
+- **Stop without a stream (review follow-up):** a discussion running with no
+  stream in this tab — the connection dropped (`interrupted`), or the board
+  adopted it from the stored list after a reload — shows Stop too, and "+ New"
+  asks before leaving it. `cancelStream(groupId, gcId)` cancels such a run by
+  its known id, without creating a store entry for a discussion this tab never
+  streamed. A successful cancel clears `interrupted`, so the "connection lost,
+  keeps updating" notice does not outlive it.
+- "Stop and start new" confirmed before `group_start` named the conversation
+  now starts the new discussion once the pending cancel lands; a cancel that
+  fails drops the intent and leaves the run on screen.
 
 ### Streams that end, and members that "type forever"
 
@@ -44,7 +54,15 @@ backend strings (P2).
 - The board used to keep the frozen live transcript after a stream settled, so
   follow-ups and later phases never appeared. It now switches to the stored
   document as soon as that has caught up with what the stream delivered
-  (`deliveredRowCount`), so the switch never flashes an older transcript.
+  (`deliveredRowCount`), so the switch never flashes an older transcript. The
+  Manager's group page applies the same caught-up rule
+  (`persistedHasCaughtUp`) when it hands an interrupted stream over, instead
+  of showing a stored copy that is still behind until the next poll.
+- A PARALLEL member whose turn threw shows ERROR live only with #843's
+  `outcome` field. Against current `main` the backend sends no completion and
+  stores the failure as an unattributed row, so the live placeholder closes as
+  SKIPPED on `phase_complete` and the stored copy corrects it on the switch —
+  there is nothing live that says which member failed.
 - A refused stream start now carries the backend's own sentence
   (`streamRefusalMessage`) instead of "400 Bad Request".
 
@@ -70,7 +88,9 @@ backend strings (P2).
   replaced with a fresh one. Moving from one advisor's thread to another (same
   page, new route param) kept the first advisor's messages and conversation:
   initialisation is now keyed per (board, member) and re-checked after every
-  await.
+  await. "New conversation" is bound the same way: pressed on one advisor and
+  still in flight when the reader moves on, it registers the new conversation
+  for that advisor without writing it into the next one's view.
 - **IME:** the Enter that confirms a Chinese/Japanese/Korean composition no
   longer sends the question, in the board composer, the Manager's discussion
   input (both textareas) and the thread input (`lib/ime.ts`).
@@ -99,7 +119,15 @@ backend strings (P2).
   point does) stored Arbitration with `inputTemplate: null`, so the moderator
   ran the generic synthesis prompt instead of the arbitration brief.
   `NEGOTIATION_ARBITRATION_TEMPLATE` mirrors `TEMPLATE_ARBITRATION`, and a test
-  compares it with the Java text block.
+  compares it with the Java text block (path resolved from the test file;
+  escapes other than line continuations are refused rather than guessed at;
+  the closing delimiter's indentation counts, per JLS 3.10.6). Groups already
+  stored that way are **repaired on read** (`repairNegotiationArbitration` in
+  `normalizeGroupConfig`): only the exact preset phase — NEGOTIATION style,
+  "Arbitration", MODERATOR SYNTHESIS, `skipIf AGREEMENT_REACHED`, no prompt of
+  its own — gets the prompt back, and the stored document is healed by the next
+  save from any editor. Until then the backend still runs those groups with the
+  generic synthesis prompt; a backend read-time default is a follow-up.
 - **Assignment mode:** `normalizeGroupTaskConfig` rebuilt the block from the
   three fields it normalizes, so Workforce settings saved BID back as ROLE. It
   now carries every other field through.
@@ -131,13 +159,14 @@ backend strings (P2).
 - The Groups page search is debounced (300 ms) and keeps the previous results
   while a new filter loads: every keystroke was a fresh enriched listing, one
   descriptor request plus one config read per group.
-- Owner-filter pagination (frontend half): the history pages through the
-  caller's conversations by `(index, limit)` and offers "Load more" exactly
-  while a page comes back full, which is correct once the backend filters by
-  owner in the query (the group-conversation-state branch). Against the current
-  backend a non-admin can still get a short first page — nothing the client
-  can detect. The MSW handler now honours `index`/`limit` as the row offset the
-  backend uses.
+- Owner-filter pagination (frontend half): **no production change.** The
+  history still fetches `index 0` with a limit that grows by 20 per "Load
+  more", and shows "Load more" while the response fills that limit — correct
+  once the backend filters by owner in the query (the group-conversation-state
+  branch), so it was left as is. A test now pins that behaviour, and the MSW
+  handler honours `index`/`limit` as the row offset the backend uses. Against
+  the current backend a non-admin can still get a short page, which the client
+  cannot detect.
 
 ### Backend strings (P2)
 
