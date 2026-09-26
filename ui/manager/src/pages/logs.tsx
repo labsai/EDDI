@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { StreamBadge } from "@/components/ui/stream-badge";
 import { useLogStream, useHistoryLogs, useInstanceId } from "@/hooks/use-logs";
+import { historyEntryKey, logEntryKey } from "@/lib/log-entries";
 import type { LogEntry, DatabaseLogEntry } from "@/lib/api/logs";
 import type { HistoryFilters } from "@/lib/api/logs";
 import { useDeployedAgents } from "@/hooks/use-chat";
@@ -402,8 +403,11 @@ function LiveTab() {
           </div>
         ) : (
           <div className="divide-y divide-border/50 font-mono text-xs">
-            {[...filteredEntries].reverse().map((entry, idx) => (
-              <LogRow key={`${entry.timestamp}-${filteredEntries.length - 1 - idx}`} entry={entry} />
+            {/* Keyed by the line's identity, not its index: with index keys every
+                new line shifted every key, so React remounted the whole list
+                (and reset every expanded stack trace) once per log line. */}
+            {[...filteredEntries].reverse().map((entry) => (
+              <LogRow key={logEntryKey(entry)} entry={entry} />
             ))}
           </div>
         )}
@@ -444,7 +448,15 @@ function HistoryTab() {
   const [levelFilter, setLevelFilter] = useState("");
   const [textSearch, setTextSearch] = useState("");
 
-  const { data: logs, isLoading, isError, refetch } = useHistoryLogs(filters);
+  const {
+    data: logs,
+    isLoading,
+    isError,
+    refetch,
+    hasMore,
+    loadMore,
+    isLoadingMore,
+  } = useHistoryLogs(filters);
 
   const updateFilter = useCallback(
     (key: keyof HistoryFilters, value: string) => {
@@ -640,9 +652,22 @@ function HistoryTab() {
           </div>
         ) : (
           <div className="divide-y divide-border/50 font-mono text-xs">
-            {filteredLogs.map((entry, idx) => (
-              <LogRow key={`${entry.timestamp}-${idx}`} entry={entry} />
+            {filteredLogs.map((entry) => (
+              <LogRow key={historyEntryKey(entry)} entry={entry} />
             ))}
+            {hasMore && (
+              <div className="flex justify-center p-3">
+                <button
+                  onClick={loadMore}
+                  disabled={isLoadingMore}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-border px-4 py-1.5 font-sans text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50"
+                  data-testid="history-load-more"
+                >
+                  {isLoadingMore && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  {t("logs.loadOlder", "Load older entries")}
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -55,7 +55,12 @@ export function CoordinatorPage() {
   useEffect(() => { const t = setTimeout(() => maybeAutoStart("coordinator"), 500); return () => clearTimeout(t); }, [maybeAutoStart]);
 
   const { data: status, isLoading: statusLoading, isError: statusError, refetch: refetchStatus } = useCoordinatorStatus();
-  const { data: deadLetters, isLoading: dlLoading, refetch: refetchDL } = useDeadLetters();
+  const {
+    data: deadLetters,
+    isLoading: dlLoading,
+    isError: dlError,
+    refetch: refetchDL,
+  } = useDeadLetters();
   const { liveStatus, sseConnected, eventHistory } = useCoordinatorSSE();
   const replayMutation = useReplayDeadLetter();
   const discardMutation = useDiscardDeadLetter();
@@ -65,8 +70,11 @@ export function CoordinatorPage() {
   const [refreshInterval, setRefreshInterval] = useState(10);
   const [expandedPayloads, setExpandedPayloads] = useState<Set<string>>(new Set());
 
-  // Use live SSE status if available, otherwise fall back to polling
-  const currentStatus = liveStatus ?? status;
+  // Live SSE status while the stream is up, polling otherwise. This used to be
+  // `liveStatus ?? status`: once one SSE snapshot had arrived it won for the
+  // rest of the page's life, so after the stream dropped the page showed that
+  // last snapshot forever while the polled status underneath kept updating.
+  const currentStatus = (sseConnected ? liveStatus : null) ?? status ?? liveStatus;
 
   const isNats = currentStatus?.coordinatorType === "nats";
   const isConnected = currentStatus?.connected ?? false;
@@ -455,6 +463,17 @@ export function CoordinatorPage() {
         {dlLoading ? (
           <div className="p-8 text-center">
             <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+          </div>
+        ) : dlError && !deadLetters ? (
+          // A failed read is not an empty queue. It used to fall through to the
+          // green "No dead-letter entries" check — telling an operator nothing
+          // is stuck at the moment the check for stuck work failed.
+          <div className="p-8" data-testid="dead-letters-error">
+            <ErrorState
+              message={t("common.error")}
+              onRetry={() => refetchDL()}
+              retryLabel={t("common.retry")}
+            />
           </div>
         ) : !deadLetters || deadLetters.length === 0 ? (
           <div className="p-8 text-center text-muted-foreground" data-testid="dead-letters-empty">

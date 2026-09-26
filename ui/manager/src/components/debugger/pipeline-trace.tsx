@@ -1,8 +1,15 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useDebugStore, buildCascadeSteps, type PipelineTurn, type PipelineEvent } from "@/hooks/use-debug-events";
-import { useQuery } from "@tanstack/react-query";
-import { getAuditTrail, type AuditEntry } from "@/lib/api/audit";
+import {
+  useDebugStore,
+  buildCascadeSteps,
+  resolveAuditStepIndex,
+  type PipelineTurn,
+  type PipelineEvent,
+} from "@/hooks/use-debug-events";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import type { AuditEntry } from "@/lib/api/audit";
+import { getWholeAuditTrail } from "@/lib/audit-pages";
 import { cn, formatDuration, formatUsd } from "@/lib/utils";
 import { CascadeStepTrace } from "@/components/cascade-step-trace";
 import { Clock, Zap, ChevronDown, AlertTriangle, ArrowUp, ArrowDown } from "lucide-react";
@@ -53,12 +60,16 @@ export function PipelineTrace({ conversationId }: PipelineTraceProps) {
   const selectedTurnIndex = useDebugStore((s) => s.selectedTurnIndex);
   const setSelectedTurn = useDebugStore((s) => s.setSelectedTurn);
 
-  const { data: auditEntries, isError: auditError } = useQuery({
-    queryKey: ["audit", "debugger", conversationId],
-    queryFn: () => getAuditTrail(conversationId!, 0, 200),
+  // Keyed on the number of finished live turns so the ledger is re-read after
+  // each turn; that is what lets a live turn find its audit step (costs, model).
+  const { data: audit, isError: auditError } = useQuery({
+    queryKey: ["audit", "debugger", conversationId, turns.length],
+    queryFn: () => getWholeAuditTrail(conversationId!),
     enabled: !!conversationId,
     staleTime: 30_000,
+    placeholderData: keepPreviousData,
   });
+  const auditEntries = audit?.entries;
 
   const historicalTurns = useMemo(() => {
     if (!auditEntries?.length) return [];
@@ -132,7 +143,11 @@ export function PipelineTrace({ conversationId }: PipelineTraceProps) {
 
 function TurnChart({ turn, auditEntries }: { turn: PipelineTurn; auditEntries: AuditEntry[] }) {
   const { t } = useTranslation();
-  const tasks = useMemo(() => buildTaskBars(turn.events, auditEntries, turn.turnIndex), [turn.events, auditEntries, turn.turnIndex]);
+  const stepIndex = useMemo(
+    () => turn.stepIndex ?? resolveAuditStepIndex(turn.events, auditEntries),
+    [turn.stepIndex, turn.events, auditEntries]
+  );
+  const tasks = useMemo(() => buildTaskBars(turn.events, auditEntries, stepIndex), [turn.events, auditEntries, stepIndex]);
   const maxDuration = Math.max(...tasks.map((bar) => bar.durationMs), 1);
   const totalCost = tasks.reduce((sum, task) => sum + (task.auditEntry?.cost ?? 0), 0);
   
@@ -187,7 +202,10 @@ function TurnChart({ turn, auditEntries }: { turn: PipelineTurn; auditEntries: A
 
 function LiveEventsChart({ events, auditEntries }: { events: PipelineEvent[]; auditEntries: AuditEntry[] }) {
   const { t } = useTranslation();
-  const tasks = useMemo(() => buildTaskBars(events, auditEntries, undefined), [events, auditEntries]);
+  const tasks = useMemo(
+    () => buildTaskBars(events, auditEntries, resolveAuditStepIndex(events, auditEntries)),
+    [events, auditEntries]
+  );
   const maxDuration = Math.max(...tasks.map((bar) => bar.durationMs || 100), 1);
 
   return (
@@ -391,7 +409,9 @@ function buildTaskBars(events: PipelineEvent[], auditEntries: AuditEntry[], step
   const tasks: TaskBarData[] = [];
   const started = new Map<string, PipelineEvent>();
   
-  const stepEntries = stepIndex !== undefined ? auditEntries.filter(a => a.stepIndex === stepIndex) : auditEntries;
+  // An unknown step gets NO audit data. Falling back to every entry attached
+  // the first (taskType, taskIndex) match from any turn — usually turn one's.
+  const stepEntries = stepIndex !== undefined ? auditEntries.filter(a => a.stepIndex === stepIndex) : [];
 
   for (const event of events) {
     const key = `${event.taskType}-${event.index}`;
@@ -477,6 +497,7 @@ function auditEntriesToTurns(entries: AuditEntry[]): PipelineTurn[] {
     const totalDurationMs = stepEntries.reduce((sum, e) => sum + (e.durationMs ?? 0), 0);
     turns.push({
       turnIndex: stepIndex,
+      stepIndex,
       events,
       totalDurationMs,
       startTime: new Date(stepEntries[0]!.timestamp).getTime(),

@@ -636,3 +636,57 @@ describe("SyncPage", () => {
     expect(firstSelect.options.length).toBeGreaterThanOrEqual(1);
   });
 });
+
+// ── Regressions: errors and stale previews ─────────────────────────────────
+
+describe("SyncPage — failed and stale previews", () => {
+  it("a failed re-preview says so and leaves nothing to sync from the previous run", async () => {
+    renderPage();
+    const user = await connectAndWaitForMapping();
+
+    // First preview succeeds (default handler) — Sync becomes possible.
+    await user.click(screen.getByTestId("sync-preview-all"));
+    await waitFor(() => expect(screen.getByTestId("sync-execute-btn")).not.toBeDisabled());
+
+    // The second preview fails outright.
+    server.use(
+      http.post("*/backup/import/sync/preview/batch", () =>
+        HttpResponse.json({ message: "source unreachable" }, { status: 502 })
+      )
+    );
+    await user.click(screen.getByTestId("sync-preview-all"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("sync-preview-all-error")).toBeInTheDocument()
+    );
+    // The old previews must not keep "Sync Selected" armed.
+    expect(screen.getByTestId("sync-execute-btn")).toBeDisabled();
+  });
+
+  it("marks a mapping the source returned no preview for as failed, not as previewed", async () => {
+    server.use(
+      http.post("*/backup/import/sync/preview/batch", () => HttpResponse.json([]))
+    );
+    renderPage();
+    const user = await connectAndWaitForMapping();
+    await user.click(screen.getByTestId("sync-preview-all"));
+
+    await waitFor(() =>
+      expect(screen.getAllByText("Preview failed").length).toBeGreaterThan(0)
+    );
+    expect(screen.getByTestId("sync-execute-btn")).toBeDisabled();
+  });
+
+  it("drops the agent list and previews when the source URL changes", async () => {
+    renderPage();
+    const user = await connectAndWaitForMapping();
+    await user.click(screen.getByTestId("sync-preview-all"));
+    await waitFor(() => expect(screen.getByTestId("sync-execute-btn")).not.toBeDisabled());
+
+    await user.type(screen.getByTestId("sync-url-input"), "/other");
+
+    expect(screen.queryByText("Agent Mapping")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("sync-execute-btn")).not.toBeInTheDocument();
+  });
+});
+

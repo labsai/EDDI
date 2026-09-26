@@ -683,7 +683,9 @@
     "endSuccess_one": "Ended {{count}} conversation",
     "endSuccess_other": "Ended {{count}} conversations",
     "purgeSuccess_one": "Purged {{count}} ended conversation",
-    "purgeSuccess_other": "Purged {{count}} ended conversations"
+    "purgeSuccess_other": "Purged {{count}} ended conversations",
+    "endStateUnavailable": "Could not re-check the conversations' current state, so nothing was ended. Try again.",
+    "endStateChanged": "A selected conversation is now waiting for approval. Review the selection and confirm again."
   },
   "conversationDetail": {
     "backToConversations": "Back to Conversations",
@@ -1589,7 +1591,8 @@
     "stateReady": "Ready",
     "stateActive": "Active",
     "stateError": "Error",
-    "stateEnded": "Ended"
+    "stateEnded": "Ended",
+    "loadOlder": "Load older entries"
   },
   "secrets": {
     "loadError": "Couldn't load secrets",
@@ -1914,7 +1917,11 @@
       "weeklyMonday": "Weekly (Mon 00:00)",
       "monthly": "Monthly (1st, 00:00)"
     },
-    "totalCappedHint": "The server returned a full page, so there may be more schedules than this."
+    "totalCappedHint": "The server returned a full page, so there may be more schedules than this.",
+    "systemManaged": "System",
+    "systemManagedHint": "Managed by EDDI (knowledge-base ingestion, memory consolidation or a team cadence). Change it where it is defined, not here.",
+    "persistentConversationIdLocked": "Set when the schedule is created. The server keeps the conversation the fires have been appending to.",
+    "failedScheduleGone": "Schedule no longer exists"
   },
   "cascadeTrace": {
     "title": "Model Cascade",
@@ -1975,7 +1982,8 @@
     "tokenDistribution": "Token distribution",
     "totalCost": "Total Cost",
     "totalTokens": "Total Tokens",
-    "turns": "Turns"
+    "turns": "Turns",
+    "partial": "This conversation has more audit entries than the debugger loads. Totals cover the most recent ones only."
   },
   "memoryInspector": {
     "error": "Failed to load memory data",
@@ -3299,7 +3307,8 @@
     "previewFirst": "Preview changes before syncing",
     "syncPartial": "Sync incomplete — some resources were not written",
     "syncIdentical": "Already up to date — nothing to write",
-    "previewFailed": "Preview failed"
+    "previewFailed": "Preview failed",
+    "noPreviewReturned": "The source returned no preview for this agent."
   },
   "userConversations": {
     "title": "User Conversations",
@@ -3582,10 +3591,7 @@
     "message": "Demo Mode — Displaying sample data. Connect an EDDI backend for real data."
   },
   "orphans": {
-    "confirmPurgeAll": "Permanently delete ALL {{count}} orphaned resources? The server purges every orphan — your selection is not applied. This cannot be undone.",
-    "deleteSelected": "Delete {{count}} selected",
     "description": "Find and clean up resources not referenced by any agent or package.",
-    "deselectAll": "Deselect All",
     "includeDeleted": "Include soft-deleted",
     "lastScanned": "Last scanned",
     "noOrphans": "No orphans found",
@@ -3596,13 +3602,13 @@
     "scanPromptDesc": "Find extension configs (rules, API calls, LLMs, outputs) that are not referenced by any workflow or agent. Clean up unused resources to keep your platform tidy.",
     "scanPromptTitle": "Scan your platform",
     "scanning": "Scanning resources…",
-    "selectAll": "Select All",
     "softDeleted": "Deleted",
     "title": "Orphan Detection",
     "found_one": "{{count}} orphan found",
     "found_other": "{{count}} orphans found",
     "scanIncomplete": "This scan did not finish",
-    "scanIncompleteBody": "Resources that are still in use may be listed as orphans. Purging is blocked until a scan completes."
+    "scanIncompleteBody": "Resources that are still in use may be listed as orphans. Purging is blocked until a scan completes.",
+    "confirmPurge": "Permanently delete all {{count}} orphaned resources? This cannot be undone."
   },
   "quotas": {
     "apiCallsMinute": "API Calls / Minute",

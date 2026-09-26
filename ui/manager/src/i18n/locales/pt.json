@@ -664,7 +664,9 @@
     "endSuccess_other": "{{count}} conversas encerradas",
     "purgeSuccess_many": "{{count}} conversas encerradas removidas",
     "purgeSuccess_one": "{{count}} conversa encerrada removida",
-    "purgeSuccess_other": "{{count}} conversas encerradas removidas"
+    "purgeSuccess_other": "{{count}} conversas encerradas removidas",
+    "endStateUnavailable": "Não foi possível voltar a verificar o estado atual das conversas, por isso nada foi terminado. Tente novamente.",
+    "endStateChanged": "Uma conversa selecionada está agora a aguardar aprovação. Reveja a seleção e confirme novamente."
   },
   "conversationDetail": {
     "backToConversations": "Voltar às conversas",
@@ -1563,7 +1565,8 @@
     "stateReady": "Pronto",
     "stateActive": "Ativo",
     "stateError": "Erro",
-    "stateEnded": "Encerrado"
+    "stateEnded": "Encerrado",
+    "loadOlder": "Carregar entradas mais antigas"
   },
   "secrets": {
     "loadError": "Não foi possível carregar os secrets",
@@ -1856,7 +1859,11 @@
       "weeklyMonday": "Semanal (seg 00:00)",
       "monthly": "Mensal (dia 1, 00:00)"
     },
-    "totalCappedHint": "O servidor devolveu uma página completa, por isso pode haver mais agendamentos do que os apresentados."
+    "totalCappedHint": "O servidor devolveu uma página completa, por isso pode haver mais agendamentos do que os apresentados.",
+    "systemManaged": "Sistema",
+    "systemManagedHint": "Gerido pelo EDDI (ingestão da base de conhecimento, consolidação de memória ou cadência da equipa). Altere-o onde está definido, não aqui.",
+    "persistentConversationIdLocked": "Definido quando o agendamento é criado. O servidor mantém a conversa à qual as execuções têm sido acrescentadas.",
+    "failedScheduleGone": "O agendamento já não existe"
   },
   "cascadeTrace": {
     "title": "Cascata de modelos",
@@ -1917,7 +1924,8 @@
     "tokenDistribution": "Distribuição de tokens",
     "totalCost": "Custo total",
     "totalTokens": "Total de tokens",
-    "turns": "Turnos"
+    "turns": "Turnos",
+    "partial": "Esta conversa tem mais entradas de auditoria do que o depurador carrega. Os totais cobrem apenas as mais recentes."
   },
   "memoryInspector": {
     "error": "Falha ao carregar os dados de memória",
@@ -3108,7 +3116,8 @@
     "previewFirst": "Pré-visualizar alterações antes de sincronizar",
     "syncPartial": "Sincronização incompleta — alguns recursos não foram gravados",
     "syncIdentical": "Já está atualizado — nada a gravar",
-    "previewFailed": "Falha na pré-visualização"
+    "previewFailed": "Falha na pré-visualização",
+    "noPreviewReturned": "A origem não devolveu nenhuma pré-visualização para este agente."
   },
   "sync": {
     "actionCreate": "Novo",
@@ -3579,10 +3588,7 @@
     "message": "Modo de demonstração — Exibindo dados de exemplo. Conecte um backend EDDI para dados reais."
   },
   "orphans": {
-    "confirmPurgeAll": "Excluir permanentemente TODOS os {{count}} recursos órfãos? O servidor limpa todos — sua seleção não é aplicada. Isso não pode ser desfeito.",
-    "deleteSelected": "Excluir {{count}} selecionado(s)",
     "description": "Encontre e limpe recursos não referenciados por nenhum agente ou workflow.",
-    "deselectAll": "Desmarcar tudo",
     "includeDeleted": "Incluir excluídos de forma reversível",
     "lastScanned": "Última verificação",
     "noOrphans": "Nenhum órfão encontrado",
@@ -3593,14 +3599,14 @@
     "scanPromptDesc": "Encontre configurações de extensão (regras, chamadas de API, LLMs, saídas) que não são referenciadas por nenhum workflow ou agente. Limpe recursos não utilizados para manter sua plataforma organizada.",
     "scanPromptTitle": "Verifique sua plataforma",
     "scanning": "Verificando recursos…",
-    "selectAll": "Selecionar tudo",
     "softDeleted": "Excluído",
     "title": "Detecção de órfãos",
     "found_many": "{{count}} órfãos encontrados",
     "found_one": "{{count}} órfão encontrado",
     "found_other": "{{count}} órfãos encontrados",
     "scanIncomplete": "Esta análise não terminou",
-    "scanIncompleteBody": "Recursos ainda em uso podem aparecer como órfãos. A purga está bloqueada até que uma análise termine."
+    "scanIncompleteBody": "Recursos ainda em uso podem aparecer como órfãos. A purga está bloqueada até que uma análise termine.",
+    "confirmPurge": "Eliminar permanentemente todos os {{count}} recursos órfãos? Esta ação não pode ser anulada."
   },
   "quotas": {
     "apiCallsMinute": "Chamadas de API / minuto",

@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { createLogEventSource, getRecentLogs, type LogEntry } from "@/lib/api/logs";
 import type { BearerEventSource } from "@/lib/bearer-event-source";
 import { cn } from "@/lib/utils";
+import { logEntryKey, mergeNewestFirst } from "@/lib/log-entries";
 import {
   ScrollText,
   Pause,
@@ -15,6 +16,7 @@ import {
 // ==================== Constants ====================
 
 const MAX_LOG_ENTRIES = 500;
+const SEED_LIMIT = 50;
 
 const LEVEL_COLORS: Record<string, string> = {
   ERROR: "text-destructive",
@@ -41,37 +43,48 @@ interface LiveLogViewerProps {
 
 export function LiveLogViewer({ agentId, conversationId }: LiveLogViewerProps) {
   const { t } = useTranslation();
+  // Newest first, de-duplicated (see mergeNewestFirst). Rendered oldest-first.
   const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [paused, setPaused] = useState(false);
-  const pausedRef = useRef(false);
+  // Pausing freezes what is shown; lines keep being collected underneath so
+  // resuming does not silently skip whatever was logged during the pause.
+  const [pausedSnapshot, setPausedSnapshot] = useState<LogEntry[] | null>(null);
+  const paused = pausedSnapshot !== null;
   const [filterLevel, setFilterLevel] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [connected, setConnected] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const eventSourceRef = useRef<BearerEventSource | null>(null);
 
-  // Keep ref in sync with state for use in SSE callback
-  useEffect(() => {
-    pausedRef.current = paused;
-  }, [paused]);
+  // A different agent or conversation is a different log; do not carry the
+  // previous one's lines (or a paused snapshot of them) over.
+  const [scopeKey, setScopeKey] = useState(`${agentId}|${conversationId}`);
+  if (scopeKey !== `${agentId}|${conversationId}`) {
+    setScopeKey(`${agentId}|${conversationId}`);
+    setLogs([]);
+    setPausedSnapshot(null);
+  }
 
-  // Connect to SSE stream — pausedRef avoids closing/reopening on pause toggle
+  // Connect to the SSE stream and (re)seed from the ring buffer on every open.
+  //
+  // The seed used to be a separate effect that REPLACED the list with the REST
+  // result whenever it resolved — discarding any live lines that had already
+  // arrived, and (the REST list being newest-first while this view appends
+  // oldest-first) showing the history upside down. It also ran only once, so a
+  // reconnect left a silent gap. Merging on every open fixes all three; the
+  // merge de-duplicates the up-to-50 lines the backend replays on connect.
   useEffect(() => {
     if (!agentId) return;
-
-    const es = createLogEventSource({
+    const scope = {
       agentId,
       conversationId: conversationId ?? undefined,
-    });
+    };
+
+    const es = createLogEventSource(scope);
 
     const handleEvent = (event: MessageEvent) => {
-      if (pausedRef.current) return;
       try {
         const entry: LogEntry = JSON.parse(event.data);
-        setLogs((prev) => {
-          const next = [...prev, entry];
-          return next.length > MAX_LOG_ENTRIES ? next.slice(-MAX_LOG_ENTRIES) : next;
-        });
+        setLogs((prev) => mergeNewestFirst(prev, [entry], MAX_LOG_ENTRIES));
       } catch {
         // Ignore malformed log events
       }
@@ -81,7 +94,24 @@ export function LiveLogViewer({ agentId, conversationId }: LiveLogViewerProps) {
     // Fallback for backends that send unnamed SSE events
     es.onmessage = handleEvent;
 
-    es.onopen = () => setConnected(true);
+    const seed = () =>
+      getRecentLogs({ ...scope, limit: SEED_LIMIT })
+        .then((recent) =>
+          setLogs((prev) => mergeNewestFirst(prev, recent, MAX_LOG_ENTRIES))
+        )
+        .catch(() => {
+          /* the live stream still works */
+        });
+
+    // Seed straight away (the history is useful even if the stream is refused),
+    // then again on every RE-open to fill whatever a dropped connection missed.
+    let opened = false;
+    es.onopen = () => {
+      setConnected(true);
+      if (opened) void seed();
+      opened = true;
+    };
+    void seed();
     es.onerror = () => setConnected(false);
 
     eventSourceRef.current = es;
@@ -93,15 +123,7 @@ export function LiveLogViewer({ agentId, conversationId }: LiveLogViewerProps) {
     };
   }, [agentId, conversationId]);
 
-  // Load initial logs
-  useEffect(() => {
-    if (!agentId) return;
-    getRecentLogs({ agentId, conversationId: conversationId ?? undefined, limit: 50 })
-      .then((entries) => setLogs(entries))
-      .catch(() => {
-        /* ignore */
-      });
-  }, [agentId, conversationId]);
+  const shown = pausedSnapshot ?? logs;
 
   // Auto-scroll
   useEffect(() => {
@@ -112,11 +134,18 @@ export function LiveLogViewer({ agentId, conversationId }: LiveLogViewerProps) {
     });
   }, [logs, paused]);
 
-  const handleClear = useCallback(() => setLogs([]), []);
+  const handleClear = useCallback(() => {
+    setLogs([]);
+    setPausedSnapshot((s) => (s === null ? null : []));
+  }, []);
 
-  // Filtered logs
+  const togglePause = useCallback(() => {
+    setPausedSnapshot((s) => (s === null ? logs : null));
+  }, [logs]);
+
+  // Filtered logs, oldest first (tail at the bottom)
   const filteredLogs = useMemo(() => {
-    let result = logs;
+    let result = shown;
     if (filterLevel) {
       result = result.filter((l) => l.level === filterLevel);
     }
@@ -128,8 +157,8 @@ export function LiveLogViewer({ agentId, conversationId }: LiveLogViewerProps) {
           l.loggerName.toLowerCase().includes(q),
       );
     }
-    return result;
-  }, [logs, filterLevel, searchQuery]);
+    return [...result].reverse();
+  }, [shown, filterLevel, searchQuery]);
 
   if (!agentId) {
     return (
@@ -194,7 +223,7 @@ export function LiveLogViewer({ agentId, conversationId }: LiveLogViewerProps) {
 
         {/* Pause/Resume */}
         <button
-          onClick={() => setPaused(!paused)}
+          onClick={togglePause}
           className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
           title={paused ? t("logViewer.resume", "Resume") : t("logViewer.pause", "Pause")}
           data-testid="log-pause"
@@ -226,14 +255,14 @@ export function LiveLogViewer({ agentId, conversationId }: LiveLogViewerProps) {
           <div className="flex flex-col items-center gap-2 py-8 text-center">
             <ScrollText className="h-6 w-6 text-muted-foreground/30" />
             <p className="text-xs text-muted-foreground">
-              {logs.length === 0
+              {shown.length === 0
                 ? t("logViewer.waiting", "Waiting for logs...")
                 : t("logViewer.noMatch", "No logs match your filter")}
             </p>
           </div>
         ) : (
-          filteredLogs.map((entry, idx) => (
-            <LogLine key={idx} entry={entry} />
+          filteredLogs.map((entry) => (
+            <LogLine key={logEntryKey(entry)} entry={entry} />
           ))
         )}
       </div>

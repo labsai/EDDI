@@ -656,7 +656,9 @@
     "endSuccess_other": "已结束 {{count}} 个对话",
     "endSuccess_one": "已结束 {{count}} 个对话",
     "purgeSuccess_other": "已清除 {{count}} 个已结束对话",
-    "purgeSuccess_one": "已清除 {{count}} 个已结束对话"
+    "purgeSuccess_one": "已清除 {{count}} 个已结束对话",
+    "endStateUnavailable": "无法重新检查对话的当前状态，因此未结束任何对话。请重试。",
+    "endStateChanged": "所选对话中有一个现在正在等待审批。请检查所选内容并再次确认。"
   },
   "conversationDetail": {
     "backToConversations": "返回对话列表",
@@ -1549,7 +1551,8 @@
     "stateReady": "就绪",
     "stateActive": "活跃",
     "stateError": "错误",
-    "stateEnded": "已结束"
+    "stateEnded": "已结束",
+    "loadOlder": "加载更早的条目"
   },
   "secrets": {
     "loadError": "无法加载密钥",
@@ -1834,7 +1837,11 @@
       "weeklyMonday": "每周（周一 00:00）",
       "monthly": "每月（1 日 00:00）"
     },
-    "totalCappedHint": "服务器返回了完整的一页，因此实际计划任务可能多于此处显示的数量。"
+    "totalCappedHint": "服务器返回了完整的一页，因此实际计划任务可能多于此处显示的数量。",
+    "systemManaged": "系统",
+    "systemManagedHint": "由 EDDI 管理（知识库摄取、记忆整合或团队节奏）。请在其定义处修改，而不是在这里。",
+    "persistentConversationIdLocked": "在创建计划时设置。服务器会保留各次触发一直追加到的那个对话。",
+    "failedScheduleGone": "该计划已不存在"
   },
   "cascadeTrace": {
     "title": "模型级联",
@@ -1895,7 +1902,8 @@
     "tokenDistribution": "令牌分布",
     "totalCost": "总成本",
     "totalTokens": "令牌总数",
-    "turns": "轮次"
+    "turns": "轮次",
+    "partial": "此对话的审计条目多于调试器加载的数量。合计仅涵盖最近的条目。"
   },
   "memoryInspector": {
     "error": "加载记忆数据失败",
@@ -3074,7 +3082,8 @@
     "previewFirst": "同步前预览变更",
     "syncPartial": "同步未完成 — 部分资源未写入",
     "syncIdentical": "已是最新 — 无需写入",
-    "previewFailed": "预览失败"
+    "previewFailed": "预览失败",
+    "noPreviewReturned": "源实例未返回此代理的预览。"
   },
   "sync": {
     "actionCreate": "新建",
@@ -3542,10 +3551,7 @@
     "message": "演示模式——显示示例数据。连接 EDDI 后端以获取真实数据。"
   },
   "orphans": {
-    "confirmPurgeAll": "永久删除全部 {{count}} 个孤立资源？服务器会清除所有孤立项——不应用您的选择。此操作无法撤销。",
-    "deleteSelected": "删除所选的 {{count}} 项",
     "description": "查找并清理未被任何智能体或工作流引用的资源。",
-    "deselectAll": "取消全选",
     "includeDeleted": "包含软删除项",
     "lastScanned": "上次扫描",
     "noOrphans": "未找到孤立项",
@@ -3556,13 +3562,13 @@
     "scanPromptDesc": "查找未被任何工作流或智能体引用的扩展配置（规则、API 调用、LLM、输出）。清理未使用的资源以保持平台整洁。",
     "scanPromptTitle": "扫描您的平台",
     "scanning": "正在扫描资源…",
-    "selectAll": "全选",
     "softDeleted": "已删除",
     "title": "孤立项检测",
     "found_other": "找到 {{count}} 个孤立项",
     "found_one": "找到 {{count}} 个孤立项",
     "scanIncomplete": "本次扫描未完成",
-    "scanIncompleteBody": "仍在使用中的资源可能被列为孤立资源。在扫描完整完成之前，清除操作已被禁用。"
+    "scanIncompleteBody": "仍在使用中的资源可能被列为孤立资源。在扫描完整完成之前，清除操作已被禁用。",
+    "confirmPurge": "永久删除全部 {{count}} 个孤立资源？此操作无法撤销。"
   },
   "quotas": {
     "apiCallsMinute": "API 调用 / 分钟",

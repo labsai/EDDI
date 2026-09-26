@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useDebugStore, type DebugTab } from "@/hooks/use-debug-events";
 import { PipelineTrace } from "./pipeline-trace";
@@ -47,6 +47,13 @@ export function DebugDrawer({ conversationId, agentId }: DebugDrawerProps) {
   const activeTab = useDebugStore((s) => s.activeTab);
   const setActiveTab = useDebugStore((s) => s.setActiveTab);
   const toggleDebug = useDebugStore((s) => s.toggleDebug);
+  const bindConversation = useDebugStore((s) => s.bindConversation);
+
+  // The recorded turns belong to one conversation; switching conversation or
+  // agent must not leave the previous one's turns on screen (or append to them).
+  useEffect(() => {
+    bindConversation(conversationId);
+  }, [conversationId, bindConversation]);
 
   /** Full ARIA keyboard navigation: Arrow Left/Right, Home/End */
   const handleTabKeyDown = useCallback(

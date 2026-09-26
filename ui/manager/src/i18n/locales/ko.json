@@ -656,7 +656,9 @@
     "endSuccess_other": "{{count}}개 대화를 종료했습니다",
     "endSuccess_one": "{{count}}개 대화를 종료했습니다",
     "purgeSuccess_other": "종료된 대화 {{count}}개를 정리했습니다",
-    "purgeSuccess_one": "종료된 대화 {{count}}개를 정리했습니다"
+    "purgeSuccess_one": "종료된 대화 {{count}}개를 정리했습니다",
+    "endStateUnavailable": "대화의 현재 상태를 다시 확인할 수 없어 아무것도 종료하지 않았습니다. 다시 시도하세요.",
+    "endStateChanged": "선택한 대화 중 하나가 이제 승인을 기다리고 있습니다. 선택을 검토하고 다시 확인하세요."
   },
   "conversationDetail": {
     "backToConversations": "대화로 돌아가기",
@@ -1549,7 +1551,8 @@
     "stateReady": "준비",
     "stateActive": "활성",
     "stateError": "오류",
-    "stateEnded": "종료"
+    "stateEnded": "종료",
+    "loadOlder": "이전 항목 불러오기"
   },
   "secrets": {
     "loadError": "시크릿을 불러올 수 없습니다",
@@ -1834,7 +1837,11 @@
       "weeklyMonday": "매주 (월 00:00)",
       "monthly": "매월 (1일 00:00)"
     },
-    "totalCappedHint": "서버가 한 페이지를 가득 채워 반환했으므로 여기에 표시된 것보다 일정이 더 많을 수 있습니다."
+    "totalCappedHint": "서버가 한 페이지를 가득 채워 반환했으므로 여기에 표시된 것보다 일정이 더 많을 수 있습니다.",
+    "systemManaged": "시스템",
+    "systemManagedHint": "EDDI가 관리합니다(지식 베이스 수집, 메모리 통합 또는 팀 주기). 여기가 아니라 정의된 곳에서 변경하세요.",
+    "persistentConversationIdLocked": "일정을 만들 때 설정됩니다. 서버는 실행이 계속 추가되어 온 대화를 유지합니다.",
+    "failedScheduleGone": "일정이 더 이상 존재하지 않습니다"
   },
   "cascadeTrace": {
     "title": "모델 캐스케이드",
@@ -1895,7 +1902,8 @@
     "tokenDistribution": "토큰 분포",
     "totalCost": "총 비용",
     "totalTokens": "총 토큰 수",
-    "turns": "턴"
+    "turns": "턴",
+    "partial": "이 대화에는 디버거가 불러오는 것보다 많은 감사 항목이 있습니다. 합계는 최근 항목만 포함합니다."
   },
   "memoryInspector": {
     "error": "메모리 데이터를 불러오지 못했습니다",
@@ -3074,7 +3082,8 @@
     "previewFirst": "동기화 전에 변경사항 미리보기",
     "syncPartial": "동기화 미완료 — 일부 리소스가 기록되지 않았습니다",
     "syncIdentical": "이미 최신 상태입니다 — 기록할 항목이 없습니다",
-    "previewFailed": "미리보기 실패"
+    "previewFailed": "미리보기 실패",
+    "noPreviewReturned": "소스가 이 에이전트의 미리보기를 반환하지 않았습니다."
   },
   "sync": {
     "actionCreate": "신규",
@@ -3542,10 +3551,7 @@
     "message": "데모 모드 — 샘플 데이터를 표시합니다. 실제 데이터를 보려면 EDDI 백엔드에 연결하세요."
   },
   "orphans": {
-    "confirmPurgeAll": "고아 리소스 {{count}}개를 모두 영구 삭제하시겠습니까? 서버는 모든 고아 항목을 삭제하며 선택은 적용되지 않습니다. 되돌릴 수 없습니다.",
-    "deleteSelected": "선택한 {{count}}개 삭제",
     "description": "어떤 에이전트나 패키지에서도 참조되지 않는 리소스를 찾아 정리합니다.",
-    "deselectAll": "전체 선택 해제",
     "includeDeleted": "소프트 삭제 포함",
     "lastScanned": "마지막 스캔",
     "noOrphans": "고아 항목을 찾을 수 없습니다",
@@ -3556,13 +3562,13 @@
     "scanPromptDesc": "어떤 워크플로나 에이전트에서도 참조되지 않는 확장 구성(규칙, API 호출, LLM, 출력)을 찾습니다. 사용하지 않는 리소스를 정리하여 플랫폼을 깔끔하게 유지하세요.",
     "scanPromptTitle": "플랫폼 스캔",
     "scanning": "리소스 스캔 중…",
-    "selectAll": "전체 선택",
     "softDeleted": "삭제됨",
     "title": "고아 항목 감지",
     "found_other": "{{count}}개의 고아 항목을 찾았습니다",
     "found_one": "{{count}}개의 고아 항목을 찾았습니다",
     "scanIncomplete": "이 스캔이 완료되지 않았습니다",
-    "scanIncompleteBody": "아직 사용 중인 리소스가 고아로 표시될 수 있습니다. 스캔이 완료될 때까지 정리가 차단됩니다."
+    "scanIncompleteBody": "아직 사용 중인 리소스가 고아로 표시될 수 있습니다. 스캔이 완료될 때까지 정리가 차단됩니다.",
+    "confirmPurge": "고아 리소스 {{count}}개를 모두 영구 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다."
   },
   "quotas": {
     "apiCallsMinute": "API 호출 / 분",

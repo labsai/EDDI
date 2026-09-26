@@ -74,6 +74,32 @@ function isHitlTimeoutSchedule(s: ScheduleConfiguration): boolean {
   return s.metadata?.hitlType === "hitl_timeout";
 }
 
+/** The metadata markers the backend's ScheduleFireExecutor reads to choose a
+ *  fire path other than "send a message to an agent": HITL approval timeouts,
+ *  RAG ingestion (RagIngestionSchedules), dream consolidation (DreamService) and
+ *  standing-team cadences (TeamCadenceService). */
+const SYSTEM_SCHEDULE_MARKERS = [
+  "hitlType",
+  "ragIngestion",
+  "dreamType",
+  "teamCadenceType",
+] as const;
+
+/** A schedule the platform minted for itself. The edit form only knows how to
+ *  describe a CHAT schedule, and a PUT is a full replace: saving it dropped the
+ *  metadata marker, so an edited RAG-ingestion, dream or team-cadence schedule
+ *  silently became one that messages an agent and stopped crawling or
+ *  consolidating. The backend also refuses a body that carries some of these
+ *  markers, so echoing them is no way out either — these schedules are changed
+ *  where they are defined (the knowledge base, the agent, the team). */
+function isSystemManagedSchedule(s: ScheduleConfiguration): boolean {
+  const md = s.metadata;
+  if (!md) return false;
+  return SYSTEM_SCHEDULE_MARKERS.some(
+    (key) => md[key] != null && md[key] !== false && md[key] !== ""
+  );
+}
+
 /** Render a cost value, treating -1 / undefined as "unlimited". */
 function formatCost(cost?: number): string {
   if (cost == null) return "—";
@@ -334,8 +360,30 @@ function FailedFiresPanel({
   const retryMutation = useRetryDeadLetter();
   const dismissMutation = useDismissDeadLetter();
 
+  const scheduleFor = (scheduleId: string) =>
+    schedules?.find((s) => s.id === scheduleId);
   const nameFor = (scheduleId: string) =>
-    schedules?.find((s) => s.id === scheduleId)?.name ?? scheduleId;
+    scheduleFor(scheduleId)?.name ?? scheduleId;
+
+  // The rows are FIRE LOGS, but retry and dismiss act on the SCHEDULE — and the
+  // backend only accepts them while that schedule is DEAD_LETTERED right now.
+  // A FAILED log whose schedule is waiting out its backoff 404s on retry, and
+  // dismiss is a markCompleted that, on a schedule that is currently claimed,
+  // clears the live claim and lets it fire twice. So the actions are offered
+  // once per schedule (on its newest log; the list is newest first) and only
+  // while the schedule itself is dead-lettered. Other rows say what state the
+  // schedule is actually in.
+  const actionableLogIds = new Set<string | number>();
+  {
+    const seen = new Set<string>();
+    (failed ?? []).forEach((log, i) => {
+      if (seen.has(log.scheduleId)) return;
+      seen.add(log.scheduleId);
+      if (scheduleFor(log.scheduleId)?.fireStatus === "DEAD_LETTERED") {
+        actionableLogIds.add(log.id ?? i);
+      }
+    });
+  }
 
   const handleRetry = (scheduleId: string) => {
     retryMutation.mutate(scheduleId, {
@@ -463,6 +511,23 @@ function FailedFiresPanel({
                     {log.errorMessage ?? "—"}
                   </td>
                   <td className="px-5 py-3">
+                    {!actionableLogIds.has(log.id ?? i) ? (
+                      <div
+                        className="text-end text-xs text-muted-foreground"
+                        data-testid={`failed-no-action-${log.id ?? i}`}
+                      >
+                        {(() => {
+                          if (!schedules) return "—";
+                          const current = scheduleFor(log.scheduleId);
+                          if (!current)
+                            return t(
+                              "schedules.failedScheduleGone",
+                              "Schedule no longer exists"
+                            );
+                          return <StatusBadge schedule={current} />;
+                        })()}
+                      </div>
+                    ) : (
                     <div className="flex items-center justify-end gap-1.5">
                       <button
                         onClick={() => handleRetry(log.scheduleId)}
@@ -483,6 +548,7 @@ function FailedFiresPanel({
                         {t("schedules.dismiss", "Dismiss")}
                       </button>
                     </div>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -509,6 +575,11 @@ function ScheduleFormDialog({
   const createMutation = useCreateSchedule();
   const updateMutation = useUpdateSchedule();
   const isEdit = editing != null;
+  // `editing` is the row as it was when the dialog opened. The list keeps
+  // polling underneath, and the PUT is a full replace, so the lifecycle fields
+  // the form does not own (enabled above all — someone may have disabled the
+  // schedule meanwhile) are taken from the freshest copy at submit time.
+  const { data: liveSchedules } = useSchedules();
 
   const [formMode, setFormMode] = useState<FormMode>("cron");
   const [name, setName] = useState("");
@@ -658,6 +729,9 @@ function ScheduleFormDialog({
   const isPending = createMutation.isPending || updateMutation.isPending;
 
   const buildConfig = (): Partial<ScheduleConfiguration> => {
+    const latest = editing
+      ? (liveSchedules?.find((s) => s.id === editing.id) ?? editing)
+      : null;
     const effectiveStrategy = formMode === "heartbeat" ? "persistent" : strategy;
     const config: Partial<ScheduleConfiguration> = {
       name: name.trim(),
@@ -670,8 +744,18 @@ function ScheduleFormDialog({
       userId: userId.trim() || undefined,
       maxCostPerFire: unlimitedCost ? UNLIMITED_COST : maxCost,
       conversationStrategy: effectiveStrategy,
-      enabled: editing ? editing.enabled : true,
+      enabled: latest ? latest.enabled : true,
     };
+    if (latest) {
+      // Not editable here, but part of the stored document: a PUT that omits
+      // them resets tenantId to null and allowSelfScheduling to false (the Java
+      // defaults), and drops any free-form metadata. System markers never reach
+      // this point — those schedules have no Edit action.
+      if (latest.tenantId != null) config.tenantId = latest.tenantId;
+      if (latest.allowSelfScheduling != null)
+        config.allowSelfScheduling = latest.allowSelfScheduling;
+      if (latest.metadata != null) config.metadata = latest.metadata;
+    }
     // Exactly one of cron / oneTimeAt / heartbeat (backend rule).
     if (formMode === "cron") {
       config.cronExpression = cronExpression.trim();
@@ -680,7 +764,15 @@ function ScheduleFormDialog({
     } else {
       config.heartbeatIntervalSeconds = heartbeatInterval;
     }
-    if (effectiveStrategy === "persistent" && persistentConversationId.trim()) {
+    // Only on create: the backend carries persistentConversationId over from
+    // the stored row on every update (it is the conversation the fires have been
+    // appending to), so an edit here was silently discarded. The field is shown
+    // read-only when editing instead.
+    if (
+      !isEdit &&
+      effectiveStrategy === "persistent" &&
+      persistentConversationId.trim()
+    ) {
       config.persistentConversationId = persistentConversationId.trim();
     }
     return config;
@@ -1081,13 +1173,26 @@ function ScheduleFormDialog({
               <input
                 value={persistentConversationId}
                 onChange={(e) => setPersistentConversationId(e.target.value)}
+                readOnly={isEdit}
+                aria-readonly={isEdit}
                 placeholder={t(
                   "schedules.persistentConversationIdPlaceholder",
                   "Auto-generated if left blank"
                 )}
-                className={inputCls}
+                className={`${inputCls} ${isEdit ? "cursor-not-allowed opacity-70" : ""}`}
                 data-testid="persistent-conv-input"
               />
+              {isEdit && (
+                <p
+                  className="mt-1 text-xs text-muted-foreground"
+                  data-testid="persistent-conv-readonly-hint"
+                >
+                  {t(
+                    "schedules.persistentConversationIdLocked",
+                    "Set when the schedule is created. The server keeps the conversation the fires have been appending to."
+                  )}
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -1502,6 +1607,7 @@ export function SchedulesPage() {
                 <tbody>
                   {schedules.map((s) => {
                     const hitl = isHitlTimeoutSchedule(s);
+                    const systemManaged = isSystemManagedSchedule(s);
                     const outcome = fireOutcomes[s.id!];
                     return (
                       <Fragment key={s.id}>
@@ -1521,6 +1627,18 @@ export function SchedulesPage() {
                               >
                                 <HandMetal className="h-3 w-3" />{" "}
                                 {t("schedules.hitlTimeout", "HITL timeout")}
+                              </span>
+                            )}
+                            {systemManaged && !hitl && (
+                              <span
+                                className="ms-2 inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
+                                title={t(
+                                  "schedules.systemManagedHint",
+                                  "Managed by EDDI (knowledge-base ingestion, memory consolidation or a team cadence). Change it where it is defined, not here."
+                                )}
+                                data-testid={`system-schedule-badge-${s.id}`}
+                              >
+                                {t("schedules.systemManaged", "System")}
                               </span>
                             )}
                           </td>
@@ -1578,9 +1696,11 @@ export function SchedulesPage() {
                           </td>
                           <td className="px-5 py-3">
                             <div className="flex items-center justify-end gap-1">
-                              {/* Edit — hidden for HITL-timeout schedules
-                                  (backend restricts their mutation to admins). */}
-                              {!hitl && (
+                              {/* Edit — hidden for every system-managed
+                                  schedule (HITL timeouts, RAG ingestion, dream,
+                                  team cadence): the form can only express a chat
+                                  schedule, so saving one rewired its fire path. */}
+                              {!systemManaged && (
                                 <button
                                   onClick={() => openEdit(s)}
                                   title={t("common.edit", "Edit")}

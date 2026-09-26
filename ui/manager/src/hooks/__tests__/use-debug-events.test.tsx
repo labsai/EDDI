@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { act } from "@testing-library/react";
 import {
   useDebugStore,
+  resolveAuditStepIndex,
   type PipelineEvent,
 } from "@/hooks/use-debug-events";
+import type { AuditEntry } from "@/lib/api/audit";
 
 describe("useDebugStore", () => {
   beforeEach(() => {
@@ -179,3 +181,92 @@ describe("useDebugStore", () => {
     expect(state.selectedTurnIndex).toBeNull();
   });
 });
+
+describe("useDebugStore.bindConversation", () => {
+  const ev = (taskType: string, durationMs: number): PipelineEvent => ({
+    type: "task_complete",
+    taskId: taskType,
+    taskType,
+    index: 0,
+    durationMs,
+    timestamp: 1,
+  });
+
+  beforeEach(() => {
+    act(() => {
+      useDebugStore.getState().reset();
+      useDebugStore.setState({ boundConversationId: null });
+    });
+  });
+
+  it("keeps the turn being recorded when the conversation id first arrives", () => {
+    act(() => {
+      useDebugStore.getState().addEvent(ev("llm", 5));
+      useDebugStore.getState().bindConversation("conv-a");
+    });
+    expect(useDebugStore.getState().currentTurnEvents).toHaveLength(1);
+  });
+
+  it("clears recorded turns when the debugger moves to another conversation", () => {
+    act(() => {
+      useDebugStore.getState().bindConversation("conv-a");
+      useDebugStore.getState().addEvent(ev("llm", 5));
+      useDebugStore.getState().finalizeTurn();
+      useDebugStore.getState().addEvent(ev("llm", 6));
+    });
+    expect(useDebugStore.getState().turns).toHaveLength(1);
+
+    act(() => useDebugStore.getState().bindConversation("conv-b"));
+    const s = useDebugStore.getState();
+    expect(s.turns).toEqual([]);
+    expect(s.boundConversationId).toBe("conv-b");
+    // The in-flight turn is the stream that is running now — the chat store's,
+    // i.e. the conversation being switched to — so it is kept.
+    expect(s.currentTurnEvents).toHaveLength(1);
+  });
+
+  it("re-binding the same conversation changes nothing", () => {
+    act(() => {
+      useDebugStore.getState().bindConversation("conv-a");
+      useDebugStore.getState().addEvent(ev("llm", 5));
+      useDebugStore.getState().finalizeTurn();
+      useDebugStore.getState().bindConversation("conv-a");
+    });
+    expect(useDebugStore.getState().turns).toHaveLength(1);
+  });
+});
+
+describe("resolveAuditStepIndex", () => {
+  const ev = (taskType: string, durationMs: number): PipelineEvent => ({
+    type: "task_complete",
+    taskId: taskType,
+    taskType,
+    index: 0,
+    durationMs,
+    timestamp: 1,
+  });
+  const audit = (stepIndex: number, taskType: string, durationMs: number) =>
+    ({ stepIndex, taskType, durationMs }) as unknown as AuditEntry;
+
+  it("finds the step whose entries carry the same (taskType, durationMs) pairs", () => {
+    const entries = [
+      audit(0, "parser", 3),
+      audit(0, "llm", 100),
+      audit(3, "parser", 42),
+      audit(3, "llm", 250),
+    ];
+    expect(resolveAuditStepIndex([ev("parser", 42), ev("llm", 250)], entries)).toBe(3);
+  });
+
+  it("returns undefined when no step accounts for every completed task", () => {
+    const entries = [audit(0, "parser", 42), audit(0, "llm", 100)];
+    expect(resolveAuditStepIndex([ev("parser", 42), ev("llm", 250)], entries)).toBeUndefined();
+  });
+
+  it("prefers the newest step on a tie and ignores a turn with no completed tasks", () => {
+    const entries = [audit(1, "llm", 7), audit(5, "llm", 7)];
+    expect(resolveAuditStepIndex([ev("llm", 7)], entries)).toBe(5);
+    expect(resolveAuditStepIndex([], entries)).toBeUndefined();
+  });
+});
+
