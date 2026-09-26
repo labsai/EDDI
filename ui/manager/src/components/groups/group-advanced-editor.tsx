@@ -4,6 +4,7 @@ import { Save, X, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useUpdateGroup } from "@/hooks/use-groups";
+import { getErrorMessage } from "@/lib/api-client";
 import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import { LLM_PROVIDERS } from "@/lib/api/agent-setup";
 import {
@@ -209,8 +210,14 @@ export function GroupAdvancedEditor({
             llmModel: summarizerModel.trim() || null,
           }
         : undefined,
+      // Not an on/off switch, whatever the checkbox looks like: the backend has
+      // no "off" for retro. A RETRO phase always harvests lessons, and a null
+      // `retroConfig` means "the default caps" (3 per run, 50 stored), not
+      // "disabled". Unticking therefore only drops the custom caps. Spread so a
+      // field this editor does not show (`maxLessonChars`) survives a save.
       retroConfig: retroEnabled
         ? {
+            ...config.retroConfig,
             maxLessonsPerRun: boundedInt(
               maxLessonsPerRun,
               RETRO_DEFAULT_MAX_PER_RUN,
@@ -263,7 +270,8 @@ export function GroupAdvancedEditor({
           toast.success(t("groups.advancedSaved", "Collaboration settings saved"));
           onDone();
         },
-        onError: () => toast.error(t("common.error", "Something went wrong")),
+        // The backend names the field and the rule it broke; keep its sentence.
+        onError: (err) => toast.error(getErrorMessage(err)),
       },
     );
   };
@@ -389,13 +397,19 @@ export function GroupAdvancedEditor({
             className="h-3.5 w-3.5 rounded border-input accent-primary"
             data-testid="adv-retro-enable"
           />
-          {t("groups.retroConfigLabel", "Retro lessons")}
+          {t("groups.retroCustomLimits", "Custom retro lesson limits")}
         </label>
-        <p className="text-[10px] text-muted-foreground">
-          {t(
-            "groups.retroConfigHint",
-            "Lets a retro phase write lessons into the team's memory, carried into later discussions.",
-          )}
+        <p className="text-[10px] text-muted-foreground" data-testid="adv-retro-hint">
+          {retroEnabled
+            ? t(
+                "groups.retroCustomHint",
+                "A retro phase writes lessons into the team's memory, carried into later discussions. These caps bound how many.",
+              )
+            : t(
+                "groups.retroDefaultHint",
+                "A retro phase still writes lessons, with the default caps ({{perRun}} per run, {{stored}} stored). To stop it, remove the RETRO phase.",
+                { perRun: RETRO_DEFAULT_MAX_PER_RUN, stored: RETRO_DEFAULT_MAX_STORED },
+              )}
         </p>
         {retroEnabled && (
           <div className="flex flex-wrap items-center gap-3 ps-5">

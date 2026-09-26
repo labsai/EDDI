@@ -2873,7 +2873,7 @@ export const handlers = [
   }),
 
   // Group conversations
-  http.get("*/groups/:groupId/conversations", ({ params }) => {
+  http.get("*/groups/:groupId/conversations", ({ params, request }) => {
     const now = Date.now();
     const groupConversations: Record<string, object[]> = {
       grp1: [
@@ -2912,7 +2912,12 @@ export const handlers = [
       ],
     };
     const id = params.groupId as string;
-    return HttpResponse.json(groupConversations[id] ?? []);
+    // The backend's `index` is a ROW offset here (GroupConversationStore hands it
+    // to findResources as `skip`), unlike the descriptor stores' page index.
+    const url = new URL(request.url);
+    const index = Number(url.searchParams.get("index") ?? 0);
+    const limit = Number(url.searchParams.get("limit") ?? 20);
+    return HttpResponse.json((groupConversations[id] ?? []).slice(index, index + limit));
   }),
 
   http.post("*/groups/:groupId/conversations", ({ params }) => {

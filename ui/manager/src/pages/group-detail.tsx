@@ -245,6 +245,13 @@ export function GroupDetailPage() {
    * could never accept a file again, with no error to explain it.
    */
   const userClearedRef = useRef(false);
+  // It is a choice about ONE group. The page stays mounted when the route moves
+  // to another group, and a "New Discussion" pressed on the last one used to
+  // leave the next group's newest discussion unselected on arrival.
+  // Declared before the auto-select effect so it runs first on a group switch.
+  useEffect(() => {
+    userClearedRef.current = false;
+  }, [groupId]);
 
   // Auto-select the first conversation on load — but never override the
   // conversation the stream is driving (its settle effect handles selection),
@@ -344,7 +351,11 @@ export function GroupDetailPage() {
   useEffect(() => {
     const verdict = pendingDecisionRef.current;
     if (!verdict) return;
-    if (streamState.hitlResume) {
+    // A rejection never produces `hitl_resume`: the backend ends the run on the
+    // spot and reports it with `group_complete` carrying state REJECTED. Waiting
+    // for the ack alone meant a rejection was never confirmed at all, and the
+    // pending decision lingered into whatever the page did next.
+    if (streamState.hitlResume || (verdict === "REJECTED" && streamState.state === "REJECTED")) {
       toast.success(
         verdict === "APPROVED" ? t("hitl.approved", "Approved") : t("hitl.rejected", "Rejected"),
       );
@@ -470,11 +481,21 @@ export function GroupDetailPage() {
     // it shows the full pause metadata (pausedAt, timeout policy/countdown,
     // per-task awaiting list, or — for a human turn — the rendered prompt) and
     // the lifecycle actions that state offers.
-    if (STREAM_SETTLED_STATES.includes(streamState.state) && streamState.conversationId) {
+    //
+    // A connection that dropped without a terminal event is handed over the
+    // same way: the discussion may still be running, and the persisted
+    // conversation polls while it is, whereas the stream is frozen for good.
+    if (
+      (STREAM_SETTLED_STATES.includes(streamState.state) || streamState.interrupted) &&
+      streamState.conversationId
+    ) {
       userClearedRef.current = false; // the stream owns the selection now
       setSelectedConvId(streamState.conversationId);
+      if (streamState.interrupted && groupId) {
+        queryClient.invalidateQueries({ queryKey: ["groupConversations", groupId] });
+      }
     }
-  }, [streamState.state, streamState.conversationId, groupId, queryClient, setSelectedConvId]);
+  }, [streamState.state, streamState.interrupted, streamState.conversationId, groupId, queryClient, setSelectedConvId]);
 
   function handleDeleteConversation(convId: string) {
     if (!groupId) return;

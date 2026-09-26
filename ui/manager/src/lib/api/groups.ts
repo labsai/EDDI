@@ -1130,6 +1130,17 @@ export function getGroup(
     .then(normalizeGroupConfig);
 }
 
+/**
+ * The group's current (newest) version — `GET /groupstore/groups/{id}/currentversion`.
+ *
+ * One small request, for the pages that are reached without a `?version=`: they
+ * used to fall back to version 1, which reads the group's FIRST version — its
+ * original name, members and phases — for any group that had ever been saved.
+ */
+export function getGroupCurrentVersion(id: string): Promise<number> {
+  return api.get<number>(`/groupstore/groups/${encodeURIComponent(id)}/currentversion`);
+}
+
 export function createGroup(
   config: AgentGroupConfiguration
 ): Promise<{ location: string }> {
@@ -1467,11 +1478,18 @@ export interface SpeakerStartPayload {
   phaseName: string;
 }
 
+/**
+ * Why a member's turn produced no contribution (`SpeakerCompleteEvent.outcome`).
+ * Absent on an ordinary contribution, and on every event from a backend that
+ * predates the field.
+ */
+export type SpeakerCompleteOutcome = "TIMEOUT" | "SKIPPED" | "ERROR";
+
 export interface SpeakerCompletePayload {
   agentId: string;
   displayName: string;
-  /** Backend field name is 'response' */
-  response: string;
+  /** Backend field name is 'response'. Null when `outcome` is set. */
+  response: string | null;
   /** Fallback alias */
   content?: string;
   phaseIndex: number;
@@ -1479,6 +1497,12 @@ export interface SpeakerCompletePayload {
   /** Peer-targeted phase: the agent this response was aimed at */
   targetAgentId?: string;
   targetDisplayName?: string;
+  /**
+   * Set when the turn produced nothing — then `response` is null, so a failure
+   * is never rendered as something the member said. The raw error text stays in
+   * the server log and the persisted transcript's `errorReason`.
+   */
+  outcome?: SpeakerCompleteOutcome | null;
 }
 
 export interface PhaseCompletePayload {
@@ -1643,8 +1667,11 @@ const NO_EVENT_TYPE = " no-event-type";
  */
 async function* readGroupSSE(response: Response): AsyncGenerator<GroupSSEEvent> {
   if (!response.ok) {
-    // M5 fix: throw a proper Error, not a plain object
-    throw new Error(`Group streaming failed: ${response.status} ${response.statusText}`);
+    // M5 fix: throw a proper Error, not a plain object. The backend's own
+    // sentence goes in it: a refused start ("question is required", a
+    // validation 400, an ownership 403) otherwise reached the user as a bare
+    // "400 Bad Request" with nothing to act on.
+    throw new Error(await streamRefusalMessage(response));
   }
 
   const reader = response.body?.getReader();
@@ -1699,6 +1726,35 @@ async function* readGroupSSE(response: Response): AsyncGenerator<GroupSSEEvent> 
   } finally {
     reader.releaseLock();
   }
+}
+
+/**
+ * The message for a stream request the server refused before streaming.
+ *
+ * Plain-text bodies (the exception mappers') are the message; JSON bodies carry
+ * it under the usual keys. Markup (a proxy's error page) and anything
+ * unreadable fall back to the status line.
+ */
+async function streamRefusalMessage(response: Response): Promise<string> {
+  const status = `Group streaming failed: ${response.status} ${response.statusText}`.trim();
+  let body = "";
+  try {
+    body = (await response.text()).trim();
+  } catch {
+    return status;
+  }
+  if (!body || body.startsWith("<")) return status;
+  let message = body;
+  try {
+    const parsed: unknown = JSON.parse(body);
+    const record = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
+    const candidate = record?.message ?? record?.error ?? record?.detail ?? record?.errorMessage;
+    if (typeof candidate !== "string" || !candidate.trim()) return status;
+    message = candidate.trim();
+  } catch {
+    // Not JSON — the body is the message.
+  }
+  return `${message.length > 500 ? `${message.slice(0, 500)}…` : message} (HTTP ${response.status})`;
 }
 
 /** POST a JSON body to an SSE endpoint (shared auth/header scaffolding). */

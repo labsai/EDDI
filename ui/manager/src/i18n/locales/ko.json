@@ -2692,7 +2692,6 @@
     "contextWindowEntries": "전문 그대로 유지할 최근 항목 수",
     "contextWindowSummarize": "창 밖으로 밀려난 내용 요약",
     "contextWindowTruncateNote": "오래된 항목은 “이전 항목 N개 생략”이라는 간단한 표시로 대체됩니다.",
-    "retroConfigHint": "회고 단계가 배운 점을 팀 메모리에 기록해 이후 논의로 이어지게 합니다.",
     "retroPerRun": "실행당",
     "retroStored": "저장 최대",
     "artifactConfigHint": "구성원이 함께 문서를 작성하고, 작성된 턴이 끝난 뒤에도 유지되게 합니다.",
@@ -2887,7 +2886,24 @@
     },
     "stateRejected": "거부됨",
     "inputDisabledRejected": "이 권고안은 거부되었습니다",
-    "debateVerdictNote": "산문이 아니라 점수 판정(승자와 점수)으로 답합니다: {{phases}}. 구성원이 둘 이상의 역할을 가지고 논증이 앞서므로 중재자 자신의 종합 프롬프트는 사용되지 않습니다. 산문을 원하면 해당 단계에 입력 템플릿을 설정하세요."
+    "debateVerdictNote": "산문이 아니라 점수 판정(승자와 점수)으로 답합니다: {{phases}}. 구성원이 둘 이상의 역할을 가지고 논증이 앞서므로 중재자 자신의 종합 프롬프트는 사용되지 않습니다. 산문을 원하면 해당 단계에 입력 템플릿을 설정하세요.",
+    "retroCustomLimits": "회고 교훈 한도 사용자 지정",
+    "retroCustomHint": "회고 단계는 교훈을 팀 메모리에 기록하여 이후 토론에 이어갑니다. 이 한도가 개수를 제한합니다.",
+    "retroDefaultHint": "회고 단계는 기본 한도(실행당 {{perRun}}개, 저장 {{stored}}개)로 계속 교훈을 기록합니다. 중지하려면 RETRO 단계를 제거하세요.",
+    "voteOptionsTooFew": "명시적 투표 용지에는 최소 두 개의 선택지가 필요합니다.",
+    "saveProblem": {
+      "title": "이 그룹은 아직 생성할 수 없습니다:",
+      "debateRoles": "토론에는 역할이 PRO인 멤버와 CON인 멤버가 각각 최소 한 명 필요합니다.",
+      "devilAdvocateRole": "악마의 변호인 그룹에는 역할이 DEVIL_ADVOCATE인 멤버가 필요합니다.",
+      "humanInTaskForce": "사람 멤버는 태스크포스 그룹(계획, 실행, 검증 단계)에 참여할 수 없습니다.",
+      "humanWithPeerPhases": "동료 검토처럼 단계가 각 동료를 차례로 대상으로 하는 그룹에는 사람 멤버가 참여할 수 없습니다.",
+      "memberUnassigned_one": "{{count}}명의 멤버에게 에이전트가 할당되지 않았습니다.",
+      "memberUnassigned_other": "{{count}}명의 멤버에게 에이전트가 할당되지 않았습니다.",
+      "humanNeedsName_one": "{{count}}명의 사람 멤버에게 표시 이름이 필요합니다.",
+      "humanNeedsName_other": "{{count}}명의 사람 멤버에게 표시 이름이 필요합니다.",
+      "humanNeedsId_one": "{{count}}명의 사람 멤버에게 해당 사용자의 ID가 필요합니다.",
+      "humanNeedsId_other": "{{count}}명의 사람 멤버에게 해당 사용자의 ID가 필요합니다."
+    }
   },
   "taskBoard": {
     "title": "작업 보드",
@@ -3744,7 +3760,17 @@
       "toggleConfig": "세부 정보 패널 전환",
       "unpin": "응답 고정 해제",
       "untitled": "제목 없음",
-      "viewSessions": "지난 세션 보기"
+      "viewSessions": "지난 세션 보기",
+      "alreadyEnded": "토론이 이미 종료되었습니다.",
+      "stopFailed": "토론을 중지할 수 없습니다: {{error}}",
+      "stopping": "중지하는 중…",
+      "startOver": "다시 시작",
+      "streamInterrupted": "실시간 연결이 끊어졌습니다. 저장된 토론을 표시하며, 진행 중에는 계속 업데이트됩니다.",
+      "confirmNewTitle": "진행 중인 토론을 중지하시겠습니까?",
+      "confirmNewDescription": "토론이 아직 진행 중입니다. 새 토론을 시작하면 먼저 중지되며 진행 중인 작업은 버려집니다.",
+      "confirmNewButton": "중지하고 새로 시작",
+      "keepRunning": "계속 실행",
+      "questionRequired": "태스크포스에 대한 질문을 추가하세요. 파일은 토론이 시작될 때 공유됩니다."
     },
     "thread": {
       "fileTooLarge": "파일은 20MB 미만이어야 합니다",
@@ -3773,7 +3799,8 @@
       "stop": "생성 중지",
       "streamEnded": "답변이 끝나기 전에 연결이 종료되었습니다. 도착한 내용은 위에 있습니다. 다시 보내 재시도하세요.",
       "newConversation": "새 대화",
-      "newConversationFailed": "새 대화를 시작할 수 없습니다"
+      "newConversationFailed": "새 대화를 시작할 수 없습니다",
+      "initFailed": "이 대화를 열 수 없습니다."
     },
     "chat": {
       "agentDetails": "에이전트 상세 정보",

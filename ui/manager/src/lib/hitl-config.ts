@@ -10,11 +10,12 @@ import type { GroupHitlConfig } from "./api/hitl";
  * Needed because preset-style groups store `phases: null` and the backend
  * generates them at runtime — but to let a user mark WHICH phases require human
  * approval (`phase.requiresApproval`, the sole HITL pause trigger) we must
- * materialize the phase list into the saved config. Every preset phase uses
- * `inputTemplate: null` (the engine resolves the prompt from the phase TYPE),
- * so replicating name/type/participants/turnOrder/contextScope/repeats here is
- * behavior-preserving. Keep in sync with
- * ai.labs.eddi.configs.groups.model.DiscussionStylePresets.
+ * materialize the phase list into the saved config. Almost every preset phase
+ * uses `inputTemplate: null` (the engine resolves the prompt from the phase
+ * TYPE), so replicating name/type/participants/turnOrder/contextScope/repeats
+ * here is behavior-preserving. The one exception is NEGOTIATION's Arbitration,
+ * which carries its own prompt — see {@link NEGOTIATION_ARBITRATION_TEMPLATE}.
+ * Keep in sync with ai.labs.eddi.configs.groups.model.DiscussionStylePresets.
  */
 function phase(
   name: string,
@@ -44,6 +45,26 @@ function phase(
     skipIf,
   };
 }
+
+/**
+ * `DiscussionStylePresets.TEMPLATE_ARBITRATION`, verbatim.
+ *
+ * The only preset phase with a prompt of its own. Materializing NEGOTIATION's
+ * phases with `inputTemplate: null` — as enabling an approval point does —
+ * silently swapped the arbitrator's brief ("the parties did NOT reach
+ * agreement… decide the outcome") for the generic synthesis prompt, so the
+ * moderator summarised a deadlock instead of breaking it. A test compares this
+ * string with the Java text block, so the two cannot drift apart unnoticed.
+ */
+export const NEGOTIATION_ARBITRATION_TEMPLATE = `You are arbitrating a negotiation on:
+"{question}"
+
+The parties bargained but did NOT reach unanimous agreement. The full transcript is your record:
+{#for entry in transcript}
+[{entry.phaseName}] {entry.speaker}: "{entry.content}"
+{/for}
+
+As the arbitrator, decide the outcome. Weigh the stated interests, the open proposals and the concession ledger (appended below); state your decision and its reasoning plainly.`;
 
 export function getStylePhases(style: DiscussionStyle, maxRounds: number): DiscussionPhase[] {
   const rounds = Math.max(1, maxRounds || 1);
@@ -101,7 +122,10 @@ export function getStylePhases(style: DiscussionStyle, maxRounds: number): Discu
         phase("Positions & Interests", "OPINION", "ALL", "PARALLEL", "NONE", false, 1),
         phase("Opening Proposals", "PROPOSAL", "ALL", "SEQUENTIAL", "FULL", false, 1),
         phase("Bargaining", "BARGAIN", "ALL", "SEQUENTIAL", "FULL", false, rounds),
-        phase("Arbitration", "SYNTHESIS", "MODERATOR", "SEQUENTIAL", "FULL", false, 1, "AGREEMENT_REACHED"),
+        {
+          ...phase("Arbitration", "SYNTHESIS", "MODERATOR", "SEQUENTIAL", "FULL", false, 1, "AGREEMENT_REACHED"),
+          inputTemplate: NEGOTIATION_ARBITRATION_TEMPLATE,
+        },
         phase("Synthesis", "SYNTHESIS", "MODERATOR", "SEQUENTIAL", "FULL", false, 1),
       ];
     case "CUSTOM":

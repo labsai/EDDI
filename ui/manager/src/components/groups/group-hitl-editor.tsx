@@ -4,6 +4,7 @@ import { Save, X, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useUpdateGroup } from "@/hooks/use-groups";
+import { getErrorMessage } from "@/lib/api-client";
 import type { AgentGroupConfiguration } from "@/lib/api/groups";
 import type { GroupHitlConfig } from "@/lib/api/hitl";
 import {
@@ -102,7 +103,8 @@ export function GroupHitlEditor({
           toast.success(t("groups.hitlSaved", "Approval settings saved"));
           onDone();
         },
-        onError: () => toast.error(t("common.error", "Something went wrong")),
+        // The backend names the field and the rule it broke; keep its sentence.
+        onError: (err) => toast.error(getErrorMessage(err)),
       },
     );
   };
