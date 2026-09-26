@@ -3,13 +3,13 @@ import { useTranslation } from "react-i18next";
 import {
   useDebugStore,
   buildCascadeSteps,
-  resolveAuditStepIndex,
+  resolveLiveTurnSteps,
+  type AuditStepMatch,
   type PipelineTurn,
   type PipelineEvent,
 } from "@/hooks/use-debug-events";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import type { AuditEntry } from "@/lib/api/audit";
-import { getWholeAuditTrail } from "@/lib/audit-pages";
+import { AUDIT_FLUSH_DELAY_MS, useDebuggerAudit } from "@/hooks/use-debugger-audit";
 import { cn, formatDuration, formatUsd } from "@/lib/utils";
 import { CascadeStepTrace } from "@/components/cascade-step-trace";
 import { Clock, Zap, ChevronDown, AlertTriangle, ArrowUp, ArrowDown } from "lucide-react";
@@ -60,16 +60,28 @@ export function PipelineTrace({ conversationId }: PipelineTraceProps) {
   const selectedTurnIndex = useDebugStore((s) => s.selectedTurnIndex);
   const setSelectedTurn = useDebugStore((s) => s.setSelectedTurn);
 
-  // Keyed on the number of finished live turns so the ledger is re-read after
-  // each turn; that is what lets a live turn find its audit step (costs, model).
-  const { data: audit, isError: auditError } = useQuery({
-    queryKey: ["audit", "debugger", conversationId, turns.length],
-    queryFn: () => getWholeAuditTrail(conversationId!),
-    enabled: !!conversationId,
-    staleTime: 30_000,
-    placeholderData: keepPreviousData,
-  });
+  // One shared, incrementally refreshed trail (see useDebuggerAudit). While a
+  // finished live turn has no audit step yet — the ledger flushes a few seconds
+  // after the turn — keep re-reading, for up to a minute after that turn.
+  const { data: audit, isError: auditError } = useDebuggerAudit(
+    conversationId,
+    (query) => {
+      const matches = resolveLiveTurnSteps(turns, query.state.data?.entries);
+      const waiting = matches.some(
+        (m, i) =>
+          m.status === "pending" &&
+          Date.now() - (turns[i]!.startTime + turns[i]!.totalDurationMs) <
+            PENDING_AUDIT_POLL_WINDOW_MS
+      );
+      return waiting ? AUDIT_FLUSH_DELAY_MS : false;
+    }
+  );
   const auditEntries = audit?.entries;
+
+  const liveMatches = useMemo(
+    () => resolveLiveTurnSteps(turns, auditEntries),
+    [turns, auditEntries]
+  );
 
   const historicalTurns = useMemo(() => {
     if (!auditEntries?.length) return [];
@@ -125,7 +137,14 @@ export function PipelineTrace({ conversationId }: PipelineTraceProps) {
         showLiveEvents ? (
           <LiveEventsChart events={currentTurnEvents} auditEntries={auditEntries ?? []} />
         ) : displayTurn ? (
-          <TurnChart turn={displayTurn} auditEntries={auditEntries ?? []} />
+          <TurnChart
+            turn={displayTurn}
+            auditEntries={auditEntries ?? []}
+            stepIndex={
+              displayTurn.stepIndex ??
+              stepOf(liveMatches[turns.indexOf(displayTurn)])
+            }
+          />
         ) : (
           <div className="flex flex-col items-center gap-2 py-6 text-center">
             <Zap className="h-8 w-8 text-muted-foreground/30" />
@@ -141,12 +160,17 @@ export function PipelineTrace({ conversationId }: PipelineTraceProps) {
 
 // ==================== Turn Chart ====================
 
-function TurnChart({ turn, auditEntries }: { turn: PipelineTurn; auditEntries: AuditEntry[] }) {
+function TurnChart({
+  turn,
+  auditEntries,
+  stepIndex,
+}: {
+  turn: PipelineTurn;
+  auditEntries: AuditEntry[];
+  /** The audit step this turn is, or undefined when it is not (yet) known. */
+  stepIndex: number | undefined;
+}) {
   const { t } = useTranslation();
-  const stepIndex = useMemo(
-    () => turn.stepIndex ?? resolveAuditStepIndex(turn.events, auditEntries),
-    [turn.stepIndex, turn.events, auditEntries]
-  );
   const tasks = useMemo(() => buildTaskBars(turn.events, auditEntries, stepIndex), [turn.events, auditEntries, stepIndex]);
   const maxDuration = Math.max(...tasks.map((bar) => bar.durationMs), 1);
   const totalCost = tasks.reduce((sum, task) => sum + (task.auditEntry?.cost ?? 0), 0);
@@ -202,8 +226,10 @@ function TurnChart({ turn, auditEntries }: { turn: PipelineTurn; auditEntries: A
 
 function LiveEventsChart({ events, auditEntries }: { events: PipelineEvent[]; auditEntries: AuditEntry[] }) {
   const { t } = useTranslation();
+  // An in-flight turn is never matched to the ledger: its partial fingerprint
+  // fits almost every earlier step, and its own entries are not written yet.
   const tasks = useMemo(
-    () => buildTaskBars(events, auditEntries, resolveAuditStepIndex(events, auditEntries)),
+    () => buildTaskBars(events, auditEntries, undefined),
     [events, auditEntries]
   );
   const maxDuration = Math.max(...tasks.map((bar) => bar.durationMs || 100), 1);
@@ -404,6 +430,13 @@ function TaskBar({ task, maxDuration }: { task: TaskBarData; maxDuration: number
 }
 
 // ==================== Helpers ====================
+
+/** Keep polling for a finished turn's audit entries for this long. */
+const PENDING_AUDIT_POLL_WINDOW_MS = 60_000;
+
+function stepOf(match: AuditStepMatch | undefined): number | undefined {
+  return match?.status === "matched" ? match.stepIndex : undefined;
+}
 
 function buildTaskBars(events: PipelineEvent[], auditEntries: AuditEntry[], stepIndex?: number): TaskBarData[] {
   const tasks: TaskBarData[] = [];

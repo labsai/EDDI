@@ -2,8 +2,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { act } from "@testing-library/react";
 import {
   useDebugStore,
-  resolveAuditStepIndex,
+  resolveLiveTurnSteps,
   type PipelineEvent,
+  type PipelineTurn,
 } from "@/hooks/use-debug-events";
 import type { AuditEntry } from "@/lib/api/audit";
 
@@ -220,9 +221,8 @@ describe("useDebugStore.bindConversation", () => {
     const s = useDebugStore.getState();
     expect(s.turns).toEqual([]);
     expect(s.boundConversationId).toBe("conv-b");
-    // The in-flight turn is the stream that is running now — the chat store's,
-    // i.e. the conversation being switched to — so it is kept.
-    expect(s.currentTurnEvents).toHaveLength(1);
+    // A switch mid-stream: the running turn belongs to conv-a, not conv-b.
+    expect(s.currentTurnEvents).toEqual([]);
   });
 
   it("re-binding the same conversation changes nothing", () => {
@@ -236,7 +236,7 @@ describe("useDebugStore.bindConversation", () => {
   });
 });
 
-describe("resolveAuditStepIndex", () => {
+describe("resolveLiveTurnSteps", () => {
   const ev = (taskType: string, durationMs: number): PipelineEvent => ({
     type: "task_complete",
     taskId: taskType,
@@ -245,28 +245,69 @@ describe("resolveAuditStepIndex", () => {
     durationMs,
     timestamp: 1,
   });
+  const turn = (...events: PipelineEvent[]): PipelineTurn => ({
+    turnIndex: 0,
+    events,
+    totalDurationMs: 0,
+    startTime: 0,
+  });
   const audit = (stepIndex: number, taskType: string, durationMs: number) =>
     ({ stepIndex, taskType, durationMs }) as unknown as AuditEntry;
 
-  it("finds the step whose entries carry the same (taskType, durationMs) pairs", () => {
+  it("matches the one step with exactly the same (taskType, durationMs) pairs", () => {
     const entries = [
       audit(0, "parser", 3),
       audit(0, "llm", 100),
       audit(3, "parser", 42),
       audit(3, "llm", 250),
     ];
-    expect(resolveAuditStepIndex([ev("parser", 42), ev("llm", 250)], entries)).toBe(3);
+    expect(
+      resolveLiveTurnSteps([turn(ev("parser", 42), ev("llm", 250))], entries)
+    ).toEqual([{ status: "matched", stepIndex: 3 }]);
   });
 
-  it("returns undefined when no step accounts for every completed task", () => {
-    const entries = [audit(0, "parser", 42), audit(0, "llm", 100)];
-    expect(resolveAuditStepIndex([ev("parser", 42), ev("llm", 250)], entries)).toBeUndefined();
+  // A rule-based turn is all fast tasks, so every step has the same
+  // fingerprint. The resolver used to pick the newest step and show its data
+  // with full confidence.
+  it("refuses to pick between two steps with the same all-zero fingerprint", () => {
+    const entries = [
+      audit(1, "parser", 0),
+      audit(1, "output", 0),
+      audit(2, "parser", 0),
+      audit(2, "output", 0),
+    ];
+    expect(
+      resolveLiveTurnSteps([turn(ev("parser", 0), ev("output", 0))], entries)
+    ).toEqual([{ status: "ambiguous" }]);
   });
 
-  it("prefers the newest step on a tie and ignores a turn with no completed tasks", () => {
-    const entries = [audit(1, "llm", 7), audit(5, "llm", 7)];
-    expect(resolveAuditStepIndex([ev("llm", 7)], entries)).toBe(5);
-    expect(resolveAuditStepIndex([], entries)).toBeUndefined();
+  it("requires the exact task count — a step with more entries is not a match", () => {
+    const entries = [audit(4, "parser", 42), audit(4, "llm", 250), audit(4, "output", 1)];
+    expect(
+      resolveLiveTurnSteps([turn(ev("parser", 42), ev("llm", 250))], entries)
+    ).toEqual([{ status: "pending" }]);
+  });
+
+  it("claims each step once, in order, so a repeated fingerprint maps to successive steps", () => {
+    const entries = [audit(0, "greet", 5), audit(1, "llm", 7), audit(2, "llm", 9)];
+    expect(
+      resolveLiveTurnSteps([turn(ev("llm", 7)), turn(ev("llm", 9))], entries)
+    ).toEqual([
+      { status: "matched", stepIndex: 1 },
+      { status: "matched", stepIndex: 2 },
+    ]);
+    // The earlier match raises the floor: a later identical turn cannot go back.
+    expect(
+      resolveLiveTurnSteps(
+        [turn(ev("llm", 9)), turn(ev("llm", 7))],
+        entries
+      )[1]
+    ).toEqual({ status: "pending" });
+  });
+
+  it("reports a turn the ledger has not written yet as pending", () => {
+    expect(resolveLiveTurnSteps([turn(ev("llm", 7))], [])).toEqual([
+      { status: "pending" },
+    ]);
   });
 });
-
