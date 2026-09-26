@@ -383,6 +383,28 @@ class PromptSnippetServiceTest {
             verify(descriptorStore, times(2)).readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean());
         }
 
+        /**
+         * A load that was reading the stores when an invalidation landed must not
+         * publish its pre-change result: the next call has to go back to the store, not
+         * serve the stale view for the rest of the TTL.
+         */
+        @Test
+        void aLoadOverlappingAnInvalidationDoesNotRepublishItsStaleResult() throws Exception {
+            DocumentDescriptor desc = createDescriptor("s1", 1);
+            when(descriptorStore.readDescriptors("ai.labs.snippet", "", 0, 0, false))
+                    .thenReturn(List.of(desc));
+            when(snippetStore.read("s1", 1))
+                    .thenAnswer(invocation -> {
+                        // the snippet is edited and the cache invalidated while this load runs
+                        service.invalidateCache();
+                        return new PromptSnippet("snippet", "custom", null, "v1", null, true);
+                    })
+                    .thenReturn(new PromptSnippet("snippet", "custom", null, "v2", null, true));
+
+            assertEquals("v1", service.getAll().get("snippet"), "the in-flight load still answers its own caller");
+            assertEquals("v2", service.getAll().get("snippet"), "the stale result was cached past the invalidation");
+        }
+
         @Test
         void shouldReturnUnmodifiableMap() throws Exception {
             DocumentDescriptor desc = createDescriptor("s1", 1);
@@ -449,10 +471,17 @@ class PromptSnippetServiceTest {
         private static final String AGENT_ID = "agent1";
 
         private void givenSnippets(Object... idNameContentDescriptor) throws Exception {
+            if (idNameContentDescriptor.length % 3 != 0) {
+                throw new IllegalArgumentException("givenSnippets takes (id, \"name=content\", descriptor) triples, got "
+                        + idNameContentDescriptor.length + " arguments");
+            }
             List<DocumentDescriptor> descriptors = new ArrayList<>();
-            for (int i = 0; i < idNameContentDescriptor.length; i += 3) {
+            for (int i = 0; i + 2 < idNameContentDescriptor.length; i += 3) {
                 String id = (String) idNameContentDescriptor[i];
                 String[] nameContent = ((String) idNameContentDescriptor[i + 1]).split("=", 2);
+                if (nameContent.length != 2) {
+                    throw new IllegalArgumentException("expected \"name=content\", got " + idNameContentDescriptor[i + 1]);
+                }
                 DocumentDescriptor desc = (DocumentDescriptor) idNameContentDescriptor[i + 2];
                 desc.setResource(URI.create("eddi://ai.labs.snippet/snippetstore/snippets/" + id + "?version=1"));
                 descriptors.add(desc);
@@ -650,6 +679,22 @@ class PromptSnippetServiceTest {
 
             verify(descriptorStore, times(2)).readCurrentDescriptor(AGENT_ID);
             verify(descriptorStore, times(2)).readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean());
+        }
+
+        @Test
+        void anAgentViewOverlappingAnInvalidationIsNotCached() throws Exception {
+            givenSnippets("s1", "tone=Be precise.", owned("bob", "team:eng", "space", 10));
+            PromptSnippetService scoped = enforcing();
+            // a grant or revoke on the agent lands while its view is being resolved
+            when(descriptorStore.readCurrentDescriptor(AGENT_ID)).thenAnswer(invocation -> {
+                scoped.invalidateCache();
+                return owned("alice", "team:eng", "space", 0);
+            });
+
+            scoped.getForAgent(AGENT_ID);
+            scoped.getForAgent(AGENT_ID);
+
+            verify(descriptorStore, times(2)).readCurrentDescriptor(AGENT_ID);
         }
     }
 

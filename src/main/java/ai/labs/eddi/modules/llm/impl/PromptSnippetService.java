@@ -38,6 +38,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -147,6 +148,18 @@ public class PromptSnippetService {
     private final Cache<String, Map<String, Object>> agentSnippetCache;
 
     /**
+     * Bumped by every {@link #invalidateCache()}. A load captures it before it
+     * reads the stores and publishes its result only if it is unchanged, so a load
+     * that was already in flight when a snippet or sharing change landed cannot put
+     * its pre-change view back into the cache for the rest of the TTL. The check
+     * and the {@code put} happen under {@link #cacheLock}, the same lock the
+     * invalidation holds while it bumps and clears — a bare check before the
+     * {@code put} would still leave a window between the two.
+     */
+    private final AtomicLong cacheGeneration = new AtomicLong();
+    private final Object cacheLock = new Object();
+
+    /**
      * Names already reported as ambiguous, so the warning is emitted once per name
      * per process rather than once per render. Bounded: past
      * {@link #MAX_COLLISION_WARNINGS} further collisions go to DEBUG only.
@@ -225,6 +238,7 @@ public class PromptSnippetService {
             return getAll();
         }
         String cacheKey = agentId == null ? "" : agentId;
+        long generation = cacheGeneration.get();
         Map<String, Object> cached = agentSnippetCache.getIfPresent(cacheKey);
         if (cached != null) {
             return cached;
@@ -244,7 +258,7 @@ public class PromptSnippetService {
         }
 
         Map<String, Object> scoped = resolveScoped(load().entries(), agentDescriptor);
-        agentSnippetCache.put(cacheKey, scoped);
+        publish(generation, () -> agentSnippetCache.put(cacheKey, scoped));
         return scoped;
     }
 
@@ -253,9 +267,24 @@ public class PromptSnippetService {
      * (e.g., from the REST layer) or from tests.
      */
     public void invalidateCache() {
-        snippetCache.invalidateAll();
-        agentSnippetCache.invalidateAll();
+        synchronized (cacheLock) {
+            cacheGeneration.incrementAndGet();
+            snippetCache.invalidateAll();
+            agentSnippetCache.invalidateAll();
+        }
         LOGGER.debug("Snippet cache invalidated");
+    }
+
+    /**
+     * Runs {@code put} only if no invalidation happened since {@code generation}
+     * was read. See {@link #cacheGeneration}.
+     */
+    private void publish(long generation, Runnable put) {
+        synchronized (cacheLock) {
+            if (cacheGeneration.get() == generation) {
+                put.run();
+            }
+        }
     }
 
     /**
@@ -264,6 +293,10 @@ public class PromptSnippetService {
      * are dropped immediately on this node rather than when the TTL runs out.
      */
     void onSharingChanged(@Observes SharingChangedEvent event) {
+        // Everything is dropped, not just the changed resources: the per-agent views
+        // are keyed by agent, and a change to either side of the relation can alter
+        // any of them. The ids only make the invalidation traceable.
+        LOGGER.debugv("Sharing changed for {0}; dropping the prompt snippet caches", event.resourceIds());
         invalidateCache();
     }
 
@@ -290,6 +323,7 @@ public class PromptSnippetService {
     }
 
     private Loaded load() {
+        long generation = cacheGeneration.get();
         Loaded cached = snippetCache.getIfPresent(CACHE_KEY);
         if (cached != null) {
             cacheHitCounter.increment();
@@ -299,7 +333,7 @@ public class PromptSnippetService {
         cacheMissCounter.increment();
         List<SnippetEntry> entries = loadAllSnippets();
         Loaded loaded = new Loaded(entries, resolveUnscoped(entries));
-        snippetCache.put(CACHE_KEY, loaded);
+        publish(generation, () -> snippetCache.put(CACHE_KEY, loaded));
         return loaded;
     }
 
