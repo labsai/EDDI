@@ -84,7 +84,11 @@ export function AccessibleDialog({
   useEffect(() => {
     if (!open) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
+      // A control inside the dialog that consumed Escape itself — an open
+      // AgentPicker or combobox closing its popup — marks it handled. Closing
+      // the whole dialog on top of that threw away the form the user was
+      // filling in (Trigger, Edit Grant).
+      if (e.key === "Escape" && !e.defaultPrevented) {
         e.stopPropagation();
         onClose();
       }
@@ -123,15 +127,23 @@ export function AccessibleDialog({
 
   return (
     <>
-      {/* Backdrop */}
+      {/* Backdrop — visual only. The centring layer below covers it entirely,
+          so a click handler here never fired; the layer owns the click. */}
       <div
         className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm"
-        onClick={onClose}
         aria-hidden="true"
       />
 
       {/* Dialog */}
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        data-testid={testId ? `${testId}-backdrop` : undefined}
+        onClick={(e) => {
+          // Only a click on the dimmed area itself, not one that bubbled out of
+          // the dialog box.
+          if (e.target === e.currentTarget) onClose();
+        }}
+      >
         {/* Capped at the viewport and scrolled in the body, not the box: a
             dialog taller than the window was centred and then clipped at BOTH
             ends, so its title and close button sat off-screen with nothing to

@@ -1,11 +1,8 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { BrowserRouter } from "react-router-dom";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Toaster } from "sonner";
-import { ThemeProvider } from "@/components/layout/theme-provider";
-import { AuthProvider } from "@/components/auth/auth-provider";
-import { App } from "@/app";
+import { createBrowserRouter, RouterProvider } from "react-router-dom";
+import { QueryClient } from "@tanstack/react-query";
+import { AppRoot } from "@/components/layout/app-root";
 import { i18nReady } from "@/i18n/config";
 import "@/index.css";
 // NOT importing "@/hooks/session-log-store" here, deliberately. It used to be a
@@ -104,18 +101,16 @@ async function startApp() {
   // to English inside i18next.
   await i18nReady;
 
+  // A data router, not <BrowserRouter>: `useBlocker` — which the unsaved-changes
+  // guard needs to stop the sidebar, a breadcrumb, the command palette or Back
+  // from silently discarding an edit — exists only under one. The route table
+  // itself stays declarative inside `App`: a single splat route hands every URL
+  // to it, so the <Routes> tree and its tests are unchanged.
+  const router = createBrowserRouter([{ path: "*", element: <AppRoot queryClient={queryClient} /> }]);
+
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
-      <BrowserRouter>
-        <AuthProvider>
-          <QueryClientProvider client={queryClient}>
-            <ThemeProvider defaultTheme="system" storageKey="eddi-theme">
-              <App />
-              <Toaster position="bottom-right" richColors closeButton />
-            </ThemeProvider>
-          </QueryClientProvider>
-        </AuthProvider>
-      </BrowserRouter>
+      <RouterProvider router={router} />
     </StrictMode>
   );
 }

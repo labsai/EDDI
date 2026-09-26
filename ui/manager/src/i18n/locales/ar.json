@@ -25,7 +25,13 @@
     "profile": "الملف الشخصي",
     "guest": "زائر",
     "userMenu": "قائمة المستخدم",
-    "signedIn": "تم تسجيل الدخول"
+    "signedIn": "تم تسجيل الدخول",
+    "initFailedTitle": "تسجيل الدخول غير متاح",
+    "initFailedMessage": "تعذّر على المدير الوصول إلى خدمة تسجيل الدخول. تحقّق من اتصالك ثم حاول مرة أخرى.",
+    "signedOutTitle": "لقد سجّلت الخروج",
+    "signedOutMessage": "سجّل الدخول للمتابعة.",
+    "retry": "حاول مرة أخرى",
+    "signIn": "تسجيل الدخول"
   },
   "nav": {
     "dashboard": "لوحة التحكم",
@@ -75,7 +81,8 @@
     "workforce": "فريق العمل",
     "monitoring": "مراقبة المحادثات",
     "analytics": "التحليلات",
-    "connections": "الاتصالات"
+    "connections": "الاتصالات",
+    "breadcrumb": "مسار التنقل"
   },
   "theme": {
     "light": "فاتح",
@@ -95,7 +102,8 @@
     "ko": "한국어",
     "pt": "Português",
     "hi": "हिन्दी",
-    "switchFailed": "تعذّر تحميل هذه اللغة. يرجى المحاولة مرة أخرى."
+    "switchFailed": "تعذّر تحميل هذه اللغة. يرجى المحاولة مرة أخرى.",
+    "select": "اللغة"
   },
   "pages": {
     "dashboard": {
@@ -268,7 +276,10 @@
     "openExternalChatIn": "فتح دردشة {{environment}} في علامة تبويب جديدة",
     "deployToProduction": "النشر في الإنتاج",
     "undeployFromProduction": "الإزالة من الإنتاج",
-    "deployFailedIn": "فشل النشر في {{environment}}"
+    "deployFailedIn": "فشل النشر في {{environment}}",
+    "pickerUseAsId": "اضغط Enter لاستخدام \"{{id}}\" كمعرّف.",
+    "pickerOpen": "عرض الوكلاء",
+    "pickerClose": "إغلاق قائمة الوكلاء"
   },
   "agentDetail": {
     "a2aDescHint": "يظهر في بطاقة الوكيل — يساعد الوكلاء الآخرين على فهم ما يفعله هذا الوكيل",
@@ -862,7 +873,9 @@
     "count_two": "موردان",
     "count_few": "{{count}} موارد",
     "count_many": "{{count}} مورد",
-    "descriptionPlaceholder": "صف إعداد {{type}} هذا…"
+    "descriptionPlaceholder": "صف إعداد {{type}} هذا…",
+    "snippetNamePlaceholder": "مثال: cautious_mode",
+    "namePlaceholder": "{{type}} الخاص بي"
   },
   "editor": {
     "compare": "مقارنة",
@@ -5141,5 +5154,14 @@
     "headerMismatch": "يرسل هذا الاتصال بيانات اعتماده باسم «{{expected}}»، لذا يجب أن تحمل الترويسة هذا الاسم — وإلا أظهرت الإعدادات اسمًا وحمل الطلب اسمًا آخر.",
     "refusedInRequest": "يُرفض ${connection:…} في المسار أو معامل الاستعلام أو المتن — بيانات الاعتماد في عنوان URL تصل إلى كل سجلات الوكيل، وفي المتن لا تُقرأ. أشر إلى الاتصال من ترويسة بدلًا من ذلك.",
     "refusedInModel": "نماذج اللغة والتضمينات ومخازن المتجهات لا تقبل ${connection:…}: يُحلّ الاتصال إلى ترويسة كاملة، بينما تحتاج هذه إلى بيانات اعتماد مجردة. استخدم ${vault:…} هنا."
+  },
+  "time": {
+    "justNow": "الآن"
+  },
+  "sidebar": {
+    "checkingVersion": "جارٍ التحقق من الإصدار…",
+    "demoModeFallback": "وضع العرض التجريبي المستقل",
+    "expand": "توسيع الشريط الجانبي",
+    "collapse": "طيّ الشريط الجانبي"
   }
 }

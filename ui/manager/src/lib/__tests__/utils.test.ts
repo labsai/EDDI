@@ -49,6 +49,21 @@ describe("formatRelativeTime", () => {
     expect(formatRelativeTime(Date.now() - 5 * 24 * 60 * 60 * 1000)).toBe("5d ago");
   });
 
+  it("speaks the language on screen, not always English", async () => {
+    // It used to build "5m ago" by hand in every locale.
+    const { default: i18n } = await import("@/i18n/config");
+    await i18n.changeLanguage("de");
+    try {
+      expect(formatRelativeTime(Date.now() - 5 * 60 * 1000)).not.toBe("5m ago");
+      expect(formatRelativeTime(Date.now() - 5 * 60 * 1000)).toBe(
+        new Intl.RelativeTimeFormat("de", { style: "narrow" }).format(-5, "minute"),
+      );
+      expect(formatRelativeTime(Date.now())).toBe("gerade eben");
+    } finally {
+      await i18n.changeLanguage("en");
+    }
+  });
+
   it("returns 'just now' for current time", () => {
     expect(formatRelativeTime(Date.now())).toBe("just now");
   });

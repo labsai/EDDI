@@ -25,7 +25,13 @@
     "profile": "个人资料",
     "guest": "访客",
     "userMenu": "用户菜单",
-    "signedIn": "已登录"
+    "signedIn": "已登录",
+    "initFailedTitle": "登录服务不可用",
+    "initFailedMessage": "Manager 无法连接登录服务。请检查网络连接后重试。",
+    "signedOutTitle": "您已退出登录",
+    "signedOutMessage": "请登录以继续。",
+    "retry": "重试",
+    "signIn": "登录"
   },
   "nav": {
     "dashboard": "仪表盘",
@@ -75,7 +81,8 @@
     "workforce": "团队",
     "monitoring": "对话监控",
     "analytics": "分析",
-    "connections": "连接"
+    "connections": "连接",
+    "breadcrumb": "面包屑导航"
   },
   "theme": {
     "light": "浅色",
@@ -95,7 +102,8 @@
     "ko": "한국어",
     "pt": "Português",
     "hi": "हिन्दी",
-    "switchFailed": "无法加载该语言。请重试。"
+    "switchFailed": "无法加载该语言。请重试。",
+    "select": "语言"
   },
   "pages": {
     "dashboard": {
@@ -264,7 +272,10 @@
     "openExternalChatIn": "在新标签页中打开 {{environment}} 聊天",
     "deployToProduction": "部署到生产环境",
     "undeployFromProduction": "从生产环境移除",
-    "deployFailedIn": "在 {{environment}} 中部署失败"
+    "deployFailedIn": "在 {{environment}} 中部署失败",
+    "pickerUseAsId": "按 Enter 将“{{id}}”用作 ID。",
+    "pickerOpen": "显示智能体",
+    "pickerClose": "关闭智能体列表"
   },
   "agentDetail": {
     "a2aDescHint": "显示在智能体名片中——帮助其他智能体了解此智能体的功能",
@@ -814,7 +825,9 @@
       }
     },
     "emptyDescription": "创建您的第一个 {{type}} 以在 Workflow 中使用。",
-    "descriptionPlaceholder": "描述此 {{type}} 配置…"
+    "descriptionPlaceholder": "描述此 {{type}} 配置…",
+    "snippetNamePlaceholder": "例如 cautious_mode",
+    "namePlaceholder": "我的 {{type}}"
   },
   "editor": {
     "compare": "比较",
@@ -4945,5 +4958,14 @@
     "headerMismatch": "此连接以“{{expected}}”发送其凭据，因此标头必须使用该名称——否则配置显示一个名称而请求携带另一个。",
     "refusedInRequest": "${connection:…} 在路径、查询参数或请求体中会被拒绝——URL 中的凭据会进入每个代理日志，请求体中的凭据不会被读取。请改为在标头中引用连接。",
     "refusedInModel": "语言模型、嵌入和向量存储不接受 ${connection:…}：连接会解析为完整标头，而它们需要裸凭据。请在此使用 ${vault:…}。"
+  },
+  "time": {
+    "justNow": "刚刚"
+  },
+  "sidebar": {
+    "checkingVersion": "正在检查版本…",
+    "demoModeFallback": "独立演示模式",
+    "expand": "展开侧边栏",
+    "collapse": "收起侧边栏"
   }
 }

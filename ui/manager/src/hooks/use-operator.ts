@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import {
   readOperatorConfig,
   assertProvisioned,
@@ -42,6 +42,34 @@ export const operatorKeys = {
   gate: (agentId: string) => ["operator", "gate", agentId] as const,
   selfUrl: ["operator", "self-url"] as const,
 };
+
+/**
+ * Everything an operator lifecycle change can alter besides the operator's own
+ * queries.
+ *
+ * Activation creates an agent, its workflow and ~20 resources; reset deletes
+ * them; deactivate and reactivate change a deployment; all of them rewrite the
+ * `platform.operator` global variable. Only `operatorKeys` used to be
+ * invalidated, so the Agents list kept showing a deleted operator (every action
+ * on it a 404), and the Variables page an outdated config.
+ */
+const OPERATOR_TOUCHED_KEYS = [
+  operatorKeys.all,
+  ["agents"],
+  ["agent"],
+  ["agent-descriptor"],
+  ["workflows"],
+  ["resources"],
+  ["variables"],
+  ["chat", "deployedAgents"],
+  ["dashboard"],
+] as const;
+
+function invalidateAfterOperatorChange(qc: QueryClient) {
+  for (const queryKey of OPERATOR_TOUCHED_KEYS) {
+    void qc.invalidateQueries({ queryKey });
+  }
+}
 
 /* ─── Config ─── */
 
@@ -349,7 +377,7 @@ export function useActivateOperator() {
       return { config: next, gate, policyVerified, spec, supersededWarning };
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: operatorKeys.all });
+      invalidateAfterOperatorChange(qc);
     },
     // A failed activation mutates server state as surely as a successful one:
     // the provisioning rollback above and `enforceGateDryRun`'s
@@ -361,7 +389,7 @@ export function useActivateOperator() {
     // both outcomes is the only version of this that matches what the server
     // actually did.
     onError: () => {
-      qc.invalidateQueries({ queryKey: operatorKeys.all });
+      invalidateAfterOperatorChange(qc);
     },
   });
 }
@@ -554,7 +582,7 @@ export function useReactivateOperator() {
   return useMutation({
     mutationFn: (config: OperatorConfig) => reactivateOperator(config),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: operatorKeys.all });
+      invalidateAfterOperatorChange(qc);
     },
   });
 }
@@ -605,7 +633,7 @@ export function useDeactivateOperator() {
   return useMutation({
     mutationFn: (config: OperatorConfig) => deactivateOperator(config),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: operatorKeys.all });
+      invalidateAfterOperatorChange(qc);
     },
   });
 }
@@ -616,7 +644,7 @@ export function useResetOperator() {
   return useMutation({
     mutationFn: (config: OperatorConfig) => resetOperator(config),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: operatorKeys.all });
+      invalidateAfterOperatorChange(qc);
     },
   });
 }

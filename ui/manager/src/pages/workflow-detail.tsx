@@ -37,6 +37,7 @@ import {
 } from "@/components/editors/add-extension-dialog";
 import { useLatestVersions } from "@/hooks/use-latest-versions";
 import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
+import { allowNextNavigation } from "@/lib/unsaved-changes";
 import { useSaveAndDeploy } from "@/hooks/use-save-and-deploy";
 import { getAgent, updateAgent } from "@/lib/api/agents";
 import {
@@ -312,6 +313,8 @@ export function WorkflowDetailPage() {
         onSuccess: () => {
           toast.success(t("common.delete") + " \u2713");
           setShowDeleteDialog(false);
+          // The workflow is gone; there is no edit left to protect.
+          allowNextNavigation();
           navigate("/manage/workflows");
         },
         onError: (err) => toast.error(getErrorMessage(err)),
