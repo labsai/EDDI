@@ -534,7 +534,16 @@ public class RestScheduleStore implements IRestScheduleStore {
         }
     }
 
-    // Fix #8: dismissDeadLetter uses markCompleted with proper nextFire recompute
+    /**
+     * Clear a dead letter without retrying it, re-armed at its next regular fire.
+     * <p>
+     * Only a DEAD_LETTERED schedule can be dismissed; anything else is a 409. The
+     * state is checked twice, and only the second check is authoritative: the read
+     * gives an honest error for the common case (the Manager offers "Dismiss" on
+     * failed fire LOGS, whose schedule may since have recovered or be running), and
+     * the store's write is itself conditional on DEAD_LETTERED, so a requeue and
+     * claim racing in between cannot be reset to PENDING under a running fire.
+     */
     @Override
     public Response dismissDeadLetter(String scheduleId) {
         try {
@@ -547,8 +556,18 @@ public class RestScheduleStore implements IRestScheduleStore {
                 return guard;
             }
             ScheduleConfiguration schedule = scheduleStore.readSchedule(scheduleId);
+            if (schedule.getFireStatus() != FireStatus.DEAD_LETTERED) {
+                return notDeadLettered(schedule.getFireStatus());
+            }
             Instant nextFire = computeNextFireForSchedule(schedule);
-            scheduleStore.markCompleted(scheduleId, nextFire);
+            try {
+                scheduleStore.dismissDeadLetter(scheduleId, nextFire);
+            } catch (IResourceStore.ResourceNotFoundException raced) {
+                // It was DEAD_LETTERED when read and is not any more (requeued, deleted
+                // or re-claimed in between): the write matched nothing, which is the
+                // point of the condition.
+                return notDeadLettered(null);
+            }
             return Response.ok().build();
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException("Schedule not found: " + scheduleId);
@@ -559,6 +578,13 @@ public class RestScheduleStore implements IRestScheduleStore {
     }
 
     // --- Helpers ---
+
+    private static Response notDeadLettered(FireStatus current) {
+        return Response.status(Response.Status.CONFLICT)
+                .entity("Only a dead-lettered schedule can be dismissed; this one is "
+                        + (current != null ? current.name() : "no longer dead-lettered") + ".")
+                .build();
+    }
 
     /**
      * Why a manual fire could not claim the schedule, phrased for the operator who
@@ -620,6 +646,15 @@ public class RestScheduleStore implements IRestScheduleStore {
      * side effect of editing it: {@code POST /schedules/{id}/enable} and
      * {@code POST /schedules/{id}/retry} both clear the failure state explicitly.
      * <p>
+     * Three EDITABLE fields are carried over too, but only when the body omits
+     * them: {@code metadata}, {@code tenantId} and {@code allowSelfScheduling}.
+     * {@code metadata} is what selects the fire path — dream consolidation, team
+     * cadence, RAG ingestion, HITL timeout — so a client that does not echo it (the
+     * Manager's schedule editor never did) silently turned an edited system
+     * schedule into a plain chat schedule that messaged the agent instead of
+     * crawling or consolidating. A body that names the field — an empty map
+     * included — still sets it; only absence means "keep".
+     * <p>
      * {@code stored} is null only when the schedule is genuinely absent, in which
      * case there is nothing to carry over and the store's own update is about to
      * surface the 404. A read that FAILED never reaches here — the caller fails
@@ -638,6 +673,16 @@ public class RestScheduleStore implements IRestScheduleStore {
         schedule.setFireId(stored.getFireId());
         schedule.setNextRetryAt(stored.getNextRetryAt());
         schedule.setPersistentConversationId(stored.getPersistentConversationId());
+
+        if (schedule.getMetadata() == null) {
+            schedule.setMetadata(stored.getMetadata());
+        }
+        if (schedule.getTenantId() == null) {
+            schedule.setTenantId(stored.getTenantId());
+        }
+        if (!schedule.hasAllowSelfScheduling()) {
+            schedule.setAllowSelfScheduling(stored.isAllowSelfScheduling());
+        }
     }
 
     /**

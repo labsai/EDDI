@@ -104,6 +104,11 @@ public class ScheduleConfiguration {
     // -- Security --
     private double maxCostPerFire = -1.0; // -1 = unlimited
     private boolean allowSelfScheduling;
+    // Whether a deserialized body carried allowSelfScheduling at all. A primitive
+    // cannot say "absent", and a PUT from a client that does not know the field
+    // (the Manager's schedule editor) must keep the stored value rather than reset
+    // it to false. No bean accessor, so it never reaches JSON or storage.
+    private transient boolean allowSelfSchedulingProvided;
     private String createdBy;
 
     // -- Metadata --
@@ -331,6 +336,15 @@ public class ScheduleConfiguration {
 
     public void setAllowSelfScheduling(boolean allowSelfScheduling) {
         this.allowSelfScheduling = allowSelfScheduling;
+        this.allowSelfSchedulingProvided = true;
+    }
+
+    /**
+     * True once {@link #setAllowSelfScheduling} has been called — for a request
+     * body, when the JSON named the field. Deliberately not a bean getter.
+     */
+    public boolean hasAllowSelfScheduling() {
+        return allowSelfSchedulingProvided;
     }
 
     public String getCreatedBy() {

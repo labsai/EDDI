@@ -459,28 +459,62 @@ class RestScheduleStoreExpandedTest {
     @DisplayName("dismissDeadLetter")
     class DismissDeadLetter {
 
-        @Test
-        @DisplayName("should mark completed with recomputed nextFire for cron")
-        void dismissCron() throws Exception {
-            var schedule = makeCronSchedule("s1");
-            when(scheduleStore.readSchedule("s1")).thenReturn(schedule);
-
-            Response response = sut.dismissDeadLetter("s1");
-
-            assertEquals(200, response.getStatus());
-            verify(scheduleStore).markCompleted(eq("s1"), any(Instant.class));
+        private ScheduleConfiguration deadLettered(ScheduleConfiguration s) {
+            s.setFireStatus(FireStatus.DEAD_LETTERED);
+            return s;
         }
 
         @Test
-        @DisplayName("should mark completed with recomputed nextFire for heartbeat")
-        void dismissHeartbeat() throws Exception {
-            var schedule = makeHeartbeatSchedule("s1");
-            when(scheduleStore.readSchedule("s1")).thenReturn(schedule);
+        @DisplayName("should dismiss with recomputed nextFire for cron")
+        void dismissCron() throws Exception {
+            when(scheduleStore.readSchedule("s1")).thenReturn(deadLettered(makeCronSchedule("s1")));
 
             Response response = sut.dismissDeadLetter("s1");
 
             assertEquals(200, response.getStatus());
-            verify(scheduleStore).markCompleted(eq("s1"), any(Instant.class));
+            verify(scheduleStore).dismissDeadLetter(eq("s1"), any(Instant.class));
+        }
+
+        @Test
+        @DisplayName("should dismiss with recomputed nextFire for heartbeat")
+        void dismissHeartbeat() throws Exception {
+            when(scheduleStore.readSchedule("s1")).thenReturn(deadLettered(makeHeartbeatSchedule("s1")));
+
+            Response response = sut.dismissDeadLetter("s1");
+
+            assertEquals(200, response.getStatus());
+            verify(scheduleStore).dismissDeadLetter(eq("s1"), any(Instant.class));
+        }
+
+        /**
+         * The Manager offers "Dismiss" on failed fire LOGS, whose schedule may be
+         * running again. Resetting it would clear a live claim and let the next poll
+         * fire it a second time.
+         */
+        @Test
+        @DisplayName("should 409 and write nothing when the schedule is not dead-lettered")
+        void notDeadLetteredIsConflict() throws Exception {
+            var claimed = makeCronSchedule("s1");
+            claimed.setFireStatus(FireStatus.CLAIMED);
+            when(scheduleStore.readSchedule("s1")).thenReturn(claimed);
+
+            Response response = sut.dismissDeadLetter("s1");
+
+            assertEquals(409, response.getStatus());
+            verify(scheduleStore, never()).dismissDeadLetter(anyString(), any());
+            verify(scheduleStore, never()).markCompleted(anyString(), any());
+            verify(scheduleStore, never()).markCompleted(anyString(), any(), any());
+        }
+
+        @Test
+        @DisplayName("should 409 when the state changed between the read and the conditional write")
+        void racedIsConflict() throws Exception {
+            when(scheduleStore.readSchedule("s1")).thenReturn(deadLettered(makeCronSchedule("s1")));
+            doThrow(new IResourceStore.ResourceNotFoundException("not dead-lettered")).when(scheduleStore).dismissDeadLetter(eq("s1"), any());
+
+            Response response = sut.dismissDeadLetter("s1");
+
+            assertEquals(409, response.getStatus());
         }
 
         @Test
@@ -495,10 +529,9 @@ class RestScheduleStoreExpandedTest {
         @Test
         @DisplayName("should throw InternalServerError on general failure")
         void error() throws Exception {
-            var schedule = makeCronSchedule("s1");
-            when(scheduleStore.readSchedule("s1")).thenReturn(schedule);
+            when(scheduleStore.readSchedule("s1")).thenReturn(deadLettered(makeCronSchedule("s1")));
             doThrow(new RuntimeException("db error"))
-                    .when(scheduleStore).markCompleted(eq("s1"), any());
+                    .when(scheduleStore).dismissDeadLetter(eq("s1"), any());
 
             assertThrows(InternalServerErrorException.class,
                     () -> sut.dismissDeadLetter("s1"));
@@ -508,12 +541,12 @@ class RestScheduleStoreExpandedTest {
         @DisplayName("should 403 for a non-admin on a HITL timeout schedule and not disarm it")
         void nonAdminHitlForbidden() throws Exception {
             doReturn(false).when(ownershipValidator).isAdmin(any());
-            when(scheduleStore.readSchedule("s1")).thenReturn(hitlSchedule("s1"));
+            when(scheduleStore.readSchedule("s1")).thenReturn(deadLettered(hitlSchedule("s1")));
 
             Response response = sut.dismissDeadLetter("s1");
 
             assertEquals(403, response.getStatus());
-            verify(scheduleStore, never()).markCompleted(anyString(), any());
+            verify(scheduleStore, never()).dismissDeadLetter(anyString(), any());
         }
     }
 
