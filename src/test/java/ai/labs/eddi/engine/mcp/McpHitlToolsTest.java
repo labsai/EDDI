@@ -139,6 +139,22 @@ class McpHitlToolsTest {
     }
 
     @Test
+    void resume_withPauseId_bindsTheDecisionToThatPause() throws Exception {
+        tools.resumeConversation("c1", "APPROVED", null, " 1700000000123 ");
+        ArgumentCaptor<HitlDecision> captor = ArgumentCaptor.forClass(HitlDecision.class);
+        verify(conversationService).resumeConversation(eq("c1"), captor.capture(), isNull());
+        assertEquals("1700000000123", captor.getValue().getPauseId());
+    }
+
+    @Test
+    void resume_pauseChanged_returnsPauseChanged() throws Exception {
+        doThrow(new IConversationService.PauseMismatchException("changed"))
+                .when(conversationService).resumeConversation(eq("c1"), any(), isNull());
+        String out = tools.resumeConversation("c1", "APPROVED", null, "1000");
+        assertTrue(out.contains("\"errorCode\":\"PAUSE_CHANGED\""), out);
+    }
+
+    @Test
     void cancel_disabledByKillSwitch_returnsDisabled() {
         tools = build(true, false);
         String out = tools.cancelConversation("c1");

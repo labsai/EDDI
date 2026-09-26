@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.engine.lifecycle.model;
+import java.time.Instant;
 import java.util.Locale;
 import java.util.Map;
 import com.fasterxml.jackson.annotation.JsonCreator;
@@ -52,6 +53,43 @@ public class HitlDecision {
      * Calls not listed here inherit the top-level {@link #verdict}.
      */
     private Map<String, ToolCallDecision> toolDecisions;
+    /**
+     * Optional: the id of the pause this decision was made for, as reported by
+     * {@code approval-status} ({@code pauseId}). When set, the decision applies
+     * only while the conversation is still in THAT pause; if it has since been
+     * resumed and paused again — a different request — the decision is refused with
+     * a conflict instead of approving something the reviewer never saw. Omitted,
+     * the decision applies to whatever pause is current (the pre-existing
+     * behaviour).
+     */
+    private String pauseId;
+
+    /**
+     * The id of a pause that started at {@code pausedAt}: its epoch milliseconds.
+     * <p>
+     * Milliseconds because that is what survives a round trip through every store —
+     * Mongo keeps a date to the millisecond — so an id computed from a freshly
+     * paused in-memory bookmark and one computed from the stored document agree.
+     * Every pause stamps a new {@code pausedAt}, so a resume followed by a re-pause
+     * always yields a different id.
+     *
+     * @return the pause id, or {@code null} when there is no pause
+     */
+    public static String pauseIdOf(Instant pausedAt) {
+        return pausedAt == null ? null : Long.toString(pausedAt.toEpochMilli());
+    }
+
+    /**
+     * Whether this decision may apply to the pause that started at
+     * {@code currentPausedAt}: always, when the decision names no pause; otherwise
+     * only when the ids are equal.
+     */
+    public boolean appliesToPause(Instant currentPausedAt) {
+        if (pauseId == null || pauseId.isBlank()) {
+            return true;
+        }
+        return pauseId.trim().equals(pauseIdOf(currentPausedAt));
+    }
 
     public HitlVerdict getVerdict() {
         return verdict;
@@ -83,5 +121,13 @@ public class HitlDecision {
 
     public void setToolDecisions(Map<String, ToolCallDecision> toolDecisions) {
         this.toolDecisions = toolDecisions;
+    }
+
+    public String getPauseId() {
+        return pauseId;
+    }
+
+    public void setPauseId(String pauseId) {
+        this.pauseId = pauseId;
     }
 }

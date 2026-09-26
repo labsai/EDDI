@@ -146,6 +146,31 @@ class SlackHitlSupportTest {
         assertEquals("gc-9", v.groupConversationId());
     }
 
+    /** H4b: the card carries the id of the pause it was posted for. */
+    @Test
+    void actionValue_pauseId_roundTrips() {
+        String conv = SlackHitlSupport.buildActionValue("my-int", "conv-1", "1700000000123");
+        assertEquals("my-int|conv-1|1700000000123", conv);
+        var v = SlackHitlSupport.parseActionValue(conv);
+        assertEquals("my-int", v.integrationName());
+        assertEquals("conv-1", v.subject());
+        assertEquals("1700000000123", v.pauseId());
+        assertFalse(v.isGroup());
+
+        var g = SlackHitlSupport.parseActionValue(
+                SlackHitlSupport.buildActionValue("my-int", SlackHitlSupport.GROUP_VALUE_PREFIX + "gc-9", "42"));
+        assertTrue(g.isGroup());
+        assertEquals("gc-9", g.groupConversationId());
+        assertEquals("42", g.pauseId());
+    }
+
+    @Test
+    void actionValue_withoutPauseId_parsesToNullPauseId() {
+        // A card posted before pause ids existed — refused by the handler.
+        assertNull(SlackHitlSupport.parseActionValue("my-int|conv-1").pauseId());
+        assertEquals("my-int|conv-1", SlackHitlSupport.buildActionValue("my-int", "conv-1", null));
+    }
+
     @Test
     void parseActionValue_legacyBareValue_hasNoIntegration() {
         var v = SlackHitlSupport.parseActionValue("conv-1");

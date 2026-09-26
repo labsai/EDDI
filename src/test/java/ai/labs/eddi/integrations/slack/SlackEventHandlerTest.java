@@ -5,12 +5,18 @@
 package ai.labs.eddi.integrations.slack;
 
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
+import ai.labs.eddi.configs.channels.model.ChannelTarget;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
+import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
 import ai.labs.eddi.integrations.channels.ObserveGate;
 import ai.labs.eddi.modules.llm.tools.ToolCostTracker;
@@ -20,6 +26,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.mockito.ArgumentCaptor;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -34,14 +41,19 @@ import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 /**
  * Tests for {@link SlackEventHandler} — static/utility methods and pattern
@@ -421,6 +433,176 @@ class SlackEventHandlerTest {
         sb.append("---\n");
         sb.append("User follow-up question: ").append(userMessage);
         return sb.toString();
+    }
+
+    // ─── Inbound binding (H4a / H4d) and user namespacing ───
+
+    @Nested
+    @DisplayName("events act only on the sending app's integrations")
+    class InboundBinding {
+
+        private final ChannelTargetRouter router = mock(ChannelTargetRouter.class);
+        private final IConversationService conversationService = mock(IConversationService.class);
+        private final IUserConversationStore userConversationStore = mock(IUserConversationStore.class);
+        private final SlackWebApiClient slackApi = mock(SlackWebApiClient.class);
+
+        private SlackEventHandler handler(boolean namespaceUserIds) throws Exception {
+            var cacheFactory = mock(ICacheFactory.class);
+            doReturn(new FakeCache<>()).when(cacheFactory).getCache(anyString(), any(Duration.class));
+            when(conversationService.startConversation(any(), anyString(), anyString(), any()))
+                    .thenReturn(new IConversationService.ConversationResult("conv-new", null));
+            doAnswer(invocation -> {
+                IConversationService.ConversationResponseHandler responseHandler = invocation.getArgument(6);
+                var snapshot = new SimpleConversationMemorySnapshot();
+                snapshot.setConversationState(ConversationState.READY);
+                responseHandler.onComplete(snapshot);
+                return null;
+            }).when(conversationService).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+            return new SlackEventHandler(router, mock(ObserveGate.class), mock(ToolCostTracker.class), slackApi,
+                    conversationService, mock(IGroupConversationService.class), userConversationStore, cacheFactory,
+                    new SlackConfig(5, 5, 1, 0L, namespaceUserIds));
+        }
+
+        private ResolvedTarget routeTo(String integrationName, String signingSecret) {
+            var target = new ChannelTarget();
+            target.setName("default");
+            target.setType(ChannelTarget.TargetType.AGENT);
+            target.setTargetId("agent-1");
+            var cfg = new ChannelIntegrationConfiguration();
+            cfg.setName(integrationName);
+            cfg.setChannelType("slack");
+            cfg.setPlatformConfig(new HashMap<>(Map.of("channelId", "C1", "botToken", "xoxb", "signingSecret", signingSecret)));
+            cfg.setTargets(List.of(target));
+            return new ResolvedTarget(target, "hello", cfg, null, null);
+        }
+
+        private Map<String, Object> mention(String channel) {
+            Map<String, Object> event = new HashMap<>();
+            event.put("type", "app_mention");
+            event.put("text", "<@UBOT> hello");
+            event.put("user", "U1");
+            event.put("channel", channel);
+            event.put("ts", "1700.1");
+            return event;
+        }
+
+        @Test
+        @DisplayName("H4a: an event signed by another integration's app never reaches this integration's agent")
+        void foreignSecretIsDropped() throws Exception {
+            var handler = handler(true);
+            when(router.resolveTarget(eq("slack"), eq("C1"), anyString())).thenReturn(routeTo("int-a", "sig-a"));
+
+            handler.handleEvent(mention("C1"), new SlackEventEnvelope("sig-b", "T1", "A1", "UBOT"));
+
+            verify(conversationService, never()).startConversation(any(), anyString(), anyString(), any());
+            verify(conversationService, never()).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+            verify(slackApi, never()).postMessage(anyString(), anyString(), any(), anyString());
+        }
+
+        @Test
+        @DisplayName("the owning app's event runs the turn, as a team-namespaced user, recording the integration")
+        void owningSecretRunsTheTurn() throws Exception {
+            var handler = handler(true);
+            when(router.resolveTarget(eq("slack"), eq("C1"), anyString())).thenReturn(routeTo("int-a", "sig-a"));
+
+            handler.handleEvent(mention("C1"), new SlackEventEnvelope("sig-a", "T1", "A1", "UBOT"));
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<Map<String, Context>> context = ArgumentCaptor.forClass(Map.class);
+            verify(conversationService).startConversation(any(), eq("agent-1"), eq("slack:T1:U1"), context.capture());
+            assertEquals("int-a", context.getValue().get("channelIntegration").getValue());
+            assertTrue(String.valueOf(context.getValue().get("channelIntent").getValue()).startsWith("channel:slack:C1:agent-1:"));
+        }
+
+        @Test
+        @DisplayName("H4d: a DM is routed with the credentials that signed it")
+        void dmUsesTheVerifiedSecret() throws Exception {
+            var handler = handler(true);
+            var event = mention("D1");
+            event.put("type", "message");
+            event.put("channel_type", "im");
+            event.put("text", "hello");
+            when(router.resolveDefaultForDm(eq("slack"), anyString(), eq("sig-a"), any())).thenReturn(routeTo("int-a", "sig-a"));
+
+            handler.handleEvent(event, new SlackEventEnvelope("sig-a", "T1", "A1", "UBOT"));
+
+            verify(router).resolveDefaultForDm(eq("slack"), eq("hello"), eq("sig-a"),
+                    argThat(ids -> "T1".equals(ids.get(ChannelTargetRouter.CFG_TEAM_ID))));
+            verify(conversationService).startConversation(any(), eq("agent-1"), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("an event with no verified secret acts on nothing")
+        void noVerifiedSecret() throws Exception {
+            var handler = handler(true);
+            when(router.resolveTarget(eq("slack"), eq("C1"), anyString())).thenReturn(routeTo("int-a", "sig-a"));
+
+            handler.handleEvent(mention("C1"), null);
+
+            verifyNoInteractions(conversationService);
+        }
+
+        @Test
+        @DisplayName("a thread mapped under the bare Slack id before namespacing keeps its conversation")
+        void legacyMappingIsReused() throws Exception {
+            var handler = handler(true);
+            when(router.resolveTarget(eq("slack"), eq("C1"), anyString())).thenReturn(routeTo("int-a", "sig-a"));
+            when(userConversationStore.readUserConversation(anyString(), eq("U1")))
+                    .thenReturn(new UserConversation("intent", "U1", Deployment.Environment.production, "agent-1", "conv-legacy"));
+
+            handler.handleEvent(mention("C1"), new SlackEventEnvelope("sig-a", "T1", "A1", "UBOT"));
+
+            verify(conversationService, never()).startConversation(any(), anyString(), anyString(), any());
+            verify(conversationService).say(eq("conv-legacy"), any(), any(), any(), any(), anyBoolean(), any());
+        }
+
+        @Test
+        @DisplayName("user ids: team-namespaced by default, bare when disabled or when no team is known")
+        void userIdNamespacing() throws Exception {
+            var event = mention("C1");
+            var envelope = new SlackEventEnvelope("sig-a", "T1", "A1", "UBOT");
+
+            assertEquals(new SlackEventHandler.SlackUser("slack:T1:U1", "U1"), handler(true).slackUser(event, envelope));
+            // A Slack Connect user from another org carries their own team.
+            event.put("user_team", "T9");
+            assertEquals("slack:T9:U1", handler(true).slackUser(event, envelope).eddiUserId());
+            assertEquals(new SlackEventHandler.SlackUser("U1", null), handler(false).slackUser(event, envelope));
+            assertEquals(new SlackEventHandler.SlackUser("U1", null),
+                    handler(true).slackUser(mention("C1"), new SlackEventEnvelope("sig-a", null, null, null)));
+        }
+    }
+
+    // ─── H4b: approval cards are bound to their pause ───
+
+    @Test
+    void notifyApprovers_buttonsCarryThePauseId() {
+        var slackApi = mock(SlackWebApiClient.class);
+        var handler = newHandler(slackApi);
+        var bookmark = bookmarkPausedAt(Instant.ofEpochMilli(1_234L));
+        bookmark.setConversationState(ConversationState.AWAITING_HUMAN);
+
+        handler.notifyApprovers(resolvedWithApprovalChannel(), "conv-1", "agent-1", bookmark);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Map<String, Object>>> blocks = ArgumentCaptor.forClass(List.class);
+        verify(slackApi).postBlocksMessage(anyString(), eq("C_APPROVAL"), any(), blocks.capture(), anyString());
+        assertTrue(blocks.getValue().toString().contains("acme-int|conv-1|1234"), blocks.getValue().toString());
+    }
+
+    @Test
+    void notifyApprovers_unidentifiedPause_rendersNoButtons() {
+        // The bookmark read never saw the pause persisted: a button could only mean
+        // "whatever is paused now", so none is rendered.
+        var slackApi = mock(SlackWebApiClient.class);
+        var handler = newHandler(slackApi);
+
+        handler.notifyApprovers(resolvedWithApprovalChannel(), "conv-1", "agent-1", new ConversationMemorySnapshot());
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Map<String, Object>>> blocks = ArgumentCaptor.forClass(List.class);
+        verify(slackApi).postBlocksMessage(anyString(), eq("C_APPROVAL"), any(), blocks.capture(), anyString());
+        assertFalse(blocks.getValue().toString().contains(SlackHitlSupport.ACTION_APPROVE));
+        assertTrue(blocks.getValue().toString().contains("could not be identified"));
     }
 
     // ─── The observe path ───

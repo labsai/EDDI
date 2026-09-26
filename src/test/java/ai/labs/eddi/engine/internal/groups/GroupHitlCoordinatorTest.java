@@ -35,6 +35,7 @@ import ai.labs.eddi.engine.lifecycle.model.DiscussionControlToken;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
+import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
@@ -413,6 +414,41 @@ class GroupHitlCoordinatorTest {
         verify(executorService).submit(runnableCaptor.capture());
         runnableCaptor.getValue().run();
         verify(groupConversationService).executeDiscussion(eq(gc), eq(config), anyList(), eq("Q?"), isNull(), eq(0));
+    }
+
+    @Test
+    void resumeDiscussion_decisionForAnEarlierPause_refusedBeforeAnyMutation() throws Exception {
+        // H4b: the discussion was resumed and has paused again since the reviewer
+        // looked; their decision must not approve the new pause.
+        var coordinator = coordinator();
+        var gc = gc(GroupConversationState.AWAITING_APPROVAL);
+        gc.setSchemaVersion(GroupConversation.CURRENT_SCHEMA_VERSION);
+        gc.setPausedAt(Instant.ofEpochMilli(2_000L));
+        when(conversationStore.read(GC_ID)).thenReturn(gc);
+        var decision = new HitlDecision();
+        decision.setVerdict(HitlDecision.HitlVerdict.APPROVED);
+        decision.setPauseId(HitlDecision.pauseIdOf(Instant.ofEpochMilli(1_000L)));
+        var request = new GroupApprovalRequest();
+        request.setDecision(decision);
+
+        assertThrows(IGroupConversationService.GroupDiscussionException.class,
+                () -> coordinator.resumeDiscussion(GC_ID, request, null));
+
+        assertEquals(GroupConversationState.AWAITING_APPROVAL, gc.getState());
+        verify(conversationStore, never()).updateIfState(any(), any());
+    }
+
+    @Test
+    void resumeCaller_isTheApproverOnlyWhenTheyStartedTheDiscussion() {
+        // H5: an admin or eddi-approver deciding someone else's discussion saw the
+        // pause and nothing after it — the resumed member turns carry no caller.
+        var gc = gc(GroupConversationState.AWAITING_APPROVAL); // started by user-1
+        var owner = new CallerIdentity("tok", "user-1", "https://eddi.example:443");
+        var admin = new CallerIdentity("tok", "admin", "https://eddi.example:443");
+
+        assertEquals(owner, GroupHitlCoordinator.resumeCallerFor(owner, gc));
+        assertNull(GroupHitlCoordinator.resumeCallerFor(admin, gc));
+        assertNull(GroupHitlCoordinator.resumeCallerFor(null, gc));
     }
 
     @Test

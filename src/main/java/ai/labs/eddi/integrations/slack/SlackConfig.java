@@ -43,6 +43,14 @@ public class SlackConfig {
     private final int groupCompletionTimeoutSeconds;
     private final int apiMaxRetries;
     private final long apiRetryBaseMs;
+    private final boolean namespaceUserIds;
+
+    /**
+     * The four tunables, with user ids namespaced by team — the shipped default.
+     */
+    public SlackConfig(int requestTimeoutSeconds, int groupCompletionTimeoutSeconds, int apiMaxRetries, long apiRetryBaseMs) {
+        this(requestTimeoutSeconds, groupCompletionTimeoutSeconds, apiMaxRetries, apiRetryBaseMs, true);
+    }
 
     @Inject
     public SlackConfig(
@@ -51,7 +59,9 @@ public class SlackConfig {
             @ConfigProperty(name = "eddi.slack.group-completion-timeout-seconds",
                             defaultValue = "" + DEFAULT_GROUP_COMPLETION_TIMEOUT_SECONDS) int groupCompletionTimeoutSeconds,
             @ConfigProperty(name = "eddi.slack.api-max-retries", defaultValue = "" + DEFAULT_API_MAX_RETRIES) int apiMaxRetries,
-            @ConfigProperty(name = "eddi.slack.api-retry-base-ms", defaultValue = "" + DEFAULT_API_RETRY_BASE_MS) long apiRetryBaseMs) {
+            @ConfigProperty(name = "eddi.slack.api-retry-base-ms", defaultValue = "" + DEFAULT_API_RETRY_BASE_MS) long apiRetryBaseMs,
+            @ConfigProperty(name = "eddi.slack.namespace-user-ids", defaultValue = "true") boolean namespaceUserIds) {
+        this.namespaceUserIds = namespaceUserIds;
 
         // A non-positive timeout would make every Slack turn fail instantly, and a
         // negative retry budget would skip the first attempt entirely. Fall back to the
@@ -82,5 +92,17 @@ public class SlackConfig {
     /** Base delay for the exponential backoff between API attempts. */
     public long getApiRetryBaseMs() {
         return apiRetryBaseMs;
+    }
+
+    /**
+     * Whether a Slack user is identified in EDDI as {@code slack:<teamId>:<userId>}
+     * rather than by the bare Slack id. Slack ids are unique only within a
+     * workspace, so with several workspaces on one deployment the bare id can name
+     * two different people — who would then share conversations and long-term
+     * memory. {@code false} restores the bare id, for a single-workspace deployment
+     * that wants to keep memories stored under it before this setting existed.
+     */
+    public boolean isNamespaceUserIds() {
+        return namespaceUserIds;
     }
 }

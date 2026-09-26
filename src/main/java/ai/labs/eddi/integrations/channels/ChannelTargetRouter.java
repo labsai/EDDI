@@ -23,12 +23,15 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.*;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.utils.RestUtilities.extractResourceId;
 
 /**
@@ -56,6 +59,17 @@ public class ChannelTargetRouter {
     private static final Logger LOGGER = Logger.getLogger(ChannelTargetRouter.class);
     private static final long REFRESH_INTERVAL_MS = 60_000; // 1 minute
     private static final String CHANNEL_TYPE_SLACK = "slack";
+
+    /**
+     * Optional {@code platformConfig} keys that, when an integration sets them,
+     * must equal the matching identifier in an inbound request's envelope. Slack
+     * puts both on every Events API envelope and interactivity payload
+     * ({@code team_id} / {@code team.id} and {@code api_app_id}). Unset means "not
+     * pinned", so an existing integration keeps working unchanged.
+     */
+    public static final String CFG_TEAM_ID = "teamId";
+    public static final String CFG_APP_ID = "appId";
+    private static final List<String> INBOUND_ID_KEYS = List.of(CFG_TEAM_ID, CFG_APP_ID);
 
     private final IChannelIntegrationStore channelStore;
     private final IDocumentDescriptorStore descriptorStore;
@@ -168,32 +182,198 @@ public class ChannelTargetRouter {
     }
 
     /**
-     * Resolve a default target for DMs or unconfigured channels. Used when the
-     * platform channel ID isn't explicitly configured (e.g., Slack DMs use dynamic
-     * D-prefixed IDs unique to each user-bot pair).
+     * Resolve a default target for a direct message. Slack DMs use dynamic
+     * D-prefixed channel ids unique to each user-bot pair, so no integration names
+     * the channel and the DM has to be attributed to an integration some other way.
      * <p>
-     * Returns the default target from the first available integration of the given
-     * channel type, or {@code null} if no integrations exist.
+     * It is attributed by the credentials that authenticated the request, never by
+     * position: only an integration whose signing secret is the one that verified
+     * the webhook — and whose optional platform identifiers (see
+     * {@link #matchesInbound}) agree with the envelope — can answer. Picking "the
+     * first integration" instead meant a DM went to whichever entry an unordered
+     * map yielded first, which differed between JVMs and so between pods, and let a
+     * DM to one Slack app be answered by another app's agent with that app's token.
+     * <p>
+     * When several integrations qualify (one Slack app serving several channels),
+     * the choice is deterministic: an integration that pins more of the identifiers
+     * the envelope carries wins, then the lowest name.
+     *
+     * @param verifiedSigningSecret
+     *            the signing secret that verified this request
+     * @param inboundIds
+     *            platform identifiers from the request envelope (for Slack
+     *            {@link #CFG_TEAM_ID} and {@link #CFG_APP_ID}); values may be null
+     * @return the default target, or {@code null} for "help" or when no integration
+     *         qualifies
      */
-    public ResolvedTarget resolveDefaultForDm(String channelType, String messageText) {
-        refreshIfNeeded();
-        String prefix = (channelType != null ? channelType.toLowerCase(Locale.ROOT) : "") + ":";
-        for (var entry : integrationMap.entrySet()) {
-            if (entry.getKey().startsWith(prefix)) {
-                return resolveFromIntegration(entry.getValue(), messageText);
-            }
+    public ResolvedTarget resolveDefaultForDm(String channelType, String messageText,
+                                              String verifiedSigningSecret, Map<String, String> inboundIds) {
+        if (verifiedSigningSecret == null || verifiedSigningSecret.isBlank()) {
+            return null;
         }
-        // Fallback to first legacy entry (Slack only)
-        if (CHANNEL_TYPE_SLACK.equals(channelType) && !legacyMap.isEmpty()) {
-            var firstLegacy = legacyMap.values().iterator().next();
+        var dmIntegration = integrationForDm(channelType, verifiedSigningSecret, inboundIds);
+        if (dmIntegration.isPresent()) {
+            return resolveFromIntegration(dmIntegration.get(), messageText);
+        }
+        // Fallback: a legacy connector authenticated by the same secret (Slack only),
+        // chosen by channel id so every pod picks the same one.
+        if (CHANNEL_TYPE_SLACK.equals(channelType)) {
+            LegacyTarget legacy = legacyMap.entrySet().stream()
+                    .filter(e -> secretsEqual(e.getValue().signingSecret(), verifiedSigningSecret))
+                    .sorted(Map.Entry.comparingByKey())
+                    .map(Map.Entry::getValue)
+                    .findFirst()
+                    .orElse(null);
+            if (legacy == null) {
+                return null;
+            }
             String trimmed = messageText != null ? messageText.trim() : "";
             if (trimmed.isEmpty() || "help".equalsIgnoreCase(trimmed)) {
                 return null;
             }
-            return new ResolvedTarget(firstLegacy.toChannelTarget(), messageText, null,
-                    firstLegacy.botToken(), firstLegacy.signingSecret());
+            return new ResolvedTarget(legacy.toChannelTarget(), messageText, null,
+                    legacy.botToken(), legacy.signingSecret());
         }
         return null;
+    }
+
+    /**
+     * The new-style integration that owns direct messages for the app identified by
+     * {@code verifiedSigningSecret} and {@code inboundIds} — the selection
+     * {@link #resolveDefaultForDm} makes, without resolving a target. Used to
+     * attach credentials to a DM thread whose lock carries none.
+     */
+    public Optional<ChannelIntegrationConfiguration> integrationForDm(String channelType, String verifiedSigningSecret,
+                                                                      Map<String, String> inboundIds) {
+        refreshIfNeeded();
+        if (verifiedSigningSecret == null || verifiedSigningSecret.isBlank()) {
+            return Optional.empty();
+        }
+        String prefix = (channelType != null ? channelType.toLowerCase(Locale.ROOT) : "") + ":";
+        ChannelIntegrationConfiguration best = null;
+        int bestPinned = -1;
+        for (var entry : integrationMap.entrySet()) {
+            if (!entry.getKey().startsWith(prefix)) {
+                continue;
+            }
+            var cfg = entry.getValue();
+            if (!matchesInbound(cfg, verifiedSigningSecret, inboundIds)) {
+                continue;
+            }
+            int pinned = pinnedIdentifierCount(cfg, inboundIds);
+            if (best == null || pinned > bestPinned
+                    || (pinned == bestPinned && compareNames(cfg, best) < 0)) {
+                best = cfg;
+                bestPinned = pinned;
+            }
+        }
+        return Optional.ofNullable(best);
+    }
+
+    /**
+     * Whether an inbound request, authenticated with {@code verifiedSigningSecret}
+     * and carrying {@code inboundIds}, may act on {@code integration}.
+     * <p>
+     * The secret must be this integration's own: holding one integration's signing
+     * secret must never be enough to drive another integration's agents, reply with
+     * its bot token or decide its pauses. Each identifier the integration pins
+     * ({@link #CFG_TEAM_ID}, {@link #CFG_APP_ID}) must additionally equal the
+     * envelope's; a pinned identifier the envelope does not carry fails closed.
+     */
+    public static boolean matchesInbound(ChannelIntegrationConfiguration integration, String verifiedSigningSecret,
+                                         Map<String, String> inboundIds) {
+        if (integration == null || integration.getPlatformConfig() == null) {
+            return false;
+        }
+        var platformConfig = integration.getPlatformConfig();
+        if (!secretsEqual(platformConfig.get("signingSecret"), verifiedSigningSecret)) {
+            return false;
+        }
+        return identifiersMatch(integration, inboundIds);
+    }
+
+    /**
+     * Whether every identifier {@code integration} pins ({@link #CFG_TEAM_ID},
+     * {@link #CFG_APP_ID}) equals the one in {@code inboundIds}. Unpinned
+     * identifiers are not checked; a pinned one missing from the envelope fails.
+     */
+    public static boolean identifiersMatch(ChannelIntegrationConfiguration integration, Map<String, String> inboundIds) {
+        if (integration == null || integration.getPlatformConfig() == null) {
+            return false;
+        }
+        var platformConfig = integration.getPlatformConfig();
+        for (String key : INBOUND_ID_KEYS) {
+            String pinned = platformConfig.get(key);
+            if (pinned == null || pinned.isBlank()) {
+                continue;
+            }
+            String actual = inboundIds != null ? inboundIds.get(key) : null;
+            if (!pinned.trim().equals(actual)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * {@link #matchesInbound} for a resolved target, covering legacy connectors
+     * too: those carry only a signing secret, so the secret is all that can be
+     * checked.
+     */
+    public static boolean matchesInbound(ResolvedTarget resolved, String verifiedSigningSecret,
+                                         Map<String, String> inboundIds) {
+        if (resolved == null) {
+            return false;
+        }
+        if (resolved.integration() != null) {
+            return matchesInbound(resolved.integration(), verifiedSigningSecret, inboundIds);
+        }
+        return secretsEqual(resolved.legacySigningSecret(), verifiedSigningSecret);
+    }
+
+    /**
+     * Whether the channel {@code platformChannelId} is served by an integration (or
+     * legacy connector) that {@code verifiedSigningSecret} authenticates. A channel
+     * nobody serves is not accepted.
+     */
+    public boolean channelMatchesInbound(String channelType, String platformChannelId, String verifiedSigningSecret,
+                                         Map<String, String> inboundIds) {
+        refreshIfNeeded();
+        String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
+        ChannelIntegrationConfiguration integration = integrationMap.get(normalizedType + ":" + platformChannelId);
+        if (integration != null) {
+            return matchesInbound(integration, verifiedSigningSecret, inboundIds);
+        }
+        if (CHANNEL_TYPE_SLACK.equals(normalizedType)) {
+            LegacyTarget legacy = legacyMap.get(platformChannelId);
+            return legacy != null && secretsEqual(legacy.signingSecret(), verifiedSigningSecret);
+        }
+        return false;
+    }
+
+    private static int pinnedIdentifierCount(ChannelIntegrationConfiguration cfg, Map<String, String> inboundIds) {
+        int count = 0;
+        for (String key : INBOUND_ID_KEYS) {
+            String pinned = cfg.getPlatformConfig().get(key);
+            if (pinned != null && !pinned.isBlank() && inboundIds != null && inboundIds.get(key) != null) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private static int compareNames(ChannelIntegrationConfiguration a, ChannelIntegrationConfiguration b) {
+        String an = a.getName() != null ? a.getName() : "";
+        String bn = b.getName() != null ? b.getName() : "";
+        return an.compareTo(bn);
+    }
+
+    /** Constant-time comparison; a null or blank secret never matches. */
+    static boolean secretsEqual(String a, String b) {
+        if (a == null || b == null || a.isBlank() || b.isBlank()) {
+            return false;
+        }
+        return MessageDigest.isEqual(a.getBytes(StandardCharsets.UTF_8), b.getBytes(StandardCharsets.UTF_8));
     }
 
     /**
@@ -319,16 +499,27 @@ public class ChannelTargetRouter {
             return Optional.empty();
         }
         String prefix = (channelType != null ? channelType.toLowerCase(Locale.ROOT) : "") + ":";
+        ChannelIntegrationConfiguration found = null;
         for (var entry : integrationMap.entrySet()) {
             if (!entry.getKey().startsWith(prefix)) {
                 continue;
             }
             var cfg = entry.getValue();
             if (name.equals(cfg.getName())) {
-                return Optional.of(cfg);
+                if (found != null) {
+                    // Two integrations share the name. The name is what binds a HITL
+                    // decision to its integration, so returning either would let the
+                    // other's secret and approver list govern it — and which one came
+                    // first depended on map order. Fail closed; the store refuses a
+                    // duplicate name, so only data written before that can get here.
+                    LOGGER.warnf("Two integrations of type %s are named '%s' — refusing to bind a decision to either",
+                            sanitize(channelType), sanitize(name));
+                    return Optional.empty();
+                }
+                found = cfg;
             }
         }
-        return Optional.empty();
+        return Optional.ofNullable(found);
     }
 
     /**

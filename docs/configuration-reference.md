@@ -329,6 +329,7 @@ Full guide: [slack-integration.md](slack-integration.md).
 | `eddi.slack.group-completion-timeout-seconds` | `300` | How long a whole group discussion may take before follow-up routing gives up |
 | `eddi.slack.api-max-retries` | `3` | Attempts, including the first, for a Slack Web API call |
 | `eddi.slack.api-retry-base-ms` | `500` | Base delay for the exponential backoff between those attempts |
+| `eddi.slack.namespace-user-ids` | `true` | Identify a Slack user as `slack:<teamId>:<userId>` rather than the bare Slack id, which is unique only within one workspace. `false` keeps the bare id — for a single-workspace deployment that wants to keep reading long-term memories stored under it. Threads already running under a bare id keep their conversation either way |
 
 ### OpenAI-compatible API
 

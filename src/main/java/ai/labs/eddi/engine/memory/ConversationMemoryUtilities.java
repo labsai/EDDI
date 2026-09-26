@@ -468,7 +468,8 @@ public class ConversationMemoryUtilities {
      * <p>
      * The approver's contract is the redacted arguments and the redacted request
      * preview — {@link #stripRequestFingerprintsForRead} handled the digest, but
-     * four other fields rode along that the approver never needs and must not see:
+     * several other fields rode along that the approver never needs and must not
+     * see:
      * <ul>
      * <li>{@code argumentsRaw} — unredacted by definition (execution needs it);
      * observed carrying a clear-text API key the model had embedded in a
@@ -478,9 +479,11 @@ public class ConversationMemoryUtilities {
      * <li>{@code gatingAssistantMessageJson} — the gating assistant message, kept
      * for the degraded resume; it embeds the gated calls' raw arguments too</li>
      * <li>{@code traceSoFar} — the running tool trace, same exposure</li>
+     * <li>the batch-level {@code fingerprint} — an unsalted digest over the raw
+     * arguments, dropped for the same reason as the per-call one</li>
      * </ul>
-     * All four are resume/execution machinery read from the PERSISTED document —
-     * this method mutates only the freshly-deserialized, caller-owned snapshot
+     * All of these are resume/execution machinery read from the PERSISTED document
+     * — this method mutates only the freshly-deserialized, caller-owned snapshot
      * (same contract as the two projections above), so resume is unaffected.
      * <p>
      * The fields the approver DOES read are additionally re-redacted through the
@@ -498,6 +501,13 @@ public class ConversationMemoryUtilities {
         batch.setChatTranscriptJson(null);
         batch.setGatingAssistantMessageJson(null);
         batch.setTraceSoFar(null);
+        // The batch fingerprint is an UNSALTED SHA-256 over the tool names and RAW
+        // arguments — the per-call digest above's big brother, and the same offline
+        // guessing exercise when served next to the redacted arguments: guess the
+        // redacted value, hash, compare. It exists only for the no-progress guard,
+        // which reads the persisted document. Unlike requestFingerprint no boolean is
+        // derived from it, so it is dropped rather than replaced with a marker.
+        batch.setFingerprint(null);
         if (batch.getCalls() == null) {
             return snapshot;
         }
