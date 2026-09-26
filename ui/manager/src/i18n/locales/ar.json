@@ -3722,7 +3722,8 @@
     "failedConversations_two": "تعذّرت قراءة محادثتين وهما غائبتان عن الحزمة.",
     "failedConversations_few": "تعذّرت قراءة {{count}} محادثات وهي غائبة عن الحزمة.",
     "failedConversations_many": "تعذّرت قراءة {{count}} محادثةً وهي غائبة عن الحزمة.",
-    "failedConversations_other": "تعذّرت قراءة {{count}} محادثة وهي غائبة عن الحزمة."
+    "failedConversations_other": "تعذّرت قراءة {{count}} محادثة وهي غائبة عن الحزمة.",
+    "deleteIncomplete": "المحو غير مكتمل — قد تظل بعض بيانات هذا المستخدم موجودة. لا تبلّغ عنه على أنه مُنجز."
   },
   "mockBanner": {
     "message": "الوضع التجريبي — عرض بيانات نموذجية. اتصل بخلفية EDDI للحصول على بيانات حقيقية."

@@ -3574,7 +3574,8 @@
     "conversationsTruncated_other": "대화가 상한에 걸렸습니다 — 이 사용자는 총 {{count}}개를 가지고 있습니다.",
     "failedConversations_other": "{{count}}개의 대화를 읽을 수 없어 번들에 포함되지 않았습니다.",
     "conversationsTruncated_one": "대화가 상한에 걸렸습니다 — 이 사용자는 총 {{count}}개를 가지고 있습니다.",
-    "failedConversations_one": "{{count}}개의 대화를 읽을 수 없어 번들에 포함되지 않았습니다."
+    "failedConversations_one": "{{count}}개의 대화를 읽을 수 없어 번들에 포함되지 않았습니다.",
+    "deleteIncomplete": "삭제가 완료되지 않았습니다. 이 사용자의 일부 데이터가 아직 남아 있을 수 있습니다. 완료된 것으로 보고하지 마세요."
   },
   "mockBanner": {
     "message": "데모 모드 — 샘플 데이터를 표시합니다. 실제 데이터를 보려면 EDDI 백엔드에 연결하세요."

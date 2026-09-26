@@ -3574,7 +3574,8 @@
     "conversationsTruncated_other": "会話は上限で打ち切られました — このユーザーの総数は {{count}} 件です。",
     "failedConversations_other": "{{count}} 件の会話を読み取れず、バンドルに含まれていません。",
     "conversationsTruncated_one": "会話は上限で打ち切られました — このユーザーの総数は {{count}} 件です。",
-    "failedConversations_one": "{{count}} 件の会話を読み取れず、バンドルに含まれていません。"
+    "failedConversations_one": "{{count}} 件の会話を読み取れず、バンドルに含まれていません。",
+    "deleteIncomplete": "消去は完了していません。このユーザーのデータの一部がまだ残っている可能性があります。完了として報告しないでください。"
   },
   "mockBanner": {
     "message": "デモモード — サンプルデータを表示しています。実際のデータには EDDI バックエンドを接続してください。"

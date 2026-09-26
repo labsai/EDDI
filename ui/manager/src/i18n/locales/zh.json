@@ -3574,7 +3574,8 @@
     "conversationsTruncated_other": "会话已被截断 — 该用户共有 {{count}} 个。",
     "failedConversations_other": "有 {{count}} 个会话无法读取，未包含在数据包中。",
     "conversationsTruncated_one": "会话已被截断 — 该用户共有 {{count}} 个。",
-    "failedConversations_one": "有 {{count}} 个会话无法读取，未包含在数据包中。"
+    "failedConversations_one": "有 {{count}} 个会话无法读取，未包含在数据包中。",
+    "deleteIncomplete": "删除未完成 — 该用户的部分数据可能仍然存在。请勿报告为已完成。"
   },
   "mockBanner": {
     "message": "演示模式——显示示例数据。连接 EDDI 后端以获取真实数据。"

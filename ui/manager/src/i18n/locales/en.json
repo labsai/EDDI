@@ -3615,7 +3615,8 @@
     "conversationsTruncated_one": "Conversations were capped — the user has {{count}} in total.",
     "conversationsTruncated_other": "Conversations were capped — the user has {{count}} in total.",
     "failedConversations_one": "{{count}} conversation could not be read and is absent from the bundle.",
-    "failedConversations_other": "{{count}} conversations could not be read and are absent from the bundle."
+    "failedConversations_other": "{{count}} conversations could not be read and are absent from the bundle.",
+    "deleteIncomplete": "Erasure incomplete — some of this user's data may still exist. Do not report it as fulfilled."
   },
   "mockBanner": {
     "message": "Demo Mode — Displaying sample data. Connect an EDDI backend for real data."

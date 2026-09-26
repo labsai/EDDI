@@ -3611,7 +3611,8 @@
     "failedConversations_one": "No se pudo leer {{count}} conversación y falta en el paquete.",
     "failedConversations_other": "No se pudieron leer {{count}} conversaciones y faltan en el paquete.",
     "conversationsTruncated_many": "Las conversaciones se limitaron — el usuario tiene {{count}} en total.",
-    "failedConversations_many": "No se pudieron leer {{count}} conversaciones y faltan en el paquete."
+    "failedConversations_many": "No se pudieron leer {{count}} conversaciones y faltan en el paquete.",
+    "deleteIncomplete": "Borrado incompleto: algunos datos de este usuario pueden seguir existiendo. No lo notifiques como cumplido."
   },
   "mockBanner": {
     "message": "Modo demo — Se muestran datos de ejemplo. Conecte un backend de EDDI para ver datos reales."

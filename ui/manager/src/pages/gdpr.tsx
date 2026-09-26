@@ -91,9 +91,21 @@ export function GdprPage() {
       onSuccess: (data) => {
         setResult(data);
         setShowConfirm(false);
-        toast.success(
-          t("gdpr.deleteSuccess", "User data deleted successfully"),
-        );
+        // A 207 is inside 2xx, so this runs for a partial erasure too — and a
+        // green "deleted successfully" over a panel listing failed steps is
+        // the message someone repeats to the data subject.
+        if (data.complete) {
+          toast.success(
+            t("gdpr.deleteSuccess", "User data deleted successfully"),
+          );
+        } else {
+          toast.warning(
+            t(
+              "gdpr.deleteIncomplete",
+              "Erasure incomplete — some of this user's data may still exist. Do not report it as fulfilled.",
+            ),
+          );
+        }
       },
       onError: (error) => {
         setShowConfirm(false);
