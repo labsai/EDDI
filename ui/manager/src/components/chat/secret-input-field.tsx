@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Eye, EyeOff, Lock, Send } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -13,7 +13,8 @@ import { cn } from "@/lib/utils";
  * backend neither masked it in the transcript nor redacted it from the audit
  * ledger.
  *
- * `onSend` is expected to send the value as a secret turn.
+ * `onSend` is expected to send the value as a secret turn. Returning `false`
+ * says it was not sent, and the value stays in the field.
  */
 export function SecretInputField({
   label,
@@ -28,7 +29,7 @@ export function SecretInputField({
   placeholder?: string;
   defaultValue?: string;
   subType?: string;
-  onSend: (value: string) => void;
+  onSend: (value: string) => boolean | void;
   disabled?: boolean;
   /** Drawer sizing: tighter padding and a smaller send button. */
   compact?: boolean;
@@ -36,11 +37,13 @@ export function SecretInputField({
   const { t } = useTranslation();
   const [value, setValue] = useState(defaultValue);
   const [visible, setVisible] = useState(false);
+  const inputId = useId();
+  const placeholderText = placeholder || t("chat.secretPlaceholder", "Enter secret value...");
 
   const handleSubmit = () => {
     const trimmed = value.trim();
     if (!trimmed || disabled) return;
-    onSend(trimmed);
+    if (onSend(trimmed) === false) return;
     setValue("");
   };
 
@@ -49,14 +52,23 @@ export function SecretInputField({
   return (
     <div className={cn("border-t border-border bg-background", compact ? "p-3 shrink-0" : "p-4")}>
       {label && (
-        <div className="mb-2 flex items-center gap-1.5 text-sm font-medium text-primary" data-testid="secret-input-label">
-          <Lock className="h-3.5 w-3.5" />
+        <label
+          htmlFor={inputId}
+          className="mb-2 flex items-center gap-1.5 text-sm font-medium text-primary"
+          data-testid="secret-input-label"
+        >
+          <Lock className="h-3.5 w-3.5" aria-hidden="true" />
           {label}
-        </div>
+        </label>
       )}
       <div className="flex items-end gap-2">
         <div className="relative flex-1">
           <input
+            id={inputId}
+            // The visible label names the field when the agent sent one; the
+            // placeholder is only a hint, so without a label it is repeated as
+            // the accessible name rather than leaving the field unnamed.
+            aria-label={label ? undefined : placeholderText}
             type={inputType}
             value={value}
             onChange={(e) => setValue(e.target.value)}
@@ -66,7 +78,7 @@ export function SecretInputField({
                 handleSubmit();
               }
             }}
-            placeholder={placeholder || t("chat.secretPlaceholder", "Enter secret value...")}
+            placeholder={placeholderText}
             disabled={disabled}
             autoFocus
             autoComplete="off"

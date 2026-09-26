@@ -95,6 +95,38 @@ describe("useSendMessage — a refused send is classified by the conversation's 
     expect(useChatStore.getState().isPaused).toBe(true);
   });
 
+  it("gives back the masked field a refused secret answer was meant for", async () => {
+    // Otherwise the retry goes into the plain textarea: shown in clear and sent
+    // without the secret flag.
+    const field = { subType: "password", label: "API Key" };
+    useChatStore.getState().setInputField(field);
+    server.use(
+      http.post("*/agents/:conversationId", () =>
+        new HttpResponse("Conversation is processing another turn", { status: 409 }),
+      ),
+      http.get("*/agents/:conversationId", () => snapshotIn("READY")),
+    );
+
+    const { result } = renderHook(() => useSendMessage(), { wrapper });
+    result.current.mutate({ message: "sk-live-key", isSecret: true });
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(useChatStore.getState().activeInputField).toEqual(field);
+  });
+
+  it("does not revive a masked field the refused send was not answering", async () => {
+    server.use(
+      http.post("*/agents/:conversationId", () => new HttpResponse("busy", { status: 409 })),
+      http.get("*/agents/:conversationId", () => snapshotIn("READY")),
+    );
+
+    const { result } = renderHook(() => useSendMessage(), { wrapper });
+    result.current.mutate({ message: "hello?" });
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(useChatStore.getState().activeInputField).toBeNull();
+  });
+
   it("classifies a 409 on the streaming endpoint the same way", async () => {
     useChatStore.setState({ streamingEnabled: true });
     server.use(

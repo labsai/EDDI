@@ -97,6 +97,9 @@ export function ChatDrawer() {
   const isProcessing = useChatStore((s) => s.isProcessing) && ownsConversation;
   const isThinking = useChatStore((s) => s.isThinking) && ownsConversation;
   const activeInputField = useChatStore((s) => s.activeInputField);
+  // A load in flight still has the conversation being left on screen; sends
+  // wait for it (useSendMessage refuses them as well).
+  const isLoadingConversation = useChatStore((s) => s.loadingConversationId !== null);
   const currentTurnEvents = useDebugStore((s) => s.currentTurnEvents);
   const liveToolCalls = useDebugStore((s) => s.liveToolCalls);
   const liveToolsSettled = useDebugStore((s) => s.liveToolsSettled);
@@ -323,12 +326,12 @@ export function ChatDrawer() {
                 {activeInputField && conversationId ? (
                   <DrawerSecretInput
                     field={activeInputField}
-                    disabled={isProcessing}
+                    disabled={isProcessing || isLoadingConversation}
                     staging={staging}
                   />
                 ) : (
                   <DrawerChatInput
-                    disabled={!conversationId}
+                    disabled={!conversationId || isLoadingConversation}
                     isProcessing={isProcessing}
                     staging={staging}
                   />
@@ -346,9 +349,10 @@ export function ChatDrawer() {
 function QuickRepliesBar() {
   const quickReplies = useChatStore((s) => s.quickReplies);
   const isProcessing = useChatStore((s) => s.isProcessing);
+  const isLoadingConversation = useChatStore((s) => s.loadingConversationId !== null);
   const sendMessage = useSendMessage();
 
-  if (quickReplies.length === 0 || isProcessing) return null;
+  if (quickReplies.length === 0 || isProcessing || isLoadingConversation) return null;
 
   return (
     <div className="flex flex-wrap gap-1.5 border-t border-border px-3 py-2 shrink-0">

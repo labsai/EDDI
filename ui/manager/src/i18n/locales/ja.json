@@ -751,7 +751,8 @@
     "errorAgentNotReady": "このエージェントは選択した環境にまだデプロイされていません。",
     "errorAgentMismatch": "この会話はエージェントの別のバージョンに属しています。",
     "errorQuotaUnavailable": "現在、利用上限を確認できませんでした。しばらくしてからもう一度お試しください。",
-    "sendRejected": "メッセージは送信されませんでした: {{reason}}"
+    "sendRejected": "メッセージは送信されませんでした: {{reason}}",
+    "sendWhileLoading": "メッセージは送信されませんでした: 会話はまだ読み込み中です。しばらくしてからもう一度お試しください。"
   },
   "resources": {
     "backToWorkflow": "ワークフローに戻る",

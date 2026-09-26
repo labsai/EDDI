@@ -25,6 +25,14 @@ findings, the built-in tool whitelist, L5, L6 and the agent-card undeploy.
   input, and for a secret turn it writes the `<secret input>` placeholder (shown
   as the mask). `input:initial` is kept as the fallback. This covers reload,
   resume, undo, redo and rerun.
+- *A refused secret answer lost its field.* The send clears the requested field
+  up front. When the backend refuses the message without consuming it (a 409 or
+  a coded stream refusal), the field is now given back, so the retry is not
+  typed into the plain textarea. The panel no longer clears the field itself:
+  it did so before the send could read it.
+- *The field is named.* Its visible label is a `<label>` bound to the input, and
+  without a label the placeholder (or the default secret prompt) is the input's
+  accessible name.
 
 **Stream binding (Medium).** Stream events were not bound to the conversation
 that started them, so switching conversation or agent mid-stream wrote A's
@@ -45,6 +53,16 @@ longer show in the new one's status line.
   started would replace B's conversation with A's, under B's name, and every
   send then went to agent A. The same happened for a history row still loading
   when "New conversation" was clicked.
+- *No sends while a load reads.* A load reads before it replaces anything, so
+  during the read the transcript and `conversationId` still belong to the
+  conversation being left. A send in that window was delivered to the OLD
+  conversation, then the load installed over it and the message vanished from
+  view. The store now carries `loadingConversationId`, set for the length of the
+  read and cleared by the latest load when it settles, or by whatever replaced
+  the transcript. `useSendMessage` refuses a send while it is set, before
+  anything is shown or sent, and toasts why (new key `chat.sendWhileLoading`).
+  The panel and the drawer disable their input, secret field and quick replies
+  for the same interval, and a refused send keeps the typed draft.
 - *Detached streams are bounded.* A detached stream is drained so the turn the
   user already sent can finish (closing the stream cancels it on the server). It
   is aborted once `DETACHED_STREAM_GRACE_MS` (120 s) has passed since the switch.
@@ -143,7 +161,7 @@ key-taking providers, so a Jlama token never becomes an OpenAI key.
 **Tests:** `use-chat-stream-binding`, `use-chat-rejected-send`,
 `use-chat-secret-input`, `chat-drawer-binding`, `chat-panel-continue`,
 `agent-card-undeploy`, `agent-wizard-providers`, `agent-detail-chat`,
-`use-chat-load-race`, new cases in `resource-detail-llm`, `model-suggestions` and
+`use-chat-load-race`, `use-chat-send-during-load`, `secret-input-field`, new cases in `resource-detail-llm`, `model-suggestions` and
 `operator-activation`, and `AgentSetupServiceBranchCoverageTest` (huggingface,
 gemini-vertex parameters and refusal). The two existing 409 tests now mock the paused
 state they assert.

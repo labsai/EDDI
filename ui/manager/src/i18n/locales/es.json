@@ -761,7 +761,8 @@
     "errorAgentNotReady": "Este agente aún no está desplegado en el entorno seleccionado.",
     "errorAgentMismatch": "Esta conversación pertenece a otra versión del agente.",
     "errorQuotaUnavailable": "No se pudieron comprobar los límites de uso en este momento. Inténtelo de nuevo en un momento.",
-    "sendRejected": "Tu mensaje no se envió: {{reason}}"
+    "sendRejected": "Tu mensaje no se envió: {{reason}}",
+    "sendWhileLoading": "Tu mensaje no se envió: la conversación aún se está cargando. Inténtalo de nuevo en un momento."
   },
   "resources": {
     "backToWorkflow": "Volver al workflow",

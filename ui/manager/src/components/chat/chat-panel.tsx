@@ -90,7 +90,9 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
   const activeInputField = useChatStore((s) => s.activeInputField);
   const isSecretMode = useChatStore((s) => s.isSecretMode);
   const toggleSecretMode = useChatStore((s) => s.toggleSecretMode);
-  const clearInputField = useChatStore((s) => s.clearInputField);
+  // A conversation load is reading: the transcript and its id still belong to
+  // the conversation being left, so nothing may be sent until it settles.
+  const isLoadingConversation = useChatStore((s) => s.loadingConversationId !== null);
 
   // Activity display
   const showActivity = useDebugStore((s) => s.showActivity);
@@ -248,21 +250,26 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
     if (isSecretMode) discardAll();
   }, [isSecretMode, discardAll]);
 
+  /** Returns whether a send was issued. */
   const handleSend = useCallback(
-    (message: string, isSecret?: boolean) => {
+    (message: string, isSecret?: boolean): boolean => {
+      // Read live, not from the render: a send racing the load's first render
+      // must not reach the conversation being left (useSendMessage refuses it
+      // too, but only after the attachments below were already drained).
+      if (useChatStore.getState().loadingConversationId) return false;
       // Secret turns never carry attachments — a masked bubble must not leak a
       // filename or thumbnail. Discard anything staged (freeing previews and
       // best-effort deleting the blob) instead of forwarding or displaying it.
       if (isSecret) {
-        if (!message.trim()) return; // nothing to send once attachments are dropped
+        if (!message.trim()) return false; // nothing to send once attachments are dropped
         discardAll();
         sendMessage.mutate({ message, isSecret: true });
-        return;
+        return true;
       }
 
       // Guard BEFORE draining the staging area: a no-op send must not clear
       // the user's staged chips.
-      if (!message.trim() && !hasReadyAttachment) return;
+      if (!message.trim() && !hasReadyAttachment) return false;
 
       // Forward only successfully-uploaded attachments as context this turn.
       const sent: SentAttachment[] = takeForSend().map((a: ReadyAttachment) => ({
@@ -279,12 +286,14 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
         isSecret,
         attachments: sent.length ? sent : undefined,
       });
+      return true;
     },
     [sendMessage, takeForSend, discardAll, hasReadyAttachment]
   );
 
   const handleQuickReply = useCallback(
     (reply: string) => {
+      if (useChatStore.getState().loadingConversationId) return;
       sendMessage.mutate({ message: reply });
     },
     [sendMessage]
@@ -621,7 +630,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
 
         {/* Quick replies — hidden while paused so a pill can't fire a send
             against an AWAITING_HUMAN conversation (the input/send are also guarded). */}
-        {quickReplies.length > 0 && !isProcessing && !isPaused && (
+        {quickReplies.length > 0 && !isProcessing && !isPaused && !isLoadingConversation && (
           <div className="flex flex-wrap gap-2 border-t border-border px-4 py-2">
             {quickReplies.map((reply, i) => (
               <button
@@ -669,16 +678,15 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
             placeholder={activeInputField.placeholder}
             defaultValue={activeInputField.defaultValue}
             subType={activeInputField.subType}
-            onSend={(val) => {
-              handleSend(val, true);
-              clearInputField();
-            }}
-            disabled={isProcessing || isPaused}
+            // The send clears the field itself, and hands it back if the
+            // backend refuses the message without consuming it.
+            onSend={(val) => handleSend(val, true)}
+            disabled={isProcessing || isPaused || isLoadingConversation}
           />
         ) : (
           <ChatInputWithSecretToggle
             onSend={handleSend}
-            disabled={!conversationId || isPaused}
+            disabled={!conversationId || isPaused || isLoadingConversation}
             isProcessing={isProcessing}
             isSecretMode={isSecretMode}
             onToggleSecret={toggleSecretMode}
@@ -721,7 +729,8 @@ function ChatInputWithSecretToggle({
   onRedo,
   embedded = false,
 }: {
-  onSend: (message: string, isSecret?: boolean) => void;
+  /** Returns whether the message was sent; the draft is kept when it was not. */
+  onSend: (message: string, isSecret?: boolean) => boolean;
   disabled?: boolean;
   isProcessing?: boolean;
   isSecretMode: boolean;
@@ -748,7 +757,7 @@ function ChatInputWithSecretToggle({
     const trimmed = value.trim();
     // Allow an attachment-only turn (empty text) once a file is uploaded.
     if ((!trimmed && !hasReadyAttachment) || disabled || isProcessing || isUploading) return;
-    onSend(trimmed, isSecretMode);
+    if (!onSend(trimmed, isSecretMode)) return;
     setValue("");
     if (isSecretMode) {
       onToggleSecret();

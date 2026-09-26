@@ -154,6 +154,18 @@ interface ChatState {
    * conversation rebuilds the transcript under the stream too.
    */
   conversationEpoch: number;
+  /**
+   * The conversation a load is currently reading, or null when none is.
+   *
+   * A load reads before it replaces anything, so for the length of that read
+   * the transcript on screen — and its `conversationId` — still belong to the
+   * conversation being left. A send in that window went to the OLD
+   * conversation on the server, and the load then installed over it, so the
+   * message vanished from view while still having been delivered. Sends are
+   * refused while this is set (see {@link SendBlockedError}) and the inputs
+   * are disabled.
+   */
+  loadingConversationId: string | null;
 
   // Actions
   setSelectedAgent: (agentId: string | null, agentName: string | null) => void;
@@ -199,6 +211,7 @@ export const useChatStore = create<ChatState>((set) => ({
   isPaused: false,
   pauseReason: null,
   conversationEpoch: 0,
+  loadingConversationId: null,
 
   // Everything that belonged to the previous agent's conversation goes with it.
   // Its quick replies and a requested input field used to survive the switch,
@@ -229,6 +242,9 @@ export const useChatStore = create<ChatState>((set) => ({
         isPaused: false,
         pauseReason: null,
         conversationEpoch: s.conversationEpoch + 1,
+        // latestLoadRequest moved on above, so a load in flight will not
+        // install and will not clear this itself.
+        loadingConversationId: null,
       };
     }),
 
@@ -295,6 +311,9 @@ export const useChatStore = create<ChatState>((set) => ({
         isPaused: false,
         pauseReason: null,
         conversationEpoch: s.conversationEpoch + 1,
+        // latestLoadRequest moved on above, so a load in flight will not
+        // install and will not clear this itself.
+        loadingConversationId: null,
       };
     }),
 
@@ -343,6 +362,9 @@ export const useChatStore = create<ChatState>((set) => ({
         isPaused: false,
         pauseReason: null,
         conversationEpoch: s.conversationEpoch + 1,
+        // latestLoadRequest moved on above, so a load in flight will not
+        // install and will not clear this itself.
+        loadingConversationId: null,
       };
     }),
 }));
@@ -485,6 +507,20 @@ class RejectedSendError extends Error {
 }
 
 /**
+ * A send refused on the client before anything was sent or shown: a
+ * conversation load is still reading (see `loadingConversationId`). Nothing
+ * reached the transcript or the server, so there is nothing to roll back —
+ * unlike {@link RejectedSendError}, whose handling also resets the processing
+ * and quick-reply state of a turn that did start.
+ */
+class SendBlockedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SendBlockedError";
+  }
+}
+
+/**
  * Stream error codes that mean the input was refused BEFORE the turn started,
  * so it was never consumed. They are the codes
  * `RestAgentEngineStreaming.buildKnownConditionOrOpaqueErrorEvent` emits for the
@@ -568,6 +604,11 @@ export function useSendMessage() {
   // invokes onError it is calling the *latest* render's closure — which saw a
   // fresh null — and the rollback below silently never ran.
   const pendingUserMessageIdRef = useRef<string | null>(null);
+  // The masked field this send answered, which the send clears up front. A ref
+  // for the same reason as above. A refused send gives it back: otherwise the
+  // retry is typed into the plain textarea, shown in clear and sent without
+  // the secret flag.
+  const pendingInputFieldRef = useRef<InputField | null>(null);
   return useMutation({
     // The transcript this send belongs to, handed to onError: an error from a
     // send whose conversation is no longer on screen must not be written into
@@ -584,6 +625,18 @@ export function useSendMessage() {
       attachments?: SentAttachment[];
     }) => {
       const state = store.getState();
+      // Until the load finishes, `conversationId` is still the conversation
+      // being left: sending now would deliver the message there and the load
+      // would then install over it. The inputs are disabled for this interval;
+      // this is the backstop for every caller (panel, drawer, quick replies).
+      if (state.loadingConversationId) {
+        throw new SendBlockedError(
+          t(
+            "chat.sendWhileLoading",
+            "Your message was not sent: the conversation is still loading. Try again in a moment.",
+          ),
+        );
+      }
       const { selectedAgentId, conversationId, streamingEnabled } = state;
       if (!selectedAgentId || !conversationId) {
         throw new Error("No active conversation");
@@ -627,6 +680,8 @@ export function useSendMessage() {
       // A requested input field is good for one answer. Whatever this turn
       // replies decides whether the next one needs it again — on the streaming
       // path too, which is the default and used to ignore the request entirely.
+      // Kept aside in case the backend refuses the send without consuming it.
+      pendingInputFieldRef.current = state.activeInputField;
       state.clearInputField();
 
       if (streamingEnabled) {
@@ -821,6 +876,11 @@ export function useSendMessage() {
       }
     },
     onError: (error, _variables, context) => {
+      if (error instanceof SendBlockedError) {
+        // Refused before it touched the transcript: say so, change nothing.
+        toast.error(error.message);
+        return;
+      }
       const state = store.getState();
       // The send belonged to a transcript that is no longer on screen; the one
       // that is must not receive its rollback, its banner or its error bubble.
@@ -834,6 +894,8 @@ export function useSendMessage() {
         // received it.
         const rejectedUserMessageId = pendingUserMessageIdRef.current;
         pendingUserMessageIdRef.current = null;
+        const answeredField = pendingInputFieldRef.current;
+        pendingInputFieldRef.current = null;
         store.setState((s) => {
           const msgs = [...s.messages];
           const last = msgs[msgs.length - 1];
@@ -848,6 +910,8 @@ export function useSendMessage() {
         state.setProcessing(false);
         state.setThinking(false);
         state.setQuickReplies([]);
+        // The question the refused message answered is still open.
+        if (answeredField) state.setInputField(answeredField);
         if (error.paused) {
           // The localized pause banner (via isPaused), not an error bubble.
           state.setPaused(true, null);
@@ -1297,18 +1361,22 @@ async function loadConversationIntoStore(
   // last — otherwise the pane shows one conversation while the list highlights
   // another.
   const request = ++latestLoadRequest;
-
-  // Read first, touch the store second. Clearing up front meant a failed read
-  // wiped the conversation the user was looking at and left a blank pane with
-  // nothing to go back to.
-  const snapshot = await readConversation(
-    "production",
-    agentId,
-    conversationId,
-    false
-  );
-
   const store = useChatStore;
+
+  // Sends are refused from here until the load settles — see
+  // `loadingConversationId`. Only the latest request clears it: a load that
+  // was superseded leaves it to whichever one superseded it (a later load, or
+  // an action that replaced the transcript and cleared it itself).
+  store.setState({ loadingConversationId: conversationId });
+  let snapshot: Awaited<ReturnType<typeof readConversation>>;
+  try {
+    // Read first, touch the store second. Clearing up front meant a failed
+    // read wiped the conversation the user was looking at and left a blank
+    // pane with nothing to go back to.
+    snapshot = await readConversation("production", agentId, conversationId, false);
+  } finally {
+    if (request === latestLoadRequest) store.setState({ loadingConversationId: null });
+  }
   // Superseded mid-flight, by a later load or by anything else that replaced
   // the transcript (see the epoch note above).
   if (request !== latestLoadRequest || store.getState().conversationEpoch !== epoch) {

@@ -778,7 +778,8 @@
     "errorAgentNotReady": "This agent is not deployed to the selected environment yet.",
     "errorAgentMismatch": "This conversation belongs to a different version of the agent.",
     "errorQuotaUnavailable": "Usage limits could not be checked right now. Try again in a moment.",
-    "sendRejected": "Your message was not sent: {{reason}}"
+    "sendRejected": "Your message was not sent: {{reason}}",
+    "sendWhileLoading": "Your message was not sent: the conversation is still loading. Try again in a moment."
   },
   "commandPalette": {
     "placeholder": "Search pages, agents, actions…",

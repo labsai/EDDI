@@ -751,7 +751,8 @@
     "errorAgentNotReady": "该智能体尚未部署到所选环境。",
     "errorAgentMismatch": "该会话属于该智能体的另一个版本。",
     "errorQuotaUnavailable": "当前无法检查使用限额，请稍后重试。",
-    "sendRejected": "您的消息未发送：{{reason}}"
+    "sendRejected": "您的消息未发送：{{reason}}",
+    "sendWhileLoading": "您的消息未发送：对话仍在加载中。请稍后再试。"
   },
   "resources": {
     "backToWorkflow": "返回工作流",
