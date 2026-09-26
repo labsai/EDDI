@@ -18,6 +18,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.regex.Matcher;
@@ -323,6 +324,43 @@ public class InfrastructureIT {
         var connectSrc = extractDirective(csp, "connect-src");
         Assertions.assertTrue(allowsSource(connectSrc, "https://api.github.com"),
                 "Non-Swagger connect-src must allow the Manager's release check: " + connectSrc);
+    }
+
+    /**
+     * The /chat split, over HTTP. CspPolicyTest reads the filter regexes out of
+     * application.properties and evaluates them with java.util.regex; this is the
+     * check that the running router agrees. /chat must get exactly ONE policy (two
+     * matching filters would send two, and the browser enforces their
+     * intersection), with frame-ancestors from eddi.chat.frame-ancestors ('none' by
+     * default) and NO X-Frame-Options, which cannot express an allow-list and would
+     * override an operator's frame-ancestors in older browsers. Everything else
+     * keeps X-Frame-Options: DENY. Status codes are not asserted: the chat page
+     * needs the built UI, which the test build may not carry, and the headers are
+     * added either way.
+     */
+    @Test
+    @Order(15)
+    @DisplayName("/chat gets one CSP header and no X-Frame-Options; the Manager keeps DENY")
+    void chatAndManagerFramingHeaders() {
+        for (var path : new String[]{"/chat", "/chat/production/000000000000000000000000"}) {
+            var response = given().redirects().follow(false).get(path);
+            var cspHeaders = response.headers().getValues("Content-Security-Policy");
+            Assertions.assertEquals(1, cspHeaders.size(),
+                    "Expected exactly 1 CSP header on " + path + " but got " + cspHeaders.size() + ": " + cspHeaders);
+            Assertions.assertEquals("frame-ancestors 'none'", extractDirective(cspHeaders.getFirst(), "frame-ancestors"),
+                    path + " must default to frame-ancestors 'none': " + cspHeaders.getFirst());
+            Assertions.assertTrue(response.headers().getValues("X-Frame-Options").isEmpty(),
+                    path + " must not carry X-Frame-Options — it would block the configurable embed: "
+                            + response.headers().getValues("X-Frame-Options"));
+        }
+        for (var path : new String[]{"/manage", "/q/health/ready"}) {
+            var response = given().redirects().follow(false).get(path);
+            Assertions.assertEquals(List.of("DENY"), response.headers().getValues("X-Frame-Options"),
+                    path + " must keep exactly one X-Frame-Options: DENY");
+            var cspHeaders = response.headers().getValues("Content-Security-Policy");
+            Assertions.assertEquals(1, cspHeaders.size(), path + " CSP headers: " + cspHeaders);
+            Assertions.assertEquals("frame-ancestors 'none'", extractDirective(cspHeaders.getFirst(), "frame-ancestors"));
+        }
     }
 
     /**
