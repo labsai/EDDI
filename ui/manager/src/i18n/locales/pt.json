@@ -3087,6 +3087,8 @@
     "title": "Sincronização",
     "subtitle": "Sincronizar agentes entre instâncias",
     "connection": "Instância de origem",
+    "loadingLocalAgents": "A carregar todos os agentes locais antes da associação…",
+    "localAgentsError": "Não foi possível carregar a lista completa de agentes locais, pelo que os agentes não podem ser associados pelo nome. Sincronizar agora criaria duplicados.",
     "sourceUrl": "URL da Instância de Origem",
     "authToken": "Token de Autorização",
     "authHint": "Opcional. Enviado como cabeçalho X-Source-Authorization.",

@@ -90,6 +90,22 @@ describe("auditToolCalls", () => {
     ]);
   });
 
+  it("attaches a tool_error's reason to the call it refused, and keeps an orphan refusal", () => {
+    const calls = auditToolCalls({
+      toolCalls: {
+        calls: [
+          { type: "tool_call", tool: "search", arguments: "{}" },
+          { type: "tool_error", tool: "search", error: "budget exceeded" },
+          { type: "tool_error", tool: "delete_all", error: "hitl_pause_cap" },
+        ],
+      },
+    });
+    expect(calls).toEqual([
+      { tool: "search", arguments: "{}", error: "budget exceeded" },
+      { tool: "delete_all", arguments: undefined, error: "hitl_pause_cap" },
+    ]);
+  });
+
   it("tolerates a bare array and untyped `{name}` entries", () => {
     expect(auditToolCalls({ toolCalls: [{ name: "legacy", arguments: {} }] })).toEqual([
       { tool: "legacy", arguments: {} },

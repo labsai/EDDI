@@ -167,6 +167,38 @@ describe("useAllAgentDescriptors", () => {
     await waitFor(() => expect(result.current.isComplete).toBe(true));
     expect(result.current.data!.pages.flat()).toHaveLength(120);
   });
+
+  it("does not share its cache with the Agents list", async () => {
+    const agents = Array.from({ length: 120 }, (_, i) => ({
+      resource: `eddi://ai.labs.agent/agentstore/agents/a${i}?version=1`,
+      name: `Agent ${i}`,
+      description: "",
+      createdOn: 0,
+      lastModifiedOn: 0,
+    }));
+    server.use(
+      http.get("*/agentstore/agents/descriptors", ({ request }) => {
+        const url = new URL(request.url);
+        const limit = Number(url.searchParams.get("limit"));
+        const index = Number(url.searchParams.get("index"));
+        return HttpResponse.json(agents.slice(index * limit, index * limit + limit));
+      }),
+    );
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    const all = renderHook(() => useAllAgentDescriptors(), { wrapper });
+    await waitFor(() => expect(all.result.current.isComplete).toBe(true));
+    expect(all.result.current.data!.pages).toHaveLength(3);
+    const list = renderHook(() => useInfiniteAgentDescriptors(), { wrapper });
+    await waitFor(() => expect(list.result.current.isSuccess && !list.result.current.isFetching).toBe(true));
+    // The list keeps its own single page — it did not inherit (and would not
+    // re-fetch) every page the Sync page loaded.
+    expect(list.result.current.data!.pages).toHaveLength(1);
+  });
 });
 
 describe("useAgent", () => {

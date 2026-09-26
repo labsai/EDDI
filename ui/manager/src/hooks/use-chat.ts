@@ -1184,24 +1184,50 @@ export function useResumeOrStartConversation() {
  * snapshot. So the transcript and both flags come from a fresh read either way:
  * after a 409 the server's view is exactly what the user needs to see, because
  * the buttons were evidently out of date.
+ *
+ * One move at a time: the flags only change after the re-read, so a second
+ * click (or a second caller) in the meantime would POST another undo and take
+ * back a second turn. A call made while one is in flight is dropped — it
+ * resolves `false` without touching the server.
+ *
+ * Results are bound to the conversation they were issued for: if the user
+ * switched conversation meanwhile, nothing is written to the store. (The chat
+ * store has no conversation epoch on main yet; comparing the id is the guard
+ * available here, and moving these onto an epoch is a follow-up.)
  */
+let stepMoveInFlight = false;
+
 async function moveStepAndReload(move: "undo" | "redo"): Promise<boolean> {
   const store = useChatStore;
   const { selectedAgentId, conversationId } = store.getState();
   if (!selectedAgentId || !conversationId) throw new Error("No active conversation");
+  if (stepMoveInFlight) return false;
+  stepMoveInFlight = true;
+  try {
+    const moved = move === "undo"
+      ? await undoConversationApi("production", selectedAgentId, conversationId)
+      : await redoConversationApi("production", selectedAgentId, conversationId);
 
-  const moved = move === "undo"
-    ? await undoConversationApi("production", selectedAgentId, conversationId)
-    : await redoConversationApi("production", selectedAgentId, conversationId);
-
-  const snapshot = await readConversation("production", selectedAgentId, conversationId, false);
-  // The user may have switched conversation while the two requests ran. The
-  // read belongs to the old one and must not overwrite the new transcript.
-  if (store.getState().conversationId !== conversationId) return moved;
-  store.getState().replaceMessages(snapshotToMessages(snapshot));
-  store.getState().setUndoRedo(...undoRedoFlags(snapshot));
-  store.getState().setPaused(snapshot.conversationState === "AWAITING_HUMAN", null);
-  return moved;
+    let snapshot: SimpleConversationMemorySnapshot;
+    try {
+      snapshot = await readConversation("production", selectedAgentId, conversationId, false);
+    } catch (err) {
+      // The move may already have happened, so the transcript on screen can no
+      // longer be trusted and neither can the buttons: disable both until the
+      // conversation is reloaded, rather than inviting another blind move.
+      if (store.getState().conversationId === conversationId) {
+        store.getState().setUndoRedo(false, false);
+      }
+      throw err;
+    }
+    if (store.getState().conversationId !== conversationId) return moved;
+    store.getState().replaceMessages(snapshotToMessages(snapshot));
+    store.getState().setUndoRedo(...undoRedoFlags(snapshot));
+    store.getState().setPaused(snapshot.conversationState === "AWAITING_HUMAN", null);
+    return moved;
+  } finally {
+    stepMoveInFlight = false;
+  }
 }
 
 /** Undo the last conversation step. Resolves `false` when the backend had nothing to undo. */
@@ -1249,6 +1275,9 @@ export function useRerunConversation() {
         conversationId,
         false
       );
+      // Same guard as undo/redo: a rerun that finishes after the user switched
+      // conversation must not replace the new transcript with the old one.
+      if (store.getState().conversationId !== conversationId) return snapshot;
       const messages = snapshotToMessages(snapshot);
       store.getState().replaceMessages(messages);
       store.getState().setUndoRedo(...undoRedoFlags(snapshot));

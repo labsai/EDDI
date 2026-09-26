@@ -1,4 +1,4 @@
-import { api } from "../api-client";
+import { api, isApiError } from "../api-client";
 import type { AgentDescriptor } from "./agents";
 import { mapWithConcurrency } from "../concurrency";
 
@@ -58,8 +58,10 @@ const VERSION_READ_CONCURRENCY = 6;
  * latest descriptor N times — every picker offered only the newest version (under
  * N duplicate keys) and Compare diffed vN against vN.
  *
- * A version that cannot be read (a gap, a permission change) is skipped rather
- * than failing the whole list. Bounded concurrency: an agent at v200 is 200
+ * Only a 404 is skipped — a genuine gap in the history. Anything else (an
+ * expired session, a 403, a 5xx) fails the whole list: silently dropping those
+ * versions would bring back exactly the "only some versions" picker this fixes,
+ * with no error to explain it. Bounded concurrency: an agent at v200 is 200
  * reads, and an unbounded fan-out would stall the browser's connection pool.
  */
 export async function getDescriptorVersions(
@@ -70,8 +72,9 @@ export async function getDescriptorVersions(
   const results = await mapWithConcurrency(versions, VERSION_READ_CONCURRENCY, async (v) => {
     try {
       return await getDescriptor(id, v);
-    } catch {
-      return null;
+    } catch (err) {
+      if (isApiError(err) && err.status === 404) return null;
+      throw err;
     }
   });
   return results.filter((d): d is AgentDescriptor => d != null && typeof d.resource === "string");

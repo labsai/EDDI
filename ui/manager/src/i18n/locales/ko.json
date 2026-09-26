@@ -3053,6 +3053,8 @@
     "title": "에이전트 동기화",
     "subtitle": "EDDI 인스턴스 간 에이전트 동기화",
     "connection": "원본 인스턴스",
+    "loadingLocalAgents": "매칭 전에 모든 로컬 에이전트를 불러오는 중…",
+    "localAgentsError": "로컬 에이전트 목록을 완전히 불러오지 못해 이름으로 에이전트를 매칭할 수 없습니다. 지금 동기화하면 중복이 생성됩니다.",
     "sourceUrl": "원본 EDDI 인스턴스 URL",
     "authToken": "인증 토큰",
     "authHint": "선택사항. X-Source-Authorization 헤더로 전송.",

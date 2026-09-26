@@ -635,4 +635,62 @@ describe("SyncPage", () => {
     const firstSelect = selects[0] as HTMLSelectElement;
     expect(firstSelect.options.length).toBeGreaterThanOrEqual(1);
   });
+
+  // ─── Matching needs the WHOLE local list ────────────────────────────────
+  // An unmatched remote agent is CREATED by the sync, so matching against a
+  // partial local list duplicates every agent past the loaded pages.
+
+  /** 60 local agents; "Support Agent" is on page 2, which answers slowly. */
+  function localAgentsWithMatchOnPage2(page2: () => Promise<Response> | Response) {
+    const agents = Array.from({ length: 60 }, (_, i) => ({
+      resource: `eddi://ai.labs.agent/agentstore/agents/local-${i}?version=1`,
+      name: i === 55 ? "Support Agent" : `Local ${i}`,
+      description: "",
+      createdOn: 0,
+      lastModifiedOn: 0,
+    }));
+    server.use(
+      http.get("*/agentstore/agents/descriptors", ({ request }) => {
+        const url = new URL(request.url);
+        const index = Number(url.searchParams.get("index"));
+        const limit = Number(url.searchParams.get("limit"));
+        if (index >= 1) return page2();
+        return HttpResponse.json(agents.slice(0, limit));
+      }),
+    );
+    return agents;
+  }
+
+  it("waits for every local page before auto-matching", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const agents = localAgentsWithMatchOnPage2(async () => {
+      await gate;
+      return HttpResponse.json(agents.slice(50));
+    });
+    renderPage();
+    const user = userEvent.setup();
+    await user.type(screen.getByTestId("sync-url-input"), "https://staging.eddi.example.com");
+    await user.click(screen.getByTestId("sync-connect-btn"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("sync-local-agents-loading")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Agent Mapping")).not.toBeInTheDocument();
+
+    release();
+    await waitFor(() => {
+      expect(screen.getByText("Agent Mapping")).toBeInTheDocument();
+    });
+    // Matched against the agent that was on page 2.
+    expect(screen.getAllByText("auto-matched").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("says so when the local list fails to load, instead of matching a partial list", async () => {
+    localAgentsWithMatchOnPage2(() => HttpResponse.json({ message: "boom" }, { status: 500 }));
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByTestId("sync-local-agents-error")).toBeInTheDocument();
+    });
+  });
 });

@@ -3278,6 +3278,8 @@
     "title": "Agent Sync",
     "subtitle": "Synchronize agents between EDDI instances",
     "connection": "Source Instance",
+    "loadingLocalAgents": "Loading all local agents before matching…",
+    "localAgentsError": "The local agent list could not be loaded completely, so agents cannot be matched by name. Syncing now would create duplicates.",
     "sourceUrl": "Source EDDI Instance URL",
     "authToken": "Authorization Token",
     "authHint": "Optional. Sent as X-Source-Authorization header.",

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { deployedEnvironments, preferredChatEnvironment } from "@/lib/deployment-environments";
+import { deployedEnvironments, isLiveAtRequestedVersion, preferredChatEnvironment } from "@/lib/deployment-environments";
 import type { Environment } from "@/lib/constants";
 import { useQueryClient } from "@tanstack/react-query";
 import { useParams, Link, useNavigate } from "react-router-dom";
@@ -870,10 +870,17 @@ function EnvironmentBadges({
         </h2>
       </div>
       <div className="grid grid-cols-1 gap-0 divide-y divide-border sm:grid-cols-2 sm:divide-x sm:divide-y-0">
-        {statuses.map(({ environment, status }) => {
+        {statuses.map((entry) => {
+          const { environment, status, deployedVersion } = entry;
           const conf = statusIcons[status];
           const Icon = conf.icon;
-          const isUp = status === "READY";
+          // The button acts on the version this page shows. An environment
+          // live at an OLDER version is shown as deployed (with its version),
+          // but its action is Deploy: undeploying the page's version would hit
+          // a version that is not running — the backend still answers 202 and
+          // disables every schedule of the agent, while the old version keeps
+          // serving.
+          const isUp = isLiveAtRequestedVersion(entry);
           return (
             <div key={environment} className="flex items-center justify-between gap-3 px-5 py-3">
               <div className="flex items-center gap-2">
@@ -886,12 +893,25 @@ function EnvironmentBadges({
                   </p>
                   <p className={cn("text-xs", conf.color)}>
                     {envStatusLabels[status] ?? status}
+                    {deployedVersion !== undefined && (
+                      <span
+                        className="ms-1 tabular-nums opacity-75"
+                        data-testid={`env-badge-version-${environment}`}
+                        title={t("agents.liveInVersion", "Live in {{environment}} at version {{version}}", {
+                          environment: t(envLabels[environment] ?? environment),
+                          version: deployedVersion,
+                        })}
+                      >
+                        v{deployedVersion}
+                      </span>
+                    )}
                   </p>
                 </div>
               </div>
               <button
                 onClick={() => (isUp ? onUndeploy(environment) : onDeploy(environment))}
                 disabled={isBusy}
+                data-testid={`env-toggle-${environment}`}
                 className={cn(
                   "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
                   isUp

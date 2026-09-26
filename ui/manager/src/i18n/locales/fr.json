@@ -3087,6 +3087,8 @@
     "title": "Synchronisation d'agents",
     "subtitle": "Synchroniser les agents entre les instances EDDI",
     "connection": "Instance source",
+    "loadingLocalAgents": "Chargement de tous les agents locaux avant l'association…",
+    "localAgentsError": "La liste des agents locaux n'a pas pu être chargée entièrement ; les agents ne peuvent donc pas être associés par nom. Une synchronisation maintenant créerait des doublons.",
     "sourceUrl": "URL de l'instance EDDI source",
     "authToken": "Jeton d'autorisation",
     "authHint": "Facultatif. Envoyé comme en-tête X-Source-Authorization.",

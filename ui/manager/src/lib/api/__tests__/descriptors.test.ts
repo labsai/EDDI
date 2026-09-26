@@ -87,6 +87,20 @@ describe("descriptors API", () => {
       expect(result.map((d) => d.name)).toEqual(["v1", "v3"]);
     });
 
+    it("fails the list on any other error instead of quietly showing fewer versions", async () => {
+      server.use(
+        http.get("*/descriptorstore/descriptors/:id", ({ params, request }) => {
+          const version = new URL(request.url).searchParams.get("version");
+          if (version === "2") return new HttpResponse(null, { status: 500 });
+          return HttpResponse.json({
+            resource: `eddi://ai.labs.agent/agentstore/agents/${params.id}?version=${version}`,
+            name: `v${version}`,
+          });
+        }),
+      );
+      await expect(getDescriptorVersions("agent-x", 3)).rejects.toMatchObject({ status: 500 });
+    });
+
     it("never sends the store listing's ignored `version` parameter", async () => {
       let listingHit = false;
       server.use(

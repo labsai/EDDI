@@ -3053,6 +3053,8 @@
     "title": "エージェントの同期",
     "subtitle": "EDDIインスタンス間でエージェントを同期する",
     "connection": "ソースインスタンス",
+    "loadingLocalAgents": "照合の前にすべてのローカルエージェントを読み込んでいます…",
+    "localAgentsError": "ローカルのエージェント一覧を完全に読み込めなかったため、名前でエージェントを照合できません。今同期すると重複が作成されます。",
     "sourceUrl": "ソースEDDIインスタンスのURL",
     "authToken": "認証トークン",
     "authHint": "任意。X-Source-Authorization ヘッダに設定。",

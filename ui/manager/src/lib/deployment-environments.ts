@@ -48,10 +48,19 @@ export function preferredChatEnvironment(live: readonly Environment[]): Environm
  * showed "Not deployed" the moment someone saved v4, on the card, the detail
  * page and the chat picker alike. `deployed` is the per-environment result of
  * `listDeploymentStatuses` (same order as `statuses`' environments, entries may
- * be missing when that call failed); only a READY or IN_PROGRESS older version
- * is adopted, and it carries `deployedVersion` so callers can tell "live at this
- * version" from "live at another one". A version-exact READY/IN_PROGRESS always
- * wins.
+ * be missing when that call failed). The adopted entry carries `deployedVersion`
+ * so callers can tell "live at this version" from "live at another one", and a
+ * version-exact READY/IN_PROGRESS always wins.
+ *
+ * Only a READY row is adopted. An IN_PROGRESS row from the listing would come
+ * from a cached, unpolled read and keep the card's toggle disabled on a state
+ * that has long moved on; the version-exact query is the one that polls.
+ *
+ * Known gap: the listing holds the HIGHEST deployed version per agent whatever
+ * its status (`AgentFactory.getAllLatestAgents`). If that version failed (ERROR)
+ * while an older one is still READY, the older one is invisible here and the
+ * environment reads "Not deployed". The backend has no "latest READY" listing,
+ * and probing every older version per card would cost N requests.
  */
 export function withAnyDeployedVersion(
   statuses: EnvironmentStatus[] | undefined,
@@ -62,7 +71,7 @@ export function withAnyDeployedVersion(
   return statuses.map((s) => {
     if (s.status === "READY" || s.status === "IN_PROGRESS") return s;
     const other = deployed[s.environment]?.find(
-      (d) => d.agentId === agentId && (d.status === "READY" || d.status === "IN_PROGRESS"),
+      (d) => d.agentId === agentId && d.status === "READY",
     );
     return other
       ? { environment: s.environment, status: other.status, deployedVersion: other.agentVersion }

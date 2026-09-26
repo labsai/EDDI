@@ -3087,6 +3087,8 @@
     "title": "Sincronización de agentes",
     "subtitle": "Sincronizar agentes entre instancias de EDDI",
     "connection": "Instancia origen",
+    "loadingLocalAgents": "Cargando todos los agentes locales antes de emparejar…",
+    "localAgentsError": "La lista de agentes locales no se pudo cargar por completo, por lo que no se pueden emparejar por nombre. Sincronizar ahora crearía duplicados.",
     "sourceUrl": "URL de la instancia EDDI de origen",
     "authToken": "Token de autorización",
     "authHint": "Opcional. Se envía como encabezado X-Source-Authorization.",
