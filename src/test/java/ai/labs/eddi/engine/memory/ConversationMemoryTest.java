@@ -102,6 +102,42 @@ public class ConversationMemoryTest {
 
     }
 
+    /**
+     * M-E3: a new turn after an undo abandons the undone step. Keeping it in the
+     * redo cache let a later redo push it on top of the new turn — a reply to input
+     * the user withdrew, spliced after an answer that was never built on it.
+     */
+    @Test
+    @DisplayName("M-E3: undo → new turn → redo is no longer available")
+    public void testNewTurnClearsRedo() {
+        memory.startNextStep();
+        memory.getCurrentStep().storeData(new Data<>("withdrawn", "yes"));
+        memory.undoLastStep();
+        Assertions.assertTrue(memory.isRedoAvailable());
+
+        memory.startNextStep();
+
+        Assertions.assertFalse(memory.isRedoAvailable(), "a new turn must abandon the undone step");
+        Assertions.assertThrows(IllegalStateException.class, () -> memory.redoLastStep());
+    }
+
+    /**
+     * Loading a conversation rebuilds it step by step through the package-private
+     * overload; that must not discard the redo cache the document holds.
+     */
+    @Test
+    @DisplayName("M-E3: loading a conversation keeps its persisted redo cache")
+    public void testLoadKeepsRedoCache() {
+        memory.startNextStep();
+        memory.getCurrentStep().storeData(new Data<>("undone", "yes"));
+        memory.undoLastStep();
+
+        var reloaded = ConversationMemoryUtilities.convertConversationMemorySnapshot(
+                ConversationMemoryUtilities.convertConversationMemory(memory));
+
+        Assertions.assertTrue(reloaded.isRedoAvailable(), "a loaded conversation must keep what it can still redo");
+    }
+
     @Test
     public void testUndoThrowsWhenNoSteps() {
         Assertions.assertThrows(IllegalStateException.class, () -> memory.undoLastStep());

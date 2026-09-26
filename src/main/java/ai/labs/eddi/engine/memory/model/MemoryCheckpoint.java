@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.memory.model;
 import ai.labs.eddi.configs.properties.model.Property;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -105,6 +106,9 @@ public record MemoryCheckpoint(
             // it resolves a credential reference read through {properties.x}. A clone
             // that loses it turns a rollback into a refused API call.
             cloned.setAutoVaulted(p.getAutoVaulted());
+            // Likewise: a group-visible memory restored without its groups is written
+            // back with none and can no longer be recalled by the group.
+            cloned.setGroupIds(p.getGroupIds() != null ? new ArrayList<>(p.getGroupIds()) : null);
             copy.put(entry.getKey(), cloned);
         }
         return Collections.unmodifiableMap(copy);

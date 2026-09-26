@@ -100,7 +100,16 @@ public class ConversationMemory implements IConversationMemory {
         return result;
     }
 
+    /**
+     * Starts a new turn. A new turn abandons whatever was undone before it, so the
+     * redo cache is emptied: otherwise undo → say → redo pushed the undone step
+     * back on top of the new one, splicing a reply to an input the user withdrew
+     * into the history after an answer that was never built on it (M-E3). Only this
+     * entry point clears it — the package-private overload also rebuilds a loaded
+     * conversation step by step, and must keep the redo cache it loaded.
+     */
     public IConversationStep startNextStep() {
+        redoCache.clear();
         return startNextStep(null);
     }
 

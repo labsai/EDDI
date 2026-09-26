@@ -95,6 +95,13 @@ public class Conversation implements IConversation {
      */
     static final int MIN_SCRUBBED_SECRET_CONTEXT_LENGTH = 8;
 
+    /**
+     * The groups this turn runs in, from its {@code groupId} context. The fallback
+     * for a {@code group}-visibility longTerm property that carries no groups of
+     * its own when it is written to the user-memory store (M-E2).
+     */
+    private List<String> turnGroupIds = List.of();
+
     Conversation(List<IExecutableWorkflow> executableWorkflows, IConversationMemory conversationMemory, IPropertiesHandler propertiesHandler,
             IConversationOutputRenderer outputProvider) {
         this.executableWorkflows = executableWorkflows;
@@ -409,8 +416,29 @@ public class Conversation implements IConversation {
     }
 
     private void postConversationLifecycleTasks() throws IResourceStore.ResourceStoreException {
-        removeOldInvalidProperties();
+        // Step-scoped properties are dropped by the turn's finally block, on every exit
+        // that ends the step — see clearStepScopedPropertiesUnlessPaused.
         storePropertiesPermanently();
+    }
+
+    /**
+     * Drops the {@code step}-scoped properties at the end of a turn — every end,
+     * not just a clean one.
+     * <p>
+     * This used to run only from {@link #postConversationLifecycleTasks()}, which a
+     * turn that fails (ERROR), is cancelled or is abandoned never reaches. The
+     * snapshot of that turn is still persisted, step properties included, so a
+     * value documented as "cleared at the end of the turn" survived into the next
+     * turn's {@code {properties.x}} and behaviour-rule matching after any error.
+     * <p>
+     * A HITL pause is the one exit that keeps them: the step is not over, and the
+     * resume continues the same pipeline, whose later tasks may read what an
+     * earlier task set.
+     */
+    private void clearStepScopedPropertiesUnlessPaused(boolean paused) {
+        if (!paused) {
+            removeOldInvalidProperties();
+        }
     }
 
     private void startNextStep() {
@@ -439,6 +467,8 @@ public class Conversation implements IConversation {
     }
 
     private List<IData<?>> prepareLifecycleData(String message, Map<String, Context> contexts, List<String> taskTypeResultsToBeRemoved) {
+
+        turnGroupIds = extractGroupIds(contexts);
 
         List<IData<Context>> contextData = createContextData(contexts);
         List<IData<?>> lifecycleData = new LinkedList<>(contextData);
@@ -556,6 +586,7 @@ public class Conversation implements IConversation {
             // First, so nothing below — the audit flush, the longTerm write, the
             // stored snapshot, the rendered output — sees a secret context value.
             scrubSecretContextValues();
+            clearStepScopedPropertiesUnlessPaused(paused);
             if (auditBuffer != null) {
                 auditBuffer.flush(conversationMemory, searchableSecretContextValues());
             }
@@ -743,7 +774,8 @@ public class Conversation implements IConversation {
                 }
                 // Apply visibility at persistence boundary only
                 Visibility vis = property.getVisibility() != null ? property.getVisibility() : configDefault;
-                UserMemoryEntry entry = UserMemoryEntry.fromProperty(property, userId, agentId, conversationId, vis);
+                UserMemoryEntry entry = UserMemoryEntry.fromProperty(property, userId, agentId, conversationId, vis,
+                        fallbackGroupIds(longTermBaseline.get(propertyEntry.getKey())));
                 store.upsert(entry);
                 pending.remove(propertyEntry.getKey());
             }
@@ -786,6 +818,31 @@ public class Conversation implements IConversation {
     }
 
     /**
+     * The groups a {@code group}-visibility property is written with when it
+     * carries none itself: those of the recalled entry it replaced (a property set
+     * by a property instruction is a new object and has lost them), else the groups
+     * of this turn — its {@code groupId} context, or for a resume, which has no
+     * context of its own, the latest {@code context:groupId} of the conversation.
+     */
+    private List<String> fallbackGroupIds(Property baseline) {
+        if (baseline != null && baseline.getGroupIds() != null && !baseline.getGroupIds().isEmpty()) {
+            return baseline.getGroupIds();
+        }
+        if (!turnGroupIds.isEmpty()) {
+            return turnGroupIds;
+        }
+        IData<Object> groupContext = conversationMemory.getAllSteps().getLatestData(KEY_CONTEXT + ":groupId");
+        if (groupContext != null && groupContext.getResult() != null) {
+            Object result = groupContext.getResult();
+            Object value = result instanceof Context context ? context.getValue() : result;
+            if (value != null && !String.valueOf(value).isBlank()) {
+                return List.of(String.valueOf(value));
+            }
+        }
+        return List.of();
+    }
+
+    /**
      * Extracts groupId(s) from the conversation context map.
      * GroupConversationService puts "groupId" in the context when creating member
      * conversations.
@@ -823,6 +880,10 @@ public class Conversation implements IConversation {
             prop = new Property(entry.key(), value != null ? value.toString() : null, Scope.longTerm);
         }
         prop.setVisibility(entry.visibility());
+        // Kept on the property so that writing it back does not wipe the groups it is
+        // shared with (M-E2). Null rather than empty when the entry has none, so a
+        // property recalled from a non-group entry stays equal to one set afresh.
+        prop.setGroupIds(entry.groupIds() == null || entry.groupIds().isEmpty() ? null : List.copyOf(entry.groupIds()));
         return prop;
     }
 
@@ -1410,6 +1471,7 @@ public class Conversation implements IConversation {
             ConversationState finalState = getConversationState();
             if (finalState == ConversationState.IN_PROGRESS)
                 setConversationState(ConversationState.READY);
+            clearStepScopedPropertiesUnlessPaused(finalState == ConversationState.AWAITING_HUMAN);
             // Tool-pause safety-net: the batch normally survives clearHitlBookmark()
             // until LlmTask consumes it and clears it. But on any exit where LlmTask
             // did NOT consume it — config drift, a degraded path, an error, or simply
