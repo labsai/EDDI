@@ -320,6 +320,27 @@ describe("useSessionLogStore", () => {
     connection.close();
   });
 
+  // A retry loop emits identical lines in one millisecond. De-duplicating by
+  // key alone collapsed them to one; only the REPLAYED copies are duplicates.
+  it("keeps genuinely repeated lines while dropping their replay", async () => {
+    const { getRecentLogs } = await import("@/lib/api/logs");
+    const twin = logLine(7000, "retrying");
+    vi.mocked(getRecentLogs).mockResolvedValueOnce([twin, { ...twin }]);
+
+    const connection = _connectForTesting();
+    const es = connection.getEventSource();
+    if (!es) return;
+    await es.onopen?.();
+    expect(useSessionLogStore.getState().entries).toHaveLength(2);
+
+    // The stream's connect replay delivers the same two lines again.
+    es.onmessage?.(new MessageEvent("message", { data: JSON.stringify(twin) }));
+    es.onmessage?.(new MessageEvent("message", { data: JSON.stringify(twin) }));
+    expect(useSessionLogStore.getState().entries).toHaveLength(2);
+
+    connection.close();
+  });
+
   // ── Lazy, reference-counted connection (D1) ──────────────────────
   //
   // This module used to connect on import, and `main.tsx` imported it for that

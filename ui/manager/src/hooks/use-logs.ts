@@ -12,7 +12,7 @@ import {
 } from "@/lib/api/logs";
 import type { BearerEventSource } from "@/lib/bearer-event-source";
 import { useSessionLogStore, connect as connectSessionLogStream } from "@/hooks/session-log-store";
-import { historyEntryKey, mergeNewestFirst } from "@/lib/log-entries";
+import { historyEntryKey, mergeNewestFirst, newByMultiplicity } from "@/lib/log-entries";
 
 // ==================== Query Keys ====================
 
@@ -61,15 +61,12 @@ export function useHistoryLogs(filters: HistoryFilters = {}) {
 
   const data = useMemo(() => {
     if (!query.data) return undefined;
-    const seen = new Set<string>();
-    const rows: DatabaseLogEntry[] = [];
+    // Rows written between two page loads shift the window, so a page can
+    // repeat rows from the end of the previous one. Counted by multiplicity so
+    // genuinely repeated lines inside a page survive.
+    let rows: DatabaseLogEntry[] = [];
     for (const page of query.data.pages) {
-      for (const row of page) {
-        const key = historyEntryKey(row);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        rows.push(row);
-      }
+      rows = rows.concat(newByMultiplicity(rows, page, historyEntryKey));
     }
     return rows;
   }, [query.data]);

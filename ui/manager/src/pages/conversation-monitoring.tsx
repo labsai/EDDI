@@ -160,13 +160,22 @@ export function ConversationMonitoringPage() {
     const statuses: ConversationStatus[] = fresh.filter((r) =>
       selected.has(r.conversationId)
     );
-    const freshPaused = statuses.filter(
-      (s) => s.conversationState === "AWAITING_HUMAN"
-    ).length;
-    // More paused than the dialog warned about: the operator confirmed without
-    // being told these approvals would be cancelled. The dialog is re-rendered
-    // from the fresh list, so leave it open for a second look.
-    if (freshPaused > pausedSelectedCount) {
+    // A paused conversation the dialog did not warn about: the operator
+    // confirmed without being told its approval would be cancelled. Compared
+    // by id, not by count — one resuming while another pauses keeps the count
+    // but changes what is being cancelled. The dialog is re-rendered from the
+    // fresh list, so leave it open for a second look.
+    const warnedPaused = new Set(
+      selectedStatuses
+        .filter((s) => s.conversationState === "AWAITING_HUMAN")
+        .map((s) => s.conversationId)
+    );
+    const unwarned = statuses.some(
+      (s) =>
+        s.conversationState === "AWAITING_HUMAN" &&
+        !warnedPaused.has(s.conversationId)
+    );
+    if (unwarned) {
       toast.warning(
         t(
           "conversations.endStateChanged",
