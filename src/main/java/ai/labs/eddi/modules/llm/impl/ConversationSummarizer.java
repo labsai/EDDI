@@ -154,7 +154,10 @@ public class ConversationSummarizer {
         }
         if (newTurnsText.length() > maxChars) {
             // A single turn larger than the whole budget: summarize its head.
-            newTurnsText = newTurnsText.substring(0, maxChars) + "\n[... the rest of this turn was cut to fit the summarizer's input budget ...]";
+            // The notice counts toward the budget too, so the input stays within it.
+            String notice = "\n[... the rest of this turn was cut to fit the summarizer's input budget ...]";
+            notice = notice.substring(0, Math.min(notice.length(), maxChars));
+            newTurnsText = newTurnsText.substring(0, maxChars - notice.length()) + notice;
         }
 
         // Build content to summarize: previous summary + new unsummarized turns

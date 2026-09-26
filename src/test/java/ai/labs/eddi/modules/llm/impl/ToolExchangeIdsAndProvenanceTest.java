@@ -55,6 +55,21 @@ class ToolExchangeIdsAndProvenanceTest {
     }
 
     @Test
+    @DisplayName("a rebuilt call with null or blank arguments carries an empty JSON object")
+    void blankArgumentsBecomeEmptyObject() {
+        var noArgs = ToolExecutionRequest.builder().name("ping").build();
+        var blankArgs = ToolExecutionRequest.builder().name("pong").arguments("  ").build();
+        List<ChatMessage> transcript = List.of(AiMessage.from(noArgs, blankArgs), ToolExecutionResultMessage.from(null, "ping", "ok"),
+                ToolExecutionResultMessage.from(null, "pong", "ok"));
+
+        var requests = ((AiMessage) ToolLoopRunner.toolExchange(transcript).get(0)).toolExecutionRequests();
+
+        // "" is not a JSON object: Gemini parses carried arguments with Json.fromJson.
+        assertEquals("{}", requests.get(0).arguments());
+        assertEquals("{}", requests.get(1).arguments());
+    }
+
+    @Test
     @DisplayName("calls that already carry ids pass through untouched")
     void existingIdsAreKept() {
         var req = ToolExecutionRequest.builder().id("call_1").name("lookup").arguments("{}").build();

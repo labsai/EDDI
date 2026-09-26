@@ -39,22 +39,21 @@ final class ModelParameterKeys {
      * provider reading another key: on Ollama, Bedrock, HuggingFace, Vertex and
      * Azure the configured summarizer model silently ran as the parent task's
      * model. The model is written under every model key the parameters already
-     * carry (so an inherited key can never win over the override), and otherwise
-     * under the provider's own key — never under keys the builder does not read,
-     * which would trip its unrecognised-parameter warning.
+     * carry (so an inherited key can never win over the override), and always under
+     * the provider's own key: parameters inherited from a task on another provider
+     * can carry only THAT provider's key ({@code modelName} from an OpenAI task
+     * under an Ollama summary), which the selected builder never reads. No other
+     * key is added, so the builder's unrecognised-parameter warning only ever names
+     * keys the caller already passed.
      */
     static Map<String, String> withModel(Map<String, String> parameters, String provider, String model) {
         Map<String, String> result = parameters != null ? new HashMap<>(parameters) : new HashMap<>();
-        boolean written = false;
         for (String key : MODEL_KEYS) {
             if (result.containsKey(key)) {
                 result.put(key, model);
-                written = true;
             }
         }
-        if (!written) {
-            result.put(keyFor(provider), model);
-        }
+        result.put(keyFor(provider), model);
         return result;
     }
 

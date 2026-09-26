@@ -20,9 +20,15 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
+import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -237,6 +243,50 @@ class PromptSnippetServiceTest {
             expireFailureBackoff();
             assertEquals("Never share PII.", service.getAll().get("safety"), "so does an unchecked one");
             verify(descriptorStore, times(3)).readDescriptors("ai.labs.snippet", "", 0, 0, false);
+        }
+
+        /**
+         * Review of #837: a reload is single-flight. While one caller's store read
+         * hangs (an outage, before its failure can set the back-off), a concurrent
+         * caller must not start a second read of its own; it gets the last good set.
+         */
+        @Test
+        void concurrentReloadSharesOneStoreRead() throws Exception {
+            DocumentDescriptor desc = createDescriptor("s1", 1);
+            CountDownLatch readStarted = new CountDownLatch(1);
+            CountDownLatch release = new CountDownLatch(1);
+            when(descriptorStore.readDescriptors("ai.labs.snippet", "", 0, 0, false))
+                    .thenReturn(List.of(desc))
+                    .thenAnswer(inv -> {
+                        readStarted.countDown();
+                        release.await(5, TimeUnit.SECONDS);
+                        throw new IResourceStore.ResourceStoreException("DB unavailable");
+                    });
+            when(snippetStore.read("s1", 1))
+                    .thenReturn(new PromptSnippet("safety", "governance", null, "Never share PII.", null, true));
+
+            assertEquals("Never share PII.", service.getAll().get("safety"));
+            service.invalidateCache();
+
+            ExecutorService pool = Executors.newSingleThreadExecutor();
+            try {
+                Future<Map<String, Object>> hanging = pool.submit(service::getAll);
+                assertTrue(readStarted.await(5, TimeUnit.SECONDS));
+
+                // Neither queued behind the hanging read nor issuing a read of its own.
+                Map<String, Object> during = assertTimeout(Duration.ofSeconds(2), () -> service.getAll());
+                assertEquals("Never share PII.", during.get("safety"), "served the last good set while the reload is in flight");
+                verify(descriptorStore, times(2)).readDescriptors("ai.labs.snippet", "", 0, 0, false);
+
+                release.countDown();
+                assertEquals("Never share PII.", hanging.get(5, TimeUnit.SECONDS).get("safety"));
+                // The failure is shared: within the back-off nobody reads the store again.
+                assertEquals("Never share PII.", service.getAll().get("safety"));
+                verify(descriptorStore, times(2)).readDescriptors("ai.labs.snippet", "", 0, 0, false);
+            } finally {
+                release.countDown();
+                pool.shutdownNow();
+            }
         }
     }
 

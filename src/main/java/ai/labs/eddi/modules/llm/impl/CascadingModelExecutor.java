@@ -23,6 +23,11 @@ import ai.labs.eddi.modules.llm.model.LlmConfiguration.JudgeModelConfig;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ModelCascadeConfig;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.exception.AuthenticationException;
+import dev.langchain4j.exception.ContentFilteredException;
+import dev.langchain4j.exception.HttpException;
+import dev.langchain4j.exception.InvalidRequestException;
+import dev.langchain4j.exception.ModelNotFoundException;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
@@ -33,6 +38,7 @@ import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.TimeoutException;
+import java.util.regex.Pattern;
 
 /**
  * Executes a multi-model cascade: tries a cheap/fast model first, evaluates
@@ -661,13 +667,97 @@ class CascadingModelExecutor {
 
     /**
      * Whether a step failure is the next provider rejecting the carried tool
-     * exchange: there WAS an exchange, and the failure is a client-side rejection
-     * (not a timeout, not a transient error, not a HITL pause), which is what a
-     * provider returns for a transcript it will not accept.
+     * exchange, which is the only failure the one-time retry without it may answer.
+     * All three must hold:
+     * <ol>
+     * <li>there WAS a carried exchange;</li>
+     * <li>the step's FIRST model request failed, so no tool of this attempt ran —
+     * the carried exchange is in every request of the step, so a provider that
+     * rejects it rejects the first one, and a failure after tools executed must
+     * never lead to a retry that could run those side effects again;</li>
+     * <li>the failure is a request rejection (HTTP 400/422, langchain4j's
+     * {@link InvalidRequestException}) — not an authentication failure, an unknown
+     * model, a content filter, a timeout or a transient error, which a retry
+     * without the exchange cannot fix and would only mask.</li>
+     * </ol>
      */
     static boolean rejectedCarriedExchange(Exception failure, List<ChatMessage> carried) {
-        return !carried.isEmpty() && !(failure instanceof TimeoutException) && !(failure instanceof ToolApprovalRequiredException)
-                && !isRetryableError(failure);
+        return !carried.isEmpty() && failedBeforeAnyTool(failure) && isTranscriptRejection(failure);
+    }
+
+    private static boolean failedBeforeAnyTool(Throwable failure) {
+        for (Throwable current = failure; current != null; current = current.getCause()) {
+            if (current instanceof ToolLoopRunner.FailedBeforeToolsException) {
+                return true;
+            }
+            if (current.getCause() == current) {
+                break;
+            }
+        }
+        return false;
+    }
+
+    private static final Set<Integer> TRANSCRIPT_REJECTION_STATUS = Set.of(400, 422);
+    private static final Set<Integer> NOT_A_TRANSCRIPT_STATUS = Set.of(401, 403, 404, 408, 429);
+    private static final Pattern TRANSCRIPT_REJECTION_MESSAGE = Pattern
+            .compile("\\b(400|422)\\b|bad request|invalid[ _]request|unprocessable", Pattern.CASE_INSENSITIVE);
+    private static final Pattern NOT_A_TRANSCRIPT_MESSAGE = Pattern
+            .compile("\\b(401|403|404)\\b|unauthori[sz]ed|forbidden|api[ _-]?key|model[ _]not[ _]found|does not exist",
+                    Pattern.CASE_INSENSITIVE);
+
+    /**
+     * A client-side rejection of the request's content, as opposed to of the caller
+     * (credentials), the target (model) or the moment (rate limit, timeout, 5xx).
+     * Exclusions are checked over the whole cause chain first, so a wrapped
+     * authentication failure is never read as a rejected transcript.
+     */
+    static boolean isTranscriptRejection(Exception failure) {
+        if (failure instanceof TimeoutException || failure instanceof ToolApprovalRequiredException || isRetryableError(failure)) {
+            return false;
+        }
+        for (Throwable current = failure; current != null; current = current.getCause()) {
+            if (current instanceof AuthenticationException || current instanceof ModelNotFoundException
+                    || current instanceof ContentFilteredException) {
+                return false;
+            }
+            if (current instanceof HttpException http && NOT_A_TRANSCRIPT_STATUS.contains(http.statusCode())) {
+                return false;
+            }
+            if (current.getCause() == current) {
+                break;
+            }
+        }
+        for (Throwable current = failure; current != null; current = current.getCause()) {
+            if (current instanceof InvalidRequestException) {
+                return true;
+            }
+            if (current instanceof HttpException http && TRANSCRIPT_REJECTION_STATUS.contains(http.statusCode())) {
+                return true;
+            }
+            if (current.getCause() == current) {
+                break;
+            }
+        }
+        // Untyped provider clients only surface the status in the message.
+        for (Throwable current = failure; current != null; current = current.getCause()) {
+            String message = current.getMessage();
+            if (message != null && NOT_A_TRANSCRIPT_MESSAGE.matcher(message).find()) {
+                return false;
+            }
+            if (current.getCause() == current) {
+                break;
+            }
+        }
+        for (Throwable current = failure; current != null; current = current.getCause()) {
+            String message = current.getMessage();
+            if (message != null && TRANSCRIPT_REJECTION_MESSAGE.matcher(message).find()) {
+                return true;
+            }
+            if (current.getCause() == current) {
+                break;
+            }
+        }
+        return false;
     }
 
     private static double conversationToolCost(IAgentOrchestrator orchestrator, IConversationMemory memory) {

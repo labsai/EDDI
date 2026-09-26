@@ -26,6 +26,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Cached service that loads all prompt snippets and provides them as a template
@@ -91,6 +92,9 @@ public class PromptSnippetService {
      */
     private volatile long lastFailureAtMs;
 
+    /** Serializes store reads; see {@link #getAll()}. */
+    private final ReentrantLock loadLock = new ReentrantLock();
+
     /** How long a failed load is remembered before the store is tried again. */
     static final long FAILURE_BACKOFF_MS = 10_000L;
 
@@ -135,26 +139,53 @@ public class PromptSnippetService {
         }
 
         cacheMissCounter.increment();
-        long failedAt = lastFailureAtMs;
-        if (failedAt != 0 && System.currentTimeMillis() - failedAt < FAILURE_BACKOFF_MS) {
-            Map<String, Object> fallback = lastLoaded;
-            return fallback != null ? fallback : Collections.emptyMap();
+        // One load at a time (single flight). Without it, every request that missed
+        // the cache in the same instant read the store on its own before the first
+        // failure could set the backoff — during an outage, a burst of request threads
+        // each blocked on the driver's timeout. A caller that finds a load in flight
+        // takes the last good map instead of queueing; only a caller with nothing to
+        // fall back on (the very first load) waits for it.
+        Map<String, Object> fallback = lastLoaded;
+        if (fallback != null) {
+            if (!loadLock.tryLock()) {
+                return fallback;
+            }
+        } else {
+            loadLock.lock();
         }
-        Map<String, Object> snippetMap = loadAllSnippets();
-        if (snippetMap == null) {
-            lastFailureAtMs = System.currentTimeMillis();
-            // A failed load is NOT cached (M-L6). It used to be, as an empty map, for
-            // the full five-minute TTL: one transient store error and every prompt
-            // rendered {snippets.x} — safety instructions included — as blank for
-            // five minutes, with nothing but one ERROR line to show for it. Serve the
-            // last good map instead, and try the store again on the next call.
-            Map<String, Object> fallback = lastLoaded;
-            return fallback != null ? fallback : Collections.emptyMap();
+        try {
+            // Re-check under the lock: the load this caller waited for may have filled
+            // the cache or recorded a failure.
+            cached = snippetCache.getIfPresent(CACHE_KEY);
+            if (cached != null) {
+                return cached;
+            }
+            long failedAt = lastFailureAtMs;
+            if (failedAt != 0 && System.currentTimeMillis() - failedAt < FAILURE_BACKOFF_MS) {
+                return lastLoadedOrEmpty();
+            }
+            Map<String, Object> snippetMap = loadAllSnippets();
+            if (snippetMap == null) {
+                lastFailureAtMs = System.currentTimeMillis();
+                // A failed load is NOT cached (M-L6). It used to be, as an empty map, for
+                // the full five-minute TTL: one transient store error and every prompt
+                // rendered {snippets.x} — safety instructions included — as blank for
+                // five minutes, with nothing but one ERROR line to show for it. Serve the
+                // last good map instead, and try the store again after the backoff.
+                return lastLoadedOrEmpty();
+            }
+            lastFailureAtMs = 0L;
+            lastLoaded = snippetMap;
+            snippetCache.put(CACHE_KEY, snippetMap);
+            return snippetMap;
+        } finally {
+            loadLock.unlock();
         }
-        lastFailureAtMs = 0L;
-        lastLoaded = snippetMap;
-        snippetCache.put(CACHE_KEY, snippetMap);
-        return snippetMap;
+    }
+
+    private Map<String, Object> lastLoadedOrEmpty() {
+        Map<String, Object> fallback = lastLoaded;
+        return fallback != null ? fallback : Collections.emptyMap();
     }
 
     /**

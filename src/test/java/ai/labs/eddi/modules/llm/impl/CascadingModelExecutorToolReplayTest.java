@@ -21,6 +21,11 @@ import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.exception.AuthenticationException;
+import dev.langchain4j.exception.ContentFilteredException;
+import dev.langchain4j.exception.HttpException;
+import dev.langchain4j.exception.InvalidRequestException;
+import dev.langchain4j.exception.ModelNotFoundException;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.chat.response.ChatResponseMetadata;
@@ -256,7 +261,7 @@ class CascadingModelExecutorToolReplayTest {
             boolean nullId = sent.stream().anyMatch(m -> m instanceof AiMessage ai && ai.hasToolExecutionRequests()
                     && ai.toolExecutionRequests().stream().anyMatch(r -> r.id() == null));
             if (nullId) {
-                throw new IllegalArgumentException("400 Bad Request: messages[1].tool_calls[0].id is required");
+                throw rejectedUpFront(new IllegalArgumentException("400 Bad Request: messages[1].tool_calls[0].id is required"));
             }
             return stepResult(LONG_ANSWER, List.of(), 0.0);
         });
@@ -272,9 +277,65 @@ class CascadingModelExecutorToolReplayTest {
     @Test
     @DisplayName("a transient failure with a carried exchange is not retried without it")
     void transientFailureIsNotTreatedAsRejection() {
-        assertFalse(CascadingModelExecutor.rejectedCarriedExchange(new RuntimeException("503 service unavailable"), placedOrderExchange()));
-        assertFalse(CascadingModelExecutor.rejectedCarriedExchange(new IllegalArgumentException("400"), List.of()));
-        assertTrue(CascadingModelExecutor.rejectedCarriedExchange(new IllegalArgumentException("400"), placedOrderExchange()));
+        assertFalse(CascadingModelExecutor.rejectedCarriedExchange(rejectedUpFront(new RuntimeException("503 service unavailable")),
+                placedOrderExchange()));
+        assertFalse(CascadingModelExecutor.rejectedCarriedExchange(rejectedUpFront(new IllegalArgumentException("400")), List.of()));
+        assertTrue(CascadingModelExecutor.rejectedCarriedExchange(rejectedUpFront(new IllegalArgumentException("400")), placedOrderExchange()));
+        assertTrue(CascadingModelExecutor.rejectedCarriedExchange(rejectedUpFront(new InvalidRequestException("tool_use ids must be unique")),
+                placedOrderExchange()));
+    }
+
+    /**
+     * Review of #837: only a rejection of the request's CONTENT may trigger the
+     * retry without the carried exchange. Credentials, an unknown model or a
+     * content filter fail the same way without it, so a retry only costs a second
+     * provider call and hides the real error.
+     */
+    @Test
+    @DisplayName("auth, unknown-model and content-filter failures are not read as a rejected exchange")
+    void nonTranscriptClientErrorsAreNotRejections() {
+        var carried = placedOrderExchange();
+        assertFalse(CascadingModelExecutor.rejectedCarriedExchange(rejectedUpFront(new AuthenticationException("invalid x-api-key")), carried));
+        assertFalse(CascadingModelExecutor.rejectedCarriedExchange(rejectedUpFront(new ModelNotFoundException("no such model")), carried));
+        assertFalse(CascadingModelExecutor.rejectedCarriedExchange(rejectedUpFront(new ContentFilteredException("blocked")), carried));
+        assertFalse(CascadingModelExecutor.rejectedCarriedExchange(rejectedUpFront(new HttpException(401, "Unauthorized")), carried));
+        assertFalse(CascadingModelExecutor.rejectedCarriedExchange(
+                rejectedUpFront(new RuntimeException("400 Bad Request", new AuthenticationException("bad key"))), carried));
+        assertFalse(CascadingModelExecutor.rejectedCarriedExchange(rejectedUpFront(new IllegalStateException("401 Unauthorized")), carried));
+        assertTrue(CascadingModelExecutor.rejectedCarriedExchange(rejectedUpFront(new HttpException(422, "unprocessable")), carried));
+    }
+
+    /**
+     * Review of #837 (security): the carried exchange is in every request of the
+     * step, so a provider that rejects it rejects the FIRST request. A failure
+     * after that one was answered may follow executed tools; retrying the step then
+     * could run their side effects a second time, so it must propagate.
+     */
+    @Test
+    @DisplayName("a 400 after the step's first request was answered is not retried without the exchange")
+    void failureAfterToolsRanIsNotRetried() throws Exception {
+        assertFalse(CascadingModelExecutor.rejectedCarriedExchange(
+                new LifecycleException("Agent execution failed: 400 Bad Request", new IllegalArgumentException("400 Bad Request")),
+                placedOrderExchange()), "no FailedBeforeToolsException marker: tools may already have run");
+
+        var cascade = twoStepCascade();
+        int[] calls = {0};
+        when(orchestrator.executeIfToolsEnabled(any(), any(), anyList(), any(), any(), any(), anyInt(), anyInt(), any())).thenAnswer(inv -> {
+            if (calls[0]++ == 0) {
+                return stepResult("ok", placedOrderExchange(), 0.0);
+            }
+            throw new LifecycleException("Agent execution failed: 400 Bad Request", new IllegalArgumentException("400 Bad Request"));
+        });
+
+        var result = executor().execute(cascade, messages(), "sys", Map.of(), agentTask(), memory, orchestrator, Map.of(), false, false, false);
+
+        assertEquals(2, calls[0], "the failed step must not be run a second time");
+        assertFalse(result.trace().stream().anyMatch(e -> e.containsKey("carriedToolExchangeRejected")), result.trace().toString());
+    }
+
+    private static LifecycleException rejectedUpFront(Exception providerFailure) {
+        return new ToolLoopRunner.FailedBeforeToolsException(
+                new LifecycleException("Agent execution failed: " + providerFailure.getMessage(), providerFailure));
     }
 
     /**
