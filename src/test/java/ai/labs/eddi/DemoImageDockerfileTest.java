@@ -207,4 +207,38 @@ class DemoImageDockerfileTest {
     private static String trimTrailingSlash(String path) {
         return path.endsWith("/") && path.length() > 1 ? path.substring(0, path.length() - 1) : path;
     }
+
+    /**
+     * {@code mvn package} builds the Manager and the Chat UI
+     * (frontend-maven-plugin, bound to {@code prepare-package}, runs {@code npm ci}
+     * in {@code ui/manager} and {@code ui/chat}). The demo ran exactly that without
+     * {@code ui/} in its build context, so {@code npm ci} failed on a missing
+     * package.json and the documented Open WebUI demo never produced an image.
+     * Either the sources are copied in before the build, or the build is told to
+     * skip the UIs; the demo needs the Manager, so it is the former — and the
+     * checkout's node_modules and downloaded Node must stay out of the context.
+     */
+    @Test
+    @DisplayName("the demo build stage has the UI sources the package build compiles")
+    void demoBuildStageCarriesTheUiSources() throws IOException {
+        String demo = read(DEMO);
+        int packageAt = demo.indexOf("mvn -B package");
+        assertTrue(packageAt > 0, "the demo no longer runs `mvn -B package`; this test is reading the wrong file");
+        String packageLine = demo.substring(packageAt, demo.indexOf('\n', packageAt));
+        boolean skipsUi = packageLine.contains("-DskipUi=true");
+        boolean copiesUi = COPY.matcher(demo.substring(0, packageAt)).results()
+                .anyMatch(copy -> copy.group(1).trim().startsWith("ui/"));
+        assertTrue(skipsUi || copiesUi,
+                "`mvn -B package` builds both UIs, but nothing copies ui/ into the build stage and the build does not"
+                        + " pass -DskipUi=true — `npm ci` fails on a missing package.json and the demo image never builds");
+
+        if (copiesUi) {
+            String ignore = read(Path.of("src", "main", "docker", "Dockerfile.demo.dockerignore"));
+            for (String excluded : List.of("**/node_modules/", "ui/node/")) {
+                assertTrue(ignore.lines().anyMatch(line -> line.trim().equals(excluded)),
+                        "Dockerfile.demo.dockerignore must exclude " + excluded + " — the demo builds the UIs from source,"
+                                + " and a checkout's installed dependencies or downloaded Node must not ride into the image");
+            }
+        }
+    }
 }
