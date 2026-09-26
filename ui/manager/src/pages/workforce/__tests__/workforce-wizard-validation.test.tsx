@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { server } from "@/test/mocks/server";
@@ -433,6 +433,48 @@ describe("Workforce wizard — creation failures", () => {
       expect(body.apiKey).toBeUndefined();
     }
     expect(JSON.stringify(bodies)).not.toContain("sk-secret");
+  });
+
+  it("a double click on Create provisions each advisor once", async () => {
+    // The button itself carries no pending lock: a running create replaces the
+    // review with the progress view. Two clicks dispatched before React
+    // re-renders both reach the still-mounted button, so it is the wizard's
+    // in-flight ref that must refuse the second — or every advisor is set up
+    // twice and a second group is saved.
+    const setupNames: string[] = [];
+    let groupPosts = 0;
+    server.use(
+      http.post("*/administration/agents/setup", async ({ request }) => {
+        const body = (await request.json()) as { name: string };
+        setupNames.push(body.name);
+        return HttpResponse.json({
+          action: "created",
+          agentId: `agent-${body.name.toLowerCase()}`,
+          agentName: body.name,
+          provider: "anthropic",
+          model: "m",
+        });
+      }),
+      http.post("*/groupstore/groups", () => {
+        groupPosts += 1;
+        return new HttpResponse(null, {
+          status: 201,
+          headers: { Location: "eddi://ai.labs.group/groupstore/groups/grp-new?version=1" },
+        });
+      }),
+    );
+
+    const user = userEvent.setup();
+    renderWizard();
+    const create = await completeCustomTeam(user);
+    act(() => {
+      fireEvent.click(create);
+      fireEvent.click(create);
+    });
+
+    await waitFor(() => expect(groupPosts).toBe(1));
+    expect(setupNames).toEqual(["Ana", "Bo"]);
+    expect(screen.queryByRole("button", { name: /create workforce/i })).toBeNull();
   });
 
   it("shows the backend's message instead of [object Object]", async () => {

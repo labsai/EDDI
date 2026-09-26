@@ -2716,7 +2716,6 @@
     "contextWindowEntries": "Entradas recentes mantidas na íntegra",
     "contextWindowSummarize": "Resumir o que sai da janela",
     "contextWindowTruncateNote": "As entradas antigas são substituídas por uma marca simples: «N entradas anteriores omitidas».",
-    "retroConfigHint": "Permite que uma fase retro escreva lições na memória da equipa, levadas para discussões posteriores.",
     "retroPerRun": "Por execução",
     "retroStored": "Máximo armazenado",
     "artifactConfigHint": "Permite que os membros escrevam em conjunto documentos que sobrevivem à vez em que foram criados.",
@@ -2920,7 +2919,27 @@
     },
     "stateRejected": "Rejeitada",
     "inputDisabledRejected": "Esta recomendação foi rejeitada",
-    "debateVerdictNote": "Responde com um veredito pontuado (vencedor e pontuações), não em prosa: {{phases}}. Os membros têm dois ou mais papéis e os argumentos vêm antes, por isso o prompt de síntese do próprio moderador não é usado. Defina um modelo de entrada na fase para obter prosa."
+    "debateVerdictNote": "Responde com um veredito pontuado (vencedor e pontuações), não em prosa: {{phases}}. Os membros têm dois ou mais papéis e os argumentos vêm antes, por isso o prompt de síntese do próprio moderador não é usado. Defina um modelo de entrada na fase para obter prosa.",
+    "retroCustomLimits": "Limites personalizados de lições de retro",
+    "retroCustomHint": "Uma fase de retro escreve lições na memória da equipa, levadas para discussões posteriores. Estes limites definem quantas.",
+    "retroDefaultHint": "Uma fase de retro continua a escrever lições, com os limites predefinidos ({{perRun}} por execução, {{stored}} guardadas). Para o impedir, remova a fase RETRO.",
+    "voteOptionsTooFew": "Um boletim explícito precisa de pelo menos duas opções.",
+    "saveProblem": {
+      "title": "Este grupo ainda não pode ser criado:",
+      "debateRoles": "Um debate precisa de pelo menos um membro com o papel PRO e outro com o papel CON.",
+      "devilAdvocateRole": "Um grupo de advogado do diabo precisa de um membro com o papel DEVIL_ADVOCATE.",
+      "humanInTaskForce": "Membros humanos não podem juntar-se a um grupo de tarefa (fases de planeamento, execução e verificação).",
+      "humanWithPeerPhases": "Membros humanos não podem juntar-se a um grupo cujas fases se dirigem a cada par à vez, como a revisão por pares.",
+      "memberUnassigned_many": "{{count}} membros não têm agente atribuído.",
+      "memberUnassigned_one": "{{count}} membro não tem agente atribuído.",
+      "memberUnassigned_other": "{{count}} membros não têm agente atribuído.",
+      "humanNeedsName_many": "{{count}} membros humanos precisam de um nome de apresentação.",
+      "humanNeedsName_one": "{{count}} membro humano precisa de um nome de apresentação.",
+      "humanNeedsName_other": "{{count}} membros humanos precisam de um nome de apresentação.",
+      "humanNeedsId_many": "{{count}} membros humanos precisam do id de utilizador da pessoa.",
+      "humanNeedsId_one": "{{count}} membro humano precisa do id de utilizador da pessoa.",
+      "humanNeedsId_other": "{{count}} membros humanos precisam do id de utilizador da pessoa."
+    }
   },
   "taskBoard": {
     "title": "Quadro de tarefas",
@@ -3783,7 +3802,17 @@
       "toggleConfig": "Alternar painel de detalhes",
       "unpin": "Desafixar resposta",
       "untitled": "Sem título",
-      "viewSessions": "Ver sessões anteriores"
+      "viewSessions": "Ver sessões anteriores",
+      "alreadyEnded": "A discussão já tinha terminado.",
+      "stopFailed": "Não foi possível parar a discussão: {{error}}",
+      "stopping": "A parar…",
+      "startOver": "Recomeçar",
+      "streamInterrupted": "A ligação em direto perdeu-se. A mostrar a discussão guardada, que continua a atualizar enquanto decorre.",
+      "confirmNewTitle": "Parar a discussão em curso?",
+      "confirmNewDescription": "Ainda há uma discussão em curso. Iniciar uma nova para-a primeiro — qualquer trabalho em curso é abandonado.",
+      "confirmNewButton": "Parar e iniciar nova",
+      "keepRunning": "Manter em curso",
+      "questionRequired": "Adicione uma pergunta para a sua equipa — os ficheiros são partilhados quando a discussão começa."
     },
     "thread": {
       "fileTooLarge": "O arquivo deve ter menos de 20MB",
@@ -3812,7 +3841,8 @@
       "stop": "Parar a geração",
       "streamEnded": "A ligação terminou antes de a resposta ficar completa. O que chegou está acima — envie novamente para tentar outra vez.",
       "newConversation": "Nova conversa",
-      "newConversationFailed": "Não foi possível iniciar uma nova conversa"
+      "newConversationFailed": "Não foi possível iniciar uma nova conversa",
+      "initFailed": "Não foi possível abrir esta conversa."
     },
     "chat": {
       "agentDetails": "Detalhes do Agente",

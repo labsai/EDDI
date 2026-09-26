@@ -1,11 +1,12 @@
 import { useMemo } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   DISCUSSION_STYLES,
   type DiscussionStyle,
   getGroupDescriptors,
   getEnrichedGroupDescriptors,
   getGroup,
+  getGroupCurrentVersion,
   createGroup,
   updateGroup,
   deleteGroup,
@@ -44,6 +45,9 @@ export function useEnrichedGroupDescriptors(limit = 20, index = 0, filter = "") 
   return useQuery({
     queryKey: [...GROUPS_KEY, "enriched", { limit, index, filter }],
     queryFn: () => getEnrichedGroupDescriptors(limit, index, filter),
+    // A new filter keeps showing the previous results until its own arrive,
+    // instead of blanking the list to a skeleton on every search.
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -53,6 +57,36 @@ export function useGroup(id: string, version?: number) {
     queryFn: () => getGroup(id, version),
     enabled: !!id,
   });
+}
+
+/**
+ * The version a page should read, given what its URL says.
+ *
+ * An explicit, valid `?version=` wins — a link can deliberately point at an
+ * older version. Without one, the group's CURRENT version is looked up rather
+ * than assumed to be 1: several Workforce links (the history page's way back,
+ * an advisor's thread) carried no version, and the pages behind them read the
+ * group's first version — its original name, members and phases — and linked
+ * onward to it, so one version-less hop pinned the whole session to history.
+ *
+ * `undefined` while the lookup is in flight, so callers leave `useGroup`
+ * disabled instead of fetching version 1 in the meantime. A failed lookup falls
+ * back to 1, the old behaviour, rather than blocking the page on it.
+ */
+export function useResolvedGroupVersion(
+  groupId: string | undefined,
+  urlVersion: string | null,
+): number | undefined {
+  const explicit = urlVersion != null && /^[1-9]\d*$/.test(urlVersion) ? Number(urlVersion) : undefined;
+  const { data, isError } = useQuery({
+    queryKey: [...GROUPS_KEY, groupId, "currentVersion"],
+    queryFn: () => getGroupCurrentVersion(groupId!),
+    enabled: !!groupId && explicit === undefined,
+    staleTime: 30_000,
+  });
+  if (explicit !== undefined) return explicit;
+  if (typeof data === "number" && data > 0) return data;
+  return isError ? 1 : undefined;
 }
 
 export function useDiscussionStyles() {

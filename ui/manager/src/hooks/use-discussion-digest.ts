@@ -426,6 +426,11 @@ export function buildDigest(
   const phaseNames = new Map<number, string>();
   const phaseEntries = new Map<number, TranscriptEntry[]>();
   for (const entry of transcript) {
+    // The round's QUESTION belongs to no phase. The backend stores it at
+    // phaseIndex 0 with the phaseName "Question", so reading it here named the
+    // first phase "Question" on every reloaded discussion, and counted a phase
+    // nobody had spoken in yet as started.
+    if (entry.type === "QUESTION") continue;
     if (entry.phaseName && !phaseNames.has(entry.phaseIndex)) phaseNames.set(entry.phaseIndex, entry.phaseName);
     const bucket = phaseEntries.get(entry.phaseIndex);
     if (bucket) bucket.push(entry);
@@ -514,13 +519,19 @@ export function buildDigest(
   const liveStances = streamState?.stances;
   const persistedStances = conversation?.memberStances;
 
-  const costs = memberCostsFor(conversation, streamState);
+  // The cost ledger and the stance maps are whole-discussion records with no
+  // per-round breakdown. An earlier round must not borrow them: it showed the
+  // discussion's TOTAL spend and each member's CURRENT stance as if they were
+  // that round's. A past round's stance is extracted from its own turns
+  // instead, and its cost is honestly unknown.
+  const costs = historical ? new Map<string, number>() : memberCostsFor(conversation, streamState);
 
   const members: DigestMember[] = memberOrder.map((agentId) => {
-    const live = liveStances?.get(agentId);
-    const persisted = persistedStances?.[agentId];
+    const live = historical ? undefined : liveStances?.get(agentId);
+    const persisted = historical ? undefined : persistedStances?.[agentId];
     const stanceSource = isLive && live ? live : (persisted ?? live);
-    const speaking = streamState?.activeSpeakers?.has(agentId) === true;
+    // Speaking and awaiting describe NOW, which only the newest round has.
+    const speaking = !historical && streamState?.activeSpeakers?.has(agentId) === true;
 
     // No stance supplied: extract one here from the member's newest
     // contribution. Not a nicety — the backend only writes stances at phase
@@ -547,7 +558,7 @@ export function buildDigest(
       cost: sumCostsFor(costs, agentId),
       status: speaking
         ? "speaking"
-        : state === "AWAITING_HUMAN_INPUT" && conversation?.pendingHumanInput?.memberId === agentId
+        : !historical && state === "AWAITING_HUMAN_INPUT" && conversation?.pendingHumanInput?.memberId === agentId
           ? "awaiting"
           : failed.has(agentId)
             ? "failed"
@@ -620,11 +631,17 @@ export function buildDigest(
     totalEntries: totalTurns,
     startedAt: conversation?.created ?? streamState?.startedAt ?? null,
     endedAt: !isLive ? (conversation?.lastModified ?? null) : null,
-    decision: (isLive ? streamState?.decision : conversation?.decision) ?? conversation?.decision ?? null,
-    synthesizedAnswer:
-      (isLive ? streamState?.synthesizedAnswer : conversation?.synthesizedAnswer) ??
-      conversation?.synthesizedAnswer ??
-      null,
+    // Both fields hold the NEWEST round's conclusion (a continuation clears
+    // them), so an earlier round reads its own synthesis from its turns and
+    // has no structured decision on record.
+    decision: historical
+      ? null
+      : ((isLive ? streamState?.decision : conversation?.decision) ?? conversation?.decision ?? null),
+    synthesizedAnswer: historical
+      ? roundSynthesis(transcript)
+      : ((isLive ? streamState?.synthesizedAnswer : conversation?.synthesizedAnswer) ??
+        conversation?.synthesizedAnswer ??
+        null),
     isEmpty: phases.length === 0 && members.length === 0,
   };
 }
@@ -695,6 +712,15 @@ function collectBids(transcript: TranscriptEntry[]): DigestBid[] {
     }
   }
   return out;
+}
+
+/** The newest SYNTHESIS turn's text in `transcript`, or null. */
+function roundSynthesis(transcript: TranscriptEntry[]): string | null {
+  for (let i = transcript.length - 1; i >= 0; i--) {
+    const entry = transcript[i];
+    if (entry?.type === "SYNTHESIS" && entry.content?.trim()) return entry.content;
+  }
+  return null;
 }
 
 /**

@@ -14,6 +14,8 @@ import {
   type PhaseStartPayload,
   type SpeakerStartPayload,
   type SpeakerCompletePayload,
+  type SpeakerCompleteOutcome,
+  type PhaseCompletePayload,
   type GroupCompletePayload,
   type TaskPlanCreatedPayload,
   type TaskVerifiedPayload,
@@ -28,7 +30,8 @@ import {
   type CostUpdatedPayload,
   type StanceUpdatedPayload,
 } from "@/lib/api/groups";
-import type { GroupApprovalRequest } from "@/lib/api/hitl";
+import { cancelGroupDiscussion, type GroupApprovalRequest } from "@/lib/api/hitl";
+import { isApiError } from "@/lib/api-client";
 
 // ─── Streaming State ────────────────────────────────────────────
 
@@ -157,6 +160,20 @@ export interface GroupStreamState {
    */
   stances: Map<string, StanceUpdatedPayload>;
   /**
+   * The connection ended without any terminal event — a proxy timeout, a pod
+   * restart, a network drop. The discussion may well still be running on the
+   * server, so this is deliberately NOT a failure: consumers stop treating the
+   * live transcript as authoritative and follow the persisted conversation
+   * (which polls while it is running) instead of freezing on the last frame.
+   */
+  interrupted: boolean;
+  /**
+   * Stop was pressed before the backend had named the conversation, so there
+   * was nothing to cancel yet. The cancel is sent as soon as `group_start`
+   * supplies the id; until then the UI shows the stop as in progress.
+   */
+  cancelRequested: boolean;
+  /**
    * Index in `transcript` where the CURRENT round's entries begin — the live
    * counterpart of `GroupConversation.roundStartTranscriptIndex`.
    *
@@ -195,6 +212,8 @@ const initialState: GroupStreamState = {
   artifactUpdates: [],
   memberCosts: new Map(),
   stances: new Map(),
+  interrupted: false,
+  cancelRequested: false,
   roundStartIndex: 0,
 };
 
@@ -243,9 +262,35 @@ interface GroupStreamStore {
     request: GroupApprovalRequest,
     seed?: GroupConversation | null,
   ) => Promise<void>;
+  /**
+   * Detach from the stream WITHOUT touching the discussion — it keeps running on
+   * the server. For navigating to another discussion, never for "Stop".
+   */
   abortStream: (groupId: string) => void;
+  /**
+   * Stop the discussion: cancel it on the server, then close the stream.
+   * See {@link CancelOutcome} for the outcome values.
+   *
+   * `gcId` names a discussion this tab is NOT streaming — one whose connection
+   * dropped, or one adopted from the stored list after a reload. It is used only
+   * when there is no live stream to cancel.
+   */
+  cancelStream: (groupId: string, gcId?: string) => Promise<CancelOutcome>;
   resetStream: (groupId: string) => void;
 }
+
+/**
+ * What a Stop achieved.
+ *
+ * - `cancelled` — the server cancelled the discussion.
+ * - `alreadyEnded` — the server answered 409: the discussion reached a terminal
+ *   state on its own before the cancel landed. Nothing is running any more, so
+ *   this is not an error; the persisted document says how it ended.
+ * - `pending` — the backend has not named the conversation yet; the cancel is
+ *   sent as soon as `group_start` arrives.
+ * - `nothingToCancel` — no stream for this group.
+ */
+export type CancelOutcome = "cancelled" | "alreadyEnded" | "pending" | "nothingToCancel";
 
 /**
  * Where a resumed or continued stream picks up from.
@@ -277,6 +322,74 @@ function resumeBase(s: GroupStreamState, gcId: string, seed?: GroupConversation 
 /** In-flight abort controllers, one per group. Kept outside the store because
  *  they are not render state. */
 const abortControllers = new Map<string, AbortController>();
+
+/** Mark every still-open speaker placeholder as a turn that produced nothing. */
+function closePlaceholders(
+  transcript: TranscriptEntry[],
+  matches: (entry: TranscriptEntry) => boolean = () => true,
+): TranscriptEntry[] {
+  let changed = false;
+  const next = transcript.map((entry) => {
+    if (!isOpenPlaceholder(entry) || !matches(entry)) return entry;
+    changed = true;
+    return { ...entry, type: "SKIPPED" as TranscriptEntryType };
+  });
+  return changed ? next : transcript;
+}
+
+/**
+ * A `speaker_start` placeholder that no `speaker_complete` has filled yet.
+ *
+ * Every renderer draws a null-content member entry as "still typing", so one
+ * left open after its turn ended types forever. SKIPPED/ERROR rows carry null
+ * content legitimately (`member_pause_skipped`, a no-content outcome) and are
+ * closed already.
+ */
+export function isOpenPlaceholder(entry: TranscriptEntry): boolean {
+  return (
+    entry.content === null &&
+    entry.type !== "SKIPPED" &&
+    entry.type !== "ERROR" &&
+    entry.type !== "QUESTION" &&
+    !!entry.speakerAgentId
+  );
+}
+
+/**
+ * How many transcript rows the stream has actually delivered — everything but
+ * the still-open placeholders, which are not rows the stored document will
+ * hold. Compared against the persisted transcript to tell whether a refetched
+ * document has caught up with what the live view showed.
+ */
+export function deliveredRowCount(transcript: TranscriptEntry[]): number {
+  let count = 0;
+  for (const entry of transcript) if (!isOpenPlaceholder(entry)) count++;
+  return count;
+}
+
+/**
+ * Whether the stored copy of the stream's discussion holds at least what the
+ * stream delivered — the point at which a stopped stream can give way to it
+ * without rows vanishing on screen until the next poll.
+ */
+export function persistedHasCaughtUp(
+  conversation: { id: string; transcript?: TranscriptEntry[] | null } | null | undefined,
+  stream: Pick<GroupStreamState, "conversationId" | "transcript">,
+): boolean {
+  return (
+    !!conversation &&
+    conversation.id === stream.conversationId &&
+    (conversation.transcript?.length ?? 0) >= deliveredRowCount(stream.transcript)
+  );
+}
+
+/**
+ * Terminal settle shared by every event that ends the run: no one is speaking
+ * any more, so any placeholder still open never gets its content.
+ */
+function settleTerminal(s: GroupStreamState): Pick<GroupStreamState, "activeSpeakers" | "transcript"> {
+  return { activeSpeakers: new Set(), transcript: closePlaceholders(s.transcript) };
+}
 
 function swapController(groupId: string): AbortController {
   abortControllers.get(groupId)?.abort();
@@ -312,6 +425,7 @@ export const useGroupStreamStore = create<GroupStreamStore>((set, get) => ({
       streamGroupDiscussion(groupId, question, undefined, abort.signal, attachments),
       abort,
       update,
+      () => get().streams[groupId],
     );
   },
 
@@ -329,6 +443,8 @@ export const useGroupStreamStore = create<GroupStreamStore>((set, get) => ({
       isStreaming: true,
       state: "IN_PROGRESS",
       conversationId: gcId,
+      interrupted: false,
+      cancelRequested: false,
       hitlPause: null,
       hitlResume: null,
       humanInputRequest: null,
@@ -342,6 +458,7 @@ export const useGroupStreamStore = create<GroupStreamStore>((set, get) => ({
       streamGroupApproval(groupId, gcId, request, abort.signal),
       abort,
       update,
+      () => get().streams[groupId],
     );
   },
 
@@ -361,6 +478,8 @@ export const useGroupStreamStore = create<GroupStreamStore>((set, get) => ({
       conversationId: gcId,
       error: null,
       errorKind: null,
+      interrupted: false,
+      cancelRequested: false,
       startedAt: (s.conversationId === gcId ? s.startedAt : null) ?? new Date().toISOString(),
       // Keep transcript (appended by the round_start handler), but reset
       // per-round derived fields so stale data doesn't leak into the UI.
@@ -388,6 +507,7 @@ export const useGroupStreamStore = create<GroupStreamStore>((set, get) => ({
       streamGroupContinue(groupId, gcId, question, undefined, abort.signal),
       abort,
       update,
+      () => get().streams[groupId],
     );
   },
 
@@ -395,6 +515,33 @@ export const useGroupStreamStore = create<GroupStreamStore>((set, get) => ({
     abortControllers.get(groupId)?.abort();
     abortControllers.delete(groupId);
     get().update(groupId, (s) => ({ ...s, isStreaming: false }));
+  },
+
+  /**
+   * "Stop" used to be {@link abortStream}: it closed this tab's connection and
+   * nothing else, so the discussion went on running — and spending — on the
+   * server while the board froze on the last frame it had seen.
+   *
+   * The cancel is sent FIRST and the stream closed only once it succeeded: if
+   * the cancel fails, the discussion is still running and the stream is still
+   * the best view of it. The caller reports a thrown error.
+   */
+  cancelStream: async (groupId, knownGcId) => {
+    const current = get().streams[groupId];
+    if (!current?.isStreaming && !current?.cancelRequested) {
+      // No live stream. A discussion can still be running on the server — the
+      // connection dropped, or the board adopted it after a reload — and it
+      // needs a Stop just as much.
+      return knownGcId ? cancelAndClose(groupId, knownGcId, get().update) : "nothingToCancel";
+    }
+    const gcId = current.conversationId;
+    if (!gcId) {
+      // Nothing to address yet. consumeStream sends the cancel as soon as
+      // group_start names the conversation.
+      get().update(groupId, (s) => ({ ...s, cancelRequested: true }));
+      return "pending";
+    }
+    return cancelAndClose(groupId, gcId, get().update);
   },
 
   /** Abort any in-flight stream AND fully reset to the initial clean state.
@@ -417,6 +564,53 @@ export const useGroupStreamStore = create<GroupStreamStore>((set, get) => ({
 
 type UpdateFn = GroupStreamStore["update"];
 
+/**
+ * Cancel `gcId` on the server, then close this group's stream.
+ *
+ * A 409 is the backend saying the discussion was already terminal — it ended
+ * between the click and the request. The stream is closed all the same (there
+ * is nothing left to follow), but the state is left to the persisted document
+ * rather than claimed as CANCELLED, because that is not how it ended.
+ */
+async function cancelAndClose(groupId: string, gcId: string, update: UpdateFn): Promise<CancelOutcome> {
+  let outcome: CancelOutcome = "cancelled";
+  try {
+    await cancelGroupDiscussion(groupId, gcId);
+  } catch (e) {
+    if (!(isApiError(e) && e.status === 409)) {
+      update(groupId, (s) => (s.conversationId === gcId ? { ...s, cancelRequested: false } : s));
+      throw e;
+    }
+    outcome = "alreadyEnded";
+  }
+  // Only close the stream this cancel was about: a newer one may own the slot.
+  // A discussion followed without a stream has no entry, and gets none.
+  if (!useGroupStreamStore.getState().streams[groupId]) return outcome;
+  const controller = abortControllers.get(groupId);
+  let closed = false;
+  update(groupId, (s) => {
+    if (s.conversationId !== gcId) return s;
+    closed = true;
+    return {
+      ...s,
+      ...settleTerminal(s),
+      isStreaming: false,
+      cancelRequested: false,
+      // Whatever the connection did, the run is over now: "the live connection
+      // was lost, keeps updating while it runs" would be false.
+      interrupted: false,
+      ...(outcome === "cancelled"
+        ? { state: "CANCELLED" as GroupConversationState, cancelInfo: { reason: undefined, cancelledBy: undefined } }
+        : {}),
+    };
+  });
+  if (closed && controller) {
+    controller.abort();
+    if (abortControllers.get(groupId) === controller) abortControllers.delete(groupId);
+  }
+  return outcome;
+}
+
 /** Drain an SSE event source into the group's state, then settle isStreaming.
  *  Shared by the start / continue / approve-resume flows. */
 async function consumeStream(
@@ -424,6 +618,7 @@ async function consumeStream(
   events: AsyncGenerator<GroupSSEEvent>,
   abort: AbortController,
   update: UpdateFn,
+  read: () => GroupStreamState | undefined,
 ) {
   // A superseded loop (new discussion started, or the user hit Stop) may still
   // run for a tick or fail afterwards. Its writes must not land on the stream
@@ -434,31 +629,62 @@ async function consumeStream(
     update(groupId, updater);
   };
 
+  // Whether the server said how the run ended (or paused). Without one, the
+  // connection simply stopped — see `interrupted`.
+  let sawTerminal = false;
+  // Whether anything arrived at all. A failure BEFORE the first frame is the
+  // request being refused (a 400, a 403): the run never started. A failure
+  // AFTER it is the connection dropping under a run that may still be going.
+  let sawEvent = false;
+
   try {
     for await (const event of events) {
+      sawEvent = true;
       const isDone = handleSSEEvent(event, setState);
       if (isDone) {
+        sawTerminal = true;
         abort.abort();
         break;
       }
+      // Stop was pressed before the conversation had an id; now it may have one.
+      const current = read();
+      if (current?.cancelRequested && current.conversationId && abortControllers.get(groupId) === abort) {
+        try {
+          await cancelAndClose(groupId, current.conversationId, update);
+          return;
+        } catch (e) {
+          setState((s) => ({ ...s, error: e instanceof Error ? e.message : String(e), errorKind: "generic" }));
+        }
+      }
     }
   } catch (e) {
-    // AbortError is expected when we abort after a terminal event
     if (e instanceof DOMException && e.name === "AbortError") {
-      // expected — swallow
-    } else {
+      // Expected when we abort after a terminal event, or on Stop/New.
+    } else if (!sawEvent) {
       const errorMsg = e instanceof Error ? e.message : String(e);
       setState((s) => ({
         ...s,
+        ...settleTerminal(s),
         isStreaming: false,
+        cancelRequested: false,
         state: "FAILED",
         error: errorMsg,
         errorKind: "generic",
       }));
+      sawTerminal = true;
     }
+    // Otherwise the run started and the connection then broke. That says
+    // nothing about the run itself, so it is not declared FAILED: it falls
+    // through to `interrupted` below.
   }
 
-  // Safety-net: if the stream ended without a done event
+  // No terminal event and not stopped by us: the connection ended under a run
+  // that may still be going. Placeholders stay open — those members may well
+  // still be answering — and consumers switch to the persisted conversation.
+  if (!sawTerminal && !abort.signal.aborted) {
+    setState((s) => (s.isStreaming ? { ...s, isStreaming: false, cancelRequested: false, interrupted: true } : s));
+  }
+  // Safety-net for every other exit.
   setState((s) => (s.isStreaming ? { ...s, isStreaming: false } : s));
 
   // Unregister once finished. The map is the supersession source of truth, so
@@ -539,11 +765,16 @@ export function useGroupDiscussionStream(groupId?: string) {
     if (key) useGroupStreamStore.getState().abortStream(key);
   }, [key]);
 
+  const cancelStream = useCallback(async (gcId?: string): Promise<CancelOutcome> => {
+    if (!key) return "nothingToCancel";
+    return useGroupStreamStore.getState().cancelStream(key, gcId);
+  }, [key]);
+
   const resetStream = useCallback(() => {
     if (key) useGroupStreamStore.getState().resetStream(key);
   }, [key]);
 
-  return { streamState, startStream, continueStream, approveAndStream, abortStream, resetStream };
+  return { streamState, startStream, continueStream, approveAndStream, abortStream, cancelStream, resetStream };
 }
 
 // ─── Event Handler ──────────────────────────────────────────────
@@ -703,12 +934,22 @@ function handleSSEEvent(
           const newSpeakers = new Set(s.activeSpeakers);
           newSpeakers.delete(payload.agentId);
 
+          // A turn that produced nothing. Newer backends say why in `outcome`
+          // (and send no content, so a failure is never shown as something the
+          // member said); older ones just send no content. Either way the
+          // placeholder must close — left at `content: null` it rendered as a
+          // member typing for ever.
+          const outcome = noContentOutcome(payload.outcome);
+          const content = outcome ? null : (payload.response ?? payload.content ?? null);
+          const closedType: TranscriptEntryType | null =
+            outcome === "ERROR" ? "ERROR" : outcome || content === null ? "SKIPPED" : null;
+
           // Replace the placeholder entry with the real content
           const transcript = [...s.transcript];
           const placeholderIdx = transcript.findIndex(
             (e) =>
               e.speakerAgentId === payload.agentId &&
-              e.content === null &&
+              isOpenPlaceholder(e) &&
               e.phaseIndex === payload.phaseIndex
           );
 
@@ -717,10 +958,10 @@ function handleSSEEvent(
             transcript[placeholderIdx] = {
               speakerAgentId: prev.speakerAgentId,
               speakerDisplayName: prev.speakerDisplayName,
-              content: payload.response ?? payload.content ?? null,
+              content,
               phaseIndex: prev.phaseIndex,
               phaseName: prev.phaseName,
-              type: prev.type,
+              type: closedType ?? prev.type,
               timestamp: new Date().toISOString(),
               errorReason: prev.errorReason,
               targetAgentId: prev.targetAgentId,
@@ -730,10 +971,10 @@ function handleSSEEvent(
             transcript.push({
               speakerAgentId: payload.agentId,
               speakerDisplayName: payload.displayName,
-              content: payload.response ?? payload.content ?? null,
+              content,
               phaseIndex: payload.phaseIndex,
               phaseName: payload.phaseName,
-              type: mapPhaseToEntryType(s.currentPhase?.type),
+              type: closedType ?? mapPhaseToEntryType(s.currentPhase?.type),
               timestamp: new Date().toISOString(),
               errorReason: null,
               targetAgentId: null,
@@ -881,10 +1122,18 @@ function handleSSEEvent(
 
     case "phase_complete": {
       try {
-        JSON.parse(event.data); // validate payload
+        const payload: PhaseCompletePayload = JSON.parse(event.data);
+        // A phase that is over has no one left typing in it. A backend that
+        // predates `speaker_complete.outcome` sent no completion at all for a
+        // PARALLEL member released by the batch deadline, so its placeholder
+        // stayed open — a typing indicator for the rest of the discussion.
         setState((s) => ({
           ...s,
           activeSpeakers: new Set(),
+          transcript: closePlaceholders(
+            s.transcript,
+            (e) => typeof payload?.phaseIndex !== "number" || e.phaseIndex === payload.phaseIndex,
+          ),
         }));
       } catch (e) {
         console.warn('[SSE] Failed to parse phase_complete event:', e);
@@ -911,18 +1160,20 @@ function handleSSEEvent(
         // remains the fallback for a payload that carries no state.
         setState((s) => ({
           ...s,
+          ...settleTerminal(s),
           isStreaming: false,
+          cancelRequested: false,
           state: payload.state ?? "COMPLETED",
           synthesizedAnswer: payload.synthesizedAnswer,
-          activeSpeakers: new Set(),
         }));
       } catch (e) {
         console.warn('[SSE] Failed to parse group_complete event:', e);
         setState((s) => ({
           ...s,
+          ...settleTerminal(s),
           isStreaming: false,
+          cancelRequested: false,
           state: "COMPLETED",
-          activeSpeakers: new Set(),
         }));
       }
       return true;
@@ -947,11 +1198,12 @@ function handleSSEEvent(
       const configDrift = /config changed while paused|fix the config and retry/i.test(errorMsg);
       setState((s) => ({
         ...s,
+        ...settleTerminal(s),
         isStreaming: false,
+        cancelRequested: false,
         state: "FAILED",
         error: errorMsg,
         errorKind: configDrift ? "config_drift" : "generic",
-        activeSpeakers: new Set(),
       }));
       return true;
     }
@@ -973,7 +1225,9 @@ function handleSSEEvent(
             reason: payload.reason,
             granularity: payload.granularity,
           },
+          ...settleTerminal(s),
           isStreaming: false,
+          cancelRequested: false,
         }));
       } catch (e) {
         console.warn('[SSE] Failed to parse awaiting_approval event:', e);
@@ -993,7 +1247,9 @@ function handleSSEEvent(
             phaseIndex: payload.phaseIndex,
             phaseName: payload.phaseName,
           },
+          ...settleTerminal(s),
           isStreaming: false,
+          cancelRequested: false,
         }));
       } catch (e) {
         console.warn('[SSE] Failed to parse human_input_requested event:', e);
@@ -1032,12 +1288,14 @@ function handleSSEEvent(
         };
         setState((s) => ({
           ...s,
+          ...settleTerminal(s),
           state: "CANCELLED" as GroupConversationState,
           cancelInfo: {
             reason: payload.reason,
             cancelledBy: payload.cancelledBy,
           },
           isStreaming: false,
+          cancelRequested: false,
         }));
       } catch (e) {
         console.warn('[SSE] Failed to parse cancelled event:', e);
@@ -1065,7 +1323,7 @@ function handleSSEEvent(
           const idx = transcript.findIndex(
             (e) =>
               e.speakerAgentId === payload.agentId &&
-              e.content === null &&
+              isOpenPlaceholder(e) &&
               e.phaseIndex === payload.phaseIndex,
           );
           if (idx >= 0) {
@@ -1146,6 +1404,16 @@ function handleSSEEvent(
 }
 
 // ─── Helpers ────────────────────────────────────────────────────
+
+/**
+ * `speaker_complete.outcome` as one of the three reasons a turn can produce
+ * nothing, or null for an ordinary contribution. Anything else — an absent
+ * field from an older backend, or a value a newer one adds — reads as a
+ * contribution, which then closes as SKIPPED if it carried no content.
+ */
+function noContentOutcome(outcome: unknown): SpeakerCompleteOutcome | null {
+  return outcome === "TIMEOUT" || outcome === "SKIPPED" || outcome === "ERROR" ? outcome : null;
+}
 
 /** Map phase type to the TranscriptEntryType used in entries */
 function mapPhaseToEntryType(phaseType?: string): TranscriptEntryType {

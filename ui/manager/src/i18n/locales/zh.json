@@ -2692,7 +2692,6 @@
     "contextWindowEntries": "完整保留的最近条目",
     "contextWindowSummarize": "为移出窗口的内容生成摘要",
     "contextWindowTruncateNote": "较早的条目将改为替换成简单的“已省略 N 条早前条目”标记。",
-    "retroConfigHint": "允许复盘阶段将经验写入团队记忆，并带入后续讨论。",
     "retroPerRun": "每次运行",
     "retroStored": "存储上限",
     "artifactConfigHint": "允许成员共同撰写文档，并在写入的那一轮结束后继续保留。",
@@ -2887,7 +2886,24 @@
     },
     "stateRejected": "已否决",
     "inputDisabledRejected": "该建议已被否决",
-    "debateVerdictNote": "将以评分裁决（获胜方与分数）作答，而非散文：{{phases}}。成员拥有两个或更多角色且论证在前，因此不会使用主持人自己的综述提示词。若需散文，请为该阶段设置输入模板。"
+    "debateVerdictNote": "将以评分裁决（获胜方与分数）作答，而非散文：{{phases}}。成员拥有两个或更多角色且论证在前，因此不会使用主持人自己的综述提示词。若需散文，请为该阶段设置输入模板。",
+    "retroCustomLimits": "自定义复盘经验上限",
+    "retroCustomHint": "复盘阶段会把经验写入团队记忆，并带入后续讨论。这些上限限制写入的数量。",
+    "retroDefaultHint": "复盘阶段仍会按默认上限写入经验（每次运行 {{perRun}} 条，最多保存 {{stored}} 条）。如需停止，请删除 RETRO 阶段。",
+    "voteOptionsTooFew": "明确的选票至少需要两个选项。",
+    "saveProblem": {
+      "title": "此小组暂时无法创建：",
+      "debateRoles": "辩论至少需要一名角色为 PRO 的成员和一名角色为 CON 的成员。",
+      "devilAdvocateRole": "“魔鬼代言人”小组需要一名角色为 DEVIL_ADVOCATE 的成员。",
+      "humanInTaskForce": "人类成员不能加入任务组（规划、执行和验证阶段）。",
+      "humanWithPeerPhases": "人类成员不能加入各阶段依次针对每位同伴的小组，例如同行评审。",
+      "memberUnassigned_one": "{{count}} 名成员未分配代理。",
+      "memberUnassigned_other": "{{count}} 名成员未分配代理。",
+      "humanNeedsName_one": "{{count}} 名人类成员需要显示名称。",
+      "humanNeedsName_other": "{{count}} 名人类成员需要显示名称。",
+      "humanNeedsId_one": "{{count}} 名人类成员需要此人的用户 ID。",
+      "humanNeedsId_other": "{{count}} 名人类成员需要此人的用户 ID。"
+    }
   },
   "taskBoard": {
     "title": "任务看板",
@@ -3744,7 +3760,17 @@
       "toggleConfig": "切换详情面板",
       "unpin": "取消置顶回复",
       "untitled": "无标题",
-      "viewSessions": "查看历史会话"
+      "viewSessions": "查看历史会话",
+      "alreadyEnded": "讨论已经结束。",
+      "stopFailed": "无法停止讨论：{{error}}",
+      "stopping": "正在停止…",
+      "startOver": "重新开始",
+      "streamInterrupted": "实时连接已断开。正在显示已保存的讨论，讨论运行期间会持续更新。",
+      "confirmNewTitle": "停止正在进行的讨论？",
+      "confirmNewDescription": "仍有讨论在进行中。开始新的讨论会先将其停止——所有进行中的工作都将被放弃。",
+      "confirmNewButton": "停止并开始新的讨论",
+      "keepRunning": "继续运行",
+      "questionRequired": "请为你的任务组添加一个问题——文件会在讨论开始时共享给它。"
     },
     "thread": {
       "fileTooLarge": "文件必须小于20MB",
@@ -3773,7 +3799,8 @@
       "stop": "停止生成",
       "streamEnded": "回复尚未完成，连接已中断。已收到的内容显示在上方，可再次发送重试。",
       "newConversation": "新建对话",
-      "newConversationFailed": "无法开始新对话"
+      "newConversationFailed": "无法开始新对话",
+      "initFailed": "无法打开此对话。"
     },
     "chat": {
       "agentDetails": "智能体详情",

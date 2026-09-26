@@ -33,7 +33,9 @@ import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
 import { useCreateGroup, useAvailableStyles, isStyleSupported } from "@/hooks/use-groups";
 import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import { styleLabel, styleDisplay } from "@/lib/discussion-styles";
-import { uncoveredRolePhases } from "@/lib/group-config";
+import { groupSaveProblems, uncoveredRolePhases, type GroupSaveProblem } from "@/lib/group-config";
+import { GroupSaveProblems } from "@/components/groups/group-save-problems";
+import { getErrorMessage } from "@/lib/api-client";
 import {
   type DiscussionStyle,
   type GroupMember,
@@ -163,6 +165,33 @@ function needsAgentCreation(slot: MemberSlot): boolean {
   return slot.memberType === "AGENT" && slot.mode === "new" && !slot.created && !slot.agentId;
 }
 
+/**
+ * What the backend would refuse about the group this wizard is about to build.
+ *
+ * Computed from the same shape `handleCreate` sends — including the phases it
+ * materializes when approvals are on, which switch off the preset role rule —
+ * and checked BEFORE the first member agent is created. Checked after, as it
+ * effectively was, the agents were already deployed when the 400 came back.
+ */
+function wizardSaveProblems(state: WizardState): GroupSaveProblem[] {
+  const members = state.members.filter((m) => m.agentId || m.displayName);
+  return groupSaveProblems(
+    {
+      members,
+      phases:
+        state.hitlEnabled && state.approvalPhases.length > 0
+          ? applyApprovalPhases(getStylePhases(state.style, state.maxRounds), state.approvalPhases)
+          : null,
+      style: state.style,
+      maxRounds: state.maxRounds,
+    },
+    (_member, index) => {
+      const slot = members[index];
+      return !!slot && needsAgentCreation(slot);
+    },
+  );
+}
+
 const INITIAL_STATE: WizardState = {
   name: "",
   description: "",
@@ -282,6 +311,7 @@ export function GroupWizardPage() {
   }
 
   async function handleCreate() {
+    if (wizardSaveProblems(state).length > 0) return;
     setIsBatchCreating(true);
     const updatedMembers = [...state.members];
     let updatedModerator = state.moderator ? { ...state.moderator } : null;
@@ -412,8 +442,10 @@ export function GroupWizardPage() {
         setIsBatchCreating(false);
         setCreationProgress(null);
       },
-      onError: () => {
-        toast.error(t("common.error"));
+      onError: (err) => {
+        // The backend's sentence, not a generic error: it names what it rejected,
+        // and the agents above have already been created for this group.
+        toast.error(getErrorMessage(err));
         setIsBatchCreating(false);
         setCreationProgress(null);
       },
@@ -563,7 +595,7 @@ export function GroupWizardPage() {
         ) : (
           <button
             onClick={() => handleCreate()}
-            disabled={isCreating}
+            disabled={isCreating || wizardSaveProblems(state).length > 0}
             className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50 active:scale-[0.98]"
             data-testid="group-wizard-create"
           >
@@ -1822,6 +1854,7 @@ function ReviewStep({
     style: state.style,
     maxRounds: state.maxRounds,
   });
+  const saveProblems = wizardSaveProblems(state);
 
   return (
     <div>
@@ -1833,6 +1866,7 @@ function ReviewStep({
       </p>
 
       <div className="mt-6 space-y-5">
+        <GroupSaveProblems problems={saveProblems} testId="wizard-save-problems" />
         {/* Summary card */}
         <div className={cn("rounded-xl border-2 p-5 space-y-3", colors.border, colors.bg)}>
           <h3 className="text-lg font-bold text-foreground">{state.name}</h3>

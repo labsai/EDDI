@@ -2692,7 +2692,6 @@
     "contextWindowEntries": "Vollständig behaltene aktuelle Einträge",
     "contextWindowSummarize": "Zusammenfassen, was aus dem Fenster fällt",
     "contextWindowTruncateNote": "Ältere Einträge werden stattdessen durch den Hinweis „N frühere Einträge ausgelassen“ ersetzt.",
-    "retroConfigHint": "Erlaubt einer Retro-Phase, Erkenntnisse ins Teamgedächtnis zu schreiben, die in spätere Diskussionen einfließen.",
     "retroPerRun": "Pro Lauf",
     "retroStored": "Max. gespeichert",
     "artifactConfigHint": "Ermöglicht Mitgliedern, gemeinsam Dokumente zu verfassen, die über den Zug hinaus bestehen bleiben.",
@@ -2887,7 +2886,24 @@
     },
     "stateRejected": "Abgelehnt",
     "inputDisabledRejected": "Diese Empfehlung wurde abgelehnt",
-    "debateVerdictNote": "Antwortet mit einem bewerteten Urteil (Sieger und Punkte) statt mit Fließtext: {{phases}}. Die Mitglieder haben zwei oder mehr Rollen und Argumente gehen voraus, daher wird der eigene Synthese-Prompt des Moderators nicht verwendet. Für Fließtext eine Eingabevorlage für die Phase setzen."
+    "debateVerdictNote": "Antwortet mit einem bewerteten Urteil (Sieger und Punkte) statt mit Fließtext: {{phases}}. Die Mitglieder haben zwei oder mehr Rollen und Argumente gehen voraus, daher wird der eigene Synthese-Prompt des Moderators nicht verwendet. Für Fließtext eine Eingabevorlage für die Phase setzen.",
+    "retroCustomLimits": "Eigene Grenzen für Retro-Lektionen",
+    "retroCustomHint": "Eine Retro-Phase schreibt Lektionen in das Gedächtnis des Teams, die in spätere Diskussionen einfließen. Diese Grenzen bestimmen, wie viele.",
+    "retroDefaultHint": "Eine Retro-Phase schreibt weiterhin Lektionen, mit den Standardgrenzen ({{perRun}} pro Lauf, {{stored}} gespeichert). Um das zu verhindern, entferne die RETRO-Phase.",
+    "voteOptionsTooFew": "Ein expliziter Stimmzettel braucht mindestens zwei Optionen.",
+    "saveProblem": {
+      "title": "Diese Gruppe kann noch nicht erstellt werden:",
+      "debateRoles": "Eine Debatte braucht mindestens ein Mitglied mit der Rolle PRO und eines mit der Rolle CON.",
+      "devilAdvocateRole": "Eine Advocatus-Diaboli-Gruppe braucht ein Mitglied mit der Rolle DEVIL_ADVOCATE.",
+      "humanInTaskForce": "Menschliche Mitglieder können keiner Taskforce-Gruppe beitreten (Planungs-, Ausführungs- und Prüfphasen).",
+      "humanWithPeerPhases": "Menschliche Mitglieder können keiner Gruppe beitreten, deren Phasen sich nacheinander an jedes Mitglied richten, etwa ein Peer-Review.",
+      "memberUnassigned_one": "{{count}} Mitglied ist kein Agent zugewiesen.",
+      "memberUnassigned_other": "{{count}} Mitgliedern ist kein Agent zugewiesen.",
+      "humanNeedsName_one": "{{count}} menschliches Mitglied braucht einen Anzeigenamen.",
+      "humanNeedsName_other": "{{count}} menschliche Mitglieder brauchen einen Anzeigenamen.",
+      "humanNeedsId_one": "{{count}} menschliches Mitglied braucht die Benutzer-ID der Person.",
+      "humanNeedsId_other": "{{count}} menschliche Mitglieder brauchen die Benutzer-ID der Person."
+    }
   },
   "taskBoard": {
     "title": "Aufgabenübersicht",
@@ -3744,7 +3760,17 @@
       "toggleConfig": "Detailbereich umschalten",
       "unpin": "Antwort lösen",
       "untitled": "Ohne Titel",
-      "viewSessions": "Frühere Sitzungen ansehen"
+      "viewSessions": "Frühere Sitzungen ansehen",
+      "alreadyEnded": "Die Diskussion war bereits beendet.",
+      "stopFailed": "Die Diskussion konnte nicht gestoppt werden: {{error}}",
+      "stopping": "Wird gestoppt…",
+      "startOver": "Neu beginnen",
+      "streamInterrupted": "Die Live-Verbindung wurde unterbrochen. Angezeigt wird die gespeicherte Diskussion, die sich weiter aktualisiert, solange sie läuft.",
+      "confirmNewTitle": "Laufende Diskussion stoppen?",
+      "confirmNewDescription": "Eine Diskussion läuft noch. Eine neue zu beginnen stoppt sie zuerst – laufende Arbeit wird verworfen.",
+      "confirmNewButton": "Stoppen und neu beginnen",
+      "keepRunning": "Weiterlaufen lassen",
+      "questionRequired": "Füge eine Frage für deine Taskforce hinzu – die Dateien werden beim Start der Diskussion geteilt."
     },
     "thread": {
       "fileTooLarge": "Datei muss kleiner als 20MB sein",
@@ -3773,7 +3799,8 @@
       "stop": "Erzeugung stoppen",
       "streamEnded": "Die Verbindung endete, bevor die Antwort fertig war. Was angekommen ist, steht oben — zum erneuten Versuch noch einmal senden.",
       "newConversation": "Neue Konversation",
-      "newConversationFailed": "Neue Konversation konnte nicht gestartet werden"
+      "newConversationFailed": "Neue Konversation konnte nicht gestartet werden",
+      "initFailed": "Diese Unterhaltung konnte nicht geöffnet werden."
     },
     "chat": {
       "agentDetails": "Agenten-Details",
