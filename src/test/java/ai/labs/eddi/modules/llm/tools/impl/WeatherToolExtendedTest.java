@@ -11,6 +11,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.io.IOException;
 import java.lang.reflect.Field;
@@ -336,6 +337,90 @@ class WeatherToolExtendedTest {
 
             assertTrue(result.contains("could not be formatted") || result.contains("Error"),
                     "Should report formatting or error");
+        }
+    }
+
+    // ==================== The operator's key never leaves ====================
+
+    @Nested
+    @DisplayName("the OpenWeatherMap key is never handed to the model or the log")
+    class KeyConfinement {
+
+        private static final String KEY = "owm-secret-key-123";
+
+        @BeforeEach
+        void setKey() throws Exception {
+            Field apiKeyField = WeatherTool.class.getDeclaredField("openWeatherMapApiKey");
+            apiKeyField.setAccessible(true);
+            apiKeyField.set(weatherTool, Optional.of(KEY));
+        }
+
+        @Test
+        @DisplayName("a units value with a space no longer reaches URI.create (whose message quoted the key)")
+        void unitsWithASpaceIsRefusedBeforeAnyRequest() throws Exception {
+            // The reproduced leak: "metric x" made URI.create throw with the full URL,
+            // appid=<key> included, as its message — returned verbatim as the answer.
+            String current = weatherTool.getCurrentWeather("London", "metric x");
+            String forecast = weatherTool.getWeatherForecast("London", 3, "metric x");
+
+            assertFalse(current.contains(KEY), current);
+            assertFalse(forecast.contains(KEY), forecast);
+            assertTrue(current.contains("units must be one of"), current);
+            verify(mockHttpClient, never()).send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
+        }
+
+        @Test
+        @DisplayName("units are an allowlist, case-insensitive, blank meaning metric")
+        void unitsAllowlist() {
+            assertEquals("metric", WeatherTool.normalizeUnits(null));
+            assertEquals("metric", WeatherTool.normalizeUnits("  "));
+            assertEquals("imperial", WeatherTool.normalizeUnits(" Imperial "));
+            assertEquals("standard", WeatherTool.normalizeUnits("STANDARD"));
+            assertNull(WeatherTool.normalizeUnits("metric&appid=other"));
+            assertNull(WeatherTool.normalizeUnits("kelvin"));
+        }
+
+        @Test
+        @DisplayName("an exception quoting the request URL is redacted in the answer")
+        void exceptionMessagesAreRedacted() throws Exception {
+            when(mockHttpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                    .thenThrow(new IOException("failed: https://api.openweathermap.org/data/2.5/weather?q=London&appid=" + KEY + "&units=metric"));
+
+            String current = weatherTool.getCurrentWeather("London", "metric");
+            String forecast = weatherTool.getWeatherForecast("London", 2, null);
+
+            assertFalse(current.contains(KEY), current);
+            assertFalse(forecast.contains(KEY), forecast);
+            assertTrue(current.contains("appid=<redacted>"), current);
+        }
+
+        @Test
+        @DisplayName("the key is URL-encoded into the request")
+        void keyIsEncoded() throws Exception {
+            Field apiKeyField = WeatherTool.class.getDeclaredField("openWeatherMapApiKey");
+            apiKeyField.setAccessible(true);
+            apiKeyField.set(weatherTool, Optional.of("a b&c"));
+            mockResponse(200, "{}");
+
+            weatherTool.getCurrentWeather("London", "metric");
+
+            ArgumentCaptor<HttpRequest> captor = ArgumentCaptor.forClass(HttpRequest.class);
+            verify(mockHttpClient).send(captor.capture(), any(HttpResponse.BodyHandler.class));
+            assertTrue(captor.getValue().uri().getRawQuery().contains("appid=a+b%26c"), captor.getValue().uri().getRawQuery());
+        }
+
+        @Test
+        @DisplayName("standard units are labelled Kelvin, not Fahrenheit")
+        void standardIsKelvin() throws Exception {
+            mockResponse(200, """
+                    {"main": {"temp": 295.1, "feels_like": 294.0, "humidity": 50}, "wind": {"speed": 3.0}}
+                    """);
+
+            String result = weatherTool.getCurrentWeather("London", "standard");
+
+            assertTrue(result.contains("295.1 K"), result);
+            assertFalse(result.contains("°F"), result);
+            assertTrue(result.contains("m/s"), result);
         }
     }
 }
