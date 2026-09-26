@@ -1,5 +1,39 @@
 # EDDI + MongoDB overlay
 # Usage: kubectl apply -k k8s/overlays/mongodb/
+#
+# ⚠️  CREATE THE mongodb-secrets SECRET FIRST — MongoDB runs with
+# authentication, and neither pod starts without it. It used to run with none:
+# any pod in the cluster could read and rewrite every agent, conversation and
+# the audit ledger. One password, in two shapes — the MONGO_INITDB_ROOT_* keys
+# for the mongo container, and a properties file with the connection string
+# for EDDI, mounted as a FILE (never an env var):
+#
+# The Secret is the stored copy of the password — run this ONCE, never on an
+# upgrade: a fresh password over an initialised database locks EDDI out,
+# because mongod keeps the user it created at first start. `kubectl create`
+# (not apply) refuses with AlreadyExists rather than replacing it.
+#
+#   set -eu
+#   pw=$(openssl rand -hex 24)   # hex: nothing in it needs URL-encoding
+#   kubectl create secret generic mongodb-secrets -n eddi \
+#     --from-literal=MONGO_INITDB_ROOT_USERNAME=eddi \
+#     --from-literal=MONGO_INITDB_ROOT_PASSWORD="$pw" \
+#     --from-literal=mongodb-secrets.properties="mongodb.connectionString=mongodb://eddi:${pw}@mongodb:27017/eddi?authSource=admin&retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000"
+#
+# (plus eddi-secrets from `bash k8s/create-secrets.sh`, as before).
+#
+# ⚠️  UPGRADING an install that ran this overlay WITHOUT authentication: the
+# mongo image reads MONGO_INITDB_ROOT_* only when it initialises an EMPTY data
+# directory, but switches --auth on every time. Create the same user in the
+# RUNNING database first, then the Secret above with the same password, then
+# re-apply:
+#
+#   kubectl exec -n eddi statefulset/mongodb -- mongosh admin \
+#     --eval 'db.createUser({user: "eddi", pwd: "<pw>", roles: ["root"]})'
+#
+# Applied first, MongoDB restarts with --auth and no user, and EDDI cannot log
+# in until you create one — the localhost exception still lets that same
+# command through, so it is recoverable, not lost.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -9,3 +43,34 @@ resources:
   - ../../base
   - mongodb-statefulset.yaml
   - mongodb-service.yaml
+  - mongodb-network-policy.yaml
+
+patches:
+  # The base's credential-less MONGODB_CONNECTIONSTRING has to go, not merely
+  # be outnumbered: the mounted file below and this env var would both sit at
+  # config ordinal 300 (a file listed in QUARKUS_CONFIG_LOCATIONS inherits the
+  # ordinal of the env var that lists it), so which one won would be an accident.
+  - target:
+      kind: ConfigMap
+      name: eddi-config
+    patch: |
+      - op: remove
+        path: /data/MONGODB_CONNECTIONSTRING
+  # Mount the connection string into EDDI as a FILE. Indexes refer to the base:
+  #   volumes[0] = the "eddi-secrets" projected volume
+  #   env[0]     = QUARKUS_CONFIG_LOCATIONS
+  - target:
+      kind: Deployment
+      name: eddi
+    patch: |
+      - op: add
+        path: /spec/template/spec/volumes/0/projected/sources/-
+        value:
+          secret:
+            name: mongodb-secrets
+            items:
+              - key: mongodb-secrets.properties
+                path: mongodb-secrets.properties
+      - op: replace
+        path: /spec/template/spec/containers/0/env/0/value
+        value: "/etc/eddi/secrets/application-secrets.properties,/etc/eddi/secrets/mongodb-secrets.properties"

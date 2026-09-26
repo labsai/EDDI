@@ -1,4 +1,35 @@
 {{- if .Values.mongodb.enabled }}
+{{- /*
+  Missing mongodb.auth (a `helm upgrade --reuse-values` from chart 2.x) counts
+  as enabled — see eddi.enabledUnlessFalse — so such an upgrade stops at the
+  `required` below instead of silently keeping an open database.
+*/}}
+{{- $mongoAuth := .Values.mongodb.auth | default dict }}
+{{- $mongoAuthOn := eq (include "eddi.mongoAuthEnabled" .) "true" }}
+{{- if $mongoAuthOn }}
+{{- $mongoUser := default "eddi" $mongoAuth.username }}
+{{- $mongoPassword := required "mongodb.auth.password is required when mongodb.enabled=true and mongodb.auth.enabled=true — the in-chart MongoDB no longer runs without authentication and the chart ships no default. Generate one: openssl rand -hex 24. UPGRADING an install that ran without auth? Create the user in the running database FIRST (kubectl exec into the <fullname>-mongodb StatefulSet and run mongosh admin with db.createUser, roles root — the exact command is under mongodb.auth in values.yaml), then upgrade with the same password. Or set mongodb.auth.enabled=false explicitly to keep the old unauthenticated database. (helm upgrade --reuse-values lands here too: it carries no mongodb.auth from the old release, and a missing setting counts as enabled.)" $mongoAuth.password }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "eddi.fullname" . }}-mongodb
+  labels:
+    {{- include "eddi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database
+type: Opaque
+stringData:
+  # Read by the mongo container's entrypoint, which creates this root user when
+  # it initialises an EMPTY data directory and starts mongod with --auth.
+  MONGO_INITDB_ROOT_USERNAME: {{ $mongoUser | quote }}
+  MONGO_INITDB_ROOT_PASSWORD: {{ $mongoPassword | quote }}
+  # Consumed by EDDI as a mounted config FILE (see the projected volume in
+  # deployment.yaml), never as an env var and never in the ConfigMap: the
+  # connection string now carries the password. urlquery percent-encodes both
+  # halves of the userinfo, which the driver decodes again.
+  mongodb-secrets.properties: |
+    mongodb.connectionString=mongodb://{{ $mongoUser | urlquery }}:{{ $mongoPassword | urlquery }}@{{ include "eddi.fullname" . }}-mongodb:27017/eddi?authSource=admin&retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000
+---
+{{- end }}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -20,6 +51,8 @@ spec:
         app.kubernetes.io/component: database
         app.kubernetes.io/part-of: eddi
     spec:
+      # MongoDB never talks to the Kubernetes API.
+      automountServiceAccountToken: false
       securityContext:
         fsGroup: 999
       containers:
@@ -28,6 +61,19 @@ spec:
           ports:
             - containerPort: 27017
               name: mongo
+          {{- if $mongoAuthOn }}
+          env:
+            - name: MONGO_INITDB_ROOT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "eddi.fullname" . }}-mongodb
+                  key: MONGO_INITDB_ROOT_USERNAME
+            - name: MONGO_INITDB_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "eddi.fullname" . }}-mongodb
+                  key: MONGO_INITDB_ROOT_PASSWORD
+          {{- end }}
           volumeMounts:
             - name: mongodb-data
               mountPath: /data/db

@@ -122,10 +122,14 @@ docker compose up
 # docker-compose.yml (an overlay cannot un-declare the base's mongodb service)
 docker compose -f docker-compose.postgres-only.yml up
 
-# With Keycloak authentication
+# With Keycloak authentication. The overlay has no default admin password and
+# refuses to start without one; no realm account ships a password either (see
+# the header of docker-compose.auth.yml, or let install.sh --with-auth do both)
+echo "KEYCLOAK_ADMIN_PASSWORD=$(openssl rand -base64 24)" >> .env
 docker compose -f docker-compose.yml -f docker-compose.auth.yml up
 
-# With Prometheus + Grafana monitoring
+# With Prometheus + Grafana monitoring (same rule for the Grafana admin)
+echo "GRAFANA_ADMIN_PASSWORD=$(openssl rand -base64 24)" >> .env
 docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up
 
 # With a local LLM — Ollama on the same Docker network, reachable as
@@ -136,6 +140,8 @@ docker compose -f docker-compose.yml -f docker-compose.ollama.yml up -d
 docker compose -f docker-compose.yml -f docker-compose.auth.yml \
   -f docker-compose.monitoring.yml -f docker-compose.nats.yml up
 ```
+
+Every port except EDDI's own is published on `127.0.0.1` only — Keycloak, Grafana, Prometheus, Jaeger, NATS, Chroma, Ollama and MongoDB are for your own machine, not the network.
 
 Available compose overlays: `docker-compose.auth.yml` (Keycloak), `docker-compose.monitoring.yml` (Prometheus+Grafana), `docker-compose.nats.yml` (NATS JetStream), `docker-compose.ollama.yml` (local LLM), `docker-compose.chroma.yml` (vector store), `docker-compose.local.yml` (build from source). `docker-compose.postgres-only.yml` is a complete standalone stack rather than an overlay — use it on its own, not with `-f docker-compose.yml`.
 
@@ -613,15 +619,29 @@ EDDI pod sits in `ContainerCreating` (`MountVolume.SetUp failed: secret
 ```bash
 # Kustomize overlays — create the vault Secret first, then apply
 bash k8s/create-secrets.sh                 # PowerShell 7: pwsh -File .\k8s\create-secrets.ps1
+# ...plus the database credentials, which are no longer shipped: mongodb-secrets
+# (MongoDB runs authenticated) or postgres-secrets — commands in the Kubernetes Guide
 kubectl apply -k k8s/overlays/mongodb/     # MongoDB backend
 kubectl apply -k k8s/overlays/postgres/    # PostgreSQL backend
 
 # Quickstart (one-file manifest; same Secret step, see the Kubernetes Guide)
 kubectl apply -f https://raw.githubusercontent.com/labsai/EDDI/main/k8s/quickstart.yaml
 
-# Helm (renders the Secret itself, so the key is a required value)
-helm install eddi ./helm/eddi \
-  --set eddi.vaultMasterKey="$(openssl rand -base64 24)" \
+# Helm (renders the Secrets itself, so the key and the MongoDB password are required values)
+# Generate the chart's secrets ONCE, into a file you keep (0600), and pass that
+# same file to every later `helm upgrade`. Never generate them inline in the
+# upgrade command: a new MongoDB password rotates EDDI's half while mongod keeps
+# the user it created at first start, and a new vault key makes every stored
+# secret unreadable. The `[ -e ]` guard stops a re-run from replacing the file.
+umask 077
+[ -e eddi-secrets.yaml ] || cat > eddi-secrets.yaml <<EOF
+eddi:
+  vaultMasterKey: "$(openssl rand -base64 24)"
+mongodb:
+  auth:
+    password: "$(openssl rand -hex 24)"
+EOF
+helm install eddi ./helm/eddi -f eddi-secrets.yaml \
   --namespace eddi --create-namespace
 ```
 

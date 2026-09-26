@@ -1801,7 +1801,7 @@ class DeploymentManifestsTest {
          * Asserted as a relationship — privileged implies no shipped credential —
          * rather than against a remembered username, so a second admin fixture added
          * later is covered by construction. The unprivileged fixtures (viewer, user)
-         * are deliberately untouched.
+         * are covered by {@link #noRealmUserShipsACredential()}.
          * <p>
          * The last assertion is what stops this passing vacuously: deleting every
          * privileged user, rather than its password, would otherwise satisfy the loop
@@ -1833,6 +1833,64 @@ class DeploymentManifestsTest {
                                 + "tell the operator to set a password on; removing it instead of its "
                                 + "password leaves those instructions pointing at nothing — and makes the "
                                 + "assertion above pass by having nothing to check");
+            }
+        }
+
+        /**
+         * The unprivileged fixtures are not harmless either. {@code user}/{@code user}
+         * carries {@code eddi-user}, which is enough to start conversations and run LLM
+         * turns at the deployment's expense, and {@code viewer}/{@code viewer} reads
+         * agent configurations. Both shipped with passwords equal to their usernames,
+         * and {@code "temporary": true} never became an UPDATE_PASSWORD required action
+         * on import — so on every cluster the realm was imported into they logged
+         * straight in, through a Keycloak Service any pod can reach.
+         * <p>
+         * So no seeded account ships a credential at all; the fixtures ship their
+         * roles, and an operator who wants them sets a password in the admin console.
+         * The auth E2E tier supplies its own passwords to a generated copy of the realm
+         * ({@code ui/manager/scripts/make-test-realm.mjs}), which asserts the same
+         * thing from its side.
+         */
+        @Test
+        @DisplayName("no realm copy ships a password for any account")
+        void noRealmUserShipsACredential() throws IOException {
+            for (Path realm : List.of(COMPOSE_REALM, KUSTOMIZE_REALM, HELM_REALM)) {
+                JsonNode users = JSON.readTree(realm.toFile()).path("users");
+                assertTrue(users.size() > 0, realm + " seeds no users; the operator docs tell the reader "
+                        + "to set passwords on `eddi`, `viewer` and `user`");
+                for (JsonNode user : users) {
+                    assertFalse(user.path("credentials").elements().hasNext(),
+                            realm + " seeds `" + user.path("username").asText() + "` with a credential. Every "
+                                    + "cluster this realm is imported into then has that login, reachable from "
+                                    + "any pod through the Keycloak ClusterIP. Ship the account's roles and let "
+                                    + "the operator set a password");
+                }
+            }
+        }
+
+        /**
+         * {@code eddi-frontend} is public — a browser SPA cannot keep a secret — so the
+         * direct access (password) grant on it needs nothing but a username and a
+         * password: one {@code curl} to the token endpoint, no browser, no redirect
+         * URI, no PKCE. With the fixture passwords above that was a token good for LLM
+         * turns for anyone who could reach Keycloak. The Manager signs in through the
+         * authorization-code flow and never used the grant; the auth E2E tier turns it
+         * back on in its generated realm only.
+         */
+        @Test
+        @DisplayName("the public SPA client refuses the password grant")
+        void spaClientRefusesThePasswordGrant() throws IOException {
+            for (Path realm : List.of(COMPOSE_REALM, KUSTOMIZE_REALM, HELM_REALM)) {
+                JsonNode spa = client(JSON.readTree(realm.toFile()), "eddi-frontend");
+                assertTrue(spa.path("publicClient").asBoolean(),
+                        realm + ": eddi-frontend is the Manager SPA and must stay a public client");
+                assertTrue(spa.path("standardFlowEnabled").asBoolean(),
+                        realm + ": eddi-frontend needs the authorization code flow — it is how the Manager "
+                                + "signs in");
+                assertFalse(spa.path("directAccessGrantsEnabled").asBoolean(true),
+                        realm + ": eddi-frontend is a PUBLIC client with the password grant enabled (or left "
+                                + "to Keycloak's default, which is enabled). Anyone who can reach Keycloak and "
+                                + "knows one password gets a token with a single curl");
             }
         }
 
@@ -2466,10 +2524,11 @@ class DeploymentManifestsTest {
          * it alone while setting {@code externalConnectionString} — one stale line in
          * an upgraded values file is enough — deployed an in-chart MongoDB StatefulSet,
          * printed "MongoDB (in-chart)" in NOTES.txt, and connected the pod to the
-         * EXTERNAL database: the external URI rides in the mounted properties file
-         * (QUARKUS_CONFIG_LOCATIONS, ordinal 400) and outranks the ConfigMap env var
-         * (ordinal 300). Which database EDDI talks to changed, with no render error and
-         * an install note saying the opposite; from the operator's side every
+         * EXTERNAL database — or not: the external URI rides in the mounted properties
+         * file, which inherits the ordinal of the QUARKUS_CONFIG_LOCATIONS env var that
+         * lists it (300), and so ties with the ConfigMap env var (300); source-name
+         * ordering decides. Which database EDDI talks to changed, with no render error
+         * and an install note saying the opposite; from the operator's side every
          * conversation and agent had vanished.
          * <p>
          * Refused rather than resolved. Silently preferring either one is a decision
@@ -2483,9 +2542,9 @@ class DeploymentManifestsTest {
             assertTrue(configmap.contains("{{- if and .Values.mongodb.enabled $externalMongo }}"),
                     "configmap.yaml must refuse mongodb.enabled=true together with "
                             + "eddi.datastore.externalConnectionString. secret.yaml renders the external URI "
-                            + "into the mounted properties file, whose config ordinal (400) beats the "
-                            + "ConfigMap env var (300), so the external database wins while the chart deploys "
-                            + "and reports an in-chart one");
+                            + "into the mounted properties file, which ties with the ConfigMap env var at "
+                            + "config ordinal 300, so either database may win while the chart deploys and "
+                            + "reports an in-chart one");
             assertTrue(configmap.contains("{{- if and .Values.postgres.enabled $externalJdbc }}"),
                     "the same must hold for PostgreSQL: postgres.enabled=true with "
                             + "eddi.datastore.externalJdbcUrl renders the in-chart URL and silently drops the "
@@ -2696,7 +2755,7 @@ class DeploymentManifestsTest {
          * The chart version this test is written against. Bump it in the same commit as
          * helm/eddi/Chart.yaml — see chartVersionRecordsTheBreakingChange.
          */
-        private static final String EXPECTED_CHART_VERSION = "2.1.0";
+        private static final String EXPECTED_CHART_VERSION = "3.0.0";
 
         /**
          * This release removes {@code manager.*}, {@code monitoring.*} and
@@ -2736,9 +2795,10 @@ class DeploymentManifestsTest {
                             + "different chart contents under one version leaves caches unable to tell them "
                             + "apart — and the last time nothing enforced it, the version sat still across three "
                             + "releases. If you changed anything under helm/, bump Chart.yaml AND this constant "
-                            + "together: major for a values file that no longer renders (this release dropped "
+                            + "together: major for a values file that no longer renders (2.0.0 dropped "
                             + "manager.*, monitoring.* and namespace, and made eddi.oidc.publicUrl / "
-                            + "nats.buildProfileImage render-time requirements), minor or patch otherwise");
+                            + "nats.buildProfileImage render-time requirements; 3.0.0 made "
+                            + "mongodb.auth.password one), minor or patch otherwise");
 
             JsonNode values = YAML.readTree(HELM.resolve("values.yaml").toFile());
             for (String removed : List.of("manager", "monitoring", "namespace")) {
@@ -2869,6 +2929,52 @@ class DeploymentManifestsTest {
     @DisplayName("monitoring stack")
     class Monitoring {
 
+        private static final Path STACK = K8S.resolve("overlays/monitoring/monitoring-stack.yaml");
+
+        /**
+         * The scrape config discovers pods in its own namespace only, so a cluster-wide
+         * ClusterRole granted list/watch on every pod, service and endpoint in the
+         * cluster for nothing.
+         */
+        @Test
+        @DisplayName("prometheus RBAC is namespaced")
+        void prometheusRbacIsNamespaced() throws IOException {
+            List<String> kinds = new ArrayList<>();
+            for (JsonNode document : yamlDocuments(STACK)) {
+                kinds.add(document.path("kind").asText());
+            }
+            assertFalse(kinds.contains("ClusterRole") || kinds.contains("ClusterRoleBinding"),
+                    STACK + " grants Prometheus cluster-wide read; it discovers pods in its own namespace only. Kinds: " + kinds);
+            assertTrue(kinds.contains("Role") && kinds.contains("RoleBinding"), STACK + " kinds: " + kinds);
+            assertEquals("Role", documentOfKind(STACK, "RoleBinding").path("roleRef").path("kind").asText());
+        }
+
+        @Test
+        @DisplayName("grafana's admin password comes from a Secret with no default")
+        void grafanaAdminPasswordHasNoDefault() throws IOException {
+            JsonNode password = null;
+            for (JsonNode document : yamlDocuments(STACK)) {
+                if (!"grafana".equals(document.path("metadata").path("name").asText())
+                        || !"Deployment".equals(document.path("kind").asText())) {
+                    continue;
+                }
+                for (JsonNode variable : document.path("spec").path("template").path("spec").path("containers").get(0)
+                        .path("env")) {
+                    if ("GF_SECURITY_ADMIN_PASSWORD".equals(variable.path("name").asText())) {
+                        password = variable;
+                    }
+                }
+            }
+            assertNotNull(password, "the Grafana Deployment sets no GF_SECURITY_ADMIN_PASSWORD");
+            assertFalse(password.has("value"), "GF_SECURITY_ADMIN_PASSWORD is a literal (it used to be \"admin\")");
+            assertEquals("grafana-admin", password.path("valueFrom").path("secretKeyRef").path("name").asText());
+            assertFalse(password.path("valueFrom").path("secretKeyRef").path("optional").asBoolean(false));
+            for (Path instruction : List.of(K8S.resolve("overlays/monitoring/kustomization.yaml"), K8S_DOC)) {
+                assertTrue(read(instruction).contains("kubectl create secret generic grafana-admin"),
+                        instruction + " must say how to create grafana-admin");
+            }
+        }
+
         /**
          * In a relabel_config {@code separator} is the string placed BETWEEN
          * concatenated source label values (default ";"). Overriding it to ":" made the
@@ -2900,6 +3006,275 @@ class DeploymentManifestsTest {
                             + "what it advertises and the manual fix dies with the pod");
             assertTrue(stack.contains("url: http://prometheus:9090"),
                     "the provisioned datasource must point at the Prometheus Service this file declares");
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Datastore credentials, isolation and service-account tokens
+    // ─────────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("datastores")
+    class Datastores {
+
+        private static final Path KUSTOMIZE_MONGO = K8S.resolve("overlays/mongodb");
+
+        /**
+         * The in-chart MongoDB ran with no authentication and a credential-less
+         * connection string, behind a Service every pod in the cluster could reach: any
+         * workload could read and rewrite every agent, conversation and the audit
+         * ledger. It now runs with a root user whose password has no default, and the
+         * connection string that carries that password reaches EDDI as a mounted FILE —
+         * never through the ConfigMap, which anything with {@code get configmaps} can
+         * read.
+         */
+        @Test
+        @DisplayName("helm: the in-chart MongoDB authenticates, with a password the operator supplies")
+        void helmMongoAuthenticates() throws IOException {
+            JsonNode auth = YAML.readTree(HELM.resolve("values.yaml").toFile()).path("mongodb").path("auth");
+            assertTrue(auth.path("enabled").asBoolean(false), "mongodb.auth.enabled must default to true");
+            assertEquals("", auth.path("password").asText("x"),
+                    "mongodb.auth.password must ship empty — a default is a password every install shares");
+
+            String mongodb = read(HELM_TEMPLATES.resolve("mongodb.yaml"));
+            assertTrue(mongodb.contains("required \"mongodb.auth.password is required"),
+                    "mongodb.yaml must refuse to render without mongodb.auth.password");
+            assertTrue(stripGoComments(mongodb).contains("key: MONGO_INITDB_ROOT_PASSWORD"),
+                    "the mongo container must read MONGO_INITDB_ROOT_PASSWORD from the Secret");
+            assertTrue(mongodb.contains("mongodb.connectionString=mongodb://{{ $mongoUser | urlquery }}:{{ $mongoPassword | urlquery }}@"),
+                    "the credentialed connection string must be rendered into the Secret, with both halves of the "
+                            + "userinfo percent-encoded");
+
+            String configmap = read(HELM_TEMPLATES.resolve("configmap.yaml"));
+            int line = configmap.indexOf("MONGODB_CONNECTIONSTRING: \"mongodb://");
+            assertTrue(line > 0, "configmap.yaml no longer renders the unauthenticated connection string at all");
+            String guard = configmap.substring(configmap.lastIndexOf("{{-", line), line);
+            assertTrue(guard.contains("ne (include \"eddi.mongoAuthEnabled\" .) \"true\""),
+                    "the credential-less MONGODB_CONNECTIONSTRING may only render when auth is OFF. With auth on it "
+                            + "would sit at the same config ordinal as the mounted file and one of the two would win "
+                            + "by accident. Guard: " + guard);
+
+            String deployment = read(HELM_TEMPLATES.resolve("deployment.yaml"));
+            assertTrue(deployment.contains("{{ if $mongoSecret }},/etc/eddi/secrets/mongodb-secrets.properties{{ end }}"),
+                    "QUARKUS_CONFIG_LOCATIONS must list the mounted MongoDB connection string when auth is on");
+        }
+
+        /**
+         * {@code helm upgrade --reuse-values} reuses the previous release's values and
+         * ignores the new chart's defaults, so {@code mongodb.auth} and
+         * {@code networkPolicy.datastores} are simply ABSENT on an upgrade from 2.x.
+         * Read as {@code (… | default dict).enabled}, absence meant off: the upgrade
+         * exited 0 with MongoDB still unauthenticated and no datastore policy, while
+         * looking hardened. Both switches go through one helper that turns only an
+         * explicit false off. manifest-lint renders the null cases; this pins the
+         * wiring so it cannot quietly go back.
+         */
+        @Test
+        @DisplayName("helm: a missing security switch counts as enabled")
+        void helmSecuritySwitchesDefaultOnWhenAbsent() throws IOException {
+            String helpers = read(HELM_TEMPLATES.resolve("_helpers.tpl"));
+            int helper = helpers.indexOf("define \"eddi.enabledUnlessFalse\"");
+            assertTrue(helper >= 0, "_helpers.tpl must define eddi.enabledUnlessFalse");
+            String body = helpers.substring(helper, helpers.indexOf("{{- end }}", helper));
+            assertTrue(body.contains("hasKey $section \"enabled\"") && body.contains("else -}}\ntrue"),
+                    "eddi.enabledUnlessFalse must answer true when the section or its `enabled` key is missing: " + body);
+
+            for (Path template : templates()) {
+                String text = stripGoComments(read(template));
+                for (String offOnAbsence : List.of("(.Values.mongodb.auth | default dict).enabled",
+                        "(.Values.networkPolicy.datastores | default dict).enabled", "$mongoAuth.enabled")) {
+                    assertFalse(text.contains(offOnAbsence), template + " reads `" + offOnAbsence + "`, which treats a "
+                            + "MISSING switch as off — exactly what `helm upgrade --reuse-values` from 2.x produces");
+                }
+            }
+            assertTrue(read(HELM_TEMPLATES.resolve("datastore-networkpolicy.yaml"))
+                    .contains("include \"eddi.enabledUnlessFalse\" (dict \"section\" .Values.networkPolicy.datastores)"),
+                    "the datastore policies must be gated by eddi.enabledUnlessFalse");
+            for (String template : List.of("mongodb.yaml", "deployment.yaml", "configmap.yaml")) {
+                assertTrue(read(HELM_TEMPLATES.resolve(template)).contains("include \"eddi.mongoAuthEnabled\" ."),
+                        template + " must read MongoDB authentication through eddi.mongoAuthEnabled");
+            }
+        }
+
+        /**
+         * The upgrade command the chart's own render error sends every 2.x upgrader to.
+         * It once sat on one comment line with its continuation lost, so the copied
+         * command ran a bare {@code mongosh admin} (exit 0, no user created), and it
+         * named the StatefulSet {@code <release>-eddi-mongodb}, which exists for no
+         * release. Checked as a script: the kubectl line continues onto the
+         * {@code --eval} line, nothing in it starts a comment, and the object is
+         * {@code <fullname>-mongodb}.
+         */
+        @Test
+        @DisplayName("helm: the documented MongoDB upgrade command is a working multi-line command")
+        void helmMongoUpgradeCommandIsWellFormed() throws IOException {
+            List<String> block = new ArrayList<>();
+            boolean inBlock = false;
+            for (String line : read(HELM.resolve("values.yaml")).lines().toList()) {
+                String content = line.strip();
+                if (content.startsWith("#   kubectl exec") && content.contains("mongosh admin")) {
+                    inBlock = true;
+                }
+                if (inBlock) {
+                    if (!content.startsWith("#  ")) {
+                        break;
+                    }
+                    block.add(content.substring(1).strip());
+                    if (!content.endsWith("\\")) {
+                        break;
+                    }
+                }
+            }
+            assertTrue(block.size() >= 2, "values.yaml must spell the createUser command over continued lines: " + block);
+            assertTrue(block.getFirst().endsWith("\\"), "the kubectl exec line must continue onto the --eval line: " + block);
+            assertTrue(block.get(1).startsWith("--eval") && block.get(1).contains("db.createUser("),
+                    "the continued line must carry the createUser --eval: " + block);
+            assertFalse(String.join(" ", block).contains("#"),
+                    "a `#` inside the command makes the shell drop everything after it: " + block);
+            assertTrue(block.getFirst().contains("statefulset/<fullname>-mongodb"),
+                    "the StatefulSet is <fullname>-mongodb (eddi-mongodb for a release named eddi): " + block);
+            for (Path doc : List.of(HELM.resolve("values.yaml"), K8S_DOC)) {
+                assertFalse(read(doc).contains("<release>-eddi-mongodb --"),
+                        doc + " names statefulset/<release>-eddi-mongodb as a command target, which no release creates");
+            }
+        }
+
+        @Test
+        @DisplayName("kustomize: the MongoDB overlay authenticates from a Secret the operator creates")
+        void kustomizeMongoAuthenticates() throws IOException {
+            JsonNode statefulSet = documentOfKind(KUSTOMIZE_MONGO.resolve("mongodb-statefulset.yaml"), "StatefulSet");
+            JsonNode password = null;
+            for (JsonNode variable : statefulSet.path("spec").path("template").path("spec").path("containers").get(0)
+                    .path("env")) {
+                if ("MONGO_INITDB_ROOT_PASSWORD".equals(variable.path("name").asText())) {
+                    password = variable;
+                }
+            }
+            assertNotNull(password, "the MongoDB StatefulSet sets no MONGO_INITDB_ROOT_PASSWORD — mongod runs without auth");
+            assertFalse(password.has("value"), "MONGO_INITDB_ROOT_PASSWORD must come from a Secret, not a literal");
+            JsonNode reference = password.path("valueFrom").path("secretKeyRef");
+            assertEquals("mongodb-secrets", reference.path("name").asText());
+            assertFalse(reference.path("optional").asBoolean(false),
+                    "an optional reference starts mongod WITHOUT auth when the Secret is missing — fail closed instead");
+
+            Path kustomization = KUSTOMIZE_MONGO.resolve("kustomization.yaml");
+            String patches = read(kustomization);
+            assertTrue(patches.contains("path: /data/MONGODB_CONNECTIONSTRING") && patches.contains("op: remove"),
+                    kustomization + " must remove the base's credential-less MONGODB_CONNECTIONSTRING");
+            assertTrue(patches.contains("/etc/eddi/secrets/mongodb-secrets.properties"),
+                    kustomization + " must mount the connection string into EDDI as a file");
+            for (Path instruction : List.of(kustomization, K8S_DOC)) {
+                assertTrue(read(instruction).contains("kubectl create secret generic mongodb-secrets"),
+                        instruction + " must say how to create mongodb-secrets — the pods do not start without it");
+            }
+        }
+
+        /**
+         * {@code k8s/overlays/postgres/postgres-secret.yaml} committed
+         * {@code eddi}/{@code eddi}, and {@code k8s/examples/postgres-ha} applied it
+         * under {@code production}. A Secret that is a kustomize resource ships its
+         * value to every install; the vault key has been created out-of-band for that
+         * reason, and every other credential now follows it.
+         */
+        @Test
+        @DisplayName("no applied k8s manifest carries a Secret value")
+        void noShippedSecretCarriesAValue() throws IOException {
+            List<String> offenders = new ArrayList<>();
+            List<Path> manifests = new ArrayList<>(manifestsUnder(K8S));
+            for (Path manifest : manifests) {
+                for (JsonNode document : yamlDocuments(manifest)) {
+                    if ("Secret".equals(document.path("kind").asText())
+                            && (document.path("stringData").size() > 0 || document.path("data").size() > 0)) {
+                        offenders.add(manifest + " (" + document.path("metadata").path("name").asText() + ")");
+                    }
+                }
+            }
+            assertEquals(List.of(), offenders,
+                    "these manifests ship a Secret WITH its value, so every install that applies them shares it. Ship "
+                            + "a *.yaml.example with the creation command instead");
+            assertTrue(Files.isRegularFile(K8S.resolve("overlays/postgres/postgres-secret.yaml.example")),
+                    "the PostgreSQL overlay must still document the Secret it needs");
+            assertFalse(read(K8S.resolve("overlays/postgres/kustomization.yaml")).contains("postgres-secret.yaml\n"),
+                    "the PostgreSQL overlay must not list a Secret manifest as a resource");
+        }
+
+        /**
+         * The network policies selected only the EDDI pod (and Helm's was off by
+         * default), so nothing restricted who could connect TO the databases. Each
+         * delivery path now ships an ingress policy per datastore that admits the EDDI
+         * server pod and nothing else — on by default.
+         */
+        @Test
+        @DisplayName("every shipped datastore admits only the EDDI pod")
+        void datastoresAdmitOnlyEddi() throws IOException {
+            assertTrue(YAML.readTree(HELM.resolve("values.yaml").toFile())
+                    .path("networkPolicy").path("datastores").path("enabled").asBoolean(false),
+                    "networkPolicy.datastores.enabled must default to true");
+            String helmPolicy = read(HELM_TEMPLATES.resolve("datastore-networkpolicy.yaml"));
+            for (String store : List.of("\"mongodb\" 27017", "\"postgres\" 5432", "\"nats\" 4222")) {
+                assertTrue(helmPolicy.contains(store), "datastore-networkpolicy.yaml does not cover " + store);
+            }
+
+            List<Path> policies = List.of(
+                    KUSTOMIZE_MONGO.resolve("mongodb-network-policy.yaml"),
+                    K8S.resolve("overlays/postgres/postgres-network-policy.yaml"),
+                    K8S.resolve("quickstart.yaml"));
+            for (Path manifest : policies) {
+                JsonNode policy = documentOfKind(manifest, "NetworkPolicy");
+                String store = policy.path("spec").path("podSelector").path("matchLabels")
+                        .path("app.kubernetes.io/name").asText();
+                assertTrue(List.of("mongodb", "postgres").contains(store), manifest + " selects `" + store + "`");
+                JsonNode from = policy.path("spec").path("ingress").get(0).path("from");
+                assertEquals(1, from.size(), manifest + ": exactly one peer may reach " + store);
+                JsonNode peer = from.get(0);
+                assertTrue(peer.path("namespaceSelector").isMissingNode(),
+                        manifest + ": the peer must be a same-namespace podSelector, not a namespaceSelector");
+                assertEquals("eddi", peer.path("podSelector").path("matchLabels").path("app.kubernetes.io/name").asText());
+                assertEquals("server", peer.path("podSelector").path("matchLabels").path("app.kubernetes.io/component").asText());
+            }
+            for (String overlay : List.of("mongodb", "postgres")) {
+                assertTrue(read(K8S.resolve("overlays/" + overlay + "/kustomization.yaml"))
+                        .contains(overlay + "-network-policy.yaml"),
+                        "overlays/" + overlay + " must apply its NetworkPolicy");
+            }
+        }
+
+        /**
+         * No shipped workload calls the Kubernetes API except Prometheus, whose pod
+         * discovery needs it — so every other pod mounted a service-account token it
+         * never used, a free API credential for anything that got into the container.
+         */
+        @Test
+        @DisplayName("only Prometheus mounts a service-account token")
+        void onlyPrometheusMountsAServiceAccountToken() throws IOException {
+            List<String> offenders = new ArrayList<>();
+            int workloads = 0;
+            for (Path manifest : manifestsUnder(K8S)) {
+                for (JsonNode document : yamlDocuments(manifest)) {
+                    String kind = document.path("kind").asText();
+                    if (!List.of("Deployment", "StatefulSet").contains(kind)) {
+                        continue;
+                    }
+                    workloads++;
+                    JsonNode pod = document.path("spec").path("template").path("spec");
+                    if ("prometheus".equals(pod.path("serviceAccountName").asText())) {
+                        continue;
+                    }
+                    if (pod.path("automountServiceAccountToken").asBoolean(true)) {
+                        offenders.add(manifest + " " + kind + "/" + document.path("metadata").path("name").asText());
+                    }
+                }
+            }
+            assertTrue(workloads > 5, "found only " + workloads + " workloads under k8s/ — the sweep is not reading them");
+            assertEquals(List.of(), offenders, "these pods mount a service-account token they never use");
+
+            for (String template : List.of("deployment.yaml", "mongodb.yaml", "postgres.yaml", "nats.yaml", "keycloak.yaml")) {
+                assertTrue(stripGoComments(read(HELM_TEMPLATES.resolve(template))).contains("automountServiceAccountToken:"),
+                        "helm/" + template + " must say automountServiceAccountToken");
+            }
+            assertFalse(YAML.readTree(HELM.resolve("values.yaml").toFile())
+                    .path("serviceAccount").path("automountToken").asBoolean(true),
+                    "serviceAccount.automountToken must default to false");
         }
     }
 
@@ -2939,7 +3314,7 @@ class DeploymentManifestsTest {
     @DisplayName("the postgres credential warning says WHEN it can be changed")
     void postgresPasswordWarningNamesInitdb() throws IOException {
         for (Path source : List.of(
-                K8S.resolve("overlays/postgres/postgres-secret.yaml"),
+                K8S.resolve("overlays/postgres/postgres-secret.yaml.example"),
                 HELM.resolve("values.yaml"))) {
             String text = read(source);
             assertTrue(text.contains("initdb"),
@@ -3090,6 +3465,9 @@ class DeploymentManifestsTest {
                         + "template catches the one that renders into invalid Kubernetes");
 
         for (String guarded : List.of(
+                "an in-chart MongoDB with authentication but no password",
+                "a --reuse-values upgrade with no mongodb.auth (mongodb.auth=null)",
+                "a --reuse-values upgrade with neither mongodb.auth nor networkPolicy.datastores",
                 "no datastore configured at all",
                 "messagingType=nats on a stock image",
                 "OIDC enabled without a browser-facing publicUrl",
@@ -3116,6 +3494,10 @@ class DeploymentManifestsTest {
         // install — and both were invisible here, because every case above sets a
         // STRING. Only rendering a null can tell the difference; grepping for the
         // guard's source text, which is what the unit assertions do, cannot.
+        assertTrue(run.contains("--set networkPolicy.datastores=null") && run.contains("grep -c '^kind: NetworkPolicy$'"),
+                "manifest-lint must render with networkPolicy.datastores=null and require the datastore policies to "
+                        + "still be there. `helm upgrade --reuse-values` from chart 2.x carries no such key, and a "
+                        + "switch read as `(… | default dict).enabled` turned that absence into OFF with exit 0");
         assertTrue(run.contains("--set eddi.datastore.externalJdbcUrl=null"),
                 "manifest-lint must render a null-valued optional datastore value and require it to SUCCEED. "
                         + "A bare `externalJdbcUrl:` in a values file is what an operator gets by clearing "

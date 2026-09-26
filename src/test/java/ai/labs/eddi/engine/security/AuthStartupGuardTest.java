@@ -142,6 +142,31 @@ class AuthStartupGuardTest {
         assertTrue(diagnostic.get().contains("403"), diagnostic.get());
     }
 
+    /**
+     * The unset-path message named the WORKSPACES claim as quarkus-oidc's default.
+     * With {@code eddi.workspaces.groups-claim=teams} it read "quarkus-oidc will
+     * read roles from its default 'teams' claim" — a claim quarkus-oidc never reads
+     * — and claimed a collision that did not exist, sending the operator after the
+     * wrong setting.
+     */
+    @Test
+    @DisplayName("the unset-path message names quarkus-oidc's real default claim, not the workspaces claim")
+    void rolesClaimUnset_namesTheRealDefaultClaim() throws Exception {
+        AuthStartupGuard guard = createGuard(true, false, LaunchMode.NORMAL, Optional.empty(), "teams");
+
+        String message = guard.rolesClaimDiagnostic().orElseThrow();
+
+        assertTrue(message.contains("default 'groups' claim"), message);
+        assertFalse(message.contains("'teams'"), "quarkus-oidc never reads the workspaces claim by default: " + message);
+        assertFalse(message.contains("eddi.workspaces.groups-claim"),
+                "with the workspaces claim moved off 'groups' there is no collision to report: " + message);
+
+        String colliding = createGuard(true, false, LaunchMode.NORMAL, Optional.empty(), "groups")
+                .rolesClaimDiagnostic().orElseThrow();
+        assertTrue(colliding.contains("eddi.workspaces.groups-claim"),
+                "with both on 'groups' the message must say they collide: " + colliding);
+    }
+
     @Test
     @DisplayName("OIDC on + blank roles claim path → treated as unset")
     void rolesClaimBlank_isReported() throws Exception {

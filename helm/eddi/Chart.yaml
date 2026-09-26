@@ -19,7 +19,13 @@ type: application
 # `eddi.oidc.publicUrl` when OIDC is on, `nats.buildProfileImage` when
 # messagingType is not in-memory. An upgrade that keeps an old values file
 # either fails to render or silently drops a setting.
-version: 2.1.0
+#
+# 3.0.0: BREAKING again. The in-chart MongoDB now runs with authentication, so
+# `mongodb.auth.password` is a render-time requirement whenever mongodb.enabled
+# (the default) — see mongodb.auth in values.yaml for the upgrade order. An
+# install that must keep the old unauthenticated database sets
+# mongodb.auth.enabled=false explicitly.
+version: 3.0.0
 appVersion: "6.4.0"
 home: https://eddi.labs.ai
 sources:

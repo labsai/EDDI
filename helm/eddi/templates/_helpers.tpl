@@ -79,3 +79,36 @@ Service account name
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
+
+{{/*
+Whether a SECURE-BY-DEFAULT switch is on: "true" or "false".
+
+Absent means ON. `helm upgrade --reuse-values` reuses the previous release's
+values and ignores this chart's defaults, so a switch introduced by a newer
+chart (mongodb.auth, networkPolicy.datastores) is simply MISSING on such an
+upgrade. Read as `(… | default dict).enabled` that absence was "off": the
+upgrade exited 0 and left MongoDB unauthenticated with no datastore policy
+while looking hardened. Only an explicit false (boolean, or the string
+"false") turns one of these off.
+
+Call with (dict "section" <map or nil>).
+*/}}
+{{- define "eddi.enabledUnlessFalse" -}}
+{{- $section := .section -}}
+{{- if and (kindIs "map" $section) (hasKey $section "enabled") -}}
+{{- $enabled := $section.enabled -}}
+{{- if kindIs "bool" $enabled -}}
+{{- $enabled -}}
+{{- else -}}
+{{- /* A string "false" / "FALSE" also turns it off; nil falls to "true" before toString (see the chart's coalesce-first rule). */ -}}
+{{- ne (lower (toString (default "true" $enabled))) "false" -}}
+{{- end -}}
+{{- else -}}
+true
+{{- end -}}
+{{- end }}
+
+{{/* The in-chart MongoDB runs with authentication. See eddi.enabledUnlessFalse. */}}
+{{- define "eddi.mongoAuthEnabled" -}}
+{{- and .Values.mongodb.enabled (eq (include "eddi.enabledUnlessFalse" (dict "section" .Values.mongodb.auth)) "true") -}}
+{{- end }}

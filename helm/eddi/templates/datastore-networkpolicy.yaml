@@ -1,0 +1,57 @@
+{{- /*
+  Ingress isolation for the in-chart datastores and broker.
+
+  networkpolicy.yaml isolates the EDDI pod and is opt-in. It never covered the
+  databases: MongoDB ran without authentication behind a Service every pod in
+  the cluster could reach, so any workload in any namespace could read and
+  rewrite all of EDDI's data, the audit ledger included. Authentication
+  (mongodb.auth) closes that for MongoDB; these policies add the network half
+  for every in-chart datastore, on by default, independent of
+  networkPolicy.enabled.
+
+  Each policy selects one datastore pod and admits only the EDDI server pod of
+  this release, on the one port EDDI uses. MongoDB's and PostgreSQL's probes
+  are exec probes, and `kubectl exec` / `kubectl port-forward` do not traverse
+  pod networking. NATS is the exception: its probes are httpGet on the
+  monitoring port 8222, which this policy does not admit. That is deliberate —
+  the kubelet's probes originate on the node, and the NetworkPolicy spec (and
+  every mainstream CNI: Calico, Cilium, the cloud providers') always allows
+  traffic from the node a pod runs on, so the probes still pass while no other
+  pod can read the monitoring endpoint. Something else that genuinely needs the database —
+  a backup job — needs a policy of its own that admits it.
+*/}}
+{{- /* Missing counts as enabled (helm upgrade --reuse-values) — see eddi.enabledUnlessFalse. */}}
+{{- if eq (include "eddi.enabledUnlessFalse" (dict "section" .Values.networkPolicy.datastores)) "true" }}
+{{- $release := . }}
+{{- $stores := list }}
+{{- if .Values.mongodb.enabled }}{{ $stores = append $stores (list "mongodb" 27017) }}{{ end }}
+{{- if .Values.postgres.enabled }}{{ $stores = append $stores (list "postgres" 5432) }}{{ end }}
+{{- if .Values.nats.enabled }}{{ $stores = append $stores (list "nats" 4222) }}{{ end }}
+{{- range $stores }}
+{{- $name := index . 0 }}
+{{- $port := index . 1 }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "eddi.fullname" $release }}-{{ $name }}
+  labels:
+    {{- include "eddi.labels" $release | nindent 4 }}
+    app.kubernetes.io/component: {{ if eq $name "nats" }}messaging{{ else }}database{{ end }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "eddi.fullname" $release }}-{{ $name }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "eddi.selectorLabels" $release | nindent 14 }}
+              app.kubernetes.io/component: server
+      ports:
+        - protocol: TCP
+          port: {{ $port }}
+{{- end }}
+{{- end }}

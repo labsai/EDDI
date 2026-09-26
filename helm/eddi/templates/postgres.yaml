@@ -41,6 +41,8 @@ spec:
         app.kubernetes.io/component: database
         app.kubernetes.io/part-of: eddi
     spec:
+      # PostgreSQL never talks to the Kubernetes API.
+      automountServiceAccountToken: false
       securityContext:
         fsGroup: 999
       containers:

@@ -48,6 +48,27 @@ if [[ ! "$EDDI_BRANCH" =~ ^[a-zA-Z0-9._/-]+$ ]]; then
 fi
 COMPOSE_BASE_URL="https://raw.githubusercontent.com/labsai/EDDI/${EDDI_BRANCH}"
 EDDI_ALREADY_RUNNING=false
+# Credentials the compose overlays refuse to start without. An exported value
+# wins; otherwise resolve_stack_passwords keeps the one already in .env or
+# generates one. Nothing here ever has a default — docker-compose.auth.yml and
+# docker-compose.monitoring.yml used to hard-code admin/admin.
+KEYCLOAK_ADMIN_USERNAME="${KEYCLOAK_ADMIN_USERNAME:-}"
+KEYCLOAK_ADMIN_PASSWORD="${KEYCLOAK_ADMIN_PASSWORD:-}"
+GRAFANA_ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD:-}"
+# Set by keycloak_admin_login; read by the steps that call the Admin API.
+KC_ADMIN_TOKEN=""
+# "user=password" for every realm account this run gave a first password, and
+# "user=" for one that already had a password and was left alone.
+FIRST_LOGIN_PASSWORDS=()
+# Unprivileged fixtures (viewer, user) that already HAVE a credential although
+# --demo-users was not given — on a realm imported before the fixtures stopped
+# shipping passwords, that is viewer/viewer and user/user.
+LEGACY_FIXTURE_LOGINS=()
+# Set by keycloak_admin_login when it moved a legacy admin/admin login to
+# KEYCLOAK_ADMIN_PASSWORD, so a caller knows the new value is now the true one.
+KC_ADMIN_ROTATED=false
+# True when this run generated KEYCLOAK_ADMIN_PASSWORD rather than finding one.
+KC_ADMIN_PASSWORD_GENERATED=false
 
 # ── State flags ────────────────────────────────────────────
 CONTAINERS_STARTED=false
@@ -377,6 +398,7 @@ NON_INTERACTIVE=false
 DB_CHOICE=""
 WITH_AUTH=false
 WITH_MONITORING=false
+DEMO_USERS=false
 LOCAL_IMAGE=false
 VAULT_KEY_ARG=""
 
@@ -392,6 +414,7 @@ for arg in "$@"; do
     --db=postgres*)   DB_CHOICE="2" ;;
     --with-auth)      WITH_AUTH=true ;;
     --with-monitoring) WITH_MONITORING=true ;;
+    --demo-users)     DEMO_USERS=true ;;
     --vault-key=*)    VAULT_KEY_ARG="${arg#*=}" ;;
     --eddi-version=*) EDDI_VERSION="${arg#*=}" ;;
     --mongo-port=*)   MONGO_PORT_REQUESTED="${arg#*=}" ;;
@@ -410,6 +433,8 @@ for arg in "$@"; do
       echo "  --vault-key=<key>       Set vault master key (min 16 chars)"
       echo "  --with-auth             Include Keycloak authentication"
       echo "  --with-monitoring       Include Grafana + Prometheus"
+      echo "  --demo-users            With --with-auth: also give the realm's unprivileged"
+      echo "                          viewer and user accounts a one-time password"
       echo "  --eddi-version=<tag>    Pin EDDI image tag (default: latest)"
       echo "  --mongo-port=<port>     Host port for MongoDB (default: 27017)"
       echo "  --full                  All options enabled"
@@ -420,6 +445,9 @@ for arg in "$@"; do
       echo "  EDDI_HTTPS_PORT     HTTPS port (default: 7443)"
       echo "  MONGO_PORT          Host port for MongoDB (default: 27017)"
       echo "  KEYCLOAK_PORT       Host port for Keycloak (default: 8180)"
+      echo "  KEYCLOAK_ADMIN_PASSWORD  Keycloak bootstrap admin password (default: generated,"
+      echo "                      kept in .env across re-runs)"
+      echo "  GRAFANA_ADMIN_PASSWORD   Grafana admin password (default: generated, kept in .env)"
       echo "  GRAFANA_PORT        Host port for Grafana (default: 3000)"
       echo "  PROMETHEUS_PORT     Host port for Prometheus (default: 9090)"
       echo "  JAEGER_PORT         Host port for the Jaeger UI (default: 16686)"
@@ -611,6 +639,72 @@ generate_vault_key() {
   else
     # Fallback: read from /dev/urandom
     head -c 24 /dev/urandom | base64
+  fi
+}
+
+# A random password of 32 characters from [A-Za-z0-9] (~190 bits). Alphanumeric
+# on purpose: it survives .env quoting, a form-encoded token request and a JSON
+# body without escaping. Each `|| true` keeps a SIGPIPE from `head` from ending
+# the installer under `set -o pipefail`.
+generate_password() {
+  local out=""
+  if command -v openssl &>/dev/null; then
+    out=$(openssl rand -base64 64 | tr -dc 'A-Za-z0-9' | head -c 32 || true)
+  fi
+  if [[ ${#out} -lt 32 ]]; then
+    out=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32 || true)
+  fi
+  printf '%s' "$out"
+}
+
+# The value of KEY in an existing .env, surrounding quotes stripped; empty when
+# the file or the key is absent.
+env_file_value() {
+  local key="$1" value=""
+  [[ -f "$EDDI_DIR/.env" ]] || return 0
+  value=$(grep -m1 "^${key}=" "$EDDI_DIR/.env" 2>/dev/null | cut -d= -f2- || true)
+  value="${value%$'\r'}"
+  value="${value#[\"\']}"
+  value="${value%[\"\']}"
+  printf '%s' "$value"
+}
+
+# Resolves the credentials the selected compose overlays require, BEFORE .env is
+# written: an exported value, else the one a previous run stored in .env, else a
+# new one. Keeping the stored value matters — Keycloak and Grafana read theirs
+# only when their volume is first initialised, so a new value on every re-run
+# would silently stop matching the running service.
+resolve_stack_passwords() {
+  # Stored values are read back WHATEVER this run's flags are, and write_env
+  # carries them forward. A re-run without --with-auth used to rewrite .env
+  # without them while the keycloak-data volume survived — deleting the only
+  # copy of the password that volume answers to, so a later --with-auth run
+  # generated a new one and was locked out of the master realm. A stale
+  # password in .env is harmless; a lost one is not.
+  [[ -n "$KEYCLOAK_ADMIN_USERNAME" ]] || KEYCLOAK_ADMIN_USERNAME=$(env_file_value KEYCLOAK_ADMIN_USERNAME)
+  [[ -n "$KEYCLOAK_ADMIN_PASSWORD" ]] || KEYCLOAK_ADMIN_PASSWORD=$(env_file_value KEYCLOAK_ADMIN_PASSWORD)
+  [[ -n "$GRAFANA_ADMIN_PASSWORD" ]] || GRAFANA_ADMIN_PASSWORD=$(env_file_value GRAFANA_ADMIN_PASSWORD)
+  if [[ "$WITH_AUTH" == "true" ]]; then
+    [[ -n "$KEYCLOAK_ADMIN_USERNAME" ]] || KEYCLOAK_ADMIN_USERNAME="admin"
+    if [[ -z "$KEYCLOAK_ADMIN_PASSWORD" ]]; then
+      KEYCLOAK_ADMIN_PASSWORD=$(generate_password)
+      KC_ADMIN_PASSWORD_GENERATED=true
+    fi
+  fi
+  if [[ "$WITH_MONITORING" == "true" ]]; then
+    [[ -n "$GRAFANA_ADMIN_PASSWORD" ]] || GRAFANA_ADMIN_PASSWORD=$(generate_password)
+  fi
+  # Written single-quoted into .env, where compose reads the value literally;
+  # a single quote is the one character that cannot be carried that way.
+  local value
+  for value in "$KEYCLOAK_ADMIN_USERNAME" "$KEYCLOAK_ADMIN_PASSWORD" "$GRAFANA_ADMIN_PASSWORD"; do
+    if [[ "$value" == *"'"* ]]; then
+      fail "KEYCLOAK_ADMIN_USERNAME, KEYCLOAK_ADMIN_PASSWORD and GRAFANA_ADMIN_PASSWORD must not contain a single quote (')."
+    fi
+  done
+  if [[ ( "$WITH_AUTH" == "true" && -z "$KEYCLOAK_ADMIN_PASSWORD" ) \
+     || ( "$WITH_MONITORING" == "true" && -z "$GRAFANA_ADMIN_PASSWORD" ) ]]; then
+    fail "Could not generate an admin password (neither openssl nor /dev/urandom produced one)."
   fi
 }
 
@@ -931,6 +1025,11 @@ resolve_compose_files() {
   if [[ "${DB_CHOICE:-1}" == "2" ]]; then
     db_txt="postgres"
   fi
+  # umask 077 for the whole write: the file is created 0600, rather than being
+  # world-readable (with the vault key and admin passwords in it) until the
+  # chmod below. A subshell, so the mask does not leak into the rest of the run.
+  (
+  umask 077
   cat > "$EDDI_DIR/.env" <<EOF
 # EDDI environment — generated by installer
 # ⚠️  The vault master key encrypts all stored API keys.
@@ -950,6 +1049,19 @@ EOF
   if [[ "$WITH_AUTH" == "true" ]]; then
     echo "KEYCLOAK_PORT=$KEYCLOAK_PORT" >> "$EDDI_DIR/.env"
   fi
+  # The admin passwords are written whenever one is known, not only when this
+  # run selected the overlay — see resolve_stack_passwords. docker-compose.auth.yml
+  # and docker-compose.monitoring.yml have no default for them and refuse to
+  # start without them. Single-quoted: compose reads the value literally.
+  if [[ -n "$KEYCLOAK_ADMIN_PASSWORD" ]]; then
+    {
+      echo "KEYCLOAK_ADMIN_USERNAME='${KEYCLOAK_ADMIN_USERNAME:-admin}'"
+      echo "KEYCLOAK_ADMIN_PASSWORD='${KEYCLOAK_ADMIN_PASSWORD}'"
+    } >> "$EDDI_DIR/.env"
+  fi
+  if [[ -n "$GRAFANA_ADMIN_PASSWORD" ]]; then
+    echo "GRAFANA_ADMIN_PASSWORD='${GRAFANA_ADMIN_PASSWORD}'" >> "$EDDI_DIR/.env"
+  fi
   if [[ "$WITH_MONITORING" == "true" ]]; then
     {
       echo "GRAFANA_PORT=$GRAFANA_PORT"
@@ -959,7 +1071,9 @@ EOF
       echo "OTLP_HTTP_PORT=$OTLP_HTTP_PORT"
     } >> "$EDDI_DIR/.env"
   fi
-  # Restrict permissions on sensitive files (owner-only read/write)
+  )
+  # Restrict permissions on sensitive files (owner-only read/write). Still here
+  # for a .env that predates the umask above.
   chmod 600 "$EDDI_DIR/.env"
   chmod 600 "$EDDI_DIR/.eddi-config"
 }
@@ -1053,6 +1167,248 @@ wait_for_ready() {
 
 # ── Configure Keycloak client (post-start) ────────────────
 
+# Prints a password-grant access token for USER against REALM's admin-cli, or
+# nothing. The password travels on stdin, so it is neither in the process table
+# nor in shell history. Args: kc_base json_tool realm user password
+kc_password_token() {
+  local kc_base="$1" json_tool="$2" realm="$3" user="$4" password="$5" token=""
+  token=$(printf '%s' "$password" | curl -sf -X POST \
+    --data-urlencode "client_id=admin-cli" \
+    --data-urlencode "grant_type=password" \
+    --data-urlencode "username=${user}" \
+    --data-urlencode "password@-" \
+    "${kc_base}/realms/${realm}/protocol/openid-connect/token" 2>/dev/null \
+    | kc_json "$json_tool" token) || token=""
+  printf '%s' "$token"
+}
+
+# PUTs a password credential for a user. The JSON body is built from stdin and
+# streamed to curl, again keeping the password out of argv. Prints the HTTP
+# status. Args: kc_base json_tool realm user_id password temporary(true|false)
+kc_reset_password() {
+  local kc_base="$1" json_tool="$2" realm="$3" user_id="$4" password="$5" temporary="$6" status=""
+  status=$(printf '%s' "$password" | kc_json "$json_tool" password-body "$temporary" | curl -s -o /dev/null -w "%{http_code}" -X PUT \
+    -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
+    -H "Content-Type: application/json" \
+    --data-binary @- \
+    "${kc_base}/admin/realms/${realm}/users/${user_id}/reset-password" 2>/dev/null) || status="000"
+  printf '%s' "$status"
+}
+
+# Logs in to the master realm as the bootstrap admin and leaves the token in
+# KC_ADMIN_TOKEN (empty on failure). Called directly, never in $(...), so the
+# token survives.
+#
+# KEYCLOAK_ADMIN_PASSWORD is tried first. A stack whose keycloak-data volume
+# predates generated passwords still answers to the admin/admin that
+# docker-compose.auth.yml used to hard-code — Keycloak reads the bootstrap
+# password only when it first creates the master realm — so that is tried next
+# and, when it works, rotated to KEYCLOAK_ADMIN_PASSWORD on the spot. After that
+# the password in .env is the one that is true.
+keycloak_admin_login() {
+  local kc_base="$1" json_tool="$2"
+  local user="${KEYCLOAK_ADMIN_USERNAME:-admin}"
+  KC_ADMIN_TOKEN=$(kc_password_token "$kc_base" "$json_tool" master "$user" "$KEYCLOAK_ADMIN_PASSWORD")
+  [[ -n "$KC_ADMIN_TOKEN" ]] && return 0
+  [[ "$user" == "admin" && "$KEYCLOAK_ADMIN_PASSWORD" != "admin" ]] || return 0
+
+  KC_ADMIN_TOKEN=$(kc_password_token "$kc_base" "$json_tool" master admin admin)
+  [[ -n "$KC_ADMIN_TOKEN" ]] || return 0
+
+  local users_json admin_id status
+  users_json=$(curl -sf -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
+    "${kc_base}/admin/realms/master/users?username=admin&exact=true" 2>/dev/null) || users_json=""
+  admin_id=$(printf '%s' "$users_json" | kc_json "$json_tool" first-id) || admin_id=""
+  if [[ -n "$admin_id" && -n "$KEYCLOAK_ADMIN_PASSWORD" ]]; then
+    status=$(kc_reset_password "$kc_base" "$json_tool" master "$admin_id" "$KEYCLOAK_ADMIN_PASSWORD" false)
+  else
+    status="000"
+  fi
+  echo ""
+  if [[ "$status" == "204" ]]; then
+    KC_ADMIN_ROTATED=true
+    warn "Keycloak still had the old admin/admin console login — changed it to KEYCLOAK_ADMIN_PASSWORD in ${EDDI_DIR}/.env"
+  else
+    warn "Keycloak still accepts admin/admin and it could not be changed (HTTP ${status})."
+    echo -e "     ${DIM}Change it now: http://localhost:${KEYCLOAK_PORT:-8180}/admin -> master realm -> Users -> admin -> Credentials${RESET}"
+  fi
+}
+
+# Gives realm accounts a first, one-time password, so a fresh --with-auth
+# install can actually be logged into: the realm seeds every account with its
+# roles and NO credential. `eddi` (the administrator) always; `viewer` and
+# `user` only with --demo-users. The password is temporary — Keycloak demands a
+# new one at the first login — and an account that already has a password is
+# never touched, so a re-run changes nothing. Results go to FIRST_LOGIN_PASSWORDS
+# for print_success.
+# Args: kc_base json_tool
+set_first_login_passwords() {
+  local kc_base="$1" json_tool="$2"
+  local accounts=(eddi)
+  [[ "$DEMO_USERS" == "true" ]] && accounts+=(viewer user)
+  # Reset per call: configure_first_logins and repair_running_keycloak can both
+  # run it, and the banner must not list an account twice.
+  FIRST_LOGIN_PASSWORDS=()
+  LEGACY_FIXTURE_LOGINS=()
+
+  echo -ne "  Setting first-login passwords  "
+  if [[ -z "$KC_ADMIN_TOKEN" ]]; then
+    echo -e "${YELLOW}⚠️${RESET}  ${DIM}(not logged in to the Keycloak admin API — set them in the admin console)${RESET}"
+    return 0
+  fi
+
+  local account users_json user_id creds_json cred_count password status problems=""
+  for account in "${accounts[@]}"; do
+    users_json=$(curl -sf -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
+      "${kc_base}/admin/realms/eddi/users?username=${account}&exact=true" 2>/dev/null) || users_json=""
+    user_id=$(printf '%s' "$users_json" | kc_json "$json_tool" first-id) || user_id=""
+    if [[ -z "$user_id" ]]; then
+      problems="${problems} ${account}(not found)"
+      continue
+    fi
+    creds_json=$(curl -sf -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
+      "${kc_base}/admin/realms/eddi/users/${user_id}/credentials" 2>/dev/null) || creds_json=""
+    cred_count=$(printf '%s' "$creds_json" | kc_json "$json_tool" length) || cred_count=""
+    if [[ -z "$cred_count" ]]; then
+      problems="${problems} ${account}(unreadable)"
+      continue
+    fi
+    if [[ "$cred_count" != "0" ]]; then
+      FIRST_LOGIN_PASSWORDS+=("${account}=")
+      continue
+    fi
+    password=$(generate_password)
+    status=$(kc_reset_password "$kc_base" "$json_tool" eddi "$user_id" "$password" true)
+    if [[ "$status" == "204" ]]; then
+      FIRST_LOGIN_PASSWORDS+=("${account}=${password}")
+    else
+      problems="${problems} ${account}(HTTP ${status})"
+    fi
+  done
+
+  if [[ -z "$problems" ]]; then
+    echo -e "${GREEN}✅${RESET}"
+  else
+    echo -e "${YELLOW}⚠️${RESET}  ${DIM}(not set:${problems} — use the admin console)${RESET}"
+  fi
+
+  # Without --demo-users the fixtures are not touched — but say whether they
+  # can log in. A realm imported before they stopped shipping passwords still
+  # has viewer/viewer and user/user (import is one-shot), and claiming they
+  # "exist without a password" would be wrong exactly there.
+  if [[ "$DEMO_USERS" != "true" ]]; then
+    for account in viewer user; do
+      users_json=$(curl -sf -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
+        "${kc_base}/admin/realms/eddi/users?username=${account}&exact=true" 2>/dev/null) || users_json=""
+      user_id=$(printf '%s' "$users_json" | kc_json "$json_tool" first-id) || user_id=""
+      [[ -n "$user_id" ]] || continue
+      creds_json=$(curl -sf -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
+        "${kc_base}/admin/realms/eddi/users/${user_id}/credentials" 2>/dev/null) || creds_json=""
+      cred_count=$(printf '%s' "$creds_json" | kc_json "$json_tool" length) || cred_count=""
+      if [[ -n "$cred_count" && "$cred_count" != "0" ]]; then
+        LEGACY_FIXTURE_LOGINS+=("$account")
+      fi
+    done
+  fi
+}
+
+# Turns the password grant off on eddi-frontend. Realm import is one-shot, so a
+# realm imported before eddi-realm.json switched it off keeps a public client
+# that trades a username and password for a token without a browser. GET, patch
+# one field, PUT the whole representation (a partial PUT wipes the rest).
+# Prints the HTTP status ("skip" when there is nothing to do).
+# Args: kc_base json_tool client_uuid
+close_spa_password_grant() {
+  local kc_base="$1" json_tool="$2" client_uuid="$3" client_config updated status
+  client_config=$(curl -sf -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
+    "${kc_base}/admin/realms/eddi/clients/${client_uuid}" 2>/dev/null) || client_config=""
+  if [[ -z "$client_config" ]]; then
+    printf '000'
+    return 0
+  fi
+  if [[ "$json_tool" == "jq" ]]; then
+    [[ "$(printf '%s' "$client_config" | jq -r '.directAccessGrantsEnabled // false' 2>/dev/null)" == "true" ]] || { printf 'skip'; return 0; }
+    updated=$(printf '%s' "$client_config" | jq -c '.directAccessGrantsEnabled = false' 2>/dev/null) || updated=""
+  else
+    [[ "$(printf '%s' "$client_config" | python3 -c 'import sys, json; print(str(json.load(sys.stdin).get("directAccessGrantsEnabled", False)).lower())' 2>/dev/null)" == "true" ]] || { printf 'skip'; return 0; }
+    updated=$(printf '%s' "$client_config" | python3 -c 'import sys, json; d = json.load(sys.stdin); d["directAccessGrantsEnabled"] = False; print(json.dumps(d))' 2>/dev/null) || updated=""
+  fi
+  [[ -n "$updated" ]] || { printf '000'; return 0; }
+  status=$(printf '%s' "$updated" | curl -s -o /dev/null -w "%{http_code}" -X PUT \
+    -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" -H "Content-Type: application/json" \
+    --data-binary @- "${kc_base}/admin/realms/eddi/clients/${client_uuid}" 2>/dev/null) || status="000"
+  printf '%s' "$status"
+}
+
+# Appends KEY='value' to .env, 0600. Used only on the already-running path,
+# where .env is not rewritten.
+append_env_line() {
+  (
+    umask 077
+    printf "%s='%s'\n" "$1" "$2" >> "$EDDI_DIR/.env"
+  )
+  chmod 600 "$EDDI_DIR/.env" 2>/dev/null || true
+}
+
+# The already-running path, for an install whose .env predates generated admin
+# passwords. docker-compose.auth.yml / docker-compose.monitoring.yml now refuse
+# to start without KEYCLOAK_ADMIN_PASSWORD / GRAFANA_ADMIN_PASSWORD, so leaving
+# .env as it is breaks the next `eddi update` or `eddi restart`. The running
+# services still answer to the admin/admin the old compose files hard-coded:
+# generate a password, move the service to it, and only THEN write it to .env.
+# When that is not possible (the operator already changed the password), fail
+# with the exact line to add — that password is theirs to supply.
+ensure_stack_passwords_for_running_install() {
+  local json_tool="$1"
+  if grep -q "docker-compose.auth.yml" "$EDDI_DIR/.eddi-config" 2>/dev/null \
+     && [[ -z "$(env_file_value KEYCLOAK_ADMIN_PASSWORD)" ]]; then
+    local kc_port kc_base
+    kc_port=$(env_file_value KEYCLOAK_PORT)
+    kc_base="http://localhost:${kc_port:-8180}"
+    KEYCLOAK_ADMIN_USERNAME="${KEYCLOAK_ADMIN_USERNAME:-admin}"
+    [[ -n "$KEYCLOAK_ADMIN_PASSWORD" ]] || KEYCLOAK_ADMIN_PASSWORD=$(generate_password)
+    KEYCLOAK_PORT="${kc_port:-8180}"
+    KC_ADMIN_ROTATED=false
+    keycloak_admin_login "$kc_base" "$json_tool"
+    # A token that came from the NEW password means the operator had already
+    # set exactly that (only possible when they exported it for this run).
+    if [[ "$KC_ADMIN_ROTATED" == "true" ]] \
+       || [[ -n "$(kc_password_token "$kc_base" "$json_tool" master "$KEYCLOAK_ADMIN_USERNAME" "$KEYCLOAK_ADMIN_PASSWORD")" ]]; then
+      append_env_line KEYCLOAK_ADMIN_USERNAME "$KEYCLOAK_ADMIN_USERNAME"
+      append_env_line KEYCLOAK_ADMIN_PASSWORD "$KEYCLOAK_ADMIN_PASSWORD"
+      info "KEYCLOAK_ADMIN_PASSWORD added to ${EDDI_DIR}/.env"
+    else
+      fail "${EDDI_DIR}/.env has no KEYCLOAK_ADMIN_PASSWORD, and docker-compose.auth.yml now refuses to start without one — the next 'eddi update' or 'eddi restart' would fail.\n     The running Keycloak no longer accepts admin/admin, so the installer cannot set it for you. Add your Keycloak console admin password:\n       echo \"KEYCLOAK_ADMIN_PASSWORD='<your console admin password>'\" >> ${EDDI_DIR}/.env\n     then re-run the installer."
+    fi
+  fi
+
+  if grep -q "docker-compose.monitoring.yml" "$EDDI_DIR/.eddi-config" 2>/dev/null \
+     && [[ -z "$(env_file_value GRAFANA_ADMIN_PASSWORD)" ]]; then
+    local g_port g_base g_status body
+    g_port=$(env_file_value GRAFANA_PORT)
+    g_base="http://localhost:${g_port:-3000}"
+    [[ -n "$GRAFANA_ADMIN_PASSWORD" ]] || GRAFANA_ADMIN_PASSWORD=$(generate_password)
+    g_status=$(curl -s -o /dev/null -w "%{http_code}" -u "admin:admin" "${g_base}/api/user" 2>/dev/null) || g_status="000"
+    if [[ "$g_status" == "200" ]]; then
+      if [[ "$json_tool" == "jq" ]]; then
+        body=$(printf '%s' "$GRAFANA_ADMIN_PASSWORD" | jq -Rsc '{oldPassword: "admin", newPassword: ., confirmNew: .}' 2>/dev/null) || body=""
+      else
+        body=$(printf '%s' "$GRAFANA_ADMIN_PASSWORD" | python3 -c 'import sys, json; p = sys.stdin.read(); print(json.dumps({"oldPassword": "admin", "newPassword": p, "confirmNew": p}))' 2>/dev/null) || body=""
+      fi
+      g_status=$(printf '%s' "$body" | curl -s -o /dev/null -w "%{http_code}" -X PUT -u "admin:admin" \
+        -H "Content-Type: application/json" --data-binary @- "${g_base}/api/user/password" 2>/dev/null) || g_status="000"
+    else
+      g_status="none"
+    fi
+    if [[ "$g_status" == "200" ]]; then
+      append_env_line GRAFANA_ADMIN_PASSWORD "$GRAFANA_ADMIN_PASSWORD"
+      warn "Grafana still had the old admin/admin login — changed it to GRAFANA_ADMIN_PASSWORD in ${EDDI_DIR}/.env"
+    else
+      fail "${EDDI_DIR}/.env has no GRAFANA_ADMIN_PASSWORD, and docker-compose.monitoring.yml now refuses to start without one — the next 'eddi update' or 'eddi restart' would fail.\n     Grafana does not accept admin/admin any more, so the installer cannot set it for you. Add your Grafana admin password:\n       echo \"GRAFANA_ADMIN_PASSWORD='<your Grafana admin password>'\" >> ${EDDI_DIR}/.env\n     then re-run the installer."
+    fi
+  fi
+}
+
 # Reads a Keycloak JSON document on stdin with whichever tool
 # configure_keycloak_client found ($1: jq or python3) and prints:
 #   names            the `name` of every entry in a list, one per line
@@ -1060,6 +1416,9 @@ wait_for_ready() {
 #   scope-def NAME   client scope NAME from a realm file's clientScopes, as JSON
 #   first-id         the `id` of the first entry in a list
 #   token            the `access_token` of a token response
+#   length           the number of entries in a list
+#   password-body T  a reset-password body for the password read from stdin
+#                    (raw, not JSON), with "temporary": T
 # Prints nothing when there is no match or the input is not JSON.
 kc_json() {
   local tool="$1" mode="$2" name="${3:-}"
@@ -1070,13 +1429,20 @@ kc_json() {
       scope-def) jq -c --arg n "$name" '[.clientScopes[]? | select(.name == $n)][0] // empty' ;;
       first-id)  jq -r '.[0].id // empty' ;;
       token)     jq -r '.access_token // empty' ;;
+      length)    jq -r 'length' ;;
+      password-body) jq -Rsc --argjson t "$name" '{type: "password", value: ., temporary: $t}' ;;
     esac 2>/dev/null
   else
     python3 -c '
 import sys, json
 mode, name = sys.argv[1], sys.argv[2]
+if mode == "password-body":
+    print(json.dumps({"type": "password", "value": sys.stdin.read(), "temporary": name == "true"}))
+    sys.exit(0)
 d = json.load(sys.stdin)
-if mode == "names":
+if mode == "length":
+    print(len(d))
+elif mode == "names":
     print("\n".join(s.get("name", "") for s in d))
 elif mode == "scope-id":
     print(next((s["id"] for s in d if s.get("name") == name), ""))
@@ -1224,16 +1590,24 @@ repair_running_keycloak() {
     curl -fsSL "${COMPOSE_BASE_URL}/keycloak/eddi-realm.json" -o "$realm_defs" 2>/dev/null || true
   fi
 
+  # The already-running path never ran resolve_stack_passwords; read what the
+  # install stored. ensure_stack_passwords_for_running_install has already
+  # made sure there is something to read (or stopped the run).
+  [[ -n "$KEYCLOAK_ADMIN_USERNAME" ]] || KEYCLOAK_ADMIN_USERNAME=$(env_file_value KEYCLOAK_ADMIN_USERNAME)
+  [[ -n "$KEYCLOAK_ADMIN_PASSWORD" ]] || KEYCLOAK_ADMIN_PASSWORD=$(env_file_value KEYCLOAK_ADMIN_PASSWORD)
+  KEYCLOAK_PORT="${kc_port:-8180}"
+  # print_success shows the login block only for an auth install.
+  WITH_AUTH=true
+
   local admin_token clients_json client_uuid
-  admin_token=$(curl -sf -X POST \
-    -d "client_id=admin-cli&username=admin&password=admin&grant_type=password" \
-    "${kc_base}/realms/master/protocol/openid-connect/token" 2>/dev/null \
-    | kc_json "$json_tool" token) || admin_token=""
+  keycloak_admin_login "$kc_base" "$json_tool"
+  admin_token="$KC_ADMIN_TOKEN"
   if [[ -z "$admin_token" ]]; then
     rm -f "$realm_defs"
-    echo -e "  Checking Keycloak identity scopes  ${YELLOW}⚠️${RESET}  ${DIM}(could not log in to ${kc_base} as admin — see docs/security.md, Identity claims)${RESET}"
+    echo -e "  Checking Keycloak identity scopes  ${YELLOW}⚠️${RESET}  ${DIM}(could not log in to ${kc_base} as ${KEYCLOAK_ADMIN_USERNAME:-admin} — see docs/security.md, Identity claims)${RESET}"
     return 0
   fi
+  set_first_login_passwords "$kc_base" "$json_tool"
   clients_json=$(curl -sf \
     -H "Authorization: Bearer ${admin_token}" \
     "${kc_base}/admin/realms/eddi/clients?clientId=eddi-frontend" 2>/dev/null) || clients_json=""
@@ -1243,6 +1617,17 @@ repair_running_keycloak() {
     echo -e "  Checking Keycloak identity scopes  ${YELLOW}⚠️${RESET}  ${DIM}(eddi-frontend client not found)${RESET}"
     return 0
   fi
+
+  # The fresh-install path closes the password grant inside
+  # configure_keycloak_client; this is the path most re-runs take.
+  local grant_status
+  echo -ne "  Closing the SPA password grant  "
+  grant_status=$(close_spa_password_grant "$kc_base" "$json_tool" "$client_uuid")
+  case "$grant_status" in
+    204)  echo -e "${GREEN}✅${RESET}  ${DIM}(was open)${RESET}" ;;
+    skip) echo -e "${GREEN}✅${RESET}  ${DIM}(already closed)${RESET}" ;;
+    *)    echo -e "${YELLOW}⚠️${RESET}  ${DIM}(HTTP ${grant_status} — turn off Direct access grants on eddi-frontend in the admin console)${RESET}" ;;
+  esac
 
   repair_keycloak_identity_scopes "$kc_base" "$realm_defs" "$json_tool" "$admin_token" "$client_uuid"
   rm -f "$realm_defs"
@@ -1277,16 +1662,9 @@ configure_keycloak_client() {
   done
 
   # Get admin token
-  local admin_token_json admin_token=""
-  admin_token_json=$(curl -sf -X POST \
-    -d "client_id=admin-cli&username=admin&password=admin&grant_type=password" \
-    "${kc_base}/realms/master/protocol/openid-connect/token" 2>/dev/null) || true
-
-  if [[ "$json_tool" == "jq" ]]; then
-    admin_token=$(echo "$admin_token_json" | jq -r '.access_token // empty' 2>/dev/null) || admin_token=""
-  else
-    admin_token=$(echo "$admin_token_json" | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null) || admin_token=""
-  fi
+  local admin_token=""
+  keycloak_admin_login "$kc_base" "$json_tool"
+  admin_token="$KC_ADMIN_TOKEN"
 
   if [[ -z "$admin_token" ]]; then
     echo -e "${YELLOW}⚠️${RESET}  ${DIM}(Keycloak admin API unavailable — CORS origins not updated)${RESET}"
@@ -1315,7 +1693,11 @@ configure_keycloak_client() {
   local https_origin="https://localhost:${EDDI_HTTPS_PORT}"
 
   # GET full client config, patch webOrigins + redirectUris, PUT it back
-  # (partial PUT wipes omitted fields in Keycloak's Admin API)
+  # (partial PUT wipes omitted fields in Keycloak's Admin API). The same PUT
+  # turns the password grant off: realm import is one-shot, so a realm imported
+  # before eddi-realm.json switched it off keeps a public client that trades a
+  # username and password for a token without a browser. The Manager signs in
+  # through the authorization-code flow and never used it.
   local client_config updated_config=""
   client_config=$(curl -sf \
     -H "Authorization: Bearer ${admin_token}" \
@@ -1330,7 +1712,7 @@ configure_keycloak_client() {
     updated_config=$(echo "$client_config" | jq \
       --arg h "$http_origin" \
       --arg s "$https_origin" \
-      '.webOrigins = [$h, $s, "+"] | .redirectUris = ["http://localhost:*", "https://localhost:*", ($h + "/*"), ($s + "/*")]' \
+      '.webOrigins = [$h, $s, "+"] | .redirectUris = ["http://localhost:*", "https://localhost:*", ($h + "/*"), ($s + "/*")] | .directAccessGrantsEnabled = false' \
       2>/dev/null) || updated_config=""
   else
     updated_config=$(echo "$client_config" | \
@@ -1342,6 +1724,7 @@ h = os.environ['HTTP_ORIGIN']
 s = os.environ['HTTPS_ORIGIN']
 d['webOrigins'] = [h, s, '+']
 d['redirectUris'] = ['http://localhost:*', 'https://localhost:*', h + '/*', s + '/*']
+d['directAccessGrantsEnabled'] = False
 print(json.dumps(d))" 2>/dev/null) || updated_config=""
   fi
 
@@ -1556,6 +1939,57 @@ print(', '.join(n for n in names if n in ('eddi-admin', 'eddi-editor')))" 2>/dev
   fi
 }
 
+# Post-start credential steps that must run even when configure_keycloak_client
+# returned early from one of its optional steps.
+configure_first_logins() {
+  local json_tool=""
+  if command -v jq &>/dev/null; then
+    json_tool="jq"
+  elif command -v python3 &>/dev/null; then
+    json_tool="python3"
+  fi
+
+  if [[ "$WITH_AUTH" == "true" && -n "$json_tool" ]]; then
+    local kc_base="http://localhost:${KEYCLOAK_PORT:-8180}"
+    [[ -n "$KC_ADMIN_TOKEN" ]] || keycloak_admin_login "$kc_base" "$json_tool"
+    set_first_login_passwords "$kc_base" "$json_tool"
+    # A stopped legacy stack: .env had no password, this run generated one, but
+    # the existing keycloak-data volume accepts neither it nor admin/admin (the
+    # operator changed the console password). Keycloak started anyway — it reads
+    # the bootstrap password only on first boot — so .env now holds a value
+    # nothing answers to. Say so, with the fix, instead of leaving it silent.
+    if [[ -z "$KC_ADMIN_TOKEN" && "$KC_ADMIN_PASSWORD_GENERATED" == "true" ]]; then
+      echo ""
+      warn "KEYCLOAK_ADMIN_PASSWORD in ${EDDI_DIR}/.env was just generated, but this Keycloak's console does not accept it (nor admin/admin)."
+      echo -e "     ${DIM}Its data volume predates it. Replace the value in .env with your real console admin password, then re-run the installer:${RESET}"
+      echo -e "     ${DIM}  KEYCLOAK_ADMIN_PASSWORD='<your console admin password>'${RESET}"
+    fi
+  fi
+
+  # Grafana, like Keycloak, applies GF_SECURITY_ADMIN_PASSWORD only when it
+  # creates its database. A grafana-data volume from before the compose file
+  # stopped hard-coding admin/admin still answers to it; move it to the
+  # generated password so .env tells the truth.
+  if [[ "$WITH_MONITORING" == "true" && -n "$GRAFANA_ADMIN_PASSWORD" && "$GRAFANA_ADMIN_PASSWORD" != "admin" ]]; then
+    local g_base="http://localhost:${GRAFANA_PORT:-3000}" g_status body
+    g_status=$(curl -s -o /dev/null -w "%{http_code}" -u "admin:admin" "${g_base}/api/user" 2>/dev/null) || g_status="000"
+    if [[ "$g_status" == "200" && -n "$json_tool" ]]; then
+      if [[ "$json_tool" == "jq" ]]; then
+        body=$(printf '%s' "$GRAFANA_ADMIN_PASSWORD" | jq -Rsc '{oldPassword: "admin", newPassword: ., confirmNew: .}' 2>/dev/null) || body=""
+      else
+        body=$(printf '%s' "$GRAFANA_ADMIN_PASSWORD" | python3 -c 'import sys, json; p = sys.stdin.read(); print(json.dumps({"oldPassword": "admin", "newPassword": p, "confirmNew": p}))' 2>/dev/null) || body=""
+      fi
+      g_status=$(printf '%s' "$body" | curl -s -o /dev/null -w "%{http_code}" -X PUT -u "admin:admin" \
+        -H "Content-Type: application/json" --data-binary @- "${g_base}/api/user/password" 2>/dev/null) || g_status="000"
+      if [[ "$g_status" == "200" ]]; then
+        warn "Grafana still had the old admin/admin login — changed it to GRAFANA_ADMIN_PASSWORD in ${EDDI_DIR}/.env"
+      else
+        warn "Grafana still accepts admin/admin and it could not be changed (HTTP ${g_status}) — change it in Grafana's profile page."
+      fi
+    fi
+  fi
+}
+
 # ── Success banner ────────────────────────────────────────
 
 print_success() {
@@ -1569,24 +2003,72 @@ print_success() {
 
   if [[ "$WITH_MONITORING" == "true" ]]; then
     echo ""
-    echo -e "  ${BOLD}Grafana${RESET}    →  ${CYAN}http://localhost:${GRAFANA_PORT}${RESET}  ${DIM}(admin/admin)${RESET}"
+    echo -e "  ${BOLD}Grafana${RESET}    →  ${CYAN}http://localhost:${GRAFANA_PORT}${RESET}  ${DIM}(admin / GRAFANA_ADMIN_PASSWORD in ${EDDI_DIR}/.env)${RESET}"
     echo -e "  ${BOLD}Prometheus${RESET} →  ${CYAN}http://localhost:${PROMETHEUS_PORT}${RESET}"
     echo -e "  ${BOLD}Jaeger${RESET}     →  ${CYAN}http://localhost:${JAEGER_PORT}${RESET}  ${DIM}(trace visualization)${RESET}"
+    if [[ "$WITH_AUTH" == "true" ]]; then
+      # /q/metrics is authenticated once Keycloak is on, so the stock scrape
+      # config gets 401 — say so rather than leave an empty dashboard.
+      echo -e "  ${YELLOW}⚠️${RESET}  ${DIM}With Keycloak on, Prometheus needs a token to scrape EDDI (the target shows DOWN until then):${RESET}"
+      echo -e "     ${DIM}https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#scraping-with-authentication-on${RESET}"
+    fi
   fi
 
   if [[ "$WITH_AUTH" == "true" ]]; then
     echo ""
-    echo -e "  ${BOLD}┌─ 🔐 Login Credentials ─────────────────────────────┐${RESET}"
-    echo -e "  ${BOLD}│${RESET}                                                    ${BOLD}│${RESET}"
-    echo -e "  ${BOLD}│${RESET}  EDDI Admin:  ${CYAN}eddi / eddi${RESET}  (change on first login) ${BOLD}│${RESET}"
-    echo -e "  ${BOLD}│${RESET}  Read-only:   ${CYAN}viewer / viewer${RESET}                      ${BOLD}│${RESET}"
-    echo -e "  ${BOLD}│${RESET}                                                    ${BOLD}│${RESET}"
-    # Padded to the width of the default URL so the box stays square
-    local kc_url
-    printf -v kc_url '%-21s' "http://localhost:${KEYCLOAK_PORT}"
-    echo -e "  ${BOLD}│${RESET}  Keycloak Console:  ${CYAN}${kc_url}${RESET}           ${BOLD}│${RESET}"
-    echo -e "  ${BOLD}│${RESET}  Console Admin:     ${CYAN}admin / admin${RESET}                  ${BOLD}│${RESET}"
-    echo -e "  ${BOLD}└────────────────────────────────────────────────────┘${RESET}"
+    echo -e "  ${BOLD}─── 🔐 Login ───────────────────────────────────────${RESET}"
+    # Each is a ONE-TIME password that Keycloak replaces at the first login. An
+    # account that already had a password was left alone, so a re-run prints
+    # nothing new for it.
+    #
+    # On a terminal it is printed. Anywhere else — the GCP startup script, CI,
+    # a piped `curl | bash` into a log — stdout ends up in a log store (the
+    # serial console, Cloud Logging) that more people can read than should be
+    # able to become the EDDI administrator. There the passwords go to a 0600
+    # file and only its path is printed.
+    local entry account password printed=false secrets_file=""
+    if [[ ! -t 1 ]]; then
+      secrets_file="$EDDI_DIR/first-login.txt"
+      # Replaced, not appended to, when this run has new passwords: a previous
+      # run's one-time password is used up or superseded.
+      if printf '%s\n' "${FIRST_LOGIN_PASSWORDS[@]+"${FIRST_LOGIN_PASSWORDS[@]}"}" | grep -q '=.'; then
+        ( umask 077; : > "$secrets_file" )
+      fi
+    fi
+    for entry in "${FIRST_LOGIN_PASSWORDS[@]+"${FIRST_LOGIN_PASSWORDS[@]}"}"; do
+      account="${entry%%=*}"
+      password="${entry#*=}"
+      printed=true
+      if [[ -z "$password" ]]; then
+        echo -e "  ${BOLD}${account}${RESET}  ${DIM}(already had a password — unchanged)${RESET}"
+      elif [[ -n "$secrets_file" ]]; then
+        (
+          umask 077
+          printf '%s / %s  (one-time: Keycloak asks for a new password at the first login)\n' "$account" "$password" >> "$secrets_file"
+        )
+        chmod 600 "$secrets_file" 2>/dev/null || true
+        echo -e "  ${BOLD}${account}${RESET}  ${DIM}(one-time password written to ${secrets_file} — delete the file after the first login)${RESET}"
+      else
+        echo -e "  ${BOLD}${account}${RESET} / ${CYAN}${password}${RESET}  ${DIM}(one-time — you choose a new one at first login)${RESET}"
+      fi
+    done
+    if [[ "$printed" != "true" ]]; then
+      echo -e "  ${DIM}No account in the eddi realm has a password yet. Set one in the${RESET}"
+      echo -e "  ${DIM}Keycloak console below: Users -> eddi -> Credentials -> Set password.${RESET}"
+    fi
+    if [[ "$DEMO_USERS" != "true" ]]; then
+      if [[ ${#LEGACY_FIXTURE_LOGINS[@]} -gt 0 ]]; then
+        warn "${LEGACY_FIXTURE_LOGINS[*]} still has a password. On a realm imported before"
+        echo -e "     ${DIM}they stopped shipping one that is viewer/viewer and user/user — anyone who can${RESET}"
+        echo -e "     ${DIM}reach Keycloak can log in. Reset or delete it: console -> Users -> <name> -> Credentials.${RESET}"
+      else
+        echo -e "  ${DIM}viewer (read-only) and user (end user) have no password; re-run${RESET}"
+        echo -e "  ${DIM}with --demo-users, or set one in the console, to use them.${RESET}"
+      fi
+    fi
+    echo ""
+    echo -e "  ${BOLD}Keycloak console${RESET}  →  ${CYAN}http://localhost:${KEYCLOAK_PORT}/admin${RESET}"
+    echo -e "  ${DIM}  ${KEYCLOAK_ADMIN_USERNAME:-admin} / KEYCLOAK_ADMIN_PASSWORD in ${EDDI_DIR}/.env${RESET}"
   fi
 
   echo ""
@@ -1796,6 +2278,21 @@ case "${1:-help}" in
       fi
     fi
 
+    # The refreshed auth/monitoring overlays have no default admin password and
+    # refuse to start without one. Say so here, with the fix, rather than let
+    # compose stop halfway through an update.
+    for required in "docker-compose.auth.yml:KEYCLOAK_ADMIN_PASSWORD" "docker-compose.monitoring.yml:GRAFANA_ADMIN_PASSWORD"; do
+      overlay="${required%%:*}"; variable="${required#*:}"
+      if printf '%s\n' "${COMPOSE_FILE_LIST[@]}" | grep -q "/${overlay}$" \
+         && ! grep -q "^${variable}=." "$ENV_FILE" 2>/dev/null; then
+        echo "" >&2
+        echo "Aborting before restart: ${overlay} now needs ${variable} in ${ENV_FILE}," >&2
+        echo "and this install predates it. Re-run the install script — it generates the" >&2
+        echo "password, moves the running service to it and records it." >&2
+        exit 1
+      fi
+    done
+
     echo ""
     echo "Pulling images..."
     docker compose "${compose_args[@]}" pull
@@ -1903,6 +2400,18 @@ EDDI_HTTPS_PORT=$EDDI_HTTPS_PORT
 CFGEOF
       chmod 600 "$EDDI_DIR/.eddi-config"
     fi
+    if grep -qE "docker-compose\.(auth|monitoring)\.yml" "$EDDI_DIR/.eddi-config" 2>/dev/null; then
+      local running_json_tool=""
+      if command -v jq &>/dev/null; then
+        running_json_tool="jq"
+      elif command -v python3 &>/dev/null; then
+        running_json_tool="python3"
+      fi
+      if [[ -n "$running_json_tool" ]]; then
+        ensure_stack_passwords_for_running_install "$running_json_tool"
+      fi
+      grep -q "docker-compose.monitoring.yml" "$EDDI_DIR/.eddi-config" 2>/dev/null && WITH_MONITORING=true
+    fi
     repair_running_keycloak
     install_cli_wrapper
     print_success
@@ -1915,6 +2424,7 @@ CFGEOF
   wizard_auth
   wizard_monitoring
   wizard_ports
+  resolve_stack_passwords
 
   # Show chosen config
   print_config_summary
@@ -1924,6 +2434,7 @@ CFGEOF
   start_eddi
   wait_for_ready
   configure_keycloak_client
+  configure_first_logins
 
   # Install CLI wrapper
   install_cli_wrapper

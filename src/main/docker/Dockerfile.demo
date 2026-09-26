@@ -51,7 +51,20 @@ COPY docs/ docs/
 # top-level *.md is reachable at runtime, and four of those pages are internal.
 RUN rm -f docs/changelog.md docs/code-review-standards.md docs/incident-response.md docs/SUMMARY.md
 
+# The Manager and the Chat UI. `package` builds both (frontend-maven-plugin in
+# prepare-package: it downloads Node into ui/node, then `npm ci` and
+# `npm run build` in each), and the demo's own story runs through the Manager —
+# the Platform Operator, the wizard, HITL approvals. Without this COPY the ui/
+# directory did not exist in the build context, `npm ci` failed on a missing
+# package.json, and the documented `docker compose -f docker-compose.openwebui.yml
+# up --build` never produced an image. Copied after src/ and docs/ so a UI edit
+# does not invalidate the dependency layer above; node_modules, ui/node and dist
+# are kept out by Dockerfile.demo.dockerignore, so this is the committed sources
+# and lockfiles only.
+COPY ui/ ui/
+
 RUN --mount=type=cache,target=/root/.m2 \
+    --mount=type=cache,target=/root/.npm \
     mvn -B package -DskipTests
 
 # ── Runtime ──

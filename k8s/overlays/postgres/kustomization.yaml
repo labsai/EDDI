@@ -5,6 +5,10 @@
 #   1. Deploys PostgreSQL 16 as a StatefulSet with persistent storage
 #   2. Patches the EDDI ConfigMap to activate the postgres profile
 #   3. Injects JDBC credentials from postgres-secrets
+#   4. Admits only the EDDI pod to PostgreSQL (postgres-network-policy.yaml)
+#
+# ⚠️  CREATE postgres-secrets FIRST — it is no longer shipped. The command is in
+# the header of postgres-secret.yaml.example; the pods wait for it.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -14,7 +18,7 @@ resources:
   - ../../base
   - postgres-statefulset.yaml
   - postgres-service.yaml
-  - postgres-secret.yaml
+  - postgres-network-policy.yaml
 
 # Patch the EDDI ConfigMap to switch to PostgreSQL mode
 patches:

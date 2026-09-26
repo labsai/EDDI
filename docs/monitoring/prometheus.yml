@@ -15,3 +15,14 @@ scrape_configs:
           environment: "production"
     # Increase scrape timeout for large metric sets
     scrape_timeout: 10s
+    # With authentication on (docker-compose.auth.yml, install.sh --full),
+    # /q/metrics answers 401 to an anonymous scrape and this target shows DOWN.
+    # Uncomment and create the client described in monitoring-guide.md
+    # ("Scraping with authentication on"), mounting its secret into the
+    # container — or set EDDI_METRICS_HTTP_POLICY=permit where /q/metrics cannot
+    # be reached from outside.
+    # oauth2:
+    #   client_id: eddi-metrics
+    #   client_secret_file: /etc/prometheus/secrets/client-secret
+    #   token_url: http://keycloak:8080/realms/eddi/protocol/openid-connect/token
+    #   scopes: [openid]
