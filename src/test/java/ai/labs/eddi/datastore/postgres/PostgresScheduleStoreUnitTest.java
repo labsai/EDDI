@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.datastore.postgres;
 
+import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
@@ -712,6 +713,44 @@ class PostgresScheduleStoreUnitTest {
         verify(connection).prepareStatement(sql.capture());
         assertTrue(sql.getValue().contains("agent_id = ? AND metadata->>'hitlType' IS DISTINCT FROM 'hitl_timeout'"),
                 "the redaction must AND onto the agent filter: " + sql.getValue());
+    }
+
+    /**
+     * H2a: owner scoping is part of the query for the same paging reason as the
+     * HITL redaction. Placeholders only; the principal is bound, never spliced.
+     */
+    @Test
+    void readAllSchedules_scopedToACaller_filtersAndBindsInTheQuery() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+
+        sut.readAllSchedules(50, 10, true, new IScheduleStore.ListingScope("alice", false));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertTrue(sql.getValue().contains("(user_id = ? OR ((user_id IS NULL OR user_id = '' OR user_id LIKE 'system:%') "
+                + "AND created_by = ?))"), sql.getValue());
+        assertTrue(sql.getValue().indexOf("user_id = ?") < sql.getValue().indexOf("LIMIT"), sql.getValue());
+        assertFalse(sql.getValue().contains("alice"), "the principal must be bound, not spliced: " + sql.getValue());
+        verify(preparedStatement).setString(1, "alice");
+        verify(preparedStatement).setString(2, "alice");
+        verify(preparedStatement).setInt(3, 50);
+        verify(preparedStatement).setInt(4, 10);
+    }
+
+    @Test
+    void readSchedulesByAgentId_scopedIncludingUnowned_bindsAfterTheAgent() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+
+        sut.readSchedulesByAgentId("agent-1", 50, 0, false, new IScheduleStore.ListingScope("alice", true));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertTrue(sql.getValue().contains("agent_id = ? AND (user_id = ? OR (user_id IS NULL"), sql.getValue());
+        assertFalse(sql.getValue().contains("created_by = ?"), "includeUnowned admits every unowned row: " + sql.getValue());
+        verify(preparedStatement).setString(1, "agent-1");
+        verify(preparedStatement).setString(2, "alice");
+        verify(preparedStatement).setInt(3, 50);
+        verify(preparedStatement).setInt(4, 0);
     }
 
     @Test

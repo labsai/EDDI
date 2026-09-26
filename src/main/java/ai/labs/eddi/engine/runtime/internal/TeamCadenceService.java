@@ -32,6 +32,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Executes team cadences (I13): scheduled pulls from a {@link GroupWorkspace}'s
@@ -167,8 +168,22 @@ public class TeamCadenceService {
      * Handles one schedule fire. Never throws — every failure lands in the result's
      * {@code error}, so the fire log records it and the schedule's retry/backoff
      * machinery decides what happens next.
+     * <p>
+     * <b>Only the schedule the cadence registered may fire it.</b> The metadata
+     * names a group and a cadence, and metadata is just data on a schedule row: a
+     * schedule forged to carry another team's ids would otherwise pull that team's
+     * backlog and run it as the cadence's creator, with no access check anywhere on
+     * the way. {@code Cadence.scheduleRef} is the id {@code RestGroupWorkspace}
+     * stored when it created the real schedule, so a fire from any other schedule
+     * is refused — as a failure, so the impostor retries into the dead-letter queue
+     * where an operator will see it, rather than succeeding quietly.
+     *
+     * @param scheduleId
+     *            the id of the schedule that is firing
+     * @param metadata
+     *            that schedule's metadata
      */
-    public CadenceResult processScheduledFire(Map<String, Object> metadata) {
+    public CadenceResult processScheduledFire(String scheduleId, Map<String, Object> metadata) {
         String groupId = metadata != null ? String.valueOf(metadata.get(METADATA_GROUP_ID_KEY)) : null;
         String cadenceId = metadata != null ? String.valueOf(metadata.get(METADATA_CADENCE_ID_KEY)) : null;
         if (groupId == null || "null".equals(groupId) || cadenceId == null || "null".equals(cadenceId)) {
@@ -178,6 +193,17 @@ public class TeamCadenceService {
             GroupWorkspace workspace = workspaceStore.find(groupId);
             if (workspace == null) {
                 return CadenceResult.failed(groupId, cadenceId, "No workspace exists for group " + groupId);
+            }
+
+            Cadence registered = workspace.getCadences().stream()
+                    .filter(c -> cadenceId.equals(c.cadenceId()))
+                    .findFirst().orElse(null);
+            if (registered != null && !Objects.equals(registered.scheduleRef(), scheduleId)) {
+                LOGGER.warnf("Refused a fire of cadence %s for group %s from schedule %s — the cadence is registered to "
+                        + "schedule %s", LogSanitizer.sanitize(cadenceId), LogSanitizer.sanitize(groupId),
+                        LogSanitizer.sanitize(scheduleId), LogSanitizer.sanitize(registered.scheduleRef()));
+                return CadenceResult.failed(groupId, cadenceId, "This schedule is not the one registered for cadence "
+                        + cadenceId + " — refusing to run the group's backlog from it. Delete this schedule.");
             }
 
             // 1. Reconcile a previous run before anything else.

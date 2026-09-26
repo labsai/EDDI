@@ -681,17 +681,19 @@ public class PostgresScheduleStore implements IScheduleStore {
     }
 
     @Override
-    public List<ScheduleConfiguration> readAllSchedules(int limit, int offset, boolean excludeHitlTimeouts)
+    public List<ScheduleConfiguration> readAllSchedules(int limit, int offset, boolean excludeHitlTimeouts, ListingScope scope)
             throws IResourceStore.ResourceStoreException {
         ensureSchema();
         // id is the tie-breaker: created_at alone is not unique (bulk-created HITL
         // timeout or cadence schedules share a millisecond), and a non-deterministic
         // order makes paging skip and repeat rows.
-        String sql = "SELECT * FROM eddi_schedules" + hitlRedactionClause(excludeHitlTimeouts, " WHERE ")
+        String hitl = hitlRedactionClause(excludeHitlTimeouts, " WHERE ");
+        String sql = "SELECT * FROM eddi_schedules" + hitl + scopeClause(scope, hitl.isEmpty() ? " WHERE " : " AND ")
                 + " ORDER BY created_at DESC NULLS LAST, id DESC LIMIT ? OFFSET ?";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setInt(1, limit);
-            ps.setInt(2, Math.max(0, offset));
+            int next = bindScope(ps, 1, scope);
+            ps.setInt(next, limit);
+            ps.setInt(next + 1, Math.max(0, offset));
             return readScheduleList(ps);
         } catch (SQLException e) {
             throw new IResourceStore.ResourceStoreException("Failed to read all schedules", e);
@@ -700,19 +702,21 @@ public class PostgresScheduleStore implements IScheduleStore {
 
     @Override
     public List<ScheduleConfiguration> readSchedulesByAgentId(String agentId) throws IResourceStore.ResourceStoreException {
-        return readSchedulesByAgentId(agentId, 500, 0, false);
+        return readSchedulesByAgentId(agentId, 500, 0, false, ListingScope.UNRESTRICTED);
     }
 
     @Override
-    public List<ScheduleConfiguration> readSchedulesByAgentId(String agentId, int limit, int offset, boolean excludeHitlTimeouts)
+    public List<ScheduleConfiguration> readSchedulesByAgentId(String agentId, int limit, int offset, boolean excludeHitlTimeouts,
+                                                              ListingScope scope)
             throws IResourceStore.ResourceStoreException {
         ensureSchema();
         String sql = "SELECT * FROM eddi_schedules WHERE agent_id = ?" + hitlRedactionClause(excludeHitlTimeouts, " AND ")
-                + " ORDER BY created_at DESC NULLS LAST, id DESC LIMIT ? OFFSET ?";
+                + scopeClause(scope, " AND ") + " ORDER BY created_at DESC NULLS LAST, id DESC LIMIT ? OFFSET ?";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, agentId);
-            ps.setInt(2, limit);
-            ps.setInt(3, Math.max(0, offset));
+            int next = bindScope(ps, 2, scope);
+            ps.setInt(next, limit);
+            ps.setInt(next + 1, Math.max(0, offset));
             return readScheduleList(ps);
         } catch (SQLException e) {
             throw new IResourceStore.ResourceStoreException("Failed to read schedules for agent " + agentId, e);
@@ -732,6 +736,36 @@ public class PostgresScheduleStore implements IScheduleStore {
      * or none carrying {@code hitlType}, yields SQL NULL there, and {@code <>}
      * would drop every one of those rows — which is every ordinary schedule.
      */
+    /**
+     * The caller's {@link ListingScope} as a SQL fragment introduced by
+     * {@code keyword}, or an empty string when unrestricted. Only placeholders
+     * carry caller data; {@link #bindScope} fills them. See {@code ListingScope}
+     * for the rule.
+     */
+    static String scopeClause(ListingScope scope, String keyword) {
+        if (scope == null || scope.isUnrestricted()) {
+            return "";
+        }
+        String unowned = "(user_id IS NULL OR user_id = '' OR user_id LIKE '" + ListingScope.SYSTEM_IDENTITY_PREFIX + "%')";
+        String admittedUnowned = scope.includeUnowned() ? unowned : "(" + unowned + " AND created_by = ?)";
+        return keyword + "(user_id = ? OR " + admittedUnowned + ")";
+    }
+
+    /**
+     * Binds {@link #scopeClause}'s placeholders from {@code index}; returns the
+     * next free index.
+     */
+    private static int bindScope(PreparedStatement ps, int index, ListingScope scope) throws SQLException {
+        if (scope == null || scope.isUnrestricted()) {
+            return index;
+        }
+        ps.setString(index++, scope.principal());
+        if (!scope.includeUnowned()) {
+            ps.setString(index++, scope.principal());
+        }
+        return index;
+    }
+
     private static String hitlRedactionClause(boolean excludeHitlTimeouts, String keyword) {
         if (!excludeHitlTimeouts) {
             return "";

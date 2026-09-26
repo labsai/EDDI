@@ -516,7 +516,7 @@ public class ScheduleFireExecutor {
         boolean interrupted = false;
 
         try {
-            TeamCadenceService.CadenceResult result = teamCadenceService.processScheduledFire(schedule.getMetadata());
+            TeamCadenceService.CadenceResult result = teamCadenceService.processScheduledFire(schedule.getId(), schedule.getMetadata());
             conversationId = result.discussionId();
             if (result.isSuccess()) {
                 status = ScheduleConfiguration.FireStatus.COMPLETED.name();
