@@ -199,6 +199,41 @@ class ZipArchiveTest {
         assertTrue(thrown.getMessage().contains(ZipArchive.MAX_ENTRY_BYTES_PROPERTY), thrown.getMessage());
     }
 
+    /**
+     * ZipInputStream trusts a STORED entry's header for how much to read, but a
+     * DEFLATED entry's declared size is only compared after the data has been
+     * inflated. Here the local header claims 16 bytes for an entry that inflates to
+     * 2 MiB: the limit must trip while inflating, on the bytes actually produced.
+     */
+    @Test
+    void unzip_entryWhoseHeaderUnderstatesItsSize_isStillRefused(@TempDir Path tempDir) throws IOException {
+        byte[] zip = zipOf(1, 2 * 1024 * 1024);
+        // Local file header: signature at 0, general-purpose flag at 6, uncompressed
+        // size at 22. Clear the data-descriptor bit so the header's own size is the one
+        // on record, and make it lie.
+        assertEquals(0x04034b50, readIntLe(zip, 0));
+        zip[6] = (byte) (zip[6] & ~0x08);
+        writeIntLe(zip, 22, 16);
+        var limited = new ZipArchive(10_000, 1024 * 1024, 256L * 1024 * 1024);
+
+        File targetDir = tempDir.resolve("extracted").toFile();
+        var thrown = assertThrows(IOException.class, () -> limited.unzip(new ByteArrayInputStream(zip), targetDir));
+
+        assertTrue(thrown instanceof ZipArchive.ZipLimitExceededException, "tripped by the limit, not by the mismatch: " + thrown);
+        assertTrue(bytesUnder(targetDir.toPath()) <= 1024 * 1024 + 4096, "stopped at the limit");
+    }
+
+    private static int readIntLe(byte[] bytes, int offset) {
+        return (bytes[offset] & 0xff) | (bytes[offset + 1] & 0xff) << 8 | (bytes[offset + 2] & 0xff) << 16 | (bytes[offset + 3] & 0xff) << 24;
+    }
+
+    private static void writeIntLe(byte[] bytes, int offset, int value) {
+        bytes[offset] = (byte) value;
+        bytes[offset + 1] = (byte) (value >>> 8);
+        bytes[offset + 2] = (byte) (value >>> 16);
+        bytes[offset + 3] = (byte) (value >>> 24);
+    }
+
     @Test
     void unzip_moreEntriesThanTheLimit_isRefused(@TempDir Path tempDir) throws IOException {
         byte[] zip = zipOf(11, 10);
@@ -224,7 +259,7 @@ class ZipArchiveTest {
     @Test
     void defaultLimitsAreTheDocumentedOnes() {
         assertEquals(10_000, ZipArchive.DEFAULT_MAX_ENTRIES);
-        assertEquals(64L * 1024 * 1024, ZipArchive.DEFAULT_MAX_ENTRY_BYTES);
+        assertEquals(32L * 1024 * 1024, ZipArchive.DEFAULT_MAX_ENTRY_BYTES);
         assertEquals(256L * 1024 * 1024, ZipArchive.DEFAULT_MAX_TOTAL_BYTES);
     }
 

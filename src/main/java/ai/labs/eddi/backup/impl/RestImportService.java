@@ -1024,25 +1024,45 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      * validation, capability registration and cache invalidation run exactly as on
      * the way in, and history is only ever appended to.
      *
+     * <p>
+     * One resource can be updated more than once by a single merge — two workflows
+     * sharing a dictionary or an LLM config each carry it, and each merges it. Only
+     * the <em>first</em> update snapshots: the second one's "previous" is the
+     * archive's own content, and restoring that would leave the import in place.
+     * Later updates only move the version the single compensation restores over,
+     * which is read when the compensation runs.
+     *
      * @return the URI of the version the update produced, or {@code null} when the
      *         store did not answer 200 - the caller then creates a resource instead
      */
     private <T> URI updateTracked(Class<?> storeClass, String resourceUri, String localId, Integer localVersion, T document,
                                   RestUpdate<T> restUpdate, ImportTransaction transaction) {
-        T previous = readForRollback(storeClass, localId, localVersion);
-        DocumentDescriptor previousDescriptor = readCurrentDescriptorForRollback(localId);
+        ImportTransaction.TrackedUpdate tracked = transaction.trackedUpdate(storeClass, localId);
+        T previous = null;
+        DocumentDescriptor previousDescriptor = null;
+        if (tracked == null) {
+            previous = readForRollback(storeClass, localId, localVersion);
+            previousDescriptor = readCurrentDescriptorForRollback(localId);
+        }
 
         Response response = restUpdate.update(localId, localVersion, document);
         if (response == null || response.getStatus() != 200) {
             return null;
         }
         int newVersion = localVersion + 1;
-        if (previous == null) {
-            LOGGER.warnf("Merge updated %s '%s' without a readable previous version; a failed import cannot restore it",
-                    storeClass.getSimpleName(), LogSanitizer.sanitize(localId));
+        if (tracked != null) {
+            tracked.latestImportedVersion = newVersion;
         } else {
-            transaction.recordCompensation(() -> restorePreviousVersion(storeClass, resourceUri, localId, newVersion, previous,
-                    previousDescriptor, restUpdate));
+            var update = transaction.recordTrackedUpdate(storeClass, localId, newVersion);
+            if (previous == null) {
+                LOGGER.warnf("Merge updated %s '%s' without a readable previous version; a failed import cannot restore it",
+                        storeClass.getSimpleName(), LogSanitizer.sanitize(localId));
+            } else {
+                T original = previous;
+                DocumentDescriptor originalDescriptor = previousDescriptor;
+                transaction.recordCompensation(() -> restorePreviousVersion(storeClass, resourceUri, localId,
+                        update.latestImportedVersion, original, originalDescriptor, restUpdate));
+            }
         }
         return URI.create(resourceUri + localId + IRestVersionInfo.versionQueryParam + newVersion);
     }
@@ -2173,6 +2193,33 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         private final List<CreatedResource> created = new ArrayList<>();
 
         /**
+         * A resource this import updated in place: the version its latest update
+         * produced, which is where the one compensation for it restores over.
+         */
+        static final class TrackedUpdate {
+            int latestImportedVersion;
+
+            TrackedUpdate(int latestImportedVersion) {
+                this.latestImportedVersion = latestImportedVersion;
+            }
+        }
+
+        /**
+         * Keyed by store and id, so a resource merged twice keeps its first snapshot.
+         */
+        private final Map<String, TrackedUpdate> updated = new HashMap<>();
+
+        TrackedUpdate trackedUpdate(Class<?> storeClass, String id) {
+            return updated.get(storeClass.getName() + "/" + id);
+        }
+
+        TrackedUpdate recordTrackedUpdate(Class<?> storeClass, String id, int importedVersion) {
+            var update = new TrackedUpdate(importedVersion);
+            updated.put(storeClass.getName() + "/" + id, update);
+            return update;
+        }
+
+        /**
          * Undo actions for things this import created that are not
          * {@code IResourceStore} resources — a schedule, for instance, lives in
          * {@link IScheduleStore} and has no version or descriptor.
@@ -2918,9 +2965,11 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      * {@code workflowOrder} has no meaning here and is not taken: it reorders an
      * existing agent's workflow list, and a created agent's order is the source's
      * own. {@code selectedResources} is passed on but reaches only the archive's
-     * schedules: {@code createOrUpdateResources} creates every config in a create,
-     * by design — an agent missing the extensions its workflow references would not
-     * run. To promote part of an agent, sync onto an existing one.
+     * schedules and prompt snippets: {@code createOrUpdateResources} creates every
+     * config in a create, by design — an agent missing the extensions its workflow
+     * references would not run. A snippet or schedule left out is simply not
+     * created; the preview's rows for them carry the source ids this selection is
+     * matched against. To promote part of an agent, sync onto an existing one.
      *
      * @return what landed, in the same shape a sync onto an existing agent answers
      */
