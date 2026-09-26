@@ -222,7 +222,7 @@ public class Conversation implements IConversation {
 
         try {
             var lifecycleData = prepareLifecycleData("", context, null);
-            executeConversationStep(lifecycleData, null);
+            executeConversationStep(lifecycleData, null, isSecretInputFlagged(context));
         } finally {
             checkActionsForConversationEnd();
         }
@@ -378,7 +378,7 @@ public class Conversation implements IConversation {
             }
 
             var lifecycleData = prepareLifecycleData(message, contexts, clearedResultTypes);
-            executeConversationStep(lifecycleData, restartTaskTypes);
+            executeConversationStep(lifecycleData, restartTaskTypes, isSecretInputFlagged(contexts));
 
         } catch (LifecycleException.LifecycleInterruptedException e) {
             setConversationState(ConversationState.EXECUTION_INTERRUPTED);
@@ -532,7 +532,47 @@ public class Conversation implements IConversation {
         }
     }
 
-    private void executeConversationStep(List<IData<?>> lifecycleData, List<String> lifecycleTaskTypes)
+    /**
+     * Rewrites the persisted raw user input to the placeholder when the client
+     * flagged the turn's input as secret (🔒 secret mode / a password inputField).
+     * <p>
+     * The plaintext deliberately flowed through the pipeline as transient lifecycle
+     * data — {@code input:initial} (and, after normalizers,
+     * {@code input:normalized}) — so parser, behavior and property tasks ran
+     * normally and a {@code scope: "secret"} property could still vault it. This
+     * runs in the turn's {@code finally}, before the step snapshot is persisted or
+     * returned to the client, so the raw value never survives the turn. Storing the
+     * placeholder replaces the datum by key (the step's data store is keyed), and
+     * it doubles as the audit ledger's signal that the input was a secret
+     * ({@link ai.labs.eddi.engine.audit.TurnAuditBuffer}). Idempotent: a
+     * {@code scope: "secret"} property that already scrubbed leaves nothing to do.
+     */
+    private void scrubSecretUserInput() {
+        IWritableConversationStep currentStep = conversationMemory.getCurrentStep();
+        if (currentStep == null) {
+            return;
+        }
+        boolean hadInput = false;
+        for (String inputKey : List.of(INPUT_INITIAL.key(), MemoryKeys.INPUT_NORMALIZED.key())) {
+            IData<String> inputData = currentStep.getLatestData(inputKey);
+            if (inputData != null && inputData.getResult() != null) {
+                hadInput = true;
+                if (!SECRET_INPUT_PLACEHOLDER.equals(inputData.getResult())) {
+                    var replacement = new Data<>(inputKey, SECRET_INPUT_PLACEHOLDER);
+                    currentStep.storeData(replacement);
+                }
+            }
+        }
+        // The echoed input the client re-reads on reload. Only touched when this turn
+        // actually carried input (never on the empty CONVERSATION_START turn).
+        if (hadInput) {
+            currentStep.resetConversationOutput(INPUT.key());
+            currentStep.addConversationOutputString(INPUT.key(), SECRET_INPUT_PLACEHOLDER);
+        }
+    }
+
+    private void executeConversationStep(List<IData<?>> lifecycleData, List<String> lifecycleTaskTypes,
+                                         boolean secretInput)
             throws LifecycleException {
         boolean paused = false;
         // Audit entries are held until the whole turn has run: only then is it known
@@ -556,6 +596,15 @@ public class Conversation implements IConversation {
             // First, so nothing below — the audit flush, the longTerm write, the
             // stored snapshot, the rendered output — sees a secret context value.
             scrubSecretContextValues();
+            // Then the client-flagged secret INPUT: the plaintext flowed through the
+            // pipeline's transient lifecycle data (so parser / property tasks ran and a
+            // scope='secret' property could vault it), but the persisted + client-visible
+            // copy must never keep it. Must run BEFORE the audit flush, whose
+            // inputWasScrubbed() keys off the placeholder on input:initial to redact the
+            // recorded input from every buffered entry.
+            if (secretInput) {
+                scrubSecretUserInput();
+            }
             if (auditBuffer != null) {
                 auditBuffer.flush(conversationMemory, searchableSecretContextValues());
             }
