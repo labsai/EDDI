@@ -178,6 +178,7 @@ This exists because `PUT /{tenantId}/{keyName}` — the other way to write `allo
 Three properties are worth knowing:
 
 - **`allowedAgents` is required and must not be empty.** Unlike the store endpoint, an omitted list is a `400` rather than a silent default to `["*"]`, and so is `[]` — which every other layer reads as "unrestricted": on an edit, a field missing from a JSON body, or a list filtered down to nothing, must not be able to open a narrowed secret to every agent. Send `["*"]` to mean "all agents". A list that mixes the wildcard with agent IDs, such as `["*", "someAgent"]`, is stored as plain `["*"]`, because that is what it already means to the deploy-time check — so a grant never *reads* narrower than it behaves.
+- **Concurrent edits can be refused instead of lost.** Every edit replaces the whole list, so two operators editing from what they each loaded would otherwise overwrite each other without either finding out — the later write quietly reinstating an agent the earlier one removed. Send the list you loaded as `expectedAllowedAgents` and the write is applied only while the grant is still that list (compared as a set; every spelling of the wildcard is equal). Otherwise the answer is **409** with the grant as it now stands, and nothing is written. A dry run checks the precondition too. Omitting the field keeps the old unconditional behaviour.
 - **Absent means null.** Like every EDDI response, fields whose value is null are omitted — a secret that has never been rotated has no `lastRotatedAt` in the response, rather than `"lastRotatedAt": null`.
 - **It is not a rotation.** `createdAt` and `lastRotatedAt` keep their values and the checksum is unchanged; all three are echoed back so you can see that for yourself. The `SecretResolver` cache is deliberately *not* invalidated — the plaintext cannot have changed, and the grant check reads metadata from the store on every call, so the new grant is in force for the very next deployment either way.
 - **Narrowing a grant is reported, not silently applied.** The response lists every *deployed* agent that references the secret and is no longer granted it:
@@ -226,6 +227,22 @@ database row tells an operator exactly what it means. A tenant holds one DEK row
 generation because [rotation adds one rather than replacing the key](#dek-rotation-is-additive--it-adds-a-generation),
 and ciphertext therefore has to say which key sealed it. A value written before
 generations existed carries no generation and reads as generation 1.
+
+**Ciphertexts are bound to their rows.** A secret is sealed with AES-GCM associated
+data naming its tenant and key name, and a wrapped DEK with associated data naming
+its tenant and generation, so a ciphertext copied into another row by someone with
+write access to the database fails authentication instead of decrypting as that
+row's value. Bound values carry an `a1:` prefix; values written before this carry
+none and keep decrypting without associated data, so nothing has to be migrated.
+A DEK rotation re-seals a tenant's secrets in the bound form, and a KEK rotation
+re-wraps DEKs in it. Values sealed for other subsystems (OAuth connection grants,
+system values) are not bound yet.
+
+**The per-deployment salt is created once, by whichever replica gets there first.**
+It is written with an insert-if-absent and every other replica adopts the winner, so
+two replicas booting against an empty database cannot each derive their KEK from a
+different salt. A salt that cannot be read fails the start: falling back to the
+legacy salt on a deployment that has a random one derives the wrong KEK.
 
 ### Configuration
 
@@ -464,7 +481,7 @@ All endpoints are under the base path `/secretstore/secrets`. All endpoints requ
 
 ### Response Examples
 
-**`PUT /{tenantId}/{keyName}`** — the request body carries the plaintext value, an optional description, and the optional agent grant list (`allowedAgents` defaults to `["*"]` when omitted):
+**`PUT /{tenantId}/{keyName}`** — the request body carries the plaintext value, an optional description, and the optional agent grant list. On a **create**, an omitted `allowedAgents` defaults to `["*"]`. On an **update** — rotating the value — an omitted `allowedAgents` or `description` keeps what is stored: a rotation used to reset a narrowed grant to `["*"]` and wipe the description whenever the client did not restate them.
 
 ```json
 {
@@ -612,9 +629,43 @@ generation for every future rotation as well.
   leaving one behind on the old KEK is exactly the orphaned-key failure generations
   exist to prevent.
 - Secret ciphertexts are NOT modified — only DEK wrappers change
-- Requires an application restart with the new `EDDI_VAULT_MASTER_KEY` after rotation
-- Verify-then-commit: every DEK is decrypted and re-encrypted in memory before any
-  write occurs, so a wrong old key fails before it can half-rewrite the set
+- Requires restarting **every** replica with the new `EDDI_VAULT_MASTER_KEY` after
+  rotation. Until then, the other replicas cannot open the re-wrapped DEKs and refuse
+  to create new ones (see below) rather than wrap them under the retired key.
+
+It cannot be made atomic, so it is ordered to be **re-run with the same two keys**
+wherever it stops:
+
+1. **New salt first.** A deployment still on the legacy salt migrates to a random one
+   during the rotation, and that salt is persisted as *pending* before anything is
+   wrapped under it. It used to exist only in memory until the end, so a failure
+   half-way left DEKs wrapped under a KEK nobody could derive again.
+2. **Verify** — every DEK must open with the old KEK *or the new one*; the second is
+   what an interrupted run leaves behind. A DEK that opens with neither stops the
+   rotation before anything is written.
+3. **Announce** — the vault's KEK check value is switched to the new KEK *before* any
+   DEK is re-wrapped. A replica still on the old master key checks it before wrapping
+   a new DEK and refuses, so no new tenant's key is wrapped under a KEK that is on its
+   way out.
+4. **Re-wrap** each DEK, guarded on the wrapping it was read with, then sweep again
+   for a DEK another replica created in the meantime.
+5. **Promote** the pending salt.
+
+A failure after step 2 answers with how many DEKs are already on the new key and a
+statement that re-running completes the rotation. A replica restarted part-way
+through with the new master key opens DEKs under either KEK and wraps new ones under
+the new one.
+
+#### Resetting a tenant
+
+`POST /{tenantId}/reset` deletes every secret and every DEK generation of the tenant,
+and — before the DEKs go — everything else sealed with them, such as the tenant's
+[OAuth connection grants](connections.md); their users reconnect. Left in place those
+values were not merely unreadable: the tenant's next DEK is generation 1 again, with
+the same `dekId`, so every later read opened them with the wrong key and failed
+authentication on every request. If discarding them fails, the reset stops with the
+DEKs still in place and can be re-run. The reserved tenant `__eddi-system`, which
+seals EDDI's own system values (the audit ledger's pinned key), cannot be reset.
 
 #### Schema
 

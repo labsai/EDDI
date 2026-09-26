@@ -6,6 +6,7 @@ package ai.labs.eddi.secrets.persistence;
 
 import ai.labs.eddi.secrets.model.EncryptedDek;
 import ai.labs.eddi.secrets.model.EncryptedSecret;
+import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import com.mongodb.ErrorCategory;
 import com.mongodb.MongoCommandException;
@@ -14,8 +15,10 @@ import com.mongodb.MongoWriteException;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.FindOneAndUpdateOptions;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
+import com.mongodb.client.model.ReturnDocument;
 import com.mongodb.client.model.Sorts;
 import com.mongodb.client.model.UpdateOptions;
 import com.mongodb.client.model.Updates;
@@ -28,6 +31,7 @@ import org.jboss.logging.Logger;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 
@@ -151,13 +155,23 @@ public class MongoSecretPersistence implements ISecretPersistence {
         try {
             var filter = and(eq(FIELD_TENANT_ID, secret.getTenantId()), eq(FIELD_KEY_NAME, secret.getKeyName()));
 
-            var update = Updates.combine(Updates.set(FIELD_ENCRYPTED_VALUE, secret.getEncryptedValue()), Updates.set(FIELD_IV, secret.getIv()),
-                    Updates.set(FIELD_DEK_ID, secret.getDekId()), Updates.set(FIELD_CHECKSUM, secret.getChecksum()),
-                    Updates.set(FIELD_DESCRIPTION, secret.getDescription()), Updates.set(FIELD_ALLOWED_AGENTS, secret.getAllowedAgents()),
+            var updates = new ArrayList<Bson>(List.of(Updates.set(FIELD_ENCRYPTED_VALUE, secret.getEncryptedValue()),
+                    Updates.set(FIELD_IV, secret.getIv()), Updates.set(FIELD_DEK_ID, secret.getDekId()),
+                    Updates.set(FIELD_CHECKSUM, secret.getChecksum()),
                     Updates.set(FIELD_LAST_ACCESSED_AT, instantToString(secret.getLastAccessedAt())),
                     Updates.set(FIELD_LAST_ROTATED_AT, instantToString(secret.getLastRotatedAt())),
                     Updates.setOnInsert(FIELD_TENANT_ID, secret.getTenantId()), Updates.setOnInsert(FIELD_KEY_NAME, secret.getKeyName()),
-                    Updates.setOnInsert(FIELD_CREATED_AT, instantToString(secret.getCreatedAt())));
+                    Updates.setOnInsert(FIELD_CREATED_AT, instantToString(secret.getCreatedAt()))));
+            // Null means "not supplied" — see ISecretPersistence#upsertSecret. Only an
+            // insert gets the defaults; an update leaves a grant or description it was
+            // not given exactly as it is.
+            if (secret.getDescription() != null) {
+                updates.add(Updates.set(FIELD_DESCRIPTION, secret.getDescription()));
+            }
+            updates.add(secret.getAllowedAgents() != null
+                    ? Updates.set(FIELD_ALLOWED_AGENTS, secret.getAllowedAgents())
+                    : Updates.setOnInsert(FIELD_ALLOWED_AGENTS, List.of(SecretMetadata.WILDCARD_AGENT)));
+            var update = Updates.combine(updates);
 
             secretsCollection.updateOne(filter, update, new UpdateOptions().upsert(true));
         } catch (MongoException e) {
@@ -240,6 +254,35 @@ public class MongoSecretPersistence implements ISecretPersistence {
     }
 
     @Override
+    public boolean updateSecretGrantIfUnchanged(String tenantId, String keyName, List<String> expectedAllowedAgents, List<String> allowedAgents,
+                                                String description) {
+        try {
+            // The precondition is part of the filter, so the check and the write are one
+            // atomic statement: there is no window in which a concurrent edit could land
+            // between them.
+            var filter = and(eq(FIELD_TENANT_ID, tenantId), eq(FIELD_KEY_NAME, keyName), grantEquals(expectedAllowedAgents));
+            var update = Updates.combine(Updates.set(FIELD_ALLOWED_AGENTS, allowedAgents), Updates.set(FIELD_DESCRIPTION, description));
+            return secretsCollection.updateOne(filter, update).getMatchedCount() == 1;
+        } catch (MongoException e) {
+            throw new PersistenceException("Failed to update the grant of secret " + tenantId + "/" + keyName, e);
+        }
+    }
+
+    /**
+     * Matches a stored grant equal to {@code expected} as a set. Order-insensitive
+     * because the order an operator happened to type the ids in is not part of what
+     * a grant means; every spelling of the wildcard matches the wildcard.
+     */
+    private static Bson grantEquals(List<String> expected) {
+        if (SecretMetadata.grantsAllAgents(expected)) {
+            return Filters.or(eq(FIELD_ALLOWED_AGENTS, null), Filters.size(FIELD_ALLOWED_AGENTS, 0),
+                    eq(FIELD_ALLOWED_AGENTS, SecretMetadata.WILDCARD_AGENT));
+        }
+        var distinct = List.copyOf(new LinkedHashSet<>(expected));
+        return and(Filters.all(FIELD_ALLOWED_AGENTS, distinct), Filters.size(FIELD_ALLOWED_AGENTS, distinct.size()));
+    }
+
+    @Override
     public void touchLastAccessed(String tenantId, String keyName, Instant lastAccessedAt) {
         try {
             // One field, no upsert: a resolve must never be able to write back a stale
@@ -287,6 +330,20 @@ public class MongoSecretPersistence implements ISecretPersistence {
             throw new PersistenceException("Failed to insert DEK generation for tenant " + dek.getTenantId(), e);
         } catch (MongoException e) {
             throw new PersistenceException("Failed to insert DEK generation for tenant " + dek.getTenantId(), e);
+        }
+    }
+
+    @Override
+    public boolean updateDekWrapping(EncryptedDek dek, String expectedIv) {
+        RuntimeUtilities.checkNotNull(dek, "dek");
+        try {
+            var filter = and(dekKey(dek.getTenantId(), dek.getGeneration()), eq(FIELD_IV, expectedIv));
+            var update = Updates.combine(Updates.set(FIELD_ENCRYPTED_DEK, dek.getEncryptedDek()), Updates.set(FIELD_IV, dek.getIv()));
+            // No upsert: re-wrapping a generation that no longer exists must not bring it
+            // back.
+            return deksCollection.updateOne(filter, update).getMatchedCount() == 1;
+        } catch (MongoException e) {
+            throw new PersistenceException("Failed to re-wrap DEK generation " + dek.getGeneration() + " for tenant " + dek.getTenantId(), e);
         }
     }
 
@@ -379,6 +436,45 @@ public class MongoSecretPersistence implements ISecretPersistence {
             metaCollection.updateOne(filter, update, new UpdateOptions().upsert(true));
         } catch (MongoException e) {
             throw new PersistenceException("Failed to write meta value: " + key, e);
+        }
+    }
+
+    @Override
+    public String putMetaValueIfAbsent(String key, String value) {
+        var filter = eq("key", key);
+        var update = Updates.combine(Updates.setOnInsert("key", key), Updates.setOnInsert("value", value));
+        try {
+            // $setOnInsert on an upsert, handing back the document as it stands after:
+            // the winner's value whether this call inserted it or found it there.
+            var doc = metaCollection.findOneAndUpdate(filter, update,
+                    new FindOneAndUpdateOptions().upsert(true).returnDocument(ReturnDocument.AFTER));
+            return doc != null ? doc.getString("value") : getMetaValue(key);
+        } catch (MongoCommandException | MongoWriteException e) {
+            // Two concurrent upserts can both miss the filter and race to insert; the
+            // unique index on key refuses the second one. That loser simply reads what
+            // the winner wrote.
+            if (isDuplicateKey(e)) {
+                return getMetaValue(key);
+            }
+            throw new PersistenceException("Failed to write meta value: " + key, e);
+        } catch (MongoException e) {
+            throw new PersistenceException("Failed to write meta value: " + key, e);
+        }
+    }
+
+    private static boolean isDuplicateKey(MongoException e) {
+        if (e instanceof MongoWriteException writeException) {
+            return writeException.getError().getCategory() == ErrorCategory.DUPLICATE_KEY;
+        }
+        return ErrorCategory.fromErrorCode(e.getCode()) == ErrorCategory.DUPLICATE_KEY;
+    }
+
+    @Override
+    public void deleteMetaValue(String key) {
+        try {
+            metaCollection.deleteOne(eq("key", key));
+        } catch (MongoException e) {
+            throw new PersistenceException("Failed to delete meta value: " + key, e);
         }
     }
 

@@ -3,11 +3,11 @@
  */
 package ai.labs.eddi.secrets.impl;
 
+import ai.labs.eddi.secrets.ISecretProvider.GrantConflictException;
 import ai.labs.eddi.secrets.ISecretProvider.SecretNotFoundException;
 import ai.labs.eddi.secrets.ISecretProvider.SecretProviderException;
 import ai.labs.eddi.secrets.crypto.EnvelopeCrypto;
 import ai.labs.eddi.secrets.crypto.VaultSaltManager;
-import ai.labs.eddi.secrets.model.EncryptedDek;
 import ai.labs.eddi.secrets.model.EncryptedSecret;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
@@ -18,13 +18,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -273,6 +267,61 @@ class VaultSecretProviderGrantTest {
         assertNotNull(provider.getMetadata(REF).lastAccessedAt(), "the access is still recorded");
     }
 
+    // ─── S6: an optional precondition on the grant the editor loaded ───
+
+    @Test
+    @DisplayName("a conditional edit whose precondition still holds is applied — order and wildcard spelling do not matter")
+    void conditionalEditApplies() throws Exception {
+        storeSecret(List.of("agent-one", "agent-two"));
+
+        SecretMetadata after = provider.updateGrant(REF, List.of("agent-one"), null, List.of("agent-two", "agent-one"));
+
+        assertEquals(List.of("agent-one"), after.allowedAgents());
+        assertEquals(List.of("agent-one"), provider.getMetadata(REF).allowedAgents());
+
+        // [] and ["*"] both mean every agent, so either spelling matches the other.
+        provider.updateGrant(REF, List.of("*"), null);
+        assertEquals(List.of("agent-two"), provider.updateGrant(REF, List.of("agent-two"), null, List.of()).allowedAgents());
+    }
+
+    /**
+     * S6: two operators editing the same grant from what they each loaded. Without
+     * a precondition the later write silently reinstated the agent the earlier one
+     * had just removed.
+     */
+    @Test
+    @DisplayName("a conditional edit built on a stale grant is refused with the current grant, and writes nothing")
+    void staleConditionalEditIsRefused() throws Exception {
+        storeSecret(List.of("agent-one", "agent-two"));
+        provider.updateGrant(REF, List.of("agent-one"), null); // the other operator's narrowing
+
+        var conflict = assertThrows(GrantConflictException.class,
+                () -> provider.updateGrant(REF, List.of("agent-one", "agent-two", "agent-three"), null, List.of("agent-one", "agent-two")));
+
+        assertEquals(List.of("agent-one"), conflict.getCurrentAllowedAgents());
+        assertEquals(List.of("agent-one"), provider.getMetadata(REF).allowedAgents());
+    }
+
+    @Test
+    @DisplayName("an edit landing between the conditional edit's read and its write is still detected")
+    void conditionalEditLosesARaceCleanly() throws Exception {
+        storeSecret(List.of("agent-one", "agent-two"));
+
+        persistence.afterNextFind = () -> {
+            try {
+                provider.updateGrant(REF, List.of("agent-two"), null);
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+        };
+
+        var conflict = assertThrows(GrantConflictException.class,
+                () -> provider.updateGrant(REF, List.of("agent-one", "agent-two", "agent-three"), null, List.of("agent-one", "agent-two")));
+
+        assertEquals(List.of("agent-two"), conflict.getCurrentAllowedAgents());
+        assertEquals(List.of("agent-two"), provider.getMetadata(REF).allowedAgents(), "the concurrent edit must survive");
+    }
+
     // ─── Absent secrets ───
 
     @Test
@@ -293,161 +342,6 @@ class VaultSecretProviderGrantTest {
         unavailable.initMetrics();
 
         assertThrows(SecretProviderException.class, () -> unavailable.updateGrant(REF, List.of("*"), null));
-    }
-
-    /**
-     * A persistence that actually stores things, so a grant edit can be followed by
-     * a real decrypt. Counts the calls the tests above assert on.
-     * <p>
-     * {@link #updateSecretGrant} mirrors the production implementations by writing
-     * exactly two fields; that narrowness is independently pinned against the real
-     * Mongo {@code $set} in {@code MongoSecretPersistenceTest}.
-     */
-    private static final class InMemorySecretPersistence implements ISecretPersistence {
-
-        private final Map<String, EncryptedSecret> secrets = new LinkedHashMap<>();
-        private final Map<String, EncryptedDek> deks = new LinkedHashMap<>();
-        private final Map<String, String> meta = new LinkedHashMap<>();
-
-        int upsertSecretCalls;
-        int updateSecretGrantCalls;
-        int findDekCalls;
-
-        /**
-         * Runs once, immediately after the next {@link #findSecret} has taken its copy
-         * — i.e. between a reader's read and whatever that reader writes next. That is
-         * the window a concurrent writer lands in, made deterministic.
-         */
-        Runnable afterNextFind;
-
-        private static String key(String tenantId, String keyName) {
-            return tenantId + "/" + keyName;
-        }
-
-        /**
-         * A copy, as a database read is. Handing back the live instance would let a
-         * caller mutate storage by accident and make "the value is unchanged" pass for
-         * the wrong reason.
-         */
-        private static EncryptedSecret copyOf(EncryptedSecret s) {
-            return new EncryptedSecret(s.getId(), s.getTenantId(), s.getKeyName(), s.getEncryptedValue(), s.getIv(), s.getDekId(), s.getChecksum(),
-                    s.getDescription(), s.getAllowedAgents() == null ? null : List.copyOf(s.getAllowedAgents()), s.getCreatedAt(),
-                    s.getLastAccessedAt(), s.getLastRotatedAt());
-        }
-
-        @Override
-        public void upsertSecret(EncryptedSecret secret) {
-            upsertSecretCalls++;
-            secrets.put(key(secret.getTenantId(), secret.getKeyName()), copyOf(secret));
-        }
-
-        @Override
-        public Optional<EncryptedSecret> findSecret(String tenantId, String keyName) {
-            Optional<EncryptedSecret> read = Optional.ofNullable(secrets.get(key(tenantId, keyName))).map(InMemorySecretPersistence::copyOf);
-            Runnable hook = afterNextFind;
-            afterNextFind = null;
-            if (hook != null) {
-                hook.run();
-            }
-            return read;
-        }
-
-        @Override
-        public boolean deleteSecret(String tenantId, String keyName) {
-            return secrets.remove(key(tenantId, keyName)) != null;
-        }
-
-        @Override
-        public List<EncryptedSecret> listSecretsByTenant(String tenantId) {
-            var result = new ArrayList<EncryptedSecret>();
-            for (var entry : secrets.entrySet()) {
-                if (entry.getValue().getTenantId().equals(tenantId)) {
-                    result.add(copyOf(entry.getValue()));
-                }
-            }
-            return result;
-        }
-
-        @Override
-        public boolean updateSecretSealing(EncryptedSecret secret, String expectedDekId) {
-            EncryptedSecret stored = secrets.get(key(secret.getTenantId(), secret.getKeyName()));
-            if (stored == null || !Objects.equals(stored.getDekId(), expectedDekId)) {
-                return false;
-            }
-            stored.setEncryptedValue(secret.getEncryptedValue());
-            stored.setIv(secret.getIv());
-            stored.setDekId(secret.getDekId());
-            stored.setLastRotatedAt(secret.getLastRotatedAt());
-            return true;
-        }
-
-        @Override
-        public boolean updateSecretGrant(String tenantId, String keyName, List<String> allowedAgents, String description) {
-            updateSecretGrantCalls++;
-            EncryptedSecret stored = secrets.get(key(tenantId, keyName));
-            if (stored == null) {
-                return false;
-            }
-            stored.setAllowedAgents(allowedAgents == null ? null : List.copyOf(allowedAgents));
-            stored.setDescription(description);
-            return true;
-        }
-
-        @Override
-        public void touchLastAccessed(String tenantId, String keyName, Instant lastAccessedAt) {
-            EncryptedSecret stored = secrets.get(key(tenantId, keyName));
-            if (stored != null) {
-                stored.setLastAccessedAt(lastAccessedAt);
-            }
-        }
-
-        @Override
-        public void upsertDek(EncryptedDek dek) {
-            deks.put(dek.getTenantId() + "/" + dek.getGeneration(), dek);
-        }
-
-        @Override
-        public boolean insertDek(EncryptedDek dek) {
-            return deks.putIfAbsent(dek.getTenantId() + "/" + dek.getGeneration(), dek) == null;
-        }
-
-        @Override
-        public Optional<EncryptedDek> findDek(String tenantId) {
-            findDekCalls++;
-            return listDeks(tenantId).stream().reduce((first, second) -> second);
-        }
-
-        @Override
-        public Optional<EncryptedDek> findDek(String tenantId, int generation) {
-            findDekCalls++;
-            return Optional.ofNullable(deks.get(tenantId + "/" + generation));
-        }
-
-        @Override
-        public List<EncryptedDek> listDeks(String tenantId) {
-            return deks.values().stream().filter(d -> d.getTenantId().equals(tenantId))
-                    .sorted(Comparator.comparingInt(EncryptedDek::getGeneration)).toList();
-        }
-
-        @Override
-        public void deleteDek(String tenantId) {
-            deks.entrySet().removeIf(e -> e.getValue().getTenantId().equals(tenantId));
-        }
-
-        @Override
-        public List<EncryptedDek> listAllDeks() {
-            return List.copyOf(deks.values());
-        }
-
-        @Override
-        public String getMetaValue(String key) {
-            return meta.get(key);
-        }
-
-        @Override
-        public void setMetaValue(String key, String value) {
-            meta.put(key, value);
-        }
     }
 
     @Test
