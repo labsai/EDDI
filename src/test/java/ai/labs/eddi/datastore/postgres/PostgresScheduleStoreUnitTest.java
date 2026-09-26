@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
+import ai.labs.eddi.utils.LogCaptureSupport;
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -22,6 +23,8 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 
+import static ai.labs.eddi.utils.LogCaptureSupport.assertNoForgedRecordBoundary;
+import static ai.labs.eddi.utils.LogCaptureSupport.captureLogsOf;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
@@ -1458,6 +1461,28 @@ class PostgresScheduleStoreUnitTest {
         verify(connection).prepareStatement(sql.capture());
         assertTrue(sql.getValue().contains("enabled=false"), sql.getValue());
         verify(preparedStatement).setString(2, "sched-1");
+    }
+
+    /**
+     * CWE-117 (code scanning alert 556): the schedule id is a path parameter on the
+     * dismiss endpoint and reaches the "Dismissed" line, so a CRLF in it must not
+     * forge a second log record.
+     */
+    @Test
+    void dismissDeadLetter_forgedScheduleId_cannotForgeALogRecord() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+        String forgedId = "sched-1" + LogCaptureSupport.FORGED_RECORD;
+
+        List<String> logged = captureLogsOf(PostgresScheduleStore.class, () -> {
+            try {
+                sut.dismissDeadLetter(forgedId, null);
+            } catch (Exception e) {
+                throw new AssertionError(e);
+            }
+        });
+
+        assertNoForgedRecordBoundary(logged, "PostgresScheduleStore's dismissed-dead-letter line");
+        assertTrue(logged.stream().anyMatch(value -> value.contains("sched-1")), "the id is sanitized, not dropped: " + logged);
     }
 
     @Test

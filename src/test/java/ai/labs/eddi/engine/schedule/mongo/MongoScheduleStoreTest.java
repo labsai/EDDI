@@ -10,6 +10,7 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
+import ai.labs.eddi.utils.LogCaptureSupport;
 import com.mongodb.MongoClientSettings;
 import com.mongodb.ReadPreference;
 import com.mongodb.client.FindIterable;
@@ -34,6 +35,8 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
+import static ai.labs.eddi.utils.LogCaptureSupport.assertNoForgedRecordBoundary;
+import static ai.labs.eddi.utils.LogCaptureSupport.captureLogsOf;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -952,6 +955,26 @@ class MongoScheduleStoreTest {
         String renderedUpdate = update.getValue().toBsonDocument().toJson();
         assertTrue(renderedUpdate.contains("\"fireStatus\": \"PENDING\""), renderedUpdate);
         assertFalse(renderedUpdate.contains("lastFired"), "nothing fired, so lastFired must not move: " + renderedUpdate);
+    }
+
+    @Test
+    @DisplayName("dismissDeadLetter — a forged schedule id cannot forge a log record (CWE-117)")
+    void dismissDeadLetterSanitizesTheLoggedId() throws Exception {
+        UpdateResult matched = mock(UpdateResult.class);
+        when(matched.getMatchedCount()).thenReturn(1L);
+        when(scheduleCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(matched);
+        String forgedId = "sched-1" + LogCaptureSupport.FORGED_RECORD;
+
+        List<String> logged = captureLogsOf(MongoScheduleStore.class, () -> {
+            try {
+                store.dismissDeadLetter(forgedId, null);
+            } catch (Exception e) {
+                throw new AssertionError(e);
+            }
+        });
+
+        assertNoForgedRecordBoundary(logged, "MongoScheduleStore's dismissed-dead-letter line");
+        assertTrue(logged.stream().anyMatch(value -> value.contains("sched-1")), "the id is sanitized, not dropped: " + logged);
     }
 
     @Test
