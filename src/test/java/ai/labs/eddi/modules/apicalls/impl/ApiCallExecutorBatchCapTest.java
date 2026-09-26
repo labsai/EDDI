@@ -120,13 +120,42 @@ class ApiCallExecutorBatchCapTest {
     }
 
     @Test
-    @DisplayName("maxBatchSize: unset or non-positive means the default; larger values clamp to the ceiling")
+    @DisplayName("maxBatchSize: unset or non-positive means the default; everything is capped at the ceiling")
     void resolveMaxBatchSize() {
-        assertEquals(ApiCallExecutor.DEFAULT_MAX_BATCH_SIZE, ApiCallExecutor.resolveMaxBatchSize(batchInstruction(null)));
-        assertEquals(ApiCallExecutor.DEFAULT_MAX_BATCH_SIZE, ApiCallExecutor.resolveMaxBatchSize(batchInstruction(0)));
-        assertEquals(ApiCallExecutor.DEFAULT_MAX_BATCH_SIZE, ApiCallExecutor.resolveMaxBatchSize(batchInstruction(-5)));
-        assertEquals(500, ApiCallExecutor.resolveMaxBatchSize(batchInstruction(500)));
-        assertEquals(ApiCallExecutor.MAX_BATCH_SIZE_CEILING, ApiCallExecutor.resolveMaxBatchSize(batchInstruction(Integer.MAX_VALUE)));
+        assertEquals(100, ApiCallExecutor.resolveMaxBatchSize(null, 100, 1000));
+        assertEquals(100, ApiCallExecutor.resolveMaxBatchSize(0, 100, 1000));
+        assertEquals(100, ApiCallExecutor.resolveMaxBatchSize(-5, 100, 1000));
+        assertEquals(500, ApiCallExecutor.resolveMaxBatchSize(500, 100, 1000));
+        assertEquals(1000, ApiCallExecutor.resolveMaxBatchSize(Integer.MAX_VALUE, 100, 1000));
+        assertEquals(50, ApiCallExecutor.resolveMaxBatchSize(null, 100, 50), "a default above the ceiling is capped too");
+    }
+
+    /**
+     * An operator can restore the pre-cap behaviour for a deployment without
+     * editing every stored config.
+     */
+    @Test
+    @DisplayName("the operator-configured default applies to calls that set no maxBatchSize")
+    void operatorDefaultApplies() throws Exception {
+        executor.defaultMaxBatchSize = 500;
+        executor.maxBatchSizeCeiling = 5000;
+        givenTargetArrayOf(300);
+
+        executor.execute(batchCall(null), memory, new HashMap<>(), SERVER);
+
+        verify(httpClient, times(300)).newRequest(any(URI.class), any());
+    }
+
+    @Test
+    @DisplayName("the operator-configured ceiling caps a stored maxBatchSize above it")
+    void operatorCeilingCapsStoredValue() throws Exception {
+        executor.maxBatchSizeCeiling = 10;
+        givenTargetArrayOf(11);
+
+        LifecycleException e = assertThrows(LifecycleException.class, () -> executor.execute(batchCall(500), memory, new HashMap<>(), SERVER));
+
+        assertTrue(e.getMessage().contains("eddi.httpcalls.batch.max-size-ceiling"), e.getMessage());
+        verify(httpClient, never()).newRequest(any(URI.class), any());
     }
 
     private void givenTargetArrayOf(int size) throws Exception {
