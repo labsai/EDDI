@@ -681,7 +681,7 @@ Its redirect URIs are `http://localhost:*` and `http://127.0.0.1:*`. Verified ag
 
 For a client with no OAuth support, or for a quick test, the token can be pasted in.
 
-**1. Get a token.** The shipped realm's `eddi-frontend` client is public and permits the direct access grant:
+**1. Get a token.** No client in the shipped realm permits the direct access (password) grant any more — a public client with it enabled hands a token to anyone who can reach Keycloak and knows one password. For a quick test, turn it on temporarily for `eddi-frontend` (admin console → *Clients* → `eddi-frontend` → *Capability config* → *Direct access grants*), run the command below, and **turn it off again**:
 
 ```bash
 read -rsp "Password for eddi: " KC_PASSWORD && echo

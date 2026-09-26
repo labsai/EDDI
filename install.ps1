@@ -22,6 +22,10 @@
 .PARAMETER WithMonitoring
     Include Grafana + Prometheus monitoring stack.
 
+.PARAMETER DemoUsers
+    With -WithAuth: also give the realm's unprivileged `viewer` and `user`
+    accounts a one-time password. The administrator `eddi` always gets one.
+
 .PARAMETER Full
     Enable all options: PostgreSQL, Keycloak, Monitoring.
 
@@ -46,6 +50,11 @@
     port when something holds it. Pinned through the environment variable below
     it is never moved -- if it is busy the install stops and says so, rather
     than starting somewhere you did not ask for.
+
+    The Keycloak bootstrap admin (KEYCLOAK_ADMIN_PASSWORD) and the Grafana admin
+    (GRAFANA_ADMIN_PASSWORD) passwords are generated and kept in .env across
+    re-runs; export either to choose your own. The compose overlays have no
+    default for them and refuse to start without one.
 
       -WithAuth        KEYCLOAK_PORT    (8180)
       -WithMonitoring  GRAFANA_PORT     (3000)
@@ -86,6 +95,7 @@ param(
     [string]$VaultKey = "",
     [switch]$WithAuth,
     [switch]$WithMonitoring,
+    [switch]$DemoUsers,
     [switch]$Full,
     [switch]$Local,
     [switch]$Help,
@@ -176,6 +186,15 @@ $Healthy = $false
 $EddiAlreadyRunning = $false
 $ComposeFiles = @()
 $EddiVaultMasterKey = ""
+# Credentials the compose overlays refuse to start without (they used to
+# hard-code admin/admin). An exported value wins; otherwise Resolve-StackCredential
+# keeps the one already in .env or generates one.
+$KeycloakAdminUser = $env:KEYCLOAK_ADMIN_USERNAME
+$KeycloakAdminSecret = $env:KEYCLOAK_ADMIN_PASSWORD
+$GrafanaAdminSecret = $env:GRAFANA_ADMIN_PASSWORD
+# One entry per realm account this run looked at: Account, and Secret (empty
+# when the account already had a password and was left alone).
+$FirstLogins = @()
 
 # -- Helpers ------------------------------------------------
 
@@ -505,6 +524,54 @@ function New-VaultKey {
     return [System.Convert]::ToBase64String($bytes)
 }
 
+# A random 32-character [A-Za-z0-9] password (~190 bits). Alphanumeric on purpose:
+# it survives .env quoting, a form-encoded token request and a JSON body as-is.
+function Get-StackPassword {
+    $alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+    $bytes = New-Object byte[] 64
+    try {
+        [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    } catch {
+        $rng = [System.Security.Cryptography.RNGCryptoServiceProvider]::new()
+        try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
+    }
+    # 248 is the largest multiple of 62 below 256, so rejecting 248-255 keeps
+    # every character equally likely.
+    $chars = foreach ($b in $bytes) { if ($b -lt 248) { $alphabet[$b % 62] } }
+    return (-join $chars[0..31])
+}
+
+# The value of $Key in an existing .env, surrounding quotes stripped.
+function Get-EnvFileValue([string]$Key) {
+    $envFile = Join-Path -Path $EddiDir -ChildPath ".env"
+    if (-not (Test-Path $envFile)) { return "" }
+    $line = Get-Content $envFile | Where-Object { $_ -match "^$([regex]::Escape($Key))=(.*)$" } | Select-Object -First 1
+    if (-not $line) { return "" }
+    return ($line -replace "^$([regex]::Escape($Key))=", "").Trim().Trim('"', "'")
+}
+
+# Resolves the overlay credentials BEFORE .env is written. Keeping a stored value
+# matters: Keycloak and Grafana read theirs only when their volume is first
+# initialised, so a fresh value on every re-run would stop matching the service.
+function Resolve-StackCredential {
+    if ($WithAuth) {
+        if (-not $script:KeycloakAdminUser) { $script:KeycloakAdminUser = Get-EnvFileValue "KEYCLOAK_ADMIN_USERNAME" }
+        if (-not $script:KeycloakAdminUser) { $script:KeycloakAdminUser = "admin" }
+        if (-not $script:KeycloakAdminSecret) { $script:KeycloakAdminSecret = Get-EnvFileValue "KEYCLOAK_ADMIN_PASSWORD" }
+        if (-not $script:KeycloakAdminSecret) { $script:KeycloakAdminSecret = Get-StackPassword }
+    }
+    if ($WithMonitoring) {
+        if (-not $script:GrafanaAdminSecret) { $script:GrafanaAdminSecret = Get-EnvFileValue "GRAFANA_ADMIN_PASSWORD" }
+        if (-not $script:GrafanaAdminSecret) { $script:GrafanaAdminSecret = Get-StackPassword }
+    }
+    # Written single-quoted into .env, where compose reads the value literally.
+    foreach ($value in @($script:KeycloakAdminUser, $script:KeycloakAdminSecret, $script:GrafanaAdminSecret)) {
+        if ($value -and $value.Contains("'")) {
+            Write-Fail "KEYCLOAK_ADMIN_USERNAME, KEYCLOAK_ADMIN_PASSWORD and GRAFANA_ADMIN_PASSWORD must not contain a single quote (')."
+        }
+    }
+}
+
 function Step-Security {
     # If a key was provided via CLI parameter, use it
     if ($VaultKey) {
@@ -811,13 +878,20 @@ EDDI_HTTPS_PORT=$EddiHttpsPort
     # KEYCLOAK_PORT would otherwise outlive the overlay that used it.
     $publishedPorts = [ordered]@{}
     if ($MongoPort) { $publishedPorts["MONGO_PORT"] = $MongoPort }
-    if ($WithAuth) { $publishedPorts["KEYCLOAK_PORT"] = $KeycloakPort }
+    if ($WithAuth) {
+        $publishedPorts["KEYCLOAK_PORT"] = $KeycloakPort
+        # docker-compose.auth.yml has no default for these and refuses to start
+        # without the password. Single-quoted: compose reads the value literally.
+        $publishedPorts["KEYCLOAK_ADMIN_USERNAME"] = "'$KeycloakAdminUser'"
+        $publishedPorts["KEYCLOAK_ADMIN_PASSWORD"] = "'$KeycloakAdminSecret'"
+    }
     if ($WithMonitoring) {
         $publishedPorts["GRAFANA_PORT"] = $GrafanaPort
         $publishedPorts["PROMETHEUS_PORT"] = $PrometheusPort
         $publishedPorts["JAEGER_PORT"] = $JaegerPort
         $publishedPorts["OTLP_GRPC_PORT"] = $OtlpGrpcPort
         $publishedPorts["OTLP_HTTP_PORT"] = $OtlpHttpPort
+        $publishedPorts["GRAFANA_ADMIN_PASSWORD"] = "'$GrafanaAdminSecret'"
     }
     foreach ($key in $publishedPorts.Keys) {
         Add-Content -Path $envPath -Value "$key=$($publishedPorts[$key])"
@@ -939,6 +1013,106 @@ function Wait-ForReady {
     exit 1
 }
 
+# -- Post-start credentials -------------------------------
+
+# Returns a master-realm admin token, or $null. Tries KEYCLOAK_ADMIN_PASSWORD
+# first. A keycloak-data volume from before the compose file stopped hard-coding
+# admin/admin still answers to that — Keycloak reads the bootstrap password only
+# when it first creates the master realm — so it is tried next and, when it
+# works, rotated to KEYCLOAK_ADMIN_PASSWORD so .env tells the truth.
+function Connect-KeycloakAdmin([string]$KcBase) {
+    $tokenUri = "$KcBase/realms/master/protocol/openid-connect/token"
+    $user = if ($KeycloakAdminUser) { $KeycloakAdminUser } else { "admin" }
+    try {
+        $body = @{ client_id = "admin-cli"; grant_type = "password"; username = $user; password = $KeycloakAdminSecret }
+        return (Invoke-RestMethod -Method Post -Uri $tokenUri -Body $body -TimeoutSec 10 -ErrorAction Stop).access_token
+    } catch {
+        Write-Verbose "Keycloak admin login with KEYCLOAK_ADMIN_PASSWORD failed: $($_.Exception.Message)"
+    }
+    if ($user -ne "admin" -or $KeycloakAdminSecret -eq "admin") { return $null }
+
+    try {
+        $legacy = @{ client_id = "admin-cli"; grant_type = "password"; username = "admin"; password = "admin" }
+        $token = (Invoke-RestMethod -Method Post -Uri $tokenUri -Body $legacy -TimeoutSec 10 -ErrorAction Stop).access_token
+    } catch {
+        return $null
+    }
+    try {
+        $headers = @{ Authorization = "Bearer $token" }
+        $admin = @(Invoke-RestMethod -Uri "$KcBase/admin/realms/master/users?username=admin&exact=true" -Headers $headers -ErrorAction Stop | Write-Output)[0]
+        $reset = @{ type = "password"; value = $KeycloakAdminSecret; temporary = $false } | ConvertTo-Json
+        Invoke-RestMethod -Method Put -Uri "$KcBase/admin/realms/master/users/$($admin.id)/reset-password" -Headers $headers -Body $reset -ContentType "application/json" -ErrorAction Stop | Out-Null
+        Write-Warn "Keycloak still had the old admin/admin console login -- changed it to KEYCLOAK_ADMIN_PASSWORD in $EddiDir\.env"
+    } catch {
+        Write-Warn "Keycloak still accepts admin/admin and it could not be changed ($($_.Exception.Message)). Change it in the admin console: master realm -> Users -> admin -> Credentials."
+    }
+    return $token
+}
+
+# Gives realm accounts a first, ONE-TIME password so a fresh -WithAuth install
+# can be logged into: the realm seeds every account with its roles and no
+# credential. `eddi` always; `viewer` and `user` only with -DemoUsers. An
+# account that already has a password is never touched.
+function Set-FirstLoginPassword {
+    [CmdletBinding(SupportsShouldProcess)]
+    param()
+    if (-not $WithAuth) { return }
+    if (-not $PSCmdlet.ShouldProcess("Keycloak realm eddi", "Set first-login passwords")) { return }
+    $kcBase = "http://localhost:$KeycloakPort"
+    $token = Connect-KeycloakAdmin $kcBase
+    if (-not $token) {
+        Write-Warn "Could not log in to the Keycloak admin API -- set the eddi account's password in the admin console."
+        return
+    }
+    $headers = @{ Authorization = "Bearer $token" }
+    # `| Write-Output` on every list read: PowerShell 7's Invoke-RestMethod
+    # emits a JSON array as ONE pipeline object, so @(...) around an empty
+    # credentials list counted 1 and every account looked as if it already had
+    # a password. Write-Output unrolls it; 5.1 unrolls either way.
+    $accounts = @("eddi")
+    if ($DemoUsers) { $accounts += @("viewer", "user") }
+    foreach ($account in $accounts) {
+        try {
+            $user = @(Invoke-RestMethod -Uri "$kcBase/admin/realms/eddi/users?username=$account&exact=true" -Headers $headers -ErrorAction Stop | Write-Output)[0]
+            if (-not $user) { Write-Warn "Realm account '$account' not found."; continue }
+            $creds = @(Invoke-RestMethod -Uri "$kcBase/admin/realms/eddi/users/$($user.id)/credentials" -Headers $headers -ErrorAction Stop | Write-Output)
+            if ($creds.Count -gt 0) {
+                $script:FirstLogins += [pscustomobject]@{ Account = $account; Secret = "" }
+                continue
+            }
+            $secret = Get-StackPassword
+            $reset = @{ type = "password"; value = $secret; temporary = $true } | ConvertTo-Json
+            Invoke-RestMethod -Method Put -Uri "$kcBase/admin/realms/eddi/users/$($user.id)/reset-password" -Headers $headers -Body $reset -ContentType "application/json" -ErrorAction Stop | Out-Null
+            $script:FirstLogins += [pscustomobject]@{ Account = $account; Secret = $secret }
+        } catch {
+            Write-Warn "Could not set a first-login password for '$account' ($($_.Exception.Message)) -- use the admin console."
+        }
+    }
+}
+
+# Grafana applies GF_SECURITY_ADMIN_PASSWORD only when it creates its database,
+# so a grafana-data volume from the admin/admin days still answers to that.
+function Update-LegacyGrafanaLogin {
+    [CmdletBinding(SupportsShouldProcess)]
+    param()
+    if (-not $WithMonitoring -or -not $GrafanaAdminSecret -or $GrafanaAdminSecret -eq "admin") { return }
+    if (-not $PSCmdlet.ShouldProcess("Grafana", "Replace the legacy admin/admin login")) { return }
+    $gBase = "http://localhost:$GrafanaPort"
+    $legacyAuth = @{ Authorization = "Basic " + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("admin:admin")) }
+    try {
+        Invoke-RestMethod -Uri "$gBase/api/user" -Headers $legacyAuth -TimeoutSec 10 -ErrorAction Stop | Out-Null
+    } catch {
+        return
+    }
+    try {
+        $change = @{ oldPassword = "admin"; newPassword = $GrafanaAdminSecret; confirmNew = $GrafanaAdminSecret } | ConvertTo-Json
+        Invoke-RestMethod -Method Put -Uri "$gBase/api/user/password" -Headers $legacyAuth -Body $change -ContentType "application/json" -ErrorAction Stop | Out-Null
+        Write-Warn "Grafana still had the old admin/admin login -- changed it to GRAFANA_ADMIN_PASSWORD in $EddiDir\.env"
+    } catch {
+        Write-Warn "Grafana still accepts admin/admin and it could not be changed -- change it in Grafana's profile page."
+    }
+}
+
 # -- Success banner ---------------------------------------
 
 function Write-Success {
@@ -952,22 +1126,35 @@ function Write-Success {
 
     if ($WithMonitoring) {
         Write-Information -MessageData ""
-        Write-Information -MessageData "  Grafana    ->  http://localhost:${GrafanaPort}  (admin/admin)"
+        Write-Information -MessageData "  Grafana    ->  http://localhost:${GrafanaPort}  (admin / GRAFANA_ADMIN_PASSWORD in $EddiDir\.env)"
         Write-Information -MessageData "  Prometheus ->  http://localhost:${PrometheusPort}"
         Write-Information -MessageData "  Jaeger     ->  http://localhost:${JaegerPort}  (trace visualization)"
     }
 
     if ($WithAuth) {
         Write-Information -MessageData ""
-        Write-Information -MessageData "  +- [lock] Login Credentials -----------------------------+"
-        Write-Information -MessageData "  |                                                    |"
-        Write-Information -MessageData "  |  EDDI Admin:  eddi / eddi  (change on first login) |"
-        Write-Information -MessageData "  |  Read-only:   viewer / viewer                      |"
-        Write-Information -MessageData "  |                                                    |"
-        $kcConsole = "http://localhost:${KeycloakPort}".PadRight(31)
-        Write-Information -MessageData "  |  Keycloak Console:  $kcConsole|"
-        Write-Information -MessageData "  |  Console Admin:     admin / admin                  |"
-        Write-Information -MessageData "  +----------------------------------------------------+"
+        Write-Information -MessageData "  --- [lock] Login ----------------------------------"
+        # Printed once and stored nowhere: each is a ONE-TIME password Keycloak
+        # replaces at the first login.
+        foreach ($entry in $FirstLogins) {
+            if ($entry.Secret) {
+                Write-Information -MessageData "  $($entry.Account) / $($entry.Secret)  (one-time -- you choose a new one at first login)"
+            }
+            else {
+                Write-Information -MessageData "  $($entry.Account)  (already had a password -- unchanged)"
+            }
+        }
+        if ($FirstLogins.Count -eq 0) {
+            Write-Information -MessageData "  No account in the eddi realm has a password yet. Set one in the"
+            Write-Information -MessageData "  Keycloak console below: Users -> eddi -> Credentials -> Set password."
+        }
+        if (-not $DemoUsers) {
+            Write-Information -MessageData "  viewer (read-only) and user (end user) exist without a password; re-run"
+            Write-Information -MessageData "  with -DemoUsers, or set one in the console, to use them."
+        }
+        Write-Information -MessageData ""
+        Write-Information -MessageData "  Keycloak console  ->  http://localhost:${KeycloakPort}/admin"
+        Write-Information -MessageData "    $(if ($KeycloakAdminUser) { $KeycloakAdminUser } else { 'admin' }) / KEYCLOAK_ADMIN_PASSWORD in $EddiDir\.env"
     }
 
     Write-Information -MessageData ""
@@ -1266,12 +1453,15 @@ EDDI_HTTPS_PORT=$EddiHttpsPort
     Step-Auth
     Step-Monitoring
     Step-Ports
+    Resolve-StackCredential
 
     Write-ConfigSummary
     Get-ComposeFiles
 
     Start-Eddi
     Wait-ForReady
+    Set-FirstLoginPassword
+    Update-LegacyGrafanaLogin
     Write-Success
     Install-CliWrapper
     $elapsed = [math]::Round(((Get-Date) - $startTime).TotalSeconds)
@@ -1294,4 +1484,6 @@ finally {
     # Scrub vault key from process environment and variable (defense-in-depth)
     Remove-Item Env:\EDDI_VAULT_MASTER_KEY -ErrorAction SilentlyContinue
     $EddiVaultMasterKey = $null
+    $KeycloakAdminSecret = $null
+    $GrafanaAdminSecret = $null
 }

@@ -3,27 +3,42 @@
 #
 # Usage: docker compose -f docker-compose.yml -f docker-compose.auth.yml up -d
 #
-# Pre-configured test users, seeded by keycloak/eddi-realm.json — DEV ONLY:
-#   viewer / viewer  (eddi-viewer — read-only)
-#   user   / user    (eddi-user — end-user access)
+# ⚠️  KEYCLOAK_ADMIN_PASSWORD must be set — in .env or the environment — or
+# `docker compose up` refuses to start. It is the bootstrap superuser of
+# Keycloak's master realm, which can mint an eddi-admin for anyone, and it used
+# to be hard-coded here as admin/admin on a port published to every interface —
+# anyone on the same network could administer the identity provider.
+#   echo "KEYCLOAK_ADMIN_PASSWORD=$(openssl rand -base64 24)" >> .env
+# install.sh / install.ps1 --with-auth generate it for you. Keycloak reads it
+# only when it first creates the master realm: on an existing keycloak-data
+# volume the password is whatever it was then (the old admin/admin, for a
+# stack started before this change) — change it in the admin console, or
+# re-run the installer, which rotates it for you.
 #
-# These log straight in; there is no forced password change. The credentials
-# are marked "temporary": true in the realm JSON, but Keycloak 26 does not
-# turn that into an UPDATE_PASSWORD required action on realm import — after
-# import the users' requiredActions are empty. Change them through the admin
-# console if you need the prompt.
+# Keycloak is published on 127.0.0.1 only, which matches KC_HOSTNAME below:
+# tokens name http://localhost as their issuer, so a browser on another machine
+# could not complete a login anyway. To expose it deliberately (behind TLS, with
+# KC_HOSTNAME and the two EDDI URLs below changed to the public name), set
+# KEYCLOAK_BIND_ADDRESS=0.0.0.0.
 #
-# The privileged `eddi` account (eddi-admin + eddi-editor) is seeded with NO
-# password and cannot be logged into until you give it one. It used to ship as
-# eddi/eddi — and the same realm file is imported into Kubernetes by
-# k8s/overlays/auth and by the Helm chart, where the Keycloak Service is
-# reachable from every pod in the cluster, so a guessable password on a full
-# EDDI administrator was not confined to a laptop. Set one after first boot:
+# keycloak/eddi-realm.json seeds three accounts, and NONE of them has a
+# password:
+#   eddi    (eddi-admin + eddi-editor + eddi-viewer)
+#   viewer  (eddi-viewer — read-only)
+#   user    (eddi-user — end-user access)
+# They used to ship as eddi/eddi, viewer/viewer and user/user — and the same
+# realm file is imported into Kubernetes by k8s/overlays/auth and by the Helm
+# chart, where the Keycloak Service is reachable from every pod in the
+# cluster, so guessable logins were not confined to a laptop. The password grant
+# on the public eddi-frontend client is off for the same reason. Set a password
+# for whichever account you need after first boot (install.sh does it for
+# `eddi`, and for the other two with --demo-users):
 #
 #   http://localhost:${KEYCLOAK_PORT:-8180}/admin → Users → eddi
 #     → Credentials → Set password
 #
-# (log in there as the KC_BOOTSTRAP_ADMIN_USERNAME/PASSWORD pair below).
+# (log in there as KEYCLOAK_ADMIN_USERNAME, default `admin`, with
+# KEYCLOAK_ADMIN_PASSWORD).
 
 services:
   eddi:
@@ -68,8 +83,10 @@ services:
     image: quay.io/keycloak/keycloak:26.0
     command: start-dev --import-realm
     environment:
-      KC_BOOTSTRAP_ADMIN_USERNAME: admin
-      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_BOOTSTRAP_ADMIN_USERNAME: "${KEYCLOAK_ADMIN_USERNAME:-admin}"
+      # No default: `:?` stops `docker compose up` with this message instead of
+      # booting the identity provider with a password anyone can guess.
+      KC_BOOTSTRAP_ADMIN_PASSWORD: "${KEYCLOAK_ADMIN_PASSWORD:?KEYCLOAK_ADMIN_PASSWORD is not set - add KEYCLOAK_ADMIN_PASSWORD=<a strong password> to .env (openssl rand -base64 24). See the header of docker-compose.auth.yml}"
       KC_HTTP_PORT: "8080"
       KC_HEALTH_ENABLED: "true"
       # KC_HOSTNAME must equal what browsers use to reach Keycloak.
@@ -78,7 +95,9 @@ services:
       KC_HOSTNAME: "http://localhost:${KEYCLOAK_PORT:-8180}"
       KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
     ports:
-      - "${KEYCLOAK_PORT:-8180}:8080"
+      # Loopback by default — see the header. KEYCLOAK_BIND_ADDRESS=0.0.0.0
+      # publishes it on every interface.
+      - "${KEYCLOAK_BIND_ADDRESS:-127.0.0.1}:${KEYCLOAK_PORT:-8180}:8080"
     volumes:
       - keycloak-data:/opt/keycloak/data
       - ./keycloak:/opt/keycloak/data/import:ro

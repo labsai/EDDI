@@ -15,20 +15,30 @@ This starts EDDI on port `7070` and MongoDB. No login required.
 This repository ships a Keycloak overlay. Layer it on the base stack:
 
 ```bash
+# The overlay has no default for the Keycloak admin password and refuses to
+# start without one
+echo "KEYCLOAK_ADMIN_PASSWORD=$(openssl rand -base64 24)" >> .env
 docker compose -f docker-compose.yml -f docker-compose.auth.yml up
 ```
 
 This starts:
 
-- **Keycloak 26** on port `8180` (admin console: `http://localhost:8180`, login `admin`/`admin`)
+- **Keycloak 26** on `127.0.0.1:8180` (admin console: `http://localhost:8180/admin`, login `admin` / your `KEYCLOAK_ADMIN_PASSWORD`)
 - **EDDI** on port `7070` with OIDC auth enabled
 - **MongoDB** for data storage
 
-Pre-configured test users:
-| Username | Password | Role |
-|----------|----------|------|
-| `eddi` | `eddi` | admin |
-| `viewer` | `viewer` | viewer (read-only) |
+The realm seeds three accounts, **none of them with a password**:
+
+| Username | Role |
+|----------|------|
+| `eddi` | `eddi-admin`, `eddi-editor`, `eddi-viewer` |
+| `viewer` | `eddi-viewer` (read-only) |
+| `user` | `eddi-user` |
+
+Set a password for the one you need in the admin console (Users → *name* →
+Credentials → Set password). `install.sh --with-auth` does it for `eddi` and
+prints a one-time password; add `--demo-users` for the other two. They used to
+ship as `eddi`/`eddi`, `viewer`/`viewer` and `user`/`user`.
 
 ### Manual Docker Setup
 

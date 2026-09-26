@@ -122,10 +122,14 @@ docker compose up
 # docker-compose.yml (an overlay cannot un-declare the base's mongodb service)
 docker compose -f docker-compose.postgres-only.yml up
 
-# With Keycloak authentication
+# With Keycloak authentication. The overlay has no default admin password and
+# refuses to start without one; no realm account ships a password either (see
+# the header of docker-compose.auth.yml, or let install.sh --with-auth do both)
+echo "KEYCLOAK_ADMIN_PASSWORD=$(openssl rand -base64 24)" >> .env
 docker compose -f docker-compose.yml -f docker-compose.auth.yml up
 
-# With Prometheus + Grafana monitoring
+# With Prometheus + Grafana monitoring (same rule for the Grafana admin)
+echo "GRAFANA_ADMIN_PASSWORD=$(openssl rand -base64 24)" >> .env
 docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up
 
 # With a local LLM — Ollama on the same Docker network, reachable as
@@ -136,6 +140,8 @@ docker compose -f docker-compose.yml -f docker-compose.ollama.yml up -d
 docker compose -f docker-compose.yml -f docker-compose.auth.yml \
   -f docker-compose.monitoring.yml -f docker-compose.nats.yml up
 ```
+
+Every port except EDDI's own is published on `127.0.0.1` only — Keycloak, Grafana, Prometheus, Jaeger, NATS, Chroma, Ollama and MongoDB are for your own machine, not the network.
 
 Available compose overlays: `docker-compose.auth.yml` (Keycloak), `docker-compose.monitoring.yml` (Prometheus+Grafana), `docker-compose.nats.yml` (NATS JetStream), `docker-compose.ollama.yml` (local LLM), `docker-compose.chroma.yml` (vector store), `docker-compose.local.yml` (build from source). `docker-compose.postgres-only.yml` is a complete standalone stack rather than an overlay — use it on its own, not with `-f docker-compose.yml`.
 

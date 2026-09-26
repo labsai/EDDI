@@ -5,13 +5,16 @@
 ## Quick Start
 
 ```bash
-# Start EDDI with full monitoring stack
+# Start EDDI with full monitoring stack. The overlay has no default Grafana
+# admin password and refuses to start without one.
+echo "GRAFANA_ADMIN_PASSWORD=$(openssl rand -base64 24)" >> .env
 docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
 
 # Access points:
 #   EDDI API:        http://localhost:7070
 #   Prometheus:      http://localhost:9090
-#   Grafana:         http://localhost:3000  (admin/admin)
+#   Grafana:         http://localhost:3000  (admin / GRAFANA_ADMIN_PASSWORD)
+# Every port above except EDDI's is published on 127.0.0.1 only.
 #   Jaeger UI:       http://localhost:16686
 #   EDDI Metrics:    http://localhost:7070/q/metrics
 #   EDDI Health:     http://localhost:7070/q/health
@@ -247,7 +250,7 @@ template variable pair scopes the whole thing.
 - [ ] Set `QUARKUS_OTEL_SDK_DISABLED=false` and `QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT` to your trace collector
 - [ ] Configure Prometheus to scrape `/q/metrics` (see `prometheus.yml`)
 - [ ] Import Grafana dashboard and configure alert notification channels
-- [ ] **Change `GF_SECURITY_ADMIN_PASSWORD`** before exposing Grafana publicly (default: `admin/admin`)
+- [ ] **Keep `GRAFANA_ADMIN_PASSWORD` secret** — the compose overlay has no default for it; a Grafana volume created before that change still has `admin`/`admin` until you change it (re-running the installer does)
 - [ ] **Restrict Jaeger UI access** — Jaeger 2.x has no built-in auth; put it behind a reverse proxy or restrict to internal network
 - [ ] Set appropriate retention policies (Prometheus: 15d, Jaeger: 7d recommended)
 - [ ] Secure `/q/metrics` and `/q/health` endpoints if exposed externally

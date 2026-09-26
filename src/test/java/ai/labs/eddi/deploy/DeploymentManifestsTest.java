@@ -1801,7 +1801,7 @@ class DeploymentManifestsTest {
          * Asserted as a relationship — privileged implies no shipped credential —
          * rather than against a remembered username, so a second admin fixture added
          * later is covered by construction. The unprivileged fixtures (viewer, user)
-         * are deliberately untouched.
+         * are covered by {@link #noRealmUserShipsACredential()}.
          * <p>
          * The last assertion is what stops this passing vacuously: deleting every
          * privileged user, rather than its password, would otherwise satisfy the loop
@@ -1833,6 +1833,64 @@ class DeploymentManifestsTest {
                                 + "tell the operator to set a password on; removing it instead of its "
                                 + "password leaves those instructions pointing at nothing — and makes the "
                                 + "assertion above pass by having nothing to check");
+            }
+        }
+
+        /**
+         * The unprivileged fixtures are not harmless either. {@code user}/{@code user}
+         * carries {@code eddi-user}, which is enough to start conversations and run LLM
+         * turns at the deployment's expense, and {@code viewer}/{@code viewer} reads
+         * agent configurations. Both shipped with passwords equal to their usernames,
+         * and {@code "temporary": true} never became an UPDATE_PASSWORD required action
+         * on import — so on every cluster the realm was imported into they logged
+         * straight in, through a Keycloak Service any pod can reach.
+         * <p>
+         * So no seeded account ships a credential at all; the fixtures ship their
+         * roles, and an operator who wants them sets a password in the admin console.
+         * The auth E2E tier supplies its own passwords to a generated copy of the realm
+         * ({@code ui/manager/scripts/make-test-realm.mjs}), which asserts the same
+         * thing from its side.
+         */
+        @Test
+        @DisplayName("no realm copy ships a password for any account")
+        void noRealmUserShipsACredential() throws IOException {
+            for (Path realm : List.of(COMPOSE_REALM, KUSTOMIZE_REALM, HELM_REALM)) {
+                JsonNode users = JSON.readTree(realm.toFile()).path("users");
+                assertTrue(users.size() > 0, realm + " seeds no users; the operator docs tell the reader "
+                        + "to set passwords on `eddi`, `viewer` and `user`");
+                for (JsonNode user : users) {
+                    assertFalse(user.path("credentials").elements().hasNext(),
+                            realm + " seeds `" + user.path("username").asText() + "` with a credential. Every "
+                                    + "cluster this realm is imported into then has that login, reachable from "
+                                    + "any pod through the Keycloak ClusterIP. Ship the account's roles and let "
+                                    + "the operator set a password");
+                }
+            }
+        }
+
+        /**
+         * {@code eddi-frontend} is public — a browser SPA cannot keep a secret — so the
+         * direct access (password) grant on it needs nothing but a username and a
+         * password: one {@code curl} to the token endpoint, no browser, no redirect
+         * URI, no PKCE. With the fixture passwords above that was a token good for LLM
+         * turns for anyone who could reach Keycloak. The Manager signs in through the
+         * authorization-code flow and never used the grant; the auth E2E tier turns it
+         * back on in its generated realm only.
+         */
+        @Test
+        @DisplayName("the public SPA client refuses the password grant")
+        void spaClientRefusesThePasswordGrant() throws IOException {
+            for (Path realm : List.of(COMPOSE_REALM, KUSTOMIZE_REALM, HELM_REALM)) {
+                JsonNode spa = client(JSON.readTree(realm.toFile()), "eddi-frontend");
+                assertTrue(spa.path("publicClient").asBoolean(),
+                        realm + ": eddi-frontend is the Manager SPA and must stay a public client");
+                assertTrue(spa.path("standardFlowEnabled").asBoolean(),
+                        realm + ": eddi-frontend needs the authorization code flow — it is how the Manager "
+                                + "signs in");
+                assertFalse(spa.path("directAccessGrantsEnabled").asBoolean(true),
+                        realm + ": eddi-frontend is a PUBLIC client with the password grant enabled (or left "
+                                + "to Keycloak's default, which is enabled). Anyone who can reach Keycloak and "
+                                + "knows one password gets a token with a single curl");
             }
         }
 

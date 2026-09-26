@@ -311,8 +311,15 @@ than coming up with a known password. Helm asks for the same value as
 it with the `eddi-admin` and `eddi-editor` roles and **no credential**, so it
 cannot be logged into until you set one: admin console → *Users* → `eddi` →
 *Credentials* → *Set password*. Or grant those two realm roles to an account you
-create yourself and leave `eddi` unused. The unprivileged fixtures
-(`viewer`/`viewer`, `user`/`user`) still log straight in.
+create yourself and leave `eddi` unused.
+
+The unprivileged fixtures `viewer` (`eddi-viewer`) and `user` (`eddi-user`) are
+opt-in the same way: they ship with their roles and **no password**, so they
+cannot log in until you set one. They used to ship as `viewer`/`viewer` and
+`user`/`user`, and with the password grant then enabled on the public
+`eddi-frontend` client a single `curl` against a reachable Keycloak returned a
+token good enough to run LLM turns. The grant is now off on `eddi-frontend`
+too — the Manager uses the authorization-code flow and never needed it.
 
 #### TLS
 
