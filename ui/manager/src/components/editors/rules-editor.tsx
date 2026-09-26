@@ -256,6 +256,16 @@ function KeyValueRow({
 const SIZE_BOUND_KEYS = new Set(["min", "max", "equal"]);
 const NO_SIZE_BOUND = "-1";
 
+/**
+ * Whether `Integer.parseInt` accepts `value` as stored: no surrounding
+ * whitespace (it does not trim) and inside the Java `int` range.
+ */
+function isJavaInt(value: string): boolean {
+  if (!/^-?\d+$/.test(value)) return false;
+  const n = Number(value);
+  return n >= -2147483648 && n <= 2147483647;
+}
+
 function ConditionEditor({
   condition,
   onChange,
@@ -279,8 +289,12 @@ function ConditionEditor({
   const isSizeBound = (key: string) =>
     condition.type === "sizematcher" && SIZE_BOUND_KEYS.has(key);
   /** What is written for a value typed into `key`. */
-  const toStored = (key: string, value: string) =>
-    isSizeBound(key) && value.trim() === "" ? NO_SIZE_BOUND : value;
+  const toStored = (key: string, value: string) => {
+    if (!isSizeBound(key)) return value;
+    // SizeMatcher does not trim, so " 2 " would fail the save.
+    const trimmed = value.trim();
+    return trimmed === "" ? NO_SIZE_BOUND : trimmed;
+  };
 
   const updateConfig = (key: string, value: string) => {
     onChange({
@@ -425,8 +439,8 @@ function ConditionEditor({
               value={isSizeBound(k) && v === NO_SIZE_BOUND ? "" : v}
               valuePlaceholder={isSizeBound(k) ? t("rulesEditor.sizeNoBound", "no limit") : undefined}
               invalidMessage={
-                isSizeBound(k) && v.trim() !== "" && !/^-?\d+$/.test(v.trim())
-                  ? t("rulesEditor.sizeBoundInvalid", "Must be a whole number, or empty for no limit.")
+                isSizeBound(k) && v !== "" && !isJavaInt(v)
+                  ? t("rulesEditor.sizeBoundInvalid", "Must be a whole number from -2147483648 to 2147483647, or empty for no limit.")
                   : undefined
               }
               onKeyChange={(nk) => renameConfigKey(k, nk)}

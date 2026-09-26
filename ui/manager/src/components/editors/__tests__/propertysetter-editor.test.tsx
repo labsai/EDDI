@@ -533,6 +533,27 @@ describe("PropertySetterEditor secret warning for non-string values", () => {
     expect(screen.getAllByTestId("property-secret-from-path-warning")).toHaveLength(2);
   });
 
+  it("warns for a secret row that also carries a typed value", () => {
+    // PropertySetterTask vaults valueString, then writes valueObject over it
+    // under the same scope — the typed value is what is stored, in plain text.
+    renderWithProviders(
+      <PropertySetterEditor
+        data={{
+          setOnActions: [
+            {
+              actions: ["a"],
+              setProperties: [
+                { name: "creds", scope: "secret", valueString: "{memory.current.input}", valueObject: { key: "v" } },
+              ],
+            },
+          ],
+        }}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("property-secret-from-path-warning")).toBeInTheDocument();
+  });
+
   it("does not warn for a secret row that has no value yet", () => {
     renderWithProviders(
       <PropertySetterEditor

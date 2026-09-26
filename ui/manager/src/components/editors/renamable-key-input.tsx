@@ -62,6 +62,10 @@ export function RenamableKeyInput({
       onBlur={commit}
       onKeyDown={(e) => {
         if (e.key === "Enter") {
+          // The Enter that confirms an IME composition is not a commit. Some
+          // browsers fire compositionend before that keydown, so isComposing
+          // is already false there; keyCode 229 still marks it.
+          if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
           e.preventDefault();
           commit();
         } else if (e.key === "Escape") {

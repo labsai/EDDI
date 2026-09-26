@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, screen } from "@testing-library/react";
+import { act, fireEvent, screen } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import {
   RagEditor,
@@ -620,13 +620,53 @@ describe("RagEditor", () => {
     expect(ingest).toBeDisabled();
     await user.click(ingest);
 
+    // The file is never read: the fetch sits in FileReader.onload, so an
+    // assertion on fetch alone would pass before an unguarded read finished.
+    const readSpy = vi.spyOn(FileReader.prototype, "readAsText");
     fireEvent.drop(screen.getByTestId("ingestion-dropzone"), {
       dataTransfer: { files: [new File(["x"], "a.txt", { type: "text/plain" })] },
     });
+    expect(readSpy).not.toHaveBeenCalled();
     expect(fetchSpy).not.toHaveBeenCalledWith(
       expect.stringContaining("/ingest"),
       expect.anything(),
     );
+    readSpy.mockRestore();
+    fetchSpy.mockRestore();
+  });
+
+  it("does not ingest a file whose read finished after the knowledge base was edited", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    // Hold the read: onload is fired by hand once the editor is dirty.
+    const readers: FileReader[] = [];
+    const readSpy = vi
+      .spyOn(FileReader.prototype, "readAsText")
+      .mockImplementation(function (this: FileReader) {
+        readers.push(this);
+      });
+    const user = userEvent.setup();
+    const { rerender } = renderWithProviders(
+      <RagEditor data={populatedConfig} onChange={onChange} resourceId="kb1" isDirty={false} />
+    );
+    await openSection(user, "Document Ingestion");
+
+    fireEvent.drop(screen.getByTestId("ingestion-dropzone"), {
+      dataTransfer: { files: [new File(["x"], "a.txt", { type: "text/plain" })] },
+    });
+    expect(readers).toHaveLength(1);
+    const pending = readers[0]!;
+
+    rerender(<RagEditor data={populatedConfig} onChange={onChange} resourceId="kb1" isDirty />);
+    await act(async () => {
+      pending.onload?.call(pending, new ProgressEvent("load") as ProgressEvent<FileReader>);
+    });
+
+    expect(fetchSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining("/ingest"),
+      expect.anything(),
+    );
+    expect(screen.getByText(/a\.txt was not ingested/)).toBeInTheDocument();
+    readSpy.mockRestore();
     fetchSpy.mockRestore();
   });
 

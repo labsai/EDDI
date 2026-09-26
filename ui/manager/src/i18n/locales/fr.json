@@ -907,7 +907,7 @@
     "noRules": "Aucune règle dans ce groupe",
     "noConditions": "Aucune condition",
     "sizeNoBound": "aucune limite",
-    "sizeBoundInvalid": "Doit être un nombre entier, ou vide pour aucune limite."
+    "sizeBoundInvalid": "Doit être un nombre entier entre -2147483648 et 2147483647, ou vide pour aucune limite."
   },
   "apiCallsEditor": {
     "noEndpointsFound": "Aucun endpoint trouvé dans la spécification",

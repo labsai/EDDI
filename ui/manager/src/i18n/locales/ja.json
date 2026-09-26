@@ -893,7 +893,7 @@
     "noRules": "このグループにルールはありません",
     "noConditions": "条件なし",
     "sizeNoBound": "制限なし",
-    "sizeBoundInvalid": "整数を入力するか、制限なしの場合は空欄にしてください。"
+    "sizeBoundInvalid": "-2147483648 から 2147483647 までの整数を入力するか、制限なしの場合は空欄にしてください。"
   },
   "apiCallsEditor": {
     "noEndpointsFound": "仕様にエンドポイントが見つかりません",

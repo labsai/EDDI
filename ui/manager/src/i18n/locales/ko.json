@@ -893,7 +893,7 @@
     "noRules": "이 그룹에 규칙이 없습니다",
     "noConditions": "조건 없음",
     "sizeNoBound": "제한 없음",
-    "sizeBoundInvalid": "정수여야 하며, 제한이 없으면 비워 두세요."
+    "sizeBoundInvalid": "-2147483648에서 2147483647 사이의 정수여야 하며, 제한이 없으면 비워 두세요."
   },
   "apiCallsEditor": {
     "noEndpointsFound": "사양에서 엔드포인트를 찾을 수 없습니다",

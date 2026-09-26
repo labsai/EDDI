@@ -556,6 +556,11 @@ function McpRetryEditor({
 function useStableArgumentIds(names: string[]) {
   const [ids] = useState(() => new Map<string, number>());
   const counter = useRef(0);
+  // Render only ever adds an entry, and adding is idempotent: a repeated or
+  // abandoned render finds the entry it added and reuses it. Removing is not —
+  // an abandoned render that dropped a name would hand it a new id (and its row
+  // a remount, losing its Text/JSON kind) when the name came back — so names
+  // that are gone are pruned only after a commit.
   const result = names.map((name) => {
     let id = ids.get(name);
     if (id === undefined) {
@@ -564,9 +569,13 @@ function useStableArgumentIds(names: string[]) {
     }
     return id;
   });
-  for (const name of [...ids.keys()]) {
-    if (!names.includes(name)) ids.delete(name);
-  }
+  const namesKey = JSON.stringify(names);
+  useEffect(() => {
+    const current = new Set(JSON.parse(namesKey) as string[]);
+    for (const name of [...ids.keys()]) {
+      if (!current.has(name)) ids.delete(name);
+    }
+  }, [ids, namesKey]);
   const rename = (from: string, to: string) => {
     const id = ids.get(from);
     if (id === undefined) return;

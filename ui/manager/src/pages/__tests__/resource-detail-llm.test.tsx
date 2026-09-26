@@ -564,7 +564,7 @@ describe("LangChain Editor", () => {
     });
   });
 
-  it("expands Execution section and shows parallel execution checkbox", async () => {
+  it("expands Execution section without the removed parallel execution control", async () => {
     const user = userEvent.setup();
     renderLlmPage();
     await waitFor(() => {
@@ -574,31 +574,12 @@ describe("LangChain Editor", () => {
     await user.click(screen.getByText("Execution"));
 
     await waitFor(() => {
-      expect(screen.getByTestId("enable-parallel-execution")).toBeInTheDocument();
+      expect(screen.getByText("Max Tool Iterations")).toBeInTheDocument();
     });
-  });
-
-  it("enables parallel execution checkbox", async () => {
-    const user = userEvent.setup();
-    renderLlmPage();
-    await waitFor(() => {
-      expect(screen.getByText("Execution")).toBeInTheDocument();
-    });
-
-    await user.click(screen.getByText("Execution"));
-
-    await waitFor(() => {
-      expect(screen.getByTestId("enable-parallel-execution")).toBeInTheDocument();
-    });
-
-    const checkbox = screen.getByTestId("enable-parallel-execution") as HTMLInputElement;
-    expect(checkbox.checked).toBe(false);
-
-    await user.click(checkbox);
-
-    await waitFor(() => {
-      expect(checkbox.checked).toBe(true);
-    });
+    // enableParallelExecution / parallelExecutionTimeoutMs were removed from
+    // LlmConfiguration.Task and are read by nothing, so no control is offered.
+    expect(screen.queryByTestId("enable-parallel-execution")).not.toBeInTheDocument();
+    expect(screen.queryByText("Parallel Tool Execution")).not.toBeInTheDocument();
   });
 
   it("sets counterweight level to strict and shows strict info note", async () => {

@@ -392,6 +392,10 @@ describe("RAG upload source", () => {
       dataTransfer: { files: [new File(["# notes"], "notes.md", { type: "text/markdown" })] },
     });
     const retry = await screen.findByTestId("ingestion-source-0-upload-retry");
+    // The first load and the refetch that ends the dropped batch can land after
+    // the retry button appears; count from after both, so only the retry's own
+    // refetch can satisfy the assertion below.
+    await waitFor(() => expect(fileListCalls).toBeGreaterThanOrEqual(2));
     const before = fileListCalls;
 
     await user.click(retry);

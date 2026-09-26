@@ -37,11 +37,12 @@ export interface PropertyInstruction {
  * Whether PropertySetterTask would store this `secret` row without vaulting it.
  * Only a non-empty `valueString` goes through `autoVaultSecret`; a
  * `fromObjectPath` read, or a `valueObject` / `valueList` / number / boolean
- * value, is stored under the scope as-is.
+ * value, is stored under the scope as-is. A typed value is written after the
+ * vaulted string and replaces it, so a row carrying both still ends up in
+ * plain text — the typed fields are checked before `valueString`.
  */
 function storesSecretInPlainText(prop: PropertyInstruction): boolean {
   if (prop.fromObjectPath?.trim()) return true;
-  if (prop.valueString?.trim()) return false;
   return (
     prop.valueObject != null ||
     prop.valueList != null ||
