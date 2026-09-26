@@ -1139,6 +1139,11 @@ jobs:
       - name: Install
         run: npm ci
 
+      # Same base rules as the Manager's lint (ui/chat/eslint.config.js). Until
+      # this step existed ui/chat had no ESLint at all.
+      - name: Lint
+        run: npm run lint
+
       - name: Type check
         run: npm run typecheck
 
