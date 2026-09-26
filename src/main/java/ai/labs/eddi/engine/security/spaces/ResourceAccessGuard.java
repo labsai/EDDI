@@ -117,6 +117,48 @@ public class ResourceAccessGuard {
     }
 
     /**
+     * What the caller holds on a resource addressed by id, decided against its
+     * <em>current</em> descriptor — the non-throwing twin of
+     * {@link #requireAccess}, for listings that hold only ids (deployment statuses,
+     * schedules, triggers) and must drop what the caller could not address
+     * directly.
+     * <p>
+     * A resource with no descriptor answers exactly what {@link #requireAccess}'s
+     * legacy fallback would admit — at most {@link AccessLevel#VIEW}, and only
+     * under the legacy-visibility policy. A descriptor that cannot be read answers
+     * {@code null}: a listing omits what it cannot verify rather than failing
+     * wholesale.
+     *
+     * @return the caller's level, or {@code null} for none
+     */
+    public AccessLevel currentLevel(String resourceId) {
+        if (seesEverything()) {
+            return AccessLevel.OWN;
+        }
+        if (resourceId == null || resourceId.isBlank()) {
+            return null;
+        }
+        try {
+            DocumentDescriptor descriptor = documentDescriptorStore.readCurrentDescriptor(resourceId);
+            return DescriptorAccess.effectiveLevel(descriptor, spaceContext.current(), settings.admitsLegacy());
+        } catch (ResourceNotFoundException e) {
+            return settings.admitsLegacy() ? AccessLevel.VIEW : null;
+        } catch (ResourceStoreException e) {
+            LOGGER.debugf("Could not load descriptor for access lookup on %s: %s", sanitize(resourceId), e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Non-throwing {@link #requireAccess}: whether the caller holds at least
+     * {@code required} on the resource. See {@link #currentLevel(String)}.
+     */
+    public boolean hasAccess(String resourceId, AccessLevel required) {
+        AccessLevel granted = currentLevel(resourceId);
+        return granted != null && granted.includes(required);
+    }
+
+    /**
      * Asserts that the caller holds at least {@code required} on the resource.
      *
      * @param resourceId

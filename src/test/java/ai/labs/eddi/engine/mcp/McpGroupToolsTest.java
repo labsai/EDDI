@@ -18,6 +18,9 @@ import ai.labs.eddi.configs.groups.templates.GroupTemplateService;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.security.OwnershipValidator;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
+import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
@@ -47,6 +50,7 @@ class McpGroupToolsTest {
     private IGroupConversationService groupConversationService;
     private IJsonSerialization jsonSerialization;
     private IGroupWorkspaceStore workspaceStore;
+    private ResourceAccessGuard resourceAccessGuard;
     private McpGroupTools tools;
 
     private static GroupTemplateService templateService() {
@@ -62,6 +66,10 @@ class McpGroupToolsTest {
         groupConversationService = mock(IGroupConversationService.class);
         jsonSerialization = mock(IJsonSerialization.class);
         workspaceStore = mock(IGroupWorkspaceStore.class);
+        // Permissive by default, as workspaces-off is: the group gate has its own
+        // tests.
+        resourceAccessGuard = mock(ResourceAccessGuard.class);
+        lenient().when(resourceAccessGuard.hasAccess(any(), any())).thenReturn(true);
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
 
         var mockIdentity = mock(SecurityIdentity.class);
@@ -69,7 +77,7 @@ class McpGroupToolsTest {
         // authorization disabled — OwnershipValidator's checks are no-ops, matching the
         // pre-existing tests. Ownership enforcement is covered separately below.
         tools = new McpGroupTools(groupStore, groupConversationService, jsonSerialization, strictConfigurationParser(),
-                mockIdentity, new OwnershipValidator(false), workspaceStore, templateService(), false);
+                mockIdentity, new OwnershipValidator(false), workspaceStore, templateService(), resourceAccessGuard, false);
     }
 
     // --- describe_discussion_styles ---
@@ -543,7 +551,7 @@ class McpGroupToolsTest {
         lenient().when(identity.getPrincipal()).thenReturn(principal);
         lenient().when(identity.hasRole(role)).thenReturn(true);
         return new McpGroupTools(groupStore, groupConversationService, jsonSerialization, strictConfigurationParser(),
-                identity, new OwnershipValidator(true), workspaceStore, templateService(), true);
+                identity, new OwnershipValidator(true), workspaceStore, templateService(), resourceAccessGuard, true);
     }
 
     /**
@@ -558,7 +566,7 @@ class McpGroupToolsTest {
         lenient().when(identity.getPrincipal()).thenReturn(principal);
         lenient().when(identity.hasRole(anyString())).thenReturn(true);
         return new McpGroupTools(groupStore, groupConversationService, jsonSerialization, strictConfigurationParser(),
-                identity, new OwnershipValidator(true), workspaceStore, templateService(), true);
+                identity, new OwnershipValidator(true), workspaceStore, templateService(), resourceAccessGuard, true);
     }
 
     @Test
@@ -915,5 +923,62 @@ class McpGroupToolsTest {
             throw new IllegalStateException(e);
         }
         return parser;
+    }
+
+    // --- group access gates (H1 / H2d) ---
+
+    @Test
+    void discussWithGroup_withoutUse_isRefusedBeforeAnyMemberRuns() throws Exception {
+        doThrow(new ForbiddenException("no")).when(resourceAccessGuard).requireUseAccess("g1", "group");
+
+        String result = tools.discuss_with_group("g1", "question?", null);
+
+        assertTrue(result.contains("Access denied"), result);
+        verify(groupConversationService, never()).discuss(any(), any(), any(), anyInt());
+    }
+
+    @Test
+    void startGroupDiscussion_withoutUse_isRefused() throws Exception {
+        doThrow(new ForbiddenException("no")).when(resourceAccessGuard).requireUseAccess("g1", "group");
+
+        String result = tools.start_group_discussion("g1", "question?", null);
+
+        assertTrue(result.contains("Access denied"), result);
+        verify(groupConversationService, never()).startAndDiscussAsync(any(), any(), any(), any());
+    }
+
+    @Test
+    void continueGroupDiscussion_withoutUseOnTheGroup_isRefused() throws Exception {
+        GroupConversation gc = ownedBy("mcp-client");
+        gc.setGroupId("g1");
+        doThrow(new ForbiddenException("no")).when(resourceAccessGuard).requireUseAccess("g1", "group");
+
+        String result = tools.continue_group_discussion("gc1", "next?");
+
+        assertTrue(result.contains("Access denied"), result);
+        verify(groupConversationService, never()).continueDiscussion(any(), any(), any());
+    }
+
+    @Test
+    void addTeamTask_withoutEditOnTheGroup_isRefused() throws Exception {
+        var workspace = teamWorkspace();
+        when(resourceAccessGuard.hasAccess("g1", AccessLevel.EDIT)).thenReturn(false);
+
+        String result = tools.add_team_task("g1", "Sneak in", null, null);
+
+        assertTrue(result.contains("Access denied"), result);
+        assertEquals(0, workspace.getBacklog().size());
+        verify(workspaceStore, never()).casRevision(any());
+    }
+
+    @Test
+    void listTeamBacklog_withoutViewOnTheGroup_isRefused() throws Exception {
+        teamWorkspace();
+        when(resourceAccessGuard.hasAccess("g1", AccessLevel.VIEW)).thenReturn(false);
+
+        String result = tools.list_team_backlog("g1");
+
+        assertTrue(result.contains("Access denied"), result);
+        verify(workspaceStore, never()).find(any());
     }
 }
