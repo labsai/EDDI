@@ -127,10 +127,11 @@ public class SlackConfig {
     /**
      * The workspace that bare Slack ids stored before namespacing belonged to, or
      * {@code null}. When set (or derivable because every routed integration pins
-     * the same {@code teamId}), a user of that workspace keeps their bare-id
-     * threads and has their bare-id long-term memories copied to the namespaced id
-     * on first contact. Without it nothing is aliased: in a multi-workspace
-     * deployment a bare id may already mix two people's data.
+     * the same {@code teamId} and no legacy Slack connector is routed — derived
+     * from the current configuration only), a user of that workspace keeps their
+     * bare-id threads and has their bare-id long-term memories copied to the
+     * namespaced id on first contact. Without it nothing is aliased: in a
+     * multi-workspace deployment a bare id may already mix two people's data.
      */
     public String getLegacyTeamId() {
         return legacyTeamId;

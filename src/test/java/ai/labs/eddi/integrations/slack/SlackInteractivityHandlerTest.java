@@ -15,6 +15,7 @@ import ai.labs.eddi.engine.internal.GroupApprovalRequest;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
+import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
@@ -110,6 +111,7 @@ class SlackInteractivityHandlerTest {
                                                                    Instant pausedAt) {
         var snapshot = new ConversationMemorySnapshot();
         snapshot.setAgentId(agentId);
+        snapshot.setConversationState(ConversationState.AWAITING_HUMAN);
         snapshot.setHitlPausedAt(pausedAt);
         var output = new ConversationOutput();
         output.put("context", new HashMap<>(startContext));
@@ -121,6 +123,7 @@ class SlackInteractivityHandlerTest {
         var gc = new GroupConversation();
         gc.setId(gcId);
         gc.setGroupId(groupId);
+        gc.setState(GroupConversation.GroupConversationState.AWAITING_APPROVAL);
         gc.setPausedAt(pausedAt);
         return gc;
     }
@@ -483,6 +486,39 @@ class SlackInteractivityHandlerTest {
 
         verify(conversationService, never()).resumeConversation(any(), any(), any());
         verify(slackApi).updateMessage(anyString(), eq("C_APPROVAL"), anyString(), contains("out of date"), any());
+    }
+
+    @Test
+    void cardForAnAlreadyResolvedConversation_isMarkedResolved_notOutOfDate() throws Exception {
+        // A second approver clicks after the first approved: the conversation is no
+        // longer paused and its bookmark is cleared. That is "already resolved", which
+        // the engine's state conflict reports — not "out of date".
+        bindIntegration(integrationWith(INT_NAME, "U_APPROVER", "s"));
+        var resolved = conversationSnapshot("agent-1", Map.of("channelIntegrationId", INT_RES), null);
+        resolved.setConversationState(ConversationState.READY);
+        when(conversationService.getConversationMemorySnapshot("conv-1")).thenReturn(resolved);
+        doThrow(new IllegalStateException("Conversation is not in AWAITING_HUMAN state (current: READY)"))
+                .when(conversationService).resumeConversation(eq("conv-1"), any(), isNull());
+
+        handler.handlePayload(approvePayload("U_APPROVER", value("conv-1")));
+
+        verify(slackApi).updateMessage(anyString(), eq("C_APPROVAL"), anyString(), contains("already been resolved"), any());
+        verify(slackApi, never()).updateMessage(anyString(), anyString(), anyString(), contains("out of date"), any());
+    }
+
+    @Test
+    void cardForAnAlreadyResolvedGroup_isMarkedResolved_notOutOfDate() throws Exception {
+        bindIntegration(integrationWith(INT_NAME, "U_APPROVER", "s"));
+        var resolved = groupConversation("gc-7", "group-1", null);
+        resolved.setState(GroupConversation.GroupConversationState.IN_PROGRESS);
+        when(groupConversationService.readGroupConversation("gc-7")).thenReturn(resolved);
+        doThrow(new GroupDiscussionException("Group conversation is not awaiting approval"))
+                .when(groupConversationService).resumeDiscussion(eq("gc-7"), any(), isNull());
+
+        handler.handlePayload(approvePayload("U_APPROVER", value(SlackHitlSupport.GROUP_VALUE_PREFIX + "gc-7")));
+
+        verify(slackApi).updateMessage(anyString(), eq("C_APPROVAL"), anyString(), contains("already been resolved"), any());
+        verify(slackApi, never()).updateMessage(anyString(), anyString(), anyString(), contains("out of date"), any());
     }
 
     @Test

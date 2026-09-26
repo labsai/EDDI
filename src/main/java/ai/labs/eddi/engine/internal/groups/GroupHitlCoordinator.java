@@ -20,6 +20,7 @@ import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
+import ai.labs.eddi.engine.api.IGroupConversationService.GroupPauseMismatchException;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
@@ -508,7 +509,7 @@ public class GroupHitlCoordinator {
         // approve this one — the discussion was resumed and has paused again on
         // something the reviewer never saw.
         if (request.getDecision() != null && !request.getDecision().appliesToPause(gc.getPausedAt())) {
-            throw new GroupDiscussionException("The pending approval changed since this decision was made — "
+            throw new GroupPauseMismatchException("The pending approval changed since this decision was made — "
                     + "review the current pause and decide again");
         }
 

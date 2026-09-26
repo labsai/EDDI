@@ -273,6 +273,19 @@ public interface IGroupConversationService {
         }
     }
 
+    /**
+     * A group HITL decision named a pause ({@code HitlDecision.pauseId}) that is no
+     * longer the discussion's current one: it was resumed and has paused again on
+     * something the reviewer never saw. A {@link GroupDiscussionException} so every
+     * existing wrong-state handler still treats it as a conflict; surfaces that can
+     * tell the reviewer more (MCP's {@code PAUSE_CHANGED}) catch it first.
+     */
+    class GroupPauseMismatchException extends GroupDiscussionException {
+        public GroupPauseMismatchException(String message) {
+            super(message);
+        }
+    }
+
     class GroupDepthExceededException extends GroupDiscussionException {
         public GroupDepthExceededException(String message) {
             super(message);
