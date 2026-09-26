@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -53,10 +54,12 @@ class RestGroupConversationHitlTest {
     private SecurityIdentity identity;
     private OwnershipValidator ownershipValidator;
     private RestGroupConversation restGroupConversation;
+    private ResourceAccessGuard resourceAccessGuard;
 
     @BeforeEach
     void setUp() {
         groupService = mock(IGroupConversationService.class);
+        resourceAccessGuard = mock(ResourceAccessGuard.class);
         jsonSerialization = mock(IJsonSerialization.class);
         identity = mock(SecurityIdentity.class);
         // Use a real OwnershipValidator with auth enabled to test actual logic
@@ -72,7 +75,8 @@ class RestGroupConversationHitlTest {
                 mock(IConversationService.class),
                 groupService);
         restGroupConversation = new RestGroupConversation(
-                groupService, jsonSerialization, identity, ownershipValidator, hitlAccessGuard);
+                groupService, jsonSerialization, identity, ownershipValidator, hitlAccessGuard,
+                resourceAccessGuard);
     }
 
     /** Creates a GC owned by the given userId. */

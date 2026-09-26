@@ -21,11 +21,13 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig;
 import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.security.OwnershipValidator;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.utils.LogSanitizer;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
@@ -71,13 +73,15 @@ public class McpGroupTools {
     private final OwnershipValidator ownershipValidator;
     private final IGroupWorkspaceStore workspaceStore;
     private final GroupTemplateService templateService;
+    private final ResourceAccessGuard resourceAccessGuard;
     private final boolean authEnabled;
 
     @Inject
     public McpGroupTools(IRestAgentGroupStore groupStore, IGroupConversationService groupConversationService, IJsonSerialization jsonSerialization,
             StrictConfigurationParser configParser, SecurityIdentity identity, OwnershipValidator ownershipValidator,
-            IGroupWorkspaceStore workspaceStore, GroupTemplateService templateService,
+            IGroupWorkspaceStore workspaceStore, GroupTemplateService templateService, ResourceAccessGuard resourceAccessGuard,
             @ConfigProperty(name = "authorization.enabled", defaultValue = "false") boolean authEnabled) {
+        this.resourceAccessGuard = resourceAccessGuard;
         this.configParser = configParser;
         this.groupStore = groupStore;
         this.groupConversationService = groupConversationService;
@@ -114,6 +118,16 @@ public class McpGroupTools {
     private String resolveOwner(String userId) {
         String resolved = ownershipValidator.validateAndResolveUserId(identity, userId);
         return resolved != null && !resolved.isBlank() ? resolved : "mcp-client";
+    }
+
+    /**
+     * Uniform, non-leaking denial for a caller who may not run (or read the
+     * workspace of) a group. Same wording whether the group is private or absent
+     * from the caller's view, so the refusal is not an existence oracle.
+     */
+    private String groupAccessDenied(String tool, String groupId) {
+        LOGGER.warnf("%s denied: caller lacks access to group %s", tool, LogSanitizer.sanitize(groupId));
+        return errorJson("Access denied: you do not have access to this group");
     }
 
     /**
@@ -388,6 +402,13 @@ public class McpGroupTools {
                                              + "calling user and may not name another user.") String userId) {
         requireRole(identity, authEnabled, "eddi-viewer");
         try {
+            // Parity with REST: running a group is the USE act on it (see
+            // RestGroupConversation#requireGroupUseAccess).
+            resourceAccessGuard.requireUseAccess(groupId, "group");
+        } catch (ForbiddenException e) {
+            return groupAccessDenied("discuss_with_group", groupId);
+        }
+        try {
             String user = resolveOwner(userId);
             GroupConversation gc = groupConversationService.discuss(groupId, question, user, 0);
             return jsonSerialization.serialize(gc);
@@ -467,6 +488,11 @@ public class McpGroupTools {
                                          @ToolArg(description = "User ID (optional). With authorization enabled this defaults to the calling user and may not name another user.") String userId) {
         requireRole(identity, authEnabled, "eddi-viewer");
         try {
+            resourceAccessGuard.requireUseAccess(groupId, "group");
+        } catch (ForbiddenException e) {
+            return groupAccessDenied("start_group_discussion", groupId);
+        }
+        try {
             String user = resolveOwner(userId);
             GroupConversation gc = groupConversationService.startAndDiscussAsync(groupId, question, user, null);
             return jsonSerialization.serialize(Map.of(
@@ -537,6 +563,20 @@ public class McpGroupTools {
         requireRole(identity, authEnabled, "eddi-viewer");
         try {
             requireConversationOwner(groupConversationId);
+        } catch (ForbiddenException e) {
+            return accessDenied("continue_group_discussion", groupConversationId);
+        } catch (Exception e) {
+            LOGGER.error("continue_group_discussion failed", e);
+            return errorJson("Failed to continue group discussion", "INTERNAL", null);
+        }
+        try {
+            // A continuation re-runs every member: re-check USE on the group itself.
+            String groupId = groupConversationService.readGroupConversation(groupConversationId).getGroupId();
+            try {
+                resourceAccessGuard.requireUseAccess(groupId, "group");
+            } catch (ForbiddenException e) {
+                return groupAccessDenied("continue_group_discussion", groupId);
+            }
             GroupConversation gc = groupConversationService.continueDiscussion(
                     groupConversationId, question, null);
             return jsonSerialization.serialize(gc);
@@ -592,6 +632,11 @@ public class McpGroupTools {
             if (groupStore.getCurrentResourceId(groupId) == null) {
                 return errorJson("Group not found: " + groupId);
             }
+            // Parity with RestGroupWorkspace.addBacklogTask: the backlog is part of the
+            // group, and writing to it is an EDIT of the group.
+            if (!resourceAccessGuard.hasAccess(groupId, AccessLevel.EDIT)) {
+                return groupAccessDenied("add_team_task", groupId);
+            }
             String trimmedSubject = subject.trim();
             // Optimistic-concurrency retry — same reasoning as the REST surface: a
             // lost CAS re-reads and re-validates so concurrent adds cannot drop
@@ -626,6 +671,10 @@ public class McpGroupTools {
         try {
             if (groupStore.getCurrentResourceId(groupId) == null) {
                 return errorJson("Group not found: " + groupId);
+            }
+            // Parity with RestGroupWorkspace.readBacklog: VIEW on the group.
+            if (!resourceAccessGuard.hasAccess(groupId, AccessLevel.VIEW)) {
+                return groupAccessDenied("list_team_backlog", groupId);
             }
             var workspace = workspaceStore.find(groupId);
             return jsonSerialization.serialize(
