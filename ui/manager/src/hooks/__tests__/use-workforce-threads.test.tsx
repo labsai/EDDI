@@ -226,6 +226,56 @@ describe("Workforce storage is per signed-in user", () => {
     expect(aliceAgain.result.current.templates.map((t) => t.name)).toEqual(["Mine"]);
   });
 
+  it("keys by the stable OIDC subject when there is one, not the renameable username", () => {
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(
+        AuthContext.Provider,
+        {
+          value: {
+            ...GUEST_CONTEXT,
+            method: "keycloak",
+            user: { id: "sub-123", username: "alice", firstName: "", lastName: "", email: "", fullName: "" },
+          },
+        },
+        children,
+      );
+    const { result } = renderHook(() => useWorkforceThreads(), { wrapper });
+    act(() => result.current.registerThread(thread));
+    expect(localStorage.getItem("workforce-threads:sub-123")).not.toBeNull();
+    expect(localStorage.getItem("workforce-threads:alice")).toBeNull();
+  });
+
+  it("adopts pre-upgrade templates into the first signed-in user's key, once", () => {
+    // Saved before keys were per user. Switching keys used to hide them.
+    localStorage.setItem(
+      "workforce-templates",
+      JSON.stringify([{ id: "t1", name: "Old", description: "", style: "ROUND_TABLE", members: [], maxRounds: 2, createdAt: "" }]),
+    );
+    const alice = renderHook(() => useTemplates(), { wrapper: signedInAs("alice") });
+    expect(alice.result.current.templates.map((t) => t.name)).toEqual(["Old"]);
+    expect(localStorage.getItem("workforce-templates:alice")).not.toBeNull();
+    expect(localStorage.getItem("workforce-templates")).toBeNull();
+
+    // Moved, not copied: the next user does not inherit it as well.
+    const bob = renderHook(() => useTemplates(), { wrapper: signedInAs("bob") });
+    expect(bob.result.current.templates).toEqual([]);
+  });
+
+  it("adopts pre-upgrade threads the same way", () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify([{ ...thread, lastActivity: 1 }]));
+    const alice = renderHook(() => useWorkforceThreads(), { wrapper: signedInAs("alice") });
+    expect(alice.result.current.getThread("b1", "m1")).toMatchObject({ conversationId: "c1" });
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+  });
+
+  it("does not overwrite a user's own data with the legacy key", () => {
+    localStorage.setItem("workforce-templates", JSON.stringify([{ id: "x", name: "Legacy" }]));
+    localStorage.setItem("workforce-templates:alice", JSON.stringify([{ id: "y", name: "Mine" }]));
+    const alice = renderHook(() => useTemplates(), { wrapper: signedInAs("alice") });
+    expect(alice.result.current.templates.map((t) => t.name)).toEqual(["Mine"]);
+    expect(localStorage.getItem("workforce-templates")).not.toBeNull();
+  });
+
   it("keeps the plain key when auth is disabled", () => {
     const { result } = renderHook(() => useWorkforceThreads());
     act(() => result.current.registerThread(thread));

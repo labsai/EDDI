@@ -31,7 +31,9 @@
     "signedOutTitle": "Sie sind abgemeldet",
     "signedOutMessage": "Melden Sie sich an, um fortzufahren.",
     "retry": "Erneut versuchen",
-    "signIn": "Anmelden"
+    "signIn": "Anmelden",
+    "incompleteTitle": "Die Anmeldung wurde nicht abgeschlossen",
+    "incompleteMessage": "Die Anmeldung wurde abgebrochen oder abgelehnt. Melden Sie sich erneut an, um fortzufahren."
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -3496,7 +3498,8 @@
   },
   "errorBoundary": {
     "retry": "Erneut versuchen",
-    "title": "Etwas ist schiefgelaufen"
+    "title": "Etwas ist schiefgelaufen",
+    "reload": "Neu laden"
   },
   "gdpr": {
     "auditPseudonymized": "Audit pseudonymisiert",

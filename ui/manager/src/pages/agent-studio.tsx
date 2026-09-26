@@ -292,22 +292,29 @@ export function AgentStudioPage() {
                 />
               </div>
             )}
-            {mobileTab === "editor" && (
-              <div className="flex-1 overflow-hidden flex flex-col">
-                {selectedStep && workflowId ? (
-                  <StudioEditorPanel
-                    key={`mobile-${selectedStageIndex}-${selectedStep.config?.uri}`}
-                    workflowStep={selectedStep}
-                    agentId={agentId}
-                    agentVersion={agentVersion}
-                    workflowId={workflowId}
-                    workflowVersion={workflowVersion}
-                  />
-                ) : (
-                  <StudioEditorEmpty />
-                )}
-              </div>
-            )}
+            {/* Hidden, not unmounted, while another tab is showing: unmounting
+                threw away an unsaved edit the moment the user looked at the
+                pipeline or the chat. */}
+            <div
+              className={cn(
+                "flex-1 overflow-hidden flex flex-col",
+                mobileTab !== "editor" && "hidden",
+              )}
+              data-testid="studio-mobile-editor"
+            >
+              {selectedStep && workflowId ? (
+                <StudioEditorPanel
+                  key={`mobile-${selectedStageIndex}-${selectedStep.config?.uri}`}
+                  workflowStep={selectedStep}
+                  agentId={agentId}
+                  agentVersion={agentVersion}
+                  workflowId={workflowId}
+                  workflowVersion={workflowVersion}
+                />
+              ) : (
+                mobileTab === "editor" && <StudioEditorEmpty />
+              )}
+            </div>
             {mobileTab === "chat" && (
               <div className="flex-1 overflow-hidden flex flex-col">
                 <ChatPanel embedded />

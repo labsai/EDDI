@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { cn, formatRelativeTime, statusConfig, hashColor, getInitials, isValidUrl, formatDuration } from "@/lib/utils";
 
+/** What this environment's CLDR data calls "n units ago" in narrow English. */
+function ago(n: number, unit: Intl.RelativeTimeFormatUnit): string {
+  return new Intl.RelativeTimeFormat("en", { style: "narrow", numeric: "always" }).format(-n, unit);
+}
+
+
 describe("cn", () => {
   it("merges class names", () => {
     expect(cn("foo", "bar")).toBe("foo bar");
@@ -36,17 +42,17 @@ describe("formatRelativeTime", () => {
 
   it("returns minutes ago", () => {
     // 3 minutes ago
-    expect(formatRelativeTime(Date.now() - 3 * 60 * 1000)).toBe("3m ago");
+    expect(formatRelativeTime(Date.now() - 3 * 60 * 1000)).toBe(ago(3, "minute"));
   });
 
   it("returns hours ago", () => {
     // 2 hours ago
-    expect(formatRelativeTime(Date.now() - 2 * 60 * 60 * 1000)).toBe("2h ago");
+    expect(formatRelativeTime(Date.now() - 2 * 60 * 60 * 1000)).toBe(ago(2, "hour"));
   });
 
   it("returns days ago", () => {
     // 5 days ago
-    expect(formatRelativeTime(Date.now() - 5 * 24 * 60 * 60 * 1000)).toBe("5d ago");
+    expect(formatRelativeTime(Date.now() - 5 * 24 * 60 * 60 * 1000)).toBe(ago(5, "day"));
   });
 
   it("speaks the language on screen, not always English", async () => {
@@ -54,7 +60,7 @@ describe("formatRelativeTime", () => {
     const { default: i18n } = await import("@/i18n/config");
     await i18n.changeLanguage("de");
     try {
-      expect(formatRelativeTime(Date.now() - 5 * 60 * 1000)).not.toBe("5m ago");
+      expect(formatRelativeTime(Date.now() - 5 * 60 * 1000)).not.toBe(ago(5, "minute"));
       expect(formatRelativeTime(Date.now() - 5 * 60 * 1000)).toBe(
         new Intl.RelativeTimeFormat("de", { style: "narrow" }).format(-5, "minute"),
       );
@@ -69,15 +75,15 @@ describe("formatRelativeTime", () => {
   });
 
   it("returns '1m ago' for exactly 60 seconds", () => {
-    expect(formatRelativeTime(Date.now() - 60 * 1000)).toBe("1m ago");
+    expect(formatRelativeTime(Date.now() - 60 * 1000)).toBe(ago(1, "minute"));
   });
 
   it("returns '1h ago' for exactly 60 minutes", () => {
-    expect(formatRelativeTime(Date.now() - 60 * 60 * 1000)).toBe("1h ago");
+    expect(formatRelativeTime(Date.now() - 60 * 60 * 1000)).toBe(ago(1, "hour"));
   });
 
   it("returns '1d ago' for exactly 24 hours", () => {
-    expect(formatRelativeTime(Date.now() - 24 * 60 * 60 * 1000)).toBe("1d ago");
+    expect(formatRelativeTime(Date.now() - 24 * 60 * 60 * 1000)).toBe(ago(1, "day"));
   });
 
   it("returns '—' for 0 timestamp", () => {

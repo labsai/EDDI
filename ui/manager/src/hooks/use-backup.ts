@@ -27,10 +27,12 @@ import type {
  * Everything an import, merge, upgrade or sync can have written.
  *
  * These operations create or bump the agent AND its workflows and every
- * resource they reference (plus snippets and descriptors), yet they used to
- * invalidate only the agent queries. The workflow and resource lists, the
+ * resource they reference, and an agent ZIP also carries snippets, schedules
+ * and connections (root AGENTS.md §5.5) — yet they used to invalidate only the
+ * agent queries. The workflow, resource, schedule and connection lists, the
  * dashboard counts, the orphan scan and every open detail page kept showing
- * the pre-import state until each entry went stale on its own.
+ * the pre-import state until each entry went stale on its own. Snippets are a
+ * resource type, so `["resources"]` covers them (`["resources", "snippets"]`).
  */
 const IMPORT_TOUCHED_KEYS = [
   agentKeys.all,
@@ -42,6 +44,8 @@ const IMPORT_TOUCHED_KEYS = [
   ["latest-versions"],
   ["dashboard"],
   ["orphans"],
+  ["schedules"],
+  ["connections"],
 ] as const;
 
 function invalidateAfterImport(queryClient: QueryClient) {

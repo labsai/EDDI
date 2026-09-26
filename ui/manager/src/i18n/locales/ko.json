@@ -31,7 +31,9 @@
     "signedOutTitle": "로그아웃되었습니다",
     "signedOutMessage": "계속하려면 로그인하세요.",
     "retry": "다시 시도",
-    "signIn": "로그인"
+    "signIn": "로그인",
+    "incompleteTitle": "로그인이 완료되지 않았습니다",
+    "incompleteMessage": "로그인이 취소되었거나 거부되었습니다. 계속하려면 다시 로그인하세요."
   },
   "nav": {
     "dashboard": "대시보드",
@@ -3496,7 +3498,8 @@
   },
   "errorBoundary": {
     "retry": "다시 시도",
-    "title": "문제가 발생했습니다"
+    "title": "문제가 발생했습니다",
+    "reload": "새로고침"
   },
   "gdpr": {
     "auditPseudonymized": "감사 가명화됨",

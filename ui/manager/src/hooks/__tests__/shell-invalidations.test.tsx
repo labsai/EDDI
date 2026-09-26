@@ -100,6 +100,9 @@ describe("import, merge, upgrade and sync invalidations", () => {
     expect(keys).toContain('["workflows"]');
     expect(keys).toContain('["resources"]');
     expect(keys).toContain('["agent"]');
+    // A ZIP also carries schedules and connections.
+    expect(keys).toContain('["schedules"]');
+    expect(keys).toContain('["connections"]');
   });
 });
 

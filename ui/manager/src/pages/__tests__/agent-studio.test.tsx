@@ -110,6 +110,33 @@ describe("Agent Studio Page", () => {
     });
   });
 
+  it("keeps the mobile editor (and its unsaved edit) mounted when switching tabs", async () => {
+    // Below lg the editor used to render only while its tab was active, so
+    // tapping Pipeline or Chat unmounted a dirty editor and lost the edit.
+    renderStudio();
+    const user = userEvent.setup();
+    const stages = await screen.findAllByTestId("stage-1", undefined, { timeout: 3000 });
+    await user.click(stages[0]!);
+
+    // Selecting a stage switches the mobile view to the editor tab.
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-mobile-editor")).not.toHaveClass("hidden");
+    });
+    const editorContainer = screen.getByTestId("studio-mobile-editor");
+    const panel = editorContainer.firstElementChild;
+    expect(panel).not.toBeNull();
+
+    await user.click(screen.getByTestId("mobile-tab-pipeline"));
+    expect(screen.getByTestId("studio-mobile-editor")).toHaveClass("hidden");
+    // The very same element — not remounted.
+    expect(screen.getByTestId("studio-mobile-editor")).toBe(editorContainer);
+    expect(editorContainer.firstElementChild).toBe(panel);
+    expect(panel!.isConnected).toBe(true);
+
+    await user.click(screen.getByTestId("mobile-tab-editor"));
+    expect(screen.getByTestId("studio-mobile-editor")).not.toHaveClass("hidden");
+  });
+
   it("can select a pipeline stage by clicking", async () => {
     renderStudio();
     const user = userEvent.setup();

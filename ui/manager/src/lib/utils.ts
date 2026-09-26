@@ -11,8 +11,9 @@ export function cn(...inputs: ClassValue[]) {
  * the language on screen.
  *
  * It used to build English by hand ("5m ago", "just now") for every locale.
- * `Intl.RelativeTimeFormat` in `narrow` style produces exactly those strings in
- * English and the right ones everywhere else; "just now" is a translation key.
+ * `Intl.RelativeTimeFormat` in `narrow` style produces the right strings in
+ * every locale — the exact English wording ("5m ago" vs "5 min. ago") comes
+ * from the browser's CLDR data, so tests compare against `Intl`, not literals; "just now" is a translation key.
  * Reads the shared i18next instance rather than taking `t`, so the ~15 callers
  * (cards, lists, pickers) stay unchanged.
  */
@@ -35,13 +36,21 @@ export function formatRelativeTime(timestamp: number): string {
   return format.format(-minutes, "minute");
 }
 
+const relativeTimeFormats = new Map<string, Intl.RelativeTimeFormat>();
+
+/** One formatter per language, reused — list pages call this per row. */
 function relativeTimeFormat(): Intl.RelativeTimeFormat {
   const language = i18next.resolvedLanguage || i18next.language || "en";
-  try {
-    return new Intl.RelativeTimeFormat(language, { style: "narrow", numeric: "always" });
-  } catch {
-    return new Intl.RelativeTimeFormat("en", { style: "narrow", numeric: "always" });
+  let format = relativeTimeFormats.get(language);
+  if (!format) {
+    try {
+      format = new Intl.RelativeTimeFormat(language, { style: "narrow", numeric: "always" });
+    } catch {
+      format = new Intl.RelativeTimeFormat("en", { style: "narrow", numeric: "always" });
+    }
+    relativeTimeFormats.set(language, format);
   }
+  return format;
 }
 
 /** Agent deployment status color configuration */

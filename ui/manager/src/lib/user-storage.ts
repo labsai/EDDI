@@ -15,6 +15,40 @@ export function userScopedKey(base: string, userId: string | null | undefined): 
   return userId ? `${base}:${userId}` : base;
 }
 
+/** The id to scope storage by: the stable OIDC subject, else the username. */
+export function storageUserId(
+  user: { id?: string; username?: string } | null | undefined,
+): string | undefined {
+  return user?.id || user?.username || undefined;
+}
+
+/**
+ * Read `base` for `userId`, adopting pre-upgrade data on first use.
+ *
+ * Before these keys were scoped, everything lived under the plain `base` key.
+ * Switching keys hid every template a user had saved. So the first time a
+ * signed-in user's own key is empty while the plain key holds data, that data
+ * is MOVED into their key: it becomes theirs, exactly as reachable as it was
+ * before the upgrade (it was visible to whoever used the browser), and it moves
+ * once — the next user to sign in does not inherit it too. Nothing is deleted.
+ *
+ * Returns the raw stored string, or null.
+ */
+export function readUserScoped(base: string, userId: string | null | undefined): string | null {
+  try {
+    const key = userScopedKey(base, userId);
+    const own = localStorage.getItem(key);
+    if (own !== null || !userId) return own;
+    const legacy = localStorage.getItem(base);
+    if (legacy === null) return null;
+    localStorage.setItem(key, legacy);
+    localStorage.removeItem(base);
+    return legacy;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Keys wiped on logout, in every scoping.
  *

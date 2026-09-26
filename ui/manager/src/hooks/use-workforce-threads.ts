@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { useAuth } from "@/hooks/use-auth";
-import { userScopedKey } from "@/lib/user-storage";
+import { readUserScoped, storageUserId, userScopedKey } from "@/lib/user-storage";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -27,9 +27,9 @@ const STORAGE_KEY = "workforce-threads";
 
 // ─── Helpers ─────────────────────────────────────────────────────
 
-function loadThreads(key: string): ThreadInfo[] {
+function loadThreads(userId: string | undefined): ThreadInfo[] {
   try {
-    const raw = localStorage.getItem(key);
+    const raw = readUserScoped(STORAGE_KEY, userId);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
@@ -63,16 +63,17 @@ function useWorkforceThreads(): UseWorkforceThreadsReturn {
   // global key handed them to whoever signed in next on the same browser. They
   // are also cleared at logout (`clearUserScopedStorage`).
   const { user } = useAuth();
-  const storageKey = userScopedKey(STORAGE_KEY, user?.username);
+  const userId = storageUserId(user);
+  const storageKey = userScopedKey(STORAGE_KEY, userId);
 
   const [state, setState] = useState(() => ({
     key: storageKey,
-    threads: loadThreads(storageKey),
+    threads: loadThreads(userId),
   }));
   // A different user (or the profile arriving) means a different store: reload
   // from it rather than carry the previous user's list across.
   if (state.key !== storageKey) {
-    setState({ key: storageKey, threads: loadThreads(storageKey) });
+    setState({ key: storageKey, threads: loadThreads(userId) });
   }
   // On the render that switched keys React discards this output and renders
   // again with the reloaded list, so the stale value is never committed.

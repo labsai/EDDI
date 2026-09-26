@@ -277,13 +277,27 @@ class ApiClient {
     const refresher = this.tokenRefresher;
     if (refresher) await refresher.ensureFresh();
 
+    const sentAuth = this.headers["Authorization"];
     let response = await send();
 
-    // One retry, after a forced refresh: the token can be revoked or expire
-    // between the freshness check and the server reading it (clock skew, a
-    // long request queue, a laptop waking from sleep). A second 401 is real.
-    if (response.status === 401 && refresher && (await refresher.forceRefresh())) {
-      response = await send();
+    // One retry, with a newer token: the token can be revoked or expire between
+    // the freshness check and the server reading it (clock skew, a long request
+    // queue, a laptop waking from sleep). A second 401 is real.
+    //
+    // Replaying the request — a POST or PUT included — is safe only because
+    // EDDI authenticates BEFORE the resource method runs: a 401 from Quarkus
+    // OIDC means the handler never executed, so nothing happened twice. An
+    // endpoint that did work and then answered 401 would break that.
+    //
+    // If a background refresh already swapped the token while this request was
+    // in flight, retry with it; otherwise force one (rate-limited by the
+    // refresher, so a 401 that is not about the token does not hit Keycloak on
+    // every request).
+    if (response.status === 401 && refresher) {
+      const tokenChanged = this.headers["Authorization"] !== sentAuth;
+      if (tokenChanged || (await refresher.forceRefresh())) {
+        response = await send();
+      }
     }
 
     if (!response.ok) {

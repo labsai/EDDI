@@ -31,7 +31,9 @@
     "signedOutTitle": "サインアウトしています",
     "signedOutMessage": "続行するにはサインインしてください。",
     "retry": "再試行",
-    "signIn": "サインイン"
+    "signIn": "サインイン",
+    "incompleteTitle": "サインインが完了しませんでした",
+    "incompleteMessage": "サインインがキャンセルされたか、拒否されました。続行するには、もう一度サインインしてください。"
   },
   "nav": {
     "dashboard": "ダッシュボード",
@@ -3496,7 +3498,8 @@
   },
   "errorBoundary": {
     "retry": "再試行",
-    "title": "問題が発生しました"
+    "title": "問題が発生しました",
+    "reload": "再読み込み"
   },
   "gdpr": {
     "auditPseudonymized": "監査を仮名化",

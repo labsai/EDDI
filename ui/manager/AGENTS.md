@@ -337,7 +337,11 @@ Chunks are content-hashed, and the Maven build copies a fresh `dist/` into the j
   navigation — ask with `hasUnsavedChanges()` there.
 - **Page errors stay in the page.** `SuspendedOutlet` carries an `ErrorBoundary`
   keyed on the path, so a throwing page keeps the shell, and navigating away
-  recovers. `lazyPage` re-imports after a failed load, so "Try Again" works.
+  recovers. `lazyPage` calls the import again after a failed load, so "Try
+  Again" is not stuck on React's cached rejection (whether the browser then
+  re-downloads the chunk is up to its module cache). Errors above the app's
+  boundaries (the providers) reach the splat route's `errorElement`,
+  `RouteErrorPage`.
 
 #### 8. Tests
 

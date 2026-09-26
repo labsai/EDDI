@@ -26,6 +26,26 @@ describe("AccessibleDialog dismissal", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("does not close when a drag starts in a field and is released on the backdrop", () => {
+    // Selecting text by dragging past the box's edge: mousedown on the input,
+    // mouseup over the dimmed area — the browser sends `click` to the common
+    // ancestor, which is the backdrop layer.
+    const onClose = vi.fn();
+    render(
+      <AccessibleDialog open onClose={onClose} title="T" testId="dlg">
+        <input data-testid="field" />
+      </AccessibleDialog>,
+    );
+    fireEvent.mouseDown(screen.getByTestId("field"));
+    fireEvent.click(screen.getByTestId("dlg-backdrop"));
+    expect(onClose).not.toHaveBeenCalled();
+
+    // A genuine press-and-release on the backdrop still closes.
+    fireEvent.mouseDown(screen.getByTestId("dlg-backdrop"));
+    fireEvent.click(screen.getByTestId("dlg-backdrop"));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it("does not close on a click inside the dialog box", async () => {
     const onClose = vi.fn();
     const user = userEvent.setup();

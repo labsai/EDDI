@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { QueryClient } from "@tanstack/react-query";
 import { AppRoot } from "@/components/layout/app-root";
+import { RouteErrorPage } from "@/components/layout/route-error-page";
 import { i18nReady } from "@/i18n/config";
 import "@/index.css";
 // NOT importing "@/hooks/session-log-store" here, deliberately. It used to be a
@@ -106,7 +107,15 @@ async function startApp() {
   // from silently discarding an edit — exists only under one. The route table
   // itself stays declarative inside `App`: a single splat route hands every URL
   // to it, so the <Routes> tree and its tests are unchanged.
-  const router = createBrowserRouter([{ path: "*", element: <AppRoot queryClient={queryClient} /> }]);
+  const router = createBrowserRouter([
+    {
+      path: "*",
+      element: <AppRoot queryClient={queryClient} />,
+      // For errors thrown above the app's own boundaries (the providers);
+      // otherwise React Router shows its unstyled, English-only default page.
+      errorElement: <RouteErrorPage />,
+    },
+  ]);
 
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
