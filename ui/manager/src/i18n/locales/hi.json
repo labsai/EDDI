@@ -3321,7 +3321,6 @@
     "agentIdPlaceholder": "संदेश संभालने के लिए एजेंट ID",
     "botToken": "बॉट टोकन",
     "botTokenHint": "बॉट उपयोगकर्ता OAuth टोकन। सुरक्षा के लिए वॉल्ट संदर्भ का उपयोग करें।",
-    "botTokenPlaceholder": "xoxb-… या ${vault:slack-bot-token}",
     "channel": "चैनल",
     "channelId": "Slack चैनल ID",
     "channelIdCol": "चैनल ID",
@@ -3342,7 +3341,6 @@
     "searchPlaceholder": "चैनल खोजें…",
     "signingSecret": "साइनिंग सीक्रेट",
     "signingSecretHint": "आपके Slack ऐप के मूलभूत जानकारी पृष्ठ से।",
-    "signingSecretPlaceholder": "हेक्स स्ट्रिंग या ${vault:slack-signing-secret}",
     "slackSetupGuide": "Slack सेटअप गाइड",
     "slackSetupSummary": "एक Slack ऐप बनाएं, बॉट टोकन स्कोप कॉन्फ़िगर करें (app_mentions:read, chat:write, im:history, channels:history, groups:history), फिर क्रेडेंशियल यहाँ पेस्ट करें।",
     "target": "लक्ष्य",
@@ -3396,7 +3394,8 @@
     "typeAgent": "एजेंट",
     "typeGroup": "समूह",
     "selectGroup": "एक समूह चुनें…",
-    "unknownGroup": "{{id}} (नहीं मिला)"
+    "unknownGroup": "{{id}} (नहीं मिला)",
+    "plaintextSecret": "{{fields}} को सीक्रेट वॉल्ट में स्टोर करें और ${vault:…} के रूप में संदर्भित करें — सादे टेक्स्ट वाले क्रेडेंशियल सहेजे नहीं जाते।"
   },
   "hitl": {
     "loadingApprovalDetails": "अनुमोदन विवरण लोड हो रहा है…",

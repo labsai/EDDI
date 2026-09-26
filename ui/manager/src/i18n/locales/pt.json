@@ -3356,7 +3356,6 @@
     "agentIdPlaceholder": "ID do agente para processar mensagens",
     "botToken": "Token do bot",
     "botTokenHint": "Token OAuth do bot. Use uma referência de cofre para maior segurança.",
-    "botTokenPlaceholder": "xoxb-… ou ${vault:slack-bot-token}",
     "channel": "canal",
     "channelId": "ID do canal Slack",
     "channelIdCol": "ID do canal",
@@ -3377,7 +3376,6 @@
     "searchPlaceholder": "Pesquisar canais…",
     "signingSecret": "Segredo de assinatura",
     "signingSecretHint": "Da página de Informações básicas do seu aplicativo Slack.",
-    "signingSecretPlaceholder": "String hex ou ${vault:slack-signing-secret}",
     "slackSetupGuide": "Guia de configuração do Slack",
     "slackSetupSummary": "Crie um aplicativo Slack, configure os escopos do token do bot (app_mentions:read, chat:write, im:history, channels:history, groups:history) e cole as credenciais aqui.",
     "target": "destino",
@@ -3431,7 +3429,8 @@
     "typeAgent": "Agente",
     "typeGroup": "Grupo",
     "selectGroup": "Escolher um grupo…",
-    "unknownGroup": "{{id}} (não encontrado)"
+    "unknownGroup": "{{id}} (não encontrado)",
+    "plaintextSecret": "Guarde {{fields}} no cofre de segredos e referencie-o como ${vault:…} — credenciais em texto simples não são guardadas."
   },
   "hitl": {
     "loadingApprovalDetails": "Carregando detalhes de aprovação…",

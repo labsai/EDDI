@@ -593,6 +593,8 @@ export function SecretKeyPicker({
   const [filter, setFilter] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
+  /** Whether the value on screen was typed or pasted here, rather than loaded. */
+  const [editedHere, setEditedHere] = useState(false);
 
   // Refs
   const containerRef = useRef<HTMLDivElement>(null);
@@ -650,6 +652,14 @@ export function SecretKeyPicker({
   const currentVaultKey = hasVaultRef ? referenceLabel(value) : "";
   /** A non-empty value that is not (yet) an admissible reference. */
   const literalRejected = referenceOnly && value.trim() !== "" && !isCanonicalRef;
+  /**
+   * A literal this field was LOADED with — a credential stored in plaintext
+   * before the field became reference-only (a channel's bot token, say).
+   * Reference-only mode renders as plain text, which put that live secret on
+   * screen for anyone looking; it stays masked until the operator types over
+   * it. Something typed or pasted here stays visible, as before.
+   */
+  const maskStoredLiteral = literalRejected && !editedHere && !hasReferencePrefix(value);
   /**
    * The warning's own id, appended to `aria-describedby` when it is showing.
    *
@@ -721,6 +731,7 @@ export function SecretKeyPicker({
 
   const handleDirectChange = useCallback(
     (newValue: string) => {
+      setEditedHere(true);
       // Auto-detect a pasted reference and normalise it to the canonical form.
       // Emitting the raw paste instead would send a trailing newline along with
       // the reference as the api key — which the backend has to trim on its side
@@ -1000,7 +1011,13 @@ export function SecretKeyPicker({
             // Nothing to mask: in reference-only mode the only admissible value
             // is a pointer, and masking it hides the one thing worth reading.
             // The same holds for a connection reference still being typed.
-            type={referenceOnly || connectionInProgress || showPassword ? "text" : "password"}
+            type={
+              maskStoredLiteral
+                ? "password"
+                : referenceOnly || connectionInProgress || showPassword
+                  ? "text"
+                  : "password"
+            }
             value={value}
             onChange={(e) => handleDirectChange(e.target.value)}
             onKeyDown={handleInputKeyDown}

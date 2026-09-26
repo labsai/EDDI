@@ -3321,7 +3321,6 @@
     "agentIdPlaceholder": "处理消息的代理 ID",
     "botToken": "机器人令牌",
     "botTokenHint": "机器人用户 OAuth 令牌。使用保管库引用以提高安全性。",
-    "botTokenPlaceholder": "xoxb-… 或 ${vault:slack-bot-token}",
     "channel": "频道",
     "channelId": "Slack 频道 ID",
     "channelIdCol": "频道 ID",
@@ -3342,7 +3341,6 @@
     "searchPlaceholder": "搜索频道…",
     "signingSecret": "签名密钥",
     "signingSecretHint": "来自您的 Slack 应用基本信息页面。",
-    "signingSecretPlaceholder": "十六进制字符串或 ${vault:slack-signing-secret}",
     "slackSetupGuide": "Slack 设置指南",
     "slackSetupSummary": "创建 Slack 应用，配置机器人令牌范围（app_mentions:read、chat:write、im:history、channels:history、groups:history），然后在此处粘贴凭据。",
     "target": "目标",
@@ -3396,7 +3394,8 @@
     "typeAgent": "智能体",
     "typeGroup": "群组",
     "selectGroup": "选择群组…",
-    "unknownGroup": "{{id}}（未找到）"
+    "unknownGroup": "{{id}}（未找到）",
+    "plaintextSecret": "请将 {{fields}} 存入密钥保险库，并以 ${vault:…} 引用 — 明文凭据不会被保存。"
   },
   "hitl": {
     "loadingApprovalDetails": "正在加载审批详情…",

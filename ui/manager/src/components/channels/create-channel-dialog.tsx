@@ -6,6 +6,7 @@ import { Cable, ChevronRight, ChevronLeft, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
+import { isEmptyOrReference } from "@/lib/channel-secrets";
 import { StepDots } from "@/components/shared/step-dots";
 import { useCreateChannel } from "@/hooks/use-channels";
 import {
@@ -58,7 +59,10 @@ export function CreateChannelDialog({
   const canProceed = () => {
     switch (step) {
       case "type": return name.trim().length > 0;
-      case "credentials": return channelId.trim().length > 0;
+      // Both credentials are optional here, but if given they must be vault
+      // references: see `plaintextSecretFields`.
+      case "credentials":
+        return channelId.trim().length > 0 && isEmptyOrReference(botToken) && isEmptyOrReference(signingSecret);
       case "target": return targetAgentId.trim().length > 0;
     }
   };
@@ -156,12 +160,12 @@ export function CreateChannelDialog({
               </div>
               <div className="space-y-1.5">
                 <label className="text-sm font-medium text-foreground">{t("channels.botToken", "Bot Token")}</label>
-                <SecretKeyPicker value={botToken} onChange={setBotToken} placeholder={t("channels.botTokenPlaceholder", "xoxb-… or ${vault:slack-bot-token}")} />
+                <SecretKeyPicker referenceOnly testId="create-channel-bot-token" value={botToken} onChange={setBotToken} placeholder="${vault:slack-bot-token}" />
                 <p className="text-xs text-muted-foreground">{t("channels.botTokenHint", "Bot User OAuth Token. Use a vault reference for security.")}</p>
               </div>
               <div className="space-y-1.5">
                 <label className="text-sm font-medium text-foreground">{t("channels.signingSecret", "Signing Secret")}</label>
-                <SecretKeyPicker value={signingSecret} onChange={setSigningSecret} placeholder={t("channels.signingSecretPlaceholder", "Hex string or ${vault:slack-signing-secret}")} />
+                <SecretKeyPicker referenceOnly testId="create-channel-signing-secret" value={signingSecret} onChange={setSigningSecret} placeholder="${vault:slack-signing-secret}" />
                 <p className="text-xs text-muted-foreground">{t("channels.signingSecretHint", "From your Slack App's Basic Information page.")}</p>
               </div>
             </>

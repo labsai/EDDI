@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { parseChannelResourceUri } from "@/lib/api/channels";
@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
+import { plaintextSecretFields } from "@/lib/channel-secrets";
 import { AgentPicker } from "@/components/shared/agent-picker";
 import { useEnrichedGroupDescriptors } from "@/hooks/use-groups";
 import { useChannel, useUpdateChannel, useDeleteChannel } from "@/hooks/use-channels";
@@ -225,12 +226,41 @@ export function ChannelDetailPage() {
   const [rawOpen, setRawOpen] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  useEffect(() => { if (config) setDraft({ ...config }); }, [config]);
+  /*
+   * Seed the draft once per channel version — not on every `config` object.
+   * A refetch (window focus, the list invalidation after any channel save)
+   * hands back a new object with the stored values, and copying it over the
+   * draft threw away whatever the operator was in the middle of typing. A new
+   * version (this page's own save moves the URL on) or another channel does
+   * reseed.
+   */
+  const seededFor = useRef<string | null>(null);
+  useEffect(() => {
+    const key = `${id}@${version}`;
+    if (config && seededFor.current !== key) {
+      seededFor.current = key;
+      setDraft({ ...config });
+    }
+  }, [config, id, version]);
 
   const webhookUrl = `${window.location.origin}/integrations/slack/events`;
 
   const handleSave = async () => {
     if (!draft || !id) return;
+    // Bot token and signing secret are references only. A plaintext value is
+    // returned verbatim by GET /channelstore/channels/{id} to anyone who can
+    // read the channel and travels into every export; the backend only logs a
+    // warning, so the Manager is where it gets refused.
+    const literal = plaintextSecretFields(draft.platformConfig);
+    if (literal.length > 0) {
+      toast.error(
+        t("channelDetail.plaintextSecret", {
+          fields: literal.join(", "),
+          defaultValue: `Store ${literal.join(", ")} in the secrets vault and reference it as \${vault:…} — plaintext credentials are not saved.`,
+        }),
+      );
+      return;
+    }
     try {
       const result = await updateMutation.mutateAsync({ id, version, config: draft });
       // Update URL to new version so subsequent saves don't conflict
@@ -397,11 +427,11 @@ export function ChannelDetailPage() {
           </div>
           <div className="space-y-1">
             <label className="text-xs font-medium">{t("channelDetail.botToken", "Bot Token")}</label>
-            <SecretKeyPicker value={draft.platformConfig.botToken ?? ""} onChange={(v) => setDraft({ ...draft, platformConfig: { ...draft.platformConfig, botToken: v } })} placeholder="xoxb-… or ${vault:slack-bot-token}" />
+            <SecretKeyPicker referenceOnly testId="channel-bot-token" value={draft.platformConfig.botToken ?? ""} onChange={(v) => setDraft((prev) => prev ? { ...prev, platformConfig: { ...prev.platformConfig, botToken: v } } : prev)} placeholder="${vault:slack-bot-token}" />
           </div>
           <div className="space-y-1">
             <label className="text-xs font-medium">{t("channelDetail.signingSecret", "Signing Secret")}</label>
-            <SecretKeyPicker value={draft.platformConfig.signingSecret ?? ""} onChange={(v) => setDraft({ ...draft, platformConfig: { ...draft.platformConfig, signingSecret: v } })} placeholder="${vault:slack-signing-secret}" />
+            <SecretKeyPicker referenceOnly testId="channel-signing-secret" value={draft.platformConfig.signingSecret ?? ""} onChange={(v) => setDraft((prev) => prev ? { ...prev, platformConfig: { ...prev.platformConfig, signingSecret: v } } : prev)} placeholder="${vault:slack-signing-secret}" />
           </div>
 
           {/* Human-in-the-Loop approvals (optional) — routes HITL approval cards

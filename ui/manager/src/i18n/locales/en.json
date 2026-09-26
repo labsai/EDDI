@@ -3362,7 +3362,6 @@
     "agentIdPlaceholder": "Agent ID to handle messages",
     "botToken": "Bot Token",
     "botTokenHint": "Bot User OAuth Token. Use a vault reference for security.",
-    "botTokenPlaceholder": "xoxb-… or ${vault:slack-bot-token}",
     "channel": "channel",
     "channelId": "Slack Channel ID",
     "channelIdCol": "Channel ID",
@@ -3383,7 +3382,6 @@
     "searchPlaceholder": "Search channels...",
     "signingSecret": "Signing Secret",
     "signingSecretHint": "From your Slack App's Basic Information page.",
-    "signingSecretPlaceholder": "Hex string or ${vault:slack-signing-secret}",
     "slackSetupGuide": "Slack Setup Guide",
     "slackSetupSummary": "Create a Slack App, configure Bot Token Scopes (app_mentions:read, chat:write, im:history, channels:history, groups:history), then paste credentials here.",
     "target": "target",
@@ -3437,7 +3435,8 @@
     "typeAgent": "Agent",
     "typeGroup": "Group",
     "selectGroup": "Select a group…",
-    "unknownGroup": "{{id}} (not found)"
+    "unknownGroup": "{{id}} (not found)",
+    "plaintextSecret": "Store {{fields}} in the secrets vault and reference it as ${vault:…} — plaintext credentials are not saved."
   },
   "hitl": {
     "loadingApprovalDetails": "Loading approval details…",
