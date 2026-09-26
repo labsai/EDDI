@@ -12,6 +12,7 @@ import com.mongodb.client.gridfs.GridFSBucket;
 import com.mongodb.client.gridfs.GridFSFindIterable;
 import com.mongodb.client.gridfs.model.GridFSFile;
 import com.mongodb.client.gridfs.model.GridFSUploadOptions;
+import com.mongodb.client.model.Indexes;
 import com.mongodb.client.result.UpdateResult;
 import org.bson.Document;
 import org.bson.conversions.Bson;
@@ -462,5 +463,30 @@ class GridFsAttachmentStoreTest {
         assertEquals(1, results.size());
         assertEquals("uuid-g", results.getFirst().storageRef());
         assertEquals("owner-conv", results.getFirst().conversationId());
+    }
+
+    // ==================== indexes (M-P7) ====================
+
+    @Test
+    void ensureIndexes_indexesEveryMetadataFieldAQueryFiltersOn() {
+        @SuppressWarnings("unchecked")
+        MongoCollection<Document> files = mock(MongoCollection.class);
+
+        GridFsAttachmentStore.ensureIndexes(files);
+
+        verify(files).createIndex(Indexes.ascending("metadata.storageRef"));
+        verify(files).createIndex(Indexes.ascending("metadata.conversationId"));
+        verify(files).createIndex(Indexes.ascending("metadata.grants"));
+    }
+
+    @Test
+    void ensureIndexes_aRefusedIndexDoesNotStopStartupOrTheOtherIndexes() {
+        @SuppressWarnings("unchecked")
+        MongoCollection<Document> files = mock(MongoCollection.class);
+        when(files.createIndex(Indexes.ascending("metadata.storageRef"))).thenThrow(new IllegalStateException("not authorized"));
+
+        assertDoesNotThrow(() -> GridFsAttachmentStore.ensureIndexes(files));
+
+        verify(files).createIndex(Indexes.ascending("metadata.grants"));
     }
 }

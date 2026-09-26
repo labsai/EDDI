@@ -101,6 +101,12 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
             ON CONFLICT (id, collection_name, version) DO NOTHING
             """;
 
+    private static final String UPSERT_TOMBSTONE_SQL = """
+            INSERT INTO resources_history (id, collection_name, version, data, deleted)
+            VALUES (?::uuid, ?, ?, ?::jsonb, TRUE)
+            ON CONFLICT (id, collection_name, version) DO UPDATE SET deleted = TRUE
+            """;
+
     private final DataSource dataSource;
     private final String collectionName;
     private final IJsonSerialization jsonSerialization;
@@ -435,20 +441,42 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
      * Archive the deleted-flagged version and drop the current row inside ONE
      * transaction — the non-transactional sequence could leave a resource that is
      * archived as deleted while still live.
+     * <p>
+     * The delete is conditioned on the version, and a mismatch rolls the tombstone
+     * back with it: an update that committed in between keeps its new version and
+     * the version it archived stays ordinary, non-deleted history. The tombstone
+     * sets the flag even on a row that already exists, for the same reason the
+     * MongoDB backend upserts it.
      */
     @Override
-    public void storeHistoryAndRemove(IHistoryResource<T> history, String id) {
+    public void storeHistoryAndRemove(IHistoryResource<T> history, String id, int expectedCurrentVersion)
+            throws IResourceStore.ResourceModifiedException {
         HistoryResource pgHistory = checkInternalHistoryResource(history);
 
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
-                insertHistory(conn, pgHistory);
-                try (PreparedStatement ps = conn.prepareStatement("DELETE FROM resources WHERE id = ?::uuid AND collection_name = ?")) {
-                    ps.setString(1, id);
+                try (PreparedStatement ps = conn.prepareStatement(UPSERT_TOMBSTONE_SQL)) {
+                    ps.setString(1, pgHistory.getId());
                     ps.setString(2, collectionName);
+                    ps.setInt(3, pgHistory.getVersion());
+                    ps.setString(4, pgHistory.getJson());
                     ps.executeUpdate();
                 }
+                int removed;
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "DELETE FROM resources WHERE id = ?::uuid AND collection_name = ? AND version = ?")) {
+                    ps.setString(1, id);
+                    ps.setString(2, collectionName);
+                    ps.setInt(3, expectedCurrentVersion);
+                    removed = ps.executeUpdate();
+                }
+                if (removed == 0 && currentRowExists(conn, id)) {
+                    conn.rollback();
+                    throw new IResourceStore.ResourceModifiedException(
+                            String.format("Resource was modified concurrently (id=%s, expected version=%d)", id, expectedCurrentVersion));
+                }
+                // removed == 0 with no live row: a concurrent delete won. Deleted, as asked.
                 conn.commit();
             } catch (SQLException e) {
                 conn.rollback();
@@ -456,6 +484,32 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
             }
         } catch (SQLException e) {
             throw new RuntimeException("Failed to archive and remove resource", e);
+        }
+    }
+
+    private boolean currentRowExists(Connection conn, String id) throws SQLException {
+        try (PreparedStatement check = conn.prepareStatement("SELECT 1 FROM resources WHERE id = ?::uuid AND collection_name = ?")) {
+            check.setString(1, id);
+            check.setString(2, collectionName);
+            try (ResultSet rs = check.executeQuery()) {
+                return rs.next();
+            }
+        }
+    }
+
+    @Override
+    public boolean replaceHistory(IHistoryResource<T> history) {
+        HistoryResource pgHistory = checkInternalHistoryResource(history);
+        String sql = "UPDATE resources_history SET data = ?::jsonb, deleted = ? WHERE id = ?::uuid AND collection_name = ? AND version = ?";
+        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, pgHistory.getJson());
+            ps.setBoolean(2, pgHistory.isDeleted());
+            ps.setString(3, pgHistory.getId());
+            ps.setString(4, collectionName);
+            ps.setInt(5, pgHistory.getVersion());
+            return ps.executeUpdate() > 0;
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to replace history", e);
         }
     }
 

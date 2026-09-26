@@ -143,8 +143,7 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
 
         List<IResourceFilter.QueryFilter> queryFiltersRequired = new LinkedList<>();
-        String filterURI = "eddi://" + type + ".*";
-        queryFiltersRequired.add(new IResourceFilter.QueryFilter(FIELD_RESOURCE, filterURI));
+        queryFiltersRequired.add(new IResourceFilter.QueryFilter(FIELD_RESOURCE, resourceTypePrefixPattern(type)));
         // includeDeleted is an INCLUSION flag, not an equality filter: true means "do
         // not constrain on `deleted` at all" (live AND soft-deleted), false means live
         // only. It previously added eq(deleted, includeDeleted), so includeDeleted=true
@@ -275,11 +274,33 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
         return descriptorResourceStore.getCurrentResourceId(id);
     }
 
+    /**
+     * The pattern selecting descriptors of one resource type: an anchored prefix
+     * match on the {@code resource} URI, with {@code type} taken literally.
+     * <p>
+     * {@code type} reaches this from a query parameter, and it used to be pasted
+     * into an unanchored regex as-is - so a caller could send a catastrophically
+     * backtracking pattern (ReDoS), a syntactically broken one (a 500), or one that
+     * matched every descriptor of every type in a full scan, conversations
+     * included. String filters are regexes on both backends, so the value is
+     * escaped rather than {@code Pattern.quote}d: PostgreSQL's {@code ~} does not
+     * understand {@code \Q...\E}.
+     */
+    static String resourceTypePrefixPattern(String type) {
+        return "^" + StringUtilities.escapeRegexChars("eddi://" + type);
+    }
+
+    /**
+     * Exact match: {@code originId} comes from an archive's file names, and was
+     * pasted into a regex unescaped and unanchored, so a crafted name matched other
+     * resources' descriptors - which a merge import would then update.
+     */
     @Override
     public List<T> findByOriginId(String originId) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
 
         List<IResourceFilter.QueryFilter> queryFilters = new LinkedList<>();
-        queryFilters.add(new IResourceFilter.QueryFilter(FIELD_ORIGIN_ID, originId));
+        queryFilters.add(new IResourceFilter.QueryFilter(FIELD_ORIGIN_ID,
+                "^" + StringUtilities.escapeRegexChars(String.valueOf(originId)) + "$"));
         queryFilters.add(new IResourceFilter.QueryFilter(FIELD_DELETED, false));
         IResourceFilter.QueryFilters required = new IResourceFilter.QueryFilters(queryFilters);
 

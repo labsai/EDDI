@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.datastore.postgres;
 
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
 import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -216,6 +217,57 @@ class PostgresResourceStorageContainerTest extends PostgresTestBase {
 
             var found = storage.readHistory(resource.getId(), 1);
             assertTrue(found.isDeleted());
+        }
+    }
+
+    // ─── Delete vs. update (M-P5) and in-place history writes (M-P1) ───
+
+    @Nested
+    @DisplayName("Version-checked delete")
+    class VersionCheckedDelete {
+
+        @Test
+        @DisplayName("a delete that read v1 after an update committed v2 is refused, and v2 survives")
+        void deleteRacingAnUpdateKeepsTheNewVersion() throws Exception {
+            var id = UUID.randomUUID().toString();
+            var v1 = storage.newResource(id, 1, Map.of("v", 1));
+            storage.store(v1);
+            // the update wins: v1 archived (not deleted), v2 current
+            storage.storeHistoryAndUpdate(storage.newHistoryResourceFor(v1, false), storage.newResource(id, 2, Map.of("v", 2)), 1);
+
+            // the delete read v1 before that and now arrives
+            assertThrows(IResourceStore.ResourceModifiedException.class,
+                    () -> storage.storeHistoryAndRemove(storage.newHistoryResourceFor(v1, true), id, 1));
+
+            assertEquals(2, storage.getCurrentVersion(id), "the committed update must not be erased");
+            assertFalse(storage.readHistory(id, 1).isDeleted(), "v1 is ordinary history of a live resource");
+        }
+
+        @Test
+        @DisplayName("a delete of the current version removes it and leaves the tombstone")
+        void deleteOfTheCurrentVersion() throws Exception {
+            var id = UUID.randomUUID().toString();
+            var v1 = storage.newResource(id, 1, Map.of("v", 1));
+            storage.store(v1);
+            // a non-deleted history row of v1 already exists, as after an interrupted
+            // update
+            storage.store(storage.newHistoryResourceFor(v1, false));
+
+            storage.storeHistoryAndRemove(storage.newHistoryResourceFor(v1, true), id, 1);
+
+            assertEquals(-1, storage.getCurrentVersion(id));
+            assertTrue(storage.readHistory(id, 1).isDeleted(), "the tombstone must win over an existing row");
+        }
+
+        @Test
+        @DisplayName("replaceHistory rewrites an existing history row and reports a missing one")
+        void replaceHistory() throws Exception {
+            var id = UUID.randomUUID().toString();
+            storage.store(storage.newHistoryResourceFor(storage.newResource(id, 1, Map.of("v", "old")), false));
+
+            assertTrue(storage.replaceHistory(storage.newHistoryResourceFor(storage.newResource(id, 1, Map.of("v", "new")), false)));
+            assertEquals("new", storage.readHistory(id, 1).getData().get("v"));
+            assertFalse(storage.replaceHistory(storage.newHistoryResourceFor(storage.newResource(id, 7, Map.of("v", "x")), false)));
         }
     }
 

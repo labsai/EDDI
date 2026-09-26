@@ -20,6 +20,8 @@ import org.mockito.MockitoAnnotations;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
+import jakarta.ws.rs.WebApplicationException;
+import java.net.URI;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -113,6 +115,59 @@ class RestDocumentDescriptorStoreTest {
         SimpleDocumentDescriptor result = restStore.readSimpleDescriptor("id1", 1);
         assertEquals("Agent-1", result.getName());
         assertEquals("My agent", result.getDescription());
+    }
+
+    @Test
+    @DisplayName("patchDescriptor — a version that is not current is a 409, not a silent no-op")
+    void patchDescriptorOfAStaleVersionIsAConflict() throws Exception {
+        when(documentDescriptorStore.getCurrentResourceId("id1")).thenReturn(resourceId("id1", 3));
+        var current = new DocumentDescriptor();
+        current.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/id1?version=3"));
+        when(documentDescriptorStore.readDescriptor("id1", 3)).thenReturn(current);
+
+        var thrown = assertThrows(WebApplicationException.class, () -> restStore.patchDescriptor("id1", 1, rename("stale")));
+
+        assertEquals(409, thrown.getResponse().getStatus());
+        verify(documentDescriptorStore, never()).setDescriptor(anyString(), anyInt(), any());
+    }
+
+    @Test
+    @DisplayName("patchDescriptor — the live resource version names the current descriptor even when the two drifted")
+    void patchDescriptorByResourceVersionWritesTheCurrentDescriptor() throws Exception {
+        // A merge import bumps the resource before its descriptor: resource v2,
+        // descriptor v1.
+        when(documentDescriptorStore.getCurrentResourceId("id1")).thenReturn(resourceId("id1", 1));
+        var current = new DocumentDescriptor();
+        current.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/id1?version=2"));
+        when(documentDescriptorStore.readDescriptor("id1", 1)).thenReturn(current);
+
+        restStore.patchDescriptor("id1", 2, rename("renamed"));
+
+        verify(documentDescriptorStore).setDescriptor("id1", 1, current);
+        assertEquals("renamed", current.getName());
+    }
+
+    private static PatchInstruction<DocumentDescriptor> rename(String name) {
+        var patch = new DocumentDescriptor();
+        patch.setName(name);
+        var instruction = new PatchInstruction<DocumentDescriptor>();
+        instruction.setDocument(patch);
+        instruction.setOperation(PatchInstruction.PatchOperation.SET);
+        return instruction;
+    }
+
+    private static IResourceStore.IResourceId resourceId(String id, int version) {
+        return new IResourceStore.IResourceId() {
+            @Override
+            public String getId() {
+                return id;
+            }
+
+            @Override
+            public Integer getVersion() {
+                return version;
+            }
+        };
     }
 
     @Test

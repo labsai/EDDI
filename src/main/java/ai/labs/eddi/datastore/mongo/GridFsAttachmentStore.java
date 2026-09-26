@@ -13,6 +13,7 @@ import com.mongodb.client.gridfs.GridFSBuckets;
 import com.mongodb.client.gridfs.model.GridFSFile;
 import com.mongodb.client.gridfs.model.GridFSUploadOptions;
 import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.Indexes;
 import com.mongodb.client.model.Updates;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -69,6 +70,32 @@ public class GridFsAttachmentStore implements IAttachmentStore {
     public GridFsAttachmentStore(MongoDatabase database) {
         this.gridFSBucket = GridFSBuckets.create(database, BUCKET_NAME);
         this.filesCollection = database.getCollection(BUCKET_NAME + ".files");
+        ensureIndexes(filesCollection);
+    }
+
+    /**
+     * Indexes every metadata field a query here filters on.
+     * <p>
+     * GridFS indexes only {@code filename} and {@code uploadDate} by itself, so
+     * resolving a {@code storageRef} (every load, grant and delete), the quota
+     * check on every upload, listing a conversation's attachments and GDPR's
+     * per-conversation delete were all full scans of {@code attachments.files},
+     * growing with every attachment anyone ever uploaded.
+     * <p>
+     * None is unique: blobs stored before {@code storageRef} existed have none, and
+     * a unique index would refuse to build over them. A failure is logged, not
+     * thrown — an index is an optimisation, and a deployment whose database user
+     * may not create one must still start.
+     */
+    static void ensureIndexes(MongoCollection<Document> filesCollection) {
+        for (String field : List.of(META_STORAGE_REF, META_CONVERSATION_ID, META_GRANTS)) {
+            try {
+                filesCollection.createIndex(Indexes.ascending("metadata." + field));
+            } catch (RuntimeException e) {
+                LOGGER.warnf("Could not create the index on attachments metadata.%s; attachment lookups fall back to a scan: %s",
+                        field, e.getMessage());
+            }
+        }
     }
 
     @Override
