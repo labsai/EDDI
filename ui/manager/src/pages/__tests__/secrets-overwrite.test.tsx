@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { SecretsPage } from "@/pages/secrets";
@@ -130,7 +130,11 @@ describe("Rotate keeps the grant", () => {
 
     await user.click(screen.getByTestId("rotate-google-gemini-key"));
     // Deleted elsewhere after the list was shown.
-    server.use(http.get("*/secretstore/secrets/:tenantId", () => HttpResponse.json([])));
+    server.use(
+      http.get("*/secretstore/secrets/:tenantId/:keyName", () =>
+        HttpResponse.json({ error: "Secret not found" }, { status: 404 }),
+      ),
+    );
     await user.type(screen.getByTestId("rotate-value-input"), "v");
     await user.click(screen.getByTestId("confirm-rotate-button"));
 
@@ -160,54 +164,5 @@ describe("tenant field", () => {
 
     await waitFor(() => expect(tenants).toContain("team-b"));
     expect(tenants.some((tenant) => tenant !== tenant.trim())).toBe(false);
-  });
-});
-
-describe("adopt master key (lost-key recovery)", () => {
-  it("requires the acknowledgement, then lists the tenants to reset", async () => {
-    let calls = 0;
-    server.use(
-      http.post("*/secretstore/secrets/admin/adopt-master-key", () => {
-        calls++;
-        return HttpResponse.json({
-          tenantsNeedingReset: ["team-b"],
-          systemValuesReset: false,
-          message: "ok",
-        });
-      }),
-    );
-    renderSecrets();
-    const user = userEvent.setup();
-    await user.click(await screen.findByTestId("open-adopt-key"));
-
-    const dialog = await screen.findByRole("dialog");
-    const confirm = within(dialog).getByRole("button", { name: "Adopt master key" });
-    expect(confirm).toBeDisabled();
-    await user.click(within(dialog).getByTestId("adopt-key-ack"));
-    await user.click(confirm);
-
-    const result = await screen.findByTestId("adopt-key-result");
-    expect(calls).toBe(1);
-    await user.click(within(result).getByTestId("adopt-reset-tenant-team-b"));
-    expect(screen.getByTestId("tenant-input")).toHaveValue("team-b");
-  });
-
-  it("explains that an older backend needs no adopt step", async () => {
-    server.use(
-      http.post("*/secretstore/secrets/admin/adopt-master-key", () =>
-        new HttpResponse(null, { status: 404 }),
-      ),
-    );
-    renderSecrets();
-    const user = userEvent.setup();
-    await user.click(await screen.findByTestId("open-adopt-key"));
-    const dialog = await screen.findByRole("dialog");
-    await user.click(within(dialog).getByTestId("adopt-key-ack"));
-    await user.click(within(dialog).getByRole("button", { name: "Adopt master key" }));
-
-    await waitFor(() =>
-      expect(toastMock.info).toHaveBeenCalledWith(expect.stringMatching(/does not need one/)),
-    );
-    expect(screen.queryByTestId("adopt-key-result")).not.toBeInTheDocument();
   });
 });

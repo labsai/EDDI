@@ -3782,6 +3782,16 @@ export const secretsHandlers = [
     return HttpResponse.json(filtered);
   }),
 
+  // One key's metadata (never its value); 404 when the key does not exist.
+  http.get("*/secretstore/secrets/:tenantId/:keyName", ({ params }) => {
+    const found = MOCK_SECRETS.find(
+      (s) => s.tenantId === params.tenantId && s.keyName === params.keyName,
+    );
+    return found
+      ? HttpResponse.json(found)
+      : HttpResponse.json({ error: "Secret not found" }, { status: 404 });
+  }),
+
   // Update a secret's agent grant. Registered BEFORE the generic secret PUT so
   // the more specific path wins; it echoes the requested list back and reports no
   // affected agents, which is the "widening a grant" case. A test that needs the
