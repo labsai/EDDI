@@ -221,6 +221,23 @@ public class AgentSetupService {
      *             if the setup fails
      */
     public SetupResult setupAgent(SetupAgentRequest request) throws AgentSetupException {
+        return setupAgent(request, null);
+    }
+
+    /**
+     * {@link #setupAgent(SetupAgentRequest)} for {@code create_sub_agent}: stamps
+     * {@code dynamicOrigin} on the agent's first version, which is what
+     * {@code teardown_agent} later requires before it will delete anything.
+     * <p>
+     * A separate overload rather than a field on {@link SetupAgentRequest}, which
+     * is a REST and MCP body: the marker must be something only the engine can
+     * write.
+     *
+     * @param dynamicOrigin
+     *            provenance to record, or {@code null} for an agent a person
+     *            created
+     */
+    public SetupResult setupAgent(SetupAgentRequest request, AgentConfiguration.DynamicOrigin dynamicOrigin) throws AgentSetupException {
         // Validate required params
         validateNameAndPrompt(request.agentName(), request.systemPrompt());
         boolean isLocalLLM = isLocalLlmProvider(request.provider());
@@ -321,6 +338,8 @@ public class AgentSetupService {
             // leaves the ungated v1 reachable by a redeploy, so a two-step provision would
             // ship an agent that can be returned to an ungated state.
             agentConfig.setHitlConfig(request.hitlConfig());
+            // On v1 for the same reason as the gate: teardown reads the current version.
+            agentConfig.setDynamicOrigin(dynamicOrigin);
             Response agentResponse = getRestStore(IRestAgentStore.class).createAgent(agentConfig);
             String agentLocation = agentResponse.getHeaderString("Location");
             String agentId = extractIdFromLocation(agentLocation);

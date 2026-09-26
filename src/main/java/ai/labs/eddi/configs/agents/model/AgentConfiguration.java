@@ -253,6 +253,87 @@ public class AgentConfiguration {
     }
 
     /**
+     * Set only on an agent that {@code create_sub_agent} provisioned: who created
+     * it, from where. {@code null} on every agent a person created.
+     * <p>
+     * {@code teardown_agent} can undeploy and <em>permanently delete</em> an agent,
+     * and it used to decide "may I?" from a list of created ids alone — a list that
+     * could be seeded from client-supplied context. It now also requires this
+     * marker to name the calling conversation (or the discussion it belongs to), so
+     * an agent a person built can never qualify, whatever a list says.
+     * <p>
+     * Written by {@code AgentSetupService} on the agent's first version, never on a
+     * later update, and carried through export/import like any other field.
+     */
+    private DynamicOrigin dynamicOrigin;
+
+    public DynamicOrigin getDynamicOrigin() {
+        return dynamicOrigin;
+    }
+
+    public void setDynamicOrigin(DynamicOrigin dynamicOrigin) {
+        this.dynamicOrigin = dynamicOrigin;
+    }
+
+    /**
+     * Provenance of a dynamically created sub-agent — see
+     * {@link AgentConfiguration#getDynamicOrigin()}.
+     */
+    public static class DynamicOrigin {
+        /** The agent whose {@code create_sub_agent} call created this one. */
+        private String createdByAgentId;
+        /** The conversation that call ran in. */
+        private String createdInConversationId;
+        /** The group discussion that conversation belonged to, if any. */
+        private String createdInGroupConversationId;
+        /** The user that conversation belonged to. */
+        private String createdForUserId;
+
+        public DynamicOrigin() {
+        }
+
+        public DynamicOrigin(String createdByAgentId, String createdInConversationId, String createdInGroupConversationId,
+                String createdForUserId) {
+            this.createdByAgentId = createdByAgentId;
+            this.createdInConversationId = createdInConversationId;
+            this.createdInGroupConversationId = createdInGroupConversationId;
+            this.createdForUserId = createdForUserId;
+        }
+
+        public String getCreatedByAgentId() {
+            return createdByAgentId;
+        }
+
+        public void setCreatedByAgentId(String createdByAgentId) {
+            this.createdByAgentId = createdByAgentId;
+        }
+
+        public String getCreatedInConversationId() {
+            return createdInConversationId;
+        }
+
+        public void setCreatedInConversationId(String createdInConversationId) {
+            this.createdInConversationId = createdInConversationId;
+        }
+
+        public String getCreatedInGroupConversationId() {
+            return createdInGroupConversationId;
+        }
+
+        public void setCreatedInGroupConversationId(String createdInGroupConversationId) {
+            this.createdInGroupConversationId = createdInGroupConversationId;
+        }
+
+        public String getCreatedForUserId() {
+            return createdForUserId;
+        }
+
+        public void setCreatedForUserId(String createdForUserId) {
+            this.createdForUserId = createdForUserId;
+        }
+    }
+
+    /**
      * Human-in-the-loop (HITL) configuration. Controls approval timeouts and
      * timeout policies for paused conversations.
      *

@@ -6,13 +6,13 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
-import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.memory.AttachmentContextExtractor;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.engine.model.ReservedContextKeys;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.ConversationRecallTool;
 import ai.labs.eddi.modules.llm.tools.UserMemoryTool;
@@ -232,11 +232,21 @@ class ContextualToolsProvider implements ToolSourceProvider {
      * Reads {@code context:groupId} the way {@code DynamicAgentToolsProvider}
      * resolves its own delegation-depth context, falling back to the current step
      * and then to any earlier step, since a resumed turn re-enters without the
-     * original context map. The property read is kept as a last resort so a config
-     * that genuinely does set a {@code groupId} property still works.
+     * original context map.
+     * <p>
+     * <b>No property fallback any more (C3c).</b> A last-resort read of a
+     * {@code groupId} conversation <em>property</em> used to follow, "so a config
+     * that genuinely sets one still works". But a client can set conversation
+     * properties — a {@code properties*} context entry of type {@code expressions}
+     * is turned into properties by {@code PropertySetterTask} on any agent that has
+     * one — so that fallback let a caller name any group and read or write its
+     * group-visible memories. Group membership is a runtime fact only the group
+     * orchestrator knows; the context key it writes is reserved
+     * ({@code ReservedContextKeys}) and stripped from client input, so it is the
+     * one source trusted here.
      */
     static List<String> resolveGroupIds(IConversationMemory memory) {
-        String contextKey = "context:groupId";
+        String contextKey = "context:" + ReservedContextKeys.GROUP_ID;
 
         var currentStep = memory.getCurrentStep();
         if (currentStep != null) {
@@ -257,11 +267,6 @@ class ContextualToolsProvider implements ToolSourceProvider {
                     }
                 }
             }
-        }
-
-        var props = memory.getConversationProperties();
-        if (props != null && props.get("groupId") instanceof Property p && p.getValueString() != null) {
-            return List.of(p.getValueString());
         }
         return List.of();
     }

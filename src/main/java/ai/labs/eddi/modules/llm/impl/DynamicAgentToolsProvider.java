@@ -19,6 +19,7 @@ import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.engine.model.ReservedContextKeys;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.setup.AgentSetupService;
 import ai.labs.eddi.modules.llm.tools.ConverseWithAgentTool;
@@ -43,6 +44,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.BiPredicate;
 import java.util.stream.Collectors;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -122,6 +124,11 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
      * tracking them too.
      */
     static final String KEY_DYNAMIC_TORN_DOWN_AGENT_IDS = MemoryKeys.DYNAMIC_TORN_DOWN_AGENT_IDS;
+    /**
+     * Conversations {@code converse_with_agent} started — the only ones it may
+     * continue.
+     */
+    static final String KEY_DYNAMIC_DELEGATED_CONVERSATION_IDS = MemoryKeys.DYNAMIC_DELEGATED_CONVERSATION_IDS;
 
     private final AgentSetupService agentSetupService;
     private final CapabilityRegistryService capabilityRegistryService;
@@ -131,11 +138,26 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
     private final IDeploymentStore deploymentStore;
     private final LiveDiscussionRegistry liveDiscussionRegistry;
     private final IAgentGroupStore agentGroupStore;
+    /**
+     * M-A1: {@code (agentId, principal) -> may that principal use that agent}.
+     * Handed to {@link RecruitAgentTool}; {@code null} means no check (direct
+     * construction in tests — CDI always supplies one).
+     */
+    private final BiPredicate<String, String> useCheck;
 
     DynamicAgentToolsProvider(AgentSetupService agentSetupService, CapabilityRegistryService capabilityRegistryService,
             IConversationService conversationService, IAgentFactory agentFactory, IAgentStore agentStore,
             IDeploymentStore deploymentStore, LiveDiscussionRegistry liveDiscussionRegistry,
             IAgentGroupStore agentGroupStore) {
+        this(agentSetupService, capabilityRegistryService, conversationService, agentFactory, agentStore, deploymentStore,
+                liveDiscussionRegistry, agentGroupStore, null);
+    }
+
+    DynamicAgentToolsProvider(AgentSetupService agentSetupService, CapabilityRegistryService capabilityRegistryService,
+            IConversationService conversationService, IAgentFactory agentFactory, IAgentStore agentStore,
+            IDeploymentStore deploymentStore, LiveDiscussionRegistry liveDiscussionRegistry,
+            IAgentGroupStore agentGroupStore, BiPredicate<String, String> useCheck) {
+        this.useCheck = useCheck;
         this.agentSetupService = agentSetupService;
         this.capabilityRegistryService = capabilityRegistryService;
         this.conversationService = conversationService;
@@ -267,13 +289,18 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
         // agents already created in this conversation so the cap actually bounds
         // the discussion.
         List<String> sharedCreatedIds = new CopyOnWriteArrayList<>(seedCreatedAgentIds(memory));
-        Set<String> sharedRetainedIds = ConcurrentHashMap.newKeySet();
         // Seeded like sharedCreatedIds so a teardown recorded on an earlier turn is
         // still known on this one — otherwise a torn-down id would be subtracted from
         // the seed once and then re-appear the turn after.
         Set<String> sharedTornDownIds = ConcurrentHashMap.newKeySet();
         sharedTornDownIds.addAll(collectFromAllSteps(memory, KEY_DYNAMIC_TORN_DOWN_AGENT_IDS));
+        // M-T2: this set used to start empty every turn, so retain=true lasted one
+        // turn — on the next, teardown_agent no longer saw the flag and deleted an
+        // agent the model had explicitly asked to keep.
+        Set<String> sharedRetainedIds = ConcurrentHashMap.newKeySet();
+        sharedRetainedIds.addAll(seedRetainedAgentIds(memory, sharedCreatedIds));
         String parentAgentId = memory.getAgentId();
+        String callerConversationId = memory.getConversationId();
         String userId = memory.getUserId();
         DynamicAgentConfig dynamicConfig = resolveDynamicAgentConfig(memory);
 
@@ -281,7 +308,7 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
         if (allows(whitelist, whitelistOmitted, "create_sub_agent") && agentSetupService != null && conversationService != null) {
             tools.add(new CreateSubAgentTool(agentSetupService,
                     conversationService, parentAgentId, userId, dynamicConfig,
-                    sharedCreatedIds, sharedRetainedIds));
+                    sharedCreatedIds, sharedRetainedIds, callerConversationId, groupConversationId));
             LOGGER.debugf("[DYNAMIC] CreateSubAgentTool enabled for agent='%s' (%d already created)",
                     sanitize(parentAgentId), sharedCreatedIds.size());
             anyDynamicToolAdded = true;
@@ -291,7 +318,16 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
             // consult no guardrails at all — allowDelegation was never read and
             // nothing bounded delegation depth or target.
             int delegationDepth = resolveDelegationDepth(memory);
-            tools.add(new ConverseWithAgentTool(conversationService, userId, dynamicConfig, delegationDepth));
+            // C6: the conversations this conversation started through the tool, from
+            // every earlier turn — the only ids a supplied conversationId may name.
+            // Stored back by reference so this turn's new ones persist.
+            Set<String> delegatedConversationIds = ConcurrentHashMap.newKeySet();
+            delegatedConversationIds.addAll(collectFromAllSteps(memory, KEY_DYNAMIC_DELEGATED_CONVERSATION_IDS));
+            tools.add(new ConverseWithAgentTool(conversationService, userId, dynamicConfig, delegationDepth, delegatedConversationIds));
+            var step = memory.getCurrentStep();
+            if (step != null) {
+                step.storeData(new Data<>(KEY_DYNAMIC_DELEGATED_CONVERSATION_IDS, delegatedConversationIds));
+            }
             LOGGER.debugf("[DYNAMIC] ConverseWithAgentTool enabled for agent='%s' at delegation depth %d",
                     sanitize(parentAgentId), delegationDepth);
         }
@@ -321,7 +357,6 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
         // before here. A guard only on this line implied a nullability the rest of the
         // method does not honour, which reads as though one path were safe and the
         // others overlooked.
-        String callerConversationId = memory.getConversationId();
         if (allows(whitelist, whitelistOmitted, "recruit_agent") && dynamicConfig.isEnabled() && dynamicConfig.isAllowRecruitment()
                 && groupConversationId != null && liveDiscussionRegistry != null) {
             var liveDiscussion = liveDiscussionRegistry.getForMember(groupConversationId, callerConversationId);
@@ -331,7 +366,7 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
             var roster = liveDiscussion.flatMap(this::configuredMemberIds);
             if (liveDiscussion.isPresent() && roster.isPresent()) {
                 tools.add(new RecruitAgentTool(liveDiscussionRegistry, groupConversationId, parentAgentId,
-                        dynamicConfig, deploymentStore, roster.get()));
+                        dynamicConfig, deploymentStore, roster.get(), useCheck));
                 LOGGER.debugf("[DYNAMIC] RecruitAgentTool enabled for agent='%s'", sanitize(parentAgentId));
                 anyDynamicToolAdded = true;
             } else if (liveDiscussion.isPresent()) {
@@ -347,7 +382,7 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
         if (allows(whitelist, whitelistOmitted, "teardown_agent") && dynamicConfig.isEnabled()
                 && agentFactory != null && agentStore != null) {
             tools.add(new TeardownAgentTool(agentFactory, agentStore, deploymentStore, sharedCreatedIds, sharedRetainedIds,
-                    sharedTornDownIds));
+                    sharedTornDownIds, callerConversationId, groupConversationId));
             LOGGER.debugf("[DYNAMIC] TeardownAgentTool enabled for agent='%s'", sanitize(parentAgentId));
             anyDynamicToolAdded = true;
         }
@@ -392,7 +427,7 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
     }
 
     /** Context key {@code MemberTurnExecutor} injects the group's policy under. */
-    static final String CONTEXT_DYNAMIC_AGENT_CONFIG = "context:dynamicAgentConfig";
+    static final String CONTEXT_DYNAMIC_AGENT_CONFIG = "context:" + ReservedContextKeys.DYNAMIC_AGENT_CONFIG;
 
     /**
      * Whether {@code toolName} is enabled for this turn.
@@ -541,7 +576,7 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
      * turn. Written by {@code MemberTurnExecutor}, read by
      * {@link #seedCreatedAgentIds}.
      */
-    static final String CONTEXT_DYNAMIC_CREATED_AGENT_IDS = "context:dynamicCreatedAgentIds";
+    static final String CONTEXT_DYNAMIC_CREATED_AGENT_IDS = "context:" + ReservedContextKeys.DYNAMIC_CREATED_AGENT_IDS;
 
     /**
      * Finding F17: the agent IDs already created in this conversation, so
@@ -590,6 +625,38 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
     }
 
     /**
+     * M-T2: the retained set as the most recent turn that recorded one left it.
+     * <p>
+     * The latest entry, not the union over all steps like the created list: a
+     * retain flag can be <em>removed</em> ({@code unretain_agent}), and a union
+     * would resurrect it from the turn that set it. Each turn stores the full set
+     * it was seeded with plus its own changes, so the latest entry is the whole
+     * state. Narrowed to agents still tracked as created — which excludes torn-down
+     * ones, since {@link #seedCreatedAgentIds} already subtracted those — because a
+     * retain flag on an agent this conversation no longer tracks means nothing.
+     */
+    static Set<String> seedRetainedAgentIds(IConversationMemory memory, Collection<String> createdAgentIds) {
+        Set<String> retained = new LinkedHashSet<>();
+        var allSteps = memory.getAllSteps();
+        if (allSteps == null) {
+            return retained;
+        }
+        List<IData<Object>> entries = allSteps.getAllLatestData(KEY_DYNAMIC_RETAINED_AGENT_IDS);
+        if (entries == null) {
+            return retained;
+        }
+        for (int i = entries.size() - 1; i >= 0; i--) {
+            IData<Object> entry = entries.get(i);
+            if (entry != null && entry.getResult() != null) {
+                collectAgentIds(entry.getResult(), retained);
+                break;
+            }
+        }
+        retained.retainAll(createdAgentIds);
+        return retained;
+    }
+
+    /**
      * Add every String element of {@code value} (if it is a collection) to sink.
      */
     private static void collectAgentIds(Object value, Set<String> sink) {
@@ -619,7 +686,7 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
      * guard is inert on exactly the turns that matter.
      */
     static int resolveDelegationDepth(IConversationMemory memory) {
-        String contextKey = "context:" + ConverseWithAgentTool.CONTEXT_DELEGATION_DEPTH;
+        String contextKey = "context:" + ReservedContextKeys.DELEGATION_DEPTH;
 
         var currentStep = memory.getCurrentStep();
         if (currentStep != null) {

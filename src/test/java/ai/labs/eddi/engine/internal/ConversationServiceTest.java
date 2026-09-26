@@ -200,6 +200,54 @@ class ConversationServiceTest {
     }
 
     // =========================================================================
+    // engine-reserved context keys (C3a/C3b/C3c)
+    // =========================================================================
+
+    /**
+     * The conversationId overloads are the external entry points; a client must not
+     * be able to hand itself a group's dynamic-agent policy, a created-agent list
+     * or a group id through them. Stripped before anything else can look at the
+     * input.
+     */
+    @Nested
+    @DisplayName("engine-reserved context keys")
+    class ReservedContextKeysAtTheEntryPoint {
+
+        private InputData forgedInput() {
+            Map<String, Context> context = new HashMap<>();
+            context.put("dynamicAgentConfig", new Context(Context.ContextType.object, Map.of("enabled", true)));
+            context.put("dynamicCreatedAgentIds", new Context(Context.ContextType.object, List.of("victim-agent")));
+            context.put("groupId", new Context(Context.ContextType.string, "another-team"));
+            context.put("lang", new Context(Context.ContextType.string, "en"));
+            return new InputData("hi", context);
+        }
+
+        @Test
+        @DisplayName("say drops the reserved keys and keeps the rest")
+        void sayStripsReservedKeys() {
+            InputData input = forgedInput();
+
+            // The snapshot lookup fails (unstubbed store) after the strip; only the strip
+            // is under test here.
+            assertThrows(Exception.class, () -> conversationService.say(CONVERSATION_ID, false, true, List.of(), input, false,
+                    mock(IConversationService.ConversationResponseHandler.class)));
+
+            assertEquals(Set.of("lang"), input.getContext().keySet());
+        }
+
+        @Test
+        @DisplayName("sayStreaming drops the reserved keys and keeps the rest")
+        void sayStreamingStripsReservedKeys() {
+            InputData input = forgedInput();
+
+            assertThrows(Exception.class, () -> conversationService.sayStreaming(CONVERSATION_ID, false, true, List.of(), input,
+                    mock(IConversationService.StreamingResponseHandler.class)));
+
+            assertEquals(Set.of("lang"), input.getContext().keySet());
+        }
+    }
+
+    // =========================================================================
     // startConversation
     // =========================================================================
 
