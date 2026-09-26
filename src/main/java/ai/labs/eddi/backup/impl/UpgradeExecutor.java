@@ -151,6 +151,10 @@ public class UpgradeExecutor {
             // Track workflow URI updates: targetWorkflowId → new version URI
             Map<String, URI> updatedWorkflowUris = new LinkedHashMap<>();
             List<URI> newWorkflowUris = new ArrayList<>();
+            // Workflows rewritten, and extensions whose new version a rewritten workflow
+            // references. Counted as updated only once the agent that loads those
+            // workflows has been written: before that, nothing deployed uses them.
+            int deliveredResources = 0;
 
             for (WorkflowSourceData sourceWf : sourceWorkflows) {
                 ResourceDiff wfDiff = diffMap.get(sourceWf.sourceId());
@@ -200,16 +204,17 @@ public class UpgradeExecutor {
                         // descriptor still names the old version was written but cannot be
                         // deployed, and reporting it as updated overstates what landed.
                         if (outcome.failures.size() == failuresBefore) {
-                            outcome.updated++;
+                            deliveredResources++;
                         }
                         // An extension counts as updated only once the workflow the agent
-                        // is about to point at references its new version. Counting it when
-                        // it was written let a run report "2 updated" next to a failure
-                        // saying that very resource is not deployed, or count extensions
-                        // whose workflow the store then refused.
+                        // is about to point at references its new version — and, below,
+                        // once that agent has been written. Counting it when it was written
+                        // let a run report "2 updated" next to a failure saying that very
+                        // resource is not deployed, or count extensions whose workflow the
+                        // store then refused.
                         for (String key : placedKeys) {
                             if (deliverableKeys.contains(key)) {
-                                outcome.updated++;
+                                deliveredResources++;
                             }
                         }
                     } else if (extensionUpdates.isEmpty() && outcome.failures.size() == failuresBefore
@@ -234,6 +239,10 @@ public class UpgradeExecutor {
             URI agentUri = agentNeedsUpdate
                     ? updateAgentConfig(targetAgentId, updatedWorkflowUris, newWorkflowUris, workflowOrder, outcome)
                     : currentAgentUri(targetAgentId);
+
+            if (agentUri != null) {
+                outcome.updated += deliveredResources;
+            }
 
             if (!agentNeedsUpdate) {
                 LOGGER.infof("Agent '%s' upgrade wrote no workflow changes — agent version left at %s",
@@ -961,6 +970,11 @@ public class UpgradeExecutor {
                 return updatedUri;
             }
 
+            // Answered without throwing: every workflow and extension this run wrote
+            // is now referenced by nothing the deployment loads, which the caller has
+            // to hear about rather than infer from a null URI.
+            outcome.failed(agentId, "agent", null, "the agent store did not accept the updated agent (HTTP "
+                    + resp.getStatus() + "), so the workflows and extensions written by this run are not deployed");
             return null;
         } catch (Exception e) {
             LOGGER.errorf(e, "Failed to update agent config %s", LogSanitizer.sanitize(agentId));
