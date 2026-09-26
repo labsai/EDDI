@@ -32,6 +32,11 @@ import java.util.concurrent.Flow;
  * {@link ResponseTooLargeException}, an {@link IOException}, so the caller's
  * existing error path handles it.
  * <p>
+ * Peak memory per response is about twice the limit: the received chunks are
+ * copied (the client recycles its buffers) and then assembled into one array.
+ * {@link #ofString} adds the decoded string on top, so about three times. A 25
+ * MiB limit therefore means up to ~50 MiB transient per concurrent download.
+ * <p>
  * The limit bounds <em>memory</em>, not time. A body trickled one byte a second
  * stays under any limit for a long while; the wall-clock deadline in
  * {@link SafeHttpClient} is what bounds that.
@@ -96,9 +101,23 @@ public final class BoundedBodyHandlers {
     static final long MAX_LIMIT = Integer.MAX_VALUE - 8;
 
     private static void requireValidLimit(long maxBytes) {
-        if (maxBytes < 0 || maxBytes > MAX_LIMIT) {
-            throw new IllegalArgumentException("maxBytes must be between 0 and " + MAX_LIMIT + ": " + maxBytes);
+        requireValidLimit("maxBytes", maxBytes);
+    }
+
+    /**
+     * Returns {@code value} if it is a usable limit, else throws naming
+     * {@code property}. For callers that take a limit from configuration: checking
+     * it once, at construction, fails a bad deployment at startup rather than every
+     * request at call time.
+     *
+     * @throws IllegalArgumentException
+     *             if {@code value} is negative or above {@link #MAX_LIMIT}
+     */
+    public static long requireValidLimit(String property, long value) {
+        if (value < 0 || value > MAX_LIMIT) {
+            throw new IllegalArgumentException(property + " must be between 0 and " + MAX_LIMIT + " bytes, but is " + value);
         }
+        return value;
     }
 
     /**

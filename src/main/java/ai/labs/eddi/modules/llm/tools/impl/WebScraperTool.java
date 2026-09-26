@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.httpclient.SafeHttpClient;
 import ai.labs.eddi.modules.ingestion.HtmlToMarkdownConverter;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
+import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -51,6 +52,16 @@ public class WebScraperTool {
      */
     @ConfigProperty(name = "eddi.tools.web-scraper.max-response-bytes", defaultValue = "5242880")
     long maxResponseBytes = DEFAULT_MAX_RESPONSE_BYTES;
+
+    /**
+     * Fails the deployment at startup on an unusable
+     * {@code eddi.tools.web-scraper.max-response-bytes}, instead of every call at
+     * call time.
+     */
+    @PostConstruct
+    void validateLimits() {
+        BoundedBodyHandlers.requireValidLimit("eddi.tools.web-scraper.max-response-bytes", maxResponseBytes);
+    }
 
     @Inject
     public WebScraperTool(SafeHttpClient httpClient, HtmlToMarkdownConverter htmlToMarkdownConverter) {

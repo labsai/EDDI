@@ -29,6 +29,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.io.ByteArrayOutputStream;
+import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -396,6 +397,25 @@ class AttachmentForwarderTest {
             assertTrue(BodyHandlerProbe.declared(handler.getValue(), 1001).refused(), "a body over the cap must be refused while reading");
             assertTrue(BodyHandlerProbe.streamed(handler.getValue(), 1001).refused());
             assertFalse(BodyHandlerProbe.streamed(handler.getValue(), 1000).refused());
+        }
+
+        @Test
+        void unusableForwardLimit_failsAtConstructionNotPerCall() {
+            IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> newForwarder(-1, 20_000));
+            assertTrue(e.getMessage().contains("eddi.attachments.max-forward-bytes"), e.getMessage());
+        }
+
+        @Test
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        void urlDownload_getsTheLongDownloadTimeout() throws Exception {
+            mockAttachments(urlImage());
+            mockDownload("imgbytes".getBytes());
+
+            forwarder.forward(messages(UserMessage.from("Describe")), memory, "gemini", "gemini-2.0-flash");
+
+            ArgumentCaptor<HttpRequest> request = ArgumentCaptor.forClass(HttpRequest.class);
+            verify(httpClient).sendValidated(request.capture(), any());
+            assertEquals(Optional.of(AttachmentForwarder.DOWNLOAD_TIMEOUT), request.getValue().timeout());
         }
 
         @Test
