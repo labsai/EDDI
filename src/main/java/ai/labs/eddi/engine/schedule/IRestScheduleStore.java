@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import jakarta.annotation.security.RolesAllowed;
 import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import jakarta.ws.rs.*;
@@ -56,7 +57,9 @@ public interface IRestScheduleStore {
     @PUT
     @Path("/{scheduleId}")
     @Consumes(MediaType.APPLICATION_JSON)
-    @Operation(description = "Update an existing schedule.")
+    @Operation(description = "Update an existing schedule. Omitted metadata, tenantId and allowSelfScheduling keep their "
+            + "stored values. A RAG-ingestion schedule cannot be updated here (409 — change the source's cron on the knowledge "
+            + "base); a team-cadence schedule requires EDIT on its group.")
     Response updateSchedule(@PathParam("scheduleId") String scheduleId, ScheduleConfiguration schedule);
 
     @DELETE
@@ -107,6 +110,11 @@ public interface IRestScheduleStore {
 
     @POST
     @Path("/{scheduleId}/dismiss")
-    @Operation(description = "Reset a dead-lettered schedule to PENDING without immediate retry.")
+    @Operation(description = "Reset a dead-lettered schedule to PENDING without immediate retry, re-armed at its next "
+            + "regular fire (a one-shot with nothing left to fire is disabled). 409 if the schedule is not dead-lettered.")
+    @APIResponse(responseCode = "200", description = "Dismissed and re-armed.")
+    @APIResponse(responseCode = "404", description = "No schedule with this id.")
+    @APIResponse(responseCode = "409",
+                 description = "The schedule is not dead-lettered (it recovered, was requeued or is running) — nothing was changed.")
     Response dismissDeadLetter(@PathParam("scheduleId") String scheduleId);
 }

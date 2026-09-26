@@ -38,6 +38,7 @@ import ai.labs.eddi.configs.snippets.IRestPromptSnippetStore;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
@@ -150,6 +151,10 @@ public class UpgradeExecutor {
             // Track workflow URI updates: targetWorkflowId → new version URI
             Map<String, URI> updatedWorkflowUris = new LinkedHashMap<>();
             List<URI> newWorkflowUris = new ArrayList<>();
+            // Workflows rewritten, and extensions whose new version a rewritten workflow
+            // references. Counted as updated only once the agent that loads those
+            // workflows has been written: before that, nothing deployed uses them.
+            int deliveredResources = 0;
 
             for (WorkflowSourceData sourceWf : sourceWorkflows) {
                 ResourceDiff wfDiff = diffMap.get(sourceWf.sourceId());
@@ -176,8 +181,9 @@ public class UpgradeExecutor {
                     // diffs only inside the UPDATE branch therefore threw away every
                     // extension change the preview had just shown the operator, and the
                     // response still said 200 OK.
+                    Set<String> deliverableKeys = new LinkedHashSet<>();
                     Map<String, URI> extensionUpdates = processWorkflowExtensions(
-                            sourceWf, diffMap, selectedSourceIds, outcome);
+                            sourceWf, diffMap, selectedSourceIds, deliverableKeys, outcome);
 
                     // The workflow document itself changed — reordered steps, a
                     // changed step config, a condition — and the preview said so.
@@ -187,19 +193,35 @@ public class UpgradeExecutor {
                             && isSelected(selectedSourceIds, sourceWf.sourceId());
 
                     int failuresBefore = outcome.failures.size();
+                    Set<String> placedKeys = new LinkedHashSet<>();
                     URI updatedUri = extensionUpdates.isEmpty() && !adoptSourceConfig
                             ? null
                             : updateMatchedWorkflow(sourceWf, wfDiff, extensionUpdates,
-                                    adoptSourceConfig, outcome);
+                                    adoptSourceConfig, placedKeys, outcome);
                     if (updatedUri != null) {
                         updatedWorkflowUris.put(wfDiff.targetId(), updatedUri);
                         // Counted only when nothing failed on the way: a workflow whose
                         // descriptor still names the old version was written but cannot be
                         // deployed, and reporting it as updated overstates what landed.
                         if (outcome.failures.size() == failuresBefore) {
-                            outcome.updated++;
+                            deliveredResources++;
                         }
-                    } else if (extensionUpdates.isEmpty() && outcome.failures.size() == failuresBefore) {
+                        // An extension counts as updated only once the workflow the agent
+                        // is about to point at references its new version — and, below,
+                        // once that agent has been written. Counting it when it was written
+                        // let a run report "2 updated" next to a failure saying that very
+                        // resource is not deployed, or count extensions whose workflow the
+                        // store then refused.
+                        for (String key : placedKeys) {
+                            if (deliverableKeys.contains(key)) {
+                                deliveredResources++;
+                            }
+                        }
+                    } else if (extensionUpdates.isEmpty() && outcome.failures.size() == failuresBefore
+                            && (wfDiff.action() == DiffAction.SKIP || adoptSourceConfig)) {
+                        // "skipped" means the content was already identical. A workflow the
+                        // preview marked changed and the operator deselected is neither —
+                        // like every other deselected resource, it is not counted at all.
                         outcome.skipped++;
                     }
                 }
@@ -214,9 +236,19 @@ public class UpgradeExecutor {
                     || !newWorkflowUris.isEmpty()
                     || (workflowOrder != null && !workflowOrder.isEmpty());
 
+            int failuresBeforeAgent = outcome.failures.size();
             URI agentUri = agentNeedsUpdate
                     ? updateAgentConfig(targetAgentId, updatedWorkflowUris, newWorkflowUris, workflowOrder, outcome)
                     : currentAgentUri(targetAgentId);
+
+            // The agent write can land while its descriptor bump fails: the new
+            // agent version exists but the deployment and the next sync still
+            // resolve the old one, so nothing it references is delivered yet.
+            // Counting the workflows and extensions then reported "N updated" next
+            // to a failure saying the agent that loads them is not deployable.
+            if (agentUri != null && outcome.failures.size() == failuresBeforeAgent) {
+                outcome.updated += deliveredResources;
+            }
 
             if (!agentNeedsUpdate) {
                 LOGGER.infof("Agent '%s' upgrade wrote no workflow changes — agent version left at %s",
@@ -292,10 +324,19 @@ public class UpgradeExecutor {
                         LogSanitizer.sanitize(sourceSnippet.name()), LogSanitizer.sanitize(diff.targetId()), diff.targetVersion(),
                         diff.targetVersion() + 1);
             } else if (diff.action() == DiffAction.CREATE) {
-                // Create new snippet
+                // Create the new snippet. Counted only when it can be found afterwards:
+                // the store answers a refusal without throwing, and a snippet with no
+                // descriptor never resolves in a template — counting either as created
+                // reported it in "created" and in "failures" at once.
                 Response created = snippetStore.createSnippet(sourceSnippet.snippet());
-                createDescriptorFor(created, "snippet", sourceSnippet.sourceId(), sourceSnippet.name(), outcome);
-                outcome.created++;
+                if (created == null || created.getStatus() != Response.Status.CREATED.getStatusCode()) {
+                    outcome.failed(sourceSnippet.sourceId(), "snippet", sourceSnippet.name(),
+                            "the store did not accept the create");
+                    return;
+                }
+                if (createDescriptorFor(created, "snippet", sourceSnippet.sourceId(), sourceSnippet.name(), outcome)) {
+                    outcome.created++;
+                }
                 LOGGER.infof("Created snippet '%s'", LogSanitizer.sanitize(sourceSnippet.name()));
             } else {
                 outcome.skipped++;
@@ -319,15 +360,17 @@ public class UpgradeExecutor {
      *
      * @param createResponse
      *            the store's answer to the create
+     * @return true when the descriptor was written; otherwise the failure has been
+     *         recorded
      */
-    private void createDescriptorFor(Response createResponse, String resourceType, String sourceId,
-                                     String name, Outcome outcome) {
+    private boolean createDescriptorFor(Response createResponse, String resourceType, String sourceId,
+                                        String name, Outcome outcome) {
         String createdUri = createResponse == null ? null : createResponse.getHeaderString("X-Resource-URI");
         if (createdUri == null || createdUri.isBlank()) {
             outcome.failed(sourceId, resourceType, name,
                     "it was created but the store named no resource URI, so no descriptor could be written"
                             + " and nothing will find it");
-            return;
+            return false;
         }
         try {
             URI uri = URI.create(createdUri);
@@ -341,12 +384,14 @@ public class UpgradeExecutor {
             descriptor.setName(name);
             documentDescriptorStore.createDescriptor(resourceId.getId(), resourceId.getVersion(),
                     resourceAccessGuard.stampNewDescriptor(descriptor));
+            return true;
         } catch (Exception e) {
             LOGGER.warnf(e, "Created %s '%s' but could not write its descriptor",
                     LogSanitizer.sanitize(resourceType), LogSanitizer.sanitize(name));
             outcome.failed(sourceId, resourceType, name,
                     "it was created but its descriptor could not be written, so nothing will find it: "
                             + e.getMessage());
+            return false;
         }
     }
 
@@ -356,6 +401,10 @@ public class UpgradeExecutor {
      * For each extension in a matched workflow, update the target extension with
      * the source content.
      *
+     * @param deliverableKeys
+     *            filled with the keys whose new version is fully written —
+     *            descriptor included — and may be counted as updated once the
+     *            workflow references it; see the caller
      * @return map of canonical extension key → updated extension URI (with new
      *         version)
      */
@@ -363,6 +412,7 @@ public class UpgradeExecutor {
                                                        WorkflowSourceData sourceWf,
                                                        Map<String, ResourceDiff> diffMap,
                                                        Set<String> selectedSourceIds,
+                                                       Set<String> deliverableKeys,
                                                        Outcome outcome) {
 
         Map<String, URI> updates = new LinkedHashMap<>();
@@ -392,7 +442,7 @@ public class UpgradeExecutor {
                         // did not.
                         if (bumpDescriptorOrFail(extDiff.targetId(), written.previousVersion(), sourceExt.type(),
                                 sourceExt.sourceId(), sourceExt.name(), outcome)) {
-                            outcome.updated++;
+                            deliverableKeys.add(extensionKey);
                         }
                         updates.put(extensionKey, written.uri());
                         LOGGER.infof("Updated %s '%s' (target=%s, v%d→v%d)",
@@ -700,11 +750,14 @@ public class UpgradeExecutor {
      *            the source's steps replace the target's. Honoured only when the
      *            two workflows wire up the same extensions — see
      *            {@link #adoptableSourceConfig}
+     * @param placedKeys
+     *            filled with the {@code extensionUpdates} keys the written workflow
+     *            references; meaningful only when a URI is returned
      * @return the workflow's new version URI, or null when nothing was written
      */
     private URI updateMatchedWorkflow(WorkflowSourceData sourceWf, ResourceDiff wfDiff,
                                       Map<String, URI> extensionUpdates,
-                                      boolean adoptSourceConfig, Outcome outcome) {
+                                      boolean adoptSourceConfig, Set<String> placedKeys, Outcome outcome) {
         String workflowId = wfDiff.targetId();
         Integer workflowVersion = wfDiff.targetVersion();
         try {
@@ -736,6 +789,7 @@ public class UpgradeExecutor {
                 URI newExtUri = extensionUpdates.get(ref.key());
                 if (newExtUri != null) {
                     unconsumed.remove(ref.key());
+                    placedKeys.add(ref.key());
                 } else if (configToWrite != targetConfig) {
                     newExtUri = targetRefs.get(ref.key());
                 }
@@ -922,6 +976,11 @@ public class UpgradeExecutor {
                 return updatedUri;
             }
 
+            // Answered without throwing: every workflow and extension this run wrote
+            // is now referenced by nothing the deployment loads, which the caller has
+            // to hear about rather than infer from a null URI.
+            outcome.failed(agentId, "agent", null, "the agent store did not accept the updated agent (HTTP "
+                    + resp.getStatus() + "), so the workflows and extensions written by this run are not deployed");
             return null;
         } catch (Exception e) {
             LOGGER.errorf(e, "Failed to update agent config %s", LogSanitizer.sanitize(agentId));
@@ -1026,17 +1085,80 @@ public class UpgradeExecutor {
      *             how the original defect stayed invisible.
      */
     private void bumpDescriptor(String resourceId, int previousVersion) throws Exception {
-        DocumentDescriptor descriptor = documentDescriptorStore.readDescriptor(resourceId, previousVersion);
+        DocumentDescriptor descriptor = readDescriptorOrNull(resourceId, previousVersion);
         if (descriptor == null) {
-            throw new IllegalStateException("No descriptor for " + resourceId + " at version " + previousVersion);
+            // The descriptor lags the resource: an earlier run wrote a version and then
+            // failed to move the descriptor (exactly the failure bumpDescriptorOrFail
+            // reports). The resource itself heals — updateExtension retries against the
+            // version the store names — but reading the descriptor at that exact
+            // version could never succeed, so every later sync failed here again and
+            // the resource stayed undeployable. Walk the descriptor forward one version
+            // at a time instead, so every resource version it skipped gets the
+            // descriptor a deployment of that version looks up.
+            descriptor = catchUpLaggingDescriptor(resourceId, previousVersion);
         }
+        advanceDescriptor(resourceId, previousVersion, descriptor);
+    }
+
+    /**
+     * Most versions a lagging descriptor is walked forward in one run. A gap wider
+     * than this is not the "one bump went missing" state and is reported instead.
+     */
+    private static final int MAX_DESCRIPTOR_CATCH_UP = 50;
+
+    /**
+     * Moves a descriptor that lags {@code previousVersion} up to it, and returns it
+     * ready for the final {@link #advanceDescriptor}.
+     *
+     * @throws IllegalStateException
+     *             when there is no descriptor at all, when it is not behind, or
+     *             when the gap exceeds {@link #MAX_DESCRIPTOR_CATCH_UP}
+     */
+    private DocumentDescriptor catchUpLaggingDescriptor(String resourceId, int previousVersion) throws Exception {
+        IResourceId current;
+        try {
+            current = documentDescriptorStore.getCurrentResourceId(resourceId);
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            current = null;
+        }
+        Integer lagging = current == null ? null : current.getVersion();
+        if (lagging == null || lagging >= previousVersion || previousVersion - lagging > MAX_DESCRIPTOR_CATCH_UP) {
+            throw new IllegalStateException("No descriptor for " + resourceId + " at version " + previousVersion
+                    + (lagging != null ? " (its current descriptor is at version " + lagging + ")" : ""));
+        }
+        DocumentDescriptor descriptor = readDescriptorOrNull(resourceId, lagging);
+        if (descriptor == null) {
+            throw new IllegalStateException("No descriptor for " + resourceId + " at version " + previousVersion
+                    + ", and its current one (version " + lagging + ") could not be read");
+        }
+        LOGGER.infof("Descriptor of %s lags its resource (v%d vs v%d) — moving it forward",
+                LogSanitizer.sanitize(resourceId), lagging, previousVersion);
+        for (int version = lagging; version < previousVersion; version++) {
+            advanceDescriptor(resourceId, version, descriptor);
+        }
+        return descriptor;
+    }
+
+    private DocumentDescriptor readDescriptorOrNull(String resourceId, int version) throws Exception {
+        try {
+            return documentDescriptorStore.readDescriptor(resourceId, version);
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Rewrites the descriptor at {@code fromVersion} to name
+     * {@code fromVersion + 1}.
+     */
+    private void advanceDescriptor(String resourceId, int fromVersion, DocumentDescriptor descriptor) throws Exception {
         descriptor.setLastModifiedOn(new Date());
-        descriptor.setResource(withVersion(descriptor.getResource(), previousVersion + 1));
+        descriptor.setResource(withVersion(descriptor.getResource(), fromVersion + 1));
         // Mirrors DocumentDescriptorFilter: carrying the descriptor object forward
         // already carries ownership, and rebuilding lets a descriptor written before
         // the access index existed acquire one the first time it is touched.
         DescriptorAccess.rebuildIndex(descriptor);
-        documentDescriptorStore.updateDescriptor(resourceId, previousVersion, descriptor);
+        documentDescriptorStore.updateDescriptor(resourceId, fromVersion, descriptor);
     }
 
     /**

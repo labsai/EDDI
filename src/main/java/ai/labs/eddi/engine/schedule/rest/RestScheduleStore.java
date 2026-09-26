@@ -16,6 +16,7 @@ import ai.labs.eddi.engine.runtime.internal.CronParser;
 import ai.labs.eddi.engine.runtime.internal.DreamService;
 import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
 import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
+import ai.labs.eddi.engine.runtime.internal.TeamCadenceService;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
@@ -264,6 +265,14 @@ public class RestScheduleStore implements IRestScheduleStore {
             Response guard = requireAdminForHitl(stored, "update");
             if (guard != null) {
                 return guard;
+            }
+
+            // Judged on the STORED row, for the same reason as the HITL guard: a PUT
+            // that omits metadata keeps the stored markers (carryOverNonEditableFields),
+            // so the body alone cannot say what the schedule will be after the write.
+            Response managedGuard = guardManagedSchedule(stored);
+            if (managedGuard != null) {
+                return managedGuard;
             }
 
             // Same USE gate as create: an update can re-point an existing schedule at a
@@ -534,7 +543,16 @@ public class RestScheduleStore implements IRestScheduleStore {
         }
     }
 
-    // Fix #8: dismissDeadLetter uses markCompleted with proper nextFire recompute
+    /**
+     * Clear a dead letter without retrying it, re-armed at its next regular fire.
+     * <p>
+     * Only a DEAD_LETTERED schedule can be dismissed; anything else is a 409. The
+     * state is checked twice, and only the second check is authoritative: the read
+     * gives an honest error for the common case (the Manager offers "Dismiss" on
+     * failed fire LOGS, whose schedule may since have recovered or be running), and
+     * the store's write is itself conditional on DEAD_LETTERED, so a requeue and
+     * claim racing in between cannot be reset to PENDING under a running fire.
+     */
     @Override
     public Response dismissDeadLetter(String scheduleId) {
         try {
@@ -547,8 +565,18 @@ public class RestScheduleStore implements IRestScheduleStore {
                 return guard;
             }
             ScheduleConfiguration schedule = scheduleStore.readSchedule(scheduleId);
+            if (schedule.getFireStatus() != FireStatus.DEAD_LETTERED) {
+                return notDeadLettered(schedule.getFireStatus());
+            }
             Instant nextFire = computeNextFireForSchedule(schedule);
-            scheduleStore.markCompleted(scheduleId, nextFire);
+            try {
+                scheduleStore.dismissDeadLetter(scheduleId, nextFire);
+            } catch (IResourceStore.ResourceNotFoundException raced) {
+                // It was DEAD_LETTERED when read and is not any more (requeued, deleted
+                // or re-claimed in between): the write matched nothing, which is the
+                // point of the condition.
+                return notDeadLettered(null);
+            }
             return Response.ok().build();
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException("Schedule not found: " + scheduleId);
@@ -559,6 +587,13 @@ public class RestScheduleStore implements IRestScheduleStore {
     }
 
     // --- Helpers ---
+
+    private static Response notDeadLettered(FireStatus current) {
+        return Response.status(Response.Status.CONFLICT)
+                .entity("Only a dead-lettered schedule can be dismissed; this one is "
+                        + (current != null ? current.name() : "no longer dead-lettered") + ".")
+                .build();
+    }
 
     /**
      * Why a manual fire could not claim the schedule, phrased for the operator who
@@ -620,6 +655,17 @@ public class RestScheduleStore implements IRestScheduleStore {
      * side effect of editing it: {@code POST /schedules/{id}/enable} and
      * {@code POST /schedules/{id}/retry} both clear the failure state explicitly.
      * <p>
+     * Three EDITABLE fields are carried over too, but only when the body omits
+     * them: {@code metadata}, {@code tenantId} and {@code allowSelfScheduling}.
+     * {@code metadata} is what selects the fire path — dream consolidation, team
+     * cadence, RAG ingestion, HITL timeout — so a client that does not echo it (the
+     * Manager's schedule editor never did) silently turned an edited system
+     * schedule into a plain chat schedule that messaged the agent instead of
+     * crawling or consolidating. A body that names the field still sets it —
+     * {@code "metadata": null} and {@code {}} both clear it — and only absence
+     * means "keep". {@code tenantId} has no such marker: null (or absent) keeps the
+     * stored tenant, because a PUT is not how a schedule changes tenant.
+     * <p>
      * {@code stored} is null only when the schedule is genuinely absent, in which
      * case there is nothing to carry over and the store's own update is about to
      * surface the 404. A read that FAILED never reaches here — the caller fails
@@ -638,6 +684,16 @@ public class RestScheduleStore implements IRestScheduleStore {
         schedule.setFireId(stored.getFireId());
         schedule.setNextRetryAt(stored.getNextRetryAt());
         schedule.setPersistentConversationId(stored.getPersistentConversationId());
+
+        if (!schedule.hasMetadata()) {
+            schedule.setMetadata(stored.getMetadata());
+        }
+        if (schedule.getTenantId() == null) {
+            schedule.setTenantId(stored.getTenantId());
+        }
+        if (!schedule.hasAllowSelfScheduling()) {
+            schedule.setAllowSelfScheduling(stored.isAllowSelfScheduling());
+        }
     }
 
     /**
@@ -653,6 +709,48 @@ public class RestScheduleStore implements IRestScheduleStore {
         } catch (RuntimeException e) {
             return SCHEDULER_USER_ID;
         }
+    }
+
+    /**
+     * Update rules for schedules another resource owns, judged on the stored row.
+     * <ul>
+     * <li><b>RAG ingestion</b> — refused for everyone. The row is minted from a
+     * knowledge base's ingestion source ({@code RagSourceIngestionService}), whose
+     * {@code cron} is the source of truth, and a fire crawls, re-embeds and can
+     * tombstone that knowledge base — which the ingestion endpoints gate on EDIT of
+     * it. Once a metadata-less PUT stopped stripping the marker, an edit here let
+     * anyone with USE on some agent and VIEW on the knowledge base re-cron it to
+     * fire every minute. Change the cadence on the knowledge base instead.</li>
+     * <li><b>Team cadence</b> — requires EDIT on the group, the same gate
+     * {@code RestGroupWorkspace.addCadence} applies. There is no cadence update
+     * endpoint, so this PUT is the only way to change a cadence's cron, and it must
+     * not be open to someone who could not have created the cadence.</li>
+     * </ul>
+     *
+     * @return a response to short-circuit with, or null when the update may
+     *         proceed; a missing EDIT grant surfaces as the guard's
+     *         {@link ForbiddenException}
+     */
+    private Response guardManagedSchedule(ScheduleConfiguration stored) {
+        Map<String, Object> md = stored != null ? stored.getMetadata() : null;
+        if (RagIngestionSchedules.isIngestionSchedule(md)) {
+            LOGGER.warnf("Refused update of ingestion schedule %s — it is managed by knowledge base %s",
+                    sanitize(stored.getId()), sanitize(RagIngestionSchedules.ragConfigId(md)));
+            return Response.status(Response.Status.CONFLICT)
+                    .entity("This schedule is managed by knowledge base '" + RagIngestionSchedules.ragConfigId(md)
+                            + "'. Change the ingestion source's cron on the knowledge base instead; "
+                            + "it re-creates this schedule when saved.")
+                    .build();
+        }
+        if (TeamCadenceService.isTeamCadenceSchedule(md)) {
+            Object groupId = md.get(TeamCadenceService.METADATA_GROUP_ID_KEY);
+            if (groupId == null || groupId.toString().isBlank()) {
+                return Response.status(Response.Status.BAD_REQUEST)
+                        .entity("This team cadence schedule names no group and cannot be updated.").build();
+            }
+            resourceAccessGuard.requireAccess(groupId.toString(), AccessLevel.EDIT, "group");
+        }
+        return null;
     }
 
     /** True if the schedule carries the HITL approval-timeout metadata marker. */

@@ -27,13 +27,15 @@ import java.util.UUID;
  * in the conversation memory as {@code capabilityMatch.results} so downstream
  * tasks (e.g., group conversation orchestration) can use the discovered agents.
  * <p>
- * Config values support template variables (Jinja2 syntax), resolved against
- * the current conversation memory at execution time. For example:
+ * Config values support Qute template expressions (single braces, like every
+ * other EDDI template), resolved against the current conversation memory at
+ * execution time. For example:
  * <ul>
- * <li>{@code skill} can be
- * {@code {{properties.requiredSkill.valueString}}}</li>
- * <li>{@code strategy} can be {@code {{context.routingStrategy}}}</li>
+ * <li>{@code skill} can be {@code {properties.requiredSkill}}</li>
+ * <li>{@code strategy} can be {@code {context.routingStrategy}}</li>
  * </ul>
+ * A strategy that renders blank falls back to {@code highest_confidence}; a
+ * skill that renders blank fails the condition.
  * <p>
  * Config keys:
  * <ul>
@@ -64,7 +66,7 @@ import java.util.UUID;
  * {
  *   "type": "capabilityMatch",
  *   "configs": {
- *     "skill": "{{properties.requiredSkill.valueString}}",
+ *     "skill": "{properties.requiredSkill}",
  *     "strategy": "highest_confidence",
  *     "minResults": "1"
  *   }
@@ -80,9 +82,10 @@ public class CapabilityMatchCondition implements IRuleCondition {
     private static final String KEY_STRATEGY = "strategy";
     private static final String KEY_MIN_RESULTS = "minResults";
     private static final String MEMORY_KEY = "capabilityMatch.results";
+    private static final String DEFAULT_STRATEGY = "highest_confidence";
 
     private String skill;
-    private String strategy = "highest_confidence";
+    private String strategy = DEFAULT_STRATEGY;
     private int minResults = 1;
 
     private final CapabilityRegistryService registryService;
@@ -142,6 +145,9 @@ public class CapabilityMatchCondition implements IRuleCondition {
 
         if (resolvedSkill == null || resolvedSkill.isBlank()) {
             return ExecutionState.FAIL;
+        }
+        if (resolvedStrategy == null || resolvedStrategy.isBlank()) {
+            resolvedStrategy = DEFAULT_STRATEGY;
         }
 
         List<CapabilityMatch> matches = registryService.findBySkill(resolvedSkill, resolvedStrategy);
@@ -205,12 +211,17 @@ public class CapabilityMatchCondition implements IRuleCondition {
     }
 
     /**
-     * Resolve Jinja2 template expressions (e.g., {{properties.foo.valueString}})
-     * against the current conversation memory. Returns the raw value unchanged if
-     * it contains no template markers or if template resolution fails.
+     * Resolve Qute template expressions (e.g. {@code {properties.foo}}) against the
+     * current conversation memory. Returns the raw value unchanged if it contains
+     * no template marker or if template resolution fails.
+     * <p>
+     * The gate used to be the double-brace marker, which no Qute expression
+     * contains — so the documented single-brace form never reached the engine, and
+     * a double-brace value that did was left literal by Qute anyway. Either way the
+     * unrendered string became the skill name and the condition silently failed.
      */
     private String resolveTemplate(String value, IConversationMemory memory) {
-        if (value == null || !value.contains("{{")) {
+        if (value == null || value.indexOf('{') < 0) {
             return value;
         }
         try {

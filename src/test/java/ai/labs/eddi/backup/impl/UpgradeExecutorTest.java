@@ -158,6 +158,11 @@ class UpgradeExecutorTest {
                     DiffAction.CREATE, null, null, null, null, null, -1));
 
             setupPreviewAndAgent("target-1", 1, diffs);
+            // The create must be accepted for the "Created snippet" line to fire at all:
+            // a store refusal is now reported as a failure, not logged as a create.
+            String createdUri = IRestPromptSnippetStore.resourceURI + "aabbccddeeff112233445566?version=1";
+            when(snippetStore.createSnippet(any())).thenReturn(Response.created(URI.create(createdUri))
+                    .header("X-Resource-URI", createdUri).build());
 
             List<String> captured = new ArrayList<>();
             Handler handler = new Handler() {
@@ -219,6 +224,33 @@ class UpgradeExecutorTest {
             executor.executeUpgrade(source, "target-1", null, null);
 
             verify(snippetStore).createSnippet(any(PromptSnippet.class));
+        }
+
+        /**
+         * G5: a create the store refused (it answers without throwing) used to be
+         * counted as created, and one whose descriptor could not be written was listed
+         * under "created" and "failures" at once.
+         */
+        @Test
+        @DisplayName("a snippet create counts as created only when accepted and findable")
+        void snippetCreateCountsOnlyWhenItLanded() throws Exception {
+            var sourceSnippet = new SnippetSourceData("src-snp-2", "new_snippet", createSnippet("new_snippet", "Brand new"));
+            List<ResourceDiff> diffs = new ArrayList<>();
+            diffs.add(agentDiff("src-1", "target-1", DiffAction.SKIP));
+            diffs.add(new ResourceDiff("src-snp-2", "snippet", "new_snippet", DiffAction.CREATE, null, null, null, null, null, -1));
+            setupPreviewAndAgent("target-1", 1, diffs);
+
+            when(snippetStore.createSnippet(any())).thenReturn(Response.status(400).build());
+            UpgradeResult refused = executor.executeUpgrade(createSource(List.of(), List.of(sourceSnippet)), "target-1", null, null);
+            assertEquals(0, refused.created(), "a refused create is not a create");
+            assertEquals(1, refused.failures().size(), "got: " + refused.failures());
+
+            String createdUri = IRestPromptSnippetStore.resourceURI + "aabbccddeeff112233445566?version=1";
+            when(snippetStore.createSnippet(any())).thenReturn(Response.created(URI.create(createdUri))
+                    .header("X-Resource-URI", createdUri).build());
+            UpgradeResult accepted = executor.executeUpgrade(createSource(List.of(), List.of(sourceSnippet)), "target-1", null, null);
+            assertEquals(1, accepted.created());
+            assertTrue(accepted.failures().isEmpty(), "got: " + accepted.failures());
         }
 
         @Test

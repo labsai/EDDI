@@ -92,6 +92,35 @@ public class ApiCallExecutor implements IApiCallExecutor {
     static final int MAX_TRANSPORT_RESPONSE_SIZE_BYTES = 8 * 1024 * 1024;
 
     /**
+     * Requests a fire-and-forget batch may expand into when its config sets no
+     * {@code maxBatchSize}. The target array usually comes from an upstream
+     * response or LLM output, so without a cap one turn could fan out into as many
+     * outbound requests as that data has elements. Operator override:
+     * {@value #BATCH_DEFAULT_MAX_SIZE_PROPERTY}.
+     */
+    public static final int DEFAULT_MAX_BATCH_SIZE = 100;
+
+    /**
+     * Ceiling for {@code maxBatchSize}: a config may lower the default or raise it
+     * up to this, never beyond — a save above it is refused. Operator override:
+     * {@value #BATCH_MAX_SIZE_CEILING_PROPERTY}.
+     */
+    public static final int MAX_BATCH_SIZE_CEILING = 1_000;
+
+    public static final String BATCH_DEFAULT_MAX_SIZE_PROPERTY = "eddi.httpcalls.batch.default-max-size";
+    public static final String BATCH_MAX_SIZE_CEILING_PROPERTY = "eddi.httpcalls.batch.max-size-ceiling";
+
+    // Field-injected rather than constructor parameters so that the many direct
+    // constructions of this class in tests keep compiling; the initializers are the
+    // same defaults the properties declare, so a directly built instance behaves
+    // like a default deployment.
+    @ConfigProperty(name = BATCH_DEFAULT_MAX_SIZE_PROPERTY, defaultValue = "100")
+    int defaultMaxBatchSize = DEFAULT_MAX_BATCH_SIZE;
+
+    @ConfigProperty(name = BATCH_MAX_SIZE_CEILING_PROPERTY, defaultValue = "1000")
+    int maxBatchSizeCeiling = MAX_BATCH_SIZE_CEILING;
+
+    /**
      * Response headers that are credentials, and are dropped before the header map
      * reaches conversation memory, the template data or an LLM tool result.
      * <p>
@@ -578,6 +607,22 @@ public class ApiCallExecutor implements IApiCallExecutor {
             // run after this one.
             List<Object> batchIterationList = prePostUtils.buildIterationValues(batchRequest.getIterationObjectName(),
                     batchRequest.getPathToTargetArray(), batchRequest.getTemplateFilterExpression(), templateDataObjects);
+            int maxBatchSize = resolveMaxBatchSize(batchRequest.getMaxBatchSize(), defaultMaxBatchSize, maxBatchSizeCeiling);
+            if (batchRequest.getMaxBatchSize() != null && batchRequest.getMaxBatchSize() > maxBatchSize) {
+                // Saving such a config is refused; one stored before the ceiling was
+                // lowered still runs, at the ceiling, and says so.
+                LOGGER.warnf("http call '%s' sets maxBatchSize %d, above the deployment ceiling %d (%s) — using %d",
+                        LogSanitizer.sanitize(callName), batchRequest.getMaxBatchSize(), maxBatchSizeCeiling, BATCH_MAX_SIZE_CEILING_PROPERTY,
+                        maxBatchSize);
+            }
+            if (batchIterationList.size() > maxBatchSize) {
+                // Refused as a whole, before anything is built or sent: a truncated batch
+                // would report success while quietly dropping the tail.
+                throw new IllegalArgumentException("Batch of http call '" + callName + "' would send " + batchIterationList.size()
+                        + " requests, more than its limit of " + maxBatchSize + ". Narrow 'pathToTargetArray' or "
+                        + "'templateFilterExpression', or raise 'preRequest.batchRequests.maxBatchSize' (at most "
+                        + maxBatchSizeCeiling + ", set by " + BATCH_MAX_SIZE_CEILING_PROPERTY + ").");
+            }
             // Each request is kept as the BuiltRequest it came back as, not just its
             // IRequest: the plaintexts the build resolved are what the log line below has
             // to be redacted by, and only the build knows them.
@@ -607,6 +652,16 @@ public class ApiCallExecutor implements IApiCallExecutor {
         } else {
             executeFireAndForgetCall(buildRequest(targetServerUrl, call, templateDataObjects, conversationProperties), callName);
         }
+    }
+
+    /**
+     * The batch size limit in force: the deployment default when the config sets
+     * none (or a non-positive value), otherwise the configured value — both capped
+     * at the deployment ceiling.
+     */
+    static int resolveMaxBatchSize(Integer configured, int defaultSize, int ceiling) {
+        int effective = configured == null || configured <= 0 ? defaultSize : configured;
+        return Math.max(1, Math.min(effective, ceiling));
     }
 
     private static void executeFireAndForgetCall(BuiltRequest built, String httpCallsName) throws IRequest.HttpRequestException {

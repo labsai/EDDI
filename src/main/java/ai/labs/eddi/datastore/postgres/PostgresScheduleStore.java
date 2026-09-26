@@ -746,6 +746,8 @@ public class PostgresScheduleStore implements IScheduleStore {
     public List<ScheduleConfiguration> findDueSchedules(Instant now, Instant leaseExpiry, int maxRetries)
             throws IResourceStore.ResourceStoreException {
         ensureSchema();
+        // Most overdue first (id breaks ties): an unordered LIMIT returns an
+        // arbitrary subset once more rows are due than one poll batch holds.
         long nowMs = now.toEpochMilli();
         long leaseMs = leaseExpiry.toEpochMilli();
 
@@ -757,6 +759,7 @@ public class PostgresScheduleStore implements IScheduleStore {
                     OR (fire_status = 'CLAIMED' AND claimed_at <= ?)
                     OR (fire_status = 'FAILED' AND next_retry_at <= ? AND fail_count < ?)
                 )
+                ORDER BY next_fire ASC, id ASC
                 LIMIT ?
                 """;
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -938,11 +941,45 @@ public class PostgresScheduleStore implements IScheduleStore {
             if (rows == 0) {
                 throw new IResourceStore.ResourceNotFoundException("Schedule " + scheduleId + " not found or not in DEAD_LETTERED state");
             }
-            LOGGER.infof("Requeued dead-lettered schedule %s", scheduleId);
+            LOGGER.infof("Requeued dead-lettered schedule %s", sanitize(scheduleId));
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw e;
         } catch (SQLException e) {
             throw new IResourceStore.ResourceStoreException("Failed to requeue: " + scheduleId, e);
+        }
+    }
+
+    @Override
+    public void dismissDeadLetter(String scheduleId, Instant nextFire)
+            throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
+        ensureSchema();
+        long nowMs = Instant.now().toEpochMilli();
+        // Conditional on DEAD_LETTERED — see IScheduleStore#dismissDeadLetter.
+        String sql = nextFire != null ? """
+                UPDATE eddi_schedules SET fire_status='PENDING', fail_count=0, claimed_by=NULL, claimed_at=NULL,
+                    fire_id=NULL, next_retry_at=NULL, next_fire=?, updated_at=?
+                WHERE id=? AND fire_status='DEAD_LETTERED'
+                """ : """
+                UPDATE eddi_schedules SET fire_status='PENDING', fail_count=0, claimed_by=NULL, claimed_at=NULL,
+                    fire_id=NULL, next_retry_at=NULL, enabled=false, next_fire=NULL, updated_at=?
+                WHERE id=? AND fire_status='DEAD_LETTERED'
+                """;
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            int i = 1;
+            if (nextFire != null) {
+                ps.setLong(i++, nextFire.toEpochMilli());
+            }
+            ps.setLong(i++, nowMs);
+            ps.setString(i, scheduleId);
+            int rows = ps.executeUpdate();
+            if (rows == 0) {
+                throw new IResourceStore.ResourceNotFoundException("Schedule " + scheduleId + " not found or not in DEAD_LETTERED state");
+            }
+            LOGGER.infof("Dismissed dead-lettered schedule %s", sanitize(scheduleId));
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            throw e;
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to dismiss dead letter: " + scheduleId, e);
         }
     }
 
