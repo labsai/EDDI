@@ -50,7 +50,11 @@
         <!-- Node 22 matches CI (ci.yml, the ui-* jobs) and mise.toml. The floor is
              22.18: Vitest 5 needs 22.12, and Stryker 10's Babel 8 declares
              `^22.18.0 || >=24.11.0`. Node 22 is Maintenance LTS until 2027-04-30;
-             20 reached end of life on 2026-04-30. -->
+             20 reached end of life on 2026-04-30.
+             frontend-maven-plugin checks no checksum on the archive it downloads. CI's
+             Build Image job (the build that ships) places and verifies it first against
+             NODE_SHA256_LINUX_X64 in ci.yml, whose NODE_VERSION must equal this value
+             (BuildQualityGatesTest); a local build trusts nodejs.org over TLS. -->
         <node.version>v22.23.2</node.version>
         <!-- Pinned: Maven only warns when a declared plugin carries no version, then
              takes whatever its default lifecycle binding says, which moves with the
