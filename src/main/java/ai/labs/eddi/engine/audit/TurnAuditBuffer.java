@@ -11,6 +11,7 @@ import ai.labs.eddi.engine.memory.MemoryKeys;
 import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -102,6 +103,17 @@ public final class TurnAuditBuffer implements IAuditEntryCollector {
                 && !MemoryKeys.SECRET_INPUT_PLACEHOLDER.equals(recorded)) {
             recordedInputs.add(recorded);
         }
+    }
+
+    /**
+     * Add input forms to redact when the turn's input turns out to be a secret —
+     * forms no entry recorded as its {@code userInput}, such as the parser's
+     * normalized copy of a client-flagged secret message.
+     */
+    public synchronized void addSecretInputForms(Collection<String> forms) {
+        forms.stream()
+                .filter(form -> form != null && !form.isEmpty() && !MemoryKeys.SECRET_INPUT_PLACEHOLDER.equals(form))
+                .forEach(recordedInputs::add);
     }
 
     /**
