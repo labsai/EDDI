@@ -396,11 +396,19 @@ export interface DetailedConversation {
 }
 
 /** Fetch a fully-detailed conversation snapshot including all step data.
- *  Used by the Memory Inspector debug tab. */
+ *  Used by the Memory Inspector debug tab.
+ *
+ *  `returnCurrentStepOnly=false` is explicit because the backend DEFAULTS it to
+ *  `true` on `GET /agents/{conversationId}` — without it the inspector's step
+ *  tabs only ever showed the latest step. */
 export function getDetailedConversation(
   conversationId: string,
 ): Promise<DetailedConversation> {
+  const params = new URLSearchParams({
+    returnDetailed: "true",
+    returnCurrentStepOnly: "false",
+  });
   return api.get<DetailedConversation>(
-    `/agents/${conversationId}?returnDetailed=true`,
+    `/agents/${conversationId}?${params.toString()}`,
   );
 }

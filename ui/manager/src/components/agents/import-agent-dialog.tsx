@@ -12,7 +12,7 @@ import {
 } from "@/hooks/use-backup";
 import type { ImportPreview, DocumentDescriptor, SyncExecution } from "@/lib/api/backup";
 import { Button } from "@/components/ui/button";
-import { useInfiniteAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
+import { useAllAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import { SyncConfigPanel } from "@/components/agents/sync-config-panel";
 import { parseResourceUri } from "@/lib/api/backup";
 import { UploadStep, StrategyStep, PreviewStep } from "@/components/agents/import-steps";
@@ -563,7 +563,7 @@ function UpgradeTargetPicker({
   onSelect: (id: string) => void;
 }) {
   const { t } = useTranslation();
-  const { data } = useInfiniteAgentDescriptors();
+  const { data } = useAllAgentDescriptors();
   const agents = groupAgentsByName(data?.pages.flat() ?? []);
 
   return (
@@ -615,7 +615,7 @@ function SyncTargetPicker({
   onSyncTarget: (id: string | null) => void;
 }) {
   const { t } = useTranslation();
-  const { data } = useInfiniteAgentDescriptors();
+  const { data } = useAllAgentDescriptors();
   const localAgents = groupAgentsByName(data?.pages.flat() ?? []);
 
   return (

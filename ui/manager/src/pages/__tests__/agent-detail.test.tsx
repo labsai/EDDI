@@ -827,4 +827,49 @@ describe("AgentDetailPage", () => {
       expect(screen.queryByText(/deploy & chat/i)).not.toBeInTheDocument();
     });
   });
+
+  /**
+   * Production still serves an OLDER version than the one on screen. The
+   * Environments panel must say so (vN) and must not offer Undeploy for the
+   * page's version: the backend would accept that undeploy of a version that
+   * is not running, disable every schedule of the agent, and report success
+   * while the old version keeps serving.
+   */
+  it("shows an older live version per environment and never offers Undeploy for the page's version", async () => {
+    let undeployed = false;
+    let deployed = false;
+    server.use(
+      http.get("*/administration/:env/deploymentstatus/:agentId", () =>
+        HttpResponse.json({ status: "NOT_FOUND" }),
+      ),
+      http.get("*/administration/:env/deploymentstatus", ({ params }) =>
+        HttpResponse.json(
+          params.env === "production"
+            ? [{ environment: "production", agentId: "agent1", agentVersion: 7, status: "READY" }]
+            : [],
+        ),
+      ),
+      http.post("*/administration/:env/undeploy/:agentId", () => {
+        undeployed = true;
+        return new HttpResponse(null, { status: 202 });
+      }),
+      http.post("*/administration/:env/deploy/:agentId", () => {
+        deployed = true;
+        return new HttpResponse(null, { status: 202 });
+      }),
+    );
+
+    renderAgentDetail();
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("env-badge-version-production")).toHaveTextContent("v7");
+    });
+    const toggle = screen.getByTestId("env-toggle-production");
+    expect(toggle).toHaveTextContent(/^Deploy$/);
+
+    await user.click(toggle);
+    await waitFor(() => expect(deployed).toBe(true));
+    expect(undeployed).toBe(false);
+  });
 });

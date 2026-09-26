@@ -81,35 +81,23 @@ describe("useWorkflow", () => {
 });
 
 describe("useWorkflowVersions", () => {
-  it("fetches workflow versions", async () => {
+  it("fetches workflow versions — one per version, not the latest N times", async () => {
     server.use(
-      http.get("*/workflowstore/workflows/descriptors", ({ request }) => {
-        const url = new URL(request.url);
-        const filter = url.searchParams.get("filter");
-        if (filter === "wf1") {
-          return HttpResponse.json([
-            {
-              resource: "eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=1",
-              name: "WF v1",
-              lastModifiedOn: Date.now() - 86400000,
-            },
-            {
-              resource: "eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=2",
-              name: "WF v2",
-              lastModifiedOn: Date.now(),
-            },
-          ]);
-        }
-        return HttpResponse.json([]);
-      })
+      http.get("*/workflowstore/workflows/:id/currentversion", () => HttpResponse.json(2)),
+      http.get("*/descriptorstore/descriptors/:id", ({ params, request }) => {
+        const version = new URL(request.url).searchParams.get("version");
+        return HttpResponse.json({
+          resource: `eddi://ai.labs.workflow/workflowstore/workflows/${params.id}?version=${version}`,
+          name: `WF v${version}`,
+          lastModifiedOn: Date.now(),
+        });
+      }),
     );
     const { result } = renderHook(() => useWorkflowVersions("wf1"), {
       wrapper: createWrapper(),
     });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data!.length).toBe(2);
-    // Check shape, not exact values (MSW returns descriptors which are then mapped)
-    expect(result.current.data![0]).toBeDefined();
+    expect(result.current.data!.map((d) => d.name)).toEqual(["WF v1", "WF v2"]);
   });
 
   it("is disabled when id is empty", () => {

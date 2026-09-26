@@ -97,3 +97,44 @@ describe("error message length", () => {
     });
   });
 });
+
+describe("Bean Validation 400s", () => {
+  it("surfaces the constraint messages of Quarkus's violation report", async () => {
+    // A `@Valid` body (discuss requests, group saves) is rejected with this
+    // report and no top-level message; it used to reach the user as "Bad Request".
+    server.use(
+      http.put(URL, () =>
+        HttpResponse.json(
+          {
+            title: "Constraint Violation",
+            status: 400,
+            violations: [
+              { field: "discuss.request.question", message: "'question' must not be blank" },
+              { field: "discuss.request.userId", message: "'userId' must be at most 256 characters" },
+              { field: "discuss.request.question", message: "'question' must not be blank" },
+            ],
+          },
+          { status: 400 },
+        ),
+      ),
+    );
+
+    await expect(api.put(PATH, {})).rejects.toMatchObject({
+      status: 400,
+      message: "'question' must not be blank; 'userId' must be at most 256 characters",
+    });
+  });
+
+  it("reads the RESTEasy Classic report shape too", async () => {
+    server.use(
+      http.put(URL, () =>
+        HttpResponse.json(
+          { parameterViolations: [{ path: "save.arg1", message: "members must not be empty" }] },
+          { status: 400 },
+        ),
+      ),
+    );
+
+    await expect(api.put(PATH, {})).rejects.toMatchObject({ message: "members must not be empty" });
+  });
+});

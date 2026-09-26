@@ -114,6 +114,8 @@ function extractErrorMessage(body: string): string | null {
       if (typeof candidate === "string" && candidate.trim()) {
         return truncateMessage(candidate.trim());
       }
+      const violations = violationMessages(parsed as Record<string, unknown>);
+      if (violations) return truncateMessage(violations);
     }
     // Valid JSON, but no recognizable message field (or a bare literal like
     // `null`/`123`) — the status phrase is more informative than the raw body.
@@ -123,6 +125,44 @@ function extractErrorMessage(body: string): string | null {
     if (text.startsWith("<")) return null;
     return truncateMessage(text);
   }
+}
+
+/**
+ * The messages of a Bean Validation 400.
+ *
+ * A `@Valid` request body (group saves, discuss and follow-up requests,
+ * attachment limits) that fails validation is answered by Quarkus's own
+ * violation report — `{"title":"Constraint Violation","status":400,
+ * "violations":[{"field":"…","message":"'question' must not be blank"}]}` — with
+ * no top-level message at all. `extractErrorMessage` read only the top-level
+ * keys, so every one of those carefully worded constraint messages reached the
+ * user as a bare "Bad Request". The RESTEasy Classic report shape
+ * (`parameterViolations`, `propertyViolations`, …) is read as well.
+ *
+ * Returns the distinct messages joined with "; ", or null when there are none.
+ */
+function violationMessages(body: Record<string, unknown>): string | null {
+  const lists = [
+    body.violations,
+    body.parameterViolations,
+    body.propertyViolations,
+    body.classViolations,
+    body.returnValueViolations,
+  ];
+  const messages: string[] = [];
+  for (const list of lists) {
+    if (!Array.isArray(list)) continue;
+    for (const violation of list) {
+      const message =
+        violation && typeof violation === "object"
+          ? (violation as Record<string, unknown>).message
+          : undefined;
+      if (typeof message === "string" && message.trim() && !messages.includes(message.trim())) {
+        messages.push(message.trim());
+      }
+    }
+  }
+  return messages.length > 0 ? messages.join("; ") : null;
 }
 
 function truncateMessage(message: string): string {

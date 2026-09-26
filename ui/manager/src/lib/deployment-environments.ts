@@ -11,7 +11,7 @@
  * exports only components (fast refresh).
  */
 import { ENVIRONMENTS, type Environment } from "@/lib/constants";
-import type { EnvironmentStatus } from "@/lib/api/agents";
+import type { AgentDeploymentSummary, EnvironmentStatus } from "@/lib/api/agents";
 
 /** The environments where `statuses` says the agent is live, in ENVIRONMENTS order. */
 export function deployedEnvironments(
@@ -37,4 +37,49 @@ export function isAnyEnvironmentBusy(statuses: EnvironmentStatus[] | undefined):
  */
 export function preferredChatEnvironment(live: readonly Environment[]): Environment {
   return live.includes("production") ? "production" : (live[0] ?? "production");
+}
+
+/**
+ * Fill in environments where the asked-for version is not live but an older
+ * version of the same agent is.
+ *
+ * The per-version status endpoint answers only for the exact version asked, and
+ * every save bumps the version — so an agent still serving v3 in production
+ * showed "Not deployed" the moment someone saved v4, on the card, the detail
+ * page and the chat picker alike. `deployed` is the per-environment result of
+ * `listDeploymentStatuses` (same order as `statuses`' environments, entries may
+ * be missing when that call failed). The adopted entry carries `deployedVersion`
+ * so callers can tell "live at this version" from "live at another one", and a
+ * version-exact READY/IN_PROGRESS always wins.
+ *
+ * Only a READY row is adopted. An IN_PROGRESS row from the listing would come
+ * from a cached, unpolled read and keep the card's toggle disabled on a state
+ * that has long moved on; the version-exact query is the one that polls.
+ *
+ * Known gap: the listing holds the HIGHEST deployed version per agent whatever
+ * its status (`AgentFactory.getAllLatestAgents`). If that version failed (ERROR)
+ * while an older one is still READY, the older one is invisible here and the
+ * environment reads "Not deployed". The backend has no "latest READY" listing,
+ * and probing every older version per card would cost N requests.
+ */
+export function withAnyDeployedVersion(
+  statuses: EnvironmentStatus[] | undefined,
+  deployed: Partial<Record<Environment, AgentDeploymentSummary[] | undefined>>,
+  agentId: string,
+): EnvironmentStatus[] | undefined {
+  if (!statuses) return statuses;
+  return statuses.map((s) => {
+    if (s.status === "READY" || s.status === "IN_PROGRESS") return s;
+    const other = deployed[s.environment]?.find(
+      (d) => d.agentId === agentId && d.status === "READY",
+    );
+    return other
+      ? { environment: s.environment, status: other.status, deployedVersion: other.agentVersion }
+      : s;
+  });
+}
+
+/** True when `status` is live at exactly the version that was asked about. */
+export function isLiveAtRequestedVersion(status: EnvironmentStatus | undefined): boolean {
+  return status?.status === "READY" && status.deployedVersion === undefined;
 }

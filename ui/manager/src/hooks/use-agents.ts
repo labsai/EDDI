@@ -1,4 +1,7 @@
-import { useQuery, useInfiniteQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
+import { useEffect } from "react";
+import { useQuery, useQueries, useInfiniteQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
+import { ENVIRONMENTS, type Environment } from "@/lib/constants";
+import { withAnyDeployedVersion } from "@/lib/deployment-environments";
 import { updateDescriptor } from "@/lib/api/descriptors";
 import { agentKeys } from "@/lib/query-keys";
 import {
@@ -13,6 +16,8 @@ import {
   undeployAgent,
   getDeploymentStatus,
   getDeploymentStatuses,
+  listDeploymentStatuses,
+  type AgentDeploymentSummary,
   type Agent,
   type AgentDescriptor,
   type EnvironmentStatus,
@@ -32,22 +37,61 @@ export function useAgentDescriptors(
   });
 }
 
-/** Infinite-scroll agent list with offset-based pagination */
-export function useInfiniteAgentDescriptors(filter = "", space = "") {
+/**
+ * Infinite-scroll agent list.
+ *
+ * The page param is a PAGE INDEX, not a row offset: the backend skips
+ * `index * limit` rows (`DescriptorStore.readDescriptors`). Sending
+ * `allPages.length * PAGE_SIZE` made page 2 skip 2,500 rows, so the list stopped
+ * at 50 — and the sync page, which matches against these pages, created
+ * duplicates of every local agent past the first 50.
+ */
+export function useInfiniteAgentDescriptors(filter = "", space = "", keySuffix?: string) {
   return useInfiniteQuery({
     // The space is part of the key: switching workspace must refetch rather
     // than re-render a cached page belonging to the previous one.
-    queryKey: [...agentKeys.descriptorsInfinite(filter), space],
+    queryKey: keySuffix
+      ? [...agentKeys.descriptorsInfinite(filter), space, keySuffix]
+      : [...agentKeys.descriptorsInfinite(filter), space],
     queryFn: ({ pageParam = 0 }) => getAgentDescriptors(PAGE_SIZE, pageParam, filter, space),
     initialPageParam: 0,
     getNextPageParam: (lastPage, allPages) => {
       // If we got a full page, there are probably more
       if (lastPage.length === PAGE_SIZE) {
-        return allPages.length * PAGE_SIZE;
+        return allPages.length;
       }
       return undefined; // no more pages
     },
   });
+}
+
+/**
+ * Every local agent, for pickers and matchers that must see the whole list —
+ * the sync page's auto-match by name, the import dialog's target pickers.
+ *
+ * Those used `useInfiniteAgentDescriptors` and never asked for a second page,
+ * so an agent past the first 50 could not be picked and was never matched: the
+ * sync then created a duplicate of it. This keeps fetching until the backend
+ * returns a short page (or a page fails). `isComplete` says whether the list is
+ * whole yet.
+ */
+export function useAllAgentDescriptors() {
+  // Its own cache entry: sharing the Agents list's key would leave that list
+  // holding every page after a visit to Sync, and each later invalidation
+  // (deploy, save) would re-fetch all of them one page after another.
+  const query = useInfiniteAgentDescriptors("", "", "all-pages");
+  const { hasNextPage, isFetchingNextPage, isError, fetchNextPage } = query;
+  // The page count is a dependency on purpose: the in-flight render can be
+  // batched away, so after a page lands every other dependency may read exactly
+  // as before (hasNextPage true, not fetching) and the effect would never fire
+  // again — the list stopped after two pages.
+  const pageCount = query.data?.pages.length ?? 0;
+  useEffect(() => {
+    // cancelRefetch: false — a repeat call while a page is in flight joins it
+    // instead of cancelling and restarting it.
+    if (hasNextPage && !isFetchingNextPage && !isError) void fetchNextPage({ cancelRefetch: false });
+  }, [hasNextPage, isFetchingNextPage, isError, fetchNextPage, pageCount]);
+  return { ...query, isComplete: query.isSuccess && !hasNextPage };
 }
 
 export function useAgent(id: string, version?: number) {
@@ -124,8 +168,17 @@ export function useUpdateAgent() {
   });
 }
 
+/**
+ * Per-environment deployment status of an agent — at `version` where that
+ * version is live, otherwise at whichever older version still is (flagged with
+ * `deployedVersion`; see `withAnyDeployedVersion`).
+ *
+ * The environment-wide listing is only fetched when some environment is not
+ * live at `version`, and is shared by key across every card on the page, so a
+ * list of 50 agents costs one listing per environment, not 50.
+ */
 export function useDeploymentStatuses(agentId: string, version: number) {
-  return useQuery({
+  const exact = useQuery({
     queryKey: [...agentKeys.all, "deploymentStatuses", agentId, version],
     queryFn: () => getDeploymentStatuses(agentId, version),
     enabled: !!agentId && version > 0,
@@ -136,6 +189,20 @@ export function useDeploymentStatuses(agentId: string, version: number) {
       return false;
     },
   });
+  const needsListing = !!exact.data?.some((s) => s.status !== "READY" && s.status !== "IN_PROGRESS");
+  const listings = useQueries({
+    queries: ENVIRONMENTS.map((environment) => ({
+      queryKey: [...agentKeys.all, "deploymentListing", environment],
+      queryFn: () => listDeploymentStatuses(environment),
+      enabled: needsListing,
+      staleTime: 10_000,
+    })),
+  });
+  const deployed: Partial<Record<Environment, AgentDeploymentSummary[] | undefined>> = {};
+  ENVIRONMENTS.forEach((environment, i) => {
+    deployed[environment] = listings[i]?.data;
+  });
+  return { ...exact, data: withAnyDeployedVersion(exact.data, deployed, agentId) };
 }
 
 export function useCreateAgent() {

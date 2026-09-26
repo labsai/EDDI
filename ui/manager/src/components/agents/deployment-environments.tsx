@@ -86,17 +86,32 @@ export function DeploymentEnvironmentBadge({
 
   return (
     <span className={cn("inline-flex flex-wrap items-center gap-1", className)} data-testid={testId}>
-      {live.map((env) => (
-        <span
-          key={env}
-          className={cn(pill, ENV_CHIP_CLASSES[env])}
-          data-testid={`env-chip-${env}`}
-          title={t("agents.liveIn", "Live in {{environment}}", { environment: label(env) })}
-        >
-          <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
-          {label(env)}
-        </span>
-      ))}
+      {live.map((env) => {
+        // Live, but at an older version than the one this badge describes —
+        // name it, so "live" is not read as "this version is live".
+        const deployedVersion = statuses?.find((s) => s.environment === env)?.deployedVersion;
+        return (
+          <span
+            key={env}
+            className={cn(pill, ENV_CHIP_CLASSES[env])}
+            data-testid={`env-chip-${env}`}
+            title={deployedVersion !== undefined
+              ? t("agents.liveInVersion", "Live in {{environment}} at version {{version}}", {
+                  environment: label(env),
+                  version: deployedVersion,
+                })
+              : t("agents.liveIn", "Live in {{environment}}", { environment: label(env) })}
+          >
+            <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+            {label(env)}
+            {deployedVersion !== undefined && (
+              <span className="tabular-nums opacity-75" data-testid={`env-chip-version-${env}`}>
+                v{deployedVersion}
+              </span>
+            )}
+          </span>
+        );
+      })}
       {/* An environment that FAILED must still be visible when another one is
           live — showing only the healthy chip would hide a broken production
           deploy behind a green test one, which is the same class of omission

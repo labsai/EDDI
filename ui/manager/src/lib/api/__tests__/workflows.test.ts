@@ -149,6 +149,9 @@ describe("workflows API", () => {
         http.get("*/workflowstore/workflows/:id/currentversion", () =>
           HttpResponse.json(2)
         ),
+        http.get("*/descriptorstore/descriptors/:id", () =>
+          HttpResponse.json({ message: "Error" }, { status: 500 })
+        ),
         http.get("*/workflowstore/workflows/descriptors", () =>
           HttpResponse.json({ message: "Error" }, { status: 500 })
         )

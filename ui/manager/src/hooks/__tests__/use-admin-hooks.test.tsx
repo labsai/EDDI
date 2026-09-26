@@ -291,7 +291,7 @@ describe("useToolHistory", () => {
     );
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toBeDefined();
-    expect(result.current.data!.length).toBeGreaterThan(0);
+    expect(result.current.data!.toolCalls.length).toBeGreaterThan(0);
   });
 
   it("is disabled when conversationId is null", () => {

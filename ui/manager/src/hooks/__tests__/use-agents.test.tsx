@@ -9,6 +9,7 @@ import { server } from "@/test/mocks/server";
 import {
   useAgentDescriptors,
   useInfiniteAgentDescriptors,
+  useAllAgentDescriptors,
   useAgent,
   useDeploymentStatus,
   useAgentVersions,
@@ -100,6 +101,39 @@ describe("useInfiniteAgentDescriptors", () => {
     expect(result.current.data?.pages).toBeDefined();
   });
 
+  it("asks for page 1 — a page INDEX — after a full page of 50", async () => {
+    // DescriptorStore skips `index * limit` rows. Sending the row offset (50)
+    // as the index skipped 2,500 rows, so the list stopped at 50 agents.
+    const agents = Array.from({ length: 60 }, (_, i) => ({
+      resource: `eddi://ai.labs.agent/agentstore/agents/a${i}?version=1`,
+      name: `Agent ${i}`,
+      description: "",
+      createdOn: 0,
+      lastModifiedOn: 0,
+    }));
+    const indexes: number[] = [];
+    server.use(
+      http.get("*/agentstore/agents/descriptors", ({ request }) => {
+        const url = new URL(request.url);
+        const limit = Number(url.searchParams.get("limit"));
+        const index = Number(url.searchParams.get("index"));
+        indexes.push(index);
+        return HttpResponse.json(agents.slice(index * limit, index * limit + limit));
+      }),
+    );
+    const { result } = renderHook(() => useInfiniteAgentDescriptors(), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.hasNextPage).toBe(true));
+    await act(async () => {
+      await result.current.fetchNextPage();
+    });
+    await waitFor(() => expect(result.current.data!.pages).toHaveLength(2));
+    expect(indexes).toEqual([0, 1]);
+    expect(result.current.data!.pages.flat()).toHaveLength(60);
+    expect(result.current.hasNextPage).toBe(false);
+  });
+
   it("determines no next page when less than PAGE_SIZE results", async () => {
     // Default mock returns 8 items (< 50 PAGE_SIZE), so no next page
     const { result } = renderHook(() => useInfiniteAgentDescriptors(), {
@@ -107,6 +141,63 @@ describe("useInfiniteAgentDescriptors", () => {
     });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.hasNextPage).toBe(false);
+  });
+});
+
+describe("useAllAgentDescriptors", () => {
+  it("keeps paging until the list is complete, so pickers and sync matching see every agent", async () => {
+    const agents = Array.from({ length: 120 }, (_, i) => ({
+      resource: `eddi://ai.labs.agent/agentstore/agents/a${i}?version=1`,
+      name: `Agent ${i}`,
+      description: "",
+      createdOn: 0,
+      lastModifiedOn: 0,
+    }));
+    server.use(
+      http.get("*/agentstore/agents/descriptors", ({ request }) => {
+        const url = new URL(request.url);
+        const limit = Number(url.searchParams.get("limit"));
+        const index = Number(url.searchParams.get("index"));
+        return HttpResponse.json(agents.slice(index * limit, index * limit + limit));
+      }),
+    );
+    const { result } = renderHook(() => useAllAgentDescriptors(), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.isComplete).toBe(true));
+    expect(result.current.data!.pages.flat()).toHaveLength(120);
+  });
+
+  it("does not share its cache with the Agents list", async () => {
+    const agents = Array.from({ length: 120 }, (_, i) => ({
+      resource: `eddi://ai.labs.agent/agentstore/agents/a${i}?version=1`,
+      name: `Agent ${i}`,
+      description: "",
+      createdOn: 0,
+      lastModifiedOn: 0,
+    }));
+    server.use(
+      http.get("*/agentstore/agents/descriptors", ({ request }) => {
+        const url = new URL(request.url);
+        const limit = Number(url.searchParams.get("limit"));
+        const index = Number(url.searchParams.get("index"));
+        return HttpResponse.json(agents.slice(index * limit, index * limit + limit));
+      }),
+    );
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    const all = renderHook(() => useAllAgentDescriptors(), { wrapper });
+    await waitFor(() => expect(all.result.current.isComplete).toBe(true));
+    expect(all.result.current.data!.pages).toHaveLength(3);
+    const list = renderHook(() => useInfiniteAgentDescriptors(), { wrapper });
+    await waitFor(() => expect(list.result.current.isSuccess && !list.result.current.isFetching).toBe(true));
+    // The list keeps its own single page — it did not inherit (and would not
+    // re-fetch) every page the Sync page loaded.
+    expect(list.result.current.data!.pages).toHaveLength(1);
   });
 });
 
@@ -188,6 +279,33 @@ describe("useDeploymentStatuses", () => {
     expect(result.current.data).toBeDefined();
   });
 
+  it("reports an environment still serving an OLDER version as live, with that version", async () => {
+    // A save bumps the agent to v4; production still runs v3. The per-version
+    // endpoint says NOT_FOUND for v4, which used to render "Not deployed".
+    server.use(
+      http.get("*/administration/:env/deploymentstatus/:agentId", () =>
+        HttpResponse.json({ status: "NOT_FOUND" }),
+      ),
+      http.get("*/administration/:env/deploymentstatus", ({ params }) =>
+        HttpResponse.json(
+          params.env === "production"
+            ? [{ environment: "production", agentId: "agent1", agentVersion: 3, status: "READY" }]
+            : [],
+        ),
+      ),
+    );
+    const { result } = renderHook(() => useDeploymentStatuses("agent1", 4), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() =>
+      expect(result.current.data?.find((s) => s.environment === "production")?.status).toBe("READY"),
+    );
+    expect(result.current.data).toEqual([
+      { environment: "production", status: "READY", deployedVersion: 3 },
+      { environment: "test", status: "NOT_FOUND" },
+    ]);
+  });
+
   it("is disabled with empty agentId", () => {
     const { result } = renderHook(
       () => useDeploymentStatuses("", 3),
@@ -198,42 +316,37 @@ describe("useDeploymentStatuses", () => {
 });
 
 describe("useAgentVersions", () => {
-  it("fetches and sorts agent versions", async () => {
+  it("lists every version, newest first, from per-version descriptor reads", async () => {
+    // The store listing has no `version` parameter: asking it
+    // `filter=agent1&version=v` returns the CURRENT descriptor every time, so
+    // the picker offered only the latest version. Each version's descriptor is
+    // read by id and version instead.
     server.use(
-      http.get("*/agentstore/agents/descriptors", ({ request }) => {
-        const url = new URL(request.url);
-        const filter = url.searchParams.get("filter");
-        if (filter === "agent1") {
-          return HttpResponse.json([
-            {
-              resource: "eddi://ai.labs.agent/agentstore/agents/agent1?version=1",
-              name: "Agent v1",
-              lastModifiedOn: Date.now() - 86400000,
-            },
-            {
-              resource: "eddi://ai.labs.agent/agentstore/agents/agent1?version=3",
-              name: "Agent v3",
-              lastModifiedOn: Date.now(),
-            },
-            {
-              resource: "eddi://ai.labs.agent/agentstore/agents/agent1?version=2",
-              name: "Agent v2",
-              lastModifiedOn: Date.now() - 3600000,
-            },
-          ]);
-        }
-        return HttpResponse.json([]);
-      })
+      http.get("*/agentstore/agents/:id/currentversion", () => HttpResponse.json(3)),
+      http.get("*/agentstore/agents/descriptors", () =>
+        HttpResponse.json([
+          {
+            resource: "eddi://ai.labs.agent/agentstore/agents/agent1?version=3",
+            name: "Agent v3",
+            lastModifiedOn: Date.now(),
+          },
+        ]),
+      ),
+      http.get("*/descriptorstore/descriptors/:id", ({ params, request }) => {
+        const version = Number(new URL(request.url).searchParams.get("version"));
+        return HttpResponse.json({
+          resource: `eddi://ai.labs.agent/agentstore/agents/${params.id}?version=${version}`,
+          name: `Agent v${version}`,
+          lastModifiedOn: Date.now() - (3 - version) * 3600000,
+        });
+      }),
     );
     const { result } = renderHook(() => useAgentVersions("agent1"), {
       wrapper: createWrapper(),
     });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data).toBeDefined();
     // Sorted descending by version
-    expect(result.current.data![0]!.version).toBe(3);
-    expect(result.current.data![1]!.version).toBe(2);
-    expect(result.current.data![2]!.version).toBe(1);
+    expect(result.current.data!.map((v) => v.version)).toEqual([3, 2, 1]);
   });
 
   it("returns one entry per version and excludes other agents", async () => {
