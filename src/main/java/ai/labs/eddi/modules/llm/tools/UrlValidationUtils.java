@@ -281,8 +281,9 @@ public final class UrlValidationUtils {
      * embedding length is a per-network choice, so the IPv4 address inside cannot
      * be located reliably</li>
      * <li>IPv4 multicast (224.0.0.0/4)</li>
-     * <li>Reserved IPv4: 240.0.0.0/4 (incl. broadcast), 198.18.0.0/15 (RFC 2544
-     * benchmarking), 192.0.0.0/24 (IETF protocol assignments)</li>
+     * <li>Reserved IPv4: 240.0.0.0/4 (incl. broadcast), 192.0.0.0/24 (IETF protocol
+     * assignments). 198.18.0.0/15 is deliberately allowed — see
+     * {@link #isPrivateIPv4(byte[])}</li>
      * <li>Unspecified (0.0.0.0/8)</li>
      * <li>Cloud metadata (169.254.169.254)</li>
      * </ul>
@@ -343,11 +344,10 @@ public final class UrlValidationUtils {
             return true;
         }
 
-        // Benchmarking (198.18.0.0/15, RFC 2544) — often used for internal
-        // lab and appliance networks, never a public API
-        if (b0 == 198 && (b1 & 0xFE) == 18) {
-            return true;
-        }
+        // Deliberately NOT blocked: 198.18.0.0/15 (RFC 2544 benchmarking). It is
+        // not an internal network by definition, and fake-IP DNS proxies (Clash /
+        // mihomo, Surge and similar TUN setups) answer EVERY lookup with an address
+        // in it — blocking it would refuse every public URL on such a host.
 
         // IETF protocol assignments (192.0.0.0/24, RFC 6890) — includes the
         // DS-Lite and NAT64 discovery addresses

@@ -400,7 +400,6 @@ DNS resolution is performed and the resolved address is checked before any conne
 | `224.0.0.0/4`    | IPv4 multicast                |
 | `0.0.0.0/8`      | Unspecified / "this network"  |
 | `240.0.0.0/4`    | Reserved (includes the `255.255.255.255` broadcast address) |
-| `198.18.0.0/15`  | Benchmarking (RFC 2544), common on lab and appliance networks |
 | `192.0.0.0/24`   | IETF protocol assignments (RFC 6890) |
 | `fc00::/7`       | IPv6 unique-local (RFC 4193 — covers `fc00::/8` and `fd00::/8`) |
 | `fe80::/10`      | IPv6 link-local               |
@@ -408,6 +407,8 @@ DNS resolution is performed and the resolved address is checked before any conne
 | `64:ff9b:1::/48` | NAT64 local-use prefix (RFC 8215) — blocked whole, since where the IPv4 address sits inside it is a per-network choice |
 
 IPv6 addresses that carry an IPv4 address are unwrapped and the IPv4 address is re-checked against every IPv4 rule above: IPv4-mapped (`::ffff:x.x.x.x`), IPv4-compatible (`::x.x.x.x`), the NAT64 well-known prefix (`64:ff9b::x.x.x.x`, RFC 6052) and 6to4 (`2002:xxxx:xxxx::/48`, RFC 3056). On a NAT64 network `64:ff9b::7f00:1` *is* 127.0.0.1 once the gateway translates it, so checking the IPv6 address alone let it through. The same unwrapping applies to the always-on cloud-metadata refusal.
+
+`198.18.0.0/15` (RFC 2544 benchmarking) is deliberately **not** blocked: it is not an internal network by definition, and fake-IP DNS proxies such as Clash/mihomo and Surge answer every lookup with an address in it, so blocking it would refuse every public URL on such a host.
 
 ### Cloud Metadata Endpoint Blocking
 
