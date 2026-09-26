@@ -166,6 +166,15 @@ class RestToolHistoryTest {
     class GetToolHistory {
 
         @Test
+        @DisplayName("M-E5: an unknown conversation is a 404, not a 500 from a null dereference")
+        void unknownConversationIsNotFound() {
+            // The store answers null (not NotFound) for an unknown id.
+            Response response = restToolHistory.getToolHistory("conv-missing");
+
+            assertEquals(404, response.getStatus());
+        }
+
+        @Test
         @DisplayName("should return 200 with empty trace for conversation without tool calls")
         void emptyConversation() throws Exception {
             var snapshot = new ConversationMemorySnapshot();

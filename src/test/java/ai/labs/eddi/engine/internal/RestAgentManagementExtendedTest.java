@@ -16,6 +16,7 @@ import ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import io.quarkus.security.UnauthorizedException;
 import io.quarkus.security.identity.SecurityIdentity;
+import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.container.AsyncResponse;
 import jakarta.ws.rs.core.Response;
@@ -144,6 +145,40 @@ class RestAgentManagementExtendedTest {
             when(restAgentEngine.getConversationState(newConvId))
                     .thenReturn(ConversationState.READY);
 
+            var snapshot = new SimpleConversationMemorySnapshot();
+            when(restAgentEngine.readConversation(eq(newConvId), any(), any(), any()))
+                    .thenReturn(snapshot);
+
+            mgmt.loadConversationMemory("intent-1", "user-1", "en",
+                    false, false, List.of(), asyncResponse);
+
+            verify(userConversationStore).deleteUserConversation("intent-1", "user-1");
+            verify(asyncResponse).resume(snapshot);
+        }
+
+        @Test
+        @DisplayName("recreates the conversation when the mapped one no longer exists (stale mapping)")
+        void recreatesPurgedConversation() throws Exception {
+            // A permanently deleted or retention-swept conversation leaves its mapping
+            // behind; the conversation guard answers 404. That must recreate, not fail
+            // every later request for this intent and user.
+            var mgmt = create(false);
+            String newConvId = "aabbccddee112233aabbccdd";
+
+            var existingConv = new UserConversation("intent-1", "user-1",
+                    Deployment.Environment.production, "agent-1", "112233445566778899aabbcc");
+            when(userConversationStore.readUserConversation("intent-1", "user-1"))
+                    .thenReturn(existingConv);
+            when(restAgentEngine.getConversationState("112233445566778899aabbcc"))
+                    .thenThrow(new NotFoundException("Conversation not found"));
+
+            when(agentTriggerStore.readAgentTrigger("intent-1"))
+                    .thenReturn(triggerWithDeployment("agent-1"));
+            var location = URI.create("eddi://ai.labs.conversation/conversationstore/conversations/" + newConvId + "?version=1");
+            when(restAgentEngine.startConversationWithContext(eq("agent-1"), any(), eq("user-1"), anyMap()))
+                    .thenReturn(Response.status(201).header("location", location.toString()).build());
+            when(restAgentEngine.getConversationState(newConvId))
+                    .thenReturn(ConversationState.READY);
             var snapshot = new SimpleConversationMemorySnapshot();
             when(restAgentEngine.readConversation(eq(newConvId), any(), any(), any()))
                     .thenReturn(snapshot);

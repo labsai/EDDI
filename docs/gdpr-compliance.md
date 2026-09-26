@@ -205,6 +205,16 @@ eddi.conversations.maximumLifeTimeOfIdleConversationsInDays=90
 eddi.usermemories.deleteOlderThanDays=-1
 ```
 
+**Deleted conversations follow the same clock.** Deleting a conversation without
+`deletePermanently=true` (the Manager's default) ends it, hides it from every
+listing and denies access to anyone but its owner and admins. Its memory stays
+until `deleteEndedConversationsOnceOlderThanDays` has passed since its **last
+interaction**, and is then removed with the other ended conversations. With the
+default of 365 days, a conversation deleted this way can stay stored for up to a
+year. Use `deletePermanently=true` or a GDPR erasure when it has to go at once.
+(Earlier releases purged such a conversation at the next daily sweep if it had
+already ended, and never if it was still open.)
+
 **Per-category retention** allows different retention periods for:
 - **Conversations** — 365 days (default)
 - **User memories** — disabled by default (configure per-deployment)
