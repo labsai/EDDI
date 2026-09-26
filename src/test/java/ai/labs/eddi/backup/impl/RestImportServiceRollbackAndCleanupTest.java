@@ -23,6 +23,7 @@ import ai.labs.eddi.configs.migration.TemplateSyntaxMigrator;
 import ai.labs.eddi.configs.snippets.IPromptSnippetStore;
 import ai.labs.eddi.configs.snippets.IRestPromptSnippetStore;
 import ai.labs.eddi.configs.snippets.model.PromptSnippet;
+import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -32,6 +33,7 @@ import jakarta.enterprise.inject.Instance;
 import jakarta.enterprise.inject.spi.CDI;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.InternalServerErrorException;
+import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import org.junit.jupiter.api.BeforeEach;
@@ -58,6 +60,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
@@ -368,6 +371,247 @@ class RestImportServiceRollbackAndCleanupTest {
                 verify(workflowStore, never()).deleteAllPermanently(anyString());
                 verify(documentDescriptorStore, never()).deleteAllDescriptor(anyString());
             }
+        }
+    }
+
+    // ==================== merge: selection and compensation of updates
+    // ====================
+
+    @Nested
+    @DisplayName("merge rollback and snippet selection (M-P4)")
+    class MergeRollbackAndSnippetSelection {
+
+        private static final String LOCAL_WORKFLOW_ID = "abab11112222333344445555";
+        private static final String ARCHIVE_SNIPPET_ID = "cdcd11112222333344445555";
+
+        /**
+         * A merge updates resources that already exist. When a later write failed, the
+         * rollback deleted what the import had created and left every update in place,
+         * so the target agent was left half-promoted.
+         */
+        @Test
+        @DisplayName("a failed merge writes the pre-import content of an updated workflow back, descriptor included")
+        void failedMergeRestoresAnUpdatedWorkflow() throws Exception {
+            var workflowStore = mock(IWorkflowStore.class);
+            var agentStore = mock(IAgentStore.class);
+            var restWorkflowStore = mock(IRestWorkflowStore.class);
+            stubAgentWithOneWorkflowZip();
+            WorkflowConfiguration previous = stubExistingLocalWorkflow(workflowStore);
+            DocumentDescriptor previousDescriptor = stubCurrentDescriptor(LOCAL_WORKFLOW_ID, 3, "Before");
+            when(restWorkflowStore.updateWorkflow(eq(LOCAL_WORKFLOW_ID), anyInt(), any())).thenReturn(Response.ok().build());
+            when(agentStore.create(any())).thenThrow(new IResourceStore.ResourceStoreException("agent store unavailable"));
+
+            try (MockedStatic<CDI> cdiMock = mockStatic(CDI.class)) {
+                stubBean(stubCdi(cdiMock, workflowStore, agentStore, mock(CapabilityRegistryService.class)),
+                        IRestWorkflowStore.class, restWorkflowStore);
+
+                assertThrows(InternalServerErrorException.class, () -> importService.importAgent(
+                        new ByteArrayInputStream(new byte[0]), "merge", null, null, null));
+
+                // the merge's own write, v3 -> v4 ...
+                verify(restWorkflowStore).updateWorkflow(eq(LOCAL_WORKFLOW_ID), eq(3), any());
+                // ... and the compensation: the pre-import content written over v4
+                verify(restWorkflowStore).updateWorkflow(LOCAL_WORKFLOW_ID, 4, previous);
+                verify(documentDescriptorStore).setDescriptor(eq(LOCAL_WORKFLOW_ID), eq(3), argThat((DocumentDescriptor d) -> d == previousDescriptor
+                        && d.getResource().toString().endsWith(LOCAL_WORKFLOW_ID + "?version=5")));
+                verify(workflowStore, never()).deleteAllPermanently(LOCAL_WORKFLOW_ID);
+            }
+        }
+
+        @Test
+        @DisplayName("a merge that succeeds restores nothing")
+        void successfulMergeRestoresNothing() throws Exception {
+            var workflowStore = mock(IWorkflowStore.class);
+            var agentStore = mock(IAgentStore.class);
+            var restWorkflowStore = mock(IRestWorkflowStore.class);
+            stubAgentWithOneWorkflowZip();
+            stubExistingLocalWorkflow(workflowStore);
+            stubCurrentDescriptor(LOCAL_WORKFLOW_ID, 3, "Before");
+            when(restWorkflowStore.updateWorkflow(eq(LOCAL_WORKFLOW_ID), anyInt(), any())).thenReturn(Response.ok().build());
+            when(agentStore.create(any())).thenReturn(resourceId(NEW_AGENT_ID, 1));
+
+            try (MockedStatic<CDI> cdiMock = mockStatic(CDI.class)) {
+                stubBean(stubCdi(cdiMock, workflowStore, agentStore, mock(CapabilityRegistryService.class)),
+                        IRestWorkflowStore.class, restWorkflowStore);
+
+                Response response = importService.importAgent(new ByteArrayInputStream(new byte[0]), "merge", null, null, null);
+
+                assertEquals(201, response.getStatus());
+                verify(restWorkflowStore).updateWorkflow(eq(LOCAL_WORKFLOW_ID), eq(3), any());
+                verify(restWorkflowStore, never()).updateWorkflow(eq(LOCAL_WORKFLOW_ID), eq(4), any());
+            }
+        }
+
+        @Test
+        @DisplayName("a merge leaves a live snippet alone when selectedResources does not name it")
+        void unselectedSnippetIsNotOverwritten() throws Exception {
+            var agentStore = mock(IAgentStore.class);
+            var workflowStore = mock(IWorkflowStore.class);
+            var restSnippetStore = stubExistingSnippet();
+            stubAgentWithOneWorkflowAndArchivedSnippet();
+            when(workflowStore.create(any())).thenReturn(resourceId(NEW_WORKFLOW_ID, 1));
+            when(agentStore.create(any())).thenReturn(resourceId(NEW_AGENT_ID, 1));
+
+            try (MockedStatic<CDI> cdiMock = mockStatic(CDI.class)) {
+                stubCdi(cdiMock, workflowStore, agentStore, mock(IPromptSnippetStore.class), restSnippetStore);
+
+                Response response = importService.importAgent(new ByteArrayInputStream(new byte[0]), "merge",
+                        WORKFLOW_ORIGIN_ID, null, null);
+
+                assertEquals(201, response.getStatus());
+                verify(restSnippetStore, never()).updateSnippet(anyString(), anyInt(), any());
+                verify(restSnippetStore, never()).createSnippet(any());
+            }
+        }
+
+        @Test
+        @DisplayName("a merge updates a snippet selectedResources names by its archive id")
+        void selectedSnippetIsUpdated() throws Exception {
+            var agentStore = mock(IAgentStore.class);
+            var workflowStore = mock(IWorkflowStore.class);
+            var restSnippetStore = stubExistingSnippet();
+            stubAgentWithOneWorkflowAndArchivedSnippet();
+            when(workflowStore.create(any())).thenReturn(resourceId(NEW_WORKFLOW_ID, 1));
+            when(agentStore.create(any())).thenReturn(resourceId(NEW_AGENT_ID, 1));
+
+            try (MockedStatic<CDI> cdiMock = mockStatic(CDI.class)) {
+                stubCdi(cdiMock, workflowStore, agentStore, mock(IPromptSnippetStore.class), restSnippetStore);
+
+                importService.importAgent(new ByteArrayInputStream(new byte[0]), "merge",
+                        WORKFLOW_ORIGIN_ID + "," + ARCHIVE_SNIPPET_ID, null, null);
+
+                verify(restSnippetStore).updateSnippet(eq(NEW_SNIPPET_ID), eq(1), any());
+            }
+        }
+
+        @Test
+        @DisplayName("a failed merge writes an updated snippet's previous content back")
+        void failedMergeRestoresAnUpdatedSnippet() throws Exception {
+            var agentStore = mock(IAgentStore.class);
+            var workflowStore = mock(IWorkflowStore.class);
+            var snippetStore = mock(IPromptSnippetStore.class);
+            var restSnippetStore = stubExistingSnippet();
+            var previous = new PromptSnippet();
+            previous.setName(SNIPPET_NAME);
+            when(snippetStore.read(NEW_SNIPPET_ID, 1)).thenReturn(previous);
+            stubAgentWithOneWorkflowAndArchivedSnippet();
+            when(workflowStore.create(any())).thenReturn(resourceId(NEW_WORKFLOW_ID, 1));
+            when(agentStore.create(any())).thenThrow(new IResourceStore.ResourceStoreException("agent store unavailable"));
+
+            try (MockedStatic<CDI> cdiMock = mockStatic(CDI.class)) {
+                stubCdi(cdiMock, workflowStore, agentStore, snippetStore, restSnippetStore);
+
+                assertThrows(InternalServerErrorException.class, () -> importService.importAgent(
+                        new ByteArrayInputStream(new byte[0]), "merge", null, null, null));
+
+                verify(restSnippetStore).updateSnippet(eq(NEW_SNIPPET_ID), eq(1), any());
+                verify(restSnippetStore).updateSnippet(NEW_SNIPPET_ID, 2, previous);
+                verify(snippetStore, never()).deleteAllPermanently(NEW_SNIPPET_ID);
+            }
+        }
+
+        @Test
+        @DisplayName("the merge preview names a snippet row by its archive id, so the row can be selected")
+        void previewSnippetRowCarriesTheArchiveId() throws Exception {
+            var restSnippetStore = stubExistingSnippet();
+            stubAgentWithOneWorkflowAndArchivedSnippet();
+
+            try (MockedStatic<CDI> cdiMock = mockStatic(CDI.class)) {
+                stubCdi(cdiMock, mock(IWorkflowStore.class), mock(IAgentStore.class), mock(IPromptSnippetStore.class),
+                        restSnippetStore);
+
+                ImportPreview preview = importService.previewImport(new ByteArrayInputStream(new byte[0]), null);
+
+                var snippetRow = preview.resources().stream().filter(r -> "snippet".equals(r.resourceType())).findFirst()
+                        .orElseThrow();
+                assertEquals(ARCHIVE_SNIPPET_ID, snippetRow.sourceId());
+                assertEquals(NEW_SNIPPET_ID, snippetRow.targetId());
+            }
+        }
+
+        private WorkflowConfiguration stubExistingLocalWorkflow(IWorkflowStore workflowStore) throws Exception {
+            var local = new DocumentDescriptor();
+            local.setResource(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + LOCAL_WORKFLOW_ID + "?version=3"));
+            when(documentDescriptorStore.findByOriginId(WORKFLOW_ORIGIN_ID)).thenReturn(List.of(local));
+            var previous = new WorkflowConfiguration();
+            when(workflowStore.read(LOCAL_WORKFLOW_ID, 3)).thenReturn(previous);
+            return previous;
+        }
+
+        private DocumentDescriptor stubCurrentDescriptor(String id, int version, String name) throws Exception {
+            when(documentDescriptorStore.getCurrentResourceId(id)).thenReturn(resourceId(id, version));
+            var descriptor = new DocumentDescriptor();
+            descriptor.setName(name);
+            // The first read is the snapshot the merge takes; every later read is a fresh
+            // copy, as from the real store, so the snapshot is never mutated behind its
+            // back.
+            when(documentDescriptorStore.readDescriptor(id, version)).thenReturn(descriptor, new DocumentDescriptor(),
+                    new DocumentDescriptor(), new DocumentDescriptor(), new DocumentDescriptor());
+            return descriptor;
+        }
+
+        /**
+         * A snippet REST store that already holds {@link #SNIPPET_NAME} as
+         * NEW_SNIPPET_ID v1.
+         */
+        private IRestPromptSnippetStore stubExistingSnippet() {
+            IRestPromptSnippetStore restSnippetStore = mock(IRestPromptSnippetStore.class);
+            var descriptor = new DocumentDescriptor();
+            descriptor.setResource(URI.create(SNIPPET_RESOURCE_URI));
+            when(restSnippetStore.readSnippetDescriptors(anyString(), anyInt(), anyInt())).thenReturn(List.of(descriptor));
+            var existing = new PromptSnippet();
+            existing.setName(SNIPPET_NAME);
+            when(restSnippetStore.readSnippet(NEW_SNIPPET_ID, 1)).thenReturn(existing);
+            when(restSnippetStore.updateSnippet(anyString(), anyInt(), any())).thenReturn(Response.ok().build());
+            return restSnippetStore;
+        }
+
+        /**
+         * As {@link #stubAgentWithOneWorkflowAndOneSnippetZip()}, but the archived
+         * snippet's file carries its own archive id, distinct from the id of the local
+         * snippet it matches by name — as it does between two deployments.
+         */
+        private void stubAgentWithOneWorkflowAndArchivedSnippet() throws Exception {
+            stubAgentWithOneWorkflowAndOneSnippetZip();
+            doAnswer(inv -> {
+                File dir = inv.getArgument(1);
+                dir.mkdirs();
+                Files.writeString(new File(dir, AGENT_ORIGIN_ID + ".agent.json").toPath(), "AGENTJSON");
+                File workflowDir = new File(new File(dir, WORKFLOW_ORIGIN_ID), "1");
+                workflowDir.mkdirs();
+                Files.writeString(new File(workflowDir, WORKFLOW_ORIGIN_ID + ".workflow.json").toPath(), "WORKFLOWJSON");
+                File snippetsDir = new File(dir, "snippets");
+                snippetsDir.mkdirs();
+                Files.writeString(new File(snippetsDir, ARCHIVE_SNIPPET_ID + ".snippet.json").toPath(), "SNIPPETJSON");
+                return null;
+            }).when(zipArchive).unzip(any(InputStream.class), any(File.class));
+        }
+    }
+
+    // ==================== H15 — archive limits ====================
+
+    @Nested
+    @DisplayName("archive limits (H15)")
+    class ArchiveLimits {
+
+        @Test
+        @DisplayName("an archive over the unpacking limits is a 413 naming the limit, on import and on preview")
+        void overSizedArchiveIs413() throws Exception {
+            doThrow(new ZipArchive.ZipLimitExceededException("The archive inflates to more than 10 bytes"))
+                    .when(zipArchive).unzip(any(InputStream.class), any(File.class));
+
+            var onImport = assertThrows(WebApplicationException.class, () -> importService.importAgent(
+                    new ByteArrayInputStream(new byte[0]), "create", null, null, null));
+            assertEquals(413, onImport.getResponse().getStatus());
+            assertTrue(onImport.getMessage().contains("inflates to more than"), onImport.getMessage());
+
+            var onPreview = assertThrows(WebApplicationException.class,
+                    () -> importService.previewImport(new ByteArrayInputStream(new byte[0]), null));
+            assertEquals(413, onPreview.getResponse().getStatus());
+
+            var onUpgrade = assertThrows(WebApplicationException.class, () -> importService.importAgent(
+                    new ByteArrayInputStream(new byte[0]), "upgrade", null, "target-1", null));
+            assertEquals(413, onUpgrade.getResponse().getStatus());
         }
     }
 
