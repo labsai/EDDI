@@ -1923,8 +1923,7 @@ class DeploymentManifestsTest {
                     assertNotEquals("*", uri,
                             realm + ": eddi-mcp allows redirects to `*`, which hands an authorization code to "
                                     + "any host that asks");
-                    assertTrue(uri.startsWith("http://localhost") || uri.startsWith("http://127.0.0.1")
-                            || uri.startsWith("https://"),
+                    assertTrue(isLoopbackOrHttps(uri),
                             realm + ": eddi-mcp redirect `" + uri + "` is neither loopback nor https. A remote "
                                     + "http callback would carry the code in cleartext");
                 }
@@ -1988,32 +1987,100 @@ class DeploymentManifestsTest {
                             + "client in it. If that is deliberate, this test is what has to change with it");
 
             for (Path realm : List.of(COMPOSE_REALM, KUSTOMIZE_REALM, HELM_REALM)) {
-                for (JsonNode candidate : JSON.readTree(realm.toFile()).path("clients")) {
-                    // Any client that can obtain a token, by any flow: a service
-                    // account mints one without a human, and Keycloak's implicit
-                    // flow returns an access token straight from the authorization
-                    // endpoint. An implicit-only client left out of this check could
-                    // ship without the audience mapper and be refused at runtime.
-                    boolean mintsTokens = candidate.path("standardFlowEnabled").asBoolean()
-                            || candidate.path("directAccessGrantsEnabled").asBoolean()
-                            || candidate.path("implicitFlowEnabled").asBoolean()
-                            || candidate.path("serviceAccountsEnabled").asBoolean();
-                    if (!mintsTokens) {
-                        continue; // eddi-backend is bearer-only: it validates tokens, it does not mint them
-                    }
-                    String clientId = candidate.path("clientId").asText();
-                    List<String> audiences = new ArrayList<>();
-                    for (JsonNode mapper : candidate.path("protocolMappers")) {
-                        if ("oidc-audience-mapper".equals(mapper.path("protocolMapper").asText())
-                                && "true".equals(mapper.path("config").path("access.token.claim").asText())) {
-                            audiences.add(mapper.path("config").path("included.client.audience").asText());
-                        }
-                    }
-                    assertTrue(audiences.contains(audience),
-                            realm + ": client `" + clientId + "` can log a user in, but its access tokens carry "
-                                    + audiences + " as audience while EDDI requires `" + audience + "`. Every "
-                                    + "token it issues would be refused with 401");
+                assertEquals(List.of(), clientsMissingAudience(JSON.readTree(realm.toFile()), audience),
+                        realm + ": these clients can log a user in, but their access tokens do not carry `" + audience
+                                + "` as audience. Every token they issue would be refused with 401");
+            }
+        }
+
+        /**
+         * The audience check above, fed realms that must fail it — without these it
+         * could pass by skipping every client. Keycloak creates a client with the
+         * standard flow ON when the field is absent, so an omitted
+         * {@code standardFlowEnabled} is a login client, not an exempt one.
+         */
+        @Test
+        @DisplayName("the audience check flags a login client without the mapper, even one that omits the flow flag")
+        void audienceCheckFlagsClientsThatWouldBeRefused() throws IOException {
+            JsonNode realm = JSON.readTree("""
+                    {"clients": [
+                      {"clientId": "omits-standard-flow"},
+                      {"clientId": "explicit-login", "standardFlowEnabled": true},
+                      {"clientId": "id-token-only", "standardFlowEnabled": true, "protocolMappers": [
+                        {"protocolMapper": "oidc-audience-mapper",
+                         "config": {"included.client.audience": "eddi-backend", "access.token.claim": "false"}}]},
+                      {"clientId": "wrong-audience", "implicitFlowEnabled": true, "standardFlowEnabled": false,
+                       "protocolMappers": [{"protocolMapper": "oidc-audience-mapper",
+                         "config": {"included.client.audience": "other", "access.token.claim": "true"}}]},
+                      {"clientId": "bearer-only", "bearerOnly": true},
+                      {"clientId": "no-flows", "standardFlowEnabled": false},
+                      {"clientId": "good", "protocolMappers": [{"protocolMapper": "oidc-audience-mapper",
+                         "config": {"included.client.audience": "eddi-backend", "access.token.claim": "true"}}]}
+                    ]}""");
+
+            assertEquals(List.of("omits-standard-flow", "explicit-login", "id-token-only", "wrong-audience"),
+                    clientsMissingAudience(realm, "eddi-backend"));
+        }
+
+        /**
+         * Client ids in {@code realm} that can obtain an access token but whose tokens
+         * would not carry {@code audience}.
+         */
+        private static List<String> clientsMissingAudience(JsonNode realm, String audience) {
+            List<String> missing = new ArrayList<>();
+            for (JsonNode candidate : realm.path("clients")) {
+                // Any client that can obtain a token, by any flow: a service
+                // account mints one without a human, and Keycloak's implicit
+                // flow returns an access token straight from the authorization
+                // endpoint. An implicit-only client left out of this check could
+                // ship without the audience mapper and be refused at runtime.
+                // A bearer-only client (eddi-backend) validates tokens and mints
+                // none, whatever its flow flags say. standardFlowEnabled defaults to
+                // TRUE in Keycloak when absent, so a missing field is not a pass.
+                boolean mintsTokens = !candidate.path("bearerOnly").asBoolean()
+                        && (candidate.path("standardFlowEnabled").asBoolean(true)
+                                || candidate.path("directAccessGrantsEnabled").asBoolean()
+                                || candidate.path("implicitFlowEnabled").asBoolean()
+                                || candidate.path("serviceAccountsEnabled").asBoolean());
+                if (!mintsTokens) {
+                    continue;
                 }
+                List<String> audiences = new ArrayList<>();
+                for (JsonNode mapper : candidate.path("protocolMappers")) {
+                    if ("oidc-audience-mapper".equals(mapper.path("protocolMapper").asText())
+                            && "true".equals(mapper.path("config").path("access.token.claim").asText())) {
+                        audiences.add(mapper.path("config").path("included.client.audience").asText());
+                    }
+                }
+                if (!audiences.contains(audience)) {
+                    missing.add(candidate.path("clientId").asText());
+                }
+            }
+            return missing;
+        }
+
+        /**
+         * A redirect URI that keeps the authorization code off the network: an https
+         * URI, or plain http to a loopback HOST. A prefix test accepted
+         * {@code http://localhost.attacker.com/cb}, which is neither. Keycloak's
+         * {@code :*} port wildcard is allowed on loopback, where RFC 8252 native
+         * clients pick a free port.
+         */
+        private static boolean isLoopbackOrHttps(String uri) {
+            return uri.startsWith("https://")
+                    || uri.matches("http://(localhost|127\\.0\\.0\\.1|\\[::1\\])(:(\\d+|\\*))?(/.*)?");
+        }
+
+        @Test
+        @DisplayName("the redirect check accepts loopback hosts only, not names that merely start like one")
+        void redirectCheckRequiresALoopbackHost() {
+            for (String ok : List.of("http://localhost:*", "http://127.0.0.1:*", "http://localhost:8080/callback",
+                    "http://[::1]:*/cb", "http://localhost", "https://eddi.example.com/*")) {
+                assertTrue(isLoopbackOrHttps(ok), ok + " should be accepted");
+            }
+            for (String bad : List.of("http://localhost.attacker.com/cb", "http://127.0.0.1.nip.io/cb",
+                    "http://localhostevil:*", "http://eddi.example.com/*", "*")) {
+                assertFalse(isLoopbackOrHttps(bad), bad + " should be refused");
             }
         }
 
