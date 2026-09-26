@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.ResourceAlreadyExistsException;
+import ai.labs.eddi.engine.api.IConversationService.ConversationNotFoundException;
 import ai.labs.eddi.engine.api.IRestAgentEngine;
 import ai.labs.eddi.engine.api.IRestAgentManagement;
 import ai.labs.eddi.engine.model.*;
@@ -22,12 +23,14 @@ import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.InternalServerErrorException;
+import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.container.AsyncResponse;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 import java.net.URI;
@@ -239,9 +242,23 @@ public class RestAgentManagement implements IRestAgentManagement {
         }
     }
 
+    /**
+     * Whether the mapped conversation can no longer be continued: it ended, or it
+     * is gone. A conversation that was permanently deleted or swept by retention
+     * leaves its user-conversation mapping behind (only GDPR erasure removes it),
+     * so "not found" is treated like "ended" and the caller recreates it —
+     * otherwise every later request for that intent and user would fail on the
+     * stale mapping.
+     */
     private boolean isConversationEnded(UserConversation userConversation) {
-        ConversationState conversationState = restAgentEngine.getConversationState(userConversation.getConversationId());
-        return conversationState.equals(ConversationState.ENDED);
+        try {
+            ConversationState conversationState = restAgentEngine.getConversationState(userConversation.getConversationId());
+            return ConversationState.ENDED.equals(conversationState);
+        } catch (NotFoundException | ConversationNotFoundException e) {
+            log.warnf("Stale user conversation mapping: conversation %s not found, recreating",
+                    sanitize(userConversation.getConversationId()));
+            return true;
+        }
     }
 
     private UserConversation createNewConversation(String intent, String userId, String language) throws CannotCreateConversationException {

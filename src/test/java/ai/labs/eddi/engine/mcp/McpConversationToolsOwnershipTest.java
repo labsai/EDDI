@@ -295,7 +295,8 @@ class McpConversationToolsOwnershipTest {
 
             String result = asIntruder().readAuditTrail(CONV_ID, null);
 
-            assertTrue(result.contains("error"), "expected an error result, got: " + result);
+            // #7: an expected not-found, answered uniformly (and logged at debug).
+            assertEquals("{\"error\":\"Conversation not found\"}", result);
             verify(auditStore, never()).getAuditTrail(anyString(), anyInt(), anyInt());
         }
 
@@ -306,7 +307,7 @@ class McpConversationToolsOwnershipTest {
 
             String result = asIntruder().readAgentLogs(null, CONV_ID, null, null);
 
-            assertTrue(result.contains("error"), "expected an error result, got: " + result);
+            assertEquals("{\"error\":\"Conversation not found\"}", result);
             verify(boundedLogStore, never()).getEntries(any(), any(), any(), anyInt());
         }
 
