@@ -3964,7 +3964,37 @@ const MOCK_AUDIT_ENTRIES = [
   },
 ];
 
+/** A clean `AuditVerificationReport` for the mock entries — every signature recomputes. */
+function mockAuditVerification(scope: "conversation" | "agent", scopeId: string) {
+  return {
+    scope,
+    scopeId,
+    signingEnabled: true,
+    entriesChecked: MOCK_AUDIT_ENTRIES.length,
+    valid: MOCK_AUDIT_ENTRIES.length,
+    recovered: 0,
+    recoverySkipped: 0,
+    invalid: 0,
+    unsigned: 0,
+    chainStatus: scope === "conversation" ? "INTACT" : "NOT_APPLICABLE",
+    missingSequences: [],
+    undeliveredSequences: [],
+    duplicateSequences: [],
+    problems: [],
+    verifiedAt: new Date().toISOString(),
+  };
+}
+
 export const auditHandlers = [
+  // Integrity verification — registered before `/:conversationId`, which would
+  // otherwise never see these two-segment paths anyway, but keeps the intent plain.
+  http.get("*/auditstore/verify/agent/:agentId", ({ params }) =>
+    HttpResponse.json(mockAuditVerification("agent", params.agentId as string)),
+  ),
+  http.get("*/auditstore/verify/:conversationId", ({ params }) =>
+    HttpResponse.json(mockAuditVerification("conversation", params.conversationId as string)),
+  ),
+
   // Get audit trail by conversation
   http.get("*/auditstore/:conversationId/count", () => {
     return HttpResponse.json(MOCK_AUDIT_ENTRIES.length);
