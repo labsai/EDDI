@@ -140,8 +140,22 @@ class HistorizedResourceStoreTest {
 
         // Same reason as update: an archive that lands without the matching removal
         // leaves the resource archived-as-deleted while the live row is still there.
-        verify(storage).storeHistoryAndRemove(deletedHistory, "id1");
+        // Version-checked, so an update that committed after the read is not erased.
+        verify(storage).storeHistoryAndRemove(deletedHistory, "id1", 1);
         verify(storage, never()).remove(anyString());
+    }
+
+    @Test
+    void deleteRacingAnUpdateIsRefusedRatherThanErasingTheNewVersion() throws Exception {
+        IResourceStorage.IResource<String> currentResource = mock(IResourceStorage.IResource.class);
+        when(storage.read("id1", 1)).thenReturn(currentResource);
+        IResourceStorage.IHistoryResource<String> deletedHistory = mock(IResourceStorage.IHistoryResource.class);
+        when(storage.newHistoryResourceFor(currentResource, true)).thenReturn(deletedHistory);
+        // An update moved the resource to v2 between the read above and the delete.
+        doThrow(new IResourceStore.ResourceModifiedException("moved on"))
+                .when(storage).storeHistoryAndRemove(deletedHistory, "id1", 1);
+
+        assertThrows(IResourceStore.ResourceModifiedException.class, () -> store.delete("id1", 1));
     }
 
     @Test
@@ -158,11 +172,11 @@ class HistorizedResourceStoreTest {
         updateOrder.verify(updateDefaults).store(history);
         updateOrder.verify(updateDefaults).storeIfCurrentVersion(newResource, 1);
 
+        // A delete has no default: an unconditional one is exactly what let a delete
+        // racing an update erase the version the update had just committed.
         IResourceStorage<String> deleteDefaults = mock(IResourceStorage.class, CALLS_REAL_METHODS);
-        deleteDefaults.storeHistoryAndRemove(history, "id1");
-        InOrder deleteOrder = inOrder(deleteDefaults);
-        deleteOrder.verify(deleteDefaults).store(history);
-        deleteOrder.verify(deleteDefaults).remove("id1");
+        assertThrows(UnsupportedOperationException.class, () -> deleteDefaults.storeHistoryAndRemove(history, "id1", 1));
+        verify(deleteDefaults, never()).remove(anyString());
     }
 
     @Test

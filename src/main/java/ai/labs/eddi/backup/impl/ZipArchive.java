@@ -7,6 +7,8 @@ package ai.labs.eddi.backup.impl;
 import ai.labs.eddi.backup.IZipArchive;
 
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import java.io.*;
 import java.nio.file.Path;
@@ -22,6 +24,41 @@ import java.util.zip.ZipOutputStream;
 @ApplicationScoped
 public class ZipArchive implements IZipArchive {
     private static final int BUFFER_SIZE = 4096;
+
+    static final String MAX_ENTRIES_PROPERTY = "eddi.backup.import.max-entries";
+    static final String MAX_ENTRY_BYTES_PROPERTY = "eddi.backup.import.max-entry-bytes";
+    static final String MAX_TOTAL_BYTES_PROPERTY = "eddi.backup.import.max-uncompressed-bytes";
+
+    static final int DEFAULT_MAX_ENTRIES = 10_000;
+    static final long DEFAULT_MAX_ENTRY_BYTES = 32L * 1024 * 1024;
+    static final long DEFAULT_MAX_TOTAL_BYTES = 256L * 1024 * 1024;
+
+    /**
+     * Unpacking limits. An agent archive is a few hundred small JSON documents, so
+     * these sit far above anything an export writes and far below what a
+     * decompression bomb needs: without them a 2 MB upload that inflates to
+     * gigabytes filled the disk and inodes under {@code tmp/import}, and the import
+     * then read each file whole into the heap. The sizes are counted from the bytes
+     * actually inflated, never from the entry header, which the archive author
+     * controls.
+     */
+    private final int maxEntries;
+    private final long maxEntryBytes;
+    private final long maxTotalBytes;
+
+    /** The shipped limits — for callers outside CDI. */
+    public ZipArchive() {
+        this(DEFAULT_MAX_ENTRIES, DEFAULT_MAX_ENTRY_BYTES, DEFAULT_MAX_TOTAL_BYTES);
+    }
+
+    @Inject
+    public ZipArchive(@ConfigProperty(name = MAX_ENTRIES_PROPERTY, defaultValue = "10000") int maxEntries,
+            @ConfigProperty(name = MAX_ENTRY_BYTES_PROPERTY, defaultValue = "33554432") long maxEntryBytes,
+            @ConfigProperty(name = MAX_TOTAL_BYTES_PROPERTY, defaultValue = "268435456") long maxTotalBytes) {
+        this.maxEntries = maxEntries;
+        this.maxEntryBytes = maxEntryBytes;
+        this.maxTotalBytes = maxTotalBytes;
+    }
 
     @Override
     public void createZip(String sourceDirPath, String targetZipPath, Path allowedBaseDir) throws IOException {
@@ -93,6 +130,13 @@ public class ZipArchive implements IZipArchive {
         return new ZipEntry(entryName);
     }
 
+    /**
+     * @throws ZipLimitExceededException
+     *             when the archive holds more entries, or inflates to more bytes,
+     *             than this deployment accepts. Whatever was written before the
+     *             limit tripped is left in {@code targetDir}; every caller unpacks
+     *             into a scratch directory it removes in a {@code finally}.
+     */
     @Override
     public void unzip(InputStream zipFile, File targetDir) throws IOException {
         if (!targetDir.exists()) {
@@ -102,9 +146,15 @@ public class ZipArchive implements IZipArchive {
         }
 
         String targetDirPath = targetDir.getCanonicalPath();
+        int entries = 0;
+        long[] totalBytes = {0};
         try (ZipInputStream zipIn = new ZipInputStream(new BufferedInputStream(zipFile))) {
             ZipEntry entry;
             while ((entry = zipIn.getNextEntry()) != null) {
+                if (++entries > maxEntries) {
+                    throw new ZipLimitExceededException("The archive holds more than " + maxEntries
+                            + " entries, more than this instance imports (" + MAX_ENTRIES_PROPERTY + ").");
+                }
                 File destFile = new File(targetDir, entry.getName());
                 String destFilePath = destFile.getCanonicalPath();
 
@@ -122,20 +172,41 @@ public class ZipArchive implements IZipArchive {
                     if (!parentDir.mkdirs() && !parentDir.isDirectory()) {
                         throw new IOException("Could not create parent directories for: " + destFilePath);
                     }
-                    extractFile(zipIn, destFile);
+                    extractFile(zipIn, destFile, totalBytes);
                 }
                 zipIn.closeEntry();
             }
         }
     }
 
-    private void extractFile(ZipInputStream zipIn, File destFile) throws IOException {
+    private void extractFile(ZipInputStream zipIn, File destFile, long[] totalBytes) throws IOException {
+        long entryBytes = 0;
         try (BufferedOutputStream bos = new BufferedOutputStream(new FileOutputStream(destFile))) {
             byte[] bytesIn = new byte[BUFFER_SIZE];
             int read;
             while ((read = zipIn.read(bytesIn)) != -1) {
+                entryBytes += read;
+                totalBytes[0] += read;
+                if (entryBytes > maxEntryBytes) {
+                    throw new ZipLimitExceededException("An archive entry inflates to more than " + maxEntryBytes
+                            + " bytes, more than this instance imports (" + MAX_ENTRY_BYTES_PROPERTY + ").");
+                }
+                if (totalBytes[0] > maxTotalBytes) {
+                    throw new ZipLimitExceededException("The archive inflates to more than " + maxTotalBytes
+                            + " bytes, more than this instance imports (" + MAX_TOTAL_BYTES_PROPERTY + ").");
+                }
                 bos.write(bytesIn, 0, read);
             }
+        }
+    }
+
+    /**
+     * An archive this deployment refuses to unpack because of its size, not its
+     * shape — so a caller can answer 413 rather than 500.
+     */
+    public static class ZipLimitExceededException extends IOException {
+        public ZipLimitExceededException(String message) {
+            super(message);
         }
     }
 }

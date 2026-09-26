@@ -213,8 +213,11 @@ curl -X POST -H "Content-Type: application/zip" \
 > carries `X-Schedules-Skipped: <count>` whenever the selection left schedules out, and
 > the same count is logged at `INFO`. List the schedule `sourceId`s alongside the
 > extension ones if you want them, or omit the parameter entirely to take the whole
-> archive. Prompt snippets are the one exception: they are matched by name and imported
-> regardless of the selection.
+> archive. Prompt snippets honour the selection too: a snippet row's `sourceId` is the
+> snippet's id in the archive (its file name), and a merge updates a live snippet of the
+> same name only when that id — or the id of the local snippet it matched — is selected.
+> The same filter applies to a create import and to a first-time live sync: a snippet
+> left out of `selectedResources` is not created.
 
 **Scenario 4: Disaster Recovery**
 
@@ -482,6 +485,25 @@ Because that parameter is a single flat list across every preview row, a caller 
 only extension ids leaves **all** of them out — the import answers `X-Schedules-Skipped: <count>`
 and logs the same number at `INFO`, rather than a bare `201` for an agent whose nightly job
 did not come back. Name the schedule ids too, or leave `selectedResources` off.
+
+### When a merge fails part-way
+
+A merge writes into resources that already exist here. If a later write fails, the import is
+rolled back as a whole: what it **created** is deleted, and what it **updated** — the agent,
+its workflows and extensions, and prompt snippets — gets its pre-import content written back as
+a new version, with the descriptor (name, description, origin) restored alongside. History only
+ever grows, so the version the failed import wrote stays readable. A resource someone else
+changed while the import ran is not overwritten by the rollback; the conflict is logged at
+`WARN` instead.
+
+### Archive limits
+
+An uploaded or synced archive is unpacked under three limits — entry count, bytes per entry,
+and total bytes, all counted from what is actually decompressed — so a small upload that
+inflates to gigabytes is refused with `413` and the limit it crossed, instead of filling the
+disk. The defaults (`10000` entries, 32 MiB per entry, 256 MiB in total) sit far above any real
+agent export; see `eddi.backup.import.*` in the
+[configuration reference](configuration-reference.md).
 
 ## Live Sync (Without ZIP)
 

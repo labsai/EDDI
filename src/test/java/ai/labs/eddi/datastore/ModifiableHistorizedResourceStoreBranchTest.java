@@ -55,7 +55,7 @@ class ModifiableHistorizedResourceStoreBranchTest {
 
         @SuppressWarnings("unchecked")
         @Test
-        @DisplayName("resource found — updates current resource")
+        @DisplayName("resource found — updates current resource, version-checked")
         void resourceFoundUpdates() throws Exception {
             IResourceStorage.IResource<String> resource = mock(IResourceStorage.IResource.class);
             when(resourceStorage.read("id1", 1)).thenReturn(resource);
@@ -66,30 +66,77 @@ class ModifiableHistorizedResourceStoreBranchTest {
             Integer result = store.set("id1", 1, "new-content");
 
             assertEquals(1, result);
-            verify(resourceStorage).store(newResource);
+            verify(resourceStorage).storeIfCurrentVersion(newResource, 1);
+            // A replace by id alone overwrote a newer version committed after the read.
+            verify(resourceStorage, never()).store(any(IResourceStorage.IResource.class));
         }
 
         @SuppressWarnings("unchecked")
         @Test
-        @DisplayName("resource not found, historyLatest exists and not deleted — updates history")
+        @DisplayName("current version moved on during the write — the history row is written, never the newer current row")
+        void currentMovedOnDuringTheWrite() throws Exception {
+            IResourceStorage.IResource<String> resource = mock(IResourceStorage.IResource.class);
+            when(resourceStorage.read("id1", 1)).thenReturn(resource);
+            IResourceStorage.IResource<String> newResource = mock(IResourceStorage.IResource.class);
+            when(resourceStorage.newResource("id1", 1, "content")).thenReturn(newResource);
+            doThrow(new IResourceStore.ResourceModifiedException("moved to v2"))
+                    .when(resourceStorage).storeIfCurrentVersion(newResource, 1);
+            stubLiveHistory(1, 2);
+            IResourceStorage.IHistoryResource<String> newHistoryRes = mock(IResourceStorage.IHistoryResource.class);
+            when(resourceStorage.newHistoryResourceFor(newResource, false)).thenReturn(newHistoryRes);
+            when(resourceStorage.replaceHistory(newHistoryRes)).thenReturn(true);
+
+            assertEquals(1, store.set("id1", 1, "content"));
+
+            verify(resourceStorage).replaceHistory(newHistoryRes);
+            verify(resourceStorage, never()).store(any(IResourceStorage.IResource.class));
+        }
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("resource not found, historyLatest exists and not deleted — rewrites the history row")
         void resourceNotFoundHistoryExists() throws Exception {
             when(resourceStorage.read("id1", 1)).thenReturn(null);
-
-            IResourceStorage.IHistoryResource<String> historyRes = mock(IResourceStorage.IHistoryResource.class);
-            when(historyRes.isDeleted()).thenReturn(false);
-            when(historyRes.getVersion()).thenReturn(2);
-            when(resourceStorage.readHistoryLatest("id1")).thenReturn(historyRes);
+            stubLiveHistory(1, 2);
 
             IResourceStorage.IResource<String> newResource = mock(IResourceStorage.IResource.class);
             when(resourceStorage.newResource("id1", 1, "content")).thenReturn(newResource);
 
             IResourceStorage.IHistoryResource<String> newHistoryRes = mock(IResourceStorage.IHistoryResource.class);
             when(resourceStorage.newHistoryResourceFor(newResource, false)).thenReturn(newHistoryRes);
+            when(resourceStorage.replaceHistory(newHistoryRes)).thenReturn(true);
 
             Integer result = store.set("id1", 1, "content");
 
             assertEquals(1, result);
-            verify(resourceStorage).store(newHistoryRes);
+            // store(history) is insert-if-absent: on an existing row it silently wrote
+            // nothing.
+            verify(resourceStorage).replaceHistory(newHistoryRes);
+            verify(resourceStorage, never()).store(any(IResourceStorage.IHistoryResource.class));
+        }
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("history row missing for the version — ResourceNotFoundException, not a silent success")
+        void historyRowMissing() throws Exception {
+            when(resourceStorage.read("id1", 1)).thenReturn(null);
+            IResourceStorage.IHistoryResource<String> latest = mock(IResourceStorage.IHistoryResource.class);
+            when(latest.getVersion()).thenReturn(2);
+            when(resourceStorage.readHistoryLatest("id1")).thenReturn(latest);
+            when(resourceStorage.readHistory("id1", 1)).thenReturn(null);
+
+            assertThrows(IResourceStore.ResourceNotFoundException.class, () -> store.set("id1", 1, "content"));
+            verify(resourceStorage, never()).replaceHistory(any());
+        }
+
+        @SuppressWarnings("unchecked")
+        private void stubLiveHistory(int version, int latestVersion) {
+            IResourceStorage.IHistoryResource<String> latest = mock(IResourceStorage.IHistoryResource.class);
+            when(latest.getVersion()).thenReturn(latestVersion);
+            when(resourceStorage.readHistoryLatest("id1")).thenReturn(latest);
+            IResourceStorage.IHistoryResource<String> row = mock(IResourceStorage.IHistoryResource.class);
+            when(row.getVersion()).thenReturn(version);
+            when(resourceStorage.readHistory("id1", version)).thenReturn(row);
         }
 
         @Test

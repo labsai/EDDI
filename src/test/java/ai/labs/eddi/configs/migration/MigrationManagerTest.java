@@ -6,9 +6,13 @@ package ai.labs.eddi.configs.migration;
 
 import ai.labs.eddi.configs.migration.model.MigrationLog;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
+import com.mongodb.MongoException;
 import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
 import org.bson.Document;
+import org.bson.conversions.Bson;
+import org.bson.types.ObjectId;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -20,6 +24,9 @@ import java.util.ArrayList;
 
 import com.mongodb.client.FindIterable;
 import static ai.labs.eddi.configs.migration.MigrationManager.*;
+import static ai.labs.eddi.utils.LogCaptureSupport.FORGED_RECORD;
+import static ai.labs.eddi.utils.LogCaptureSupport.assertNoForgedRecordBoundary;
+import static ai.labs.eddi.utils.LogCaptureSupport.captureLogsOf;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
@@ -43,6 +50,8 @@ class MigrationManagerTest {
     void setUp() {
         openMocks(this);
         MongoCollection<Document> mockCollection = mock(MongoCollection.class);
+        FindIterable<Document> noDocuments = iterableOf();
+        when(mockCollection.find()).thenReturn(noDocuments);
         when(database.getCollection(anyString())).thenReturn(mockCollection);
 
         migrationManager = new MigrationManager(database, migrationLogStore, true);
@@ -396,7 +405,7 @@ class MigrationManagerTest {
             migrationManager.startMigrationIfFirstTimeRun(() -> completed[0] = true);
 
             assertTrue(completed[0], "onComplete should be called");
-            verify(migrationLogStore).createMigrationLog(any(MigrationLog.class));
+            verify(migrationLogStore).createMigrationLog(argThat((MigrationLog log) -> MIGRATION_CONFIRMATION.equals(log.getName())));
         }
 
         @SuppressWarnings("unchecked")
@@ -408,8 +417,10 @@ class MigrationManagerTest {
             MongoCollection<Document> conversationMemoryColl = mock(MongoCollection.class, "conversationMemoryColl");
             when(database.getCollection(anyString())).thenReturn(defaultColl);
             when(database.getCollection(COLLECTION_CONVERSATION_MEMORY)).thenReturn(conversationMemoryColl);
-            when(defaultColl.find()).thenReturn(mock(FindIterable.class));
-            when(conversationMemoryColl.find()).thenReturn(mock(FindIterable.class));
+            FindIterable<Document> noDefaults = iterableOf();
+            FindIterable<Document> noMemories = iterableOf();
+            when(defaultColl.find()).thenReturn(noDefaults);
+            when(conversationMemoryColl.find()).thenReturn(noMemories);
 
             var managerWithMemories = new MigrationManager(database, migrationLogStore, false);
             when(migrationLogStore.readMigrationLog(MIGRATION_CONFIRMATION)).thenReturn(null);
@@ -418,10 +429,139 @@ class MigrationManagerTest {
             managerWithMemories.startMigrationIfFirstTimeRun(() -> completed[0] = true);
 
             assertTrue(completed[0]);
-            verify(migrationLogStore).createMigrationLog(any(MigrationLog.class));
+            verify(migrationLogStore).createMigrationLog(argThat((MigrationLog log) -> MIGRATION_CONFIRMATION.equals(log.getName())));
             // Verify conversation memory collection was actually iterated
             verify(conversationMemoryColl).find();
         }
+
+        /**
+         * One document that cannot be migrated used to throw out of the sweep — every
+         * document after it stayed unmigrated — and the migration was then recorded as
+         * complete anyway, so nothing ever retried it.
+         */
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("a document that cannot be migrated neither stops the sweep nor lets it be recorded as done")
+        void failedDocumentIsNotRecordedAsDone() {
+            MongoCollection<Document> defaultColl = mock(MongoCollection.class, "defaultColl");
+            MongoCollection<Document> propertySetters = mock(MongoCollection.class, "propertySetters");
+            when(database.getCollection(anyString())).thenReturn(defaultColl);
+            when(database.getCollection(COLLECTION_PROPERTYSETTER)).thenReturn(propertySetters);
+            FindIterable<Document> noDocuments = iterableOf();
+            when(defaultColl.find()).thenReturn(noDocuments);
+
+            // Two legacy documents; persisting the first one fails. The second must still
+            // be migrated, and the run must not be recorded as done.
+            var first = new HashMap<String, Object>();
+            first.put("value", "hello");
+            Document broken = buildPropertySetterDoc(first);
+            broken.put("_id", new ObjectId());
+            var second = new HashMap<String, Object>();
+            second.put("value", "world");
+            Document valid = buildPropertySetterDoc(second);
+            valid.put("_id", new ObjectId());
+            FindIterable<Document> twoDocuments = iterableOf(broken, valid);
+            when(propertySetters.find()).thenReturn(twoDocuments);
+            when(propertySetters.replaceOne(any(Bson.class), any(Document.class)))
+                    .thenThrow(new MongoException("write failed"))
+                    .thenReturn(null);
+
+            var manager = new MigrationManager(database, migrationLogStore, true, false);
+            when(migrationLogStore.readMigrationLog(MIGRATION_CONFIRMATION)).thenReturn(null);
+
+            var completed = new boolean[]{false};
+            manager.startMigrationIfFirstTimeRun(() -> completed[0] = true);
+
+            assertTrue(completed[0], "startup must still be told the migration step finished");
+            verify(propertySetters, times(2)).replaceOne(any(Bson.class), any(Document.class));
+            verify(migrationLogStore, never()).createMigrationLog(argThat((MigrationLog log) -> MIGRATION_CONFIRMATION.equals(log.getName())
+                    || collectionConfirmation(COLLECTION_PROPERTYSETTER).equals(log.getName())));
+            // The collections that did complete are recorded, so only propertysetter is
+            // swept again.
+            verify(migrationLogStore).createMigrationLog(argThat((MigrationLog log) -> collectionConfirmation(COLLECTION_OUTPUTS)
+                    .equals(log.getName())));
+        }
+
+        /**
+         * A document that keeps failing used to re-sweep every collection on every
+         * start, conversation memories included, before agents deploy. Completed
+         * collections are now recorded and skipped.
+         */
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("a collection an earlier start completed is not swept again")
+        void completedCollectionIsNotSweptAgain() {
+            MongoCollection<Document> defaultColl = mock(MongoCollection.class, "defaultColl");
+            MongoCollection<Document> propertySetters = mock(MongoCollection.class, "propertySetters");
+            when(database.getCollection(anyString())).thenReturn(defaultColl);
+            when(database.getCollection(COLLECTION_PROPERTYSETTER)).thenReturn(propertySetters);
+            FindIterable<Document> noDocuments = iterableOf();
+            when(defaultColl.find()).thenReturn(noDocuments);
+            var manager = new MigrationManager(database, migrationLogStore, true, false);
+            when(migrationLogStore.readMigrationLog(MIGRATION_CONFIRMATION)).thenReturn(null);
+            when(migrationLogStore.readMigrationLog(collectionConfirmation(COLLECTION_PROPERTYSETTER)))
+                    .thenReturn(new MigrationLog(collectionConfirmation(COLLECTION_PROPERTYSETTER)));
+
+            manager.startMigrationIfFirstTimeRun(() -> {
+            });
+
+            verify(propertySetters, never()).find();
+            verify(migrationLogStore).createMigrationLog(argThat((MigrationLog log) -> MIGRATION_CONFIRMATION.equals(log.getName())));
+        }
+
+        /**
+         * CWE-117: the failure lines log a document id and a driver exception message.
+         * A legacy id is whatever was stored, and a driver quotes back what it was
+         * handed, so neither may start a new log record.
+         */
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("a document that cannot be migrated does not forge a log record")
+        void migrationFailureLinesAreSanitized() {
+            MongoCollection<Document> defaultColl = mock(MongoCollection.class, "defaultColl");
+            MongoCollection<Document> propertySetters = mock(MongoCollection.class, "propertySetters");
+            when(database.getCollection(anyString())).thenReturn(defaultColl);
+            when(database.getCollection(COLLECTION_PROPERTYSETTER)).thenReturn(propertySetters);
+            FindIterable<Document> noDocuments = iterableOf();
+            when(defaultColl.find()).thenReturn(noDocuments);
+            var first = new HashMap<String, Object>();
+            first.put("value", "hello");
+            Document one = buildPropertySetterDoc(first);
+            one.put("_id", "first" + FORGED_RECORD);
+            var second = new HashMap<String, Object>();
+            second.put("value", "world");
+            Document two = buildPropertySetterDoc(second);
+            two.put("_id", new ObjectId());
+            FindIterable<Document> twoDocuments = iterableOf(one, two);
+            when(propertySetters.find()).thenReturn(twoDocuments);
+            // Both fail. The first - a legacy id that is not an ObjectId - reaches the
+            // line that logs the id; the second reaches the line that logs the driver's
+            // message.
+            when(propertySetters.replaceOne(any(Bson.class), any(Document.class)))
+                    .thenThrow(new MongoException("write failed" + FORGED_RECORD));
+            var manager = new MigrationManager(database, migrationLogStore, true, false);
+            when(migrationLogStore.readMigrationLog(MIGRATION_CONFIRMATION)).thenReturn(null);
+
+            List<String> captured = captureLogsOf(MigrationManager.class, () -> manager.startMigrationIfFirstTimeRun(() -> {
+            }));
+
+            assertTrue(captured.stream().anyMatch(value -> value.contains("either")),
+                    "the second-failure line must have been logged, captured: " + captured);
+            assertNoForgedRecordBoundary(captured, "the migration failure lines");
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static FindIterable<Document> iterableOf(Document... documents) {
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        doAnswer(inv -> {
+            MongoCursor<Document> cursor = mock(MongoCursor.class);
+            var remaining = new ArrayDeque<>(List.of(documents));
+            when(cursor.hasNext()).thenAnswer(i -> !remaining.isEmpty());
+            when(cursor.next()).thenAnswer(i -> remaining.poll());
+            return cursor;
+        }).when(iterable).iterator();
+        return iterable;
     }
 
     // ─── migrateConversationMemory ────────────────────────────────

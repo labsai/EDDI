@@ -419,13 +419,64 @@ class PostgresResourceStorageTest {
         when(jsonSerialization.serialize(config)).thenReturn("{\"name\":\"value1\"}");
         var resource = storage.newResource("11111111-1111-1111-1111-111111111111", 1, config);
         var history = storage.newHistoryResourceFor(resource, true);
+        when(preparedStatement.executeUpdate()).thenReturn(1);
 
-        storage.storeHistoryAndRemove(history, "11111111-1111-1111-1111-111111111111");
+        storage.storeHistoryAndRemove(history, "11111111-1111-1111-1111-111111111111", 1);
 
         InOrder inOrder = inOrder(connection);
         inOrder.verify(connection).setAutoCommit(false);
         inOrder.verify(connection).commit();
         verify(connection, never()).rollback();
+        verify(connection).prepareStatement(argThat((String sql) -> sql.startsWith("DELETE FROM resources ") && sql.contains("AND version = ?")));
+        // The tombstone must set the flag even over a row an update already archived.
+        verify(connection).prepareStatement(argThat((String sql) -> sql.contains("DO UPDATE SET deleted = TRUE")));
+    }
+
+    @Test
+    void storeHistoryAndRemove_refusesAndRollsBackWhenAnUpdateMovedTheResourceOn() throws Exception {
+        TestConfig config = new TestConfig("value1");
+        when(jsonSerialization.serialize(config)).thenReturn("{\"name\":\"value1\"}");
+        var resource = storage.newResource("11111111-1111-1111-1111-111111111111", 1, config);
+        var history = storage.newHistoryResourceFor(resource, true);
+        // tombstone written, version-checked delete matches nothing, the live row is
+        // still there (at v2)
+        when(preparedStatement.executeUpdate()).thenReturn(1, 0);
+        when(resultSet.next()).thenReturn(true);
+
+        assertThrows(IResourceStore.ResourceModifiedException.class,
+                () -> storage.storeHistoryAndRemove(history, "11111111-1111-1111-1111-111111111111", 1));
+
+        // Rolling back takes the tombstone with it: v1 stays ordinary history of a live
+        // resource.
+        verify(connection).rollback();
+        verify(connection, never()).commit();
+    }
+
+    @Test
+    void storeHistoryAndRemove_ofAResourceAConcurrentDeleteAlreadyRemovedIsNotAnError() throws Exception {
+        TestConfig config = new TestConfig("value1");
+        when(jsonSerialization.serialize(config)).thenReturn("{\"name\":\"value1\"}");
+        var resource = storage.newResource("11111111-1111-1111-1111-111111111111", 1, config);
+        var history = storage.newHistoryResourceFor(resource, true);
+        when(preparedStatement.executeUpdate()).thenReturn(1, 0);
+        when(resultSet.next()).thenReturn(false);
+
+        storage.storeHistoryAndRemove(history, "11111111-1111-1111-1111-111111111111", 1);
+
+        verify(connection).commit();
+        verify(connection, never()).rollback();
+    }
+
+    @Test
+    void replaceHistory_rewritesTheRowAndReportsWhetherOneExisted() throws Exception {
+        TestConfig config = new TestConfig("value1");
+        when(jsonSerialization.serialize(config)).thenReturn("{\"name\":\"value1\"}");
+        var history = storage.newHistoryResourceFor(storage.newResource("11111111-1111-1111-1111-111111111111", 1, config), false);
+        when(preparedStatement.executeUpdate()).thenReturn(1, 0);
+
+        assertTrue(storage.replaceHistory(history));
+        assertFalse(storage.replaceHistory(history));
+        verify(connection, times(2)).prepareStatement(argThat((String sql) -> sql.startsWith("UPDATE resources_history SET data")));
     }
 
     @Test
@@ -436,7 +487,7 @@ class PostgresResourceStorageTest {
         var history = storage.newHistoryResourceFor(resource, true);
         when(preparedStatement.executeUpdate()).thenReturn(1).thenThrow(new SQLException("connection lost"));
 
-        assertThrows(RuntimeException.class, () -> storage.storeHistoryAndRemove(history, "11111111-1111-1111-1111-111111111111"));
+        assertThrows(RuntimeException.class, () -> storage.storeHistoryAndRemove(history, "11111111-1111-1111-1111-111111111111", 1));
 
         // Otherwise the resource is archived as deleted while its live row remains.
         verify(connection).rollback();

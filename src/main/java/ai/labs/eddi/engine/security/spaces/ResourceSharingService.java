@@ -335,10 +335,21 @@ public class ResourceSharingService {
      * people re-sharing one resource in the same instant is not a case worth a
      * lock; two people sharing <em>different</em> resources, which is the common
      * one, does not interact at all.
+     * <p>
+     * What is checked is that version N was still current once the write landed.
+     * When a {@code PUT} moved the descriptor on in between, the change went into
+     * the history row of N and the live descriptor never carried it — a share that
+     * was reported as applied and did nothing. That is now a failure, so the target
+     * is reported as skipped and the caller can retry.
      */
     private void writeBack(String id, DocumentDescriptor descriptor, int version) throws ResourceStoreException, ResourceNotFoundException {
         accessGuard.stampModification(descriptor);
         documentDescriptorStore.setDescriptor(id, version, descriptor);
+        var current = documentDescriptorStore.getCurrentResourceId(id);
+        if (current != null && current.getVersion() != null && current.getVersion() != version) {
+            throw new ResourceStoreException("The descriptor of '" + id + "' moved from version " + version + " to "
+                    + current.getVersion() + " while it was being shared; the change did not reach the current version");
+        }
     }
 
     /**

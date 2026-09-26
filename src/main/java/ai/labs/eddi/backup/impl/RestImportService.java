@@ -192,7 +192,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         // Legacy merge preview path
         File targetDir = new File(FileUtilities.buildPath(tmpPath.toString(), UUID.randomUUID().toString()));
         try {
-            this.zipArchive.unzip(zippedAgentConfigFiles, targetDir);
+            unzipArchive(zippedAgentConfigFiles, targetDir);
             var targetDirPath = targetDir.getPath();
 
             for (Path agentFilePath : singleAgentFileIn(Paths.get(targetDirPath))) {
@@ -248,6 +248,21 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             throw new InternalServerErrorException("Preview failed: " + e.getMessage(), e);
         } finally {
             deleteTempDirectoryQuietly(targetDir.toPath());
+        }
+    }
+
+    /**
+     * Unpacks an uploaded or fetched archive, answering an over-sized one with 413
+     * and the limit it crossed rather than a 500.
+     */
+    private void unzipArchive(InputStream archive, File targetDir) throws IOException {
+        try {
+            this.zipArchive.unzip(archive, targetDir);
+        } catch (ZipArchive.ZipLimitExceededException e) {
+            throw new WebApplicationException(e.getMessage(), Response.status(Response.Status.REQUEST_ENTITY_TOO_LARGE)
+                    .entity(Map.of("error", e.getMessage()))
+                    .type(MediaType.APPLICATION_JSON)
+                    .build());
         }
     }
 
@@ -320,13 +335,17 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                             continue;
 
                         String snippetName = snippet.getName();
+                        // The archive id, like every other row: it is what a merge matches
+                        // selectedResources against. The local id used to stand here, and
+                        // a new snippet had none at all, so it could not be selected.
+                        String archiveId = snippetArchiveId(snippetFilePath);
                         IResourceId existing = existingByName.get(snippetName);
                         if (existing != null) {
-                            diffs.add(new ResourceDiff(existing.getId(), SNIPPET_EXT, snippetName,
+                            diffs.add(new ResourceDiff(archiveId, SNIPPET_EXT, snippetName,
                                     DiffAction.UPDATE, existing.getId(), existing.getVersion(),
                                     "name", null, null, -1));
                         } else {
-                            diffs.add(new ResourceDiff(null, SNIPPET_EXT, snippetName,
+                            diffs.add(new ResourceDiff(archiveId, SNIPPET_EXT, snippetName,
                                     DiffAction.CREATE, null, null,
                                     null, null, null, -1));
                         }
@@ -603,14 +622,14 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                                           Set<String> selectedSet, ImportTransaction transaction)
             throws IOException {
 
-        this.zipArchive.unzip(zippedAgentConfigFiles, targetDir);
+        unzipArchive(zippedAgentConfigFiles, targetDir);
         var targetDirPath = targetDir.getPath();
 
         // Import snippets (global resources, not workflow-embedded). They are
         // recorded on the transaction like everything else — a snippet this import
         // created is just as much an orphan as a workflow when a later resource
         // blows up.
-        importSnippets(Paths.get(targetDirPath), isMerge, transaction);
+        importSnippets(Paths.get(targetDirPath), isMerge, selectedSet, transaction);
 
         // Connections are global too, and the configs about to be imported reference
         // them by name — so they land first, and never over a live one.
@@ -958,11 +977,10 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             IResourceId localResId = RestUtilities.extractResourceId(existingUri);
             if (localResId != null) {
                 IRestAgentStore restAgentStore = getRestResourceStore(IRestAgentStore.class);
-                Response updateResponse = restAgentStore.updateAgent(localResId.getId(), localResId.getVersion(), agentConfiguration);
-                if (updateResponse.getStatus() == 200) {
-                    // updated — new version = old version + 1
-                    int newVersion = localResId.getVersion() + 1;
-                    return URI.create(IRestAgentStore.resourceURI + localResId.getId() + IRestAgentStore.versionQueryParam + newVersion);
+                URI updated = updateTracked(IAgentStore.class, IRestAgentStore.resourceURI, localResId.getId(),
+                        localResId.getVersion(), agentConfiguration, restAgentStore::updateAgent, transaction);
+                if (updated != null) {
+                    return updated;
                 }
             }
         }
@@ -977,14 +995,128 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             if (localResId != null) {
                 WorkflowConfiguration workflowConfig = jsonSerialization.deserialize(workflowFileString, WorkflowConfiguration.class);
                 IRestWorkflowStore restWorkflowStore = getRestResourceStore(IRestWorkflowStore.class);
-                Response updateResponse = restWorkflowStore.updateWorkflow(localResId.getId(), localResId.getVersion(), workflowConfig);
-                if (updateResponse.getStatus() == 200) {
-                    int newVersion = localResId.getVersion() + 1;
-                    return URI.create(IRestWorkflowStore.resourceURI + localResId.getId() + IRestWorkflowStore.versionQueryParam + newVersion);
+                URI updated = updateTracked(IWorkflowStore.class, IRestWorkflowStore.resourceURI, localResId.getId(),
+                        localResId.getVersion(), workflowConfig, restWorkflowStore::updateWorkflow, transaction);
+                if (updated != null) {
+                    return updated;
                 }
             }
         }
         return createNewWorkflow(workflowFileString, transaction);
+    }
+
+    /** An {@code IRest*Store} update, e.g. {@code IRestAgentStore::updateAgent}. */
+    @FunctionalInterface
+    private interface RestUpdate<T> {
+        Response update(String id, Integer version, T document);
+    }
+
+    /**
+     * Updates a resource that already exists here during a merge, and records on
+     * the transaction how to put it back.
+     * <p>
+     * A merge writes into live resources. When a later write failed, the rollback
+     * used to delete what the import had created and leave every update in place,
+     * so a failed merge left the target agent half-promoted: its workflows and
+     * extensions already carried the archive's content while the agent itself - the
+     * last write - still pointed at the old versions. The compensation writes the
+     * pre-import content back as a new version through the same REST bean, so
+     * validation, capability registration and cache invalidation run exactly as on
+     * the way in, and history is only ever appended to.
+     *
+     * <p>
+     * One resource can be updated more than once by a single merge — two workflows
+     * sharing a dictionary or an LLM config each carry it, and each merges it. Only
+     * the <em>first</em> update snapshots: the second one's "previous" is the
+     * archive's own content, and restoring that would leave the import in place.
+     * Later updates only move the version the single compensation restores over,
+     * which is read when the compensation runs.
+     *
+     * @return the URI of the version the update produced, or {@code null} when the
+     *         store did not answer 200 - the caller then creates a resource instead
+     */
+    private <T> URI updateTracked(Class<?> storeClass, String resourceUri, String localId, Integer localVersion, T document,
+                                  RestUpdate<T> restUpdate, ImportTransaction transaction) {
+        ImportTransaction.TrackedUpdate tracked = transaction.trackedUpdate(storeClass, localId);
+        T previous = null;
+        DocumentDescriptor previousDescriptor = null;
+        if (tracked == null) {
+            previous = readForRollback(storeClass, localId, localVersion);
+            previousDescriptor = readCurrentDescriptorForRollback(localId);
+        }
+
+        Response response = restUpdate.update(localId, localVersion, document);
+        if (response == null || response.getStatus() != 200) {
+            return null;
+        }
+        int newVersion = localVersion + 1;
+        if (tracked != null) {
+            tracked.latestImportedVersion = newVersion;
+        } else {
+            var update = transaction.recordTrackedUpdate(storeClass, localId, newVersion);
+            if (previous == null) {
+                LOGGER.warnf("Merge updated %s '%s' without a readable previous version; a failed import cannot restore it",
+                        storeClass.getSimpleName(), LogSanitizer.sanitize(localId));
+            } else {
+                T original = previous;
+                DocumentDescriptor originalDescriptor = previousDescriptor;
+                transaction.recordCompensation(() -> restorePreviousVersion(storeClass, resourceUri, localId,
+                        update.latestImportedVersion, original, originalDescriptor, restUpdate));
+            }
+        }
+        return URI.create(resourceUri + localId + IRestVersionInfo.versionQueryParam + newVersion);
+    }
+
+    private <T> T readForRollback(Class<?> storeClass, String id, Integer version) {
+        try {
+            IResourceStore<T> store = resolveStore(storeClass);
+            return store.read(id, version);
+        } catch (Exception e) {
+            LOGGER.debugf("Could not read %s '%s' v%s before a merge update: %s", storeClass.getSimpleName(),
+                    LogSanitizer.sanitize(id), version, LogSanitizer.sanitize(e.getMessage()));
+            return null;
+        }
+    }
+
+    private DocumentDescriptor readCurrentDescriptorForRollback(String id) {
+        try {
+            IResourceId current = documentDescriptorStore.getCurrentResourceId(id);
+            return current == null ? null : documentDescriptorStore.readDescriptor(current.getId(), current.getVersion());
+        } catch (Exception e) {
+            LOGGER.debugf("Could not read the descriptor of '%s' before a merge update: %s", LogSanitizer.sanitize(id),
+                    LogSanitizer.sanitize(e.getMessage()));
+            return null;
+        }
+    }
+
+    /**
+     * Writes {@code previous} back over the version a failed merge produced, then
+     * points the descriptor - name, description and originId included, which the
+     * merge also rewrote - at the restored version. A resource someone else changed
+     * in the meantime is not overwritten: the update is version-checked, the
+     * conflict propagates, and the rollback loop logs it.
+     */
+    private <T> void restorePreviousVersion(Class<?> storeClass, String resourceUri, String id, int importedVersion, T previous,
+                                            DocumentDescriptor previousDescriptor, RestUpdate<T> restUpdate) {
+        Response response = restUpdate.update(id, importedVersion, previous);
+        if (response == null || response.getStatus() != 200) {
+            throw new IllegalStateException("restoring " + storeClass.getSimpleName() + " '" + id + "' answered "
+                    + (response == null ? "nothing" : response.getStatus()));
+        }
+        URI restoredUri = URI.create(resourceUri + id + IRestVersionInfo.versionQueryParam + (importedVersion + 1));
+        LOGGER.warnf("Import failed - restored %s '%s' to its pre-import content as %s", storeClass.getSimpleName(),
+                LogSanitizer.sanitize(id), LogSanitizer.sanitize(restoredUri.toString()));
+        if (previousDescriptor == null) {
+            return;
+        }
+        try {
+            IResourceId currentDescriptorId = documentDescriptorStore.getCurrentResourceId(id);
+            previousDescriptor.setResource(restoredUri);
+            documentDescriptorStore.setDescriptor(currentDescriptorId.getId(), currentDescriptorId.getVersion(), previousDescriptor);
+        } catch (Exception e) {
+            LOGGER.warnf("Restored %s '%s' but could not restore its descriptor: %s", storeClass.getSimpleName(),
+                    LogSanitizer.sanitize(id), LogSanitizer.sanitize(e.getMessage()));
+        }
     }
 
     private void setOriginIdOnDescriptor(URI resourceUri, String originId) {
@@ -1128,56 +1260,45 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     private URI updateDictionary(DictionaryConfiguration config, String localId, Integer localVersion, ImportTransaction transaction) {
         IRestDictionaryStore store = getRestResourceStore(IRestDictionaryStore.class);
-        Response response = store.updateRegularDictionary(localId, localVersion, config);
-        if (response.getStatus() == 200) {
-            return URI.create(IRestDictionaryStore.resourceURI + localId + IRestDictionaryStore.versionQueryParam + (localVersion + 1));
-        }
-        return createResourceDirect(IDictionaryStore.class, config, IRestDictionaryStore.resourceURI, transaction);
+        URI updated = updateTracked(IDictionaryStore.class, IRestDictionaryStore.resourceURI, localId, localVersion, config,
+                store::updateRegularDictionary, transaction);
+        return updated != null ? updated : createResourceDirect(IDictionaryStore.class, config, IRestDictionaryStore.resourceURI, transaction);
     }
 
     private URI updateBehavior(RuleSetConfiguration config, String localId, Integer localVersion, ImportTransaction transaction) {
         IRestRuleSetStore store = getRestResourceStore(IRestRuleSetStore.class);
-        Response response = store.updateRuleSet(localId, localVersion, config);
-        if (response.getStatus() == 200) {
-            return URI.create(IRestRuleSetStore.resourceURI + localId + IRestRuleSetStore.versionQueryParam + (localVersion + 1));
-        }
-        return createResourceDirect(IRuleSetStore.class, config, IRestRuleSetStore.resourceURI, transaction);
+        URI updated = updateTracked(IRuleSetStore.class, IRestRuleSetStore.resourceURI, localId, localVersion, config, store::updateRuleSet,
+                transaction);
+        return updated != null ? updated : createResourceDirect(IRuleSetStore.class, config, IRestRuleSetStore.resourceURI, transaction);
     }
 
     private URI updateApiCalls(ApiCallsConfiguration config, String localId, Integer localVersion, ImportTransaction transaction) {
         IRestApiCallsStore store = getRestResourceStore(IRestApiCallsStore.class);
-        Response response = store.updateApiCalls(localId, localVersion, config);
-        if (response.getStatus() == 200) {
-            return URI.create(IRestApiCallsStore.resourceURI + localId + IRestApiCallsStore.versionQueryParam + (localVersion + 1));
-        }
-        return createResourceDirect(IApiCallsStore.class, config, IRestApiCallsStore.resourceURI, transaction);
+        URI updated = updateTracked(IApiCallsStore.class, IRestApiCallsStore.resourceURI, localId, localVersion, config, store::updateApiCalls,
+                transaction);
+        return updated != null ? updated : createResourceDirect(IApiCallsStore.class, config, IRestApiCallsStore.resourceURI, transaction);
     }
 
     private URI updateLangchain(LlmConfiguration config, String localId, Integer localVersion, ImportTransaction transaction) {
         IRestLlmStore store = getRestResourceStore(IRestLlmStore.class);
-        Response response = store.updateLlm(localId, localVersion, config);
-        if (response.getStatus() == 200) {
-            return URI.create(IRestLlmStore.resourceURI + localId + IRestLlmStore.versionQueryParam + (localVersion + 1));
-        }
-        return createResourceDirect(ILlmStore.class, config, IRestLlmStore.resourceURI, transaction);
+        URI updated = updateTracked(ILlmStore.class, IRestLlmStore.resourceURI, localId, localVersion, config, store::updateLlm, transaction);
+        return updated != null ? updated : createResourceDirect(ILlmStore.class, config, IRestLlmStore.resourceURI, transaction);
     }
 
     private URI updateProperty(PropertySetterConfiguration config, String localId, Integer localVersion, ImportTransaction transaction) {
         IRestPropertySetterStore store = getRestResourceStore(IRestPropertySetterStore.class);
-        Response response = store.updatePropertySetter(localId, localVersion, config);
-        if (response.getStatus() == 200) {
-            return URI.create(IRestPropertySetterStore.resourceURI + localId + IRestPropertySetterStore.versionQueryParam + (localVersion + 1));
-        }
-        return createResourceDirect(IPropertySetterStore.class, config, IRestPropertySetterStore.resourceURI, transaction);
+        URI updated = updateTracked(IPropertySetterStore.class, IRestPropertySetterStore.resourceURI, localId, localVersion, config,
+                store::updatePropertySetter, transaction);
+        return updated != null
+                ? updated
+                : createResourceDirect(IPropertySetterStore.class, config, IRestPropertySetterStore.resourceURI, transaction);
     }
 
     private URI updateOutput(OutputConfigurationSet config, String localId, Integer localVersion, ImportTransaction transaction) {
         IRestOutputStore store = getRestResourceStore(IRestOutputStore.class);
-        Response response = store.updateOutputSet(localId, localVersion, config);
-        if (response.getStatus() == 200) {
-            return URI.create(IRestOutputStore.resourceURI + localId + IRestOutputStore.versionQueryParam + (localVersion + 1));
-        }
-        return createResourceDirect(IOutputStore.class, config, IRestOutputStore.resourceURI, transaction);
+        URI updated = updateTracked(IOutputStore.class, IRestOutputStore.resourceURI, localId, localVersion, config, store::updateOutputSet,
+                transaction);
+        return updated != null ? updated : createResourceDirect(IOutputStore.class, config, IRestOutputStore.resourceURI, transaction);
     }
 
     private List<URI> createNewMcpCalls(List<McpCallsConfiguration> configs, ImportTransaction transaction) {
@@ -1186,11 +1307,9 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     private URI updateMcpCalls(McpCallsConfiguration config, String localId, Integer localVersion, ImportTransaction transaction) {
         IRestMcpCallsStore store = getRestResourceStore(IRestMcpCallsStore.class);
-        Response response = store.updateMcpCalls(localId, localVersion, config);
-        if (response.getStatus() == 200) {
-            return URI.create(IRestMcpCallsStore.resourceURI + localId + IRestMcpCallsStore.versionQueryParam + (localVersion + 1));
-        }
-        return createResourceDirect(IMcpCallsStore.class, config, IRestMcpCallsStore.resourceURI, transaction);
+        URI updated = updateTracked(IMcpCallsStore.class, IRestMcpCallsStore.resourceURI, localId, localVersion, config, store::updateMcpCalls,
+                transaction);
+        return updated != null ? updated : createResourceDirect(IMcpCallsStore.class, config, IRestMcpCallsStore.resourceURI, transaction);
     }
 
     private List<URI> createNewRags(List<RagConfiguration> configs, ImportTransaction transaction) {
@@ -1248,11 +1367,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     private URI updateRag(RagConfiguration config, String localId, Integer localVersion, ImportTransaction transaction) {
         IRestRagStore store = getRestResourceStore(IRestRagStore.class);
-        Response response = store.updateRag(localId, localVersion, config);
-        if (response.getStatus() == 200) {
-            return URI.create(IRestRagStore.resourceURI + localId + IRestRagStore.versionQueryParam + (localVersion + 1));
-        }
-        return createResourceDirect(IRagStore.class, config, IRestRagStore.resourceURI, transaction);
+        URI updated = updateTracked(IRagStore.class, IRestRagStore.resourceURI, localId, localVersion, config, store::updateRag, transaction);
+        return updated != null ? updated : createResourceDirect(IRagStore.class, config, IRestRagStore.resourceURI, transaction);
     }
 
     // ==================== Connection Import ====================
@@ -1451,7 +1567,19 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     // ==================== Snippet Import ====================
 
-    private void importSnippets(Path targetDirPath, boolean isMerge, ImportTransaction transaction) {
+    /**
+     * Imports the archive's prompt snippets, matched to this deployment's snippets
+     * by name.
+     *
+     * @param selectedSet
+     *            the caller's resource selection, or null for "everything". A
+     *            snippet row in the preview carries the snippet's archive id (its
+     *            file name) as {@code sourceId}; the local id of the snippet it
+     *            matched by name is accepted too, because that is what earlier
+     *            previews put in the row. Ignoring the selection here overwrote a
+     *            live snippet the operator had explicitly unticked.
+     */
+    private void importSnippets(Path targetDirPath, boolean isMerge, Set<String> selectedSet, ImportTransaction transaction) {
         try {
             // Look for snippets directory — could be inside the agent subdirectory
             Path snippetsDir = findSnippetsDir(targetDirPath);
@@ -1481,6 +1609,12 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                             continue;
 
                         String snippetName = snippet.getName();
+                        IResourceId matched = existingSnippetsByName.get(snippetName);
+                        if (!isSnippetSelected(selectedSet, snippetArchiveId(snippetFilePath), matched)) {
+                            LOGGER.debugf("Snippet '%s' left out of selectedResources, skipping", LogSanitizer.sanitize(snippetName));
+                            skippedCount++;
+                            continue;
+                        }
 
                         // Always check for name collision — snippets are global resources,
                         // duplicates cause unpredictable runtime behavior regardless of strategy
@@ -1488,20 +1622,20 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                             if (isMerge) {
                                 // Merge strategy: update existing snippet with imported content
                                 IResourceId localResId = existingSnippetsByName.get(snippetName);
-                                Response updateResp = restSnippetStore.updateSnippet(
-                                        localResId.getId(), localResId.getVersion(), snippet);
-                                if (updateResp.getStatus() == 200) {
+                                URI updated = updateTracked(IPromptSnippetStore.class, IRestPromptSnippetStore.resourceURI,
+                                        localResId.getId(), localResId.getVersion(), snippet, restSnippetStore::updateSnippet,
+                                        transaction);
+                                if (updated != null) {
                                     LOGGER.debugf("Updated existing snippet '%s' (id=%s, v=%d)",
-                                            snippetName, localResId.getId(), localResId.getVersion());
+                                            LogSanitizer.sanitize(snippetName), localResId.getId(), localResId.getVersion());
                                     importedCount++;
                                     continue;
                                 }
                                 // Update failed (e.g., version conflict) — fall through to create
-                                LOGGER.warnf("Update failed for snippet '%s' (status=%d), creating new",
-                                        snippetName, updateResp.getStatus());
+                                LOGGER.warnf("Update failed for snippet '%s', creating new", LogSanitizer.sanitize(snippetName));
                             } else {
                                 // Create strategy: snippet already exists globally, skip to avoid duplicates
-                                LOGGER.debugf("Snippet '%s' already exists, skipping (create strategy)", snippetName);
+                                LOGGER.debugf("Snippet '%s' already exists, skipping (create strategy)", LogSanitizer.sanitize(snippetName));
                                 skippedCount++;
                                 continue;
                             }
@@ -1512,18 +1646,31 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         checkIfCreatedResponse(createResp);
                         recordCreatedSnippet(createResp, transaction);
                         importedCount++;
-                        LOGGER.debugf("Created new snippet '%s'", snippetName);
+                        LOGGER.debugf("Created new snippet '%s'", LogSanitizer.sanitize(snippetName));
                     } catch (Exception e) {
                         LOGGER.warnf("Failed to import snippet from %s: %s", snippetFilePath, e.getMessage());
                     }
                 }
                 if (importedCount > 0 || skippedCount > 0) {
-                    LOGGER.infof("Snippets: imported %d, skipped %d (already exist)", importedCount, skippedCount);
+                    LOGGER.infof("Snippets: imported %d, skipped %d (already exist or not selected)", importedCount, skippedCount);
                 }
             }
         } catch (Exception e) {
             LOGGER.warnf("Failed to import snippets: %s", e.getMessage());
         }
+    }
+
+    /** A snippet's id in the archive: its file name without the extension. */
+    private static String snippetArchiveId(Path snippetFilePath) {
+        String fileName = snippetFilePath.getFileName().toString();
+        String suffix = "." + SNIPPET_EXT + ".json";
+        return fileName.endsWith(suffix) ? fileName.substring(0, fileName.length() - suffix.length()) : fileName;
+    }
+
+    private static boolean isSnippetSelected(Set<String> selectedSet, String archiveId, IResourceId matchedLocal) {
+        return selectedSet == null
+                || selectedSet.contains(archiveId)
+                || (matchedLocal != null && selectedSet.contains(matchedLocal.getId()));
     }
 
     /**
@@ -2046,6 +2193,33 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         private final List<CreatedResource> created = new ArrayList<>();
 
         /**
+         * A resource this import updated in place: the version its latest update
+         * produced, which is where the one compensation for it restores over.
+         */
+        static final class TrackedUpdate {
+            int latestImportedVersion;
+
+            TrackedUpdate(int latestImportedVersion) {
+                this.latestImportedVersion = latestImportedVersion;
+            }
+        }
+
+        /**
+         * Keyed by store and id, so a resource merged twice keeps its first snapshot.
+         */
+        private final Map<String, TrackedUpdate> updated = new HashMap<>();
+
+        TrackedUpdate trackedUpdate(Class<?> storeClass, String id) {
+            return updated.get(storeClass.getName() + "/" + id);
+        }
+
+        TrackedUpdate recordTrackedUpdate(Class<?> storeClass, String id, int importedVersion) {
+            var update = new TrackedUpdate(importedVersion);
+            updated.put(storeClass.getName() + "/" + id, update);
+            return update;
+        }
+
+        /**
          * Undo actions for things this import created that are not
          * {@code IResourceStore} resources — a schedule, for instance, lives in
          * {@link IScheduleStore} and has no version or descriptor.
@@ -2084,9 +2258,9 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      * Deletes everything the failed import created, newest first, so a ZIP that
      * blows up on its last resource leaves no orphans behind.
      * <p>
-     * Resources that already existed and were merely <em>updated</em> during a
-     * merge are deliberately left alone: they are not orphans, and their previous
-     * versions remain in the store's history.
+     * Resources that already existed and were <em>updated</em> during a merge are
+     * not deleted - they are not orphans - but their pre-import content is written
+     * back by the compensations {@link #updateTracked} recorded, which run first.
      * <p>
      * Every step is guarded — a rollback failure is logged, never thrown, so it can
      * never mask the original error.
@@ -2555,7 +2729,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         try {
             // try-with-resources: ZipResourceSource.close() removes the unzipped tree
             try (var source = new ZipResourceSource(targetDir.toPath(), jsonSerialization)) {
-                this.zipArchive.unzip(zippedAgentConfigFiles, targetDir);
+                unzipArchive(zippedAgentConfigFiles, targetDir);
                 return structuralMatcher.buildPreview(source, targetAgentId, true);
             }
         } catch (WebApplicationException e) {
@@ -2576,7 +2750,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         try {
             // try-with-resources: ZipResourceSource.close() removes the unzipped tree
             try (var source = new ZipResourceSource(targetDir.toPath(), jsonSerialization)) {
-                this.zipArchive.unzip(zippedAgentConfigFiles, targetDir);
+                unzipArchive(zippedAgentConfigFiles, targetDir);
                 Set<String> selectedSet = parseSelectedResources(selectedOriginIds);
                 List<String> workflowOrder = parseWorkflowOrder(workflowOrderString);
 
@@ -2791,9 +2965,11 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      * {@code workflowOrder} has no meaning here and is not taken: it reorders an
      * existing agent's workflow list, and a created agent's order is the source's
      * own. {@code selectedResources} is passed on but reaches only the archive's
-     * schedules: {@code createOrUpdateResources} creates every config in a create,
-     * by design — an agent missing the extensions its workflow references would not
-     * run. To promote part of an agent, sync onto an existing one.
+     * schedules and prompt snippets: {@code createOrUpdateResources} creates every
+     * config in a create, by design — an agent missing the extensions its workflow
+     * references would not run. A snippet or schedule left out is simply not
+     * created; the preview's rows for them carry the source ids this selection is
+     * matched against. To promote part of an agent, sync onto an existing one.
      *
      * @return what landed, in the same shape a sync onto an existing agent answers
      */

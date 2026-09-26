@@ -13,6 +13,7 @@ import com.mongodb.client.gridfs.GridFSBuckets;
 import com.mongodb.client.gridfs.model.GridFSFile;
 import com.mongodb.client.gridfs.model.GridFSUploadOptions;
 import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.Indexes;
 import com.mongodb.client.model.Updates;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -28,6 +29,7 @@ import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -52,6 +54,7 @@ public class GridFsAttachmentStore implements IAttachmentStore {
     private static final String META_STORAGE_REF = "storageRef";
     private static final String META_MIME_TYPE = "mimeType";
     private static final String META_GRANTS = "grants";
+    static final long INDEX_TIMEOUT_SECONDS = 10;
 
     private final GridFSBucket gridFSBucket;
     private final MongoCollection<Document> filesCollection;
@@ -69,6 +72,43 @@ public class GridFsAttachmentStore implements IAttachmentStore {
     public GridFsAttachmentStore(MongoDatabase database) {
         this.gridFSBucket = GridFSBuckets.create(database, BUCKET_NAME);
         this.filesCollection = database.getCollection(BUCKET_NAME + ".files");
+    }
+
+    /**
+     * Creates the metadata indexes, each bounded by {@link #INDEX_TIMEOUT_SECONDS}
+     * so an unreachable database delays startup by that much at most rather than by
+     * one server-selection timeout per index. Called once at startup by
+     * {@link GridFsIndexInitializer}, not from the constructor: the bean is created
+     * on first use, which put a blocking index build on the first attachment
+     * request.
+     */
+    public void ensureIndexes() {
+        ensureIndexes(filesCollection.withTimeout(INDEX_TIMEOUT_SECONDS, TimeUnit.SECONDS));
+    }
+
+    /**
+     * Indexes every metadata field a query here filters on.
+     * <p>
+     * GridFS indexes only {@code filename} and {@code uploadDate} by itself, so
+     * resolving a {@code storageRef} (every load, grant and delete), the quota
+     * check on every upload, listing a conversation's attachments and GDPR's
+     * per-conversation delete were all full scans of {@code attachments.files},
+     * growing with every attachment anyone ever uploaded.
+     * <p>
+     * None is unique: blobs stored before {@code storageRef} existed have none, and
+     * a unique index would refuse to build over them. A failure is logged, not
+     * thrown — an index is an optimisation, and a deployment whose database user
+     * may not create one must still start.
+     */
+    static void ensureIndexes(MongoCollection<Document> filesCollection) {
+        for (String field : List.of(META_STORAGE_REF, META_CONVERSATION_ID, META_GRANTS)) {
+            try {
+                filesCollection.createIndex(Indexes.ascending("metadata." + field));
+            } catch (RuntimeException e) {
+                LOGGER.warnf("Could not create the index on attachments metadata.%s; attachment lookups fall back to a scan: %s",
+                        field, sanitize(e.getMessage()));
+            }
+        }
     }
 
     @Override

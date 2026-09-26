@@ -12,6 +12,7 @@ import com.mongodb.client.gridfs.GridFSBucket;
 import com.mongodb.client.gridfs.GridFSFindIterable;
 import com.mongodb.client.gridfs.model.GridFSFile;
 import com.mongodb.client.gridfs.model.GridFSUploadOptions;
+import com.mongodb.client.model.Indexes;
 import com.mongodb.client.result.UpdateResult;
 import org.bson.Document;
 import org.bson.conversions.Bson;
@@ -24,6 +25,7 @@ import java.io.OutputStream;
 import java.lang.reflect.Field;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -462,5 +464,44 @@ class GridFsAttachmentStoreTest {
         assertEquals(1, results.size());
         assertEquals("uuid-g", results.getFirst().storageRef());
         assertEquals("owner-conv", results.getFirst().conversationId());
+    }
+
+    // ==================== indexes (M-P7) ====================
+
+    @Test
+    void ensureIndexes_indexesEveryMetadataFieldAQueryFiltersOn() {
+        @SuppressWarnings("unchecked")
+        MongoCollection<Document> files = mock(MongoCollection.class);
+
+        GridFsAttachmentStore.ensureIndexes(files);
+
+        verify(files).createIndex(Indexes.ascending("metadata.storageRef"));
+        verify(files).createIndex(Indexes.ascending("metadata.conversationId"));
+        verify(files).createIndex(Indexes.ascending("metadata.grants"));
+    }
+
+    @Test
+    void ensureIndexes_eachIndexBuildIsTimeBounded() {
+        @SuppressWarnings("unchecked")
+        MongoCollection<Document> bounded = mock(MongoCollection.class);
+        when(filesCollection.withTimeout(GridFsAttachmentStore.INDEX_TIMEOUT_SECONDS, TimeUnit.SECONDS)).thenReturn(bounded);
+
+        sut.ensureIndexes();
+
+        // An unreachable database must cost a bounded wait, not a server-selection
+        // timeout per index.
+        verify(bounded).createIndex(Indexes.ascending("metadata.storageRef"));
+        verify(filesCollection, never()).createIndex(any(Bson.class));
+    }
+
+    @Test
+    void ensureIndexes_aRefusedIndexDoesNotStopStartupOrTheOtherIndexes() {
+        @SuppressWarnings("unchecked")
+        MongoCollection<Document> files = mock(MongoCollection.class);
+        when(files.createIndex(Indexes.ascending("metadata.storageRef"))).thenThrow(new IllegalStateException("not authorized"));
+
+        assertDoesNotThrow(() -> GridFsAttachmentStore.ensureIndexes(files));
+
+        verify(files).createIndex(Indexes.ascending("metadata.grants"));
     }
 }

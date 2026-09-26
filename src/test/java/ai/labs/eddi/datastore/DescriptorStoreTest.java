@@ -14,6 +14,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -417,5 +418,62 @@ class DescriptorStoreTest {
         List<String> result = store.findByOriginId("origin-1");
         assertEquals(1, result.size());
         assertEquals("data-res-1", result.getFirst());
+    }
+
+    // ==================== regex built from caller input (M-P2)
+    // ====================
+
+    @Test
+    @DisplayName("the type filter is an anchored prefix with the type taken literally — no ReDoS, no match-all")
+    void typeFilterIsEscapedAndAnchored() throws Exception {
+        when(resourceStorage.findResources(any(IResourceFilter.QueryFilters[].class), anyString(), anyInt(), anyInt()))
+                .thenReturn(List.of());
+
+        store.readDescriptors("(a+)+$|.*", null, 0, 10, false);
+
+        var captor = ArgumentCaptor.forClass(IResourceFilter.QueryFilters[].class);
+        verify(resourceStorage).findResources(captor.capture(), anyString(), anyInt(), anyInt());
+        String pattern = (String) filterValue(captor.getValue(), "resource");
+        assertEquals("^eddi://\\(a\\+\\)\\+\\$\\|\\.\\*", pattern);
+        assertTrue(Pattern.compile(pattern).matcher("eddi://(a+)+$|.*/x").find());
+        assertFalse(Pattern.compile(pattern).matcher("eddi://ai.labs.agent/agentstore/agents/x?version=1").find(),
+                "a crafted type must not select every descriptor");
+    }
+
+    @Test
+    @DisplayName("an ordinary type still selects its own descriptors, and only by prefix")
+    void ordinaryTypeStillMatches() {
+        Pattern pattern = Pattern.compile(DescriptorStore.resourceTypePrefixPattern("ai.labs.agent"));
+
+        assertTrue(pattern.matcher("eddi://ai.labs.agent/agentstore/agents/abc?version=1").find());
+        assertFalse(pattern.matcher("eddi://aiXlabsXagent/agentstore/agents/abc?version=1").find(), "a dot is a dot");
+        assertFalse(pattern.matcher("x eddi://ai.labs.agent/agentstore/agents/abc").find(), "anchored at the start");
+    }
+
+    @Test
+    @DisplayName("findByOriginId matches the origin id exactly — an archive file name is not a pattern")
+    void findByOriginIdIsAnExactMatch() throws Exception {
+        when(resourceStorage.findResources(any(IResourceFilter.QueryFilters[].class), anyString(), anyInt(), anyInt()))
+                .thenReturn(List.of());
+
+        store.findByOriginId(".*");
+
+        var captor = ArgumentCaptor.forClass(IResourceFilter.QueryFilters[].class);
+        verify(resourceStorage).findResources(captor.capture(), anyString(), anyInt(), anyInt());
+        Pattern pattern = Pattern.compile((String) filterValue(captor.getValue(), "originId"));
+        assertTrue(pattern.matcher(".*").find());
+        assertFalse(pattern.matcher("aaaa11112222333344445555").find());
+        assertFalse(Pattern.compile((String) filterValue(captor.getValue(), "originId")).matcher("x.*").find());
+    }
+
+    private static Object filterValue(IResourceFilter.QueryFilters[] groups, String field) {
+        for (IResourceFilter.QueryFilters group : groups) {
+            for (IResourceFilter.QueryFilter filter : group.getQueryFilters()) {
+                if (field.equals(filter.getField())) {
+                    return filter.getFilter();
+                }
+            }
+        }
+        throw new AssertionError("no filter on " + field);
     }
 }
