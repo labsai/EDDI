@@ -224,6 +224,12 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         if (config.getName() == null || config.getName().isBlank()) {
             throw new BadRequestException("Channel integration name is required.");
         }
+        // '|' separates the integration name from the subject in a Slack approval
+        // button value; a name containing it would be split wrongly and bind the
+        // decision to a different integration name.
+        if (config.getName().contains("|")) {
+            throw new BadRequestException("Channel integration name must not contain '|'.");
+        }
 
         warnOnPlaintextSecrets(config);
 
@@ -406,6 +412,22 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                         throw new BadRequestException(
                                 "Another channel integration already uses channelId '" + channelId
                                         + "' for type '" + channelType + "'.");
+                    }
+                    // The name is what a Slack approval card binds its decision to, so two
+                    // routed integrations of one type sharing a name would let either's
+                    // signing secret and approver list govern the other's pauses. Only
+                    // integrations with a channelId are routed — a duplicate (which has
+                    // its channelId cleared) may keep the name until it is activated.
+                    if (existing != null
+                            && existing.getPlatformConfig() != null
+                            && channelType.equalsIgnoreCase(existing.getChannelType())
+                            && config.getName() != null
+                            && config.getName().equals(existing.getName())
+                            && existing.getPlatformConfig().get("channelId") != null
+                            && !existing.getPlatformConfig().get("channelId").isBlank()) {
+                        throw new BadRequestException(
+                                "This channel integration name is not available — choose a different name. "
+                                        + "(Names must be unique; which integration holds it is not disclosed.)");
                     }
                 } catch (BadRequestException e) {
                     throw e; // re-throw validation errors

@@ -8,6 +8,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
+import java.util.Optional;
+
 /**
  * Runtime configuration for the Slack channel ({@code eddi.slack.*}).
  * <p>
@@ -43,6 +45,24 @@ public class SlackConfig {
     private final int groupCompletionTimeoutSeconds;
     private final int apiMaxRetries;
     private final long apiRetryBaseMs;
+    private final boolean namespaceUserIds;
+    private final String legacyTeamId;
+
+    /**
+     * The four tunables, with bare Slack user ids — the shipped default.
+     */
+    public SlackConfig(int requestTimeoutSeconds, int groupCompletionTimeoutSeconds, int apiMaxRetries, long apiRetryBaseMs) {
+        this(requestTimeoutSeconds, groupCompletionTimeoutSeconds, apiMaxRetries, apiRetryBaseMs, false, Optional.empty());
+    }
+
+    /**
+     * The four tunables plus the namespacing switch, with no configured legacy
+     * team.
+     */
+    public SlackConfig(int requestTimeoutSeconds, int groupCompletionTimeoutSeconds, int apiMaxRetries, long apiRetryBaseMs,
+            boolean namespaceUserIds) {
+        this(requestTimeoutSeconds, groupCompletionTimeoutSeconds, apiMaxRetries, apiRetryBaseMs, namespaceUserIds, Optional.empty());
+    }
 
     @Inject
     public SlackConfig(
@@ -51,7 +71,11 @@ public class SlackConfig {
             @ConfigProperty(name = "eddi.slack.group-completion-timeout-seconds",
                             defaultValue = "" + DEFAULT_GROUP_COMPLETION_TIMEOUT_SECONDS) int groupCompletionTimeoutSeconds,
             @ConfigProperty(name = "eddi.slack.api-max-retries", defaultValue = "" + DEFAULT_API_MAX_RETRIES) int apiMaxRetries,
-            @ConfigProperty(name = "eddi.slack.api-retry-base-ms", defaultValue = "" + DEFAULT_API_RETRY_BASE_MS) long apiRetryBaseMs) {
+            @ConfigProperty(name = "eddi.slack.api-retry-base-ms", defaultValue = "" + DEFAULT_API_RETRY_BASE_MS) long apiRetryBaseMs,
+            @ConfigProperty(name = "eddi.slack.namespace-user-ids", defaultValue = "false") boolean namespaceUserIds,
+            @ConfigProperty(name = "eddi.slack.legacy-team-id") Optional<String> legacyTeamId) {
+        this.namespaceUserIds = namespaceUserIds;
+        this.legacyTeamId = legacyTeamId != null ? legacyTeamId.map(String::trim).filter(s -> !s.isEmpty()).orElse(null) : null;
 
         // A non-positive timeout would make every Slack turn fail instantly, and a
         // negative retry budget would skip the first attempt entirely. Fall back to the
@@ -82,5 +106,34 @@ public class SlackConfig {
     /** Base delay for the exponential backoff between API attempts. */
     public long getApiRetryBaseMs() {
         return apiRetryBaseMs;
+    }
+
+    /**
+     * Whether a Slack user is identified in EDDI as {@code slack:<teamId>:<userId>}
+     * rather than by the bare Slack id. Slack ids are unique only within a
+     * workspace, so with several workspaces on one deployment the bare id can name
+     * two different people — who would then share conversations and long-term
+     * memory.
+     * <p>
+     * Off by default: switching an existing deployment over changes every Slack
+     * user's EDDI id, which templates ({@code {userInfo.userId}}), long-term memory
+     * and GDPR requests are keyed by. A multi-workspace deployment opts in; see
+     * {@link #getLegacyTeamId()} for carrying existing memories over.
+     */
+    public boolean isNamespaceUserIds() {
+        return namespaceUserIds;
+    }
+
+    /**
+     * The workspace that bare Slack ids stored before namespacing belonged to, or
+     * {@code null}. When set (or derivable because every routed integration pins
+     * the same {@code teamId} and no legacy Slack connector is routed — derived
+     * from the current configuration only), a user of that workspace keeps their
+     * bare-id threads and has their bare-id long-term memories copied to the
+     * namespaced id on first contact. Without it nothing is aliased: in a
+     * multi-workspace deployment a bare id may already mix two people's data.
+     */
+    public String getLegacyTeamId() {
+        return legacyTeamId;
     }
 }

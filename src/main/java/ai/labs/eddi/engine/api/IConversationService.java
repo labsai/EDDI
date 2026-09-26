@@ -340,7 +340,9 @@ public interface IConversationService {
      *             silently reaching the tool-execution gate with nothing to check.
      * @throws IllegalStateException
      *             wrong-state conflict (not AWAITING_HUMAN, or agent not deployed)
-     *             — maps to HTTP 409; the pause is preserved/restored
+     *             — maps to HTTP 409; the pause is preserved/restored. A
+     *             {@link PauseMismatchException} when {@code decision.pauseId}
+     *             names a pause other than the current one
      * @throws ResourceStoreException
      *             on infrastructure failures (store errors, coordinator saturation)
      *             — maps to HTTP 500; the pause is restored
@@ -455,6 +457,20 @@ public interface IConversationService {
      */
     class ConversationAwaitingApprovalException extends Exception {
         public ConversationAwaitingApprovalException(String message) {
+            super(message);
+        }
+    }
+
+    /**
+     * A decision named a pause ({@code HitlDecision.pauseId}) that is no longer the
+     * conversation's current one — it was resumed and has paused again on a
+     * different request. The decision is refused rather than applied to a request
+     * the reviewer never saw; the current pause is left untouched. Being an
+     * {@link IllegalStateException} it maps to HTTP 409 wherever wrong-state
+     * conflicts already do, while letting a surface say specifically what changed.
+     */
+    class PauseMismatchException extends IllegalStateException {
+        public PauseMismatchException(String message) {
             super(message);
         }
     }

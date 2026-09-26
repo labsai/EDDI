@@ -39,6 +39,16 @@ class SlackHitlSupportTest {
     }
 
     @Test
+    void isAuthorizedApprover_teamScopedEntries() {
+        String list = "U_BARE, T1:U_SCOPED";
+        assertTrue(SlackHitlSupport.isAuthorizedApprover("U_BARE", "T9", list), "a bare entry matches any team");
+        assertTrue(SlackHitlSupport.isAuthorizedApprover("U_SCOPED", "T1", list));
+        assertFalse(SlackHitlSupport.isAuthorizedApprover("U_SCOPED", "T2", list), "same id, other team");
+        assertFalse(SlackHitlSupport.isAuthorizedApprover("U_SCOPED", null, list), "a scoped entry needs a team");
+        assertFalse(SlackHitlSupport.isAuthorizedApprover("U_SCOPED", list), "the two-arg form carries no team");
+    }
+
+    @Test
     void isAuthorizedApprover_failsClosed_whenListUnset() {
         assertFalse(SlackHitlSupport.isAuthorizedApprover("U1", null));
         assertFalse(SlackHitlSupport.isAuthorizedApprover("U1", ""));
@@ -144,6 +154,31 @@ class SlackHitlSupportTest {
         assertEquals("my-int", v.integrationName());
         assertTrue(v.isGroup());
         assertEquals("gc-9", v.groupConversationId());
+    }
+
+    /** H4b: the card carries the id of the pause it was posted for. */
+    @Test
+    void actionValue_pauseId_roundTrips() {
+        String conv = SlackHitlSupport.buildActionValue("my-int", "conv-1", "1700000000123");
+        assertEquals("my-int|conv-1|1700000000123", conv);
+        var v = SlackHitlSupport.parseActionValue(conv);
+        assertEquals("my-int", v.integrationName());
+        assertEquals("conv-1", v.subject());
+        assertEquals("1700000000123", v.pauseId());
+        assertFalse(v.isGroup());
+
+        var g = SlackHitlSupport.parseActionValue(
+                SlackHitlSupport.buildActionValue("my-int", SlackHitlSupport.GROUP_VALUE_PREFIX + "gc-9", "42"));
+        assertTrue(g.isGroup());
+        assertEquals("gc-9", g.groupConversationId());
+        assertEquals("42", g.pauseId());
+    }
+
+    @Test
+    void actionValue_withoutPauseId_parsesToNullPauseId() {
+        // A card posted before pause ids existed — refused by the handler.
+        assertNull(SlackHitlSupport.parseActionValue("my-int|conv-1").pauseId());
+        assertEquals("my-int|conv-1", SlackHitlSupport.buildActionValue("my-int", "conv-1", null));
     }
 
     @Test

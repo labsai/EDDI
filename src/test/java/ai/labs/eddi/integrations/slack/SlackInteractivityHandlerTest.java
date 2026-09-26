@@ -5,12 +5,20 @@
 package ai.labs.eddi.integrations.slack;
 
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
+import ai.labs.eddi.configs.channels.model.ChannelTarget;
+import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
 import ai.labs.eddi.engine.internal.GroupApprovalRequest;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.engine.memory.model.ConversationOutput;
+import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
+import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.HashMap;
@@ -18,6 +26,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -33,21 +44,41 @@ import static org.mockito.Mockito.*;
 class SlackInteractivityHandlerTest {
 
     private static final String INT_NAME = "acme-int";
+    private static final String INT_RES = "int-res-1";
 
     private ChannelTargetRouter router;
     private IConversationService conversationService;
     private IGroupConversationService groupConversationService;
     private SlackWebApiClient slackApi;
+    private IUserConversationStore userConversationStore;
     private SlackInteractivityHandler handler;
 
+    private static final Instant PAUSED_AT = Instant.ofEpochMilli(1_700_000_000_123L);
+    private static final String PAUSE_ID = HitlDecision.pauseIdOf(PAUSED_AT);
+
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         router = mock(ChannelTargetRouter.class);
         conversationService = mock(IConversationService.class);
         groupConversationService = mock(IGroupConversationService.class);
         slackApi = mock(SlackWebApiClient.class);
+        userConversationStore = mock(IUserConversationStore.class);
         handler = new SlackInteractivityHandler(router, conversationService,
-                groupConversationService, slackApi, new ObjectMapper());
+                groupConversationService, slackApi, userConversationStore, new ObjectMapper());
+        // By default every targeted conversation / discussion belongs to INT_NAME and
+        // is in the pause the cards were posted for; individual tests override.
+        when(conversationService.getConversationMemorySnapshot(anyString()))
+                .thenReturn(conversationSnapshot("agent-1", Map.of("channelIntegrationId", INT_RES), PAUSED_AT));
+        when(groupConversationService.readGroupConversation(anyString()))
+                .thenAnswer(inv -> groupConversation(inv.getArgument(0), "group-1", PAUSED_AT));
+        // ...and every discussion was started through INT_NAME (the origin mapping).
+        when(userConversationStore.readUserConversation(startsWith(SlackEventHandler.GROUP_ORIGIN_INTENT_PREFIX),
+                eq(SlackEventHandler.GROUP_ORIGIN_USER_PREFIX + INT_RES)))
+                .thenAnswer(inv -> {
+                    String gcId = ((String) inv.getArgument(0)).substring(SlackEventHandler.GROUP_ORIGIN_INTENT_PREFIX.length());
+                    return new UserConversation(inv.getArgument(0), inv.getArgument(1), Deployment.Environment.production,
+                            "group-1", gcId);
+                });
     }
 
     private ChannelIntegrationConfiguration integrationWith(String name, String approverIds, String signingSecret) {
@@ -63,12 +94,46 @@ class SlackInteractivityHandlerTest {
             pc.put(SlackHitlSupport.CFG_HITL_APPROVER_USER_IDS, approverIds);
         }
         cfg.setPlatformConfig(pc);
+        cfg.setResourceId(INT_RES);
+        var agent = new ChannelTarget();
+        agent.setName("agent");
+        agent.setType(ChannelTarget.TargetType.AGENT);
+        agent.setTargetId("agent-1");
+        var group = new ChannelTarget();
+        group.setName("group");
+        group.setType(ChannelTarget.TargetType.GROUP);
+        group.setTargetId("group-1");
+        cfg.setTargets(List.of(agent, group));
         return cfg;
     }
 
-    /** Value carries the owning integration name: {@code <name>|<subject>}. */
+    private static ConversationMemorySnapshot conversationSnapshot(String agentId, Map<String, Object> startContext,
+                                                                   Instant pausedAt) {
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setAgentId(agentId);
+        snapshot.setConversationState(ConversationState.AWAITING_HUMAN);
+        snapshot.setHitlPausedAt(pausedAt);
+        var output = new ConversationOutput();
+        output.put("context", new HashMap<>(startContext));
+        snapshot.setConversationOutputs(List.of(output));
+        return snapshot;
+    }
+
+    private static GroupConversation groupConversation(String gcId, String groupId, Instant pausedAt) {
+        var gc = new GroupConversation();
+        gc.setId(gcId);
+        gc.setGroupId(groupId);
+        gc.setState(GroupConversation.GroupConversationState.AWAITING_APPROVAL);
+        gc.setPausedAt(pausedAt);
+        return gc;
+    }
+
+    /**
+     * Value carries the owning integration name and the pause id:
+     * {@code <name>|<subject>|<pauseId>}.
+     */
     private String value(String subject) {
-        return SlackHitlSupport.buildActionValue(INT_NAME, subject);
+        return SlackHitlSupport.buildActionValue(INT_NAME, subject, PAUSE_ID);
     }
 
     private String approvePayload(String slackUserId, String value) {
@@ -267,6 +332,245 @@ class SlackInteractivityHandlerTest {
 
         verify(slackApi).updateMessage(anyString(), eq("C_APPROVAL"), anyString(),
                 contains("already been resolved"), any());
+    }
+
+    // ─── H4c: the targeted conversation must belong to the integration ───
+
+    @Test
+    void conversationStartedByAnotherIntegration_isRefused() throws Exception {
+        // An editor can create an integration with their own secret and approver
+        // list. Resuming whichever conversation id their card names would let them
+        // decide every paused conversation in the deployment.
+        bindIntegration(integrationWith(INT_NAME, "U_APPROVER", "s"));
+        when(conversationService.getConversationMemorySnapshot("victim"))
+                .thenReturn(conversationSnapshot("agent-1", Map.of("channelIntegrationId", "res-someone-else"), PAUSED_AT));
+
+        handler.handlePayload(approvePayload("U_APPROVER", value("victim")));
+
+        verify(conversationService, never()).resumeConversation(any(), any(), any());
+        verify(slackApi).postMessage(anyString(), eq("C_APPROVAL"), isNull(), contains("not authorized"));
+    }
+
+    @Test
+    void conversationOfAnAgentThatIsNotATarget_isRefused() throws Exception {
+        bindIntegration(integrationWith(INT_NAME, "U_APPROVER", "s"));
+        when(conversationService.getConversationMemorySnapshot("rest-conv"))
+                .thenReturn(conversationSnapshot("agent-elsewhere", Map.of("channelIntegrationId", INT_RES), PAUSED_AT));
+
+        handler.handlePayload(approvePayload("U_APPROVER", value("rest-conv")));
+
+        verify(conversationService, never()).resumeConversation(any(), any(), any());
+    }
+
+    @Test
+    void conversationSlackNeverStarted_isRefused() throws Exception {
+        // No channel context at all — a REST/MCP conversation of the same agent.
+        bindIntegration(integrationWith(INT_NAME, "U_APPROVER", "s"));
+        when(conversationService.getConversationMemorySnapshot("rest-conv"))
+                .thenReturn(conversationSnapshot("agent-1", Map.of(), PAUSED_AT));
+
+        handler.handlePayload(approvePayload("U_APPROVER", value("rest-conv")));
+
+        verify(conversationService, never()).resumeConversation(any(), any(), any());
+    }
+
+    @Test
+    void preUpgradeConversation_withoutIntegrationId_isRefused() throws Exception {
+        // #4: only the resource id binds. A channelIntent naming the integration's
+        // channel is not enough — that channel id can be freed and claimed by a new
+        // integration, which would then inherit the old paused conversations.
+        bindIntegration(integrationWith(INT_NAME, "U_APPROVER", "s"));
+        when(conversationService.getConversationMemorySnapshot("old-conv")).thenReturn(conversationSnapshot("agent-1",
+                Map.of("channelIntent", "channel:slack:C_MAIN:agent-1:1700.1"), PAUSED_AT));
+
+        handler.handlePayload(approvePayload("U_APPROVER", value("old-conv")));
+
+        verify(conversationService, never()).resumeConversation(any(), any(), any());
+    }
+
+    @Test
+    void sameNameDifferentIntegration_isRefused() throws Exception {
+        // #4: integration renamed/deleted, a new one created under the old name.
+        var impostor = integrationWith(INT_NAME, "U_APPROVER", "s");
+        impostor.setResourceId("int-res-new");
+        bindIntegration(impostor);
+
+        handler.handlePayload(approvePayload("U_APPROVER", value("conv-1")));
+
+        verify(conversationService, never()).resumeConversation(any(), any(), any());
+    }
+
+    @Test
+    void groupStartedElsewhere_isRefused() throws Exception {
+        // #3: the group is one of the integration's targets, but this discussion was
+        // not started through it (REST, another integration, another user).
+        bindIntegration(integrationWith(INT_NAME, "U_APPROVER", "s"));
+        when(userConversationStore.readUserConversation(eq(SlackEventHandler.GROUP_ORIGIN_INTENT_PREFIX + "gc-rest"), anyString()))
+                .thenReturn(null);
+
+        handler.handlePayload(approvePayload("U_APPROVER", value(SlackHitlSupport.GROUP_VALUE_PREFIX + "gc-rest")));
+
+        verify(groupConversationService, never()).resumeDiscussion(any(), any(), any());
+        verify(slackApi).postMessage(anyString(), eq("C_APPROVAL"), isNull(), contains("not authorized"));
+    }
+
+    @Test
+    void approverFromAnotherTeam_isRefusedWhenTheWorkspaceIsPinned() throws Exception {
+        // #5: Slack ids are unique per team; a Slack Connect user whose id collides
+        // with a listed approver must not pass.
+        var cfg = integrationWith(INT_NAME, "U_APPROVER", "s");
+        var pc = cfg.getPlatformConfig();
+        pc.put(ChannelTargetRouter.CFG_TEAM_ID, "T_OWN");
+        cfg.setPlatformConfig(pc);
+        bindIntegration(cfg);
+
+        handler.handlePayload(approvePayloadFromTeam("U_APPROVER", "T_OTHER", "T_OWN", value("conv-1")));
+        verify(conversationService, never()).resumeConversation(any(), any(), any());
+
+        handler.handlePayload(approvePayloadFromTeam("U_APPROVER", "T_OWN", "T_OWN", value("conv-1")));
+        verify(conversationService).resumeConversation(eq("conv-1"), any(), isNull());
+    }
+
+    @Test
+    void teamScopedApproverEntry_matchesOnlyThatTeam() throws Exception {
+        bindIntegration(integrationWith(INT_NAME, "T_OWN:U_APPROVER", "s"));
+
+        handler.handlePayload(approvePayloadFromTeam("U_APPROVER", "T_OTHER", null, value("conv-1")));
+        verify(conversationService, never()).resumeConversation(any(), any(), any());
+
+        handler.handlePayload(approvePayloadFromTeam("U_APPROVER", "T_OWN", null, value("conv-1")));
+        verify(conversationService).resumeConversation(eq("conv-1"), any(), isNull());
+    }
+
+    private String approvePayloadFromTeam(String slackUserId, String userTeam, String team, String value) {
+        return """
+                {"type":"block_actions",%s
+                 "user":{"id":"%s","team_id":"%s"},
+                 "channel":{"id":"C_APPROVAL"},
+                 "message":{"ts":"1700000000.000100"},
+                 "actions":[{"action_id":"hitl_approve","value":"%s"}]}
+                """.formatted(team != null ? "\"team\":{\"id\":\"" + team + "\"}," : "", slackUserId, userTeam, value);
+    }
+
+    @Test
+    void groupWhoseGroupIsNotATarget_isRefused() throws Exception {
+        bindIntegration(integrationWith(INT_NAME, "U_APPROVER", "s"));
+        when(groupConversationService.readGroupConversation("gc-x")).thenReturn(groupConversation("gc-x", "group-other", PAUSED_AT));
+
+        handler.handlePayload(approvePayload("U_APPROVER", value(SlackHitlSupport.GROUP_VALUE_PREFIX + "gc-x")));
+
+        verify(groupConversationService, never()).resumeDiscussion(any(), any(), any());
+    }
+
+    // ─── H4b: a card is bound to its pause ───
+
+    @Test
+    void decisionCarriesThePauseIdToTheResume() throws Exception {
+        bindIntegration(integrationWith(INT_NAME, "U_APPROVER", "s"));
+
+        handler.handlePayload(approvePayload("U_APPROVER", value("conv-1")));
+
+        ArgumentCaptor<HitlDecision> captor = ArgumentCaptor.forClass(HitlDecision.class);
+        verify(conversationService).resumeConversation(eq("conv-1"), captor.capture(), isNull());
+        // The engine re-checks it under the CAS — the authoritative check.
+        assertEquals(PAUSE_ID, captor.getValue().getPauseId());
+    }
+
+    @Test
+    void staleCard_forAnEarlierPause_doesNotApproveTheCurrentOne() throws Exception {
+        bindIntegration(integrationWith(INT_NAME, "U_APPROVER", "s"));
+        when(conversationService.getConversationMemorySnapshot("conv-1")).thenReturn(conversationSnapshot("agent-1",
+                Map.of("channelIntegrationId", INT_RES), PAUSED_AT.plusSeconds(60)));
+
+        handler.handlePayload(approvePayload("U_APPROVER", value("conv-1")));
+
+        verify(conversationService, never()).resumeConversation(any(), any(), any());
+        verify(slackApi).updateMessage(anyString(), eq("C_APPROVAL"), anyString(), contains("out of date"), any());
+    }
+
+    @Test
+    void cardForAnAlreadyResolvedConversation_isMarkedResolved_notOutOfDate() throws Exception {
+        // A second approver clicks after the first approved: the conversation is no
+        // longer paused and its bookmark is cleared. That is "already resolved", which
+        // the engine's state conflict reports — not "out of date".
+        bindIntegration(integrationWith(INT_NAME, "U_APPROVER", "s"));
+        var resolved = conversationSnapshot("agent-1", Map.of("channelIntegrationId", INT_RES), null);
+        resolved.setConversationState(ConversationState.READY);
+        when(conversationService.getConversationMemorySnapshot("conv-1")).thenReturn(resolved);
+        doThrow(new IllegalStateException("Conversation is not in AWAITING_HUMAN state (current: READY)"))
+                .when(conversationService).resumeConversation(eq("conv-1"), any(), isNull());
+
+        handler.handlePayload(approvePayload("U_APPROVER", value("conv-1")));
+
+        verify(slackApi).updateMessage(anyString(), eq("C_APPROVAL"), anyString(), contains("already been resolved"), any());
+        verify(slackApi, never()).updateMessage(anyString(), anyString(), anyString(), contains("out of date"), any());
+    }
+
+    @Test
+    void cardForAnAlreadyResolvedGroup_isMarkedResolved_notOutOfDate() throws Exception {
+        bindIntegration(integrationWith(INT_NAME, "U_APPROVER", "s"));
+        var resolved = groupConversation("gc-7", "group-1", null);
+        resolved.setState(GroupConversation.GroupConversationState.IN_PROGRESS);
+        when(groupConversationService.readGroupConversation("gc-7")).thenReturn(resolved);
+        doThrow(new GroupDiscussionException("Group conversation is not awaiting approval"))
+                .when(groupConversationService).resumeDiscussion(eq("gc-7"), any(), isNull());
+
+        handler.handlePayload(approvePayload("U_APPROVER", value(SlackHitlSupport.GROUP_VALUE_PREFIX + "gc-7")));
+
+        verify(slackApi).updateMessage(anyString(), eq("C_APPROVAL"), anyString(), contains("already been resolved"), any());
+        verify(slackApi, never()).updateMessage(anyString(), anyString(), anyString(), contains("out of date"), any());
+    }
+
+    @Test
+    void engineRefusal_ofAChangedPause_marksTheCardOutOfDate() throws Exception {
+        bindIntegration(integrationWith(INT_NAME, "U_APPROVER", "s"));
+        doThrow(new IConversationService.PauseMismatchException("changed"))
+                .when(conversationService).resumeConversation(eq("conv-1"), any(), isNull());
+
+        handler.handlePayload(approvePayload("U_APPROVER", value("conv-1")));
+
+        verify(slackApi).updateMessage(anyString(), eq("C_APPROVAL"), anyString(), contains("out of date"), any());
+    }
+
+    @Test
+    void cardWithoutPauseId_isRefused() throws Exception {
+        bindIntegration(integrationWith(INT_NAME, "U_APPROVER", "s"));
+
+        handler.handlePayload(approvePayload("U_APPROVER", SlackHitlSupport.buildActionValue(INT_NAME, "conv-1")));
+
+        verify(conversationService, never()).resumeConversation(any(), any(), any());
+        verify(slackApi).updateMessage(anyString(), eq("C_APPROVAL"), anyString(), contains("out of date"), any());
+    }
+
+    @Test
+    void staleGroupCard_isRefused() throws Exception {
+        bindIntegration(integrationWith(INT_NAME, "U_APPROVER", "s"));
+        when(groupConversationService.readGroupConversation("gc-7")).thenReturn(groupConversation("gc-7", "group-1",
+                PAUSED_AT.plusSeconds(5)));
+
+        handler.handlePayload(approvePayload("U_APPROVER", value(SlackHitlSupport.GROUP_VALUE_PREFIX + "gc-7")));
+
+        verify(groupConversationService, never()).resumeDiscussion(any(), any(), any());
+    }
+
+    // ─── Pinned workspace / app ───
+
+    @Test
+    void pinnedTeamId_mismatch_isIgnored() throws Exception {
+        var cfg = integrationWith(INT_NAME, "U_APPROVER", "s");
+        var pc = cfg.getPlatformConfig();
+        pc.put(ChannelTargetRouter.CFG_TEAM_ID, "T_OWN");
+        cfg.setPlatformConfig(pc);
+        bindIntegration(cfg);
+        String payload = """
+                {"type":"block_actions","team":{"id":"T_FOREIGN"},
+                 "user":{"id":"U_APPROVER"},"channel":{"id":"C_APPROVAL"},"message":{"ts":"1.2"},
+                 "actions":[{"action_id":"hitl_approve","value":"%s"}]}
+                """.formatted(value("conv-1"));
+
+        handler.handlePayload(payload);
+
+        verify(conversationService, never()).resumeConversation(any(), any(), any());
     }
 
     // ─── Ignored payloads ───

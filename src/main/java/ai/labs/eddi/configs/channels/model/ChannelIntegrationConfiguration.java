@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.channels.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.util.ArrayList;
@@ -30,6 +31,7 @@ public class ChannelIntegrationConfiguration {
     private Map<String, String> platformConfig;
     private List<ChannelTarget> targets;
     private String defaultTargetName;
+    private transient String resourceId;
 
     public ChannelIntegrationConfiguration() {
         this.platformConfig = new HashMap<>();
@@ -66,8 +68,11 @@ public class ChannelIntegrationConfiguration {
      * Platform-specific credentials and identifiers. Keys depend on
      * {@link #channelType}:
      * <ul>
-     * <li><b>slack:</b> {@code channelId}, {@code botToken},
-     * {@code signingSecret}</li>
+     * <li><b>slack:</b> {@code channelId}, {@code botToken}, {@code signingSecret};
+     * optionally {@code teamId} and {@code appId} — when set, inbound events and
+     * approval clicks must carry that {@code team_id} / {@code api_app_id} (an
+     * event is always bound to the integration whose own {@code signingSecret}
+     * verified it)</li>
      * <li><b>teams:</b> {@code channelId}, {@code appId}, {@code appPassword},
      * {@code serviceUrl}</li>
      * <li><b>discord:</b> {@code guildId}, {@code channelId}, {@code botToken},
@@ -119,5 +124,24 @@ public class ChannelIntegrationConfiguration {
 
     public void setDefaultTargetName(String defaultTargetName) {
         this.defaultTargetName = defaultTargetName;
+    }
+
+    /**
+     * The store resource id of this integration, set by the channel router on its
+     * cached copies. Runtime-only — never stored, never serialized — so a stored
+     * document or REST body cannot carry one.
+     * <p>
+     * It is what a Slack-started conversation or discussion records as the
+     * integration that started it: unlike the name, it cannot be renamed onto or
+     * reused by a different integration.
+     */
+    @JsonIgnore
+    public String getResourceId() {
+        return resourceId;
+    }
+
+    @JsonIgnore
+    public void setResourceId(String resourceId) {
+        this.resourceId = resourceId;
     }
 }

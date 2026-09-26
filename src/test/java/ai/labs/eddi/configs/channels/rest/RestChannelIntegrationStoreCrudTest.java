@@ -385,6 +385,48 @@ class RestChannelIntegrationStoreCrudTest {
         }
 
         @Test
+        @DisplayName("should reject a name another routed integration of the type already uses")
+        void duplicateNameOfRoutedIntegration() throws Exception {
+            // The name binds a Slack approval decision to its integration: two
+            // routed integrations sharing it would let either govern the other's.
+            var config = validConfig();
+            config.setPlatformConfig(new HashMap<>(Map.of("channelId", "C-NEW")));
+
+            var descriptor = new DocumentDescriptor();
+            descriptor.setResource(URI.create("eddi://ai.labs.channel/channelstore/channels/aabbccddeeff112233445566?version=1"));
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.channel"), eq(""), eq(0), eq(IDescriptorStore.NO_LIMIT), eq(false)))
+                    .thenReturn(List.of(descriptor));
+            var existing = validConfig();
+            existing.setName(config.getName());
+            existing.setPlatformConfig(Map.of("channelId", "C-OTHER"));
+            when(channelStore.read("aabbccddeeff112233445566", 1)).thenReturn(existing);
+
+            var ex = assertThrows(BadRequestException.class, () -> sut.createChannel(config));
+            assertTrue(ex.getMessage().contains("name is not available"));
+            // Generic: it must not name the integration that holds the name.
+            assertFalse(ex.getMessage().contains("Other"));
+        }
+
+        @Test
+        @DisplayName("a same-named integration that is not routed (no channelId, e.g. a duplicate) does not block")
+        void duplicateNameOfUnroutedIntegrationAllowed() throws Exception {
+            var config = validConfig();
+            config.setPlatformConfig(new HashMap<>(Map.of("channelId", "C-NEW")));
+
+            var descriptor = new DocumentDescriptor();
+            descriptor.setResource(URI.create("eddi://ai.labs.channel/channelstore/channels/aabbccddeeff112233445566?version=1"));
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.channel"), eq(""), eq(0), eq(IDescriptorStore.NO_LIMIT), eq(false)))
+                    .thenReturn(List.of(descriptor));
+            var existing = validConfig();
+            existing.setName(config.getName());
+            existing.setPlatformConfig(Map.of());
+            when(channelStore.read("aabbccddeeff112233445566", 1)).thenReturn(existing);
+            when(channelStore.create(any())).thenReturn(dummyResourceId("newChan12345678901", 1));
+
+            assertDoesNotThrow(() -> sut.createChannel(config));
+        }
+
+        @Test
         @DisplayName("should allow channelId when config is the same document being updated")
         void sameDocumentOnUpdate() throws Exception {
             var config = validConfig();

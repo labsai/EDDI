@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionType;
 import ai.labs.eddi.configs.groups.model.GroupConversation.Dissent;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
+import java.time.Instant;
 import java.util.ArrayList;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -396,7 +397,8 @@ class SlackGroupDiscussionListenerTest {
                 "C_APPROVAL", "U1,U2", "acme-int");
         withHitl.onGroupStart(groupStart("ROUND_TABLE", 2));
 
-        withHitl.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(0, "Phase 1", "sign-off", "phase"));
+        withHitl.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(0, "Phase 1", "sign-off", "phase",
+                Instant.ofEpochMilli(4_242L)));
 
         var blocksCaptor = org.mockito.ArgumentCaptor.forClass(List.class);
         verify(slackApi).postBlocksMessage(eq(AUTH_TOKEN), eq("C_APPROVAL"), isNull(), blocksCaptor.capture(), anyString());
@@ -409,6 +411,21 @@ class SlackGroupDiscussionListenerTest {
         var parsed = SlackHitlSupport.parseActionValue(value);
         assertEquals("acme-int", parsed.integrationName());
         assertTrue(parsed.isGroup());
+        // H4b: bound to THIS pause, so the card cannot approve a later one.
+        assertEquals("4242", parsed.pauseId());
+    }
+
+    @Test
+    void onHitlPause_unknownPauseStart_rendersNoButtons() {
+        var withHitl = new SlackGroupDiscussionListener(slackApi, AUTH_TOKEN, CHANNEL, USER_THREAD,
+                "C_APPROVAL", "U1,U2", "acme-int");
+        withHitl.onGroupStart(groupStart("ROUND_TABLE", 2));
+
+        withHitl.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(0, "Phase 1", "sign-off", "phase"));
+
+        var blocksCaptor = org.mockito.ArgumentCaptor.forClass(List.class);
+        verify(slackApi).postBlocksMessage(eq(AUTH_TOKEN), eq("C_APPROVAL"), isNull(), blocksCaptor.capture(), anyString());
+        assertFalse(blocksCaptor.getValue().toString().contains(SlackHitlSupport.ACTION_APPROVE));
     }
 
     @Test

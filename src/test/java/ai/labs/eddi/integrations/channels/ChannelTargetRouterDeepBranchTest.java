@@ -298,10 +298,11 @@ class ChannelTargetRouterDeepBranchTest {
         @DisplayName("matching integration → resolves")
         void matchingIntegration() throws Exception {
             var defaultTarget = createTarget("default", List.of());
-            var integration = createIntegration("default", List.of(defaultTarget), Map.of("channelId", "C123"));
+            var integration = createIntegration("default", List.of(defaultTarget),
+                    Map.of("channelId", "C123", "signingSecret", "sig"));
             setField(router, "integrationMap", Map.of("slack:C123", integration));
 
-            var result = router.resolveDefaultForDm("slack", "hello there");
+            var result = router.resolveDefaultForDm("slack", "hello there", "sig", Map.of());
             assertNotNull(result);
         }
 
@@ -311,7 +312,7 @@ class ChannelTargetRouterDeepBranchTest {
             var legacyMap = Map.of("C123", new LegacyTarget("agent1", "token", "secret", null));
             setField(router, "legacyMap", legacyMap);
 
-            var result = router.resolveDefaultForDm("slack", "hello");
+            var result = router.resolveDefaultForDm("slack", "hello", "secret", Map.of());
             assertNotNull(result);
         }
 
@@ -321,7 +322,7 @@ class ChannelTargetRouterDeepBranchTest {
             var legacyMap = Map.of("C123", new LegacyTarget("agent1", "token", "secret", null));
             setField(router, "legacyMap", legacyMap);
 
-            assertNull(router.resolveDefaultForDm("slack", "  "));
+            assertNull(router.resolveDefaultForDm("slack", "  ", "secret", Map.of()));
         }
 
         @Test
@@ -330,7 +331,190 @@ class ChannelTargetRouterDeepBranchTest {
             var legacyMap = Map.of("C123", new LegacyTarget("agent1", "token", "secret", null));
             setField(router, "legacyMap", legacyMap);
 
-            assertNull(router.resolveDefaultForDm("slack", "help"));
+            assertNull(router.resolveDefaultForDm("slack", "help", "secret", Map.of()));
+        }
+
+        // H4d: a DM is attributed by the credentials that authenticated it, never by
+        // map position.
+
+        @Test
+        @DisplayName("H4d: a DM signed by another app's secret reaches no integration")
+        void foreignSecretResolvesNothing() throws Exception {
+            var integration = createIntegration("default", List.of(createTarget("default", List.of())),
+                    Map.of("channelId", "C123", "signingSecret", "sig-a"));
+            setField(router, "integrationMap", Map.of("slack:C123", integration));
+            setField(router, "legacyMap", Map.of("C9", new LegacyTarget("agent1", "token", "sig-legacy", null)));
+
+            assertNull(router.resolveDefaultForDm("slack", "hello", "sig-b", Map.of()));
+        }
+
+        @Test
+        @DisplayName("H4d: the integration whose secret verified the DM answers it, whatever the map order")
+        void secretSelectsTheIntegration() throws Exception {
+            var targetA = createTarget("default", List.of());
+            targetA.setTargetId("agent-a");
+            var a = createIntegration("default", List.of(targetA), Map.of("channelId", "CA", "signingSecret", "sig-a"));
+            a.setName("app-a");
+            var targetB = createTarget("default", List.of());
+            targetB.setTargetId("agent-b");
+            var b = createIntegration("default", List.of(targetB), Map.of("channelId", "CB", "signingSecret", "sig-b"));
+            b.setName("app-b");
+            setField(router, "integrationMap", Map.of("slack:CA", a, "slack:CB", b));
+
+            assertEquals("agent-a", router.resolveDefaultForDm("slack", "hi", "sig-a", Map.of()).target().getTargetId());
+            assertEquals("agent-b", router.resolveDefaultForDm("slack", "hi", "sig-b", Map.of()).target().getTargetId());
+        }
+
+        @Test
+        @DisplayName("H4d: several integrations of one app → the one pinning the team wins, then the lowest name")
+        void deterministicAmongOneApp() throws Exception {
+            var t1 = createTarget("default", List.of());
+            t1.setTargetId("agent-zeta");
+            var zeta = createIntegration("default", List.of(t1), Map.of("channelId", "C1", "signingSecret", "sig"));
+            zeta.setName("zeta");
+            var t2 = createTarget("default", List.of());
+            t2.setTargetId("agent-alpha");
+            var alpha = createIntegration("default", List.of(t2), Map.of("channelId", "C2", "signingSecret", "sig"));
+            alpha.setName("alpha");
+            setField(router, "integrationMap", Map.of("slack:C1", zeta, "slack:C2", alpha));
+
+            assertEquals("agent-alpha", router.resolveDefaultForDm("slack", "hi", "sig", Map.of()).target().getTargetId());
+
+            var t3 = createTarget("default", List.of());
+            t3.setTargetId("agent-pinned");
+            var pinned = createIntegration("default", List.of(t3),
+                    Map.of("channelId", "C3", "signingSecret", "sig", ChannelTargetRouter.CFG_TEAM_ID, "T1"));
+            pinned.setName("zzz-pinned");
+            setField(router, "integrationMap", Map.of("slack:C1", zeta, "slack:C2", alpha, "slack:C3", pinned));
+
+            assertEquals("agent-pinned", router.resolveDefaultForDm("slack", "hi", "sig",
+                    Map.of(ChannelTargetRouter.CFG_TEAM_ID, "T1")).target().getTargetId());
+        }
+
+        @Test
+        @DisplayName("a pinned team or app id that the envelope contradicts excludes the integration")
+        void pinnedIdentifierMismatchExcludes() throws Exception {
+            var integration = createIntegration("default", List.of(createTarget("default", List.of())),
+                    Map.of("channelId", "C123", "signingSecret", "sig", ChannelTargetRouter.CFG_TEAM_ID, "T1"));
+            setField(router, "integrationMap", Map.of("slack:C123", integration));
+
+            assertNull(router.resolveDefaultForDm("slack", "hi", "sig", Map.of(ChannelTargetRouter.CFG_TEAM_ID, "T2")));
+            // A pinned id the envelope does not carry fails closed, too.
+            assertNull(router.resolveDefaultForDm("slack", "hi", "sig", Map.of()));
+        }
+    }
+
+    // ─── Inbound binding (H4a) ──────────────────────────────────────────
+
+    @Nested
+    @DisplayName("matchesInbound / channelMatchesInbound")
+    class InboundBinding {
+
+        @Test
+        @DisplayName("only the integration's own signing secret matches")
+        void secretMustBeTheIntegrations() {
+            var integration = createIntegration("default", List.of(), Map.of("signingSecret", "sig-a"));
+            assertTrue(ChannelTargetRouter.matchesInbound(integration, "sig-a", Map.of()));
+            assertFalse(ChannelTargetRouter.matchesInbound(integration, "sig-b", Map.of()));
+            assertFalse(ChannelTargetRouter.matchesInbound(integration, null, Map.of()));
+            assertFalse(ChannelTargetRouter.matchesInbound(
+                    createIntegration("default", List.of(), Map.of()), "sig-a", Map.of()));
+        }
+
+        @Test
+        @DisplayName("a resolved legacy target matches on its legacy secret")
+        void legacyResolvedTarget() {
+            var resolved = new ResolvedTarget(createTarget("default", List.of()), "m", null, "tok", "sig-l");
+            assertTrue(ChannelTargetRouter.matchesInbound(resolved, "sig-l", Map.of()));
+            assertFalse(ChannelTargetRouter.matchesInbound(resolved, "sig-x", Map.of()));
+        }
+
+        @Test
+        @DisplayName("a channel is accepted only for the app of the integration that serves it")
+        void channelBinding() throws Exception {
+            var integration = createIntegration("default", List.of(), Map.of("channelId", "C1", "signingSecret", "sig-a"));
+            setField(router, "integrationMap", Map.of("slack:C1", integration));
+            setField(router, "legacyMap", Map.of("C2", new LegacyTarget("agent", "tok", "sig-l", null)));
+
+            assertTrue(router.channelMatchesInbound("slack", "C1", "sig-a", Map.of()));
+            assertFalse(router.channelMatchesInbound("slack", "C1", "sig-l", Map.of()));
+            assertTrue(router.channelMatchesInbound("slack", "C2", "sig-l", Map.of()));
+            assertFalse(router.channelMatchesInbound("slack", "C2", "sig-a", Map.of()));
+            assertFalse(router.channelMatchesInbound("slack", "C-unknown", "sig-a", Map.of()));
+        }
+
+        @Test
+        @DisplayName("#1: DM thread credentials only from an integration that has the locked target")
+        void dmThreadCredentialsRequireTheLockedTarget() throws Exception {
+            var targetOfB = createTarget("default", List.of());
+            targetOfB.setTargetId("agent-b");
+            var targetOfA = createTarget("default", List.of());
+            targetOfA.setTargetId("agent-a");
+            var a = createIntegration("default", List.of(targetOfA), Map.of("channelId", "CA", "signingSecret", "sig-a"));
+            a.setName("app-a");
+            var b = createIntegration("default", List.of(targetOfB), Map.of("channelId", "CB", "signingSecret", "sig-b"));
+            b.setName("app-b");
+            setField(router, "integrationMap", Map.of("slack:CA", a, "slack:CB", b));
+
+            // App A's secret cannot pick up a thread locked to app B's agent.
+            assertNull(router.threadCredentialsForDm("slack", targetOfB, "sig-a", Map.of()));
+            var own = router.threadCredentialsForDm("slack", targetOfB, "sig-b", Map.of());
+            assertNotNull(own);
+            assertEquals("app-b", own.integration().getName());
+            assertEquals(targetOfB, own.target());
+        }
+
+        @Test
+        @DisplayName("#7: a legacy connector's DM thread gets its own credentials")
+        void dmThreadCredentialsFromLegacyConnector() throws Exception {
+            var legacy = new LegacyTarget("agent-l", "xoxb-l", "sig-l", null);
+            setField(router, "legacyMap", Map.of("C9", legacy));
+
+            var resolved = router.threadCredentialsForDm("slack", legacy.toChannelTarget(), "sig-l", Map.of());
+            assertNotNull(resolved);
+            assertEquals("xoxb-l", resolved.botToken());
+            assertTrue(ChannelTargetRouter.matchesInbound(resolved, "sig-l", Map.of()));
+            assertNull(router.threadCredentialsForDm("slack", legacy.toChannelTarget(), "sig-other", Map.of()));
+        }
+
+        @Test
+        @DisplayName("the common pinned team is derived only when every routed integration pins the same one")
+        void commonPinnedTeam() throws Exception {
+            var t1 = createIntegration("default", List.of(), Map.of("channelId", "C1", ChannelTargetRouter.CFG_TEAM_ID, "T1"));
+            var t1b = createIntegration("default", List.of(), Map.of("channelId", "C2", ChannelTargetRouter.CFG_TEAM_ID, "T1"));
+            var t2 = createIntegration("default", List.of(), Map.of("channelId", "C3", ChannelTargetRouter.CFG_TEAM_ID, "T2"));
+            var none = createIntegration("default", List.of(), Map.of("channelId", "C4"));
+
+            setField(router, "integrationMap", Map.of("slack:C1", t1, "slack:C2", t1b));
+            assertEquals("T1", router.commonPinnedTeamId("slack"));
+            setField(router, "integrationMap", Map.of("slack:C1", t1, "slack:C3", t2));
+            assertNull(router.commonPinnedTeamId("slack"));
+            setField(router, "integrationMap", Map.of("slack:C1", t1, "slack:C4", none));
+            assertNull(router.commonPinnedTeamId("slack"));
+        }
+
+        @Test
+        @DisplayName("a routed legacy Slack connector pins no workspace → no common team is derived")
+        void commonPinnedTeamWithLegacyConnector() throws Exception {
+            var t1 = createIntegration("default", List.of(), Map.of("channelId", "C1", ChannelTargetRouter.CFG_TEAM_ID, "T1"));
+            var t1b = createIntegration("default", List.of(), Map.of("channelId", "C2", ChannelTargetRouter.CFG_TEAM_ID, "T1"));
+            setField(router, "integrationMap", Map.of("slack:C1", t1, "slack:C2", t1b));
+            setField(router, "legacyMap", Map.of("C9", new LegacyTarget("agent-l", "xoxb-l", "sig-l", null)));
+
+            // Every new-style integration pins T1, but the legacy connector may serve T2:
+            // its users' bare ids must not be read as T1's.
+            assertNull(router.commonPinnedTeamId("slack"));
+            assertNull(router.commonPinnedTeamId("SLACK"));
+        }
+
+        @Test
+        @DisplayName("two integrations with one name → getIntegrationByName binds to neither")
+        void duplicateNameIsAmbiguous() throws Exception {
+            var a = createIntegration("default", List.of(), Map.of("channelId", "C1", "signingSecret", "sig-a"));
+            var b = createIntegration("default", List.of(), Map.of("channelId", "C2", "signingSecret", "sig-b"));
+            setField(router, "integrationMap", Map.of("slack:C1", a, "slack:C2", b));
+
+            assertTrue(router.getIntegrationByName("slack", "test-integration").isEmpty());
         }
     }
 

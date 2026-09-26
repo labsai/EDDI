@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Instant;
 import static org.junit.jupiter.api.Assertions.*;
 
 @DisplayName("HitlDecision")
@@ -196,6 +197,45 @@ class HitlDecisionTest {
         void mixedCaseVerdictBodyDeserializes() throws Exception {
             var decision = mapper.readValue("{\"verdict\":\"Rejected\"}", HitlDecision.class);
             assertEquals(HitlVerdict.REJECTED, decision.getVerdict());
+        }
+
+        @Test
+        @DisplayName("request body may name the pause it decides")
+        void pauseIdDeserializes() throws Exception {
+            var decision = mapper.readValue("{\"verdict\":\"APPROVED\",\"pauseId\":\"1700000000123\"}", HitlDecision.class);
+            assertEquals("1700000000123", decision.getPauseId());
+        }
+    }
+
+    @Nested
+    @DisplayName("pause binding (H4b)")
+    class PauseBinding {
+
+        @Test
+        @DisplayName("the pause id is the pause start's epoch milliseconds — stable across a store round trip")
+        void pauseIdIsEpochMillis() {
+            assertEquals("1700000000123", HitlDecision.pauseIdOf(Instant.ofEpochMilli(1_700_000_000_123L)));
+            // Sub-millisecond precision (an in-memory Instant.now()) does not change it.
+            assertEquals("1700000000123",
+                    HitlDecision.pauseIdOf(Instant.ofEpochMilli(1_700_000_000_123L).plusNanos(456_789)));
+            assertNull(HitlDecision.pauseIdOf(null));
+        }
+
+        @Test
+        @DisplayName("no pause id → applies to any pause (the pre-existing contract)")
+        void unboundDecisionAppliesToAnyPause() {
+            assertTrue(decision.appliesToPause(Instant.now()));
+            assertTrue(decision.appliesToPause(null));
+        }
+
+        @Test
+        @DisplayName("a pause id applies only to that pause")
+        void boundDecisionAppliesOnlyToItsPause() {
+            var pausedAt = Instant.ofEpochMilli(5_000L);
+            decision.setPauseId(HitlDecision.pauseIdOf(pausedAt));
+            assertTrue(decision.appliesToPause(pausedAt));
+            assertFalse(decision.appliesToPause(pausedAt.plusMillis(1)));
+            assertFalse(decision.appliesToPause(null));
         }
     }
 }

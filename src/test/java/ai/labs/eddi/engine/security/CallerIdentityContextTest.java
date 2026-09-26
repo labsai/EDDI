@@ -27,6 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -101,6 +102,57 @@ class CallerIdentityContextTest {
         var resolver = new CallerIdentityResolver(context, true);
         assertThrows(CallerIdentityResolver.CallerIdentityException.class,
                 () -> resolver.resolveValue("Bearer ${caller:token}", URI.create("https://eddi.example/x")));
+    }
+
+    // ─── H5: the approver of a HITL resume ───
+
+    @Test
+    @DisplayName("H5: the approver is the caller only inside callAsApprover — not for the rest of the turn")
+    void approverIsScopedToApprovedCalls() throws Exception {
+        var approver = new CallerIdentity("admin-token", "admin", "https://eddi.example:443");
+
+        Callable<CallerIdentity[]> turn = context.withIdentity(null, context.withApprover(approver, () -> new CallerIdentity[]{
+                context.current(),
+                context.callAsApprover(context::current),
+                context.current()}));
+        CallerIdentity[] seen = turn.call();
+
+        assertNull(seen[0], "before the approved call the turn has no caller");
+        assertEquals(approver, seen[1], "the approved call runs as the approver");
+        assertNull(seen[2], "after it the turn has no caller again");
+        assertNull(context.approver(), "the approver binding is restored after the turn");
+    }
+
+    @Test
+    @DisplayName("callAsApprover with no approver bound keeps the turn's own caller")
+    void callAsApproverWithoutApprover() {
+        var owner = new CallerIdentity("owner-token", "owner", "https://eddi.example:443");
+        context.bind(owner);
+        assertEquals(owner, context.callAsApprover(context::current));
+    }
+
+    @Test
+    @DisplayName("propagate() carries the approver binding across a thread hop")
+    void propagateCarriesTheApprover() throws Exception {
+        var approver = new CallerIdentity("admin-token", "admin", "https://eddi.example:443");
+        var executor = Executors.newSingleThreadExecutor();
+        try {
+            CallerIdentity seen = context.withApprover(approver, () -> executor.submit(
+                    context.propagate(() -> context.callAsApprover(context::current))).get()).call();
+            assertEquals(approver, seen);
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void isSameUser() {
+        var alice = new CallerIdentity("t", "alice", "https://eddi.example:443");
+        assertTrue(CallerIdentityContext.isSameUser(alice, "alice"));
+        assertFalse(CallerIdentityContext.isSameUser(alice, "bob"));
+        assertFalse(CallerIdentityContext.isSameUser(alice, null));
+        assertFalse(CallerIdentityContext.isSameUser(null, "alice"));
+        assertFalse(CallerIdentityContext.isSameUser(new CallerIdentity("t", null, null), null));
     }
 
     @Test

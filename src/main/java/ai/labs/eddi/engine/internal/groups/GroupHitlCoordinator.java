@@ -20,6 +20,7 @@ import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
+import ai.labs.eddi.engine.api.IGroupConversationService.GroupPauseMismatchException;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
@@ -31,6 +32,7 @@ import ai.labs.eddi.engine.lifecycle.model.DiscussionControlToken;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
+import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.utils.LogSanitizer;
 import io.micrometer.core.instrument.Counter;
@@ -209,7 +211,7 @@ public class GroupHitlCoordinator {
 
         if (listener != null) {
             listener.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(
-                    phaseIdx, phase.name(), gc.getHitlPauseReason(), granularity));
+                    phaseIdx, phase.name(), gc.getHitlPauseReason(), granularity, gc.getPausedAt()));
         }
     }
 
@@ -480,6 +482,14 @@ public class GroupHitlCoordinator {
         return true;
     }
 
+    /**
+     * The caller a resumed discussion runs as: the approver when they started the
+     * discussion, otherwise nobody (H5).
+     */
+    static CallerIdentity resumeCallerFor(CallerIdentity approver, GroupConversation gc) {
+        return CallerIdentityContext.isSameUser(approver, gc.getUserId()) ? approver : null;
+    }
+
     public GroupConversation resumeDiscussion(String groupConversationId, GroupApprovalRequest request,
                                               GroupDiscussionEventListener listener)
             throws GroupDiscussionException, IResourceStore.ResourceStoreException,
@@ -494,6 +504,13 @@ public class GroupHitlCoordinator {
         var gc = GroupConversationSchemaMigrations.prepareForResume(conversationStore.read(groupConversationId));
         if (gc.getState() != GroupConversationState.AWAITING_APPROVAL) {
             throw new GroupDiscussionException("Group conversation is not awaiting approval");
+        }
+        // A decision made for an earlier pause (HitlDecision.pauseId) must not
+        // approve this one — the discussion was resumed and has paused again on
+        // something the reviewer never saw.
+        if (request.getDecision() != null && !request.getDecision().appliesToPause(gc.getPausedAt())) {
+            throw new GroupPauseMismatchException("The pending approval changed since this decision was made — "
+                    + "review the current pause and decide again");
         }
 
         // Apply task-level approvals if present
@@ -855,7 +872,14 @@ public class GroupHitlCoordinator {
             }
         };
         try {
-            executorService.submit(callerIdentityContext.withIdentity(callerIdentityContext.captureOrCurrent(), resumeWork));
+            // The approver's identity carries the rest of the discussion only when the
+            // approver started it. An admin or eddi-approver deciding someone else's
+            // discussion saw the pause and nothing after it, so the member turns that
+            // follow run with no caller — a ${caller:token} call fails closed rather
+            // than going out with the approver's token (same rule as a conversation
+            // resume, ConversationHitlService).
+            executorService.submit(callerIdentityContext.withIdentity(
+                    resumeCallerFor(callerIdentityContext.captureOrCurrent(), gc), resumeWork));
         } catch (RuntimeException e) {
             // Executor saturated/shut down — no thread will run the resume. The CAS
             // above already consumed the pause; restore it so the approval remains
