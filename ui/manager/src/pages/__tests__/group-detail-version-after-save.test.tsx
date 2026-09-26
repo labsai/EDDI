@@ -103,8 +103,9 @@ describe("GroupDetailPage — after an inline save", () => {
 
     await toggleApproval(user);
     await waitFor(() => expect(current).toBe(2));
-    // The edit stays on screen: the panel summarises the approval point.
-    await waitFor(() => expect(screen.getAllByText("Synthesis").length).toBeGreaterThan(0));
+    // The edit stays on screen: the panel summarises the new approval point
+    // (on the pre-save version there is none to summarise).
+    await waitFor(() => expect(screen.getAllByText("Approval at").length).toBeGreaterThan(0));
 
     await toggleApproval(user);
     await waitFor(() => expect(current).toBe(3));
@@ -120,6 +121,7 @@ describe("GroupDetailPage — after an inline save", () => {
 
     await toggleApproval(user);
     await waitFor(() => expect(current).toBe(2));
+    await waitFor(() => expect(screen.getAllByText("Approval at").length).toBeGreaterThan(0));
 
     const [deleteOnly] = await screen.findAllByRole("button", { name: /Delete Group Only/ });
     await user.click(deleteOnly!);
