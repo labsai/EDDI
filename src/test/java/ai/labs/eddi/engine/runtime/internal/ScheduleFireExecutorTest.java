@@ -410,6 +410,78 @@ class ScheduleFireExecutorTest {
         verify(conversationService, never()).startConversation(any(), any(), any(), any());
     }
 
+    /**
+     * A persistent heartbeat appends a step on every fire to one document. Without
+     * a bound it reached MongoDB's 16 MB limit and every fire after that was lost.
+     */
+    @Test
+    void fire_persistentStrategy_rollsOverAConversationAtTheStepLimit() throws Exception {
+        var schedule = makeHeartbeatSchedule("hb-roll", "persistent");
+        schedule.setPersistentConversationId("full-conv");
+        setField(executor, "persistentConversationMaxSteps", 3);
+
+        var full = new SimpleConversationMemorySnapshot();
+        full.setConversationState(ConversationState.READY);
+        for (int i = 0; i < 3; i++) {
+            full.getConversationSteps().add(new SimpleConversationMemorySnapshot.SimpleConversationStep());
+        }
+        when(conversationService.readConversation(any(), any(), eq("full-conv"), anyBoolean(), anyBoolean(), any())).thenReturn(full);
+        when(conversationService.startConversation(any(), any(), any(), any()))
+                .thenReturn(new IConversationService.ConversationResult("fresh-conv", null));
+        doAnswer(inv -> {
+            ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onComplete(null);
+            return null;
+        }).when(conversationService).say(any(), any(), eq("fresh-conv"), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals("fresh-conv", result.conversationId());
+        verify(conversationService).endConversation("full-conv", "system:scheduler");
+        verify(scheduleStore).setPersistentConversationId("hb-roll", "fresh-conv");
+    }
+
+    @Test
+    void fire_persistentStrategy_replacesAnEndedConversation() throws Exception {
+        var schedule = makeHeartbeatSchedule("hb-ended", "persistent");
+        schedule.setPersistentConversationId("ended-conv");
+
+        var ended = new SimpleConversationMemorySnapshot();
+        ended.setConversationState(ConversationState.ENDED);
+        when(conversationService.readConversation(any(), any(), eq("ended-conv"), anyBoolean(), anyBoolean(), any())).thenReturn(ended);
+        when(conversationService.startConversation(any(), any(), any(), any()))
+                .thenReturn(new IConversationService.ConversationResult("fresh-conv", null));
+        doAnswer(inv -> {
+            ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onComplete(null);
+            return null;
+        }).when(conversationService).say(any(), any(), eq("fresh-conv"), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals("fresh-conv", result.conversationId(), "every fire into an ended conversation was refused, forever");
+        verify(conversationService, never()).endConversation(any(), any());
+    }
+
+    @Test
+    void fire_persistentStrategy_keepsAConversationBelowTheStepLimit() throws Exception {
+        var schedule = makeHeartbeatSchedule("hb-keep", "persistent");
+        schedule.setPersistentConversationId("live-conv");
+
+        var live = new SimpleConversationMemorySnapshot();
+        live.setConversationState(ConversationState.READY);
+        live.getConversationSteps().add(new SimpleConversationMemorySnapshot.SimpleConversationStep());
+        when(conversationService.readConversation(any(), any(), eq("live-conv"), anyBoolean(), anyBoolean(), any())).thenReturn(live);
+        doAnswer(inv -> {
+            ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onComplete(null);
+            return null;
+        }).when(conversationService).say(any(), any(), eq("live-conv"), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals("live-conv", result.conversationId());
+        verify(conversationService, never()).startConversation(any(), any(), any(), any());
+        verify(conversationService, never()).endConversation(any(), any());
+    }
+
     @Test
     void fire_heartbeat_defaultsPersistentStrategy() throws Exception {
         var schedule = makeHeartbeatSchedule("hb-1", null); // null strategy → defaults to persistent

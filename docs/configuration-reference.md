@@ -67,6 +67,9 @@ applies in dev mode only.
 | `eddi.nats.dead-letter-stream-name` | `EDDI_DEAD_LETTERS` | Stream that receives messages past `max-retries` |
 | `eddi.nats.max-retries` | `3` | Redelivery attempts before dead-lettering |
 | `eddi.nats.ack-wait-seconds` | `60` | How long JetStream waits for an ack before redelivering. Must exceed your slowest conversation turn, or slow turns are processed twice |
+| `eddi.nats.stream-max-age` | `1h` | Age bound of the conversation stream. Its messages are ordering markers nothing consumes, so the oldest are discarded when any of the three bounds is reached |
+| `eddi.nats.stream-max-messages` | `100000` | Message-count bound of the conversation stream |
+| `eddi.nats.stream-max-bytes` | `268435456` | Size bound of the conversation stream (256 MiB) |
 
 ---
 
@@ -118,6 +121,7 @@ Full narrative and metrics: [scheduling.md → Deployment Configuration](schedul
 | `eddi.schedule.instance-id` | *(hostname)* | Cluster claim identity. Set explicitly where hostnames are recycled |
 | `eddi.schedule.default-timezone` | `UTC` | IANA zone for schedules that name none |
 | `eddi.schedule.fire-timeout` | `5m` | How long one conversation fire may run before it is abandoned as failed. **Keep it at or below `lease-timeout`** — past the lease another instance may reclaim the schedule regardless |
+| `eddi.schedule.persistent-conversation-max-steps` | `1000` | Steps after which a `conversationStrategy: persistent` schedule ends its conversation and starts a new one, keeping the document clear of MongoDB's 16 MB limit. The ended conversation stays readable. `0` disables the rollover |
 | `eddi.schedule.fire-log-retention` | `90d` | Fire logs older than this are deleted by a periodic sweep. `0` keeps everything — a 60-second heartbeat alone writes ~525,600 rows a year |
 | `eddi.schedule.fire-log-prune-interval` | `1h` | How often that sweep runs. The `DELETE` is by timestamp and therefore idempotent, so it needs no cluster claim |
 | `eddi.rag.ingestion.schedule-repair.enabled` | `true` | At startup, gives a next fire time to any RAG ingestion schedule stored without one. Such a row reads back enabled and can never be selected by the poller, so it looks scheduled and never runs. The sweep only touches rows that have no fire time at all, so an already armed row is skipped and a boot with nothing left to repair does no writes. It is not guaranteed to finish in one pass: it stops at its own 20,000-row bound, and at a store failure, logging a warning that says which — a later boot picks up the rows it never examined — see [rag.md](rag.md#ingestion-sources) |
