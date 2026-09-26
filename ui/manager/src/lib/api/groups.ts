@@ -1619,7 +1619,7 @@ export interface ArtifactUpdatedPayload {
  * type has nothing to dispatch on and is skipped — passing a sentinel is how we
  * tell the two cases apart without re-parsing.
  */
-const NO_EVENT_TYPE = " no-event-type";
+const NO_EVENT_TYPE = "\u0000no-event-type";
 
 /**
  * Read a Server-Sent Events response body as a stream of parsed group events.
