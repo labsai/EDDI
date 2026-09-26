@@ -13,6 +13,7 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import io.quarkus.security.ForbiddenException;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.event.Event;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.ServiceUnavailableException;
@@ -60,13 +61,15 @@ public class ResourceSharingService {
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final ResourceAccessGuard accessGuard;
     private final ConfigGraphResolver graphResolver;
+    private final Event<SharingChangedEvent> sharingChanged;
 
     @Inject
     public ResourceSharingService(IDocumentDescriptorStore documentDescriptorStore, ResourceAccessGuard accessGuard,
-            ConfigGraphResolver graphResolver) {
+            ConfigGraphResolver graphResolver, Event<SharingChangedEvent> sharingChanged) {
         this.documentDescriptorStore = documentDescriptorStore;
         this.accessGuard = accessGuard;
         this.graphResolver = graphResolver;
+        this.sharingChanged = sharingChanged;
     }
 
     /**
@@ -168,7 +171,7 @@ public class ResourceSharingService {
         for (String referenced : targets(resourceId, cascade)) {
             applyGrant(referenced, subject, level, grantedBy, updated, skipped);
         }
-        return new ShareResult(updated, skipped);
+        return notifyChanged(new ShareResult(updated, skipped));
     }
 
     /** Removes {@code subject}'s grant, mirroring {@link #share}. */
@@ -182,7 +185,7 @@ public class ResourceSharingService {
         for (String referenced : targets(resourceId, cascade)) {
             applyRevoke(referenced, subject, updated, skipped);
         }
-        return new ShareResult(updated, skipped);
+        return notifyChanged(new ShareResult(updated, skipped));
     }
 
     /**
@@ -201,7 +204,7 @@ public class ResourceSharingService {
         for (String referenced : targets(resourceId, cascade)) {
             applyVisibility(referenced, visibility, updated, skipped);
         }
-        return new ShareResult(updated, skipped);
+        return notifyChanged(new ShareResult(updated, skipped));
     }
 
     /**
@@ -247,7 +250,24 @@ public class ResourceSharingService {
                 skipped.add(new ShareTarget(id, null));
             }
         }
-        return new ShareResult(updated, skipped);
+        return notifyChanged(new ShareResult(updated, skipped));
+    }
+
+    /**
+     * Tells ownership-derived caches (prompt snippet scoping, for one) that access
+     * changed, so a revoked or unpublished resource stops being served now rather
+     * than when their TTL expires. A failing observer must not undo a sharing
+     * change that has already been written, so it is logged and swallowed.
+     */
+    private ShareResult notifyChanged(ShareResult result) {
+        if (!result.updated().isEmpty() && sharingChanged != null) {
+            try {
+                sharingChanged.fire(new SharingChangedEvent(result.updatedIds()));
+            } catch (RuntimeException e) {
+                LOGGER.warnf("A sharing-change observer failed; dependent caches converge on their TTL instead: %s", e.getMessage());
+            }
+        }
+        return result;
     }
 
     private Set<String> targets(String resourceId, boolean cascade) {

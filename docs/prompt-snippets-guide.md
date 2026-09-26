@@ -60,24 +60,37 @@ Template Data Map:
 With [workspaces](workspaces.md) off (the default) there is one shared workspace
 and every snippet is available to every agent.
 
-With workspaces enforced, a render gets only the snippets the **agent** could
-use — decided exactly as for a user holding the agent owner's identity and the
-agent's space: snippets in the agent's space, the owner's own snippets, snippets
-granted to the owner or the space, published snippets, and legacy (unowned)
-snippets while `eddi.workspaces.legacy-visibility=shared`. Another team's
-private or space-visible snippets never reach the prompt. The same scoping
-applies to the counterweight preset snippets (`counterweight-cautious`,
-`counterweight-strict`).
+With workspaces enforced, snippets are injected **by name, automatically**, so
+sharing a snippet would push it into other teams' prompts without their say. A
+render therefore gets only snippets from sources the agent's own side controls:
 
-If several visible snippets share a name, the closest one wins: the agent's own
-space first, then the owner's snippets, then grants, then published, then legacy.
-Within a tier the **oldest** snippet wins, so creating a same-named snippet later
-never takes over a name an agent already uses. Each ambiguous name is logged once
-as a warning; rename one of the snippets to make the choice explicit. Without
-enforcement a duplicated name likewise resolves to the oldest snippet.
+1. **Snippets filed in the agent's space** that the space may use (a teammate's
+   `private` snippet in the same space is not included).
+2. **The owner's own snippets — for an agent in a personal space only.** An agent
+   in a team space does not carry its creator's private snippets or snippets
+   granted to the creator personally: every editor in the team can change that
+   agent's prompt and read it back.
+3. **Legacy (unowned) snippets**, the pre-workspace shared namespace. They load
+   regardless of `eddi.workspaces.legacy-visibility`, like every other
+   configuration an agent references. That policy controls the authoring
+   surface, not the engine.
 
-A change to an agent's own owner or space takes up to the cache TTL below to
-affect which snippets it sees.
+A snippet from another space is **never** injected, even if it is granted to the
+agent's team or published. To use one, copy it into the agent's space. The
+counterweight preset snippets (`counterweight-cautious`, `counterweight-strict`)
+follow the same rule, so another workspace cannot replace an agent's safety text.
+
+If several eligible snippets share a name, the one from the earliest source above
+wins, and within a source the **oldest** snippet wins. So creating a same-named
+snippet later never takes over a name an agent already uses. Each ambiguous name
+is logged once as a warning; rename one of the snippets to make the choice
+explicit. Without enforcement, a duplicated name likewise resolves to the oldest
+snippet.
+
+If an agent's descriptor cannot be read, the turn still gets the legacy snippets,
+so safety text is not silently dropped. That result is not cached. A grant,
+revoke, publish or ownership transfer clears the cached snippet views at once on
+the node that made the change; other nodes pick it up within the cache TTL below.
 
 ### Caching
 

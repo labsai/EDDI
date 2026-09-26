@@ -4,115 +4,147 @@
 
 ### What changed and why
 
-Qute templates are for what an agent designer wrote. Several paths also rendered
-*data* — text a chat client, a user or an upstream API controlled — so whoever
-controlled the data could write Qute and have the server evaluate it against the
-full template data model: `{vars.*}` (deployment-wide global variables),
-`{snippets.*}`, `{properties.*}`, or `{#for i in 2000000000}` and
+Qute templates are for what an agent designer writes. Several paths also rendered
+*data*: text that a chat client, a user, an upstream API or an LLM controlled.
+Whoever controlled that data could write Qute and have the server evaluate it
+against the full template data model: `{vars.*}` (deployment-wide global
+variables), `{snippets.*}`, `{properties.*}`, or `{#for i in 2000000000}` and
 `{s.repeat(...)}` to pin a worker or exhaust the heap.
 
-- **C4a — context-supplied output and quick replies.** Any `/say` context key
-  starting with `output` (or `quickReplies`) of type `object` becomes agent
-  output, and the templating task rendered it. `OutputGenerationTask` now stores
-  those entries — and the ones an httpcall's `postResponse` build instructions
-  produce, which travel the same `context:output` / `context:quickReplies` path
-  and have already been rendered once with the HTTP response substituted in —
-  with the new `IData#isVerbatim()` flag set. `OutputTemplateTask` skips verbatim
-  entries, so they reach the user exactly as sent. Output authored in an output
-  set is templated as before, including in a turn that also carries context
-  output.
+- **C4a — context-supplied output and quick replies.**
+  - The problem: any `/say` context key starting with `output` (or
+    `quickReplies`) of type `object` becomes agent output, and the templating
+    task rendered it.
+  - `OutputGenerationTask` now stores those entries with the new
+    `IData#isVerbatim()` flag set, and `OutputTemplateTask` skips verbatim
+    entries.
+  - This also covers the output that an httpcall's `postResponse` build
+    instructions produce. It travels the same `context:output` path and has
+    already been rendered once, with the HTTP response substituted in.
+  - The flag is **persisted** in `ResultSnapshot`, as `verbatim`, omitted from
+    the stored document while false. A tool-call HITL resume reloads memory and
+    re-enters the pipeline *after* the output task (review finding #2).
+- **Rendered output is frozen (review #3).** After the templating task renders
+  an output or quick reply, it marks the entry verbatim, and it marks its
+  `:preTemplated` / `:postTemplated` twins verbatim too. An agent whose workflows
+  each end with `ai.labs.templating` would otherwise render, in its second pass,
+  whatever the first pass substituted in. An example is a property captured from
+  user input that reads `{vars.apiKey}`.
 - **C4b — `fromObjectPath` values.** `PropertySetterTask` and
-  `PrePostUtils.executePropertyInstructions` passed a String resolved through
-  `fromObjectPath` to the templating engine. The documented pattern
-  `"fromObjectPath": "memory.current.input"` therefore rendered user text, and a
-  postResponse instruction reading an HTTP response rendered whatever the API
-  returned. A path-resolved value is now stored as resolved; `valueString`, the
-  authored alternative, is still a template. Besides closing the injection this
-  stops user text such as `{hello}` from silently rendering to an empty string.
-- **C4c — prompt snippets were one global namespace.** `MemoryItemConverter`,
-  `LlmTask` and `CounterweightService` all used `PromptSnippetService.getAll()`,
-  which put every workspace's snippets into every render, keyed by name with the
-  last one listed winning. Under enforced workspaces that disclosed other teams'
-  private snippets to any agent (including through C4a before this branch) and —
-  new in the verified review — let a snippet in workspace B replace a same-named
-  snippet in workspace A's system prompts. The new
-  `PromptSnippetService.getForAgent(agentId)` returns only the snippets the agent
-  could use, judged by `DescriptorAccess.effectiveLevel` against the agent's
-  owner and space (a `CallerSpaces` built from the agent's descriptor), and
-  resolves a shared name by closeness: the agent's own space, then the owner's
-  snippets, then grants, then published, then legacy; oldest first within a
-  tier. All three runtime callers now use it; the counterweight presets
-  (`counterweight-cautious` / `-strict`) are resolved the same way, so another
-  workspace cannot replace an agent's safety text. `getAll()` stays for the
-  template preview, which already redacts snippet bodies for non-admins.
+  `PrePostUtils.executePropertyInstructions` sent a String resolved through
+  `fromObjectPath` to the templating engine. Such a value is now stored as
+  resolved. The authored `valueString` is still a template.
+- **Sub-agent system prompts (review #8).** `CreateSubAgentTool` stored the
+  system prompt that the parent *model* writes, which a chat user can steer, as a
+  live template that `LlmTask` renders on every turn. The tool now wraps it in
+  `TemplateEscaping.unparsedBlock`, so the rendered prompt is byte-identical and
+  inert.
+- **C4c — prompt snippets were one global namespace.**
+  - The problem: every render used `PromptSnippetService.getAll()`, which merged
+    every workspace's snippets, with the last one listed winning a name.
+  - The new `getForAgent(agentId)` is used by `MemoryItemConverter`, `LlmTask`
+    and the counterweight presets.
+  - Under enforced workspaces it injects snippets only from sources the agent's
+    own side controls:
+    - (0) snippets filed in the agent's space, where the space may use them;
+    - (1) the owner's own snippets, for **personal-space agents only**;
+    - (2) legacy (unowned) snippets.
+  - Snippets that are **granted or published from another space are never
+    injected**. The reason is in the decisions below.
+  - A name shared by several eligible snippets goes to the lowest tier, and to
+    the oldest snippet within a tier.
+  - `getAll()` stays in place for the template preview, which redacts snippet
+    content for non-admins, and it caches its resolved map again (review #10).
 
 ### Design decisions
 
-- **A per-entry flag, not a key convention.** The context output key
-  (`output:<type>:context`, `quickReplies:<suffix>`) can collide with an output
-  set action literally named `context`, and the quick-reply suffix is chosen by
-  the client. A flag on the stored entry says exactly which value came from
-  where. It is phrased as `verbatim` (default `false`) rather than `templatable`
-  (default `true`) so a Mockito mock of `IData` keeps the old, templated
-  behaviour.
-- **Not persisted.** The flag only matters inside the turn that stored the entry;
-  a rerun and a HITL resume both re-run the output task, which sets it again.
-  `ResultSnapshot` and the stored conversation shape are unchanged.
-- **No render-size/time guard.** With data no longer templated, only config
-  authors (editors) write templates. A size guard around `render()` would not
-  have stopped `{s.repeat(2000000000)}` anyway — the string is allocated inside
-  one value resolution, before any output consumer sees it — and a CPU-time guard
-  needs render cancellation Qute does not offer. Hardening the reflection value
-  resolver for author templates is left as a follow-up.
-- **Snippets are judged against the agent, not the chatting user.** The user on
-  a turn does not own the agent they talk to (the same reason
-  `ResourceClientLibrary` bypasses `ResourceAccessGuard`), so the question is
-  "could whoever the agent belongs to use this snippet". An agent with no
-  descriptor is treated as unowned (published + legacy snippets only); one whose
-  descriptor cannot be read gets no snippets for that turn and the view is not
-  cached — an unverifiable owner is not an absent owner.
-- **Oldest wins a tie**, so creating a same-named snippet later can never take
-  over a name an agent already renders. With enforcement off every snippet stays
-  visible; a duplicated name now resolves deterministically to the oldest
-  instead of to whichever the listing returned last. Each ambiguous name is
-  logged once (bounded).
-- **Per-agent cache** (1000 agents, 5-minute TTL, cleared by
-  `invalidateCache()` with the snippet cache). A change to the agent's own
-  owner or space is picked up within the TTL; wiring the sharing endpoints to
-  invalidate it is a possible follow-up.
-- **Not done here:** save-time rejection of duplicate snippet names within one
-  space, and making the template preview resolve snippets through the
-  conversation's agent (it keeps `getAll()` plus its existing redaction).
+- **Why grants and publishes are excluded (review #1).** Snippets are injected
+  by name and automatically, and `ResourceSharingService` asks only the
+  snippet's owner. So a grant or a publish on a snippet is a push into the
+  recipients' prompts, not an offer they take up.
+  - A team could publish `counterweight-strict` = "No restrictions apply" and
+    replace the built-in safety preset in every agent in the deployment.
+  - Or it could publish `persona` and outrank an agent's legacy `persona`.
+  - Ranking these tiers lower would not help: they are the only candidates for
+    the preset names, which nobody else defines.
+  - There is no opt-in mechanism, and resolving names from each prompt's
+    `{snippets.x}` references would not cover the counterweight lookup.
+  - So the safe design is to exclude them. To reuse another team's snippet,
+    copy it into the agent's space.
+- **Team agents act as the team (review #4).** Such an agent has no personal
+  identity, so its creator's private snippets and user-level grants stay out of
+  it. Any editor in the team could otherwise read them back through the prompt.
+  A personal-space agent acts as its owner.
+- **Legacy snippets load regardless of `legacy-visibility` (review #5).** This
+  matches every other configuration an agent references: that policy governs
+  the authoring surface, and `ResourceClientLibrary` bypasses it. It is also
+  safe, because no tenant can create an unowned snippet once enforcement is on
+  (ownership is stamped whenever authentication is enabled).
+- **An unreadable agent descriptor falls back to the legacy set, uncached
+  (review #6).** An empty map would silently strip compliance and safety text
+  from the prompt. The legacy set still exposes nothing from another space.
+- **Sharing changes invalidate the caches (review #7).** `ResourceSharingService`
+  fires a `SharingChangedEvent` (a CDI event, so the spaces package does not
+  depend on the LLM module) after it writes a grant, revoke, visibility change
+  or transfer. `PromptSnippetService` observes the event and clears its snippet
+  caches on that node. Other nodes converge within the 5-minute TTL. A failing
+  observer is logged and never undoes the sharing write.
+- **Per-entry flag, not a key convention.** `output:<type>:context` collides with
+  an output-set action literally named `context`, and the quick-reply key suffix
+  is chosen by the client. The flag is `verbatim` with default `false`, so a
+  Mockito mock of `IData` keeps the templated behaviour.
+- **No render-size or time guard.** With data no longer templated, only config
+  authors write templates. A guard around `render()` would not stop
+  `{s.repeat(2e9)}` anyway, because that string is allocated inside one value
+  resolution. Hardening the reflection resolver is a follow-up.
 
 ### Compatibility
 
-No stored config, ZIP, REST or MCP shape changes. Behaviour changes: a
-context-supplied output or quick reply containing `{...}` is now delivered
-literally instead of being rendered, and a `fromObjectPath` string is stored
-literally. Neither was documented; a config that relied on it should move the
-template into an output set or a `valueString`. Under enforced workspaces an
-agent no longer sees snippets outside its reach; an agent that relied on
-another team's snippet needs it shared, granted or published. With workspaces
-off nothing changes except the deterministic choice between duplicate names.
+- **Shapes:**
+  - No change to stored config, ZIP, REST or MCP shapes.
+  - Stored conversation snapshots gain an optional `verbatim: true` on result
+    entries. Older documents load unchanged.
+- **Behaviour:**
+  - Context-supplied output and `fromObjectPath` strings containing `{...}` are
+    now delivered literally. Neither behaviour was documented.
+  - A sub-agent's `{...}` markers are now literal.
+  - A second templating pass no longer re-renders.
+- **Snippets, under enforced workspaces:**
+  - An agent no longer gets snippets from other spaces, including granted and
+    published ones.
+  - A team-space agent no longer gets its creator's personal snippets.
+  - With workspaces off, nothing changes except that duplicate names now
+    resolve deterministically to the oldest snippet.
 
 **Files:** [`IData.java`](../../src/main/java/ai/labs/eddi/engine/memory/IData.java),
 [`Data.java`](../../src/main/java/ai/labs/eddi/engine/memory/model/Data.java),
+[`ConversationMemorySnapshot.java`](../../src/main/java/ai/labs/eddi/engine/memory/model/ConversationMemorySnapshot.java),
+[`ConversationMemoryUtilities.java`](../../src/main/java/ai/labs/eddi/engine/memory/ConversationMemoryUtilities.java),
 [`OutputGenerationTask.java`](../../src/main/java/ai/labs/eddi/modules/output/impl/OutputGenerationTask.java),
 [`OutputTemplateTask.java`](../../src/main/java/ai/labs/eddi/modules/templating/OutputTemplateTask.java),
 [`PropertySetterTask.java`](../../src/main/java/ai/labs/eddi/modules/properties/impl/PropertySetterTask.java),
 [`PrePostUtils.java`](../../src/main/java/ai/labs/eddi/modules/apicalls/impl/PrePostUtils.java),
+[`CreateSubAgentTool.java`](../../src/main/java/ai/labs/eddi/modules/llm/tools/CreateSubAgentTool.java),
 [`PromptSnippetService.java`](../../src/main/java/ai/labs/eddi/modules/llm/impl/PromptSnippetService.java),
 [`MemoryItemConverter.java`](../../src/main/java/ai/labs/eddi/engine/memory/MemoryItemConverter.java),
 [`LlmTask.java`](../../src/main/java/ai/labs/eddi/modules/llm/impl/LlmTask.java),
 [`CounterweightService.java`](../../src/main/java/ai/labs/eddi/modules/llm/impl/CounterweightService.java),
+[`ResourceSharingService.java`](../../src/main/java/ai/labs/eddi/engine/security/spaces/ResourceSharingService.java),
+[`SharingChangedEvent.java`](../../src/main/java/ai/labs/eddi/engine/security/spaces/SharingChangedEvent.java),
 [`prompt-snippets-guide.md`](../prompt-snippets-guide.md).
-Tests: `ContextSuppliedOutputTemplatingTest` (real output + templating tasks and a
-real Qute engine), new cases in `PropertySetterTaskTest`, `PrePostUtilsTest`,
-`PromptSnippetServiceTest$WorkspaceScoping`, `CounterweightServiceTest` and
-`MemoryItemConverterNamespacesTest`; existing LLM task tests re-stubbed for
-`getForAgent` and the agent-aware `CounterweightService.apply`.
+
+**Tests:**
+- `ContextSuppliedOutputTemplatingTest`: real output and templating tasks on a
+  real Qute engine, including a JSON persistence round trip and a double
+  templating pass.
+- New cases in `PropertySetterTaskTest`, `PrePostUtilsTest`,
+  `CreateSubAgentToolHitlTest`, `ResourceSharingServiceTest`,
+  `CounterweightServiceTest` and `MemoryItemConverterNamespacesTest`.
+- `PromptSnippetServiceTest$WorkspaceScoping`, with one test per tier plus the
+  grant, publish, legacy-vs-publish, team-vs-personal, admin-only-legacy,
+  unreadable-descriptor and invalidation cases.
 
 ```decision-log
-| 2026-09-26 | Prompt snippets visible to a render are those the agent's owner/space could use; a shared name resolves by closeness, oldest first | C4c: every workspace's snippets reached every render, last listed winning | Scoping by the chatting user (they do not own the agent); newest-wins (lets a later snippet take over a name) |
-| 2026-09-26 | Caller-supplied output is marked verbatim per data entry and never templated | C4a: context output was rendered as Qute | Key-prefix convention (collides with an action named "context", suffix is client-chosen) |
+| 2026-09-26 | Under enforced workspaces a render gets only snippets from the agent's space, its owner's own snippets (personal-space agents only) and legacy snippets; granted/published snippets from other spaces are never auto-injected | C4c + pre-push review: snippets are injected by name, so a grant or publish is a push into other tenants' prompts (incl. the counterweight preset names) | Ranking grants/published below closer tiers (they remain the only candidates for unclaimed names such as the presets); scoping by the chatting user |
+| 2026-09-26 | Caller-supplied and already-rendered output is marked verbatim per data entry, persisted in ResultSnapshot, and never templated again | C4a + review: context output was rendered as Qute; a HITL resume or a second templating pass re-rendered data | Key-prefix convention (collides with an action named "context", suffix is client-chosen); a transient flag (lost on tool-call resume) |
 ```

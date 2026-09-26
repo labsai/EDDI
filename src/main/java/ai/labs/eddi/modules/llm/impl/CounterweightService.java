@@ -106,11 +106,14 @@ public class CounterweightService {
 
     /**
      * As {@link #apply(String, CounterweightConfig, String)}, resolving the preset
-     * snippets the way a render for {@code agentId} does: under enforced workspaces
-     * only a snippet that agent may use can replace the built-in preset, so another
-     * workspace cannot override this agent's safety text by naming a snippet
-     * {@code counterweight-strict}. A {@code null} agent sees only snippets visible
-     * to everybody.
+     * snippets the way a render for {@code agentId} does
+     * ({@link PromptSnippetService#getForAgent}): under enforced workspaces only a
+     * snippet in the agent's own space, its owner's own snippet (personal-space
+     * agents only) or a legacy snippet can replace the built-in preset. A snippet
+     * granted or published from another workspace never can, so another workspace
+     * cannot override this agent's safety text by naming a snippet
+     * {@code counterweight-strict}. A {@code null} agent gets the legacy snippets
+     * only.
      *
      * @param agentId
      *            the agent whose system message this is
