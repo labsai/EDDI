@@ -66,8 +66,10 @@ export function lazyPage<K extends string, M extends Record<K, ComponentType>>(
   // could not serve for a moment) every later render re-threw the same error,
   // and the ErrorBoundary's "Try Again" could never work: only a full reload
   // recovered. On failure the lazy component is replaced with a fresh one, and
-  // the wrapper below always renders the current one, so a retry really does
-  // call `loader()` again.
+  // the wrapper below always renders the current one, so a retry calls
+  // `loader()` again. Whether that re-downloads the chunk is up to the browser:
+  // some keep a failed module in their module map and reject again without
+  // fetching, in which case only a reload helps — the stale-chunk path above.
   let current: LazyExoticComponent<ComponentType> = createLazy();
 
   function createLazy(): LazyExoticComponent<ComponentType> {

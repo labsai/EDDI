@@ -130,6 +130,41 @@ describe("AuthProvider (Keycloak)", () => {
     expect(screen.queryByTestId("status")).not.toBeInTheDocument();
   });
 
+  it("says the sign-in did not complete — not that Keycloak is unreachable — on an OAuth error", async () => {
+    // A user who cancels on the Keycloak page comes back with
+    // error=access_denied; keycloak-js rejects init() with a plain object.
+    kc.initImpl = () => Promise.reject({ error: "access_denied", error_description: "" });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    renderStrict();
+    expect(await screen.findByTestId("auth-incomplete")).toHaveTextContent(
+      "Sign-in did not complete",
+    );
+    expect(screen.getByTestId("auth-sign-in")).toBeInTheDocument();
+    expect(screen.queryByTestId("auth-init-failed")).not.toBeInTheDocument();
+  });
+
+  it("on a lost session stops sending the dead token and leaves the redirect to keycloak-js", async () => {
+    renderStrict();
+    await screen.findByTestId("status");
+    const instance = lastInstance() as FakeInstance & {
+      refreshToken?: string;
+      login: ReturnType<typeof vi.fn>;
+    };
+    instance.updateToken.mockImplementation(async () => {
+      // keycloak-js on a 400 from the token endpoint: clears its tokens (and
+      // itself calls login(), because init ran with login-required).
+      instance.refreshToken = undefined;
+      instance.token = undefined;
+      throw new Error("Server responded with an invalid status.");
+    });
+    await act(async () => {
+      instance.onTokenExpired?.();
+    });
+    expect(api.getAuthHeader()).toEqual({});
+    // No second login() on top of keycloak-js's own.
+    expect(instance.login).not.toHaveBeenCalled();
+  });
+
   it("re-reads realm roles when the token is refreshed", async () => {
     renderStrict();
     expect(await screen.findByTestId("roles")).toHaveTextContent("eddi-viewer");

@@ -31,7 +31,9 @@
     "signedOutTitle": "Vous êtes déconnecté",
     "signedOutMessage": "Connectez-vous pour continuer.",
     "retry": "Réessayer",
-    "signIn": "Se connecter"
+    "signIn": "Se connecter",
+    "incompleteTitle": "La connexion n’a pas abouti",
+    "incompleteMessage": "La connexion a été annulée ou refusée. Reconnectez-vous pour continuer."
   },
   "nav": {
     "dashboard": "Tableau de bord",
@@ -3531,7 +3533,8 @@
   },
   "errorBoundary": {
     "retry": "Réessayer",
-    "title": "Une erreur est survenue"
+    "title": "Une erreur est survenue",
+    "reload": "Recharger"
   },
   "gdpr": {
     "auditPseudonymized": "Audit pseudonymisé",

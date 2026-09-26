@@ -31,7 +31,9 @@
     "signedOutTitle": "لقد سجّلت الخروج",
     "signedOutMessage": "سجّل الدخول للمتابعة.",
     "retry": "حاول مرة أخرى",
-    "signIn": "تسجيل الدخول"
+    "signIn": "تسجيل الدخول",
+    "incompleteTitle": "لم يكتمل تسجيل الدخول",
+    "incompleteMessage": "تم إلغاء تسجيل الدخول أو رفضه. سجّل الدخول مرة أخرى للمتابعة."
   },
   "nav": {
     "dashboard": "لوحة التحكم",
@@ -3636,7 +3638,8 @@
   },
   "errorBoundary": {
     "retry": "حاول مجدداً",
-    "title": "حدث خطأ ما"
+    "title": "حدث خطأ ما",
+    "reload": "إعادة التحميل"
   },
   "gdpr": {
     "auditPseudonymized": "تم إخفاء هوية التدقيق",

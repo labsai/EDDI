@@ -56,7 +56,9 @@ function toAuthUser(
 ): AuthUser {
   const claims = (keycloak.tokenParsed ?? {}) as Record<string, unknown>;
   const claim = (name: string) => (claims[name] as string | undefined) ?? "";
+  const id = info.sub ?? claim("sub");
   return {
+    ...(id ? { id } : {}),
     username: info.preferred_username ?? claim("preferred_username"),
     firstName: info.given_name ?? claim("given_name"),
     lastName: info.family_name ?? claim("family_name"),
@@ -76,9 +78,26 @@ function sameRoles(a: string[], b: string[]): boolean {
  * - `failed`: init threw — Keycloak unreachable, misconfigured realm or client.
  *   The app used to render anyway, unauthenticated, so every call 401'd with
  *   nothing on screen saying why and no way to sign in.
+ * - `incomplete`: Keycloak sent the user back with an OAuth error — the user
+ *   cancelled, or Keycloak refused the sign-in. The service is reachable, so
+ *   "could not reach the sign-in service" would be the wrong thing to say.
  * - `signed-out`: init completed without a session.
  */
-type Gate = "loading" | "failed" | "signed-out" | "ready";
+type Gate = "loading" | "failed" | "incomplete" | "signed-out" | "ready";
+
+/**
+ * keycloak-js rejects `init()` with a plain `{ error, error_description }`
+ * object — not an `Error` — when the login redirect comes back with an OAuth
+ * error (`access_denied` when the user cancels).
+ */
+function isOAuthCallbackError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    !(error instanceof Error) &&
+    typeof (error as { error?: unknown }).error === "string"
+  );
+}
 
 /** Internal component that handles Keycloak init lifecycle */
 function KeycloakAuthProvider({
@@ -180,7 +199,7 @@ function KeycloakAuthProvider({
       } catch (error) {
         if (!mounted) return;
         console.error("[EDDI Auth] Keycloak init failed:", error);
-        setGate("failed");
+        setGate(isOAuthCallbackError(error) ? "incomplete" : "failed");
       }
     };
 
@@ -196,13 +215,15 @@ function KeycloakAuthProvider({
     if (gate !== "ready") return;
 
     // A refresh that failed because the session is GONE (the token endpoint
-    // rejected the refresh token) — sign in again. keycloak-js has usually
-    // redirected already (`login-required`); calling login() covers the case
-    // where it has not. A failure that left the session intact (network error,
-    // Keycloak 5xx) is retried on the next tick instead of logging the user out.
+    // rejected the refresh token). No login() here: keycloak-js's clearToken()
+    // already redirects to sign in, because init ran with
+    // `onLoad: "login-required"` (which sets `loginRequired`) — a second call
+    // only assigned `location` twice. What is left for us is to stop sending a
+    // dead token in the moment before the redirect. A failure that left the
+    // session intact (network error, Keycloak 5xx) is retried on the next tick
+    // instead of logging the user out.
     const onSessionLost = () => {
       api.clearAuthToken();
-      void keycloak.login();
     };
 
     const refresher = createTokenRefresher(keycloak, applyToken, onSessionLost);
@@ -304,17 +325,22 @@ function AuthGateScreen({ gate, onSignIn }: { gate: Gate; onSignIn: () => void }
   }
 
   const failed = gate === "failed";
+  const incomplete = gate === "incomplete";
   return (
     <div
       className="flex h-screen items-center justify-center bg-background p-4"
-      data-testid={failed ? "auth-init-failed" : "auth-signed-out"}
+      data-testid={
+        failed ? "auth-init-failed" : incomplete ? "auth-incomplete" : "auth-signed-out"
+      }
       role="alert"
     >
       <div className="flex max-w-sm flex-col items-center gap-4 text-center">
         <h1 className="text-lg font-semibold text-foreground">
           {failed
             ? t("auth.initFailedTitle", "Sign-in is unavailable")
-            : t("auth.signedOutTitle", "You are signed out")}
+            : incomplete
+              ? t("auth.incompleteTitle", "Sign-in did not complete")
+              : t("auth.signedOutTitle", "You are signed out")}
         </h1>
         <p className="text-sm text-muted-foreground">
           {failed
@@ -322,7 +348,12 @@ function AuthGateScreen({ gate, onSignIn }: { gate: Gate; onSignIn: () => void }
                 "auth.initFailedMessage",
                 "The Manager could not reach the sign-in service. Check your connection, then try again.",
               )
-            : t("auth.signedOutMessage", "Sign in to continue.")}
+            : incomplete
+              ? t(
+                  "auth.incompleteMessage",
+                  "The sign-in was cancelled or refused. Sign in again to continue.",
+                )
+              : t("auth.signedOutMessage", "Sign in to continue.")}
         </p>
         {/* A failed init leaves the adapter unusable, so the way out is a fresh
             page load (which re-runs init), not login() on the broken instance. */}

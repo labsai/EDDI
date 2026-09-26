@@ -2,6 +2,12 @@ import { createContext } from "react";
 import type { AuthConfig } from "@/lib/auth-config";
 
 export interface AuthUser {
+  /**
+   * The OIDC subject (`sub`) — the stable identity. Use it, not `username`,
+   * to key anything stored per user: `preferred_username` can be renamed in
+   * Keycloak, which would orphan the data.
+   */
+  id?: string;
   username: string;
   firstName: string;
   lastName: string;

@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import type { DiscussionStyle } from '@/lib/api/groups';
 import { useAuth } from '@/hooks/use-auth';
-import { userScopedKey } from '@/lib/user-storage';
+import { readUserScoped, storageUserId, userScopedKey } from '@/lib/user-storage';
 
 export interface DiscussionTemplate {
   id: string;
@@ -15,9 +15,9 @@ export interface DiscussionTemplate {
 
 const STORAGE_KEY = 'workforce-templates';
 
-function readTemplates(key: string): DiscussionTemplate[] {
+function readTemplates(userId: string | undefined): DiscussionTemplate[] {
   try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(key) || '[]');
+    const parsed: unknown = JSON.parse(readUserScoped(STORAGE_KEY, userId) || '[]');
     return Array.isArray(parsed) ? (parsed as DiscussionTemplate[]) : [];
   } catch {
     return [];
@@ -33,18 +33,20 @@ function writeTemplates(key: string, templates: DiscussionTemplate[]) {
 }
 
 export function useTemplates() {
-  // Per signed-in user, so the next person on a shared browser does not get
-  // this user's saved templates. Deliberately NOT cleared at logout: they exist
+  // Per signed-in user (keyed by the OIDC subject), so the next person on a
+  // shared browser does not get this user's saved templates. Templates saved
+  // before per-user keys existed are adopted on first sign-in (`readUserScoped`). Deliberately NOT cleared at logout: they exist
   // only here, and clearing them would destroy the user's work.
   const { user } = useAuth();
-  const storageKey = userScopedKey(STORAGE_KEY, user?.username);
+  const userId = storageUserId(user);
+  const storageKey = userScopedKey(STORAGE_KEY, userId);
 
   const [state, setState] = useState(() => ({
     key: storageKey,
-    templates: readTemplates(storageKey),
+    templates: readTemplates(userId),
   }));
   if (state.key !== storageKey) {
-    setState({ key: storageKey, templates: readTemplates(storageKey) });
+    setState({ key: storageKey, templates: readTemplates(userId) });
   }
   // On the render that switched keys React discards this output and renders
   // again with the reloaded list, so the stale value is never committed.

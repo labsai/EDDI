@@ -34,7 +34,10 @@ editor without a prompt.
 `SuspendedOutlet` now carries an `ErrorBoundary` keyed on the path: the
 fallback fills the page area and navigating away recovers. `lazyPage` no
 longer caches a rejected import — `React.lazy` does, which is why "Try Again"
-could never recover a failed chunk load; it now re-imports.
+could never recover a failed chunk load; it now calls the import again (some
+browsers keep a failed module in their module cache, where only a reload
+helps). An `errorElement` (`RouteErrorPage`) on the splat route replaces React
+Router's unstyled English default for errors thrown by the providers.
 
 **Auth.**
 - Tokens are refreshed ahead of expiry (every 20 s, when < 60 s remain, and on
@@ -83,6 +86,38 @@ could never recover a failed chunk load; it now re-imports.
   cleared — they exist only in that browser — but another user no longer sees
   them. With auth disabled the plain keys are used as before.
 
+### Review follow-up (same branch)
+
+- **Backdrop close required the press to START on the backdrop.** A drag that
+  began in an input and was released over the dimmed area also delivers a click
+  to the layer (the nearest common ancestor), which closed the dialog and lost
+  the form — a data-loss path this branch had introduced. The layer now records
+  whether the mousedown was on itself.
+- **A slow Keycloak no longer stalls requests.** `ensureFresh` waits only when
+  the token has actually expired; inside the refresh window it refreshes in the
+  background. Before, every request in the last minute of a token's life waited
+  on keycloak-js's un-timed fetch.
+- **Forced refreshes on 401 are rate-limited** (one per 10 s), so a 401 that is
+  not about token age does not hit Keycloak's token endpoint on every request or
+  poll; a 401 whose token was already swapped by a background refresh is retried
+  with the new token without forcing another. The code now says why replaying a
+  POST is safe: Quarkus OIDC rejects before the resource method runs.
+- **Pre-upgrade Workforce data is adopted, not hidden.** The first time a
+  signed-in user's own key is empty while the old shared key holds data, it is
+  moved into their key (once — the next user does not inherit it). Keys use the
+  OIDC `sub` (`AuthUser.id`), falling back to the username, because
+  `preferred_username` can be renamed.
+- **Agent Studio on mobile/tablet:** the editor tab is hidden, not unmounted,
+  when the user switches to Pipeline or Chat, so a pending edit survives.
+- **Import/sync also invalidates schedules and connections** (an agent ZIP
+  carries both); snippets are a resource type and were already covered.
+- A cancelled or refused sign-in (`error=access_denied`) now says "Sign-in did
+  not complete" instead of "could not reach the sign-in service"; the lost-
+  session path no longer calls `login()` on top of keycloak-js's own redirect.
+- `formatRelativeTime` caches one `Intl.RelativeTimeFormat` per language, and
+  the tests compare against `Intl` rather than English literals, since the
+  exact English wording comes from the engine's CLDR data.
+
 ### Decisions
 
 - The route table stays declarative inside a single splat data route rather
@@ -91,9 +126,9 @@ could never recover a failed chunk load; it now re-imports.
   loading for no behavioural gain.
 - The guard lives in `AppRoot`, outside `App`, because `useBlocker` throws
   under the `MemoryRouter` every page and routing test renders `App` in.
-- Legacy unscoped Workforce data is not migrated into a user's key when auth is
-  on — it cannot be attributed to a user. Unscoped threads are removed at
-  logout.
+- Legacy unscoped Workforce data is moved into the first signed-in user's key
+  on that browser (it was visible to every user of the browser before, so this
+  exposes nothing new), rather than hidden.
 
 ### Overlap with other open branches (left for them)
 
@@ -115,8 +150,13 @@ could never recover a failed chunk load; it now re-imports.
 `tsc -b`, ESLint on changed files, `check-i18n` and the Manager vitest suite.
 New tests: `unsaved-changes-navigation-guard`, `suspended-outlet`,
 `api-client-token-refresh`, `keycloak-session`, `auth-provider-keycloak`,
-`accessible-dialog-dismiss`, `themed-toaster`, `shell-invalidations`, plus cases
+`accessible-dialog-dismiss`, `themed-toaster`, `shell-invalidations`,
+`route-error-page`, plus cases in `agent-studio`,
 in `lazy-page`, `top-bar`, `app-layout`, `theme-provider`, `pipeline-railroad`,
 `use-workforce-threads`, `utils`, `create-resource-dialog`; the
 `auth-provider` test that could not fail (`getByTestId(a) || getByTestId(b)`)
 now asserts.
+
+The Keycloak provider is covered by unit tests against a fake keycloak-js only.
+The `Auth E2E (Keycloak)` CI job drives the API with `request`, not the SPA, so
+it does not exercise the refresh loop, the session-lost path or StrictMode init.

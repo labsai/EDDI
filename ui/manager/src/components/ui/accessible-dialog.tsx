@@ -39,6 +39,8 @@ export function AccessibleDialog({
 }: AccessibleDialogProps) {
   const { t } = useTranslation();
   const dialogRef = useRef<HTMLDivElement>(null);
+  /** Whether the current mouse press began on the backdrop layer itself. */
+  const pressStartedOnLayerRef = useRef(false);
   const titleId = useId();
 
   // The element to hand focus back to on close, recorded while rendering the
@@ -138,10 +140,17 @@ export function AccessibleDialog({
       <div
         className="fixed inset-0 z-50 flex items-center justify-center p-4"
         data-testid={testId ? `${testId}-backdrop` : undefined}
+        onMouseDown={(e) => {
+          pressStartedOnLayerRef.current = e.target === e.currentTarget;
+        }}
         onClick={(e) => {
-          // Only a click on the dimmed area itself, not one that bubbled out of
-          // the dialog box.
-          if (e.target === e.currentTarget) onClose();
+          // Only a click that both STARTED and ENDED on the dimmed area. A drag
+          // that begins in an input (selecting text past the box's edge) and is
+          // released over the backdrop also delivers a click to this layer —
+          // the nearest common ancestor — and closing then threw the form away.
+          const startedOnLayer = pressStartedOnLayerRef.current;
+          pressStartedOnLayerRef.current = false;
+          if (startedOnLayer && e.target === e.currentTarget) onClose();
         }}
       >
         {/* Capped at the viewport and scrolled in the body, not the box: a

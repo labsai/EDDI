@@ -31,7 +31,9 @@
     "signedOutTitle": "You are signed out",
     "signedOutMessage": "Sign in to continue.",
     "retry": "Try again",
-    "signIn": "Sign in"
+    "signIn": "Sign in",
+    "incompleteTitle": "Sign-in did not complete",
+    "incompleteMessage": "The sign-in was cancelled or refused. Sign in again to continue."
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -3536,7 +3538,8 @@
   },
   "errorBoundary": {
     "retry": "Try Again",
-    "title": "Something went wrong"
+    "title": "Something went wrong",
+    "reload": "Reload"
   },
   "gdpr": {
     "auditPseudonymized": "Audit Pseudonymized",

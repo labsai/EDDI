@@ -31,7 +31,9 @@
     "signedOutTitle": "您已退出登录",
     "signedOutMessage": "请登录以继续。",
     "retry": "重试",
-    "signIn": "登录"
+    "signIn": "登录",
+    "incompleteTitle": "登录未完成",
+    "incompleteMessage": "登录已取消或被拒绝。请重新登录以继续。"
   },
   "nav": {
     "dashboard": "仪表盘",
@@ -3496,7 +3498,8 @@
   },
   "errorBoundary": {
     "retry": "重试",
-    "title": "出错了"
+    "title": "出错了",
+    "reload": "重新加载"
   },
   "gdpr": {
     "auditPseudonymized": "审计已假名化",

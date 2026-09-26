@@ -120,4 +120,27 @@ describe("ApiClient token refresh", () => {
     await expect(api.get(PATH)).rejects.toMatchObject({ status: 401 });
     expect(calls).toBe(1);
   });
+
+  it("retries with a token a background refresh swapped in, without forcing another", async () => {
+    const seen: (string | null)[] = [];
+    server.use(
+      http.get(URL, ({ request }) => {
+        const auth = request.headers.get("Authorization");
+        seen.push(auth);
+        if (auth === "Bearer old") {
+          // The background refresh lands while this request is in flight.
+          api.setAuthToken("new");
+          return new HttpResponse(null, { status: 401 });
+        }
+        return HttpResponse.json({ ok: true });
+      }),
+    );
+    api.setAuthToken("old");
+    const refresher = refresherIssuing("newer");
+    api.setTokenRefresher(refresher);
+
+    await expect(api.get(PATH)).resolves.toEqual({ ok: true });
+    expect(seen).toEqual(["Bearer old", "Bearer new"]);
+    expect(refresher.forceRefresh).not.toHaveBeenCalled();
+  });
 });
